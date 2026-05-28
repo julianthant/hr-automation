@@ -38,7 +38,7 @@ Every workflow must declare `archetype` and `runtimePolicy`; architecture guards
 
 Workflow-local functions describe orchestration steps. Reusable behavior belongs in `src/domain/`, `src/core/`, `src/services/ocr/forms/`, or the relevant `src/systems/` module. If another workflow could use it, promote it.
 
-Internal helper workflow modules may live under `src/workflows/<name>/` without being operator-startable. They must stay out of `WORKFLOW_LOADERS` and dashboard run-surface lists. `src/workflows/person-lookup/` is the shared UCPath Person Org lookup primitive used by Active Check and EID Lookup.
+Internal helper workflow modules may live under `src/workflows/<name>/` without being operator-startable. They must stay out of `WORKFLOW_LOADERS` and dashboard run-surface lists. `src/workflows/person-lookup/` is the operator-facing merged workflow (formerly EID Lookup + Active Check); it is registered in `WORKFLOW_LOADERS` and dashboard input runs, and also exports the `lookupPersonInUcpath` primitive for internal callers (OCR orchestrator, force-research, retry-page).
 
 ## Opt-Ins
 
@@ -48,7 +48,7 @@ The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operato
 
 ## Lessons Learned
 
-- **2026-05-28: Person Lookup is internal, not a dashboard workflow.** Shared UCPath Person Org lookup lives in `src/workflows/person-lookup/`; Active Check and EID Lookup derive their status behavior from it. Do not add `person-lookup` to `WORKFLOW_LOADERS`, input-run surfaces, or upload-run surfaces.
+- **2026-05-28: Person Lookup is the merged operator-facing workflow (formerly EID Lookup + Active Check).** `src/workflows/person-lookup/` is registered in `WORKFLOW_LOADERS` and dashboard input runs. It also exports the `lookupPersonInUcpath` primitive for internal callers. Do not add separate `eid-lookup` or `active-check` entries back to any registry.
 - **2026-05-25: Dashboard run surfaces are the public start paths.** New operator starts must be input runs or upload runs. Do not add `npm run <workflow>` launch scripts or YAML/batch-file starts; keep CLI adapters internal when tests or composed workflows still need them.
 - **2026-05-16: `buildCliAdapter` remains the internal daemon adapter pattern.** Use it for "shape inputs → enqueue typed items → pre-emit pending rows"; keep pending-data helpers small when reused by in-process paths.
 - **`ensurePageHealthy` is gone.** Use `ctx.session.healthCheck(id)` for an explicit mid-handler probe if needed.

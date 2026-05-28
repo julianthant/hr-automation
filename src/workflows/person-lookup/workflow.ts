@@ -1,13 +1,18 @@
 /**
- * EID Lookup workflow: search employees by name in parallel tabs.
+ * Person Lookup workflow: resolve an employee in UCPath Person Org Summary by
+ * name or EID, cross-verify names against CRM, and derive active / HDH status.
+ *
+ * Merges the former EID Lookup and Active Check workflows: name inputs run the
+ * full searching → cross-verification → active-status chain; EID inputs skip
+ * CRM cross-verification (the EID already identifies the person).
  *
  * Kernel-based (shared-context-pool mode). Each input-run batch launches one
- * UCPath browser (+ CRM browser in CRM mode), authenticates once per system,
- * then fans out N names across N tabs in each shared BrowserContext. Each
- * name is a separate kernel item so the dashboard shows one row per name.
+ * UCPath browser (+ CRM browser), authenticates once per system, then fans out
+ * N items across N tabs in each shared BrowserContext. Each item is a separate
+ * kernel item so the dashboard shows one row per name/EID.
  */
 
-import { defineWorkflow } from "../../core/index.js";
+import { defineWorkflow, runWorkflow } from "../../core/index.js";
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
@@ -19,21 +24,24 @@ import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import {
   deriveActiveCheckOutcome,
-  lookupPersonInUcpath,
   resolvePersonLookupForEidLookup,
   type ActiveCheckOutcome,
-} from "../person-lookup/index.js";
+} from "./outcome.js";
+import { lookupPersonInUcpath } from "./lookup.js";
 import {
   parsePersonOrgNameInput as parseNameInput,
   type EidResult,
 } from "../../systems/ucpath/person-org-summary.js";
 import { searchCrmByName, datesWithinDays } from "./crm-search.js";
 import {
-  EidLookupItemSchema,
+  PersonLookupItemSchema,
+  derivePersonLookupItemId,
+  displayPersonLookupInput,
   isEidInput,
-  type EidLookupItem,
+  normalizeName,
+  type PersonLookupItem,
 } from "./schema.js";
-import { normalizeName, prepareNames } from "../../domain/identity/person-name.js";
+import { prepareNames } from "../../domain/identity/person-name.js";
 
 export interface LookupResult {
   name: string;
@@ -42,10 +50,10 @@ export interface LookupResult {
   error?: string;
 }
 
-const stepsCrm = ["searching", "cross-verification", "active-status"] as const;
+const steps = ["searching", "cross-verification", "active-status"] as const;
 
 /** Direct input runs use normal utility defaults; OCR fan-out children title by person/EID. */
-export const EID_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+export const PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
   memberRow: {
     titleSource: "person",
@@ -58,22 +66,18 @@ export const EID_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
  *
  *  - `{ name }`   — multi-strategy SDCMP/HDH search, returns up to N
  *                   candidate rows (callers may cross-verify against CRM)
- *  - `{ emplId }` — direct Empl ID search, single result; used by the
- *                   prep-flow verification path
+ *  - `{ emplId }` — direct Empl ID search, single result
  *
  * After either branch resolves to a detail page, captures a screenshot
- * via `ctx.screenshot({ kind: "form", label: "person-org-summary" })`
  * and stamps the resulting filename onto the tracker row's
- * `personOrgScreenshot` data field — the prep watcher reads it from
- * the eid-lookup JSONL to populate `verification.screenshotFilename`.
+ * `personOrgScreenshot` data field.
  *
  * Returns the raw results so the CRM step can cross-reference them
- * (CRM cross-verification is skipped for EID-input items — the prep
- * flow doesn't need it).
+ * (CRM cross-verification is skipped for EID-input items).
  */
 async function searchingStep<TSteps extends readonly string[]>(
-  ctx: Ctx<TSteps, EidLookupItem>,
-  input: EidLookupItem,
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  input: PersonLookupItem,
 ): Promise<EidResult[]> {
   const page = await ctx.page("ucpath");
 
@@ -148,8 +152,8 @@ async function searchingStep<TSteps extends readonly string[]>(
  *  - ""         — CRM returned no records for this name
  */
 async function crossVerificationStep<TSteps extends readonly string[]>(
-  ctx: Ctx<TSteps, EidLookupItem>,
-  input: EidLookupItem,
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  input: PersonLookupItem,
   sdcmp: EidResult[],
 ): Promise<void> {
   // CRM cross-verification is name-based; EID-input items skip this step
@@ -233,7 +237,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 }
 
 function stampActiveCheckFields<TSteps extends readonly string[]>(
-  ctx: Ctx<TSteps, EidLookupItem>,
+  ctx: Ctx<TSteps, PersonLookupItem>,
   outcome: ActiveCheckOutcome,
 ): void {
   ctx.updateData({
@@ -249,14 +253,14 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
     candidateEids: outcome.candidateEids.join(", "),
   });
   if (outcome.activeStatus === "active") {
-    log.success(`EID Lookup active status: ${outcome.emplId} is active (HDH)`);
+    log.success(`Person Lookup active status: ${outcome.emplId} is active (HDH)`);
   } else {
-    log.step(`EID Lookup active status: ${outcome.searchName} → ${outcome.activeStatus}`);
+    log.step(`Person Lookup active status: ${outcome.searchName} → ${outcome.activeStatus}`);
   }
 }
 
-export function resolveActiveStatusResultsForEidLookup(args: {
-  input: EidLookupItem;
+export function resolveActiveStatusResultsForPersonLookup(args: {
+  input: PersonLookupItem;
   sdcmpFromSearch: EidResult[];
   crmMatchedEmplId?: string;
 }): {
@@ -276,13 +280,13 @@ export function resolveActiveStatusResultsForEidLookup(args: {
 }
 
 /**
- * UCPath Person Org active / HDH disposition (same rules as standalone Active Check).
- * Uses search results from `searching`, except CRM-only matches where UCPath had no row
- * — then loads detail by CRM EID via `searchByEid`.
+ * UCPath Person Org active / HDH disposition. Uses search results from
+ * `searching`, except CRM-only matches where UCPath had no row — then loads
+ * detail by CRM EID via the lookup primitive.
  */
 async function activeStatusStep<TSteps extends readonly string[]>(
-  ctx: Ctx<TSteps, EidLookupItem>,
-  input: EidLookupItem,
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  input: PersonLookupItem,
   sdcmpFromSearch: EidResult[],
 ): Promise<void> {
   const crmMatch = ctx.data.crmMatch as string | undefined;
@@ -303,7 +307,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
     return;
   }
 
-  const { deriveInput, results } = resolveActiveStatusResultsForEidLookup({
+  const { deriveInput, results } = resolveActiveStatusResultsForPersonLookup({
     input,
     sdcmpFromSearch,
     crmMatchedEmplId:
@@ -314,13 +318,14 @@ async function activeStatusStep<TSteps extends readonly string[]>(
 }
 
 /**
- * CRM-on kernel definition. Two systems (UCPath + CRM), three handler steps:
- * searching → cross-verification → active-status (UCPath disposition / HDH rules).
- * Sequential auth chain — Duo ×1 UCPath then ×1 CRM, once for the whole pool.
+ * Person Lookup kernel definition. Two systems (UCPath + CRM), three handler
+ * steps: searching → cross-verification → active-status. CRM auth is part of
+ * the batch's one-time auth chain; EID-input items skip the cross-verification
+ * step at runtime.
  */
-export const eidLookupCrmWorkflow = defineWorkflow({
-  name: "eid-lookup",
-  label: "EID Lookup",
+export const personLookupWorkflow = defineWorkflow({
+  name: "person-lookup",
+  label: "Person Lookup",
   archetype: "single",
   category: "Utils",
   iconName: "Search",
@@ -341,9 +346,9 @@ export const eidLookupCrmWorkflow = defineWorkflow({
     },
   ],
   authSteps: true,
-  steps: stepsCrm,
-  schema: EidLookupItemSchema,
-  runtimePolicy: EID_LOOKUP_WORKFLOW_RUNTIME_POLICY,
+  steps,
+  schema: PersonLookupItemSchema,
+  runtimePolicy: PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY,
   queueTitle: { kind: "single" },
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
@@ -362,12 +367,14 @@ export const eidLookupCrmWorkflow = defineWorkflow({
       : buildOperatorSubject({ kind: "person", value: input.name }),
   initialData: (input) =>
     isEidInput(input)
-      ? { searchName: input.emplId, emplId: input.emplId }
+      ? { searchName: displayPersonLookupInput(input), emplId: input.emplId }
       : { searchName: normalizeName(input.name) },
-  deriveItemId: deriveEidLookupItemId,
-  handler: async (ctx: Ctx<typeof stepsCrm, EidLookupItem>, input) => {
+  deriveItemId: derivePersonLookupItemId,
+  handler: async (ctx: Ctx<typeof steps, PersonLookupItem>, input) => {
     if (!isEidInput(input)) {
       ctx.updateData({ searchName: normalizeName(input.name) });
+    } else {
+      ctx.updateData({ searchName: displayPersonLookupInput(input) });
     }
     const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
     if (isEidInput(input)) {
@@ -382,32 +389,28 @@ export const eidLookupCrmWorkflow = defineWorkflow({
   },
 });
 
-export { dedupeNames, prepareNames } from "../../domain/identity/person-name.js";
-
-export function deriveEidLookupItemId(input: EidLookupItem): string {
-  return isEidInput(input) ? input.emplId : normalizeName(input.name);
+export async function runPersonLookup(input: PersonLookupItem): Promise<void> {
+  await runWorkflow(personLookupWorkflow, input);
 }
+
+export { dedupeNames, prepareNames } from "../../domain/identity/person-name.js";
 
 /**
  * Internal daemon-mode adapter.
  *
- * Enqueues one `{name}` or
- * `{emplId}` item per unique, normalized input to any alive `eid-lookup`
- * daemon (or spawns one via `ensureDaemonsAndEnqueue`). Keeps the UCPath +
- * CRM browser session warm across batches so subsequent names don't re-Duo.
- *
- * The daemon hard-wires `eidLookupCrmWorkflow` (UCPath + CRM) — this is the
- * only variant; the former `--no-crm` and `--i9` flag combos were removed
- * 2026-04-28 along with the legacy `runEidLookup` in-process path.
+ * Enqueues one `{name}` or `{emplId}` item per unique, normalized input to any
+ * alive `person-lookup` daemon (or spawns one via `ensureDaemonsAndEnqueue`).
+ * Keeps the UCPath + CRM browser session warm across batches so subsequent
+ * items don't re-Duo.
  */
-export const runEidLookupCli = buildCliAdapter<[string[]], EidLookupItem>({
-  workflow: eidLookupCrmWorkflow,
-  emptyMessage: "runEidLookupCli: no names provided",
+export const runPersonLookupCli = buildCliAdapter<[string[]], PersonLookupItem>({
+  workflow: personLookupWorkflow,
+  emptyMessage: "runPersonLookupCli: no names or EIDs provided",
   buildInputs: (names) => prepareNames(names).map((name) => ({ name })),
-  deriveItemId: deriveEidLookupItemId,
+  deriveItemId: derivePersonLookupItemId,
   buildPendingData: (item, itemId) => {
-    const n = "name" in item ? normalizeName(item.name) : item.emplId;
-    const subject = eidLookupCrmWorkflow.config.operatorSubject?.(item);
+    const n = "name" in item && item.name ? normalizeName(item.name) : ("emplId" in item ? item.emplId : "");
+    const subject = personLookupWorkflow.config.operatorSubject?.(item);
     const parentSubject = "parentSubject" in item ? item.parentSubject : undefined;
     return {
       searchName: n,

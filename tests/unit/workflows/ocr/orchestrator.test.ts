@@ -76,7 +76,7 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [
         {
-          workflow: "eid-lookup",
+          workflow: "person-lookup",
           itemId: "ocr-oath-run-1-r0",
           runId: "verify-1",
           status: "done" as const,
@@ -210,7 +210,7 @@ test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", asy
         assert.equal(parent.itemId, "session-deps");
         assert.equal(parent.runId, "run-deps");
         assert.equal(children.length, 1);
-        assert.equal(children[0].workflow, "eid-lookup");
+        assert.equal(children[0].workflow, "person-lookup");
         assert.equal(children[0].recordIndex, 0);
         assert.equal(children[0].lookupKind, "name");
       },
@@ -265,7 +265,7 @@ test("orchestrator waits for eid-lookup results before completing awaiting-appro
         watcherCalled = true;
         await new Promise((resolve) => setTimeout(resolve, 10));
         return [{
-          workflow: "eid-lookup",
+          workflow: "person-lookup",
           itemId: "ocr-oath-run-wait-eid-r0",
           runId: "eid-run-1",
           status: "done" as const,
@@ -299,7 +299,7 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
   const outcome = {
-    workflow: "eid-lookup",
+    workflow: "person-lookup",
     itemId: "ocr-oath-run-single-patch-r0",
     runId: "eid-run-failed",
     status: "failed" as const,
@@ -395,7 +395,7 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
       _enqueueEidLookupOverride: async () => {},
       _disableSqliteDependencies: true,
       _watchChildRunsOverride: async () => [{
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         itemId: "ocr-oath-run-preemit-eid-r0",
         runId: "eid-run-1",
         status: "done" as const,
@@ -404,13 +404,13 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
     },
   );
 
-  const eidFileName = readdirSync(dir).find((file) => /^eid-lookup-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
-  assert.ok(eidFileName, "expected an eid-lookup tracker file");
+  const eidFileName = readdirSync(dir).find((file) => /^person-lookup-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
+  assert.ok(eidFileName, "expected a person-lookup tracker file");
   const eidFile = join(dir, eidFileName);
-  assert.equal(existsSync(eidFile), true, "delegated eid-lookup pending row should be written immediately");
+  assert.equal(existsSync(eidFile), true, "delegated person-lookup pending row should be written immediately");
   const entries = readFileSync(eidFile, "utf-8").trim().split("\n").map((line) => JSON.parse(line));
   const pending = entries.find((entry: any) => entry.status === "pending" && entry.id === "ocr-oath-run-preemit-eid-r0");
-  assert.ok(pending, "expected pre-emitted pending eid-lookup row");
+  assert.ok(pending, "expected pre-emitted pending person-lookup row");
   assert.equal(pending.data.searchName, "Barahona Martell, Carlos D");
   // New approval contract (2026-05-25): awaiting-approval is status="running".
   assert.equal(writtenEntries.some((entry: any) => entry.status === "running" && entry.step === "awaiting-approval"), true);
@@ -459,7 +459,7 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
       _disableSqliteDependencies: true,
       _watchChildRunsOverride: async ({ expectedItemIds }: WatchChildRunsOpts) =>
         expectedItemIds.map((itemId) => ({
-          workflow: "eid-lookup",
+          workflow: "person-lookup",
           itemId,
           runId: "eid-run-active-mock",
           status: "done" as const,
@@ -576,7 +576,7 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
         assert.equal(parent.itemId, "session-active-deps");
         assert.equal(parent.runId, runId);
         assert.equal(children.length, 1);
-        assert.equal(children[0].workflow, "eid-lookup");
+        assert.equal(children[0].workflow, "person-lookup");
         assert.equal(children[0].itemId, `ocr-oath-${runId}-r0`);
         assert.equal(children[0].recordIndex, 0);
         assert.equal(children[0].lookupKind, "verify");
@@ -896,7 +896,7 @@ test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approv
       _enqueueEidLookupOverride: async () => { /* no-op */ },
       _watchChildRunsOverride: async () => [
         {
-          workflow: "eid-lookup",
+          workflow: "person-lookup",
           itemId: "ocr-oath-run-fp-1-r0",
           runId: "verify-1",
           status: "done" as const,

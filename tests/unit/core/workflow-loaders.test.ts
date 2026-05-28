@@ -7,10 +7,10 @@ test("ocr is NOT in the daemon registry — HTTP-only workflow", () => {
   assert.ok(!listWorkflowNames().includes("ocr"));
 });
 
-test("active-check is daemon-spawnable", async () => {
-  assert.ok("active-check" in WORKFLOW_LOADERS);
-  assert.ok(listWorkflowNames().includes("active-check"));
+test("person-lookup is daemon-spawnable", async () => {
+  assert.ok("person-lookup" in WORKFLOW_LOADERS);
+  assert.ok(listWorkflowNames().includes("person-lookup"));
 
-  const workflow = await WORKFLOW_LOADERS["active-check"]();
-  assert.equal(workflow.config.name, "active-check");
+  const workflow = await WORKFLOW_LOADERS["person-lookup"]();
+  assert.equal(workflow.config.name, "person-lookup");
 });

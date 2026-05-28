@@ -170,7 +170,7 @@ export function createOcrEidLookupDependencyBatch(input: {
   trackerDir?: string;
   parent: { workflow: "ocr"; itemId: string; runId: string; formType: string };
   children: Array<{
-    workflow: "eid-lookup";
+    workflow: "person-lookup";
     itemId: string;
     runId: string;
     recordIndex: number;

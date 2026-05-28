@@ -115,7 +115,7 @@ export interface OcrOrchestratorOpts {
   _createDependencyBatchOverride?: (input: {
     parent: { workflow: "ocr"; itemId: string; runId: string; formType: string };
     children: Array<{
-      workflow: "eid-lookup";
+      workflow: "person-lookup";
       itemId: string;
       runId: string;
       recordIndex: number;
@@ -676,7 +676,7 @@ export async function runOcrOrchestrator(
           }
         },
         buildChild: (itemId, childRunId, item) => ({
-          workflow: "eid-lookup",
+          workflow: "person-lookup",
           itemId,
           runId: childRunId,
           recordIndex: item.index,
@@ -699,7 +699,7 @@ export async function runOcrOrchestrator(
             }
           : undefined,
         preEmitPendingForOverride: async () => {
-          const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+          const { personLookupWorkflow } = await import("../person-lookup/index.js");
           for (const e of eidLookupEnqueueItems) {
             const item = e.kind === "name"
               ? {
@@ -716,9 +716,9 @@ export async function runOcrOrchestrator(
             // Keep the override branch on the same write path shape as the
             // real fan-out below: eid-lookup children are `single` rows and
             // delegated scope is represented by parentRunId.
-            const overrideData = buildHttpPendingData(eidLookupCrmWorkflow, item, runId);
+            const overrideData = buildHttpPendingData(personLookupWorkflow, item, runId);
             emitTrackerRow({
-              workflow: eidLookupCrmWorkflow.config.name,
+              workflow: personLookupWorkflow.config.name,
               timestamp: new Date().toISOString(),
               id: e.itemId,
               runId: `override-${e.itemId}`,
@@ -745,7 +745,7 @@ export async function runOcrOrchestrator(
           //     await — wrapping a second wait inside delegateToAllImpl
           //     would double-count and re-watch the same children.
           const { delegateToAllImpl } = await import("../../core/delegate.js");
-          const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+          const { personLookupWorkflow } = await import("../person-lookup/index.js");
           const inputs = eidLookupEnqueueItems.map((e) =>
             e.kind === "name"
               ? {
@@ -772,11 +772,11 @@ export async function runOcrOrchestrator(
           await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
             parentRunId: runId,
             trackerDir,
-            // eidLookupCrmWorkflow's exact generic param doesn't line up
+            // personLookupWorkflow's exact generic param doesn't line up
             // with the union type of `inputs` (name-only vs emplId-only
             // variants), so cast through unknown — the runtime schema
             // validates both shapes.
-            child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+            child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
             inputs,
             renderAs: "flat",
             fireAndForget: true,
@@ -786,7 +786,7 @@ export async function runOcrOrchestrator(
             // so the dashboard's queue-surface dispatcher has everything it
             // needs to title/group the rows.
             buildPendingExtras: (childItem, _itemId) => {
-              const base = buildHttpPendingData(eidLookupCrmWorkflow, childItem, runId);
+              const base = buildHttpPendingData(personLookupWorkflow, childItem, runId);
               // buildPendingTrackerData stamps __name/__id + parentSubject
               // again, so strip ours to avoid duplicate keys winning the
               // wrong write order. The remaining buildHttpPendingData fields
@@ -880,7 +880,7 @@ export async function runOcrOrchestrator(
 // ─── Helpers (private) ──────────────────────────────────────
 
 interface FanOutChildSpec {
-  workflow: "eid-lookup";
+  workflow: "person-lookup";
   itemId: string;
   runId: string;
   recordIndex: number;

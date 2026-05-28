@@ -32,14 +32,13 @@ import { isMainModule } from "../main-module.js";
 // Listed alphabetically; no need to actually use their exports here beyond the
 // schemas below — the side-effect is what we care about for any future
 // registry-based features.
-import * as activeCheck from "../../workflows/active-check/index.js";
 import * as crmDocDownload from "../../workflows/crm-doc-download/index.js";
-import * as eidLookup from "../../workflows/eid-lookup/index.js";
 import * as emergencyContact from "../../workflows/emergency-contact/index.js";
 import * as oldKronosReports from "../../workflows/old-kronos-reports/index.js";
 import * as onboarding from "../../workflows/onboarding/index.js";
 import * as oathSignature from "../../workflows/oath-signature/index.js";
 import * as oathUpload from "../../workflows/oath-upload/index.js";
+import * as personLookup from "../../workflows/person-lookup/index.js";
 import * as separations from "../../workflows/separations/index.js";
 // separations/index.ts only re-exports helpers, not the schema itself — pull
 // the schema from the underlying module directly.
@@ -70,14 +69,13 @@ interface SchemaEntry {
 type AnySchema = SchemaEntry["schema"];
 
 const SCHEMA_REGISTRY: SchemaEntry[] = [
-  { workflowName: "active-check", schema: activeCheck.ActiveCheckItemSchema as unknown as AnySchema },
   { workflowName: "crm-doc-download", schema: crmDocDownload.CrmDocDownloadInputSchema as unknown as AnySchema },
-  { workflowName: "eid-lookup", schema: eidLookup.EidLookupItemSchema as unknown as AnySchema },
   { workflowName: "emergency-contact", schema: emergencyContact.BatchSchema as unknown as AnySchema },
   { workflowName: "kronos-reports", schema: oldKronosReports.KronosInputSchema as unknown as AnySchema },
   { workflowName: "oath-signature", schema: oathSignature.OathSignatureInputSchema as unknown as AnySchema },
   { workflowName: "oath-upload", schema: oathUpload.OathUploadInputSchema as unknown as AnySchema },
   { workflowName: "onboarding", schema: onboarding.EmployeeDataSchema as unknown as AnySchema },
+  { workflowName: "person-lookup", schema: personLookup.PersonLookupItemSchema as unknown as AnySchema },
   { workflowName: "separations", schema: SeparationDataSchema as unknown as AnySchema },
   { workflowName: "work-study", schema: workStudy.WorkStudyInputSchema as unknown as AnySchema },
 ];

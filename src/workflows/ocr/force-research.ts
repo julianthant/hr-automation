@@ -103,7 +103,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     //   - `parentRunId: input.runId` so the OCR session row is the parent of
     //     each eid-lookup child row.
     const { delegateToAllImpl } = await import("../../core/delegate.js");
-    const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+    const { personLookupWorkflow } = await import("../person-lookup/index.js");
     const inputToItemId = new Map(
       enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? ""])
     );
@@ -111,11 +111,11 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
       parentRunId: input.runId,
       trackerDir,
-      // eidLookupCrmWorkflow's exact generic param doesn't line up with the
+      // personLookupWorkflow's exact generic param doesn't line up with the
       // narrowed `{ name }` shape used here (it accepts a union of name-only /
       // emplId-only variants), so cast through unknown — the runtime schema
       // validates the actual shape.
-      child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+      child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
       inputs: enqueueInputs,
       renderAs: "flat",
       fireAndForget: true,
@@ -125,7 +125,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
 
   const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
   const outcomes = await watchFn({
-    workflow: "eid-lookup",
+    workflow: "person-lookup",
     expectedItemIds: itemIds,
     trackerDir,
     date,

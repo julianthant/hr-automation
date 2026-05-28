@@ -1,7 +1,7 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { PersonLookupResult } from "../../../../src/workflows/person-lookup/outcome.js";
-import { deriveActiveCheckOutcome } from "../../../../src/workflows/active-check/workflow.js";
+import { deriveActiveCheckOutcome } from "../../../../src/workflows/person-lookup/outcome.js";
 
 function eidResult(patch: Partial<PersonLookupResult> = {}): PersonLookupResult {
   return {

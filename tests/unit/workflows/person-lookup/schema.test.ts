@@ -2,11 +2,11 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   normalizeName,
-  EidLookupItemSchema,
-  EidLookupNameInputSchema,
-  EidLookupEidInputSchema,
+  PersonLookupItemSchema as EidLookupItemSchema,
+  PersonLookupNameInputSchema as EidLookupNameInputSchema,
+  PersonLookupEidInputSchema as EidLookupEidInputSchema,
   isEidInput,
-} from "../../../../src/workflows/eid-lookup/schema.js";
+} from "../../../../src/workflows/person-lookup/schema.js";
 
 describe("normalizeName", () => {
   it("title-cases all-lowercase input", () => {
