@@ -36,9 +36,11 @@
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "test": "vitest run",
+    "test": "vitest run --reporter=dot",
+    "test:stderr-audit": "vitest run --reporter=dot",
+    "test:verbose": "vitest run --reporter=verbose",
     "test:watch": "vitest",
-    "test:architecture": "vitest run tests/unit/architecture"
+    "test:architecture": "vitest run tests/unit/architecture --reporter=dot"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

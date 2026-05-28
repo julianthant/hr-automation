@@ -8,13 +8,15 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
     "paths": {
       "@/*": ["./src/dashboard/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
   "exclude": ["src/dashboard/**/*"]
 }
