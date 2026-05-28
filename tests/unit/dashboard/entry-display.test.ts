@@ -129,7 +129,7 @@ test("delegated OCR prep rows use PDF name as title and inherited Oath title as 
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "running",
     data: {
-      archetype: "batch-parent",
+      archetype: "batch",
       mode: "prepare",
       pdfOriginalName: "packet.pdf",
       __queueTitle: "Oath · 1234",
@@ -154,7 +154,7 @@ test("delegated oath-signature PDF batch rows use the PDF name instead of the wo
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "running",
     data: {
-      archetype: "batch-parent",
+      archetype: "batch",
       pdfOriginalName: "upload-packet.pdf",
       __name: "upload-packet.pdf",
       __id: "oath-session-1",
@@ -176,7 +176,7 @@ test("dispatch rows can show an explicit queue subtitle", () => {
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "done",
     data: {
-      archetype: "dispatch",
+      archetype: "single", delegationRole: "dispatch",
       __name: "Delegation Request",
       __queueSubtitle: "Oath request sent",
       __queueRootTitle: "Oath · 1234",
@@ -189,7 +189,7 @@ test("dispatch rows can show an explicit queue subtitle", () => {
 
 test("delegated person rows keep the person name instead of inheriting the parent title", () => {
   const row = entry("10874100", {
-    archetype: "delegate-child",
+    archetype: "single",
     name: "Barahona Martell, Carlos D",
     emplId: "10874100",
     __name: "Barahona Martell, Carlos D",

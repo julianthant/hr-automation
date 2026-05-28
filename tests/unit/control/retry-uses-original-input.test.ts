@@ -19,79 +19,34 @@
  */
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
-import {
-  __resetDaemonSpawnLocksForTests,
-  __setSpawnDaemonImplForTests,
-} from "../../../src/core/daemon/client.js";
-import {
-  ensureDaemonsDir,
-  lockfilePath,
-  writeLockfile,
-} from "../../../src/core/daemon/registry.js";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { trackEvent, readEntries } from "../../../src/tracker/jsonl.js";
 import { buildRetryHandler } from "../../../src/control/ops/retry.js";
+import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
+import {
+  resetDaemonSpawnStubs,
+  stubDaemonSpawn,
+} from "../../_utils/stub-daemon-spawn.js";
 
 let tmp: string;
-const servers: Server[] = [];
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "retry-original-"));
 });
 afterEach(async () => {
-  __setSpawnDaemonImplForTests(null);
-  __resetDaemonSpawnLocksForTests();
-  for (const server of servers.splice(0)) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
+  await resetDaemonSpawnStubs();
   closeStateDbForTests(tmp);
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
 
-function stubDaemonSpawn(): () => number {
-  let spawnCalls = 0;
-  ensureDaemonsDir(tmp);
-  __setSpawnDaemonImplForTests(async (workflow, trackerDir) => {
-    spawnCalls++;
-    const instanceId = `retry-${spawnCalls}`;
-    const server = createServer((req, res) => {
-      if (req.url === "/whoami" && req.method === "GET") {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ workflow, instanceId, pid: process.pid, version: 1 }));
-        return;
-      }
-      if (req.url === "/wake" && req.method === "POST") {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end('{"ok":true}');
-        return;
-      }
-      res.writeHead(404);
-      res.end();
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-    servers.push(server);
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
-    const startedAt = new Date().toISOString();
-    const path = lockfilePath(workflow, instanceId, trackerDir);
-    writeLockfile(
-      { workflow, instanceId, pid: process.pid, port, startedAt, hostname: "host", version: 1 },
-      path,
-    );
-    return { workflow, instanceId, pid: process.pid, port, startedAt, lockfilePath: path };
-  });
-  return () => spawnCalls;
-}
-
 describe("retry uses pristine original input (Contract 2)", () => {
   it("re-enqueues with the original input even when later tracker rows carry mutated data", async () => {
-    stubDaemonSpawn();
+    stubDaemonSpawn(tmp, { instanceIdPrefix: "retry" });
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
 
@@ -246,7 +201,19 @@ describe("retry uses pristine original input (Contract 2)", () => {
       error: "transient failure",
     });
 
-    const spawnCalls = stubDaemonSpawn();
+    emitTrackerRow(
+      {
+        workflow: "work-study",
+        timestamp: new Date().toISOString(),
+        id: "9876",
+        runId: "failed-run-no-daemon",
+        status: "failed",
+        data: { archetype: "single", emplId: "9876" },
+      },
+      tmp,
+    );
+
+    const { getSpawnCalls } = stubDaemonSpawn(tmp, { instanceIdPrefix: "retry" });
 
     const result = await buildRetryHandler(tmp)({
       workflow: "work-study",
@@ -255,7 +222,7 @@ describe("retry uses pristine original input (Contract 2)", () => {
     });
 
     assert.equal(result.ok, true);
-    assert.equal(spawnCalls(), 1, "retry must spawn one daemon when none is alive");
+    assert.equal(getSpawnCalls(), 1, "retry must spawn one daemon when none is alive");
   });
 
   it("returns a structured error when both original and current task inputs are missing", async () => {

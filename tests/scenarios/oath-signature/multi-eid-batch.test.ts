@@ -8,14 +8,14 @@ import { oathSignatureBeats, maskVolatile } from "./_beats.js";
 /**
  * Scenario: operator enqueues N EIDs in one dashboard input run. Because
  * oath-signature is `archetype: "single"`, each EID
- * becomes its own independent flat queue row — there is no batch-parent
+ * becomes its own independent flat queue row — there is no batch row
  * card grouping them.
  *
  * Dashboard contract:
  *   - N rows on the flat queue surface, each independent.
  *   - Each row's title comes from the per-row `__queueTitle` (operator
  *     subject), so the queue reads as a stack of "Oath Signature EID …".
- *   - No `parentRunId` on any of them (no batch-parent).
+ *   - No `parentRunId` on any of them (no batch row).
  */
 describe("oath-signature scenario: multi-EID batch", () => {
   test("three EIDs enqueued together — three independent rows complete", async (t) => {
@@ -59,6 +59,7 @@ describe("oath-signature scenario: multi-EID batch", () => {
             "__subject": "Oath Signature EID 10000001",
             "__subjectKind": "eid",
             "archetype": "single",
+            "date": "05/01/2026",
             "emplId": "10000001",
             "instance": "<instance>",
             "name": "Alice Smith",
@@ -87,6 +88,7 @@ describe("oath-signature scenario: multi-EID batch", () => {
             "__subject": "Oath Signature EID 10000002",
             "__subjectKind": "eid",
             "archetype": "single",
+            "date": "05/01/2026",
             "emplId": "10000002",
             "instance": "<instance>",
             "name": "Bob Jones",
@@ -115,6 +117,7 @@ describe("oath-signature scenario: multi-EID batch", () => {
             "__subject": "Oath Signature EID 10000003",
             "__subjectKind": "eid",
             "archetype": "single",
+            "date": "05/01/2026",
             "emplId": "10000003",
             "instance": "<instance>",
             "name": "Carol Lee",

@@ -55,6 +55,7 @@ function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {
       return {
         kind: "batch",
         parentRunId: surface.parentRunId,
+        ...(surface.parent ? { parent: toDashboardEntry(surface.parent) } : {}),
         members: surface.members.map(toDashboardEntry),
         titleOverride: surface.titleOverride,
       };
@@ -82,6 +83,7 @@ export interface PassiveDelegationSurface {
 export interface BatchSurface {
   kind: "batch";
   parentRunId: string;
+  parent?: TrackerEntry;
   members: TrackerEntry[];
   titleOverride?: string;
 }

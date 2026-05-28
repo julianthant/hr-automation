@@ -219,11 +219,11 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
     const seedData = buildInitialTrackerData(wf, handlerInput)
-    const rowArchetype = runtimeOptions?.rowArchetype
-      ?? deriveRowArchetype(
-        resolveArchetype(wf.config, handlerInput),
-        opts.parentRunId,
-      )
+    const rowArchetype = deriveRowArchetype(
+      resolveArchetype(wf.config, handlerInput),
+      opts.parentRunId,
+      runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
+    )
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),

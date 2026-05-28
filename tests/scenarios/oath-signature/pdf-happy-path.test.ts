@@ -51,7 +51,7 @@ describe("oath-signature scenario: pdf branch happy path", () => {
       workflowLabel: oathSignatureWorkflow.config.label,
     });
     assert.equal(snap.status, "done", "pdf-branch row should reach terminal done");
-    assert.equal(snap.archetype, "batch-parent", "pdf inputs resolve to batch archetype");
+    assert.equal(snap.archetype, "batch", "pdf inputs resolve to batch archetype");
 
     // Lock the full row shape — captures everything the dashboard renders.
     expect(maskVolatile(snap)).toMatchSnapshot();

@@ -1,7 +1,7 @@
 import { randomUUID, type UUID } from 'node:crypto'
 import { findAliveDaemons, invalidateAliveDaemonsCache, killOrphanedChromiumProcesses, spawnDaemon } from './registry.js'
 import { enqueueItems } from './queue.js'
-import { deriveItemId } from '../kernel/workflow.js'
+import { deriveItemId, splitPrefilled } from '../kernel/workflow.js'
 import { log } from '../../utils/log.js'
 import type { Daemon, DaemonFlags, EnqueueResult } from './types.js'
 import type { RegisteredWorkflow } from '../kernel/types.js'
@@ -300,7 +300,8 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   // Fail-fast input validation via workflow schema — consistent with runWorkflow.
   for (const input of inputs) {
     try {
-      wf.config.schema.parse(input)
+      const { cleaned } = splitPrefilled(input)
+      wf.config.schema.parse(cleaned)
     } catch (err) {
       throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
     }

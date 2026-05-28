@@ -9,9 +9,7 @@
  *     `data.archetype` stamped (Contract 1).
  *   - Persists the child input on the task store for the daemon path
  *     (Contract 2 tier 1); for in-process delegation, the input rides on
- *     the pending row's `input` field (Contract 2 tier 2). When delegation
- *     has to preserve an explicit row archetype, the input includes the
- *     kernel `__runtimeOptions.rowArchetype` channel.
+ *     the pending row's `input` field (Contract 2 tier 2).
  *   - Awaits the child's terminal status (`done` / `failed` /
  *     `cancelled`) and returns a typed `ChildRunResult`. With
  *     `fireAndForget: true`, returns immediately after enqueue/launch with
@@ -37,19 +35,13 @@
  *     for the daemon path; for the in-process path, terminal status comes
  *     from the per-run resolved/rejected promise.
  *
- * `renderAs` overrides:
- *   - "flat"    → stamps `archetype: "passive-child"` so projections render
- *                 the child through the passive-delegation surface model.
- *   - "preview" → child renders as an `approval-delegation` preview row.
- *                 Stamps the child's natural archetype (`delegate-child`
- *                 for non-utility children); the preview affordance comes
- *                 from the child workflow's `runtimePolicy.preview`.
- *   - "batch"   → child renders as a `batch-delegation` group member.
- *                 Stamps `archetype: "delegate-child"`. Use for fan-outs
- *                 where many children belong to one parent card.
+ * `renderAs` is mostly a projection hint:
+ *   - "flat"    → child may render as a flat delegation-member row.
+ *   - "preview" → child may render as an approval-delegation preview row.
+ *   - "batch"   → child is stamped as a batch-member under the parent row.
  *
- * When `renderAs` is omitted, the kernel derives the row archetype via
- * `deriveRowArchetype(child.archetype, parentRunId)`.
+ * The kernel always derives the row archetype via
+ * `deriveRowArchetype(child.archetype, parentRunId, opts)`.
  */
 import type {
   RegisteredWorkflow,
@@ -60,10 +52,10 @@ import type {
   DelegateRenderAs,
 } from "./kernel/types.js"
 import { runWorkflow } from "./kernel/run-workflow.js"
-import type { TrackerRowArchetype } from "../domain/row-archetype.js"
 import {
   deriveRowArchetype,
   resolveArchetype,
+  type RowArchetype,
 } from "../domain/row-archetype.js"
 import { listWorkflowNames } from "./workflow-loaders.js"
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js"
@@ -101,54 +93,31 @@ interface DelegateCoreArgs<TChildData, TChildSteps extends readonly string[]> {
   parentSignal?: AbortSignal
 }
 
-/** Map a `renderAs` override to the canonical `RowArchetype` to stamp. */
 function resolveDelegateArchetype<TData, TSteps extends readonly string[]>(
   child: RegisteredWorkflow<TData, TSteps>,
   input: TData,
   parentRunId: string,
   renderAs?: DelegateRenderAs,
-): TrackerRowArchetype {
-  if (renderAs === "flat") return "passive-child"
-  if (renderAs === "batch" || renderAs === "preview") return "delegate-child"
-  return deriveRowArchetype(resolveArchetype(child.config, input), parentRunId)
+): RowArchetype {
+  return deriveRowArchetype(
+    resolveArchetype(child.config, input),
+    parentRunId,
+    renderAs === "batch" ? { member: true } : undefined,
+  )
 }
 
-function defaultDelegatedRunArchetype<TData, TSteps extends readonly string[]>(
-  child: RegisteredWorkflow<TData, TSteps>,
-  input: TData,
-  parentRunId: string,
-): TrackerRowArchetype {
-  return deriveRowArchetype(resolveArchetype(child.config, input), parentRunId)
-}
-
-function mergeRuntimeRowArchetype<TData>(
-  input: TData,
-  rowArchetype: TrackerRowArchetype,
-): TData {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return input
-  const current = (input as { __runtimeOptions?: unknown }).__runtimeOptions
-  const currentRuntimeOptions =
-    current && typeof current === "object" && !Array.isArray(current)
-      ? current as Record<string, unknown>
-      : {}
+function withBatchMemberRuntimeOptions<TInput>(input: TInput, renderAs?: DelegateRenderAs): TInput {
+  if (renderAs !== "batch" || !input || typeof input !== "object" || Array.isArray(input)) {
+    return input
+  }
+  const current = (input as Record<string, unknown>).__runtimeOptions
   return {
     ...(input as Record<string, unknown>),
     __runtimeOptions: {
-      ...currentRuntimeOptions,
-      rowArchetype,
+      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
+      rowShape: "batch-member",
     },
-  } as TData
-}
-
-function inputForDelegatedRun<TData, TSteps extends readonly string[]>(args: {
-  child: RegisteredWorkflow<TData, TSteps>
-  input: TData
-  parentRunId: string
-  archetype: TrackerRowArchetype
-}): TData {
-  return args.archetype === defaultDelegatedRunArchetype(args.child, args.input, args.parentRunId)
-    ? args.input
-    : mergeRuntimeRowArchetype(args.input, args.archetype)
+  } as TInput
 }
 
 function isDaemonCapable(workflowName: string): boolean {
@@ -169,7 +138,7 @@ function preEmitPendingForChild<TChildData, TChildSteps extends readonly string[
   parentRunId: string
   itemId: string
   runId: string
-  archetype: TrackerRowArchetype
+  archetype: RowArchetype
   trackerDir: string | undefined
 }): void {
   const data = buildPendingTrackerData({
@@ -246,18 +215,13 @@ async function runInProcessAndCollectResult<TChildData, TChildSteps extends read
 export async function delegateToImpl<TChildData, TChildSteps extends readonly string[]>(
   args: DelegateCoreArgs<TChildData, TChildSteps>,
 ): Promise<ChildRunResult<TChildData>> {
+  const childInput = withBatchMemberRuntimeOptions(args.input, args.renderAs)
   const childItemId =
     args.itemId
     ?? args.child.config.deriveItemId?.(args.input)
     ?? `delegate-${randomUUID().slice(0, 8)}`
   const childRunId = args.runId ?? randomUUID()
-  const archetype = resolveDelegateArchetype(args.child, args.input, args.parentRunId, args.renderAs)
-  const input = inputForDelegatedRun({
-    child: args.child,
-    input: args.input,
-    parentRunId: args.parentRunId,
-    archetype,
-  })
+  const archetype = resolveDelegateArchetype(args.child, childInput, args.parentRunId, args.renderAs)
 
   // Route daemon-capable, non-fire-and-forget children through the daemon
   // path so SQLite `tasks.original_input_json` lands (Contract 2 tier 1).
@@ -270,7 +234,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
       parentRunId: args.parentRunId,
       trackerDir: args.trackerDir,
       child: args.child,
-      inputs: [input],
+      inputs: [childInput],
       renderAs: args.renderAs,
       fireAndForget: false,
       deriveItemId: args.itemId ? () => childItemId : undefined,
@@ -280,7 +244,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
 
   preEmitPendingForChild({
     child: args.child,
-    input,
+    input: childInput,
     parentRunId: args.parentRunId,
     itemId: childItemId,
     runId: childRunId,
@@ -290,7 +254,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
 
   if (args.fireAndForget) {
     // Spawn the child but don't await it — caller asked us not to.
-    void runWorkflow(args.child, input, {
+    void runWorkflow(args.child, childInput, {
       itemId: childItemId,
       preAssignedRunId: childRunId,
       trackerDir: args.trackerDir,
@@ -340,7 +304,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
 
   return runInProcessAndCollectResult({
     ...args,
-    input,
+    input: childInput,
     itemId: childItemId,
     runId: childRunId,
   })
@@ -430,6 +394,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
 
+  const queuedInputs = args.inputs.map((input) => withBatchMemberRuntimeOptions(input, args.renderAs))
   const expectedItemIds: string[] = []
   // Parallel to expectedItemIds: index → assigned childRunId from the
   // daemon enqueue path. Captured here so the fire-and-forget branch can
@@ -439,7 +404,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 
   await ensureDaemonsAndEnqueue(
     args.child,
-    args.inputs as TChildData[],
+    queuedInputs as TChildData[],
     {},
     {
       trackerDir: args.trackerDir,
@@ -458,12 +423,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
       onPreEmitPending: (item, childRunId, parentRunIdFwd, itemId) => {
         expectedItemIds.push(itemId)
         expectedRunIds.push(childRunId)
-        const archetype = resolveDelegateArchetype(
-          args.child,
-          item as TChildData,
-          args.parentRunId,
-          args.renderAs,
-        )
+        const archetype = resolveDelegateArchetype(args.child, item as TChildData, args.parentRunId, args.renderAs)
         const extras = args.buildPendingExtras?.(item as TChildData, itemId) ?? {}
         const data = buildPendingTrackerData({
           workflow: args.child,
@@ -580,16 +540,7 @@ export async function delegateToAllImpl<TChildData, TChildSteps extends readonly
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
   if (isDaemonCapable(args.child.config.name)) {
-    const inputs = args.inputs.map((input) => {
-      const archetype = resolveDelegateArchetype(args.child, input, args.parentRunId, args.renderAs)
-      return inputForDelegatedRun({
-        child: args.child,
-        input,
-        parentRunId: args.parentRunId,
-        archetype,
-      })
-    })
-    return dispatchToDaemonAndWait({ ...args, inputs })
+    return dispatchToDaemonAndWait(args)
   }
   return runInProcessPool(args)
 }

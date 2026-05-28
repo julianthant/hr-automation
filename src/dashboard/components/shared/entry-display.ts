@@ -1,7 +1,7 @@
 import type { TrackerEntry } from "./types";
 import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
 import { readQueueTitle } from "../../../domain/queue-title.js";
-import { resolveRowArchetype } from "../../../domain/row-archetype.js";
+import { hasDelegationRole, resolveRowArchetype } from "../../../domain/row-archetype.js";
 export {
   groupMergedTrackerEntries as groupMergedEntries,
   type MergedEntryGroup,
@@ -55,7 +55,7 @@ export function resolveEntryName(
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
-  if ((d.mode === "prepare" || resolveRowArchetype(entry) === "batch-parent") && d.pdfOriginalName) {
+  if ((d.mode === "prepare" || resolveRowArchetype(entry) === "batch") && d.pdfOriginalName) {
     return d.pdfOriginalName;
   }
   if (entry.parentRunId) {
@@ -116,7 +116,7 @@ export function resolveEntryId(entry: TrackerEntry): string {
   const d = entry.data ?? {};
   // Dispatch rows use the group context label as the secondary footer ID
   // rather than the technical request item ID.
-  if (resolveRowArchetype(entry) === "dispatch") {
+  if (hasDelegationRole(entry, "dispatch")) {
     if (d.__queueSubtitle) return d.__queueSubtitle;
     return d.__queueRootTitle || d.parentSubject || d.__id || entry.id;
   }
@@ -166,7 +166,7 @@ export function buildDisplayNameMap(
 ): Map<string, string> {
   const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean; explicitWorkflowName: boolean } => {
     const d = e.data ?? {};
-    if ((d.mode === "prepare" || resolveRowArchetype(e) === "batch-parent") && d.pdfOriginalName) {
+    if ((d.mode === "prepare" || resolveRowArchetype(e) === "batch") && d.pdfOriginalName) {
       return { base: d.pdfOriginalName, ordinal: false, explicitWorkflowName: false };
     }
     const personName = resolveEmployeeLabel(d);
@@ -186,9 +186,9 @@ export function buildDisplayNameMap(
     if (parentSubject) return { base: parentSubject, ordinal: false, explicitWorkflowName: true };
     const ocrBase = ocrQueueDisplayBase(e);
     if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
-    // Batch-parent rows already have a unique batch id in __name (e.g. "Oath · 7596").
-    // No ordinal suffix needed. OCR batch-parent rows are handled above by ocrQueueDisplayBase.
-    if (resolveRowArchetype(e) === "batch-parent") {
+    // Batch rows already have a unique batch id in __name (e.g. "Oath · 7596").
+    // No ordinal suffix needed. OCR batch rows are handled above by ocrQueueDisplayBase.
+    if (resolveRowArchetype(e) === "batch") {
       const workflowName = firstNonBlank(d.__name);
       return { base: workflowName || workflowLabel, ordinal: false, explicitWorkflowName: Boolean(workflowName) };
     }
@@ -278,7 +278,7 @@ export function buildDisplayNameMap(
     if (!parentLabel) continue;
     // Dispatch rows are named notification rows; keep their own __name rather
     // than inheriting the parent batch label.
-    if (resolveRowArchetype(e) === "dispatch") {
+    if (hasDelegationRole(e, "dispatch")) {
       const ownName = firstNonBlank(d?.__name);
       if (ownName) {
         result.set(e.id, ownName);

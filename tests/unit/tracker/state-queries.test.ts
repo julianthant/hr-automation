@@ -166,7 +166,7 @@ test("queryEntriesPayload wfCounts excludes approved OCR prep rows (new approval
           runId: `${id}#1`,
           status: "done",
           step: "approved",
-          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "batch-parent" },
+          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "batch" },
         },
         dir,
       );

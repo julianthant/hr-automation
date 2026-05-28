@@ -12,7 +12,7 @@ export interface TrackerRowClassification {
 
 export function classifyTrackerRow(entry: TrackerEntry): TrackerRowClassification {
   return {
-    shape: resolveRowArchetype(entry) as RowArchetype,
+    shape: resolveRowArchetype(entry),
     scope: entry.parentRunId ? "delegated" : "root",
   };
 }
@@ -21,17 +21,25 @@ function isBatchAnchor(entry: TrackerEntry): boolean {
   return classifyTrackerRow(entry).shape === "batch";
 }
 
+function isPreviewAnchor(entry: TrackerEntry): boolean {
+  const classification = classifyTrackerRow(entry);
+  if (classification.shape === "preview") return true;
+  // Compatibility for older OCR JSONL rows written before `preview` became a
+  // first-class archetype. Forward writes should stamp `preview`.
+  return classification.shape === "batch" && entry.workflow === "ocr" && entry.data?.mode === "prepare";
+}
+
 function entryKey(entry: Pick<TrackerEntry, "workflow" | "id" | "runId">): string {
   return `${entry.workflow}\0${entry.id}\0${entry.runId ?? ""}`;
 }
 
-function isDiscardedPrepRow(e: TrackerEntry): boolean {
-  if (!isBatchAnchor(e)) return false;
+function isDiscardedPreviewRow(e: TrackerEntry): boolean {
+  if (!isPreviewAnchor(e)) return false;
   return e.status === "failed" && e.step === "discarded";
 }
 
-function isApprovedPrepRow(e: TrackerEntry): boolean {
-  if (!isBatchAnchor(e)) return false;
+function isApprovedPreviewRow(e: TrackerEntry): boolean {
+  if (!isPreviewAnchor(e)) return false;
   // New approval contract (2026-05-25): OCR rows only ever reach
   // `status="done"` after the operator approves. The kernel-path handler
   // suspends at `awaiting-approval` and the orchestrator emits `running`
@@ -44,7 +52,11 @@ function isApprovedPrepRow(e: TrackerEntry): boolean {
 }
 
 function isVisibleBatchAnchor(e: TrackerEntry): boolean {
-  return isBatchAnchor(e) && !isDiscardedPrepRow(e);
+  return isBatchAnchor(e) && !isPreviewAnchor(e);
+}
+
+function isVisiblePreviewAnchor(e: TrackerEntry): boolean {
+  return isPreviewAnchor(e) && !isDiscardedPreviewRow(e);
 }
 
 function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
@@ -100,24 +112,9 @@ function buildMembersByParentRunId(
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
     if (isPolicyFlatMemberChild(entry, entriesByRunId, runtimePolicies)) continue;
-    if (isBatchAnchor(entry) && !rootPersistingRunIds.has(entry.parentRunId)) continue; // batch rows are anchors, not members
-    const list = map.get(entry.parentRunId) ?? [];
-    list.push(entry);
-    map.set(entry.parentRunId, list);
-  }
-  return map;
-}
-
-function groupPendingDelegatedBatchAnchors(
-  entries: TrackerEntry[],
-  rootPersistingRunIds: Set<string>,
-): Map<string, TrackerEntry[]> {
-  const map = new Map<string, TrackerEntry[]>();
-  for (const entry of entries) {
-    if (!entry.parentRunId) continue;
-    if (rootPersistingRunIds.has(entry.parentRunId)) continue;
-    if (!isVisibleBatchAnchor(entry)) continue;
-    if (isApprovedPrepRow(entry)) continue;
+    if ((isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry)) && !rootPersistingRunIds.has(entry.parentRunId)) {
+      continue; // grouped rows are anchors, not members
+    }
     const list = map.get(entry.parentRunId) ?? [];
     list.push(entry);
     map.set(entry.parentRunId, list);
@@ -152,6 +149,7 @@ export interface TrackerPassiveDelegationSurface {
 export interface TrackerBatchSurface {
   kind: "batch";
   parentRunId: string;
+  parent?: TrackerEntry;
   members: TrackerEntry[];
   titleOverride?: string;
 }
@@ -174,15 +172,29 @@ export interface BuildTrackerQueueSurfacesInput {
   runtimePolicies?: WorkflowRuntimePolicyLookup;
 }
 
+function titleOverrideForAnchor(entry: TrackerEntry): string | undefined {
+  const data = entry.data ?? {};
+  for (const value of [
+    data.pdfOriginalName,
+    data.__queueRootTitle,
+    data.__queueTitle,
+    data.parentSubject,
+    data.__name,
+  ]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 /**
  * Canonical queue **surface** model: one group card + zero or more flat rows.
  * Shared by dashboard `buildQueueSurfaces` and sidebar / wfCounts aggregation
  * so digits never double-count delegated children that render inside a card.
  */
 export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput): TrackerQueueSurfaces {
-  const visibleEntries = input.entries.filter((entry) => !isDiscardedPrepRow(entry));
+  const visibleEntries = input.entries.filter((entry) => !isDiscardedPreviewRow(entry));
   const visibleSources = input.delegationSourceEntries.filter(
-    (entry) => !isDiscardedPrepRow(entry),
+    (entry) => !isDiscardedPreviewRow(entry),
   );
   const entriesByRunId = buildEntriesByRunId(visibleSources);
   const rootPersistingRunIds = rootPersistingParentRunIds(visibleSources, input.runtimePolicies);
@@ -193,11 +205,11 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     input.runtimePolicies,
   );
   const batchAnchors = visibleEntries.filter(isVisibleBatchAnchor);
+  const previewAnchors = visibleEntries.filter(isVisiblePreviewAnchor);
   const batchAnchorRunIds = new Set(batchAnchors.map((entry) => entry.runId ?? entry.id));
-  const approvalParentRunIds = new Set([...batchAnchorRunIds]);
-  const pendingDelegatedBatchAnchorsByParentRunId =
-    groupPendingDelegatedBatchAnchors(batchAnchors, rootPersistingRunIds);
-  const pendingDelegatedBatchAnchorRunIds = new Set<string>();
+  const previewAnchorRunIds = new Set(previewAnchors.map((entry) => entry.runId ?? entry.id));
+  const anchoredParentRunIds = new Set([...batchAnchorRunIds, ...previewAnchorRunIds]);
+  const approvalParentRunIds = new Set([...previewAnchorRunIds]);
   const singleDelegationEntries: TrackerEntry[] = [];
   const flatDelegationMemberEntries = visibleSources.filter((entry) =>
     isPolicyFlatMemberChild(entry, entriesByRunId, input.runtimePolicies),
@@ -205,51 +217,32 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
 
   const groupRows: TrackerQueueGroupSurface[] = [];
 
-  for (const [parentRunId, members] of pendingDelegatedBatchAnchorsByParentRunId) {
-    for (const member of members) {
-      pendingDelegatedBatchAnchorRunIds.add(member.runId ?? member.id);
-    }
-    if (members.length === 1) {
-      singleDelegationEntries.push(members[0]!);
-      continue;
-    }
-    groupRows.push({
-      kind: "batch",
-      parentRunId,
-      members,
-      titleOverride: members[0]?.data?.parentSubject,
-    });
-  }
-
-  for (const parent of batchAnchors) {
+  for (const parent of previewAnchors) {
     const parentRunId = parent.runId ?? parent.id;
-    if (pendingDelegatedBatchAnchorRunIds.has(parentRunId)) continue;
     const members = membersByParentRunId.get(parentRunId) ?? [];
-    const approved = isApprovedPrepRow(parent);
-
-    if (approved && members.length === 0) {
-      // Approved parent with no visible members stays flat — downstream
-      // entries live in a different workflow's queue (e.g. the OCR tab
-      // showing a prep row whose signer children are oath-signature rows).
-      // Row type must not change after approval.
-      continue;
-    }
-
-    // A prep/upload batch anchor represents one operator upload action, so
-    // it stays an approval-delegation card regardless of approval state and
-    // signer count. A single-signer PDF must not collapse into a flat row
-    // after OCR approval — that would change the row type mid-lifecycle.
     groupRows.push({
       kind: "approval-delegation",
       parentRunId,
       parent,
       members,
-      approvalState: approved ? "approved" : "awaiting-approval",
+      approvalState: isApprovedPreviewRow(parent) ? "approved" : "awaiting-approval",
+    });
+  }
+
+  for (const parent of batchAnchors) {
+    const parentRunId = parent.runId ?? parent.id;
+    const members = membersByParentRunId.get(parentRunId) ?? [];
+    groupRows.push({
+      kind: "batch",
+      parentRunId,
+      parent,
+      members,
+      titleOverride: titleOverrideForAnchor(parent),
     });
   }
 
   for (const [parentRunId, members] of membersByParentRunId) {
-    if (approvalParentRunIds.has(parentRunId)) continue;
+    if (anchoredParentRunIds.has(parentRunId)) continue;
     if (members.length === 1) {
       const only = members[0]!;
       singleDelegationEntries.push(only);
@@ -264,17 +257,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
 
   const groupedParentRunIds = new Set(groupRows.map((surface) => surface.parentRunId));
   const visibleFlatEntries = visibleEntries.filter((entry) => {
-    if (isVisibleBatchAnchor(entry)) {
-      if (isApprovedPrepRow(entry)) {
-        // Suppress the approved prep row only when its members are rendered
-        // elsewhere (single-delegation entry or group card). With 0 visible
-        // members it stays flat — its row type must not change after approval.
-        const parentRunId = entry.runId ?? entry.id;
-        const members = membersByParentRunId.get(parentRunId) ?? [];
-        return members.length === 0;
-      }
-      return false;
-    }
+    if (isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry)) return false;
     if (entry.parentRunId && groupedParentRunIds.has(entry.parentRunId)) return false;
     if (entry.parentRunId && membersByParentRunId.has(entry.parentRunId)) return false;
     return true;

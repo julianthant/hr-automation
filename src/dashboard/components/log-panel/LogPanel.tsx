@@ -16,7 +16,7 @@ import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow } from "@/lib/workflows-context";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
-import { resolveRowArchetype } from "../../../domain/row-archetype.js";
+import { hasDelegationRole, resolveRowArchetype } from "../../../domain/row-archetype.js";
 import {
   deriveRowTypeLabelForEntry,
 } from "../../../domain/workflow-runtime/projection.js";
@@ -151,9 +151,9 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
   const steps = useMemo(() => {
     const archetype = entry ? resolveRowArchetype(entry) : null;
-    // batch-parent OCR rows (no parentRunId, launched directly) don't surface
+    // Batch OCR rows (no parentRunId, launched directly) don't surface
     // awaiting-approval in the step timeline — they render the review pane instead.
-    return archetype === "batch-parent"
+    return entry?.workflow === "ocr" && archetype === "batch"
       ? registeredSteps.filter((step) => step !== "awaiting-approval")
       : registeredSteps;
   }, [entry, registeredSteps]);
@@ -208,7 +208,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
 
   // Show skeleton while logs are loading and we have no data yet
   const showSkeleton = logsLoading && displayedLogs.length === 0;
-  const hideDetailGrid = Boolean(previewAvailable) || resolveRowArchetype(entry) === "dispatch";
+  const hideDetailGrid = Boolean(previewAvailable) || hasDelegationRole(entry, "dispatch");
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">

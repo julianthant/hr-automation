@@ -4,6 +4,9 @@ import type {
   OathPdfInput,
 } from "../../../src/workflows/oath-signature/schema.js";
 
+/** Populates the workflow `date` detailField in scenario tests. */
+export const SCENARIO_SIGNATURE_DATE = "05/01/2026";
+
 export interface OathSignatureBeatsOpts {
   /**
    * Step name to hold inside until the runtime releases or cancels. Only
@@ -43,7 +46,7 @@ export function oathSignatureBeats(
       data: {
         emplId: input.emplId,
         ...(input.name ? { name: input.name } : {}),
-        ...(input.date ? { date: input.date } : {}),
+        date: input.date ?? SCENARIO_SIGNATURE_DATE,
         ...(input.dryRun ? { dryRun: true } : {}),
       },
     },

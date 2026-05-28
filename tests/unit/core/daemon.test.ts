@@ -266,7 +266,7 @@ test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row arch
     assert.equal(cancelled.parentRunId, parentRunId)
     assert.equal(cancelled.data?.__name, '10424984')
     assert.equal(cancelled.data?.__queueTitle, '10424984')
-    assert.equal(cancelled.data?.archetype, 'passive-child')
+    assert.equal(cancelled.data?.archetype, 'single')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -557,7 +557,7 @@ test('runWorkflowDaemon: in-flight shutdown-cancel rows preserve title and row a
     assert.equal(cancelled.parentRunId, parentRunId)
     assert.equal(cancelled.data?.__name, '10424984')
     assert.equal(cancelled.data?.__queueTitle, '10424984')
-    assert.equal(cancelled.data?.archetype, 'passive-child')
+    assert.equal(cancelled.data?.archetype, 'single')
   } finally {
     taskStore.close()
     rmSync(dir, { recursive: true, force: true })

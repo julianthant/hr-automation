@@ -285,13 +285,12 @@ export type DelegateRenderAs = "batch" | "preview" | "flat"
 
 export interface DelegateOpts {
   /**
-   * Override the child's derived row archetype for this delegation. Maps
-   * to the surface types the dashboard renders:
-   *   - "flat"    → `delegation-member` flat row (passive-child stamp)
-   *   - "preview" → approval-delegation preview card (delegate-child stamp)
-   *   - "batch"   → batch-delegation group member (delegate-child stamp)
-   * Omitted → use the child workflow's declared archetype + `parentRunId`
-   * to derive the archetype (default kernel behavior).
+   * Projection hint for delegated rows. The child row's stamped archetype
+   * still comes from the child workflow's resolved shape (`single` / `batch`)
+   * plus the top-level `parentRunId` scope.
+   *   - "flat"    → flat delegation-member row
+   *   - "preview" → approval-delegation preview card
+   *   - "batch"   → grouped delegation member
    */
   renderAs?: DelegateRenderAs
   /**

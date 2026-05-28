@@ -263,8 +263,11 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // row before the first step runs; withTrackedWorkflow skips its own pending
   // emit when preAssignedRunId is provided.
   const stringifiedSeed = buildInitialTrackerData(wf, handlerInput)
-  const rowArchetype = runtimeOptions?.rowArchetype
-    ?? deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId)
+  const rowArchetype = deriveRowArchetype(
+    resolveArchetype(wf.config, handlerInput),
+    args.parentRunId,
+    runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
+  )
   // Stamp the run-mode preset id on the seed so it's visible from the very
   // first tracker row (pending). The dashboard reads `data.__preset` to render
   // a small chip next to the row; absent on the implicit "Full" preset.

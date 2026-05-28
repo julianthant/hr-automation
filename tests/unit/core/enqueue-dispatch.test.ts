@@ -41,15 +41,15 @@ test("buildHttpPendingData stamps a single separation enqueue as a single row", 
   assert.equal(data.archetype, "single");
 });
 
-test("buildHttpPendingData honors direct input-run batch row archetype override", () => {
+test("buildHttpPendingData honors direct input-run batch row-shape hint", () => {
   const data = buildHttpPendingData(
     eidLookupCrmWorkflow,
-    { name: "Doe, Jane", __runtimeOptions: { rowArchetype: "delegate-child" } },
+    { name: "Doe, Jane", __runtimeOptions: { rowShape: "batch-member" } },
     "input-run-batch-1",
   );
 
   assert.equal(data.searchName, "Doe, Jane");
-  assert.equal(data.archetype, "delegate-child");
+  assert.equal(data.archetype, "batch-member");
 });
 
 test("eidLookupCrmWorkflow exposes the stable itemId deriver for HTTP enqueue", () => {

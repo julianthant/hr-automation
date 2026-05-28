@@ -42,6 +42,7 @@ describe("oath-signature scenario: happy path (single EID)", () => {
           "__subject": "Oath Signature EID 10873698",
           "__subjectKind": "eid",
           "archetype": "single",
+          "date": "05/01/2026",
           "emplId": "10873698",
           "instance": "<instance>",
           "name": "Jane Doe",

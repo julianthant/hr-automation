@@ -51,6 +51,7 @@ describe("oath-signature scenario: fail during transaction", () => {
           "__subject": "Oath Signature EID 10873698",
           "__subjectKind": "eid",
           "archetype": "single",
+          "date": "05/01/2026",
           "emplId": "10873698",
           "instance": "<instance>",
           "name": "Jane Doe",

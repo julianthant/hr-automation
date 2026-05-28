@@ -2,7 +2,7 @@
 
 exports[`oath-signature scenario: pdf branch — cancel during ocr approval > cancel during ocr-await aborts handler; fan-out never runs 1`] = `
 {
-  "archetype": "batch-parent",
+  "archetype": "batch",
   "data": {
     "__id": "scenario-pdf-cancel",
     "__name": "oath-cancel.pdf",
@@ -10,7 +10,7 @@ exports[`oath-signature scenario: pdf branch — cancel during ocr approval > ca
     "__queueTitleKind": "single",
     "__subject": "Oath Signature oath-cancel.pdf",
     "__subjectKind": "pdf",
-    "archetype": "batch-parent",
+    "archetype": "batch",
     "instance": "<instance>",
     "pdfOriginalName": "oath-cancel.pdf",
     "sessionId": "scenario-pdf-cancel",
