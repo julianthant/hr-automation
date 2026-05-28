@@ -179,11 +179,11 @@ export async function runOcrRetryPage(
       );
     } else {
       // Contract 3 (Finding #23): route through delegateToAllImpl so
-      // parentRunId stamping, archetype derivation, and child pending pre-emit
+      // parentRunId stamping, canonical archetype derivation, and child pending pre-emit
       // share one code path with the OCR orchestrator's eid-lookup fan-out.
-      //   - `renderAs: "flat"` → stamps archetype "passive-child" so children
-      //     render as `delegation-member` rows (OCR runtime policy's
-      //     `utilityChildSurface: "delegation-member"`).
+      //   - `renderAs: "flat"` remains a projection hint; eid-lookup rows
+      //     stamp `single`, parentRunId marks delegated scope, and one vs
+      //     many children controls single vs batch grouping.
       //   - `fireAndForget: true` because the `watchChildren` call below
       //     drives the wait — wrapping a second wait inside delegateToAllImpl
       //     would double-count.
@@ -470,8 +470,8 @@ function emitRow(args: {
     failedPages: args.failedPages,
     pageStatusSummary: args.summary,
     // Mirror the orchestrator's awaiting-approval stamp so dashboard
-    // surfaces the preview-tab affordance and batch label on retried rows.
-    archetype: "batch-parent",
+    // surfaces the preview-tab affordance on retried rows.
+    archetype: "preview",
     mode: "prepare",
     __id: args.sessionId,
     __name: priorName,
@@ -508,4 +508,3 @@ function patchUnresolved(records: unknown[], idx: number): void {
     rec.warnings = warnings;
   }
 }
-

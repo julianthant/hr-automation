@@ -22,17 +22,14 @@ import { CancelledError } from "../../core/kernel/types.js";
  *  - Single PDF → approval-delegation surface with `Single delegation`,
  *    suffixed by `· Preview` when the preview tab is rendered.
  *  - Multiple PDFs → batch delegation over single-file prep rows.
- *  - OCR utility EID/active-check fan-out children stay as delegation
- *    members instead of being promoted to a batch-delegation group.
+ *  - OCR utility EID/active-check fan-out children use normal delegated
+ *    grouping: one child stays a single row, multiple children render as a
+ *    batch surface.
  *  - File-scope cancel routes through OCR discard so the prep run AND
  *    its delegated children are cleaned up together.
  */
 export const OCR_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  delegation: {
-    flatMemberChildWorkflows: ["eid-lookup", "active-check"],
-    flatMemberSurface: "delegation-member",
-  },
   preview: {
     rowTypeLabelSuffix: "Preview",
     alwaysAvailable: true,
@@ -55,7 +52,7 @@ const ocrSteps = [
 export const ocrWorkflow = defineWorkflow({
   name: "ocr",
   label: "OCR",
-  archetype: "batch",
+  archetype: "preview",
   category: "Utils",
   iconName: "FileScan",
   systems: [],

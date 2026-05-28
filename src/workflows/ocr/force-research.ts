@@ -82,8 +82,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       runId: input.runId,
       status: "running",
       step: "eid-lookup",
-      // OCR prep parent is always batch-parent.
-      data: { records: JSON.stringify(records), archetype: "batch-parent" },
+      data: { records: JSON.stringify(records), archetype: "preview" },
     },
     trackerDir,
   );
@@ -92,12 +91,12 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     await opts._enqueueOverride(itemIds, enqueueInputs);
   } else {
     // Contract 3 (Finding #23): route through delegateToAllImpl so parentRunId
-    // stamping, archetype derivation, and child pending pre-emit share one
+    // stamping, canonical archetype derivation, and child pending pre-emit share one
     // code path with the OCR orchestrator's eid-lookup fan-out. Mirrors the
     // orchestrator's shape:
-    //   - `renderAs: "flat"` → stamps archetype "passive-child" so children
-    //     render as `delegation-member` rows (OCR runtime policy's
-    //     `utilityChildSurface: "delegation-member"`).
+    //   - `renderAs: "flat"` remains a projection hint; eid-lookup rows
+    //     stamp `single`, parentRunId marks delegated scope, and one vs
+    //     many children controls single vs batch grouping.
     //   - `fireAndForget: true` because the `watchChildRuns` call below still
     //     drives the wait — wrapping a second wait inside delegateToAllImpl
     //     would double-count.
@@ -166,12 +165,12 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     ...(latest.data ?? {}),
     records: JSON.stringify(records),
     mode: "prepare",
-    archetype: "batch-parent",
+    archetype: "preview",
     __id: input.sessionId,
     __name: parentSubject ?? "OCR",
     ...(parentSubject ? { parentSubject } : {}),
   };
-  // baseData already carries `archetype: "batch-parent"` (line above) so
+  // baseData already carries `archetype: "preview"` (line above) so
   // emitTrackerRow's StampedData contract is satisfied at compile time.
   const stampedBase = baseData as StampedData;
   emitTrackerRow(

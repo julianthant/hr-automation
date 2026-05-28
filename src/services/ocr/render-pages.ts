@@ -2,6 +2,41 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { log } from "../../utils/log.js";
 
+/** Benign pdfjs stderr when opening valid PDFs built with pdf-lib. */
+const PDFJS_INDEXING_WARNING = "Warning: Indexing all PDF objects";
+
+function withSuppressedPdfjsIndexingWarning<T>(fn: () => Promise<T>): Promise<T> {
+  const prevWarn = console.warn;
+  const prevWrite = process.stderr.write.bind(process.stderr);
+  console.warn = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    if (msg.includes(PDFJS_INDEXING_WARNING)) return;
+    prevWarn(...args);
+  };
+  process.stderr.write = ((
+    chunk: string | Uint8Array,
+    encodingOrCb?: BufferEncoding | ((err?: Error) => void),
+    cb?: (err?: Error) => void,
+  ): boolean => {
+    const encoding =
+      typeof encodingOrCb === "string" ? encodingOrCb : "utf8";
+    const text =
+      typeof chunk === "string"
+        ? chunk
+        : Buffer.from(chunk).toString(encoding);
+    if (!text.includes(PDFJS_INDEXING_WARNING)) {
+      return prevWrite(chunk, encodingOrCb as never, cb as never);
+    }
+    if (typeof encodingOrCb === "function") encodingOrCb();
+    else if (cb) cb();
+    return true;
+  }) as typeof process.stderr.write;
+  return fn().finally(() => {
+    console.warn = prevWarn;
+    process.stderr.write = prevWrite;
+  });
+}
+
 /**
  * Render each page of a PDF to a PNG file.
  * Files are named `page-NN.png` (1-indexed, zero-padded to 2 digits).
@@ -19,20 +54,22 @@ export async function renderPdfPagesToPngs(
     const pad = opts.pad ?? 2;
     await fs.mkdir(outDir, { recursive: true });
     const pdfBuffer = await fs.readFile(pdfPath);
-    const { pdf } = await import("pdf-to-img");
-    // Render review previews at a higher scale so operators can manually
-    // verify handwriting and small printed labels without opening the PDF
-    // separately.
-    const document = await pdf(pdfBuffer, { scale: 1.5 });
-    const filenames: string[] = [];
-    let i = 1;
-    for await (const image of document) {
-      const name = `page-${String(i).padStart(pad, "0")}.png`;
-      await fs.writeFile(path.join(outDir, name), image);
-      filenames.push(name);
-      i += 1;
-    }
-    return filenames;
+    return await withSuppressedPdfjsIndexingWarning(async () => {
+      const { pdf } = await import("pdf-to-img");
+      // Render review previews at a higher scale so operators can manually
+      // verify handwriting and small printed labels without opening the PDF
+      // separately.
+      const document = await pdf(pdfBuffer, { scale: 1.5 });
+      const filenames: string[] = [];
+      let i = 1;
+      for await (const image of document) {
+        const name = `page-${String(i).padStart(pad, "0")}.png`;
+        await fs.writeFile(path.join(outDir, name), image);
+        filenames.push(name);
+        i += 1;
+      }
+      return filenames;
+    });
   } catch (err) {
     log.warn(
       `renderPdfPagesToPngs failed for ${pdfPath}: ${err instanceof Error ? err.message : String(err)}`,
