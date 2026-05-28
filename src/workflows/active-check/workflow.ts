@@ -58,12 +58,12 @@ export const activeCheckWorkflow = defineWorkflow({
     { key: "terminationDate", label: "End Date" },
     { key: "department", label: "Dept" },
   ],
-  getName: (d) => d.name || d.searchName || "",
+  getName: (d) => d.searchName || d.name || "",
   getId: (d) => d.emplId || d.searchName || "",
   operatorSubject: (input) =>
     isActiveCheckEidInput(input)
-      ? buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "Active Check" })
-      : buildOperatorSubject({ kind: "person", value: input.name, prefix: "Active Check" }),
+      ? buildOperatorSubject({ kind: "eid", value: input.emplId })
+      : buildOperatorSubject({ kind: "person", value: input.name }),
   initialData: (input) => ({ searchName: displayActiveCheckInput(input) }),
   deriveItemId: deriveActiveCheckItemId,
   handler: async (ctx: Ctx<typeof steps, ActiveCheckItem>, input) => {

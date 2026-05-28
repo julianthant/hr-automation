@@ -220,8 +220,40 @@ export function deriveAssignmentDetailsFromCells(cells: string[]): PersonOrgAssi
   };
 }
 
-async function extractAssignmentCellsFromBody(frame: FrameLocator): Promise<string[] | null> {
+function isInactiveHrStatus(status: string | undefined): boolean {
+  return /inactive|terminated|separated/i.test(status ?? "");
+}
+
+function comparePreferredAssignment(
+  a: PersonOrgAssignmentDetails,
+  b: PersonOrgAssignmentDetails,
+): number {
+  const aActive = !isInactiveHrStatus(a.hrStatus);
+  const bActive = !isInactiveHrStatus(b.hrStatus);
+  if (aActive !== bActive) return aActive ? -1 : 1;
+
+  const aHdh = isAcceptedHdhDepartment(a.department);
+  const bHdh = isAcceptedHdhDepartment(b.department);
+  if (aHdh !== bHdh) return aHdh ? -1 : 1;
+
+  const aRecord = Number.parseInt(a.emplRecord, 10);
+  const bRecord = Number.parseInt(b.emplRecord, 10);
+  if (Number.isFinite(aRecord) && Number.isFinite(bRecord) && aRecord !== bRecord) {
+    return bRecord - aRecord;
+  }
+  return 0;
+}
+
+export function selectPreferredAssignmentDetails(
+  assignments: readonly PersonOrgAssignmentDetails[],
+): PersonOrgAssignmentDetails | null {
+  if (assignments.length === 0) return null;
+  return [...assignments].sort(comparePreferredAssignment)[0] ?? null;
+}
+
+async function extractAssignmentRowsFromBody(frame: FrameLocator): Promise<string[][]> {
   return personOrgSummary.body(frame).evaluate((body) => {
+    const out: string[][] = [];
     const tables = body.querySelectorAll("table");
     for (const table of Array.from(tables)) {
       for (const row of Array.from(table.rows)) {
@@ -230,13 +262,44 @@ async function extractAssignmentCellsFromBody(frame: FrameLocator): Promise<stri
           const buCell = cells[3]?.textContent?.trim() ?? "";
           const deptCell = cells[6]?.textContent?.trim() ?? "";
           if (/^[A-Z]{4,5}\d?$/.test(buCell) && deptCell && deptCell !== "Department Description") {
-            return cells.map((cell) => cell.textContent?.trim() ?? "");
+            out.push(cells.map((cell) => cell.textContent?.trim() ?? ""));
           }
         }
       }
     }
-    return null;
-  }).catch(() => null);
+    return out;
+  }).catch(() => []);
+}
+
+async function extractPreferredAssignmentFromBody(frame: FrameLocator): Promise<PersonOrgAssignmentDetails | null> {
+  const rows = await extractAssignmentRowsFromBody(frame);
+  const assignments = rows
+    .map((cells) => deriveAssignmentDetailsFromCells(cells))
+    .filter((assignment): assignment is PersonOrgAssignmentDetails => assignment !== null);
+  return selectPreferredAssignmentDetails(assignments);
+}
+
+async function clickEmploymentInstancesViewAllIfPresent(page: Page, frame: FrameLocator): Promise<void> {
+  const before = await extractAssignmentRowsFromBody(frame);
+  try {
+    const viewAll = personOrgSummary.viewAllLink(frame);
+    if (await clickIfPresent(viewAll, {
+      timeout: 3_000,
+      label: "ucpath person org employment instances view all link",
+    })) {
+      log.step("Clicked View All to load all employment instances...");
+      await page.waitForTimeout(3_000);
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+      await waitForPeopleSoftProcessing(frame);
+    }
+  } catch {
+    // Detail page may already show all employment instances.
+  }
+
+  const after = await extractAssignmentRowsFromBody(frame);
+  if (after.length > before.length) {
+    log.step(`Employment Instances expanded from ${before.length} to ${after.length} assignment row(s)`);
+  }
 }
 
 /**
@@ -322,6 +385,7 @@ async function executeSearch(
  * - Return to Search button: role button "Return to Search"
  */
 async function extractSingleResultDetail(
+  page: Page,
   frame: FrameLocator,
 ): Promise<EidResult | null> {
   // Check if the detail page is showing (person ID field is present)
@@ -351,6 +415,7 @@ async function extractSingleResultDetail(
   if (!emplId) return null;
 
   log.success(`Single-result detail page detected — EID: ${emplId}`);
+  await clickEmploymentInstancesViewAllIfPresent(page, frame);
 
   // Extract dates from ORG Instance section
   const startDate = await personOrgSummary.lastHireDate(frame)
@@ -361,10 +426,11 @@ async function extractSingleResultDetail(
   const fullName = await readPersonNameFromDetail(frame);
 
   // Extract assignment details (same logic as drillInAndGetDetails)
-  const assignmentCells = await extractAssignmentCellsFromBody(frame);
-  const assignment = assignmentCells ? deriveAssignmentDetailsFromCells(assignmentCells) : null;
+  const assignment = await extractPreferredAssignmentFromBody(frame);
 
-  const endDate = termDate || "Active";
+  const selectedTermDate = assignment && !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
+  const selectedStartDate = assignment?.effectiveDate || startDate;
+  const endDate = selectedTermDate || "Active";
   const nameParts = fullName?.split(" ") ?? [];
   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
 
@@ -385,8 +451,8 @@ async function extractSingleResultDetail(
     department: assignment?.department,
     deptId: assignment?.deptId,
     positionNumber: assignment?.positionNumber,
-    effectiveDate: startDate,
-    terminationDate: termDate,
+    effectiveDate: selectedStartDate,
+    terminationDate: selectedTermDate,
     expectedJobEndDate: assignment?.expectedJobEndDate,
     fte: assignment?.fte,
     emplClass: assignment?.emplClass,
@@ -416,7 +482,7 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
   }
 
   // Check for single-result detail page (PeopleSoft skips grid when exactly 1 match)
-  const singleResult = await extractSingleResultDetail(frame);
+  const singleResult = await extractSingleResultDetail(page, frame);
   if (singleResult) {
     log.step("Single result detected — PeopleSoft redirected directly to detail page");
     return [singleResult];
@@ -536,6 +602,7 @@ async function drillInAndGetDetails(
   await page.waitForTimeout(3_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await waitForPeopleSoftProcessing(frame);
+  await clickEmploymentInstancesViewAllIfPresent(page, frame);
 
   // Extract dates from ORG Instance section (above the Assignments table)
   const startDate = await personOrgSummary.lastHireDate(frame)
@@ -545,16 +612,17 @@ async function drillInAndGetDetails(
 
   // Extract assignment details from the Assignments grid.
   // Scan all tables for rows with 10+ cells where cell[3] is a business unit code.
-  const assignmentCells = await extractAssignmentCellsFromBody(frame);
-  const assignment = assignmentCells ? deriveAssignmentDetailsFromCells(assignmentCells) : null;
+  const assignment = await extractPreferredAssignmentFromBody(frame);
 
   if (assignment) {
-    const endDate = termDate || "Active";
-    log.step(`  Department: ${assignment.department} | Start: ${startDate} | End: ${endDate}`);
+    const selectedTermDate = !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
+    const selectedStartDate = assignment.effectiveDate || startDate;
+    const endDate = selectedTermDate || "Active";
+    log.step(`  Department: ${assignment.department} | Start: ${selectedStartDate} | End: ${endDate}`);
     return {
       ...assignment,
-      startDate,
-      terminationDate: termDate,
+      startDate: selectedStartDate,
+      terminationDate: selectedTermDate,
     };
   }
   log.step(`  Could not extract assignment details`);
@@ -829,7 +897,7 @@ export async function searchByEid(
   await waitForPeopleSoftProcessing(frame);
 
   // PeopleSoft auto-redirects to the detail page when 1 result. Extract.
-  const result = await extractSingleResultDetail(frame);
+  const result = await extractSingleResultDetail(page, frame);
   if (!result) {
     log.warn(`searchByEid: no detail page rendered for EID ${emplId}`);
     return null;

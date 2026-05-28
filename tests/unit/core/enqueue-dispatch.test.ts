@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { defineWorkflow } from "../../../src/core/index.js";
 import { buildHttpPendingData } from "../../../src/core/daemon/enqueue-dispatch.js";
+import { activeCheckWorkflow } from "../../../src/workflows/active-check/workflow.js";
 import { eidLookupCrmWorkflow } from "../../../src/workflows/eid-lookup/workflow.js";
 import { separationsWorkflow } from "../../../src/workflows/separations/workflow.js";
 
@@ -14,6 +15,18 @@ test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display dat
   assert.equal(data.__name, "Zaw, Hein Thant");
   assert.equal(data.__id, "Zaw, Hein Thant");
   assert.equal(data.__subject, "Zaw, Hein Thant");
+});
+
+test("buildHttpPendingData: active-check HTTP enqueue uses person/EID title without workflow prefix", () => {
+  const byName = buildHttpPendingData(activeCheckWorkflow, { name: "agook, martha" });
+  const byEid = buildHttpPendingData(activeCheckWorkflow, { emplId: "10733938" });
+
+  assert.equal(byName.__subject, "Agook, Martha");
+  assert.equal(byName.__queueTitle, "Agook, Martha");
+  assert.equal(byName.__name, "Agook, Martha");
+  assert.equal(byEid.__subject, "EID 10733938");
+  assert.equal(byEid.__queueTitle, "EID 10733938");
+  assert.equal(byEid.__name, "10733938");
 });
 
 test("buildHttpPendingData preserves workflow queue title metadata", () => {

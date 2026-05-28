@@ -74,4 +74,33 @@ describe("deriveActiveCheckOutcome", () => {
     assert.equal(outcome.isActive, false);
     assert.deepEqual(outcome.candidateEids, ["10706431", "10706432"]);
   });
+
+  it("uses the active instance when a name search returns active and inactive rows for the same EID", () => {
+    const outcome = deriveActiveCheckOutcome({ kind: "by-name", name: "Agook, Martha" }, [
+      eidResult({
+        emplId: "10733938",
+        name: "Martha Agook",
+        hrStatus: "Inactive",
+        department: "TEMPORARY EMPLOYMENT SERVICES",
+        effectiveDate: "04/13/2026",
+        terminationDate: "04/12/2026",
+      }),
+      eidResult({
+        emplId: "10733938",
+        name: "Martha Agook",
+        hrStatus: "Active",
+        department: "HOUSING/DINING/HOSPITALITY",
+        effectiveDate: "04/13/2026",
+        terminationDate: "",
+      }),
+    ]);
+
+    assert.equal(outcome.activeStatus, "active");
+    assert.equal(outcome.isActive, true);
+    assert.equal(outcome.emplId, "10733938");
+    assert.equal(outcome.department, "HOUSING/DINING/HOSPITALITY");
+    assert.equal(outcome.hrStatus, "Active");
+    assert.equal(outcome.terminationDate, "");
+    assert.deepEqual(outcome.candidateEids, ["10733938"]);
+  });
 });

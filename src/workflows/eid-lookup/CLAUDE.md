@@ -49,7 +49,7 @@ After each successful strategy the SDCMP candidate list is drilled into to fill 
 - CRM date matching uses ±7 day tolerance for hire date comparison
 - Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages. If ACT CRM ever rate-limits, the remedy is to collapse `cross-verification` into a post-pool pass (separate step list, single CRM page).
 - Browsers kept open for inspection (no automatic close past `parent.close()` at end of pool)
-- Only the FIRST SDCMP result per name stamps the detail fields; the full result list lives in the step log output. Multi-result names are rare (one employee ≈ one SDCMP record).
+- Person Org may return multiple SDCMP rows for the same EID / employment history. The UCPath system layer expands Employment Instances and selects the preferred assignment row (active first, HDH-active before non-HDH) before workflow status derivation.
 
 ## Lessons Learned
 
@@ -58,4 +58,5 @@ After each successful strategy the SDCMP candidate list is drilled into to fill 
 - **2026-05-25: Dashboard input run is the public start path.** `npm run eid-lookup` is retired; typed name starts belong in `InputRunPanel` and `/api/enqueue`. The removed `--no-crm`, `--i9`, and legacy non-daemon variants should not be restored. If I-9 signer lookup is needed again, add a separate daemon workflow shape.
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases `Last, First Middle` and canonicalizes the separator to `", "`; `prepareNames` drops duplicates after normalization so item ids do not collide.
 - **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. `src/systems/ucpath/person-org-summary.ts` filters department descriptions by HDH keywords; rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
+- **2026-05-28: Person Org active-row selection is shared with Active Check.** Do not fork the active/inactive parsing in this workflow. Keep status derivation fed by `searchByName` / `searchByEid` so hidden active Employment Instances are handled consistently.
 - **Shared-context pool is the current batch model.** One UCPath/CRM auth pair per batch, N worker tabs, one dashboard row per name, one workflow instance per input-run batch, and synthetic auth timings injected into each item. Excel tracking is gone; JSONL/dashboard are the only observability.
