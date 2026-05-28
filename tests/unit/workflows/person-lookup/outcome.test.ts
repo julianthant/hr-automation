@@ -1,9 +1,9 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import type { ActiveOutcomePersonOrgResult } from "../../../../src/domain/active-check-outcome.js";
+import type { PersonLookupResult } from "../../../../src/workflows/person-lookup/outcome.js";
 import { deriveActiveCheckOutcome } from "../../../../src/workflows/active-check/workflow.js";
 
-function eidResult(patch: Partial<ActiveOutcomePersonOrgResult> = {}): ActiveOutcomePersonOrgResult {
+function eidResult(patch: Partial<PersonLookupResult> = {}): PersonLookupResult {
   return {
     emplId: "10706431",
     hrStatus: "Active",

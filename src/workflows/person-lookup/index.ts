@@ -8,7 +8,7 @@ import {
   type PersonLookupInput,
   type PersonLookupResult,
   type PersonLookupSelection,
-} from "../../domain/person-lookup.js";
+} from "./outcome.js";
 import {
   searchByEid,
   searchByName,
