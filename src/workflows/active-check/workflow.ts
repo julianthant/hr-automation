@@ -7,10 +7,9 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
 import { PATHS } from "../../config.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
-import { deriveActiveCheckOutcome } from "../../domain/active-check-outcome.js";
-import { searchByEid, searchByName } from "../../systems/ucpath/person-org-summary.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { log } from "../../utils/log.js";
+import { deriveActiveCheckOutcome, lookupPersonInUcpath } from "../person-lookup/index.js";
 import {
   ActiveCheckItemSchema,
   buildActiveCheckCliInput,
@@ -70,13 +69,14 @@ export const activeCheckWorkflow = defineWorkflow({
     ctx.updateData({ searchName: displayActiveCheckInput(input) });
     await ctx.step("checking", async () => {
       const page = await ctx.page("ucpath");
-      const results = isActiveCheckEidInput(input)
-        ? await searchByEid(page, input.emplId).then((result) => (result ? [result] : []))
-        : (await searchByName(page, input.name, { keepNonHdh: true })).sdcmpResults;
-      const deriveIn = isActiveCheckEidInput(input)
-        ? ({ kind: "by-eid", emplId: input.emplId } as const)
-        : ({ kind: "by-name", name: input.name } as const);
-      const outcome = deriveActiveCheckOutcome(deriveIn, results);
+      const lookup = await lookupPersonInUcpath(
+        page,
+        isActiveCheckEidInput(input)
+          ? { kind: "by-eid", emplId: input.emplId }
+          : { kind: "by-name", name: input.name },
+        { keepNonHdh: true },
+      );
+      const outcome = deriveActiveCheckOutcome(lookup.input, lookup.results);
       ctx.updateData({
         ...outcome,
         isActive: String(outcome.isActive),
@@ -88,7 +88,7 @@ export const activeCheckWorkflow = defineWorkflow({
       } else {
         log.step(`Active Check: ${displayActiveCheckInput(input)} -> ${outcome.activeStatus}`);
       }
-      if (results.length > 0) await ctx.captureAndStampScreenshot("person-org-summary-active-check", "personOrgScreenshot");
+      if (lookup.results.length > 0) await ctx.captureAndStampScreenshot("person-org-summary-active-check", "personOrgScreenshot");
     });
   },
 });
@@ -125,5 +125,5 @@ export const runActiveCheckCli = buildCliAdapter<[string[]], ActiveCheckItem>({
   },
 });
 
-export type { ActiveCheckOutcome, ActiveCheckStatus } from "../../domain/active-check-outcome.js";
+export type { ActiveCheckOutcome, ActiveCheckStatus } from "../person-lookup/index.js";
 export { deriveActiveCheckOutcome };

@@ -1,6 +1,6 @@
 # EID Lookup Workflow
 
-Searches UCPath Person Organizational Summary for employees by name, filters for SDCMP business unit + HDH-accepted departments (Housing / Dining / Hospitality keyword match), with CRM cross-verification.
+Searches UCPath Person Organizational Summary for employees by name via internal `person-lookup` (`src/workflows/person-lookup/`), filters for SDCMP business unit + HDH-accepted departments (Housing / Dining / Hospitality keyword match), with CRM cross-verification.
 
 **Kernel-based (daemon mode only).** One active `defineWorkflow`: `eidLookupCrmWorkflow` (UCPath + CRM). Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → **`active-status`** (Person Org disposition / HDH rules — same outcome derivation as standalone Active Check). This variant is wired to dashboard input runs, the daemon registry, and `WORKFLOW_LOADERS`.
 
@@ -58,5 +58,5 @@ After each successful strategy the SDCMP candidate list is drilled into to fill 
 - **2026-05-25: Dashboard input run is the public start path.** `npm run eid-lookup` is retired; typed name starts belong in `InputRunPanel` and `/api/enqueue`. The removed `--no-crm`, `--i9`, and legacy non-daemon variants should not be restored. If I-9 signer lookup is needed again, add a separate daemon workflow shape.
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases `Last, First Middle` and canonicalizes the separator to `", "`; `prepareNames` drops duplicates after normalization so item ids do not collide.
 - **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. `src/systems/ucpath/person-org-summary.ts` filters department descriptions by HDH keywords; rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
-- **2026-05-28: Person Org active-row selection is shared with Active Check.** Do not fork the active/inactive parsing in this workflow. Keep status derivation fed by `searchByName` / `searchByEid` so hidden active Employment Instances are handled consistently.
+- **2026-05-28: Person Org active-row selection is shared with Active Check.** Do not fork the active/inactive parsing in this workflow. Keep status derivation fed by `lookupPersonInUcpath` / `resolvePersonLookupForEidLookup` so hidden active Employment Instances are handled consistently.
 - **Shared-context pool is the current batch model.** One UCPath/CRM auth pair per batch, N worker tabs, one dashboard row per name, one workflow instance per input-run batch, and synthetic auth timings injected into each item. Excel tracking is gone; JSONL/dashboard are the only observability.
