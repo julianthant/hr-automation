@@ -1,5 +1,5 @@
-import { isAcceptedHdhDepartment } from "./hdh/departments.js";
-import { displayPersonName, toLastFirstName } from "./identity/person-name.js";
+import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { displayPersonName, toLastFirstName } from "../../domain/identity/person-name.js";
 
 export type ActiveCheckStatus = "active" | "inactive" | "not-found" | "non-hdh" | "ambiguous";
 export type PersonLookupStatus = "resolved" | "not-found" | "ambiguous";
