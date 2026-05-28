@@ -9,6 +9,7 @@ import {
 
 const CANONICAL: RowArchetype[] = [
   "single",
+  "preview",
   "batch-member",
   "batch",
 ];
@@ -16,6 +17,7 @@ const CANONICAL: RowArchetype[] = [
 describe("row-archetype", () => {
   it("archetypeRowTypeLabel returns the canonical label per archetype", () => {
     assert.equal(archetypeRowTypeLabel("single"), "Single");
+    assert.equal(archetypeRowTypeLabel("preview"), "Preview");
     assert.equal(archetypeRowTypeLabel("batch"), "Batch");
     assert.equal(archetypeRowTypeLabel("batch-member"), "Batch member");
   });
@@ -35,13 +37,6 @@ describe("row-archetype", () => {
     assert.equal(resolveRowArchetype({ parentRunId: "parent-run-1", data: {} }), "single");
   });
 
-  it("resolveRowArchetype maps legacy data.archetype values to canonical values", () => {
-    assert.equal(resolveRowArchetype({ data: { archetype: "batch-parent" } }), "batch");
-    assert.equal(resolveRowArchetype({ data: { archetype: "passive-child" } }), "single");
-    assert.equal(resolveRowArchetype({ data: { archetype: "delegate-child" } }), "single");
-    assert.equal(resolveRowArchetype({ data: { archetype: "dispatch" } }), "single");
-  });
-
   it("resolveRowArchetype throws when data.archetype is set but invalid", () => {
     // Production write code can't reach this state (StampedData type contract
     // on emitTrackerRow). An explicitly-invalid value is a bug worth surfacing.
@@ -58,6 +53,11 @@ describe("row-archetype", () => {
   it("deriveRowArchetype: batch without parentRunId → batch", () => {
     assert.equal(deriveRowArchetype("batch"), "batch");
     assert.equal(deriveRowArchetype("batch", undefined), "batch");
+  });
+
+  it("deriveRowArchetype: preview → preview", () => {
+    assert.equal(deriveRowArchetype("preview"), "preview");
+    assert.equal(deriveRowArchetype("preview", "parent-run-1"), "preview");
   });
 
   it("deriveRowArchetype: batch with parentRunId → batch", () => {

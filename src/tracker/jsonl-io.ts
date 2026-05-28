@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 
 import { log } from "../utils/log.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
-import { deriveRowArchetype, type TrackerRowArchetype, type WorkflowArchetype } from "../domain/row-archetype.js";
+import { deriveRowArchetype, type RowArchetype, type WorkflowArchetype } from "../domain/row-archetype.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive } from "./state/runtime.js";
 import { getSessionsFilePathForDate, type ScreenshotSessionEvent } from "./session-events.js";
@@ -225,14 +225,13 @@ export interface TrackerEntry {
  * legacy heuristic" approach that broke whenever a control-layer or
  * orchestrator emit site forgot to stamp it.
  *
- * For row archetypes derived from a workflow's declared `WorkflowArchetype` +
- * presence of a `parentRunId`, see {@link stampArchetypeForRow}. Callers that
- * already know the row archetype directly (OCR prep `batch-parent`, OCR
- * approve `delegate-child`, etc.) can stamp it inline. The
+ * For row archetypes derived from a workflow's declared `WorkflowArchetype`,
+ * see {@link stampArchetypeForRow}. `parentRunId` is still accepted so callers
+ * can pass their tracker-row context alongside the workflow shape. The
  * `tests/unit/architecture/tracker-row-emission.test.ts` guard fails the
  * build if any new caller bypasses the helper.
  */
-export type StampedData = Record<string, string> & { archetype: TrackerRowArchetype };
+export type StampedData = Record<string, string> & { archetype: RowArchetype };
 
 /** A tracker row emission with archetype-stamped `data` required at the type level. */
 export interface TrackerRowEmission {
@@ -255,13 +254,12 @@ export interface TrackerRowEmission {
  * the `StampedData` constraint.
  *
  * Pass the workflow's declared `WorkflowArchetype` plus the row's
- * `parentRunId` (when present). For row archetypes that don't follow the
- * derivation rule (e.g. OCR's `batch-parent` for the prep parent row), set
- * `override` directly.
+ * `parentRunId` (when present). For canonical row shapes that don't follow the
+ * workflow derivation rule, set `override` directly.
  */
 export function stampArchetypeForRow(
   data: Record<string, string>,
-  args: { workflowArchetype: WorkflowArchetype; parentRunId?: string } | { override: TrackerRowArchetype },
+  args: { workflowArchetype: WorkflowArchetype; parentRunId?: string } | { override: RowArchetype },
 ): StampedData {
   if ("override" in args) {
     return { ...data, archetype: args.override };
@@ -318,8 +316,6 @@ function getTrackerJsonlPath(workflow: string, dir: string): string {
  *     compile-time contract has been satisfied.
  *   - The SIGINT/SIGTERM handler in `tracked-workflow.ts`, which already
  *     stamps `data.archetype` via the wrapper's seeded `data` object.
- *   - Test helpers that need to forge legacy-shaped rows for backwards-
- *     compatibility assertions on the read path.
  *
  * New production emit sites must NOT call this directly — the architecture
  * guard `tests/unit/architecture/tracker-row-emission.test.ts` fails the

@@ -75,7 +75,7 @@ export function dedupeLatestByIdWithCarriedEmplId(raw: TrackerEntry[]): TrackerE
 }
 
 function isPrepareMode(e: TrackerEntry): boolean {
-  return resolveRowArchetype(e) === "batch-parent";
+  return resolveRowArchetype(e) === "batch";
 }
 
 function isDiscardedPrepForQueueStrip(e: TrackerEntry): boolean {

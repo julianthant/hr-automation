@@ -58,6 +58,6 @@ test("enqueueFromHttp marks multi-value input-run batches as normal batch member
   assert.equal(queuedInputs.length, 2);
   assert.equal(typeof opts.parentRunId, "string");
   assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.preset, "lookup-only");
-  assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowArchetype, "delegate-child");
-  assert.equal((queuedInputs[1] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowArchetype, "delegate-child");
+  assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "batch-member");
+  assert.equal((queuedInputs[1] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "batch-member");
 });

@@ -31,7 +31,7 @@ describe("buildWorkflowActionRequest", () => {
           enabled: true,
         },
         fallbackTarget: { workflowId: "ignored", id: "ignored", runId: "ignored", date: "ignored" },
-        parentRunId: "batch-parent",
+        parentRunId: "batch",
       }),
       {
         path: "/api/retry",
@@ -40,7 +40,7 @@ describe("buildWorkflowActionRequest", () => {
           id: "employee-id",
           runId: "run-2",
           date: "2026-05-21",
-          parentRunId: "batch-parent",
+          parentRunId: "batch",
         },
       },
     );
@@ -133,7 +133,7 @@ describe("buildBulkWorkflowActionRequest", () => {
         kind: "retry",
         workflow: "oath-upload",
         date: "2026-05-21",
-        parentRunId: "batch-parent",
+        parentRunId: "batch",
         action: {
           kind: "retry",
           scope: "group",
@@ -154,7 +154,7 @@ describe("buildBulkWorkflowActionRequest", () => {
         body: {
           workflow: "oath-upload",
           date: "2026-05-21",
-          parentRunId: "batch-parent",
+          parentRunId: "batch",
           source: "batch-view",
           scope: "visible-view",
           items: [

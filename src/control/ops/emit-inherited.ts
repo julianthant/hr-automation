@@ -1,7 +1,24 @@
 import { emitTrackerRow, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { resolveRowArchetype, type TrackerRowArchetype } from "../../domain/row-archetype.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import type { Database } from "../../infra/sqlite/index.js";
+
+export class PriorTrackerRowNotFoundError extends Error {
+  readonly workflow: string;
+  readonly id: string;
+  readonly runId?: string;
+
+  constructor(args: { workflow: string; id: string; runId?: string }) {
+    super(
+      `Cannot emit inherited tracker row: no prior entry for workflow=${args.workflow} id=${args.id}` +
+        (args.runId ? ` runId=${args.runId}` : ""),
+    );
+    this.name = "PriorTrackerRowNotFoundError";
+    this.workflow = args.workflow;
+    this.id = args.id;
+    this.runId = args.runId;
+  }
+}
 
 export interface EmitInheritedRowArgs {
   workflow: string;
@@ -13,7 +30,6 @@ export interface EmitInheritedRowArgs {
   error?: string;
   input?: TrackerEntry["input"];
   data?: Record<string, string>;
-  fallbackArchetype: TrackerRowArchetype;
   parentRunId?: string;
   inheritFrom?: {
     id?: string;
@@ -31,19 +47,15 @@ export interface EmitInheritedRowArgs {
   db?: Database;
 }
 
-export function emitInheritedRow(args: EmitInheritedRowArgs): void {
+export function findInheritedPriorEntry(args: EmitInheritedRowArgs): TrackerEntry | null {
   const inheritId = args.inheritFrom?.id ?? args.id;
   const inheritRunId = args.inheritFrom?.runId ?? args.runId;
-  const priorEntry = findLatestEntryForPredicate({
+  return findLatestEntryForPredicate({
     workflow: args.workflow,
     trackerDir: args.trackerDir,
     lookbackDays: 30,
     predicate: args.predicate ?? ((entry) =>
       entry.id === inheritId && (inheritRunId ? entry.runId === inheritRunId : true)),
-    // SQLite fast path — uses the indexed `runs.run_id` lookup when a runId
-    // is known, or the `items` projection when only an itemId is known.
-    // Falls through to JSONL scan when no `db` was provided (e.g. tests
-    // with isolated trackerDir) or when no projection row matches yet.
     ...(args.db ? { db: args.db } : {}),
     ...(args.predicate
       ? {}
@@ -52,8 +64,21 @@ export function emitInheritedRow(args: EmitInheritedRowArgs): void {
           ...(!inheritRunId && inheritId ? { itemId: inheritId } : {}),
         }),
   });
-  const archetype = priorEntry ? resolveRowArchetype(priorEntry) : args.fallbackArchetype;
-  const parentRunId = args.parentRunId ?? priorEntry?.parentRunId;
+}
+
+export function emitInheritedRow(args: EmitInheritedRowArgs): void {
+  const inheritId = args.inheritFrom?.id ?? args.id;
+  const inheritRunId = args.inheritFrom?.runId ?? args.runId;
+  const priorEntry = findInheritedPriorEntry(args);
+  if (!priorEntry) {
+    throw new PriorTrackerRowNotFoundError({
+      workflow: args.workflow,
+      id: inheritId,
+      runId: inheritRunId,
+    });
+  }
+  const archetype = resolveRowArchetype(priorEntry);
+  const parentRunId = args.parentRunId ?? priorEntry.parentRunId;
 
   emitTrackerRow(
     {
@@ -65,7 +90,7 @@ export function emitInheritedRow(args: EmitInheritedRowArgs): void {
       status: args.status,
       ...(args.step ? { step: args.step } : {}),
       data: {
-        ...(priorEntry?.data ?? {}),
+        ...(priorEntry.data ?? {}),
         ...(args.data ?? {}),
         archetype,
       },

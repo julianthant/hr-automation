@@ -24,6 +24,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSy
 import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries } from "../../../src/tracker/jsonl.js";
+import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
@@ -151,6 +152,18 @@ describe("Test C: buildCancelQueuedHandler writes cancel_task command for active
       runIds: ["ac-run-queued"],
     });
 
+    emitTrackerRow(
+      {
+        workflow: "active-check",
+        timestamp: new Date().toISOString(),
+        id: "Doe, John",
+        runId: "ac-run-queued",
+        status: "pending",
+        data: { archetype: "single", name: "Doe, John" },
+      },
+      tmp,
+    );
+
     const result = await buildCancelQueuedHandler(tmp)({
       workflow: "active-check",
       id: "Doe, John",
@@ -218,6 +231,18 @@ describe("Test D: cancel queued active-check writes tracker row + JSONL log line
       deriveItemId: (input) => input.name,
       runIds: ["ac-run-D"],
     });
+
+    emitTrackerRow(
+      {
+        workflow: "active-check",
+        timestamp: new Date().toISOString(),
+        id: "Smith, Jane",
+        runId: "ac-run-D",
+        status: "pending",
+        data: { archetype: "single", name: "Smith, Jane" },
+      },
+      tmp,
+    );
 
     const result = await buildCancelQueuedHandler(tmp)({
       workflow: "active-check",

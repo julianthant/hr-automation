@@ -1,25 +1,19 @@
 /**
  * Row-level archetype. Stamped on every tracker row as `data.archetype`.
- * Canonical discriminator for queue surface, log panel footer chip, and
- * display-name resolution. Read via `resolveRowArchetype(entry)`; write via
- * `deriveRowArchetype(workflowArchetype, parentRunId?)` at pre-emit sites,
- * or let `withTrackedWorkflow` stamp it via the `archetype` opt.
+ * Canonical shape discriminator for queue surface, log panel footer chip,
+ * and display-name resolution. Scope is not encoded here: a row is delegated
+ * when it has `parentRunId`. Read via `resolveRowArchetype(entry)`; write via
+ * `deriveRowArchetype(workflowArchetype, parentRunId?)` at pre-emit sites.
  */
 export type RowArchetype =
   /** One item, one row. Flat in the queue. Workflows: work-study, oath-signature (direct CLI run), active-check. */
   | "single"
-  /** Anchor row over N peers. Emitted by OCR prep, oath-upload root. */
+  /** One review/approval row with a preview surface. Workflow: OCR. */
+  | "preview"
+  /** Anchor row over N peers. Emitted by oath-signature PDFs and input batches. */
   | "batch"
   /** Peer item under a batch anchor. Emitted by emergency-contact records, oath-signature batch members. */
   | "batch-member";
-
-export type LegacyRowArchetype =
-  | "batch-parent"
-  | "dispatch"
-  | "delegate-child"
-  | "passive-child";
-
-export type TrackerRowArchetype = RowArchetype | LegacyRowArchetype;
 
 /**
  * Workflow-level archetype. Declared on every `defineWorkflow({...})` call.
@@ -30,11 +24,14 @@ export type TrackerRowArchetype = RowArchetype | LegacyRowArchetype;
 export type WorkflowArchetype =
   /** Emits `single` rows only. Examples: work-study, active-check. */
   | "single"
+  /** Emits one preview/approval row. Example: OCR. */
+  | "preview"
   /** Emits a batch anchor over N batch-member rows. Examples: emergency-contact, oath-signature. */
   | "batch";
 
 const LABELS: Record<RowArchetype, string> = {
   "single": "Single",
+  "preview": "Preview",
   "batch": "Batch",
   "batch-member": "Batch member",
 };
@@ -48,17 +45,14 @@ interface ResolveEntry {
   data?: Record<string, unknown> | null;
 }
 
-const LEGACY_ALIASES: Record<LegacyRowArchetype, RowArchetype> = {
-  "batch-parent": "batch",
-  "passive-child": "single",
-  "delegate-child": "single",
-  "dispatch": "single",
-};
+export interface DelegationRoleEntry {
+  data?: Record<string, unknown> | null;
+}
 
 /**
- * Read `data.archetype`. Post-Contract-1, every production tracker row is
- * written through `emitTrackerRow` which requires `StampedData` at the type
- * level — `archetype` is always present in real data.
+ * Read `data.archetype`. Every production tracker row is written through
+ * `emitTrackerRow` which requires `StampedData` at the type level —
+ * `archetype` is always present in real data.
  *
  * Behavior when the field is not a valid `RowArchetype`:
  *   - **Missing** (unstamped entry) → return `"single"`. Parentage is
@@ -68,15 +62,12 @@ const LEGACY_ALIASES: Record<LegacyRowArchetype, RowArchetype> = {
  *     state through the type system, so it's almost certainly a hand-rolled
  *     entry that meant something else.
  */
-export function resolveRowArchetype(entry: ResolveEntry): TrackerRowArchetype {
+export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
   const stamped = entry.data?.archetype;
   if (stamped === undefined || stamped === null) {
     return "single";
   }
   if (typeof stamped === "string" && isRowArchetype(stamped)) return stamped;
-  if (isLegacyRowArchetype(stamped)) {
-    return LEGACY_ALIASES[stamped];
-  }
   throw new Error(
     `resolveRowArchetype: data.archetype is set but not a valid RowArchetype — bug. ` +
       `Got ${JSON.stringify(stamped)} on parentRunId=${entry.parentRunId ?? "<none>"}.`,
@@ -84,15 +75,16 @@ export function resolveRowArchetype(entry: ResolveEntry): TrackerRowArchetype {
 }
 
 export function isRowArchetype(v: string): v is RowArchetype {
-  return v === "single" || v === "batch" || v === "batch-member";
+  return v === "single" || v === "preview" || v === "batch" || v === "batch-member";
 }
 
-export function isLegacyRowArchetype(v: unknown): v is LegacyRowArchetype {
-  return typeof v === "string" && v in LEGACY_ALIASES;
-}
-
-export function isTrackerRowArchetype(v: string): v is TrackerRowArchetype {
-  return isRowArchetype(v) || isLegacyRowArchetype(v);
+/**
+ * Forward rows that represent a terminal delegation/dispatch marker carry
+ * `data.delegationRole = "dispatch"`. Keep the role test separate from
+ * `resolveRowArchetype`, which deliberately returns only canonical shapes.
+ */
+export function hasDelegationRole(entry: DelegationRoleEntry, role: "dispatch"): boolean {
+  return entry.data?.delegationRole === role;
 }
 
 /**
@@ -114,6 +106,7 @@ export type WorkflowArchetypeOrResolver<TInput> =
 
 const VALID_WORKFLOW_ARCHETYPES = new Set<string>([
   "single",
+  "preview",
   "batch",
 ]);
 
@@ -131,15 +124,15 @@ export function resolveArchetypeFromValue<TInput>(
     if (!isWorkflowArchetype(result)) {
       throw new Error(
         `resolveArchetype: workflow '${workflowName}' archetype resolver returned ${JSON.stringify(result)}, ` +
-          `which is not a valid WorkflowArchetype (expected one of: single, batch).`,
+        `which is not a valid WorkflowArchetype (expected one of: single, preview, batch).`,
       );
     }
     return result;
   }
   if (!isWorkflowArchetype(archetype)) {
     throw new Error(
-      `resolveArchetype: workflow '${workflowName}' has invalid literal archetype ${JSON.stringify(archetype)} ` +
-        `(expected one of: single, batch).`,
+        `resolveArchetype: workflow '${workflowName}' has invalid literal archetype ${JSON.stringify(archetype)} ` +
+        `(expected one of: single, preview, batch).`,
     );
   }
   return archetype;
@@ -165,6 +158,7 @@ export function resolveArchetype<TInput>(
  *
  * Mapping:
  *   member option                  → "batch-member"
+ *   workflowArchetype === "preview" → "preview"
  *   workflowArchetype === "batch"  → "batch"
  *   everything else                → "single"
  *
@@ -177,5 +171,6 @@ export function deriveRowArchetype(
   opts?: { member?: boolean },
 ): RowArchetype {
   if (opts?.member) return "batch-member";
+  if (workflowArchetype === "preview") return "preview";
   return workflowArchetype === "batch" ? "batch" : "single";
 }

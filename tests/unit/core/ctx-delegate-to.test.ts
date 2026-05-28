@@ -70,10 +70,10 @@ function makeParentWorkflow(opts: { name: string; onCtx: (ctx: unknown) => Promi
     authSteps: false,
     steps: ["delegate"] as const,
     schema: z.object({ parentPayload: z.string() }),
-    detailFields: [{ key: "parentPayload", label: "Parent Payload" }],
     getName: (d) => d.parentPayload ?? "",
     getId: (d) => d.parentPayload ?? "",
-    handler: async (ctx, _input) => {
+    handler: async (ctx, input) => {
+      ctx.updateData({ parentPayload: input.parentPayload });
       await ctx.step("delegate", async () => {
         await opts.onCtx(ctx);
       });
@@ -103,15 +103,15 @@ test("ctx.delegateTo pre-emits child pending row with parentRunId, derived arche
   assert.equal(pending!.parentRunId !== undefined, true, "child pending row must carry parentRunId");
   assert.equal(
     (pending!.data as { archetype?: string }).archetype,
-    "delegate-child",
-    "default archetype for single child with parentRunId is delegate-child",
+    "single",
+    "default archetype for single child stays single; parentRunId carries delegated scope",
   );
   assert.deepEqual(pending!.input, { payload: "hello-child" }, "pristine input persisted on pending row");
   const r = observedResult as { status: string; data?: Record<string, string> };
   assert.equal(r.status, "done", "child reached terminal done status");
 });
 
-test("ctx.delegateTo with renderAs: 'flat' stamps passive-child archetype", async (t) => {
+test("ctx.delegateTo with renderAs: 'flat' leaves row archetype canonical", async (t) => {
   const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-flat-"));
   t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
 
@@ -128,10 +128,11 @@ test("ctx.delegateTo with renderAs: 'flat' stamps passive-child archetype", asyn
   const pending = readWorkflowLines(trackerDir, "deleg-child-flat")
     .find((l) => l.status === "pending");
   assert.ok(pending);
-  assert.equal((pending!.data as { archetype?: string }).archetype, "passive-child");
+  assert.equal(pending!.parentRunId !== undefined, true);
+  assert.equal((pending!.data as { archetype?: string }).archetype, "single");
 });
 
-test("ctx.delegateTo stamps a natural batch child as delegated when it has a parent", async (t) => {
+test("ctx.delegateTo stamps a natural batch child as batch when it has a parent", async (t) => {
   const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-batch-child-"));
   t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
 
@@ -170,13 +171,13 @@ test("ctx.delegateTo stamps a natural batch child as delegated when it has a par
   const pending = lines.find((l) => l.status === "pending");
   const done = lines.find((l) => l.status === "done");
   assert.ok(pending, "child pending row must be emitted");
-  assert.equal((pending!.data as { archetype?: string }).archetype, "delegate-child");
+  assert.equal((pending!.data as { archetype?: string }).archetype, "batch");
   assert.deepEqual(pending!.input, {
     pdfOriginalName: "oath-batch.pdf",
     sessionId: "oath-session-1",
   });
   assert.ok(done, "child done row must be emitted");
-  assert.equal((done!.data as { archetype?: string }).archetype, "delegate-child");
+  assert.equal((done!.data as { archetype?: string }).archetype, "batch");
 });
 
 test("delegateToAllImpl with concurrency: 1 runs children sequentially", async (t) => {
@@ -374,7 +375,7 @@ test("delegateToImpl fire-and-forget emits terminal failed row when runWorkflow 
   assert.equal(failed!.parentRunId, "parent-run-faf-reject", "failed row inherits parentRunId");
   assert.equal(
     (failed!.data as { archetype?: string }).archetype,
-    "delegate-child",
+    "single",
     "failed row stamps the same archetype as the pending row",
   );
 });

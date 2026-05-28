@@ -59,7 +59,7 @@ test("Hono projection routes reopen state.db when the file was replaced after se
         id: "ocr-prep-session-1",
         runId: "prep-run-1",
         status: "pending",
-        data: { archetype: "batch-parent", mode: "prepare" },
+        data: { archetype: "batch", mode: "prepare" },
       },
       {
         sourceKind: "tracker",

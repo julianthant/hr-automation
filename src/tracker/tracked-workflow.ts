@@ -33,7 +33,7 @@ import {
   type TrackerEntry,
   type TypedValue,
 } from "./jsonl-io.js";
-import type { TrackerRowArchetype } from "../domain/row-archetype.js";
+import type { RowArchetype } from "../domain/row-archetype.js";
 
 /** Session context passed to workflow callbacks for registering sessions/browsers. */
 export interface SessionContext {
@@ -118,7 +118,7 @@ export interface WithTrackedWorkflowOpts {
    * queue-surface, log-panel, and display-name classifiers can dispatch on a
    * single field instead of the legacy seven-discriminator sprawl.
    */
-  archetype?: import("../domain/row-archetype.js").TrackerRowArchetype;
+  archetype?: import("../domain/row-archetype.js").RowArchetype;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -165,7 +165,7 @@ export async function withTrackedWorkflow<T>(
   // satisfied. Real kernel call paths pass `opts.archetype` from
   // `deriveRowArchetype(wf.archetype, parentRunId)`; tests that bypass the
   // kernel get a "single" stamp which matches their workflow shape.
-  const stampedArchetype: TrackerRowArchetype = opts.archetype ?? "single";
+  const stampedArchetype: RowArchetype = opts.archetype ?? "single";
   const data: Record<string, string> = { ...initialData, archetype: stampedArchetype };
   const typedData: Record<string, TypedValue> = {};
   const ts = () => new Date().toISOString();

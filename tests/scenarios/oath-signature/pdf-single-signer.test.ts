@@ -9,7 +9,7 @@ import { oathPdfBeats, oathSignatureBeats, maskVolatile } from "./_beats.js";
  * Scenario: a PDF that resolves to one signer. Per the vocab doc's
  * "N≥2 fans out into a batch row; N=1 stays as a single row" rule, the
  * downstream signer is a flat single — no batch wrapper. The PDF parent
- * row itself is still a batch-parent (its archetype is fixed by the
+ * row itself is still a batch row (its archetype is fixed by the
  * resolver for `kind: "pdf"`).
  *
  * Scenario-harness limitation: the runtime doesn't model the real
@@ -62,7 +62,7 @@ describe("oath-signature scenario: pdf branch — single signer", () => {
     });
 
     assert.equal(pdfSnap.status, "done");
-    assert.equal(pdfSnap.archetype, "batch-parent");
+    assert.equal(pdfSnap.archetype, "batch");
     assert.equal(signerSnap.status, "done");
     assert.equal(
       signerSnap.archetype,

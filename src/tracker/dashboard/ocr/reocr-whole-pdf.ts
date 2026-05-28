@@ -189,9 +189,8 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             records: JSON.stringify(records),
             failedPages: JSON.stringify([]),
             pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
-            // OCR prep parent rows are always batch-parent — required for
-            // emitTrackerRow's StampedData contract.
-            archetype: "batch-parent" as const,
+            // OCR prep parent rows are preview-shaped.
+            archetype: "preview" as const,
           };
           emit({
             workflow: WORKFLOW,

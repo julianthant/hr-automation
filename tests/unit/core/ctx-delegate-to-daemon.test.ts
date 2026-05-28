@@ -10,7 +10,7 @@
  *
  *   A. `ensureDaemonsAndEnqueue` is called with the expected inputs.
  *   B. The `onPreEmitPending` hook fires per item, writing a pending JSONL row
- *      with `archetype: "delegate-child"` (Contract 1 stamping).
+ *      with canonical child workflow archetypes (Contract 1 stamping).
  *   C. `watchChildRuns` is called to await terminal statuses.
  *   D. Returned `ChildRunResult[]` are in INPUT ORDER even when `watchChildRuns`
  *      resolves outcomes in a DIFFERENT (reverse) order.
@@ -221,8 +221,8 @@ describe("dispatchToDaemonAndWait — daemon-dispatch path of delegateToAll (Fin
       assert.equal(row!.runId, runId, `pending row for ${itemId} carries assigned runId`);
       assert.equal(
         (row!.data as { archetype?: string }).archetype,
-        "delegate-child",
-        `pending row for ${itemId} carries archetype=delegate-child`,
+        "single",
+        `pending row for ${itemId} carries archetype=single`,
       );
     }
   });
@@ -280,7 +280,7 @@ describe("dispatchToDaemonAndWait — daemon-dispatch path of delegateToAll (Fin
     assert.notEqual(results[1].runId, "");
   });
 
-  test("daemon delegation stamps a natural batch child as delegated when it has a parent", async () => {
+  test("daemon delegation stamps a natural batch child as batch when it has a parent", async () => {
     const { defineWorkflow } = await import("../../../src/core/index.js");
     const { delegateToAllImpl } = await import("../../../src/core/delegate.js");
     const clientMod = await import("../../../src/core/daemon/client.js");
@@ -329,7 +329,7 @@ describe("dispatchToDaemonAndWait — daemon-dispatch path of delegateToAll (Fin
     const lines = readWorkflowLines(trackerDir, "daemon-test-child", dateStr);
     const pending = lines.find((l) => l.status === "pending" && l.id === "oath-session-1");
     assert.ok(pending, "expected pre-emitted delegated batch child row");
-    assert.equal((pending!.data as { archetype?: string }).archetype, "delegate-child");
+    assert.equal((pending!.data as { archetype?: string }).archetype, "batch");
     assert.equal((pending!.data as { pdfOriginalName?: string }).pdfOriginalName, "upload-packet.pdf");
   });
 

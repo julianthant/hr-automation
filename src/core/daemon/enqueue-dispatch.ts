@@ -18,7 +18,7 @@ import { loadWorkflow } from "../workflow-loaders.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
-import type { TrackerRowArchetype } from "../../domain/row-archetype.js";
+import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
@@ -151,6 +151,9 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
   const baseData = buildTrackerDataForInput(input);
   const { cleaned, runtimeOptions } = splitPrefilled(input);
   const handlerInput = wf.config.schema.parse(cleaned) as TData;
+  const rowArchetype = runtimeOptions?.rowShape === "batch-member"
+    ? deriveRowArchetype(resolveArchetype(wf.config, handlerInput), parentRunId, { member: true })
+    : undefined;
   return buildPendingTrackerData({
     workflow: wf,
     input: handlerInput,
@@ -158,7 +161,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
     useInitialTrackerSeed: true,
     nameIdStamp: "if-truthy-on-merged",
     parentRunId,
-    ...(runtimeOptions?.rowArchetype ? { rowArchetype: runtimeOptions.rowArchetype } : {}),
+    ...(rowArchetype ? { rowArchetype } : {}),
   });
 }
 
@@ -198,11 +201,8 @@ export async function enqueueFromHttp(
     effectiveParentRunId = randomUUID();
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
   }
-  const rowArchetypeOverride: TrackerRowArchetype | undefined = isDirectInputRunBatch
-    ? "delegate-child"
-    : undefined;
-  const queuedInputs = rowArchetypeOverride
-    ? inputs.map((input) => mergeRuntimeOptions(input, { rowArchetype: rowArchetypeOverride }))
+  const queuedInputs = isDirectInputRunBatch
+    ? inputs.map((input) => mergeRuntimeOptions(input, { rowShape: "batch-member" }))
     : inputs;
 
   // Fail-fast schema validation here (ensureDaemonsAndEnqueue also does this,

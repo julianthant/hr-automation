@@ -3,7 +3,7 @@
 exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row terminates done; signer is a flat single row 1`] = `
 [
   {
-    "archetype": "batch-parent",
+    "archetype": "batch",
     "data": {
       "__id": "scenario-pdf-single",
       "__name": "oath-single.pdf",
@@ -11,7 +11,7 @@ exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row
       "__queueTitleKind": "single",
       "__subject": "Oath Signature oath-single.pdf",
       "__subjectKind": "pdf",
-      "archetype": "batch-parent",
+      "archetype": "batch",
       "instance": "<instance>",
       "pdfOriginalName": "oath-single.pdf",
       "sessionId": "scenario-pdf-single",
@@ -40,6 +40,7 @@ exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row
       "__subject": "Oath Signature EID 10000050",
       "__subjectKind": "eid",
       "archetype": "single",
+      "date": "05/01/2026",
       "emplId": "10000050",
       "instance": "<instance>",
       "name": "Solo Signer",

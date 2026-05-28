@@ -10,7 +10,7 @@ export function sweepStuckOcrRows(trackerDir: string): void {
   for (const e of latestById.values()) {
     if (e.status === "pending" || e.status === "running") {
       // Inherit archetype from the stuck row so the sweep marker matches
-      // the row type it's replacing (always "batch-parent" for OCR, but
+      // the row type it's replacing (normally "preview" for OCR, but
       // we route through resolveRowArchetype so this code stays generic).
       const archetype = resolveRowArchetype(e);
       emitTrackerRow(

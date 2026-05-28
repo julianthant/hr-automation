@@ -2,7 +2,7 @@ import type { TrackerEntry } from "../jsonl.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 export function isPrepEntry(e: TrackerEntry): boolean {
-  return resolveRowArchetype(e) === "batch-parent";
+  return resolveRowArchetype(e) === "batch";
 }
 
 /**

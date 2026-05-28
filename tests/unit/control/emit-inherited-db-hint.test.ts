@@ -17,8 +17,12 @@ import { join } from "path";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { openControlStores } from "../../../src/control/ops/shared.js";
 import * as findLatest from "../../../src/tracker/find-latest-entry.js";
-import { emitInheritedRow } from "../../../src/control/ops/emit-inherited.js";
+import {
+  emitInheritedRow,
+  PriorTrackerRowNotFoundError,
+} from "../../../src/control/ops/emit-inherited.js";
 import { emitDashboardCancelTrackerRow } from "../../../src/control/ops/shared.js";
+import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
 
 let tmp: string;
 beforeEach(() => {
@@ -30,10 +34,39 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function priorEntry(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
+  return {
+    workflow: "work-study",
+    id: "9999",
+    runId: "some-run",
+    status: "running",
+    timestamp: new Date().toISOString(),
+    data: { archetype: "single" },
+    ...overrides,
+  };
+}
+
+describe("emitInheritedRow — prior row required", () => {
+  it("throws PriorTrackerRowNotFoundError when no prior row exists", () => {
+    assert.throws(
+      () =>
+        emitInheritedRow({
+          workflow: "work-study",
+          trackerDir: tmp,
+          id: "9999",
+          runId: "some-run",
+          status: "failed",
+          step: "cancelled",
+        }),
+      (err: unknown) => err instanceof PriorTrackerRowNotFoundError,
+    );
+  });
+});
+
 describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
   it("forwards `db` to findLatestEntryForPredicate when provided", () => {
     const stores = openControlStores(tmp);
-    const spy = vi.spyOn(findLatest, "findLatestEntryForPredicate");
+    const spy = vi.spyOn(findLatest, "findLatestEntryForPredicate").mockReturnValue(priorEntry());
 
     emitInheritedRow({
       workflow: "work-study",
@@ -42,7 +75,6 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
       runId: "some-run",
       status: "failed",
       step: "cancelled",
-      fallbackArchetype: "single",
       db: stores.taskStore.db,
     });
 
@@ -53,7 +85,7 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
   });
 
   it("omits `db` when caller does not pass it (single-row path)", () => {
-    const spy = vi.spyOn(findLatest, "findLatestEntryForPredicate");
+    const spy = vi.spyOn(findLatest, "findLatestEntryForPredicate").mockReturnValue(priorEntry());
 
     emitInheritedRow({
       workflow: "work-study",
@@ -62,7 +94,6 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
       runId: "some-run",
       status: "failed",
       step: "cancelled",
-      fallbackArchetype: "single",
     });
 
     assert.equal(spy.mock.calls.length, 1);
@@ -73,28 +104,20 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
   it("emitDashboardCancelTrackerRow forwards db to emitInheritedRow's prior-row lookup", () => {
     const stores = openControlStores(tmp);
     const spy = vi.spyOn(findLatest, "findLatestEntryForPredicate");
+    spy.mockReturnValue(priorEntry({ id: "8888", runId: "run-abc" }));
 
     emitDashboardCancelTrackerRow("work-study", "8888", "run-abc", tmp, stores.taskStore.db);
 
-    // emitDashboardCancelTrackerRow internally calls findLatestEntryForPredicate
-    // TWICE: once via emitInheritedRow (which gets the db hint), and once via
-    // resolveInstanceForRunId (a separate workflowInstance lookup, no db). The
-    // first invocation is the one we care about — it's the prior-row lookup
-    // that bulk cancel would hit O(K*D*L) times.
     assert.ok(spy.mock.calls.length >= 1, "called at least once");
-    const inheritedLookup = spy.mock.calls.find((c) => c[0].runId === "run-abc" && c[0].itemId === undefined && c[0].lookbackDays === 30);
-    // Find the prior-row lookup by its lookbackDays === 30 (emit-inherited.ts)
-    // vs lookbackDays === 2 (resolveInstanceForRunId).
     const priorRowLookup = spy.mock.calls.find((c) => c[0].lookbackDays === 30);
     assert.ok(priorRowLookup, "emit-inherited prior-row lookup happened");
     assert.ok(priorRowLookup[0].db, "db propagated through emitDashboardCancelTrackerRow into prior-row lookup");
     assert.equal(priorRowLookup[0].runId, "run-abc");
-    // Silence unused warning for the unused alias above.
-    void inheritedLookup;
   });
 
   it("emitDashboardCancelTrackerRow without db leaves the JSONL fallback path open", () => {
     const spy = vi.spyOn(findLatest, "findLatestEntryForPredicate");
+    spy.mockReturnValue(priorEntry({ id: "7777", runId: "run-xyz" }));
 
     emitDashboardCancelTrackerRow("work-study", "7777", "run-xyz", tmp);
 

@@ -3,7 +3,6 @@ import { normalizeDetailField } from './registry.js'
 import type { WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
-import { isTrackerRowArchetype, type TrackerRowArchetype } from '../../domain/row-archetype.js'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -33,9 +32,8 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
  *   gear menu passes the chosen preset's skip set under this key; the kernel
  *   exposes it as `ctx.shouldSkipStep(name)` for handlers to OR into their
  *   existing skip branches.
- * - `runtimeOptions.rowArchetype` (dashboard direct input batches) — internal
- *   row-shape override for utility workflows that should render typed
- *   multi-value runs as normal batch rows rather than passive delegation.
+ * - `runtimeOptions.rowShape` (dashboard direct input batches) — internal
+ *   row-shape hint for typed multi-value runs that should emit member rows.
  *
  * The kernel strips both channels before handing the input to the workflow's
  * Zod schema so workflow files don't have to know about either contract.
@@ -46,7 +44,7 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-  runtimeOptions: { skipSteps?: string[]; preset?: string; rowArchetype?: TrackerRowArchetype } | null
+  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member' } | null
 }
 
 export function splitPrefilled(input: unknown): SplitInput {
@@ -68,8 +66,8 @@ export function splitPrefilled(input: unknown): SplitInput {
 
 function normalizeRuntimeOptions(
   raw: Record<string, unknown>,
-): { skipSteps?: string[]; preset?: string; rowArchetype?: TrackerRowArchetype } | null {
-  const out: { skipSteps?: string[]; preset?: string; rowArchetype?: TrackerRowArchetype } = {}
+): { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member' } | null {
+  const out: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member' } = {}
   const skipSteps = raw.skipSteps
   if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
     if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
@@ -77,8 +75,8 @@ function normalizeRuntimeOptions(
   if (typeof raw.preset === 'string' && raw.preset.length > 0) {
     out.preset = raw.preset
   }
-  if (typeof raw.rowArchetype === 'string' && isTrackerRowArchetype(raw.rowArchetype)) {
-    out.rowArchetype = raw.rowArchetype
+  if (raw.rowShape === 'batch-member') {
+    out.rowShape = 'batch-member'
   }
   return Object.keys(out).length > 0 ? out : null
 }
