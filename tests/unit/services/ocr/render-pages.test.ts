@@ -4,20 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { renderPdfPagesToPngs } from "../../../../src/services/ocr/render-pages.js";
-
-async function createOnePagePdf(dir: string): Promise<string> {
-  const { PDFDocument } = await import("pdf-lib");
-  const doc = await PDFDocument.create();
-  doc.addPage([200, 200]);
-  const bytes = await doc.save();
-  const out = path.join(dir, "test.pdf");
-  fs.writeFileSync(out, bytes);
-  return out;
-}
+import { writeOnePagePdf } from "../../../_utils/one-page-pdf.js";
 
 test("renderPdfPagesToPngs returns one PNG file per page", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "render-test-"));
-  const pdfPath = await createOnePagePdf(tmpDir);
+  const pdfPath = path.join(tmpDir, "test.pdf");
+  await writeOnePagePdf(pdfPath);
   const outDir = path.join(tmpDir, "out");
 
   const filenames = await renderPdfPagesToPngs(pdfPath, outDir);

@@ -20,7 +20,7 @@ import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { emitTrackerRow, dateLocal, stampArchetypeForRow, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -221,7 +221,7 @@ export async function runOcrOrchestrator(
     });
     flat.__id = input.sessionId ?? "";
     flat.__name = cachedParentSubject ?? "OCR";
-    flat.archetype = "batch-parent";
+    flat.archetype = "preview";
     if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,
@@ -713,17 +713,10 @@ export async function runOcrOrchestrator(
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 };
-            // Explicitly stamp archetype via stampArchetypeForRow so the
-            // type-level Contract 1 guarantee is enforced (no unsafe
-            // `as StampedData` cast). The real fan-out below uses
-            // renderAs: "flat" → passive-child via delegateToAllImpl; the
-            // override branch (test-mode / early enqueue) must produce the
-            // same row archetype so dashboard projections classify these
-            // rows identically.
-            const overrideData = stampArchetypeForRow(
-              buildHttpPendingData(eidLookupCrmWorkflow, item, runId),
-              { override: "passive-child" },
-            );
+            // Keep the override branch on the same write path shape as the
+            // real fan-out below: eid-lookup children are `single` rows and
+            // delegated scope is represented by parentRunId.
+            const overrideData = buildHttpPendingData(eidLookupCrmWorkflow, item, runId);
             emitTrackerRow({
               workflow: eidLookupCrmWorkflow.config.name,
               timestamp: new Date().toISOString(),
@@ -738,13 +731,13 @@ export async function runOcrOrchestrator(
         },
         realEnqueue: async (onPreparedItems) => {
           // Contract 3: route the eid-lookup fan-out through the kernel's
-          // delegateToAllImpl primitive so parentRunId stamping, archetype
-          // derivation, and pending-row pre-emit share one code path with
+          // delegateToAllImpl primitive so parentRunId stamping, canonical
+          // archetype derivation, and pending-row pre-emit share one code path with
           // every other delegation site. Behavioural equivalence vs the
           // pre-Contract-3 ensureDaemonsAndEnqueue call:
-          //   - `renderAs: "flat"` stamps archetype "passive-child" so the
-          //     children render as `delegation-member` rows — matching the
-          //     OCR runtime policy's `utilityChildSurface: "delegation-member"`.
+          //   - `renderAs: "flat"` remains a projection hint; the child row
+          //     stamp is `single`, parentRunId marks it as delegated, and
+          //     one vs many children controls single vs batch grouping.
           //   - `onPreparedItems` is forwarded verbatim so the SQLite task
           //     dependency batch is still created in the same lifecycle slot.
           //   - `fireAndForget: true` because the orchestrator's own
