@@ -51,5 +51,6 @@ npm run dashboard:tunneled
 - **SSE:** Real-time streams use one `/events/hub` EventSource. Listener errors must not kill other listeners, and projection-backed topics must resolve the current `state.db` handle each tick.
 - **Run launchers:** Operators start workflows through upload runs (`RunModal` + `RUN_MODAL_REGISTRY`) or input runs (`InputRunPanel` + `INPUT_RUN_REGISTRY`).
 - **Input-bar row shape is count-based.** One parsed value is flat; multiple parsed values become one batch row.
+- **2026-05-28: Retired workflows are filtered at the dashboard payload boundary.** `active-check` and `eid-lookup` tracker history can remain on disk, but `/events` workflow metadata and `/api/workflows` filter them out so the rail only exposes Person Lookup.
 - **OCR review UI:** Preserve source-page ordering, retry/re-OCR page isolation, and `data-pair-index` instrumentation.
 - **Testing gap:** There is no browser/component harness yet. Pure projection logic has unit tests; visual changes need lint, typecheck, dashboard build, and manual dashboard verification.

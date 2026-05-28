@@ -101,7 +101,7 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconColor: "text-sky-600 dark:text-sky-400",
     label: "Needs review",
   },
-  /** EID lookup / Active Check — UCPath had no matching row (tracker status is still `done`). */
+  /** Person Lookup — UCPath had no matching row (tracker status is still `done`). */
   notFound: {
     badge: "bg-secondary/90 text-muted-foreground border border-border/80",
     icon: SearchX,
@@ -124,16 +124,16 @@ function resolveStatusConfig(entry: TrackerEntry): StatusConfig {
   return STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
 }
 
-function deriveActiveCheckTag(entry: TrackerEntry, isDone: boolean): null | {
+function derivePersonLookupStatusTag(entry: TrackerEntry, isDone: boolean): null | {
   text: string;
   title: string;
   className: string;
 } {
-  const activeCheckStatus =
-    entry.workflow === "active-check" && typeof entry.data?.activeStatus === "string"
+  const activeStatus =
+    entry.workflow === "person-lookup" && typeof entry.data?.activeStatus === "string"
       ? entry.data.activeStatus
       : null;
-  if (activeCheckStatus === "inactive") {
+  if (activeStatus === "inactive") {
     return {
       text: "IA",
       title: "Inactive",
@@ -141,13 +141,13 @@ function deriveActiveCheckTag(entry: TrackerEntry, isDone: boolean): null | {
     };
   }
   if (
-    activeCheckStatus === "active" ||
-    activeCheckStatus === "non-hdh" ||
+    activeStatus === "active" ||
+    activeStatus === "non-hdh" ||
     (isDone && entry.data?.isActive === "true")
   ) {
     return {
       text: "A",
-      title: activeCheckStatus === "non-hdh" ? "Active (non-HDH dept)" : "Active",
+      title: activeStatus === "non-hdh" ? "Active (non-HDH dept)" : "Active",
       className: "bg-success/12 text-success border border-success/30",
     };
   }
@@ -233,7 +233,7 @@ function EntryItemImpl({
       (isDaemonRunning || isPending || isOcrDelegatedNeedsReview) && entry.lastLogMessage,
     );
 
-  const activeCheckTag = deriveActiveCheckTag(entry, isDone);
+  const personLookupStatusTag = derivePersonLookupStatusTag(entry, isDone);
 
   return (
     <div className="px-3 pt-2 first:pt-3">
@@ -243,8 +243,8 @@ function EntryItemImpl({
         tabIndex={0}
         aria-pressed={selected}
         aria-label={
-          activeCheckTag
-            ? `${name || entry.id} — ${activeCheckTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
+          personLookupStatusTag
+            ? `${name || entry.id} — ${personLookupStatusTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
             : `${name || entry.id} — ${(statusLabel ?? cfg.label).toLowerCase()}`
         }
         data-queue-entry-id={entry.id}
@@ -284,15 +284,15 @@ function EntryItemImpl({
                   {presetId}
                 </span>
               )}
-              {activeCheckTag && (
+              {personLookupStatusTag && (
                 <span
-                  title={activeCheckTag.title}
+                  title={personLookupStatusTag.title}
                   className={cn(
                     "text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans tabular-nums",
-                    activeCheckTag.className,
+                    personLookupStatusTag.className,
                   )}
                 >
-                  {activeCheckTag.text}
+                  {personLookupStatusTag.text}
                 </span>
               )}
               <span

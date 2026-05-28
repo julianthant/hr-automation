@@ -7,7 +7,7 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
 
 /**
  * Display title for daemon / dashboard batch cards and batch-queue toolbar
- * (`Active Check 1`, `EID Lookup 2`, …). Uses `data.batchDisplayOrdinal` from
+ * (`Person Lookup 1`, `Person Lookup 2`, …). Uses `data.batchDisplayOrdinal` from
  * members when present; otherwise a short parent id suffix for pre-ordinal rows.
  *
  * When `titleOverride` is provided and non-empty (for example an inherited

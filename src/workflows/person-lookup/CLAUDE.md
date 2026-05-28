@@ -72,6 +72,7 @@ The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyB
 ## Lessons Learned
 
 - **2026-05-28: Person Lookup merged from EID Lookup + Active Check.** Both former workflows are deleted. All callers import from `src/workflows/person-lookup/`. The workflow name is `"person-lookup"`, label `"Person Lookup"`.
+- **2026-05-28: Retired workflow ids are not dashboard surfaces.** Historical `eid-lookup` and `active-check` tracker rows stay readable for audit/debugging, but dashboard workflow lists/counts filter them out. Do not re-add either id to workflow metadata, input-run registries, or dashboard rail logic.
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases and canonicalizes separator; `prepareNames` + `dedupeNames` prevent itemId collisions.
 - **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. Rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
 - **Person Org active-row selection is shared.** Do not fork active/inactive parsing. Keep status derivation fed by `lookupPersonInUcpath` / `derivePersonLookupSelection` so hidden active Employment Instances are handled consistently.

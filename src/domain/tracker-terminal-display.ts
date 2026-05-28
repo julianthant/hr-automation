@@ -1,7 +1,7 @@
 /**
  * Dashboard queue / search surfaces use raw tracker `status` ("done", …).
- * EID lookup and Active Check stamp a business outcome in `data` when no
- * Person Org row is found; those runs still emit `status: "done"` because the
+ * Person Lookup stamps a business outcome in `data` when no Person Org row is
+ * found; those runs still emit `status: "done"` because the
  * automation succeeded. Operators should see "Not found" instead of "Done"
  * in the queue and related UI.
  */
@@ -14,19 +14,8 @@ export function isTerminalNotFoundEntry(entry: {
   data?: Record<string, unknown>;
 }): boolean {
   if (entry.status !== "done") return false;
-  const w = entry.workflow;
   const d = entry.data ?? {};
-  const s = (key: string): string => {
-    const v = d[key];
-    return v == null ? "" : String(v);
-  };
-  if (w === "eid-lookup") {
-    return s("emplId") === "Not found" || s("hrStatus") === "Not found";
-  }
-  if (w === "active-check") {
-    return s("activeStatus") === "not-found" || s("hrStatus") === "Not found";
-  }
-  return false;
+  return entry.workflow === "person-lookup" && d.activeStatus === "not-found";
 }
 
 /** Badge / pill text: either {@link TERMINAL_NOT_FOUND_LABEL} or the raw status. */

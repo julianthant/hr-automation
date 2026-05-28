@@ -218,7 +218,7 @@ export function buildDisplayNameMap(
       continue;
     }
     // Only one entry with this base — omit from map so resolveEntryName falls
-    // through to data fields / entry.id, avoiding a pointless "Active Check 1".
+    // through to data fields / entry.id, avoiding a pointless workflow ordinal.
     // Explicit workflow-level names (incl. OATH/EMPL) still get an ordinal so the
     // parent row and all delegated children share the same numbered label as the OCR run.
     if ((totals.get(base) ?? 0) <= 1 && !explicitWorkflowName) continue;
@@ -229,7 +229,7 @@ export function buildDisplayNameMap(
 
   // Final pass: delegated rows use the root parent's display label. This is
   // intentionally transitive: a parent workflow can delegate to OCR, and OCR
-  // can delegate onward to EID lookup / downstream daemon rows.
+  // can delegate onward to Person Lookup / downstream daemon rows.
   //
   // Single-pass walk with path compression: build runId → parentRunId, then
   // for each delegated entry walk up to a labeled root and cache the result
