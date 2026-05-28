@@ -2,16 +2,6 @@
 
 Generic mobile-photo upload primitive. Operator clicks a button on the dashboard, gets a QR code, scans on phone, takes photos, taps Done. Photos bundle to a single PDF at `.tracker/uploads/{sessionId}.pdf` that downstream workflows feed to `ocrDocument()` (in `src/services/ocr/`).
 
-## Files
-
-- `index.ts` — public barrel
-- `sessions.ts` — `createSessionStore({ now })` — in-memory session store with 15-min idle expiry, terminal-state stickiness, photo append/remove
-- `pdf-bundle.ts` — `bundlePhotosToPdf(paths, outPath)` via pdf-lib (JPG + PNG)
-- `lan-ip.ts` — `pickLanIp()` chooses first non-internal IPv4 from `os.networkInterfaces()`, 5-min cache
-- `qr.ts` — `qrSvgFor(url)` wraps the qrcode npm lib
-- `server.ts` — pure route handlers (returns `{status, body}`); `handleStart`, `handleManifest`, `handleUpload`, `handleDeletePhoto`, `handleFinalize`, `handleDiscard`
-- `mobile.html` — static mobile UI served at `/capture/:token`
-
 ## Public API
 
 ```ts

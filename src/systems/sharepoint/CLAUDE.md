@@ -2,10 +2,6 @@
 
 Headed browser automation for downloading files from UCSD's SharePoint / OneDrive (Microsoft 365) — specifically the Excel Online viewer at `ucsdcloud-my.sharepoint.com/.../doc2.aspx`. Primary consumers: the dashboard **SharePoint download dropdown** in the queue header (`GET /api/sharepoint-download/list` → `POST /api/sharepoint-download/run` with `{ id }` from the backend `SHAREPOINT_DOWNLOADS` registry) and the workflow-agnostic control in **Run modal** (`SharePointDownloadButton`), both pulling configured roster xlsx files into `src/data/` via `src/workflows/sharepoint-download/`.
 
-## Files
-
-- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `microsoft` (email prefill), `kmsi` (Stay-signed-in), `getExcelFrame` + `excelOnline` (WAC iframe handle + ribbon), `fileMenu` (backstage + Create a Copy / Export flyouts).
-
 ## Auth flow (verified 2026-04-22)
 
 SharePoint pushes you through four auth layers. Every other workflow that talks to an SSO-backed Microsoft / UC system uses the same helpers, so REUSE them — do not re-implement login logic here.

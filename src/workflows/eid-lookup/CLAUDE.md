@@ -20,49 +20,6 @@ This workflow touches two systems: **ucpath** and **crm**.
   - [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
   - [`src/systems/crm/SELECTORS.md`](../../systems/crm/SELECTORS.md)
 
-## Files
-
-- `schema.ts` — Zod per-item schemas (`EidLookupNameInputSchema` / `EidLookupEidInputSchema`) + `EidLookupItemSchema` union; `normalizeName` helper.
-- `crm-search.ts` — CRM cross-verification helpers (`searchCrmByName`, `datesWithinDays`).
-- `workflow.ts` — Kernel definition (`eidLookupCrmWorkflow`), `searchingStep`, `crossVerificationStep`, `activeStatusStep`, `runEidLookupCli`, `prepareNames` / `dedupeNames` exports.
-- `index.ts` — Barrel exports.
-
-Person Org search + HDH acceptance logic lives in **`src/systems/ucpath/person-org-summary.ts`** (`searchByName`, `searchByEid`, filters) — not a `search.ts` file in this folder.
-
-No `tracker.ts` — dashboard JSONL only. The xlsx tracker was removed on 2026-04-21 (see Lessons Learned).
-
-## Kernel Config (`eidLookupCrmWorkflow`)
-
-| Field | Value |
-|-------|-------|
-| `systems` | `[ucpath, crm]` |
-| `steps` | `["searching", "cross-verification", "active-status"]` |
-| `schema` | `EidLookupItemSchema` — `{ name, ... }` **or** `{ emplId, ... }` |
-| `authSteps` | `true` — kernel prepends `auth:ucpath`, `auth:crm` |
-| `tiling` | `"auto"` |
-| `batch` | `{ mode: "shared-context-pool", poolSize: 4, preEmitPending: true }` |
-| `detailFields` | `searchName`, `emplId`, `department`, `hrStatus`, `effdt`, `terminationDate` (declared keys — see `workflow.ts`) |
-| `getName` / `getId` | `d.searchName` |
-| `initialData` | Name path: `{ searchName: normalizeName(name) }`; EID path: `{ searchName: emplId, emplId }` |
-
-**`crmMatch`**, **`crmMatchedEmplId`**, and the **active-check overlay fields** (`activeStatus`, `isActive`, `isHdhAccepted`, `candidateEids`, `expectedJobEndDate`, …) are written via `ctx.updateData` in the step helpers — useful in JSONL / dashboards — but are **not** listed in `detailFields` (avoids “declared but optional” grid noise).
-
-## Data Flow
-
-```
-InputRunPanel → /api/enqueue
-  → enqueueFromHttp
-    → validate each input with EidLookupItemSchema
-    → ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, [{name}])
-      - Discovers alive daemons via .tracker/daemons/eid-lookup-*.lock.json + /whoami liveness
-      - Spawns a daemon when none is alive — Duo once per new daemon (UCPath + CRM)
-      - Inserts SQLite task rows and appends `enqueue` audit events to .tracker/daemons/eid-lookup.queue.jsonl
-      - POST /wake to every alive daemon; daemons race to claim via atomic SQLite transaction
-      - Each daemon runs items sequentially under shared-context-pool semantics
-```
-
-**Public start path:** dashboard input run with semicolon-separated names.
-
 ## Shared-context pool semantics
 
 - N workers (default `min(names.length, 4)`) share per-system `BrowserContext`s. Each worker opens its own Page on first `ctx.page(id)` call (lazy allocation).
@@ -70,15 +27,6 @@ InputRunPanel → /api/enqueue
 - Per-name failures become `failed` tracker rows via `runOneItem`'s catch; the worker continues to the next queue item.
 - Duplicate names in an input run should be deduped before enqueue. Duplicate-name requests would collide on the name-derived `itemId`.
 - JSONL writes (kernel-owned `trackEvent`) need no coordination — `appendFileSync` is atomic per-line.
-
-## Dashboard integration
-
-- Workflow name: `eid-lookup`
-- Steps (per-item): `auth:ucpath` → `auth:crm` → `searching` → `cross-verification` (skipped when input is `{ emplId }`) → **`active-status`**.
-  - `authSteps: true` → the kernel prepends per-system `auth:<systemId>` step labels to the visible pipeline. Actual auth timing is **captured once per batch** by a `SessionObserver` wired via `withBatchLifecycle`, then injected into each item's tracker rows as synthetic pre-handler `running` entries with the real `onAuthStart` timestamp. The pool runs auth ONCE but every per-item row tiles exactly to elapsed with accurate per-system durations.
-- **Batch instance:** Every item in a batch shares a single workflow instance (e.g. `EID Lookup 1`). `runWorkflowSharedContextPool` emits exactly one `workflow_start` + one `workflow_end(done|failed)` per input-run batch. The dashboard session drawer therefore shows ONE row per batch, not N.
-- Detail fields: see `detailFields` in `workflow.ts` — excludes `crmMatch` / active-status extras (those are tracker `updateData` fields for orchestration and OCR panes).
-- Item ID on the dashboard = the searched name (deduped). `__name` / `__id` seeded on the initial pending row via `onPreEmitPending` so the row reads correctly before `searching` runs.
 
 ## Name Search Strategy
 
@@ -102,10 +50,6 @@ After each successful strategy the SDCMP candidate list is drilled into to fill 
 - Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages. If ACT CRM ever rate-limits, the remedy is to collapse `cross-verification` into a post-pool pass (separate step list, single CRM page).
 - Browsers kept open for inspection (no automatic close past `parent.close()` at end of pool)
 - Only the FIRST SDCMP result per name stamps the detail fields; the full result list lives in the step log output. Multi-result names are rare (one employee ≈ one SDCMP record).
-
-## Verified Selectors
-
-No workflow-local selectors live here. Use the UCPath and CRM system selector catalogs listed above; add selector lessons to the relevant system `LESSONS.md` after searching/updating existing entries.
 
 ## Lessons Learned
 

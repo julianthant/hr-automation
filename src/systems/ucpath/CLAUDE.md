@@ -2,18 +2,6 @@
 
 PeopleSoft HR automation: Smart HR transactions, person search, job summary extraction, emergency contact forms, and the ActionPlan execution pattern. Used by onboarding, work-study, emergency-contact, eid-lookup, and separations workflows.
 
-## Files
-
-- `action-plan.ts` — `ActionPlan` class: queue-based step collector with `add()`, `preview()` (dry-run), and `execute()` (sequential with error wrapping as `TransactionError`)
-- `navigate.ts` — `getContentFrame(page)` (iframe `#main_target_win0`), `waitForPeopleSoftProcessing(frame)`, `searchPerson(page, ssn, firstName, lastName, dob)`, `navigateToSmartHR(page)` (direct URL preferred, menu fallback)
-- `person-org-summary.ts` — Person Organizational Summary search/read helpers used by eid-lookup and related flows (registry-backed name read — see Lessons Learned)
-- `transaction.ts` — Full Smart HR flow: template selection, effective date, create transaction, reason code, personal data, comments, job data tabs, save/submit. Exports ~15 individual step functions
-- `personal-data.ts` — Emergency Contact standalone component: `navigateToEmergencyContact(page, emplId)`, `readExistingContactNames(page)`, `demoteExistingContact(page, existingName)`
-- `job-summary.ts` — `getJobSummaryData(page, emplId)`: navigates to Workforce Job Summary, searches by EID, extracts work location (deptId, description) and job info (jobCode, description). Throws with a clear "verify EID in upstream record" message when Workforce returns no results — no cross-source auto-fallback by design.
-- `selectors.ts` — **Selector registry** (Subsystem A). All Playwright locators grouped by flow: `smartHR`, `personalData`, `comments`, `jobData`, `personSearch`, `jobSummary`, `hrTasks`, `emergencyContact`. Callers import group-level namespaces and invoke `selector(root)` to get a Locator.
-- `types.ts` — `TransactionResult`, `TransactionError`, `PlannedAction`, `PersonSearchResult`, `PersonalDataInput`, `JobDataInput`, `JobSummaryData`
-- `index.ts` — Barrel exports (includes `ucpathSelectors` registry barrel)
-
 ## Before mapping a new selector
 
 1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.
@@ -61,23 +49,6 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 - Phone/email grid indices hardcoded: `$6` for phone type, `$7` for email type
 - SSN is optional (international students), address is required
 - Transaction number extraction: parse the reopened Smart HR readback page, accepting both `Transaction ID: T...` and the approval strip `Transaction: T...`; scroll to that lower section before workflow screenshots
-
-## Verified Selectors
-
-All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
-grouped by page/flow. Each selector carries a `// verified YYYY-MM-DD` inline
-comment. Grid-index-mutating selectors (PeopleSoft `$0`/`$11` shifts around
-position-number refresh — Comp Rate Code, Compensation Rate) use 5-deep
-`.or()` fallback chains.
-
-**Do not add inline selectors outside `selectors.ts`.** The
-[`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
-guard will reject PRs that do. Dynamic regex-based employee-name lookups and
-JS-eval paths (e.g. `#ICOK` dialog dismiss, `#processing` spinner probe) are
-whitelisted via end-of-line `// allow-inline-selector` comments.
-
-When you verify a selector via playwright-cli, update the `// verified`
-comment in `selectors.ts` to today's date.
 
 ## No cross-source auto-fallbacks
 

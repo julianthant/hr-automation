@@ -1,38 +1,21 @@
 # HR Automation
 
-UCPath HR automation for UCSD. Playwright-driven onboarding, separations, EID lookups, work-study updates, UKG report downloads, and emergency contact fills — composed from per-system drivers and a small workflow kernel.
+UCPath HR automation for UCSD: Playwright-driven onboarding, separations, EID lookups, work-study updates, UKG report downloads, oath workflows, OCR review, and emergency contact fills.
 
 ## Before You Start
 
-**Read the relevant local CLAUDE.md FIRST — it's the source of truth for domain-specific patterns, gotchas, and verified selectors:**
-
-- **System driver work** (selectors, auth, Playwright)?  
-  → `src/systems/<system>/CLAUDE.md` (UCPath, CRM, I9, Kuali, Kronos, ServiceNow, SharePoint). Check `LESSONS.md` before mapping selectors.
-- **Workflow implementation or modification?**  
-  → `src/workflows/<workflow>/CLAUDE.md`
-- **Dashboard or tracker changes?**  
-  → `src/dashboard/CLAUDE.md` or `src/tracker/CLAUDE.md`
-- **Shared primitives or architecture?**  
-  → `docs/engineering/codebase-conventions.md`
-- **Which markdown is canonical vs ephemeral (reviews, drift checks)?**  
-  → `docs/README.md`
-
-**General lessons that apply everywhere:**  
-→ `LESSONS.md` (project root) — read before every non-trivial task. Selector workflow, shared code boundaries, kernel patterns, common mistakes, architecture guards, daemon mode.
-
-Before non-trivial tasks:
-- **Read `LESSONS.md`** in the project root — cross-codebase patterns, common mistakes, architecture decisions.
-- **Query claude-mem** with `mem-search` skill to surface prior solutions.
+- Read only the local instruction file for the area being changed: `src/systems/<system>/CLAUDE.md`, `src/workflows/<workflow>/CLAUDE.md`, `src/dashboard/CLAUDE.md`, `src/tracker/CLAUDE.md`, or `src/core/CLAUDE.md`.
+- Before selector work, search `src/systems/<system>/LESSONS.md` and run `npm run selector:search "<intent>"`.
+- Before non-trivial planning/debugging, read root `LESSONS.md` and query claude-mem with `mem-search`.
+- Use `docs/engineering/codebase-conventions.md` for shared architecture and naming rules; use `docs/README.md` to distinguish maintained docs from historical or ephemeral docs.
 
 ## Commands
 
 ```bash
-# Dashboard (canonical workflow launch surface)
 npm run dashboard            # SSE backend (:3838) + Vite dev (:5173) — open http://localhost:5173
 npm run dashboard:watch      # Same as `dashboard`, but tsx watch restarts the SSE backend process on src/ changes (full restart, not HMR)
 npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 
-# Daemon stops (lifecycle only; workflow starts happen in the dashboard)
 npm run onboarding:stop
 npm run separation:stop
 npm run work-study:stop
@@ -42,7 +25,6 @@ npm run active-check:stop
 npm run oath-signature:stop
 npm run oath-upload:stop
 
-# Export / Utilities
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
 npm run clean:tracker                              # Prune .tracker/*.jsonl older than 7 days (default)
 npm run clean:tracker -- --days 30 --dir .tracker  # Custom age + dir
@@ -53,81 +35,29 @@ npm run selectors:catalog                          # Regenerate per-system SELEC
 npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
 npm run typecheck                                  # Type-check src/
 npm run typecheck:all                              # Type-check src/ + tests
-npm run test                                       # Unit tests (vitest run — non-watch)
+npm run test                                       # Unit tests (dot reporter — live progress)
+npm run test:verbose                               # Per-test lines (scoped debugging)
 npm run test:watch                                 # Vitest in watch mode for iterative dev
 npm run test:architecture                          # Static architecture/convention guards
 npm run build:dashboard                            # Single-file dashboard build
 ```
 
-All runtime scripts use `tsx --env-file=.env`. Workflow starts are dashboard-only: use an upload run (`RunModal`) for PDF/file-backed workflows or an input run (`InputRunPanel`) for typed IDs/names. Do not add new `npm run <workflow>` launch scripts or revive YAML/batch-file launch paths.
+Workflow starts are dashboard-only: upload run (`RunModal`) for PDF/file-backed workflows, input run (`InputRunPanel`) for typed IDs/names. Do not add `npm run <workflow>` launch scripts or revive YAML/batch-file starts. Runtime scripts use `tsx --env-file=.env`.
 
 ## Architecture
 
-Layers: `src/domain/` (business concepts) → `src/infra/` (runtime infra) → `src/services/` (reusable IO) → `src/systems/` (per-system Playwright drivers) → `src/core/` (workflow kernel + daemon + SQLite) → `src/control/` (operator actions) → `src/workflows/` (composed workflows). `src/tracker/`, `src/dashboard/`, `src/scripts/`, `src/utils/` are support areas.
-
-Full walkthrough: `docs/engineering/architecture-deep-dive.md`. File-by-file kernel/daemon listing: `docs/engineering/core-internals.md`.
-
-Observability: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` + `*-logs.jsonl`, streamed to the dashboard. Debug lifecycle artifacts at `.tracker/debug/`.
-
-OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` means `/api/ocr/approve-batch` enqueues downstream daemon rows (emergency-contact); omitting `approveTo` means approval only terminates OCR and the owning workflow consumes approved records itself (oath-signature PDF branch).
-
-### Row archetypes (target model)
+Layer order: `domain` → `infra` / `services` / `systems` → `core` → `control` / `workflows`; `tracker`, `dashboard`, `scripts`, and `utils` support those layers.
 
 Every tracker row carries `data.archetype`. Queue rendering, log-panel labels, and display-name resolution all dispatch on this field plus `parentRunId`. **Scope** (root vs delegated) is `parentRunId`, not a separate archetype family. **Child presentation and wait gates** (e.g. OCR blocking approval until eid-lookup finishes) belong on the **parent workflow** (`runtimePolicy` + orchestrator), not on the child row type.
 
-**Operator mental model** (how we describe rows in design docs and prompts):
+Stamped row shapes are `single`, `preview`, `batch`, and `batch-member`; delegated rows keep their natural shape and carry `parentRunId`. `resolveRowArchetype` aliases historical stamps at read time until old JSONL ages out.
 
-```
-Root workflows (no parentRunId)
-├── single          work-study, separations doc, direct eid-lookup
-└── batch           emergency-contact root, OCR prep, oath-signature PDF when top-level
-    └── batch-member × N
-
-Delegated work (always has parentRunId)
-├── delegate-child (single)     oath-upload → one PDF run; OCR → one eid-lookup
-└── delegate-child (batch)      oath-signature PDF fan-out anchor under oath-upload
-    └── delegate-batch-member × N   signers under that PDF run
-```
-
-**Stamped `data.archetype`** (three shapes — migration in progress; see spec):
-
-| Concept | `data.archetype` | `parentRunId` |
-|---|---|---|
-| Root single | `single` | — |
-| Root batch anchor | `batch` | — |
-| Batch peer (root or under delegated batch) | `batch-member` | anchor's `runId` |
-| Delegated single child | `single` | set |
-| Delegated batch anchor | `batch` | set |
-
-Legacy stamps (`batch-parent`, `passive-child`, `delegate-child`, `dispatch`) are being removed; `resolveRowArchetype` aliases them at read time until JSONL ages out. Implementation spec: `docs/superpowers/specs/2026-05-27-row-archetype-simplification.md`. Glossary + `defineWorkflow` archetypes: `src/workflows/CLAUDE.md`. Types: `src/domain/row-archetype.ts`.
-
-## Where to Find Things
-
-| Need | Location | Method |
-|---|---|---|
-| Playwright selector for UI element | `src/systems/<system>/selectors.ts` | Use `npm run selector:search "intent"` first; never guess |
-| Lessons from past selector failures | `src/systems/<system>/LESSONS.md` | Search first; update/merge stale or contradictory entries before adding new ones |
-| Workflow implementation example | `src/workflows/work-study/` or `src/workflows/onboarding/` | Reference minimal (work-study) or complex (onboarding) example |
-| Selector registry, intelligence artifacts, playwright-cli guide | `src/systems/CLAUDE.md` | All systems' selectors.ts layout, SELECTORS.md, LESSONS.md, selector discovery workflow |
-| Row archetype tree (root vs delegated) | Root `CLAUDE.md` → Row archetypes; `src/domain/row-archetype.ts` | Shape = `single` / `batch` / `batch-member`; scope = `parentRunId` |
-| New workflow guide + archetype glossary | `src/workflows/CLAUDE.md` | Writing a new workflow, archetypes, daemon conversion template |
-| Kernel API (defineWorkflow, Ctx, etc.) | `src/core/CLAUDE.md` | User-facing primer, Ctx methods, run modes, dupe-protection |
-| Daemon mode (queues, health checks, etc.) | `src/core/CLAUDE.md` | Queue mechanics, flags, daemon conversion guide |
-| Workflow control actions & ops handlers | `src/control/CLAUDE.md` | Operator cancel/retry/delete/bump dispatch, low-level handlers, OCR discard |
-| Dashboard internals & React components | `src/dashboard/CLAUDE.md` | SSE streams, queue rendering, detail panels |
-| Tracker & JSONL observability patterns | `src/tracker/CLAUDE.md` | Emit patterns, Excel export, child-run delegation |
-| System-specific gotchas | `src/systems/<system>/CLAUDE.md` | PeopleSoft quirks, frame navigation, auth edge cases |
-| Shared primitives & anti-patterns | `src/domain/`, `src/services/`, `src/infra/` + `docs/engineering/codebase-conventions.md` | Names, operators, logs, matching, OCR, capture, auth/browser — use before adding workflow-local |
-| Canonical vs ephemeral docs (review / drift-check scope) | `docs/README.md` | Maintained codebase narrative vs `superpowers/` handoffs & plans vs historical snapshots |
-| Architecture guards & what they enforce | `npm run test:architecture` + test files in `tests/unit/` | No inline selectors, no default exports, lesson format, catalog sync |
-| General cross-codebase lessons | `LESSONS.md` (project root) | Read before every non-trivial task |
+OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr/approve-batch` enqueue downstream rows; omitting it means the owning workflow consumes approved OCR records itself.
 
 ## Codebase conventions
 
-Full rules: `docs/engineering/codebase-conventions.md`. Key points:
 - No default exports in `src/`.
 - No `page.locator(...)` inline in system files (architecture guard enforces this).
-- Action-oriented function names: `parse`, `normalize`, `display/format`, `derive`, `resolve`, `build`, `create`, `read/write/list/find`, `is/has/can/should`, `ensure`, `assert`, `run`.
 - Shared helpers used by 2+ workflows (or 1 workflow + tracker/dashboard/core/OCR) → promote out of `src/workflows/<workflow>/`. Shared homes listed in `src/workflows/CLAUDE.md`.
 - Use `log.*` with structured fields; no ad hoc `console.*`, toasts, or Telegram messages.
 
@@ -137,7 +67,7 @@ Full rules: `docs/engineering/codebase-conventions.md`. Key points:
 - **New workflow:** `src/workflows/CLAUDE.md` (example, archetypes, daemon template). Kernel API: `src/core/CLAUDE.md`.
 - **Before commits:** `npm run test` + `npm run test:architecture` (architecture guards run here).
 - **After changes — CLAUDE.md:** update after every non-trivial fix, new pattern, or gotcha; merge/replace stale entries, don't layer duplicates.
-- **After changes — docs/engineering/:** update only when the reference material structurally changes — new endpoint added/removed, new module file, changed API signature, removed feature. Not needed for every implementation change.
+- **After changes:** update only the nearest relevant `CLAUDE.md` when a non-obvious pattern, gotcha, or contract changes; merge stale lessons instead of adding duplicates.
 
 ## Environment
 
@@ -156,20 +86,16 @@ Duo MFA is manual — the automation pauses and polls until you approve on your 
 
 `npm run dashboard` starts SSE backend (`:3838`) + Vite frontend (`:5173`). Workflow starts are centralized here: upload runs use `RunModal` / `RUN_MODAL_REGISTRY`, and typed input runs use `InputRunPanel` / `INPUT_RUN_REGISTRY`.
 
-Workflows emit JSONL to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`; SSE server streams to React SPA. All UI metadata (label, steps, detailFields) comes from server-side kernel registry — no frontend edits needed when adding workflows.
+Workflows emit JSONL to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`; SSE server streams to React SPA. All UI metadata (label, steps, detailFields) comes from the server-side kernel registry.
 
 **Row lifecycle debug logs:** `.tracker/debug/row-lifecycle-{YYYY-MM-DD}.{jsonl,json}` — regenerated every 60s; full per-row status/surface/cause history. Useful when diagnosing surface mis-classification or stuck retries. See `src/tracker/CLAUDE.md`.
 
-**Details:** `src/dashboard/CLAUDE.md` (frontend), `src/tracker/CLAUDE.md` (backend).
-
 ## Docs
 
-What’s canonical vs ephemeral: `docs/README.md`. Full reference docs in `docs/engineering/`. Session handoffs/plans in `docs/superpowers/` (ephemeral). Frozen snapshots in `docs/historical/`.
+What’s canonical vs ephemeral: `docs/README.md`. Full reference docs in `docs/engineering/`. Workflow behavior and delegation docs live in `docs/workflow/`. Session handoffs/plans in `docs/superpowers/` (ephemeral). Frozen snapshots in `docs/historical/`.
 
 ## Memory Search (claude-mem)
 
 `MEMORY.md` and recent session summaries are auto-injected — no action needed. Use `mem-search` skill to go further back or find specific past decisions before non-trivial planning or debugging.
 
-**Memory hygiene:** Delete project-state memories when work is done. Only feedback/preference memories are permanent. See global CLAUDE.md for the full hygiene rules.
-
-**Skills:** `mem-search` (past bugs/decisions), `knowledge-agent` (repeated broad questions in one session), `smart-explore` (code structure without reading full files), `timeline-report`
+**Memory hygiene:** Delete project-state memories when work is done. Only feedback/preference memories are permanent.

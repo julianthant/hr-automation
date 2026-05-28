@@ -4,32 +4,6 @@ Shared Playwright helpers used across multiple systems. Keep this layer
 **minimal**: only move a helper here when >=2 systems call it. Most helpers
 belong in the system that owns them, not in common.
 
-## Files
-
-- `modal.ts` — `dismissPeopleSoftModalMask(page)`: hides `#pt_modalMask`,
-  the transparent overlay PeopleSoft leaves visible between tab switches.
-  Used by UCPath transaction flow and emergency-contact.
-- `safe.ts` — `safeClick(locator, { label })` and `safeFill(locator, value,
-  { label })`: instrumented wrappers around Playwright's click/fill. Three
-  tiers of instrumentation, gated on call latency:
-    - **quick success** (≤ 3s) — `log.debug("<label>: clicked in Nms")`
-      (only surfaces on stdout when `DEBUG=true`; always written to JSONL
-      when a log context is active).
-    - **slow success** (> 3s) — `log.warn("selector fallback triggered:
-      <label> (click took Nms — likely fallback-hit or page stall)")`.
-      Inferred fallback-hit: Playwright's `.or()` doesn't surface which
-      branch matched, so we use elapsed time as a proxy. The wording is
-      hedged because a plain slow page load can also push latency past 3s
-      without any fallback involvement.
-    - **failure** — `log.error("selector fallback triggered: <label>
-      (click failed after Nms — <error message>)")` then re-throws the
-      original error. Shares the `selector fallback triggered:` marker
-      with the warn case so the dashboard's Selector Health Panel
-      aggregates both on `<label>`.
-  The 3_000ms threshold is overridable via a `_slowThresholdMs` option
-  (underscore-prefixed = test-only escape hatch).
-- `index.ts` — Barrel exports.
-
 ## Pattern
 
 ```typescript

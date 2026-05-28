@@ -25,14 +25,6 @@ systems: [{
 
 Tuning knobs live on `LaunchOpts` (`staggerMs`, `settleMs`, `maxConcurrentDuos`) and are primarily for tests. Production callers don't pass them.
 
-## Files
-
-- `login.ts` — All login flows: `loginToUCPath`, `loginToACTCrm`, `loginToUKG` (split into `ukgNavigateAndFill` + `ukgSubmitAndWaitForDuo`), `loginToKuali`, `loginToNewKronos`
-- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, recovery callbacks, and optional `systemLabel` for the voice-cue + Telegram hooks
-- `voice-cue.ts` — `cueDuo(systemId)` — best-effort macOS voice cue ("Duo for UCPath") spoken via `say` when `HR_AUTOMATION_VOICE_CUES=1`. No-op on non-darwin or when the env var is unset. Per-systemId 30s cooldown prevents rapid duplicates across auth retries. Never throws. `pollDuoApproval` calls this once per auth attempt before the polling loop starts
-- `telegram-notify.ts` — `notifyAuthEvent(ev)` — best-effort Telegram DM via Bot API on Duo `waiting` / `approved` / `timeout` / `resent`. Activated only when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are both in env; no-op otherwise. Mirrors `voice-cue.ts` (factory `createTelegramNotifier` + default instance, never throws). Workflow + runId pulled from `AsyncLocalStorage` log context so messages name the kernel item without per-call-site plumbing
-- `types.ts` — `AuthResult` (ucpath/actCrm booleans)
-
 ## Login Flows
 
 | Function | System | Duo? | Session Persistence? | Timeout |
@@ -62,10 +54,6 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 - ACTCrm may land on `act-crm.my.site.com` OR `crm.ucsd.edu` after Duo — both are checked
 - Debug screenshots saved to `.auth/debug-*.png` (ACTCrm flow only)
 - "Enroll in Two-Step Login" nav link has `role="button"` containing "Login" — causes selector collisions if not using `button[name=...]`
-
-## Verified Selectors
-
-SSO field fallbacks are documented in the selector pattern above and live inline in `fillSsoCredentials`. If a login selector changes, update this file and the relevant system `LESSONS.md` after searching/merging related entries.
 
 ## Lessons Learned
 
