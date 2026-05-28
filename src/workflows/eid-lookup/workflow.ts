@@ -19,11 +19,11 @@ import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import {
   deriveActiveCheckOutcome,
+  lookupPersonInUcpath,
+  resolvePersonLookupForEidLookup,
   type ActiveCheckOutcome,
-} from "../../domain/active-check-outcome.js";
+} from "../person-lookup/index.js";
 import {
-  searchByName,
-  searchByEid,
   parsePersonOrgNameInput as parseNameInput,
   type EidResult,
 } from "../../systems/ucpath/person-org-summary.js";
@@ -78,14 +78,15 @@ async function searchingStep<TSteps extends readonly string[]>(
   const page = await ctx.page("ucpath");
 
   if (isEidInput(input)) {
-    let result: EidResult | null;
+    let lookup: Awaited<ReturnType<typeof lookupPersonInUcpath>>;
     try {
-      result = await searchByEid(page, input.emplId);
+      lookup = await lookupPersonInUcpath(page, { kind: "by-eid", emplId: input.emplId });
     } catch (err) {
       log.error(`searchByEid failed for "${input.emplId}": ${errorMessage(err)}`);
       ctx.updateData({ emplId: input.emplId, hrStatus: "Error" });
       throw err;
     }
+    const result = lookup.selection.selected;
     if (!result) {
       log.step(`No detail page for EID ${input.emplId}`);
       ctx.updateData({ emplId: input.emplId, hrStatus: "Not found" });
@@ -102,13 +103,13 @@ async function searchingStep<TSteps extends readonly string[]>(
       jobTitle: result.jobCodeDescription ?? "",
     });
     await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
-    return [result];
+    return lookup.results as EidResult[];
   }
 
   // Name-search path
-  let result: Awaited<ReturnType<typeof searchByName>>;
+  let lookup: Awaited<ReturnType<typeof lookupPersonInUcpath>>;
   try {
-    result = await searchByName(page, input.name, {
+    lookup = await lookupPersonInUcpath(page, { kind: "by-name", name: input.name }, {
       keepNonHdh: input.keepNonHdh,
       onAfterSearchAttempt: async () => {
         await ctx.captureAndStampScreenshot("person-org-summary-search-results", "personOrgSearchScreenshot");
@@ -119,14 +120,14 @@ async function searchingStep<TSteps extends readonly string[]>(
     ctx.updateData({ emplId: "Error" });
     throw err;
   }
-  if (result.sdcmpResults.length === 0) {
+  if (lookup.results.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
     ctx.updateData({ emplId: "Not found" });
     return [];
   }
-  const first = result.sdcmpResults[0];
+  const first = lookup.selection.selected ?? lookup.results[0]!;
   log.success(
-    `Found ${result.sdcmpResults.length} result(s) for "${input.name}": EID ${first.emplId} | ${first.department ?? "?"} | ${first.jobCodeDescription}`,
+    `Found ${lookup.results.length} result(s) for "${input.name}": EID ${first.emplId} | ${first.department ?? "?"} | ${first.jobCodeDescription}`,
   );
   ctx.updateData({
     emplId: first.emplId,
@@ -135,7 +136,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     jobTitle: first.jobCodeDescription ?? "",
   });
   await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
-  return result.sdcmpResults;
+  return lookup.results as EidResult[];
 }
 
 /**
@@ -262,25 +263,15 @@ export function resolveActiveStatusResultsForEidLookup(args: {
   deriveInput: { kind: "by-eid"; emplId: string } | { kind: "by-name"; name: string };
   results: EidResult[];
 } {
-  if (isEidInput(args.input)) {
-    return {
-      deriveInput: { kind: "by-eid", emplId: args.input.emplId },
-      results: args.sdcmpFromSearch,
-    };
-  }
-
-  const matchedEid = args.crmMatchedEmplId?.trim();
-  if (matchedEid) {
-    const matched = args.sdcmpFromSearch.find((result) => result.emplId === matchedEid);
-    return {
-      deriveInput: { kind: "by-eid", emplId: matchedEid },
-      results: matched ? [matched] : [],
-    };
-  }
-
-  return {
-    deriveInput: { kind: "by-name", name: args.input.name },
-    results: args.sdcmpFromSearch,
+  return resolvePersonLookupForEidLookup({
+    input: isEidInput(args.input)
+      ? { kind: "by-eid", emplId: args.input.emplId }
+      : { kind: "by-name", name: args.input.name },
+    sdcmpFromSearch: args.sdcmpFromSearch,
+    crmMatchedEmplId: args.crmMatchedEmplId,
+  }) as {
+    deriveInput: { kind: "by-eid"; emplId: string } | { kind: "by-name"; name: string };
+    results: EidResult[];
   };
 }
 
@@ -304,8 +295,8 @@ async function activeStatusStep<TSteps extends readonly string[]>(
       stampActiveCheckFields(ctx, outcome);
       return;
     }
-    const row = await searchByEid(page, eid);
-    const results = row ? [row] : [];
+    const lookup = await lookupPersonInUcpath(page, { kind: "by-eid", emplId: eid });
+    const results = lookup.results;
     await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
     const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results);
     stampActiveCheckFields(ctx, outcome);

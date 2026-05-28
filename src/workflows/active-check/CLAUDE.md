@@ -1,6 +1,6 @@
 # Active Check Workflow
 
-Checks UCPath **Person Organizational Summary** for active/inactive HR status by employee **name** or **8-digit EID**, using `searchByName` / `searchByEid` (`src/systems/ucpath/person-org-summary.js`) with outcome derivation in `deriveActiveCheckOutcome` (`src/domain/active-check-outcome.ts`). Name search uses `keepNonHdh: true` so non-HDH rows can surface for operator review; EID search drills a single row set. Multiple Person Org rows with the same EID are one employee, not ambiguity; the shared Person Org selector chooses the preferred active assignment before status derivation.
+Checks UCPath **Person Organizational Summary** for active/inactive HR status by employee **name** or **8-digit EID** through the internal `person-lookup` helper (`src/workflows/person-lookup/`). Name search uses `keepNonHdh: true` so non-HDH rows can surface for operator review; EID search drills a single row set. Multiple Person Org rows with the same EID are one employee, not ambiguity; the shared Person Lookup selector chooses the preferred active assignment before status derivation.
 
 **Kernel-based (dashboard input run by default)** — `activeCheckWorkflow` in `workflow.ts`; dashboard input runs enqueue through `/api/enqueue`.
 
@@ -19,5 +19,6 @@ Same topology as **eid-lookup**: up to 4 workers share UCPath browser contexts; 
 ## Lessons Learned
 
 - **2026-05-28: Active Check names match EID Lookup title conventions.** Direct input rows should title by normalized person/EID subject, not `Active Check <subject>`. The row can still show an `A` / `IA` chip beside `Done`; workflow identity belongs in the rail/header, not the item name.
+- **2026-05-28: Active Check derives from internal Person Lookup.** Do not call `searchByName` / `searchByEid` directly from this workflow. Route UCPath Person Org reads through `lookupPersonInUcpath` so EID Lookup and Active Check share hidden Employment Instances handling.
 - **2026-05-25: Dashboard input run is the public start path.** `npm run active-check` is retired; typed name/EID starts belong in `InputRunPanel` and `/api/enqueue`.
 - **2026-05-27: OCR utility rows use normal count-based grouping.** `ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY` spreads the shared default policy and sets `memberRow.titleSource: "person"` for OCR utility children. Direct input-run rows stay normal surfaces; OCR fan-out rows are `single` with OCR `parentRunId`, so one child is flat and multiple siblings group as a batch surface.
