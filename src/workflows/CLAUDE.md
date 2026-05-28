@@ -14,7 +14,7 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 - `ctx.page(id)` returns a Playwright Page proxy that injects per-run `ctx.signal` into Playwright methods with `signal?: AbortSignal`. Do not add handler-side cancel polling for ordinary browser calls.
 - For non-Playwright awaits that accept an `AbortSignal`, pass `ctx.signal`.
 - Compose workflows with `ctx.delegateTo` and `ctx.delegateToAll`. Do not call `runWorkflow(child, ..., { parentRunId })` or `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` directly inside handlers; architecture guards block this.
-- `renderAs` is projection-only: `"flat"`, `"preview"`, or `"batch"` changes dashboard presentation, not stamped row archetype.
+- `renderAs: "flat"` and `"preview"` are presentation hints. `renderAs: "batch"` means the parent represents a grouped person set, so children are stamped `batch-member` under the parent run.
 
 ## Dashboard Integration
 
@@ -28,10 +28,11 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 
 Every workflow must declare `archetype` and `runtimePolicy`; architecture guards fail if either is missing. Spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` unless the workflow needs delegation, preview, memberRow, or prepRow overrides.
 
-- `single` — one item, one row.
+- `single` — one person/subject, one row.
 - `preview` — one review/approval row; OCR is the current preview workflow.
-- `batch` — anchor row over peer `batch-member` rows.
+- `batch` — anchor row over multiple person/subject rows, or a parent that will fan out to person rows after approval.
 - `parentRunId` means delegated scope only; it never changes stamped row shape.
+- `batch-member` — one person/subject row that belongs to a grouped parent run.
 - Dispatch markers are `single` rows with `data.delegationRole = "dispatch"` for terminal-at-enqueue handoffs.
 
 ## Shared Ownership
@@ -49,6 +50,7 @@ The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operato
 ## Lessons Learned
 
 - **2026-05-28: Person Lookup is the merged operator-facing workflow (formerly EID Lookup + Active Check).** `src/workflows/person-lookup/` is registered in `WORKFLOW_LOADERS` and dashboard input runs. It also exports the `lookupPersonInUcpath` primitive for internal callers. Do not add separate `eid-lookup` or `active-check` entries back to any registry.
+- **2026-05-28: Row archetype follows person/subject cardinality, not process count.** A one-person run is `single`; a grouped input run or a PDF/upload path that fans out to people is `batch` with `batch-member` children. Do not collapse an OCR/PDF fan-out to `single` just because it produced one approved person.
 - **2026-05-25: Dashboard run surfaces are the public start paths.** New operator starts must be input runs or upload runs. Do not add `npm run <workflow>` launch scripts or YAML/batch-file starts; keep CLI adapters internal when tests or composed workflows still need them.
 - **2026-05-16: `buildCliAdapter` remains the internal daemon adapter pattern.** Use it for "shape inputs → enqueue typed items → pre-emit pending rows"; keep pending-data helpers small when reused by in-process paths.
 - **`ensurePageHealthy` is gone.** Use `ctx.session.healthCheck(id)` for an explicit mid-handler probe if needed.

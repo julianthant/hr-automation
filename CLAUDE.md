@@ -49,7 +49,7 @@ Layer order: `domain` → `infra` / `services` / `systems` → `core` → `contr
 
 Every tracker row carries `data.archetype`. Queue rendering, log-panel labels, and display-name resolution all dispatch on this field plus `parentRunId`. **Scope** (root vs delegated) is `parentRunId`, not a separate archetype family. **Child presentation and wait gates** (e.g. OCR blocking approval until Person Lookup finishes) belong on the **parent workflow** (`runtimePolicy` + orchestrator), not on the child row type.
 
-Stamped row shapes are `single`, `preview`, `batch`, and `batch-member`; delegated rows keep their natural shape and carry `parentRunId`. `resolveRowArchetype` aliases historical stamps at read time until old JSONL ages out.
+Stamped row shapes are `single`, `preview`, `batch`, and `batch-member`. `single` means one person/subject, not one daemon run. Multi-person input runs and approval/upload flows that fan out to people are `batch` surfaces with `batch-member` rows. Delegated rows carry `parentRunId`; scope is separate from shape.
 
 OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr/approve-batch` enqueue downstream rows; omitting it means the owning workflow consumes approved OCR records itself.
 

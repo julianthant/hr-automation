@@ -9,7 +9,7 @@ Schema is `z.discriminatedUnion("kind", ...)`.
 - `{ kind: "signer", emplId, name?, date?, dryRun? }` — one EID, one UCPath transaction.
 - `{ kind: "pdf", pdfPath, pdfOriginalName, sessionId, rosterMode?, rosterPath?, dryRun? }` — delegates to OCR, waits for approval, then fans out signer children via `ctx.delegateToAll`.
 
-`archetype` resolves to `single` for signer inputs and `batch` for PDF inputs. Delegated PDF runs keep `batch` plus `parentRunId`; signer children keep their natural person rows.
+`archetype` resolves to `single` for signer inputs and `batch` for PDF inputs. Delegated PDF runs keep `batch` plus `parentRunId`; signer children from the PDF branch are stamped `batch-member` under the PDF parent, even when OCR approval leaves only one selected signer.
 
 ## UCPath Rules
 
@@ -37,6 +37,7 @@ Run `npm run selector:search "<intent>"` before mapping UCPath selectors. Search
 
 - **Lesson maintenance rule:** Merge old OCR-prep notes into the current shared-OCR model; do not preserve obsolete grouped-upload behavior.
 - **2026-05-27: Oath-upload starts oath-signature through delegation.** The PDF branch owns OCR, approval, and signer fan-out.
+- **2026-05-28: PDF path is batch by person cardinality.** A PDF upload represents an approved signer set after OCR, so the parent row is `batch` and fan-out signer rows are `batch-member` children of the PDF run. Do not special-case N=1 approval into a flat `single` row.
 - **2026-05-26: Oath approve-side fan-out retired.** `approveTo` is intentionally omitted for oath forms; emergency-contact still uses approve-route fan-out.
 - **2026-05-25: Dashboard input/upload runs are the public starts.** Do not restore `npm run oath-signature`.
 - **Multi-file upload is N independent PDF runs.** Do not reintroduce a grouped upload card.

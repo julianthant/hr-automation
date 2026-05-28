@@ -35,7 +35,7 @@
  *     for the daemon path; for the in-process path, terminal status comes
  *     from the per-run resolved/rejected promise.
  *
- * `renderAs` is mostly a projection hint:
+ * `renderAs` controls how delegated child rows relate to the parent:
  *   - "flat"    → child may render as a flat delegation-member row.
  *   - "preview" → child may render as an approval-delegation preview row.
  *   - "batch"   → child is stamped as a batch-member under the parent row.

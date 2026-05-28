@@ -6,13 +6,13 @@
  * `deriveRowArchetype(workflowArchetype, parentRunId?)` at pre-emit sites.
  */
 export type RowArchetype =
-  /** One item, one row. Flat in the queue. Workflows: work-study, oath-signature (direct CLI run), active-check. */
+  /** One person/subject, one row. Flat in the queue. Workflows: work-study, direct oath-signature signer runs. */
   | "single"
   /** One review/approval row with a preview surface. Workflow: OCR. */
   | "preview"
-  /** Anchor row over N peers. Emitted by oath-signature PDFs and input batches. */
+  /** Anchor row over N people/subjects, or a parent that will fan out to people after approval. */
   | "batch"
-  /** Peer item under a batch anchor. Emitted by emergency-contact records, oath-signature batch members. */
+  /** Peer person/subject row under a batch anchor or grouped input-run parent. */
   | "batch-member";
 
 /**
@@ -22,11 +22,11 @@ export type RowArchetype =
  * `tests/unit/architecture/archetype-coverage.test.ts` enforces declaration.
  */
 export type WorkflowArchetype =
-  /** Emits `single` rows only. Examples: work-study, active-check. */
+  /** Emits one person/subject row per input item. Examples: work-study, person-lookup, oath-signature signer input. */
   | "single"
   /** Emits one preview/approval row. Example: OCR. */
   | "preview"
-  /** Emits a batch anchor over N batch-member rows. Examples: emergency-contact, oath-signature. */
+  /** Emits a grouped parent row or upload/approval path that fans out to batch-member rows. */
   | "batch";
 
 const LABELS: Record<RowArchetype, string> = {
