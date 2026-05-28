@@ -20,4 +20,4 @@ This folder is organized by dashboard area. Keep files near the UI surface that 
 
 ## Lessons Learned
 
-- **2026-05-27: Batch-parent PDF rows title by filename before queue title.** `shared/entry-display.ts` must prefer `data.pdfOriginalName` for any `batch-parent` row, not only legacy `mode: "prepare"` rows. This keeps direct and delegated Oath Signature PDF rows titled as the bare PDF filename even when `__queueTitle` carries a workflow-prefixed subject for other surfaces.
+- **2026-05-27: Batch PDF rows title by filename before queue title.** `shared/entry-display.ts` must prefer `data.pdfOriginalName` for any `batch` row, not only legacy `mode: "prepare"` rows. This keeps direct and delegated Oath Signature PDF rows titled as the bare PDF filename even when `__queueTitle` carries a workflow-prefixed subject for other surfaces.

@@ -2,22 +2,6 @@
 
 Kuali Build separation form automation: extraction and form filling for employee termination workflows.
 
-## Files
-
-- `navigate.ts` — All functions:
-  - `openActionList(page)` — navigates to Kuali space, clicks Action List
-  - `clickDocument(page, docNumber)` — finds and clicks document link
-  - `extractSeparationData(page)` → `KualiSeparationData` (name, EID, dates, termination type, location)
-  - `isVoluntaryTermination(type)` — returns `false` for "Never Started Employment" and "Graduated/No longer a Student" (involuntary), `true` for all others
-  - `mapTerminationToUCPathReason(type)` — maps Kuali types to UCPath codes (e.g., "Graduated/No longer a Student" → "No Longer Student")
-  - `fillTimekeeperTasks(page, name)` — checks acknowledgment, fills timekeeper name
-  - `fillFinalTransactions(page, opts)` — fills termination date, department (combobox best-match), payroll title code/title
-  - `fillTransactionResults(page, transactionNumber)` — checks submitted checkbox, fills txn number, selects "Does not need Final Pay" radio
-  - `fillTimekeeperComments(page, comments)` — fills comments textbox
-  - `clickSave(page)` — scrolls to top, targets navbar save button (3-deep `.or()` chain from the registry), waits for network idle
-- `selectors.ts` — **Selector registry** (Subsystem A). Grouped: `actionList`, `separationForm`, `timekeeperTasks`, `finalTransactions`, `transactionResults`, `save`.
-- `index.ts` — Barrel exports (includes `kualiSelectors` registry barrel)
-
 ## Before mapping a new selector
 
 1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.
@@ -49,19 +33,6 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 - **Date field verification after fill** — `updateLastDayWorked`, `updateSeparationDate`, and `fillFinalTransactions` termination date fields must verify the value after fill. Kuali date inputs sometimes don't accept the value on first attempt. If the readback doesn't match, retry using `type()` (character-by-character) instead of `fill()`.
 - **clickSave false-positive error detection** — Removed overly aggressive error detection from `clickSave` that was triggering on benign page elements. The save button click + network idle wait is sufficient confirmation.
-
-## Verified Selectors
-
-All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
-grouped by form section. The `save.navbarSaveButton` entry uses a 3-deep
-`.or()` fallback chain (action-bar → nav → role-based) — preserved verbatim
-from the prior inline implementation.
-
-**Do not add inline selectors outside `selectors.ts`.** The
-[`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
-guard will reject PRs that do. The `deptCombo.locator("option")` enumeration
-inside `fillFinalTransactions` (for best-match department selection) is
-whitelisted via end-of-line `// allow-inline-selector`.
 
 ## Lessons Learned
 

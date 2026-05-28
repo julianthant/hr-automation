@@ -2,36 +2,6 @@
 
 Unit tests for pure/near-pure logic. Playwright automation, login flows, and live system interactions are NOT tested here — they require real sessions, Duo MFA, and PII.
 
-## Layout
-
-`tests/unit/` mirrors `src/` one-for-one. A test for `src/foo/bar.ts` lives at `tests/unit/foo/bar.test.ts`.
-
-```
-tests/unit/
-  infra/auth/      ← src/infra/auth/
-  infra/browser/   ← src/infra/browser/
-  services/ocr/    ← src/services/ocr/
-  services/capture/ ← src/services/capture/
-  services/matching/← src/services/matching/
-  tracker/         ← src/tracker/
-  systems/
-    ucpath/        ← src/systems/ucpath/
-  utils/           ← src/utils/
-  workflows/
-    onboarding/    ← src/workflows/onboarding/
-    separations/   ← src/workflows/separations/
-```
-
-Two test files for the same source module are allowed when they test distinct behaviors (e.g. `utils/log.test.ts` + `utils/log-context.test.ts`).
-
-`tests/integration/` is reserved for future browser-backed integration tests — do not put unit tests there.
-
-`tests/scenarios/` holds **dashboard-contract scenario tests** for a workflow's
-row lifecycle: real kernel + real tracker + real projection, scripted handler in
-place of the production one. Each test snapshots `RowSnapshot` shapes via
-`expect(snap).toMatchInlineSnapshot()`. Read `tests/scenarios/CLAUDE.md` before
-adding scenarios for a new workflow.
-
 ## Conventions
 
 - Framework: **vitest** for the runner (`describe`, `it`, `test`, hooks, `vi.*`) + `node:assert/strict` for assertions. We deliberately keep `node:assert/strict` rather than vitest's `expect` — both work side by side; the existing ~1800 assertion calls stay readable and the diffs vitest gives on a thrown AssertionError are still rich.
@@ -64,15 +34,31 @@ Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifi
 - Excel file I/O and screenshot helpers
 - CLI command scaffolding (Commander parsing)
 
+## Stderr audit
+
+`tests/log-audit.ts` is loaded via `vitest.config.ts` + `setupFiles`. After each
+test, any stderr line outside the allowlist in that file fails the run (intentional
+`✗` error-path logs, the SSE malformed-envelope test, and the invalid-PDF fixture
+in `render-pages.test.ts` only). Fix root causes rather than widening the list.
+
 ## Running
 
 ```bash
-npm test                    # Run all tests (vitest run — non-watch mode)
+npm test                    # Run all tests (dot reporter — live progress, quiet on pass)
+npm run test:verbose        # Per-test pass/fail lines (best for one file or -t filter)
 npm run test:watch          # Watch mode for iterative dev
 npm run test:architecture   # Just the static convention guards
 npm run typecheck:all       # Typecheck tests + src together
-npx vitest run tests/unit/workflows/separations/schema.test.ts   # Single file
-npx vitest run -t "ANNUAL_DATES"                                  # Filter by test name
+npx vitest run tests/unit/workflows/separations/schema.test.ts --reporter=verbose   # Single file
+npx vitest run -t "ANNUAL_DATES" --reporter=verbose                                  # Filter by test name
 ```
+
+### Stderr audit (every `npm test`)
+
+`tests/log-audit.ts` is a vitest setup file. After each test it fails if **stderr** contains a line that is not on the allowlist in `tests/log-audit-core.ts`. The hook captures both `console.*` (via vitest `onConsoleLog`) and direct `process.stderr.write` (pdfjs and similar).
+
+- Intentional `log.error` lines in failure-path tests usually start with `✗ ` and are allowlisted.
+- Add a new allowlist entry only when a test **must** emit stderr and you have a matching assertion on the outcome.
+- Benign pdfjs `Warning: Indexing all PDF objects` is ignored; the contract is `renderPdfPagesToPngs` returning page files (see `tests/unit/workflows/ocr/orchestrator.test.ts` `setup()`).
 
 The vitest config lives at `vitest.config.ts` (project root). It pins single-fork sequential execution to match the previous `tsx --test` behavior — several tests still rely on serial module state and shared on-disk paths under `PATHS.*`.

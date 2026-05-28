@@ -2,27 +2,6 @@
 
 Scripts are organized by purpose. Workflow-specific dev tools live in their workflow folder, not here.
 
-## Layout
-
-```
-src/scripts/
-├── selectors/        ← selector intelligence tooling
-│   ├── catalog.ts        — TS Compiler API walker → per-system SELECTORS.md
-│   ├── search.ts         — CLI fuzzy search across SELECTORS.md + LESSONS.md
-│   └── search-lib.ts     — pure scoring/index logic (tested in isolation)
-├── codegen/          ← code generators
-│   └── export-schemas.ts — per-workflow Zod → JSON Schema export to generated/schemas/
-├── ops/              ← operational tooling
-│   ├── clean-tracker.ts  — prunes .tracker JSONL + .screenshots PNGs
-│   └── setup.ts          — first-use environment validation wizard
-└── debug/            ← manual one-off dev tools
-    └── kronos.ts         — auth both Kronos systems + map/test/explore subcommands
-
-src/workflows/emergency-contact/scripts/   ← workflow-specific dev tools
-├── download-roster.ts    — manual SharePoint roster fetch
-└── verify-roster.ts      — verify a batch YAML against a local roster
-```
-
 ## Files (per category)
 
 ### `selectors/`

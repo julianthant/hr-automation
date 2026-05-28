@@ -16,58 +16,6 @@ This workflow touches one system: **old-kronos** (UKG, Genies iframe).
 - Per-system lessons (read before re-mapping): [`src/systems/old-kronos/LESSONS.md`](../../systems/old-kronos/LESSONS.md)
 - Per-system catalog (auto-generated): [`src/systems/old-kronos/SELECTORS.md`](../../systems/old-kronos/SELECTORS.md)
 
-## Files
-
-- `schema.ts` — Input schema: `EmployeeIdSchema` (5+ digit numeric string). `KronosItemSchema` wraps it as the kernel's per-item TData.
-- `config.ts` — Constants: `REPORTS_DIR` (`PATHS.reportsDir`), `SESSION_DIR` (base for per-worker dirs), default dates, `DEFAULT_WORKERS`, `TRACKER_PATH`.
-- `validate.ts` — PDF validation: non-zero size, "No Data Returned" substring, name/ID extraction (regex `/^(.+?)\s+ID:\s*(\d+)/`), expected-employee match.
-- `tracker.ts` — `kronos-tracker.xlsx` writer (Excel-only; JSONL events handled by the kernel). Preserved per `src/workflows/CLAUDE.md` grandfather clause.
-- `workflow.ts` — Kernel definition (`kronosReportsWorkflow`). Handler runs `searching → extracting → downloading` per employee. Module-scoped runtime (`setKronosRuntime` / `clearKronosRuntime`) holds the tracker mutex, report-lock mutex, date range, and reports dir — they can't ride on Zod-validated TData. A `WeakSet<Page>` tracks which worker pages have had the date range set so we only `setDateRange` once per worker.
-- `index.ts` — Barrel exports. **`defineWorkflow` auto-registers** dashboard metadata from the kernel definition — no duplicate registration needed.
-
-## Kernel Config
-
-| Field | Value |
-|-------|-------|
-| `name` | `"kronos-reports"` — matches the pre-migration dashboard registration + JSONL filename prefix. NOT `"old-kronos-reports"` (the directory name). |
-| `label` | `"Kronos Reports"` |
-| `systems` | `[{ id: "old-kronos", login: loginToUKG-wrapped }]` — sessionDir NOT set on the SystemConfig; a future dashboard-owned runner must inject it per-worker via `opts.launchFn` |
-| `steps` | `["searching", "extracting", "downloading"] as const` |
-| `schema` | `KronosItemSchema = z.object({ employeeId })` — each queue entry |
-| `tiling` | `"single"` — each worker Session has one browser |
-| `authChain` | `"sequential"` — one system per worker, sequential by definition |
-| `batch` | `{ mode: "pool", poolSize: 4, preEmitPending: true }` — programmatic callers can override with `RunOpts.poolSize` |
-| `detailFields` | `[{ key: "name", label: "Employee" }, { key: "id", label: "ID" }]` |
-| `getName` | `(d) => d.name ?? ""` |
-| `getId` | `(d) => d.id ?? ""` |
-
-## Data Flow
-
-```
-Future dashboard-owned runner:
-  → parse dashboard input list
-  → mkdirSync REPORTS_DIR
-  → setKronosRuntime({ trackerMutex, reportMutex, startDate, endDate, reportsDir, writeTracker })
-  → runWorkflowBatch(kronosReportsWorkflow, items, {
-      poolSize: actualWorkers,
-      launchFn: per-worker counter closure → ukg_session_workerN sessionDir,
-      deriveItemId: item => item.employeeId,
-      onPreEmitPending: (item, runId) => trackEvent(pending, { id: employeeId }),
-    })
-    → Kernel launches N Sessions in parallel; each worker auths to UKG (Duo ×N).
-    → Workers pull items from a shared queue until empty.
-    → For each item:
-      - Kernel emits `pending` via onPreEmitPending (already written above)
-      - withTrackedWorkflow wraps the handler, reuses pre-emitted runId
-      - Handler: await ctx.page → ensureDateRangeSet (first item on this worker)
-      - Step "searching" → searchEmployee + row-exists check → early return + tracker "Done" on no-match
-      - Step "extracting" → clickEmployeeRow → updateData({ name })
-      - Step "downloading" → ctx.retry(reportMutex.acquire → clickGoToReports → handleReportsPage → goBackToMain)
-        → validateAndRecordTracker on success / "Failed" row on exhausted attempts
-  → clearKronosRuntime + rm -rf per-worker session dirs
-  → Batch result summary: "N/M succeeded, K failed"
-```
-
 ## Parallel execution model
 
 - **Pool mode via kernel**: `runWorkflowPool` launches N Sessions (one Duo each), each with its own `Page` and `BrowserContext` via our `launchFn`. All Sessions pull from a single shared queue. `poolSize` is read from `RunOpts.poolSize ?? wf.config.batch.poolSize ?? 4`.
@@ -99,10 +47,6 @@ Default pool size: `4` (from `wf.config.batch.poolSize`). Programmatic callers c
 **Dashboard retry is not currently supported for this workflow.** kronos-reports is intentionally NOT in `WORKFLOW_LOADERS` — see the table in `src/workflows/CLAUDE.md`. A future dashboard-owned runner must set module-scoped runtime (`setKronosRuntime` with `trackerMutex`, `reportMutex`, date range, reports dir, tracker writer) BEFORE the kernel handler executes. The dashboard retry path goes through `enqueueFromHttp` → daemon claim → kernel `runOneItem`, which has no opportunity to call `setKronosRuntime`. A dashboard-issued retry would throw `Kronos runtime not initialized` from the handler's first action.
 
 Contract 2 (Uniform Retry) does not gate this — there's no per-workflow opt-out. The fix lives in this workflow: decouple the per-run state from a module-scoped singleton (e.g. carry the mutexes/dates/tracker through `ctx.runtime` or via a workflow-local registry keyed by `instance`) so the handler can be invoked from a real dashboard run surface.
-
-## Verified Selectors
-
-UKG selectors live in `src/systems/old-kronos/selectors.ts`. This workflow uses them through `handleReportsPage`, `waitForReportAndDownload`, and the search helpers in that system module.
 
 ## Lessons Learned
 
