@@ -90,7 +90,7 @@ describe("buildRowLifecycles", () => {
       entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "pending", timestamp: ts(0), data: { archetype: "batch", mode: "prepare" } }),
       entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "running", step: "ocr", timestamp: ts(1), data: { archetype: "batch", mode: "prepare" } }),
       entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "done", step: "approved", timestamp: ts(2), data: { archetype: "batch", mode: "prepare" } }),
-      entry({ workflow: "oath-signature", id: "signer-1", runId: "k-1", parentRunId: "prep-run", status: "pending", timestamp: ts(3), data: { archetype: "single" } }),
+      entry({ workflow: "oath-signature", id: "signer-1", runId: "k-1", parentRunId: "prep-run", status: "pending", timestamp: ts(3), data: { archetype: "batch-member" } }),
     ]);
     const parent = rows.find((r) => r.id === "prep-1")!;
     assert.ok(parent);
@@ -104,8 +104,8 @@ describe("resolveRowSurfaces", () => {
   it("classifies a batch with members as a card and members as member rows", () => {
     const surfaces = resolveRowSurfaces([
       entry({ workflow: "oath-signature", id: "prep", runId: "prep-run", status: "running", step: "ocr", timestamp: ts(0), data: { archetype: "batch", mode: "prepare" } }),
-      entry({ workflow: "oath-signature", id: "m1", runId: "k1", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "single" } }),
-      entry({ workflow: "oath-signature", id: "m2", runId: "k2", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "single" } }),
+      entry({ workflow: "oath-signature", id: "m1", runId: "k1", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "batch-member" } }),
+      entry({ workflow: "oath-signature", id: "m2", runId: "k2", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "batch-member" } }),
     ]);
     assert.equal(surfaces.get("prep")?.surface, "card:batch");
     assert.deepEqual(surfaces.get("prep")?.memberIds, ["m1", "m2"]);

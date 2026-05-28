@@ -54,6 +54,11 @@ export interface EnqueueOpts<TData = unknown, TSteps extends readonly string[] =
   itemId?: string;
   runId?: string;
   /**
+   * Optional parent run used by scenarios that need to model grouped input
+   * runs or delegated fan-out rows.
+   */
+  parentRunId?: string;
+  /**
    * Override the runtime-level default beats for this enqueue. Useful for
    * retry scenarios (one input, two runs with different scripted behavior)
    * and any test where each run needs its own throw / hold script.
@@ -188,6 +193,7 @@ export async function createScenarioRuntime<TData, TSteps extends readonly strin
       runId,
       trackerDir,
       callerPreEmits: false,
+      ...(enqueueOpts?.parentRunId ? { parentRunId: enqueueOpts.parentRunId } : {}),
       isCancelRequested: () => cancelRequested,
       onCancelController: (controller) => {
         runControllers.set(runId, controller);

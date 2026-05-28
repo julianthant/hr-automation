@@ -4,7 +4,7 @@ Resolves an employee by name or EID via UCPath Person Organizational Summary + C
 
 **Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → `active-status`. Output: resolved EID, active/HDH status, department, termination date.
 
-Each dashboard input run enqueues N names/EIDs as N kernel items to an alive daemon (session reused — no re-Duo between items). Each item produces its own `pending → running → done/failed` tracker row with per-step timing.
+Each dashboard input run enqueues N names/EIDs as N kernel items to an alive daemon (session reused — no re-Duo between items). A one-person input run is a `single` row. A multi-person input run is a batch surface: every person row is stamped `batch-member` under the shared input-run `parentRunId`.
 
 ## Internal primitive: `lookupPersonInUcpath`
 
@@ -76,5 +76,6 @@ The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyB
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases and canonicalizes separator; `prepareNames` + `dedupeNames` prevent itemId collisions.
 - **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. Rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
 - **Person Org active-row selection is shared.** Do not fork active/inactive parsing. Keep status derivation fed by `lookupPersonInUcpath` / `derivePersonLookupSelection` so hidden active Employment Instances are handled consistently.
-- **Runtime policy uses default row actions + memberRow person title.** `PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY` spreads `DEFAULT_WORKFLOW_RUNTIME_POLICY` and sets `memberRow.titleSource: "person"` for OCR utility children. Direct input-run rows are normal surfaces; OCR fan-out rows are `single` with OCR `parentRunId`.
+- **Runtime policy uses default row actions + memberRow person title.** `PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY` spreads `DEFAULT_WORKFLOW_RUNTIME_POLICY` and sets `memberRow.titleSource: "person"` for grouped input-run rows and OCR utility children. Direct one-person input runs are `single`; direct multi-person input runs are grouped `batch-member` rows under the input-run `parentRunId`; OCR lookup children remain flat delegated utility rows unless the caller explicitly renders them as a batch.
+- **2026-05-28: Batch means multiple people, not one daemon/session.** Keep `personLookupWorkflow.archetype` as `single` because each schema item is one person. The `/api/enqueue` boundary marks multi-value input runs with `__runtimeOptions.rowShape = "batch-member"` and a shared `parentRunId`, which is what makes a 5-ID Person Lookup request a batch surface.
 - **Dashboard input run is the public start path.** `npm run person-lookup:stop` stops the daemon pool. Typed name/EID starts go through `InputRunPanel` and `/api/enqueue`. There is no `npm run person-lookup` launch script.

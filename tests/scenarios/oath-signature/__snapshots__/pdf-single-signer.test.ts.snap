@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row terminates done; signer is a flat single row 1`] = `
+exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row terminates done; signer remains grouped as a batch member 1`] = `
 [
   {
     "archetype": "batch",
@@ -31,7 +31,7 @@ exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row
     "workflow": "oath-signature",
   },
   {
-    "archetype": "single",
+    "archetype": "batch-member",
     "data": {
       "__id": "10000050",
       "__name": "Solo Signer",
@@ -39,7 +39,7 @@ exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row
       "__queueTitleKind": "single",
       "__subject": "Oath Signature EID 10000050",
       "__subjectKind": "eid",
-      "archetype": "single",
+      "archetype": "batch-member",
       "date": "05/01/2026",
       "emplId": "10000050",
       "instance": "<instance>",
@@ -47,16 +47,16 @@ exports[`oath-signature scenario: pdf branch — single signer > N=1 → pdf row
     },
     "displayId": "10000050",
     "itemId": "<itemId>",
-    "parentRunId": null,
-    "rowTypeLabel": "Normal row",
+    "parentRunId": "scenario-pdf-single#<run>",
+    "rowTypeLabel": "Delegation member",
     "runId": "<runId>",
     "status": "done",
     "statusLabel": "Done",
     "step": undefined,
     "subtitle": "10000050",
-    "surfacePlacement": "flat",
-    "surfaceType": "normal",
-    "title": "Oath Signature EID 10000050",
+    "surfacePlacement": "grouped",
+    "surfaceType": "delegation-member",
+    "title": "Solo Signer",
     "workflow": "oath-signature",
   },
 ]
