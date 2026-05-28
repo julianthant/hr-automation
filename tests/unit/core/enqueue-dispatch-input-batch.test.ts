@@ -24,7 +24,7 @@ beforeEach(async () => {
 });
 
 test("enqueueFromHttp keeps a single input-run item unparented so it renders as one row", async () => {
-  const result = await enqueueFromHttp("eid-lookup", [{ name: "Doe, Jane" }], {
+  const result = await enqueueFromHttp("person-lookup", [{ name: "Doe, Jane" }], {
     trackerDir: tempTrackerDir(),
   });
 
@@ -41,7 +41,7 @@ test("enqueueFromHttp keeps a single input-run item unparented so it renders as 
 
 test("enqueueFromHttp marks multi-value input-run batches as normal batch members", async () => {
   const result = await enqueueFromHttp(
-    "eid-lookup",
+    "person-lookup",
     [
       { name: "Doe, Jane", __runtimeOptions: { preset: "lookup-only" } },
       { name: "Smith, John" },

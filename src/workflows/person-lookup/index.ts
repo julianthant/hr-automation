@@ -1,75 +1,56 @@
-import type { Page } from "playwright";
-import {
+// Outcome / status derivation (shared domain logic).
+export {
   deriveActiveCheckOutcome,
   derivePersonLookupSelection,
   resolvePersonLookupForEidLookup,
-  type ActiveCheckOutcome,
-  type ActiveCheckStatus,
-  type PersonLookupInput,
-  type PersonLookupResult,
-  type PersonLookupSelection,
 } from "./outcome.js";
-import {
-  searchByEid,
-  searchByName,
-  type EidSearchResult,
-} from "../../systems/ucpath/person-org-summary.js";
-
 export type {
   ActiveCheckOutcome,
   ActiveCheckStatus,
   PersonLookupInput,
   PersonLookupResult,
   PersonLookupSelection,
-};
+} from "./outcome.js";
+
+// UCPath Person Org lookup primitive.
+export { lookupPersonInUcpath, type PersonLookupRunResult } from "./lookup.js";
+
+// UCPath Person Org system re-exports (used by composing callers + tests).
 export {
-  deriveActiveCheckOutcome,
-  derivePersonLookupSelection,
-  resolvePersonLookupForEidLookup,
-};
+  searchByName,
+  searchByEid,
+  parsePersonOrgNameInput as parseNameInput,
+  type EidResult,
+  type EidSearchResult,
+} from "../../systems/ucpath/person-org-summary.js";
+export { isAcceptedHdhDepartment as isAcceptedDept } from "../../domain/hdh/departments.js";
 
-export interface PersonLookupRunResult {
-  input: PersonLookupInput;
-  results: PersonLookupResult[];
-  selection: PersonLookupSelection;
-  allAttempts: EidSearchResult[];
-}
+// CRM cross-verification helpers.
+export { searchCrmByName, datesWithinDays, type CrmRecord } from "./crm-search.js";
 
-/**
- * Internal UCPath Person Org lookup primitive.
- *
- * This is intentionally not registered in WORKFLOW_LOADERS or dashboard run
- * surfaces. Operator-facing workflows derive from it; operators do not start
- * it directly.
- */
-export async function lookupPersonInUcpath(
-  page: Page,
-  input: PersonLookupInput,
-  options: {
-    keepNonHdh?: boolean;
-    onAfterSearchAttempt?: (attempt: EidSearchResult) => Promise<void>;
-  } = {},
-): Promise<PersonLookupRunResult> {
-  if (input.kind === "by-eid") {
-    const result = await searchByEid(page, input.emplId);
-    const results = result ? [result] : [];
-    return {
-      input,
-      results,
-      selection: derivePersonLookupSelection(input, results),
-      allAttempts: [],
-    };
-  }
+// Workflow + CLI adapter.
+export {
+  personLookupWorkflow,
+  runPersonLookup,
+  runPersonLookupCli,
+  resolveActiveStatusResultsForPersonLookup,
+  PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY,
+  dedupeNames,
+  prepareNames,
+  type LookupResult,
+} from "./workflow.js";
 
-  const search = await searchByName(page, input.name, {
-    keepNonHdh: options.keepNonHdh,
-    onAfterSearchAttempt: options.onAfterSearchAttempt,
-  });
-  const results = search.sdcmpResults;
-  return {
-    input,
-    results,
-    selection: derivePersonLookupSelection(input, results),
-    allAttempts: search.allAttempts,
-  };
-}
+// Input schema + helpers.
+export {
+  PersonLookupItemSchema,
+  PersonLookupNameInputSchema,
+  PersonLookupEidInputSchema,
+  isEidInput,
+  buildPersonLookupCliInput,
+  displayPersonLookupInput,
+  derivePersonLookupItemId,
+  normalizeName,
+  type PersonLookupItem,
+  type PersonLookupNameInput,
+  type PersonLookupEidInput,
+} from "./schema.js";

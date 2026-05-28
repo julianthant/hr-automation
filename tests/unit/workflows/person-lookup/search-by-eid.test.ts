@@ -1,13 +1,13 @@
 import { test } from "vitest";
 import assert from "node:assert";
 import {
-  EidLookupEidInputSchema,
-  EidLookupNameInputSchema,
-  EidLookupItemSchema,
+  PersonLookupEidInputSchema as EidLookupEidInputSchema,
+  PersonLookupNameInputSchema as EidLookupNameInputSchema,
+  PersonLookupItemSchema as EidLookupItemSchema,
   isEidInput,
-} from "../../../../src/workflows/eid-lookup/schema.js";
+} from "../../../../src/workflows/person-lookup/schema.js";
 import { buildPersonOrgNameSearchAttempts } from "../../../../src/systems/ucpath/person-org-summary.js";
-import { buildCrmNameSearchQueries } from "../../../../src/workflows/eid-lookup/crm-search.js";
+import { buildCrmNameSearchQueries } from "../../../../src/workflows/person-lookup/crm-search.js";
 
 test("EidLookupEidInputSchema: rejects non-numeric Empl ID", () => {
   assert.throws(() => EidLookupEidInputSchema.parse({ emplId: "abc" }));

@@ -190,7 +190,7 @@ export async function runOcrRetryPage(
       //   - `parentRunId: input.runId` so the OCR session row is the parent
       //     of each eid-lookup child row.
       const { delegateToAllImpl } = await import("../../core/delegate.js");
-      const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+      const { personLookupWorkflow } = await import("../person-lookup/index.js");
       const inputs = enqueueItems.map((e) =>
         e.kind === "name"
           ? { name: extractOcrRecordName(e.record, spec) }
@@ -212,11 +212,11 @@ export async function runOcrRetryPage(
       await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
         parentRunId: input.runId,
         trackerDir,
-        // eidLookupCrmWorkflow's exact generic param is a union of name-only /
+        // personLookupWorkflow's exact generic param is a union of name-only /
         // emplId-only variants; the local `EidLookupChildInput` widens both
         // into one optional-fields shape, so cast through unknown — the
         // runtime schema validates either variant.
-        child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+        child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
         inputs,
         renderAs: "flat",
         fireAndForget: true,
@@ -229,7 +229,7 @@ export async function runOcrRetryPage(
     }
 
     const outcomes = await watchChildren({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       expectedItemIds: enqueueItems.map((e) => e.itemId),
       trackerDir,
       date,

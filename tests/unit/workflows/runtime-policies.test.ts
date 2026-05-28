@@ -1,9 +1,8 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
-import { activeCheckWorkflow } from "../../../src/workflows/active-check/workflow.js";
+import { personLookupWorkflow } from "../../../src/workflows/person-lookup/workflow.js";
 import { crmDocDownloadWorkflow } from "../../../src/workflows/crm-doc-download/workflow.js";
-import { eidLookupCrmWorkflow } from "../../../src/workflows/eid-lookup/workflow.js";
 import { emergencyContactWorkflow } from "../../../src/workflows/emergency-contact/workflow.js";
 import { oathSignatureWorkflow } from "../../../src/workflows/oath-signature/workflow.js";
 import { oathUploadWorkflow } from "../../../src/workflows/oath-upload/workflow.js";
@@ -16,9 +15,8 @@ import { workStudyWorkflow } from "../../../src/workflows/work-study/workflow.js
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../../src/domain/workflow-runtime/default-policy.js";
 
 const ALL_WORKFLOWS = [
-  ["active-check", activeCheckWorkflow],
+  ["person-lookup", personLookupWorkflow],
   ["crm-doc-download", crmDocDownloadWorkflow],
-  ["eid-lookup", eidLookupCrmWorkflow],
   ["emergency-contact", emergencyContactWorkflow],
   ["oath-signature", oathSignatureWorkflow],
   ["oath-upload", oathUploadWorkflow],

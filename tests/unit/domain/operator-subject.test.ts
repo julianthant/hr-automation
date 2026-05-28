@@ -11,7 +11,7 @@ import "../../../src/workflows/separations/index.js";
 import "../../../src/workflows/old-kronos-reports/index.js";
 import "../../../src/workflows/work-study/index.js";
 import "../../../src/workflows/emergency-contact/index.js";
-import "../../../src/workflows/eid-lookup/index.js";
+import "../../../src/workflows/person-lookup/index.js";
 import "../../../src/workflows/oath-signature/index.js";
 import "../../../src/workflows/oath-upload/index.js";
 import "../../../src/workflows/ocr/index.js";
@@ -53,7 +53,7 @@ describe("registered workflow subject coverage", () => {
       "kronos-reports",
       "work-study",
       "emergency-contact",
-      "eid-lookup",
+      "person-lookup",
       "oath-signature",
       "oath-upload",
       "ocr",

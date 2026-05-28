@@ -11,8 +11,7 @@ import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow
 import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-signature/workflow.js";
 import { OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-upload/workflow.js";
 import { EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/emergency-contact/workflow.js";
-import { EID_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/eid-lookup/workflow.js";
-import { ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/active-check/workflow.js";
+import { PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/person-lookup/workflow.js";
 import { CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/crm-doc-download/workflow.js";
 import { SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/sharepoint-download/workflow.js";
 import { SEPARATIONS_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/separations/workflow.js";
@@ -34,8 +33,7 @@ const phase4Policies = new Map([
 
 const phase5Policies = new Map([
   ...phase4Policies,
-  ["eid-lookup", EID_LOOKUP_WORKFLOW_RUNTIME_POLICY],
-  ["active-check", ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY],
+  ["person-lookup", PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY],
   ["crm-doc-download", CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY],
   ["sharepoint-download", SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY],
   ["separations", SEPARATIONS_WORKFLOW_RUNTIME_POLICY],
@@ -131,9 +129,9 @@ describe("workflow runtime projection adapters", () => {
     );
   });
 
-  it("keeps OCR utility EID lookup children as delegation members", () => {
+  it("keeps OCR utility person-lookup children as delegation members", () => {
     const child = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "lookup-1",
       runId: "lookup-run-1",
       parentRunId: "ocr-run-1",
@@ -157,7 +155,7 @@ describe("workflow runtime projection adapters", () => {
 
   it("does not expose a raw parent run id as the batch group subtitle", () => {
     const first = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "lookup-first",
       runId: "lookup-first-run",
       parentRunId: "oath-batch-run-1234",
@@ -168,7 +166,7 @@ describe("workflow runtime projection adapters", () => {
       },
     });
     const second = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "lookup-second",
       runId: "lookup-second-run",
       parentRunId: "oath-batch-run-1234",
@@ -186,7 +184,7 @@ describe("workflow runtime projection adapters", () => {
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
 
     assert.equal(projection.surfaceType, "batch-delegation");
-    assert.equal(projection.title, "eid-lookup · #1234");
+    assert.equal(projection.title, "person-lookup · #1234");
     assert.notEqual(projection.subtitle, "oath-batch-run-1234");
     assert.equal(projection.subtitle, undefined);
   });
@@ -308,7 +306,7 @@ describe("workflow runtime projection adapters", () => {
       },
     });
     const lookup = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "lookup-1",
       runId: "lookup-run-1",
       parentRunId: "ocr-run-1",
@@ -319,7 +317,7 @@ describe("workflow runtime projection adapters", () => {
       },
     });
     const active = entry({
-      workflow: "active-check",
+      workflow: "person-lookup",
       id: "active-1",
       runId: "active-run-1",
       parentRunId: "ocr-run-1",
@@ -432,9 +430,9 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     }
   });
 
-  it("projects a direct eid-lookup row as a normal utility surface", () => {
+  it("projects a direct person-lookup row as a normal utility surface", () => {
     const row = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "Doe, Jane",
       runId: "lookup-direct-run",
       status: "pending",
@@ -447,9 +445,9 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     assert.equal(projection.title, "Doe, Jane");
   });
 
-  it("titles OCR eid-lookup children by resolved person name instead of technical ids", () => {
+  it("titles OCR person-lookup children by resolved person name instead of technical ids", () => {
     const child = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "ocr-oath-technical-r0",
       runId: "lookup-run-1",
       parentRunId: "ocr-run-1",
@@ -467,9 +465,9 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     assert.equal(projection.title, "Jane Doe");
   });
 
-  it("projects OCR active-check utility children as flat delegation members", () => {
+  it("projects OCR person-lookup utility children as flat delegation members", () => {
     const child = entry({
-      workflow: "active-check",
+      workflow: "person-lookup",
       id: "ocr-active-1",
       runId: "active-run-1",
       parentRunId: "ocr-run-1",

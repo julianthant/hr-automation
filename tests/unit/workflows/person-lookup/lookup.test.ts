@@ -22,11 +22,11 @@ function personRow(patch: Partial<PersonLookupResult> = {}): PersonLookupResult 
   };
 }
 
-describe("person-lookup internal workflow helper", () => {
-  it("is not daemon-spawnable or dashboard-startable", () => {
-    assert.equal("person-lookup" in WORKFLOW_LOADERS, false);
-    assert.equal(listWorkflowNames().includes("person-lookup"), false);
-    assert.equal((DASHBOARD_INPUT_RUN_WORKFLOWS as readonly string[]).includes("person-lookup"), false);
+describe("person-lookup workflow helper", () => {
+  it("is daemon-spawnable and dashboard-startable as an input run", () => {
+    assert.equal("person-lookup" in WORKFLOW_LOADERS, true);
+    assert.equal(listWorkflowNames().includes("person-lookup"), true);
+    assert.equal((DASHBOARD_INPUT_RUN_WORKFLOWS as readonly string[]).includes("person-lookup"), true);
     assert.equal((DASHBOARD_UPLOAD_RUN_WORKFLOWS as readonly string[]).includes("person-lookup"), false);
   });
 

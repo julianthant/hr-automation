@@ -7,13 +7,11 @@ import {
 } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
-import { EID_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/eid-lookup/workflow.js";
-import { ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/active-check/workflow.js";
+import { PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/person-lookup/workflow.js";
 
 const runtimePolicies = new Map([
   ["ocr", OCR_WORKFLOW_RUNTIME_POLICY],
-  ["eid-lookup", EID_LOOKUP_WORKFLOW_RUNTIME_POLICY],
-  ["active-check", ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY],
+  ["person-lookup", PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY],
 ]);
 
 function row(
@@ -29,14 +27,14 @@ function row(
 describe("buildQueueSurfaces", () => {
   it("builds projection rows from the same queue surfaces", () => {
     const a = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "a",
       runId: "run-a",
       parentRunId: "batch-1",
       status: "pending",
     });
     const b = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "b",
       runId: "run-b",
       parentRunId: "batch-1",
@@ -46,8 +44,8 @@ describe("buildQueueSurfaces", () => {
     const projections = buildQueueProjections({
       entries: [a, b],
       delegationSourceEntries: [a, b],
-      workflow: "eid-lookup",
-      workflowLabel: "EID Lookup",
+      workflow: "person-lookup",
+      workflowLabel: "Person Lookup",
     });
 
     assert.equal(projections.length, 1);
@@ -59,7 +57,7 @@ describe("buildQueueSurfaces", () => {
     ]);
   });
 
-  it("groups multiple OCR eid-lookup children as a delegated batch", () => {
+  it("groups multiple OCR person-lookup children as a delegated batch", () => {
     const ocr = row({
       workflow: "ocr",
       id: "ocr-session-1",
@@ -70,7 +68,7 @@ describe("buildQueueSurfaces", () => {
       data: { archetype: "preview", mode: "prepare", formType: "oath", pdfOriginalName: "oath.pdf" },
     });
     const eidA = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "ocr-session-1-r0",
       runId: "eid-run-1",
       parentRunId: "ocr-run-1",
@@ -78,7 +76,7 @@ describe("buildQueueSurfaces", () => {
       data: { archetype: "single", searchName: "Doe, Jane", emplId: "10000001" },
     });
     const eidB = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "ocr-session-1-r1",
       runId: "eid-run-2",
       parentRunId: "ocr-run-1",
@@ -136,9 +134,9 @@ describe("buildQueueSurfaces", () => {
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
-  it("surfaces a single OCR-fan-out eid-lookup child as a flat delegation member", () => {
+  it("surfaces a single OCR-fan-out person-lookup child as a flat delegation member", () => {
     const eid = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "ocr-oath-run-1-r0",
       runId: "eid-run-single",
       parentRunId: "ocr-run-1",
@@ -196,14 +194,14 @@ describe("buildQueueSurfaces", () => {
 
   it("classifies non-approval parentRunId groups as batch rows", () => {
     const a = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "a",
       runId: "run-a",
       parentRunId: "batch-1",
       status: "pending",
     });
     const b = row({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "b",
       runId: "run-b",
       parentRunId: "batch-1",
@@ -213,8 +211,8 @@ describe("buildQueueSurfaces", () => {
     const surfaces = buildQueueSurfaces({
       entries: [a, b],
       delegationSourceEntries: [a, b],
-      workflow: "eid-lookup",
-      workflowLabel: "EID Lookup",
+      workflow: "person-lookup",
+      workflowLabel: "Person Lookup",
     });
 
     assert.equal(surfaces.groupRows.length, 1);

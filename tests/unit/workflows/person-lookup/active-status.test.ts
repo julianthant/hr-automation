@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { resolveActiveStatusResultsForEidLookup } from "../../../../src/workflows/eid-lookup/workflow.js";
+import { resolveActiveStatusResultsForPersonLookup } from "../../../../src/workflows/person-lookup/workflow.js";
 import type { EidResult } from "../../../../src/systems/ucpath/person-org-summary.js";
 
-test("resolveActiveStatusResultsForEidLookup narrows multi-result name search by CRM matched EID", () => {
+test("resolveActiveStatusResultsForPersonLookup narrows multi-result name search by CRM matched EID", () => {
   const results = [
     {
       emplId: "10700001",
@@ -21,7 +21,7 @@ test("resolveActiveStatusResultsForEidLookup narrows multi-result name search by
     },
   ] as EidResult[];
 
-  const resolved = resolveActiveStatusResultsForEidLookup({
+  const resolved = resolveActiveStatusResultsForPersonLookup({
     input: { name: "Person, Test" },
     sdcmpFromSearch: results,
     crmMatchedEmplId: "10700002",

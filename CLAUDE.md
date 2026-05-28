@@ -20,8 +20,7 @@ npm run onboarding:stop
 npm run separation:stop
 npm run work-study:stop
 npm run emergency-contact:stop
-npm run eid-lookup:stop
-npm run active-check:stop
+npm run person-lookup:stop
 npm run oath-signature:stop
 npm run oath-upload:stop
 

@@ -116,7 +116,7 @@ export function parseSemicolonSeparated(fieldName: string) {
   };
 }
 
-export function parseActiveCheckInputs(raw: string): InputRunParseResult {
+export function parsePersonLookupInputs(raw: string): InputRunParseResult {
   const pieces = raw
     .split(";")
     .map((s) => s.trim())
@@ -138,13 +138,9 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
     parseInput: parseCommaSeparated("docId"),
   },
-  "eid-lookup": {
-    placeholder: 'Enter names, semicolon-separated (e.g. Smith, John; Doe, Jane)',
-    parseInput: parseSemicolonSeparated("name"),
-  },
-  "active-check": {
+  "person-lookup": {
     placeholder: "Enter EIDs or names, semicolon-separated (e.g. 10873698; Battistessa, Johnnie)",
-    parseInput: parseActiveCheckInputs,
+    parseInput: parsePersonLookupInputs,
   },
   "oath-signature": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",

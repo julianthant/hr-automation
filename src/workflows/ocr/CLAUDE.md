@@ -22,8 +22,7 @@ archetype.
 | Row                                | RowArchetype      | Dashboard surface              |
 |------------------------------------|-------------------|--------------------------------|
 | OCR prep parent (awaiting-approval) | `preview` | OCR review card |
-| `eid-lookup` children | `single` + `parentRunId` | Single if one OCR person; batch surface if multiple |
-| `active-check` children | `single` + `parentRunId` | Single if one OCR person; batch surface if multiple |
+| `person-lookup` children | `single` + `parentRunId` | Single if one OCR person; batch surface if multiple |
 | Approved downstream children (`approveTo` forms only) | natural child shape + `parentRunId` | Nested under parent card |
 
 ## EID lookup dependency mode
@@ -55,9 +54,9 @@ finishes.
 
 - **Lesson maintenance rule:** Search this section plus the downstream form workflow docs before adding OCR lessons. Merge old per-form prep behavior into the current shared OCR orchestration model.
 - **2026-05-26: `approveTo` is optional and controls approve-route fan-out.** Emergency-contact still declares `approveTo`, so `/api/ocr/approve-batch` enqueues downstream daemon rows and writes dependency rows. Oath omits `approveTo`; approve only emits `done step=approved` for OCR and wakes the `oath-signature` PDF handler, which reads the approved records and runs `ctx.delegateToAll` itself. Do not gate this behavior by form-type string in the approve handler — the presence of `spec.approveTo` is the contract.
-- **2026-05-27: eid-lookup fan-out stamps single + parentRunId.** The orchestrator, force-research, and retry-page routes still use `delegateToAllImpl({ child: eidLookupCrmWorkflow, renderAs: "flat", fireAndForget: true, deriveItemId, ... })`, but `renderAs` is now a projection hint only. The kernel stamps the lookup rows `single`; `parentRunId` ties them to the OCR session. OCR still waits through SQLite task dependencies or `watchChildRuns`.
+- **2026-05-27: person-lookup fan-out stamps single + parentRunId.** The orchestrator, force-research, and retry-page routes still use `delegateToAllImpl({ child: personLookupWorkflow, renderAs: "flat", fireAndForget: true, deriveItemId, ... })`, but `renderAs` is now a projection hint only. The kernel stamps the lookup rows `single`; `parentRunId` ties them to the OCR session. OCR still waits through SQLite task dependencies or `watchChildRuns`.
 - **2026-05-24: `force-research.ts` + `retry-page.ts` also route through `delegateToAllImpl` (Finding #23).** They previously called `ensureDaemonsAndEnqueue` directly from HTTP entrypoints (no parent `ctx`), and remain on `delegate-to-all-impl-callers.test.ts`'s allow-list alongside the orchestrator because they need stable per-record item IDs and their own `watchChildRuns` wait.
-- **2026-05-27: OCR is a preview archetype.** `ocrWorkflow.metadata.runtimePolicy` declares preview labels and file-scope cancel behavior. EID Lookup / Active Check utility rows keep their natural `single` row archetype plus OCR `parentRunId`; one child renders as a single delegated row, multiple siblings group as a batch surface in the utility workflow tab.
+- **2026-05-27: OCR is a preview archetype.** `ocrWorkflow.metadata.runtimePolicy` declares preview labels and file-scope cancel behavior. Person Lookup utility rows keep their natural `single` row archetype plus OCR `parentRunId`; one child renders as a single delegated row, multiple siblings group as a batch surface in the utility workflow tab.
 - **2026-05-26: Legacy cross-tab parent synthesis is deleted.** OCR prepare no longer creates parent rows in consumer workflow tabs. Parent context is explicit `parentRunId` / `parentSubject` from kernel delegation; `/api/ocr/prepare` is a standalone OCR entrypoint.
 - **Multi-file uploads are independent.** `/api/ocr/prepare` no longer accepts `originBatchRunId` or `originBatchSubject`; selecting N PDFs fires N standalone prepare requests, each with its own top-level prep row/card.
 - **Phase logs and parent context are deliberate.** `runOcrOrchestrator` emits plain `Phase: <step>` markers, and delegated OCR rows inherit parent context via explicit `parentSubject` while person lookup rows keep their own person/EID title.

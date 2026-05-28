@@ -20,9 +20,8 @@ import type { TrackerQueueGroupSurface } from "../../../src/tracker/queue-surfac
 import { getAll } from "../../../src/core/kernel/registry.js";
 
 // Side-effect imports register every kernel workflow in the metadata registry.
-import "../../../src/workflows/active-check/workflow.js";
+import "../../../src/workflows/person-lookup/workflow.js";
 import "../../../src/workflows/crm-doc-download/workflow.js";
-import "../../../src/workflows/eid-lookup/workflow.js";
 import "../../../src/workflows/emergency-contact/workflow.js";
 import "../../../src/workflows/oath-signature/workflow.js";
 import "../../../src/workflows/oath-upload/workflow.js";
@@ -78,7 +77,7 @@ test("registered workflow metadata runtime policies validate action descriptors"
 test("batch-view visible actions stay scoped to opened batch member run ids", () => {
   const members = [
     {
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "member-a",
       runId: "run-a",
       parentRunId: "batch-run",
@@ -87,7 +86,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
       data: { archetype: "batch-member" },
     },
     {
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "member-b",
       runId: "run-b",
       parentRunId: "batch-run",
@@ -112,7 +111,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
             ...action,
             source: "batch-view" as const,
             scope: "visible-view" as const,
-            targets: [{ workflowId: "eid-lookup", id: "member-a", runId: "run-a" }],
+            targets: [{ workflowId: "person-lookup", id: "member-a", runId: "run-a" }],
           }
         : action,
     ),
@@ -127,8 +126,8 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
         ? {
             ...action,
             targets: [
-              { workflowId: "eid-lookup", id: "member-a", runId: "run-a" },
-              { workflowId: "eid-lookup", id: "outside", runId: "outside-run" },
+              { workflowId: "person-lookup", id: "member-a", runId: "run-a" },
+              { workflowId: "person-lookup", id: "outside", runId: "outside-run" },
             ],
           }
         : action,

@@ -2,8 +2,7 @@ export type DashboardRunSurface = "input" | "upload";
 
 export const DASHBOARD_INPUT_RUN_WORKFLOWS = [
   "separations",
-  "eid-lookup",
-  "active-check",
+  "person-lookup",
   "oath-signature",
   "crm-doc-download",
 ] as const;

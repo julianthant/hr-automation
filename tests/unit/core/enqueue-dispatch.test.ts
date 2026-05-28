@@ -3,12 +3,11 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { defineWorkflow } from "../../../src/core/index.js";
 import { buildHttpPendingData } from "../../../src/core/daemon/enqueue-dispatch.js";
-import { activeCheckWorkflow } from "../../../src/workflows/active-check/workflow.js";
-import { eidLookupCrmWorkflow } from "../../../src/workflows/eid-lookup/workflow.js";
+import { personLookupWorkflow } from "../../../src/workflows/person-lookup/workflow.js";
 import { separationsWorkflow } from "../../../src/workflows/separations/workflow.js";
 
 test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display data", () => {
-  const data = buildHttpPendingData(eidLookupCrmWorkflow, { name: "zaw, hein thant" });
+  const data = buildHttpPendingData(personLookupWorkflow, { name: "zaw, hein thant" });
 
   assert.equal(data.name, "zaw, hein thant");
   assert.equal(data.searchName, "Zaw, Hein Thant");
@@ -17,9 +16,9 @@ test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display dat
   assert.equal(data.__subject, "Zaw, Hein Thant");
 });
 
-test("buildHttpPendingData: active-check HTTP enqueue uses person/EID title without workflow prefix", () => {
-  const byName = buildHttpPendingData(activeCheckWorkflow, { name: "agook, martha" });
-  const byEid = buildHttpPendingData(activeCheckWorkflow, { emplId: "10733938" });
+test("buildHttpPendingData: person-lookup HTTP enqueue uses person/EID title without workflow prefix", () => {
+  const byName = buildHttpPendingData(personLookupWorkflow, { name: "agook, martha" });
+  const byEid = buildHttpPendingData(personLookupWorkflow, { emplId: "10733938" });
 
   assert.equal(byName.__subject, "Agook, Martha");
   assert.equal(byName.__queueTitle, "Agook, Martha");
@@ -56,7 +55,7 @@ test("buildHttpPendingData stamps a single separation enqueue as a single row", 
 
 test("buildHttpPendingData honors direct input-run batch row-shape hint", () => {
   const data = buildHttpPendingData(
-    eidLookupCrmWorkflow,
+    personLookupWorkflow,
     { name: "Doe, Jane", __runtimeOptions: { rowShape: "batch-member" } },
     "input-run-batch-1",
   );
@@ -65,9 +64,9 @@ test("buildHttpPendingData honors direct input-run batch row-shape hint", () => 
   assert.equal(data.archetype, "batch-member");
 });
 
-test("eidLookupCrmWorkflow exposes the stable itemId deriver for HTTP enqueue", () => {
+test("personLookupWorkflow exposes the stable itemId deriver for HTTP enqueue", () => {
   assert.equal(
-    eidLookupCrmWorkflow.config.deriveItemId?.({ name: "zaw, hein thant" }),
+    personLookupWorkflow.config.deriveItemId?.({ name: "zaw, hein thant" }),
     "Zaw, Hein Thant",
   );
 });

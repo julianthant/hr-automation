@@ -403,7 +403,7 @@ test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', asyn
         formType: 'oath',
       },
       children: [{
-        workflow: 'eid-lookup',
+        workflow: 'person-lookup',
         itemId: 'ocr-oath-ocr-run-1-r0',
         runId: childRunId,
         recordIndex: 0,
@@ -420,7 +420,7 @@ test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', asyn
     assert.equal(parentState.failed.length, 0)
 
     const enqueued = await enqueueItems(
-      'eid-lookup',
+      'person-lookup',
       [{ name: 'Barahona Martell, Carlos, D' }],
       () => 'ocr-oath-ocr-run-1-r0',
       dir,
@@ -433,7 +433,7 @@ test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', asyn
     assert.ok(enqueued[0].attemptId)
     assert.equal(enqueued[0].runId, childRunId)
 
-    let state = await readQueueState('eid-lookup', dir)
+    let state = await readQueueState('person-lookup', dir)
     assert.equal(state.queued.length, 1)
     assert.equal(state.queued[0].id, 'ocr-oath-ocr-run-1-r0')
     assert.deepEqual(state.queued[0].input, { name: 'Barahona Martell, Carlos, D' })
@@ -441,13 +441,13 @@ test('SQLite enqueue adopts OCR dependency-precreated EID child task rows', asyn
     assert.equal(state.queued[0].parentRunId, 'ocr-run-1')
 
     await markItemFailed(
-      'eid-lookup',
+      'person-lookup',
       'ocr-oath-ocr-run-1-r0',
       'No alive daemon available to process this item. Start a daemon and retry.',
       childRunId,
       dir,
     )
-    state = await readQueueStateIncludingTerminals('eid-lookup', dir)
+    state = await readQueueStateIncludingTerminals('person-lookup', dir)
     assert.equal(state.queued.length, 0)
     assert.equal(state.failed.length, 1)
     assert.equal(state.failed[0].id, 'ocr-oath-ocr-run-1-r0')
