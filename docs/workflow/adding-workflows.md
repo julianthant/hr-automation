@@ -10,14 +10,14 @@
 | Oath multiple file group title | Shared Oath default title; member rows are PDF filenames. |
 | Batch group footer | Usual time/run/footer controls without raw parent run id beside the run number. |
 | OCR workflow footer | OCR preview/member rows may show the Oath default title beside the run number when the preview is for Oath. |
-| EID lookup title | Resolved person/EID should win over technical `ocr-retry-*` ids. |
+| Person Lookup title | Resolved person/EID should win over technical `ocr-retry-*` ids. |
 | Status badges | Badges should describe what happened: Queued, Running, Needs review, Done, Skipped/Existing, Cancelled, Failed, Not found. They are not separate arbitrary tags. |
 
 ## Known Sharp Edges
 
 - A group row is often just a display group. Do not assume group cancel exists because group retry/delete exists.
 - `/api/ocr/discard-prepare` is the file-scope cancel path for OCR preview; it is stronger than generic queued/running cancel.
-- OCR utility EID/active-check rows use normal count-based grouping: one child is a single row; multiple siblings become a batch surface.
+- OCR utility Person Lookup rows use normal count-based grouping: one child is a single row; multiple siblings become a batch surface.
 - Multi-PDF Oath Signature behaves as multiple single-file OCR preview runs grouped for display.
 - Daemon stop is operational control. It stops workers; it is not the same as a clean cancellation decision for every related row.
 - Some workflows exist in metadata but are not exposed through the dashboard upload-run or input-run registry.

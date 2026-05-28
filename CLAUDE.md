@@ -47,7 +47,7 @@ Workflow starts are dashboard-only: upload run (`RunModal`) for PDF/file-backed 
 
 Layer order: `domain` → `infra` / `services` / `systems` → `core` → `control` / `workflows`; `tracker`, `dashboard`, `scripts`, and `utils` support those layers.
 
-Every tracker row carries `data.archetype`. Queue rendering, log-panel labels, and display-name resolution all dispatch on this field plus `parentRunId`. **Scope** (root vs delegated) is `parentRunId`, not a separate archetype family. **Child presentation and wait gates** (e.g. OCR blocking approval until eid-lookup finishes) belong on the **parent workflow** (`runtimePolicy` + orchestrator), not on the child row type.
+Every tracker row carries `data.archetype`. Queue rendering, log-panel labels, and display-name resolution all dispatch on this field plus `parentRunId`. **Scope** (root vs delegated) is `parentRunId`, not a separate archetype family. **Child presentation and wait gates** (e.g. OCR blocking approval until Person Lookup finishes) belong on the **parent workflow** (`runtimePolicy` + orchestrator), not on the child row type.
 
 Stamped row shapes are `single`, `preview`, `batch`, and `batch-member`; delegated rows keep their natural shape and carry `parentRunId`. `resolveRowArchetype` aliases historical stamps at read time until old JSONL ages out.
 

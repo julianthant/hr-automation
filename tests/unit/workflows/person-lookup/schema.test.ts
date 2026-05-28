@@ -1,10 +1,12 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
+  buildPersonLookupCliInput,
+  derivePersonLookupItemId,
   normalizeName,
-  PersonLookupItemSchema as EidLookupItemSchema,
-  PersonLookupNameInputSchema as EidLookupNameInputSchema,
-  PersonLookupEidInputSchema as EidLookupEidInputSchema,
+  PersonLookupItemSchema,
+  PersonLookupNameInputSchema,
+  PersonLookupEidInputSchema,
   isEidInput,
 } from "../../../../src/workflows/person-lookup/schema.js";
 
@@ -54,49 +56,77 @@ describe("normalizeName", () => {
   });
 });
 
-describe("EidLookupItemSchema (discriminated union)", () => {
-  it("EidLookupNameInputSchema accepts a name string", () => {
-    const parsed = EidLookupNameInputSchema.parse({ name: "Coleman, Renee" });
+describe("PersonLookupItemSchema", () => {
+  it("PersonLookupNameInputSchema accepts a name string", () => {
+    const parsed = PersonLookupNameInputSchema.parse({ name: "Coleman, Renee" });
     assert.equal(parsed.name, "Coleman, Renee");
   });
 
-  it("EidLookupNameInputSchema rejects empty name", () => {
-    assert.throws(() => EidLookupNameInputSchema.parse({ name: "" }));
+  it("PersonLookupNameInputSchema rejects empty name", () => {
+    assert.throws(() => PersonLookupNameInputSchema.parse({ name: "" }));
   });
 
-  it("EidLookupEidInputSchema accepts a 5+ digit Empl ID", () => {
-    const parsed = EidLookupEidInputSchema.parse({ emplId: "10706431" });
+  it("PersonLookupEidInputSchema accepts a UCPath EID", () => {
+    const parsed = PersonLookupEidInputSchema.parse({ emplId: "10706431" });
     assert.equal(parsed.emplId, "10706431");
   });
 
-  it("EidLookupEidInputSchema rejects non-numeric Empl ID", () => {
-    assert.throws(() => EidLookupEidInputSchema.parse({ emplId: "abc" }));
+  it("PersonLookupEidInputSchema rejects non-numeric Empl ID", () => {
+    assert.throws(() => PersonLookupEidInputSchema.parse({ emplId: "abc" }));
   });
 
-  it("EidLookupEidInputSchema rejects too-short Empl ID", () => {
-    assert.throws(() => EidLookupEidInputSchema.parse({ emplId: "1234" }));
+  it("PersonLookupEidInputSchema rejects too-short Empl ID", () => {
+    assert.throws(() => PersonLookupEidInputSchema.parse({ emplId: "1234" }));
   });
 
-  it("EidLookupItemSchema accepts both shapes via union", () => {
-    EidLookupItemSchema.parse({ name: "Smith, Bob" });
-    EidLookupItemSchema.parse({ emplId: "10812990" });
+  it("PersonLookupItemSchema accepts both shapes via union", () => {
+    PersonLookupItemSchema.parse({ name: "Smith, Bob" });
+    PersonLookupItemSchema.parse({ emplId: "10812990" });
   });
 
   it("isEidInput discriminates the union", () => {
-    assert.equal(isEidInput({ name: "Smith, Bob" }), false);
-    assert.equal(isEidInput({ emplId: "10706431" }), true);
+    assert.equal(isEidInput(PersonLookupItemSchema.parse({ name: "Smith, Bob" })), false);
+    assert.equal(isEidInput(PersonLookupItemSchema.parse({ emplId: "10706431" })), true);
   });
 
   it("keepNonHdh flag carries through both shapes", () => {
-    const n = EidLookupNameInputSchema.parse({
+    const n = PersonLookupNameInputSchema.parse({
       name: "Coleman, Renee",
       keepNonHdh: true,
     });
-    const e = EidLookupEidInputSchema.parse({
+    const e = PersonLookupEidInputSchema.parse({
       emplId: "10706431",
       keepNonHdh: true,
     });
     assert.equal(n.keepNonHdh, true);
     assert.equal(e.keepNonHdh, true);
+  });
+});
+
+describe("derivePersonLookupItemId", () => {
+  it("uses the EID as the stable item id for EID inputs", () => {
+    assert.equal(derivePersonLookupItemId({ emplId: "10706431" }), "10706431");
+  });
+
+  it("uses the display name as the stable item id for name inputs", () => {
+    assert.equal(derivePersonLookupItemId({ name: "zaw, hein thant" }), "Zaw, Hein Thant");
+  });
+});
+
+describe("buildPersonLookupCliInput", () => {
+  it("routes digit-only queries through EID validation only when they normalize to a UCPath EID", () => {
+    assert.deepEqual(buildPersonLookupCliInput("10706431"), { emplId: "10706431" });
+    assert.deepEqual(buildPersonLookupCliInput("10-706431"), { emplId: "10-706431" });
+    assert.deepEqual(buildPersonLookupCliInput(" 10870001 "), { emplId: " 10870001 " });
+  });
+
+  it("treats short or non-10xxxxxx digit strings as name queries", () => {
+    assert.deepEqual(buildPersonLookupCliInput("12345"), { name: "12345" });
+    assert.deepEqual(buildPersonLookupCliInput("20706431"), { name: "20706431" });
+  });
+
+  it("never treats strings with letters as bare EID queries", () => {
+    assert.deepEqual(buildPersonLookupCliInput("Room 101"), { name: "Room 101" });
+    assert.deepEqual(buildPersonLookupCliInput("Zaw, Hein Thant"), { name: "Zaw, Hein Thant" });
   });
 });
