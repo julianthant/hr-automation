@@ -43,6 +43,15 @@ Every workflow must declare `archetype` and `runtimePolicy`; architecture guards
 - `code`: a 2-char per-workflow string used as the trace-id prefix (e.g. `ou`, `pl`, `os`). Stamped into `data.__traceId` = `<code>-<mmddyyHHMMSS>-<runId4>` at pre-emit.
 - Title/subtitle resolve through `src/domain/queue-row-presentation.ts` — do **not** hardcode titles in the dashboard. No session-local ordinals in titles (`OATH 1`, `· #1234` are retired).
 
+## Queue row status (statusExtensions)
+
+A fourth, OPTIONAL axis, orthogonal to shape/kind/scope: **status**. When a workflow needs status beyond the 5 universal tracker statuses + the universal `cancelled` override, it declares `statusExtensions` on `defineWorkflow` (`src/domain/queue-row-status.ts`):
+
+- `derivedStatus(entry)` → promote to a workflow-specific display status that replaces the badge (`notFound`, `needsReview`). person-lookup owns `notFound` (UCPath had no row; status still `done`); ocr owns `needsReview` (delegated awaiting-approval).
+- `secondaryTag(entry, { isDone })` → a supplemental chip beside the badge (person-lookup's A/IA from `data.activeStatus`/`isActive`).
+
+Rule objects live client-bundle-safe in domain/tracker (`domain/person-lookup-status.ts`, `tracker/dashboard/ocr-status.ts`) and are re-exported as the workflow's `statusExtensions`. `statusExtensions` is optional — omit it and the row uses default base-status behavior. Do **not** branch on `entry.workflow` for status in the dashboard.
+
 ## Shared Ownership
 
 Workflow-local functions describe orchestration steps. Reusable behavior belongs in `src/domain/`, `src/core/`, `src/services/ocr/forms/`, or the relevant `src/systems/` module. If another workflow could use it, promote it.
@@ -57,6 +66,7 @@ The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operato
 
 ## Lessons Learned
 
+- **2026-05-30: Queue row status is a fourth (optional) axis via `statusExtensions`.** Per-workflow status rules (person-lookup A/IA + `notFound`, ocr `needsReview`) moved out of the generic `EntryItem` dashboard component into `WorkflowConfig.statusExtensions`, resolved by `resolveQueueRowStatus` (`src/domain/queue-row-status.ts`). Rule objects are client-bundle-safe (domain/tracker only — no `src/workflows/*` reaches the dashboard bundle) and registered for the client via `domain/queue-row-status-index.ts`. Optional axis: omitting it = default base-status behavior. No coverage guard (it's optional, unlike `queueRowKind`).
 - **2026-05-30: Queue row kind is a third axis, orthogonal to shape and scope.** `queueRowKind` (person/file/catalog) + `code` are now required on every `defineWorkflow`; the `queue-row-kind-coverage` guard enforces it. Kind drives title/subtitle only (via `src/domain/queue-row-presentation.ts`) — never footer/layout/status. Pending→resolved phase is derived at projection time from data presence, not stamped. Trace id (`data.__traceId`) replaced session-local ordinals in titles; `code` is its 2-char prefix.
 - **2026-05-28: Person Lookup is the merged operator-facing workflow (formerly EID Lookup + Active Check).** `src/workflows/person-lookup/` is registered in `WORKFLOW_LOADERS` and dashboard input runs. It also exports the `lookupPersonInUcpath` primitive for internal callers. Do not add separate `eid-lookup` or `active-check` entries back to any registry.
 - **2026-05-28: Row archetype follows person/subject cardinality, not process count.** A one-person run is `single`; a grouped input run or a PDF/upload path that fans out to people is `batch` with `batch-member` children. Do not collapse an OCR/PDF fan-out to `single` just because it produced one approved person.

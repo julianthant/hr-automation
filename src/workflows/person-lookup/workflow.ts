@@ -23,6 +23,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
+import { personLookupStatusExtensions } from "../../domain/person-lookup-status.js";
 import {
   deriveActiveCheckOutcome,
   resolvePersonLookupForEidLookup,
@@ -329,6 +330,7 @@ export const personLookupWorkflow = defineWorkflow({
   label: "Person Lookup",
   archetype: "single",
   queueRowKind: "person",
+  statusExtensions: personLookupStatusExtensions,
   code: "pl",
   category: "Utils",
   iconName: "Search",
