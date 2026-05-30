@@ -4,6 +4,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { runOcrOrchestrator } from "./orchestrator.js";
+import { ocrStatusExtensions } from "../../tracker/dashboard/ocr-status.js";
 import { OcrInputSchema, type OcrInput } from "./schema.js";
 import {
   subscribeToApproval,
@@ -53,6 +54,7 @@ export const ocrWorkflow = defineWorkflow({
   label: "OCR",
   archetype: "preview",
   queueRowKind: "file",
+  statusExtensions: ocrStatusExtensions,
   code: "oc",
   category: "Utils",
   iconName: "FileScan",

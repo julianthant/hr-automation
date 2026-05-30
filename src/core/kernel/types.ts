@@ -4,6 +4,7 @@ import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
+import type { WorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 
 export interface SystemConfig {
@@ -152,6 +153,16 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * See `domain/queue-row-kind.ts`.
    */
   queueRowKind?: QueueRowKindOrResolver<TData>
+  /**
+   * Optional per-workflow queue-row **status** rules — the status axis,
+   * orthogonal to `queueRowKind` (title/subtitle). Lets a workflow promote a
+   * row to a workflow-specific derived display status (e.g. person-lookup
+   * `notFound`, OCR `needsReview`) and/or render a supplemental status chip
+   * (e.g. person-lookup's A/IA tag), instead of teaching the generic dashboard
+   * `EntryItem` component to branch on `entry.workflow`. Omitted → the row uses
+   * the default base-status behavior unchanged. See `domain/queue-row-status.ts`.
+   */
+  statusExtensions?: WorkflowStatusExtensions
   /**
    * Short (2-char) workflow code used as the provenance prefix of a row's
    * trace id (`<code>-<mmddyyHHMMSS>-<runId4>`, see `domain/queue-trace-id.ts`)

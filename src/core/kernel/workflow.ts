@@ -11,6 +11,7 @@ import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domai
 import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
+import { registerWorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import { Session } from './session.js'
 import { log } from '../../utils/log.js'
 import { runWorkflowPool } from './pool.js'
@@ -120,6 +121,9 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
   }
   if (config.runtimePolicy) {
     setWorkflowRuntimePolicy(config.name, config.runtimePolicy)
+  }
+  if (config.statusExtensions) {
+    registerWorkflowStatusExtensions(config.name, config.statusExtensions)
   }
   register(metadata)
   return { config: { ...config, archetype, code }, metadata, archetype, queueRowKind, code }
