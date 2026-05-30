@@ -77,7 +77,7 @@ test("buildDisplayNameMap falls back to the workflow label when no employee name
   assert.equal(resolveEntryName(row, displayNames), "Separation separation-doc-1");
 });
 
-test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from formType", () => {
+test("buildDisplayNameMap labels OCR prep rows with bare OATH / EMPL bases from formType (no ordinals)", () => {
   const first = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
   first.workflow = "ocr";
   const second = entry("ocr-session-2", { __id: "ocr-session-2", formType: "emergency-contact" }, "2026-05-05T12:01:00.000Z");
@@ -85,8 +85,8 @@ test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from
 
   const displayNames = buildDisplayNameMap([second, first], "OCR");
 
-  assert.equal(resolveEntryName(first, displayNames), "OATH 1");
-  assert.equal(resolveEntryName(second, displayNames), "EMPL 1");
+  assert.equal(resolveEntryName(first, displayNames), "OATH");
+  assert.equal(resolveEntryName(second, displayNames), "EMPL");
 });
 
 test("OCR parent rows use parentSubject while lookup children keep person titles", () => {
@@ -261,8 +261,8 @@ test("delegated utility person rows keep their own person display name", () => {
 
   const displayNames = buildDisplayNameMap([child, secondParent, firstParent], "OCR");
 
-  assert.equal(resolveEntryName(firstParent, displayNames), "OATH 1");
-  assert.equal(resolveEntryName(secondParent, displayNames), "EMPL 1");
+  assert.equal(resolveEntryName(firstParent, displayNames), "OATH");
+  assert.equal(resolveEntryName(secondParent, displayNames), "EMPL");
   assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 
@@ -288,7 +288,7 @@ test("delegated final oath-signature rows keep their own person display name", (
 
   const displayNames = buildDisplayNameMap([child, parent], "OCR");
 
-  assert.equal(resolveEntryName(parent, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(parent, displayNames), "OATH");
   assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 

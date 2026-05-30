@@ -54,7 +54,7 @@ interface QueuePanelProps {
   workflow: string;
   /** Registry label for batch summary cards / synthetic batch toolbar titles. */
   workflowLabel: string;
-  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  /** Per-entry base-name labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   /** Per-workflow runtime policies from workflow metadata. */
   runtimePolicies?: WorkflowRuntimePolicyLookup;

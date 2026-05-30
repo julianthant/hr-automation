@@ -136,7 +136,7 @@ interface EntryItemProps {
   subtitle?: string;
   statusLabel?: string;
   actions?: WorkflowActionDescriptor[];
-  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  /** Per-entry base-name labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   selected: boolean;
   /**
