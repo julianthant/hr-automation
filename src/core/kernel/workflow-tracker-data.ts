@@ -44,7 +44,7 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member' } | null
+  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string } | null
 }
 
 export function splitPrefilled(input: unknown): SplitInput {
@@ -66,8 +66,8 @@ export function splitPrefilled(input: unknown): SplitInput {
 
 function normalizeRuntimeOptions(
   raw: Record<string, unknown>,
-): { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member' } | null {
-  const out: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member' } = {}
+): { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string } | null {
+  const out: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string } = {}
   const skipSteps = raw.skipSteps
   if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
     if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
@@ -77,6 +77,14 @@ function normalizeRuntimeOptions(
   }
   if (raw.rowShape === 'batch-member') {
     out.rowShape = 'batch-member'
+  }
+  // Provenance code for the trace-id prefix — the delegating parent's 2-char
+  // workflow code. Rides the existing `__runtimeOptions` channel (like
+  // `rowShape`) so it survives the SQLite task store to the daemon worker's
+  // own pre-emit, keeping the child's trace id prefixed with the originating
+  // workflow even after the worker re-emits.
+  if (typeof raw.rootCode === 'string' && raw.rootCode.length > 0) {
+    out.rootCode = raw.rootCode
   }
   return Object.keys(out).length > 0 ? out : null
 }
