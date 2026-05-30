@@ -210,8 +210,8 @@ export async function runOcrOrchestrator(
     // surfaces these rows in oath-signature / emergency-contact queues
     // where the workflow-label fallback in `buildDisplayNameMap` would
     // otherwise label them with the downstream workflow's name. Hardcoding
-    // "OCR" keeps the row labeled "OCR 1" / "OCR 2" no matter which queue
-    // surfaces it.
+    // "OCR" keeps the row labeled "OCR" no matter which queue surfaces it
+    // (OCR rows now resolve their title from queue row kind anyway).
     // mode: "prepare" makes the dashboard render this row with the
     // preview-tab affordance (gated on workflow === "ocr").
     const flat = flattenForData({

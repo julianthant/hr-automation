@@ -30,7 +30,7 @@ interface LogPanelProps {
   date: string;
   /** Cross-workflow entries for child-run detection. Optional — if absent, child section is hidden. */
   allEntries?: TrackerEntry[];
-  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  /** Per-entry base-name labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   /**
    * Other entries merged into this entry (same person, different input
