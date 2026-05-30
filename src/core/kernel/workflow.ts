@@ -8,6 +8,7 @@ import type {
   BatchResult,
 } from './types.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
+import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
 import { Session } from './session.js'
@@ -94,6 +95,11 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     typeof archetype === 'function'
       ? (config.batch ? 'batch' : 'single')
       : archetype
+  // Subject-semantics kind (defaults to person — the majority shape; the
+  // architecture guard enforces an explicit declaration on every real
+  // workflow). Code is the trace-id/daemon provenance prefix.
+  const queueRowKind: QueueRowKindOrResolver<TData> = config.queueRowKind ?? 'person'
+  const code = (config.code ?? config.name.slice(0, 2)).toLowerCase()
   const presetsMetadata = config.presets
     ? validateAndNormalizePresets(config.name, config.steps, config.presets)
     : undefined
@@ -101,6 +107,7 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     name: config.name,
     label: config.label ?? autoLabel(config.name),
     archetype: metadataArchetype,
+    code,
     steps: effectiveSteps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
@@ -115,7 +122,7 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     setWorkflowRuntimePolicy(config.name, config.runtimePolicy)
   }
   register(metadata)
-  return { config: { ...config, archetype }, metadata, archetype }
+  return { config: { ...config, archetype, code }, metadata, archetype, queueRowKind, code }
 }
 
 export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(

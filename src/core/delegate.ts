@@ -36,8 +36,8 @@
  *     from the per-run resolved/rejected promise.
  *
  * `renderAs` controls how delegated child rows relate to the parent:
- *   - "flat"    → child may render as a flat delegation-member row.
- *   - "preview" → child may render as an approval-delegation preview row.
+ *   - "flat"    → child renders as a flat single row.
+ *   - "preview" → child renders as a preview card row.
  *   - "batch"   → child is stamped as a batch-member under the parent row.
  *
  * The kernel always derives the row archetype via

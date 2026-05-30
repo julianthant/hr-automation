@@ -41,7 +41,7 @@ interface LogStreamProps {
   onPreviewVisibleChange?: (visible: boolean) => void;
   /** Compact controls for run history and row actions, rendered in the footer. */
   runControlsSlot?: ReactNode;
-  /** Queue row type label shown as a chip in the footer (e.g. "Normal row", "Batch delegation · Preview"). */
+  /** Queue row type label shown as a chip in the footer (e.g. "Single", "Preview", "Batch"). */
   rowTypeLabel?: string;
   /** Default-active when first mounted — used to deep-link into Preview from another row. */
   initialTab?: string;

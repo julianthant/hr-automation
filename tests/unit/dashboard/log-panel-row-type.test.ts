@@ -45,7 +45,7 @@ test("OCR prep row type uses file count, not record/EID child count", () => {
 
   assert.equal(
     deriveQueueRowTypeLabel(prep, children, [prep, ...children], true),
-    "Single delegation · Preview",
+    "Preview",
   );
 });
 
@@ -63,11 +63,11 @@ test("OCR prep row type stays preview even when multiple OCR file prep rows shar
 
   assert.equal(
     deriveQueueRowTypeLabel(first, [], [first, second], true),
-    "Single delegation · Preview",
+    "Preview",
   );
 });
 
-test("OCR EID lookup child remains a delegation member projection", () => {
+test("OCR person-lookup child projects as a single row", () => {
   const child = {
     workflow: "eid-lookup",
     timestamp: "2026-05-19T18:01:00.000Z",
@@ -84,6 +84,6 @@ test("OCR EID lookup child remains a delegation member projection", () => {
 
   assert.equal(
     deriveQueueRowTypeLabel(child, [], [child], false),
-    "Delegation member",
+    "Single",
   );
 });

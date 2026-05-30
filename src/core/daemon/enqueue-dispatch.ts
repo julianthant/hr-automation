@@ -147,6 +147,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   input: unknown,
   parentRunId?: string,
+  runId?: string,
 ): StampedData {
   const baseData = buildTrackerDataForInput(input);
   const { cleaned, runtimeOptions } = splitPrefilled(input);
@@ -161,6 +162,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
     useInitialTrackerSeed: true,
     nameIdStamp: "if-truthy-on-merged",
     parentRunId,
+    ...(runId ? { runId } : {}),
     ...(rowArchetype ? { rowArchetype } : {}),
   });
 }
@@ -247,7 +249,7 @@ export async function enqueueFromHttp(
         onPreEmitPending: (item, runId, passedParentRunId, itemId) => {
           /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
           const stampedParentRunId = passedParentRunId ?? effectiveParentRunId;
-          const data = buildHttpPendingData(wf, item, stampedParentRunId);
+          const data = buildHttpPendingData(wf, item, stampedParentRunId, runId);
           if (batchDisplayOrdinal !== undefined) {
             data.batchDisplayOrdinal = String(batchDisplayOrdinal);
           }
@@ -282,7 +284,7 @@ export async function enqueueFromHttp(
           // becoming a ghost. Use the same data-shape helper as the
           // pending emit so prefilledData (edit-and-resume) values stay
           // visible on the failed row.
-          const data = buildHttpPendingData(wf, item, effectiveParentRunId);
+          const data = buildHttpPendingData(wf, item, effectiveParentRunId, runId);
           if (batchDisplayOrdinal !== undefined) {
             data.batchDisplayOrdinal = String(batchDisplayOrdinal);
           }
