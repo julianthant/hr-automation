@@ -49,6 +49,17 @@ const authLabel: Record<AuthState, string> = {
   failed: "Failed",
 };
 
+/**
+ * Operator-facing daemon label. The instance identity stays numbered
+ * ("Oath Upload 1") for stable start/end pairing, but a lone daemon shows just
+ * "Oath Upload" — the gratuitous " 1" is dropped. A second concurrent daemon
+ * keeps its "Oath Upload 2" so the rail still disambiguates. The full numbered
+ * identity stays in the hover `title`.
+ */
+function displayInstance(instance: string): string {
+  return instance.replace(/\s1$/, "");
+}
+
 function AuthIcon({ state, className }: { state: AuthState; className?: string }) {
   const cls = cn("w-3 h-3", className);
   switch (state) {
@@ -407,7 +418,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
       >
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full flex-shrink-0 bg-destructive" />
-          <span className="text-[14px] font-semibold text-foreground truncate flex-1">{instance}</span>
+          <span className="text-[14px] font-semibold text-foreground truncate flex-1" title={instance}>{displayInstance(instance)}</span>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive">
             Launch failed
           </span>
@@ -493,7 +504,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                 className="text-[14px] font-semibold text-foreground leading-tight truncate"
                 title={instance}
               >
-                {instance}
+                {displayInstance(instance)}
               </span>
             </div>
             <div

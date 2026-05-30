@@ -28,6 +28,8 @@ export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
   label: "Work Study",
   archetype: "single",
+  queueRowKind: "person",
+  code: "ws",
   category: "Work Study",
   iconName: "Briefcase",
   systems: [

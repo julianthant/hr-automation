@@ -6,27 +6,25 @@ import { cn } from "@/lib/utils";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
 /**
- * Display title for daemon / dashboard batch cards and batch-queue toolbar
- * (`Person Lookup 1`, `Person Lookup 2`, …). Uses `data.batchDisplayOrdinal` from
- * members when present; otherwise a short parent id suffix for pre-ordinal rows.
+ * Fallback title for daemon / dashboard batch cards when no projection title is
+ * supplied (the projection's `batchGroupTitle` is the primary path). Session-
+ * local ordinals (`Person Lookup 1`, `<label> · #1234`) are retired:
  *
- * When `titleOverride` is provided and non-empty (for example an inherited
- * delegated-batch label like `"Oath · 1234"`), it takes precedence over all
- * computed fallbacks.
+ *   - `titleOverride` (e.g. an inherited delegated-batch label) wins outright.
+ *   - File/roster batches surface their document identity (`pdfOriginalName`).
+ *   - Person batches have NO synthetic title — the `{done}/{total}` count badge
+ *     and the member-name preview already identify the bag of people.
  */
 export function resolveDaemonBatchQueueTitle(
-  workflowLabel: string,
+  _workflowLabel: string,
   members: TrackerEntry[],
-  batchParentRunId: string,
+  _batchParentRunId: string,
   titleOverride?: string,
 ): string {
   if (titleOverride && titleOverride.length > 0) return titleOverride;
-  const raw = members.map((m) => m.data?.batchDisplayOrdinal).find((v) => v != null && v !== "");
-  const n = raw !== undefined ? Number.parseInt(String(raw), 10) : Number.NaN;
-  if (Number.isFinite(n) && n > 0) {
-    return `${workflowLabel} ${n}`;
-  }
-  return `${workflowLabel} · #${batchParentRunId.slice(-4)}`;
+  const pdfName = members.map((m) => m.data?.pdfOriginalName).find((v) => v != null && v !== "");
+  if (pdfName) return pdfName;
+  return "";
 }
 
 /**

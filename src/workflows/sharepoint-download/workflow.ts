@@ -119,6 +119,8 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   name: "sharepoint-download",
   label: "SharePoint Download",
   archetype: "single",
+  queueRowKind: "catalog",
+  code: "sp",
   category: "Utils",
   iconName: "Download",
   systems: [

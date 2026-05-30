@@ -28,6 +28,8 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "CRM Doc Download",
   archetype: "single",
+  queueRowKind: "person",
+  code: "cd",
   category: "Utils",
   iconName: "Download",
   systems: [

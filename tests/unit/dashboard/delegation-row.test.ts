@@ -23,8 +23,8 @@ function renderDelegationRow(
     workflowLabel,
   });
   const row = rows.groupRows[0];
-  assert.ok(row, "expected an approval-delegation group row");
-  if (row.surface.kind !== "approval-delegation") throw new Error("expected approval-delegation surface");
+  assert.ok(row, "expected an preview group row");
+  if (row.surface.kind !== "preview") throw new Error("expected preview surface");
   return renderToStaticMarkup(
     React.createElement(
       TooltipProvider,
@@ -42,7 +42,7 @@ function renderDelegationRow(
   );
 }
 
-test("prep-only approval-delegation card shows duration and row retry/delete footer", () => {
+test("prep-only preview card shows duration and row retry/delete footer", () => {
   // New approval contract (2026-05-25): the OCR row stays status="running"
   // step="awaiting-approval" until operator approves. While running, the
   // batch timer is live; while live, the rendered label uses useElapsed

@@ -293,6 +293,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       nameIdStamp: 'always-on-seed',
       parentRunId: args.parentRunId,
       rowArchetype,
+      runId,
     })
     emitTrackerRow(
       {

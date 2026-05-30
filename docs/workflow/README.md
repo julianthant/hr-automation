@@ -48,12 +48,11 @@ Queue rows render from `WorkflowRunProjection` plus per-workflow `runtimePolicy`
 
 | Unit | Meaning | Renderer | Opens batch view? | Common title | Common footer/subtitle |
 |---|---|---|---|---|---|
-| Normal row | One tracker entry or one SQLite task projection. | `EntryItem` | No. | `resolveEntryName()` from data/name/EID/file/person. | Time, `#run`, optional secondary id, duration. |
-| Approval delegation row | OCR preview parent that is awaiting or has completed approval. | `DelegationRow` over `GroupRowBase` | Yes. | Prep/PDF title. | Prep footer; Oath prep uses `Oath · <last4 run id>` as the useful secondary id. |
-| Batch delegation row | Multiple rows share one `parentRunId`, or multiple delegated preview rows are grouped under one upstream batch id. | `DaemonBatchRow` over `GroupRowBase` | Yes. | Batch/workflow title or inherited parent subject. | Usual footer, but no raw `parentRunId` beside the run number. |
-| Passive delegation row | Utility children grouped under a parent, not intended as the main operator task. | `GroupRowBase` | Yes. | Parent subject or delegated utility work. | Usual footer; no direct retry/delete actions unless wired by caller. |
-| Batch view member | A row shown inside an opened group. | `EntryItem` | No nested batch view. | The member's own title. | The member's own footer/subtitle. |
-| Log panel row label | Small bottom label in the right log panel. | Log panel surface classifier | N/A | Row type text such as `Normal row`, `Single delegation`, or `Batch delegation · Preview`. | Informational only. |
+| Single row | One tracker entry (`single` or `batch-member` archetype). | `EntryItem` | No. | `resolveEntryName()` from data/name/EID/file/person. | Time, `#run`, optional secondary id, duration. |
+| Preview card | Preview anchor awaiting or past approval (OCR). | `DelegationRow` over `GroupRowBase` | Yes. | Prep/PDF title. | Prep footer; Oath prep uses `Oath · <last4 run id>` as the useful secondary id. |
+| Batch card | Batch anchor or 2+ siblings sharing one `parentRunId`. | `DaemonBatchRow` over `GroupRowBase` | Yes. | Batch/workflow title or inherited parent subject. | Usual footer, but no raw `parentRunId` beside the run number. |
+| Batch view member | A row shown inside an opened group. | `EntryItem` (same as single) | No nested batch view. | The member's own title. | The member's own footer/subtitle. |
+| Log panel row label | Small bottom label in the right log panel. | Log panel surface classifier | N/A | Row type text: `Single`, `Preview`, or `Batch`. | Informational only. |
 
 Title means the main title of the row. Subtitle means the footer text shown beside the run number.
 
@@ -65,14 +64,14 @@ Dashboard grouping is display-only unless an endpoint explicitly cancels/deletes
 flowchart TD
   A["Tracker entries + task projections"] --> B["Discard hidden rows"]
   B --> C{"Has batch anchor?"}
-  C -->|yes| D["Batch delegation row<br/>{ renderer: DaemonBatchRow,<br/>opens: batch view,<br/>members: same parentRunId }"]
+  C -->|yes| D["Batch card<br/>{ renderer: DaemonBatchRow,<br/>opens: batch view,<br/>members: same parentRunId }"]
   B --> E{"Has preview anchor?"}
-  E -->|yes| F["Approval delegation row<br/>{ renderer: DelegationRow,<br/>opens: batch view,<br/>members: preview children }"]
+  E -->|yes| F["Preview card<br/>{ renderer: DelegationRow,<br/>opens: batch view,<br/>members: preview children }"]
   E -->|no| G{"Multiple visible entries share parentRunId?"}
-  G -->|yes| H["Batch delegation row<br/>{ members: same parentRunId }"]
-  G -->|no| I{"One delegated child?"}
-  I -->|yes| J["Flat delegated child row<br/>{ renderer: EntryItem }"]
-  I -->|no| K["Normal flat row<br/>{ renderer: EntryItem }"]
+  G -->|yes| H["Batch card<br/>{ members: same parentRunId }"]
+  G -->|no| I{"One child under parentRunId?"}
+  I -->|yes| J["Flat single row<br/>{ renderer: EntryItem }"]
+  I -->|no| K["Flat single row<br/>{ renderer: EntryItem }"]
 ```
 
 OCR is a preview archetype, not a batch. Person Lookup children spawned from OCR use normal count-based grouping: one child is a single row; multiple siblings become a batch surface.

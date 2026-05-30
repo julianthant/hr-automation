@@ -19,9 +19,8 @@ import { CancelledError } from "../../core/kernel/types.js";
  * Captures the dashboard rules that previously lived as inline special
  * cases (`isOcrDaemonPrepFanoutChild`, the log panel's `· Preview`
  * suffix, etc.):
- *  - Single PDF → approval-delegation surface with `Single delegation`,
- *    suffixed by `· Preview` when the preview tab is rendered.
- *  - Multiple PDFs → batch delegation over single-file prep rows.
+ *  - Single PDF → preview surface card.
+ *  - Multiple PDFs → batch cards over single-file prep rows.
  *  - OCR utility EID/active-check fan-out children use normal delegated
  *    grouping: one child stays a single row, multiple children render as a
  *    batch surface.
@@ -53,6 +52,8 @@ export const ocrWorkflow = defineWorkflow({
   name: "ocr",
   label: "OCR",
   archetype: "preview",
+  queueRowKind: "file",
+  code: "oc",
   category: "Utils",
   iconName: "FileScan",
   systems: [],

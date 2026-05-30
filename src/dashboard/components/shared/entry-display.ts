@@ -1,6 +1,7 @@
 import type { TrackerEntry } from "./types";
 import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
 import { readQueueTitle } from "../../../domain/queue-title.js";
+import { resolveQueueRowPresentation } from "../../../domain/queue-row-presentation.js";
 import { hasDelegationRole, resolveRowArchetype } from "../../../domain/row-archetype.js";
 export {
   groupMergedTrackerEntries as groupMergedEntries,
@@ -52,6 +53,12 @@ export function resolveEntryName(
   entry: TrackerEntry,
   displayNames?: Map<string, string>,
 ): string {
+  // Kind-based title (person/file/catalog) is the canonical contract and wins
+  // over the legacy display-name map (which only carried session-local
+  // ordinals like "OATH 1" / "Onboarding Roster 2" — now retired). The map and
+  // the fallbacks below only run for rows with no stamped queueRowKind.
+  const presentation = resolveQueueRowPresentation(entry);
+  if (presentation) return presentation.title;
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
@@ -113,6 +120,8 @@ export function deduplicateByResolvedId(entries: TrackerEntry[]): TrackerEntry[]
  * `getId` result (`data.__id`), falls back to `entry.id`.
  */
 export function resolveEntryId(entry: TrackerEntry): string {
+  const presentation = resolveQueueRowPresentation(entry);
+  if (presentation) return presentation.subtitle ?? "";
   const d = entry.data ?? {};
   // Dispatch rows use the group context label as the secondary footer ID
   // rather than the technical request item ID.

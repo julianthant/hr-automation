@@ -79,6 +79,8 @@ export const oathSignatureWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Signature",
   archetype: (input: OathSignatureInput) => (input.kind === "pdf" ? "batch" : "single"),
+  queueRowKind: (input: OathSignatureInput) => (input.kind === "pdf" ? "file" : "person"),
+  code: "os",
   category: "Onboarding",
   iconName: "ClipboardSignature",
   systems: [
@@ -246,7 +248,7 @@ async function runSignerBranch(
  * approved record back into this workflow.
  *
  * The OCR delegation uses `renderAs: "preview"` so the OCR row gets the
- * approval-delegation surface. The fan-out uses `renderAs: "batch"` so
+ * preview surface card. The fan-out uses `renderAs: "batch"` so
  * signer children are stamped `batch-member` and remain grouped under the
  * PDF batch row in this workflow's tab.
  */

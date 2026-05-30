@@ -328,6 +328,8 @@ export const personLookupWorkflow = defineWorkflow({
   name: "person-lookup",
   label: "Person Lookup",
   archetype: "single",
+  queueRowKind: "person",
+  code: "pl",
   category: "Utils",
   iconName: "Search",
   systems: [

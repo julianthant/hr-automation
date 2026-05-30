@@ -49,8 +49,8 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(projections.length, 1);
-    assert.equal(projections[0]?.surfaceType, "batch-delegation");
-    assert.equal(projections[0]?.rowTypeLabel, "Batch delegation");
+    assert.equal(projections[0]?.surfaceType, "batch");
+    assert.equal(projections[0]?.rowTypeLabel, "Batch");
     assert.deepEqual(projections[0]?.actions.map((action) => action.targets.map((target) => target.runId)), [
       ["run-a", "run-b"],
       ["run-a", "run-b"],
@@ -93,7 +93,7 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(surfaces.groupRows[0]?.kind, "preview");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), [
       "ocr-session-1-r0",
       "ocr-session-1-r1",
@@ -129,7 +129,7 @@ describe("buildQueueSurfaces", () => {
 
     // A single-signer prep row stays a batch card after approval.
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(surfaces.groupRows[0]?.kind, "preview");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["10000001"]);
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
@@ -187,8 +187,8 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(projections.length, 1);
-    assert.equal(projections[0]?.surfaceType, "batch-delegation");
-    assert.equal(projections[0]?.rowTypeLabel, "Batch delegation");
+    assert.equal(projections[0]?.surfaceType, "batch");
+    assert.equal(projections[0]?.rowTypeLabel, "Batch");
     assert.notEqual(projections[0]?.subtitle, "batch-1");
   });
 
@@ -279,7 +279,7 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(surfaces.groupRows[0]?.kind, "preview");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), []);
     assert.deepEqual(surfaces.flatEntries.map((e) => e.id), []);
   });
@@ -302,7 +302,7 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(surfaces.groupRows[0]?.kind, "preview");
     assert.equal(surfaces.groupRows[0]?.approvalState, "awaiting-approval");
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
@@ -347,7 +347,7 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(surfaces.groupRows[0]?.kind, "preview");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), []);
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
@@ -381,8 +381,8 @@ describe("buildQueueSurfaces", () => {
 
     assert.equal(surfaces.groupRows.length, 2);
     assert.deepEqual(surfaces.groupRows.map((surface) => surface.kind), [
-      "approval-delegation",
-      "approval-delegation",
+      "preview",
+      "preview",
     ]);
     assert.deepEqual(surfaces.groupRows.map((surface) => surface.parentRunId), [
       "ocr-run-first",
@@ -428,7 +428,7 @@ describe("buildQueueSurfaces", () => {
         workflowLabel: "OCR",
       });
 
-      assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+      assert.equal(surfaces.groupRows[0]?.kind, "preview");
       assert.equal(surfaces.groupRows[0]?.parentRunId, `${origin}-ocr-run`);
       assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), [
         `${origin}-child-1`,
