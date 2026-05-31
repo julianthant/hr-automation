@@ -12,9 +12,10 @@ export interface WorkerCommandContext<TData, TSteps extends readonly string[]> {
   state: DaemonState
   abortLaunchAndKillSession: (reason: string) => void
   /**
-   * Centralized cancel-request entry — sets `state.cancelTarget` AND aborts
-   * `state.currentRunController`. Daemon owner constructs this so all three
-   * cancel triggers (HTTP /cancel-current, worker `cancel_task` command,
+   * Centralized cancel-request entry — calls `runRegistry.cancel(runId)`
+   * which aborts the per-run `AbortController` and schedules a watchdog
+   * hard-kill fallback. Daemon owner constructs this so all three cancel
+   * triggers (HTTP /cancel-current, worker `cancel_task` command,
    * browser-disconnect) share one mutation path and cannot drift.
    */
   requestCancel: (
@@ -29,13 +30,14 @@ export function createEmitWorkerHeartbeat<TData, TSteps extends readonly string[
   const { instanceId, state } = ctx
   return (): void => {
     try {
+      const inFlight = state.activeRun
       state.workerStore?.heartbeatWorker({
         workerId: instanceId,
         phase: state.phase,
-        currentTaskId: state.inFlight?.taskId ?? null,
-        currentAttemptId: state.inFlight?.attemptId ?? null,
+        currentTaskId: inFlight?.taskId ?? null,
+        currentAttemptId: inFlight?.attemptId ?? null,
         queueDepth: state.queueDepthCache,
-        payload: { itemId: state.inFlight?.itemId ?? null, runId: state.inFlight?.runId ?? null },
+        payload: { itemId: inFlight?.itemId ?? null, runId: inFlight?.runId ?? null },
       })
     } catch (err) {
       log.warn(
@@ -57,8 +59,25 @@ export function createRegisterBrowserProcesses<TData, TSteps extends readonly st
   const { wf, instanceId, state } = ctx
   return (): void => {
     if (!state.activeSession || !state.workerStore) return
-    // Skip if pids are already registered for the same inFlight task.
-    if (registrationState.browsersRegistered && state.inFlight === registrationState.lastRegisteredInFlight) return
+    // Build a stable `DaemonInFlight` snapshot for the registration-skip
+    // identity comparison. We can't compare `state.activeRun` references
+    // directly because they're full `RunHandle` objects that may have
+    // different identity between pre-registration and post-`runOneItem`
+    // re-registration (see daemon claim-loop `onCancelController` hook).
+    const inFlight: DaemonInFlight | null = state.activeRun
+      ? {
+          itemId: state.activeRun.itemId,
+          runId: state.activeRun.runId,
+          ...(state.activeRun.taskId ? { taskId: state.activeRun.taskId } : {}),
+          ...(state.activeRun.attemptId ? { attemptId: state.activeRun.attemptId } : {}),
+        }
+      : null
+    if (
+      registrationState.browsersRegistered &&
+      sameInFlight(inFlight, registrationState.lastRegisteredInFlight ?? null)
+    ) {
+      return
+    }
     for (const [systemId, pid] of Object.entries(state.activeSession.chromePids)) {
       const sys = wf.config.systems.find((s) => s.id === systemId)
       state.workerStore.upsertBrowserProcess({
@@ -67,14 +86,25 @@ export function createRegisterBrowserProcesses<TData, TSteps extends readonly st
         systemId,
         browserId: systemId,
         pid,
-        ...(state.inFlight?.taskId ? { taskId: state.inFlight.taskId } : {}),
-        ...(state.inFlight?.attemptId ? { attemptId: state.inFlight.attemptId } : {}),
+        ...(inFlight?.taskId ? { taskId: inFlight.taskId } : {}),
+        ...(inFlight?.attemptId ? { attemptId: inFlight.attemptId } : {}),
         ...(sys?.sessionDir ? { sessionDir: sys.sessionDir } : {}),
       })
     }
     registrationState.browsersRegistered = true
-    registrationState.lastRegisteredInFlight = state.inFlight
+    registrationState.lastRegisteredInFlight = inFlight
   }
+}
+
+function sameInFlight(a: DaemonInFlight | null, b: DaemonInFlight | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.itemId === b.itemId &&
+    a.runId === b.runId &&
+    a.taskId === b.taskId &&
+    a.attemptId === b.attemptId
+  )
 }
 
 export function createRecoverClaimsFromDeadOrStaleWorkers<TData, TSteps extends readonly string[]>(
@@ -105,22 +135,25 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
     if (!workerStore) return
     try {
       if (command.commandType === 'cancel_task') {
+        const inFlight = state.activeRun
         if (
-          !state.inFlight ||
-          (command.targetTaskId && command.targetTaskId !== state.inFlight.taskId) ||
-          (command.targetAttemptId && command.targetAttemptId !== state.inFlight.attemptId)
+          !inFlight ||
+          (command.targetTaskId && command.targetTaskId !== inFlight.taskId) ||
+          (command.targetAttemptId && command.targetAttemptId !== inFlight.attemptId)
         ) {
           workerStore.failCommand(command.commandId, 'task not in flight on this worker')
           return
         }
         workerStore.acknowledgeCommand(command.commandId, instanceId)
-        // Contract 5: route through `requestCancel` so all three cancel
-        // triggers (HTTP, worker command, browser disconnect) share one
-        // mutation path. Sets `state.cancelTarget` (stepper between-step
-        // probe) AND aborts the per-run AbortController (in-flight
-        // Playwright call rejects within ms instead of waiting timeout).
+        // Contract 5: route through `requestCancel` (→ `runRegistry.cancel`)
+        // so the three cancel triggers (HTTP, worker command, browser
+        // disconnect) share one mutation path. Aborts the per-run
+        // AbortController — any in-flight Playwright call rejects within
+        // ms via the Page proxy signal-injection. Fire-and-forget; the
+        // watchdog hard-kill handles the rare case where nothing observes
+        // the signal (pre-handler launch hang).
         requestCancel(
-          { itemId: state.inFlight.itemId, runId: state.inFlight.runId },
+          { itemId: inFlight.itemId, runId: inFlight.runId },
           'worker-command',
         )
         workerStore.completeCommand(command.commandId)

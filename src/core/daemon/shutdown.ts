@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { unlinkSync } from 'node:fs'
 import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
+import { runRegistry } from '../run-registry.js'
 import { findAliveDaemons } from './registry.js'
 import {
   readQueueState,
@@ -187,12 +188,33 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
   // still includes self in the alive set — `otherAlive.length === 0`
   // correctly identifies "this is the last alive daemon, no one else will
   // process these items".
+  // Walk every still-registered run and abort its controller — covers
+  // any in-process delegated children that haven't unwound yet plus the
+  // active claim-loop run. `hardKillAfterMs: 0` skips the watchdog
+  // because `abortLaunchAndKillSession` (or the signal handler that
+  // preceded us) is already tearing chromium down — the watchdog would
+  // just race the natural shutdown path.
+  for (const handle of runRegistry.list()) {
+    void runRegistry
+      .cancel(handle.runId, { reason: 'daemon_shutdown', hardKillAfterMs: 0 })
+      .catch(() => {
+        /* best-effort — shutdown writes the cancelled row below */
+      })
+  }
   try {
-    // Snapshot inFlight into a local — TypeScript's flow analysis can't
-    // see assignments inside the async body callback (different closure),
-    // so without the local + cast it narrows `inFlight` to `null` here
-    // even though the body may have set it.
-    const inFlightSnapshot = state.inFlight
+    // Snapshot the active run into a local — TypeScript's flow analysis
+    // can't see assignments inside the async body callback (different
+    // closure), so without the local + cast it narrows `activeRun` to
+    // `null` here even though the body may have set it.
+    const activeRunSnapshot = state.activeRun
+    const inFlightSnapshot = activeRunSnapshot
+      ? {
+          itemId: activeRunSnapshot.itemId,
+          runId: activeRunSnapshot.runId,
+          ...(activeRunSnapshot.taskId ? { taskId: activeRunSnapshot.taskId } : {}),
+          ...(activeRunSnapshot.attemptId ? { attemptId: activeRunSnapshot.attemptId } : {}),
+        }
+      : null
     if (inFlightSnapshot) {
       const existingTask = inFlightSnapshot.taskId ? taskStore.getTask(inFlightSnapshot.taskId) : null
       const trackerRoot = trackerDir ?? DEFAULT_DIR
@@ -248,7 +270,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
       // Otherwise emit shutdown cleanup — including repair when SQLite is
       // terminal but JSONL still shows pending/running (crash window).
       if (skipShutdownEmit) {
-        state.inFlight = null
+        state.activeRun = null
       } else {
         // Daemon shutdown while processing — mark the in-flight item as
         // cancelled (not failed). All shutdown paths are user-initiated
@@ -311,7 +333,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
         } catch {
           /* best-effort */
         }
-        state.inFlight = null
+        state.activeRun = null
       }
     }
 
