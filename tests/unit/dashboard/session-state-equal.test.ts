@@ -139,3 +139,16 @@ test("sessionStateEqual short-circuits on reference equality", () => {
   };
   assert.equal(sessionStateEqual(state, state), true);
 });
+
+test("workflowEqual returns false when recentDaemonLogs gains a new entry", () => {
+  // Two states identical except one has an extra daemon log line — the SSE
+  // dedup must detect this so the terminal drawer re-renders with the new
+  // machine-scoped session-log entry.
+  const logEntry = { ts: "2026-05-31T10:00:00.000Z", level: "step", message: "queue ping" };
+  const before = makeWorkflow([makeSession([makeBrowser("authed")])]);
+  const after = {
+    ...makeWorkflow([makeSession([makeBrowser("authed")])]),
+    recentDaemonLogs: [logEntry],
+  };
+  assert.equal(workflowEqual(before, after), false);
+});

@@ -282,6 +282,12 @@ export interface WorkflowInstanceState {
   sessions: SessionInfo[];
   /** Daemon-mode phase from `daemon_phase` session events (idle vs keepalive). */
   daemonPhase?: "idle" | "keepalive";
+  /**
+   * Recent daemon log lines (session-log `daemon_log` events) for this
+   * instance, oldest→newest, capped to the last 30. Machine-scoped: shown
+   * in the terminal drawer, never attributed to a per-run Events tab.
+   */
+  recentDaemonLogs?: Array<{ ts: string; level: string; message: string }>;
   /** UCPath idle refresh — from `ucpath_idle_signal` session events. */
   ucpathIdle?: { lastTouchAt: string; refreshing: boolean };
 }
