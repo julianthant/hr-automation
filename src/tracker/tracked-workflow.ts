@@ -3,7 +3,8 @@ import { join } from "path";
 import { execSync } from "child_process";
 import { randomUUID } from "node:crypto";
 
-import { log, setLogRunId } from "../utils/log.js";
+import { log } from "../utils/log.js";
+import { setLogRunId } from "../utils/log-context.js";
 import { classifyError } from "../utils/errors.js";
 import { applySigintTerminalToProjection } from "./state/runtime.js";
 import {
