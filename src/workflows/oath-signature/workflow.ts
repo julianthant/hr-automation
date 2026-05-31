@@ -59,7 +59,7 @@ const oathSignatureSteps = ["ocr", "fan-out", "ucpath-auth", "transaction"] as c
  *
  * Two input variants share this workflow definition:
  *
- *  - `kind: "signer"` (today's per-EID flow): one item, one row, one
+ *  - `kind: "signer"` (today's per-EID flow): one person, one row, one
  *    PeopleSoft transaction. Each EID is independent — daemon mode
  *    enqueues 1:1 and the daemon processes them sequentially on one
  *    browser (or fans out via `--parallel`).
@@ -79,6 +79,8 @@ export const oathSignatureWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Signature",
   archetype: (input: OathSignatureInput) => (input.kind === "pdf" ? "batch" : "single"),
+  queueRowKind: (input: OathSignatureInput) => (input.kind === "pdf" ? "file" : "person"),
+  code: "os",
   category: "Onboarding",
   iconName: "ClipboardSignature",
   systems: [
@@ -246,8 +248,9 @@ async function runSignerBranch(
  * approved record back into this workflow.
  *
  * The OCR delegation uses `renderAs: "preview"` so the OCR row gets the
- * approval-delegation surface. The fan-out uses `renderAs: "batch"` so
- * N signer children group under a batch row in this workflow's tab.
+ * preview surface card. The fan-out uses `renderAs: "batch"` so
+ * signer children are stamped `batch-member` and remain grouped under the
+ * PDF batch row in this workflow's tab.
  */
 async function runPdfBranch(
   ctx: Parameters<typeof oathSignatureWorkflow.config.handler>[0],

@@ -287,10 +287,10 @@ export function App() {
     [dedupedEntries, entries, workflow, wfLabel, runtimePolicies],
   );
 
-  // Per-entry "<base> <ordinal>" labels for the queue / log header / toasts.
-  // Recomputed whenever entries or the workflow's label change so a row's
-  // ordinal stays stable as more rows arrive (the map is keyed by entry id;
-  // older rows keep their #1, the newest gets #N).
+  // Per-entry base-name labels for the queue / log header / toasts. Stamped
+  // rows resolve their title from queue row kind (resolveQueueRowPresentation)
+  // before this map is consulted; the map supplies bare base names for legacy /
+  // unstamped rows and delegated-label inheritance. No session-local ordinals.
   const displayNameEntries = useMemo(
     () =>
       buildDisplayNameEntries({

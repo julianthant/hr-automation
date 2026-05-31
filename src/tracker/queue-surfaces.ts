@@ -78,40 +78,13 @@ function rootPersistingParentRunIds(
   return runIds;
 }
 
-function buildEntriesByRunId(entries: TrackerEntry[]): Map<string, TrackerEntry> {
-  const map = new Map<string, TrackerEntry>();
-  for (const entry of entries) {
-    map.set(runIdFor(entry), entry);
-  }
-  return map;
-}
-
-function isPolicyFlatMemberChild(
-  entry: TrackerEntry,
-  entriesByRunId: ReadonlyMap<string, TrackerEntry>,
-  runtimePolicies?: WorkflowRuntimePolicyLookup,
-): boolean {
-  const classification = classifyTrackerRow(entry);
-  if (classification.shape !== "single" || classification.scope !== "delegated") return false;
-  if (!entry.parentRunId) return false;
-  const parent = entriesByRunId.get(entry.parentRunId);
-  if (!parent) return false;
-  const policy = getWorkflowRuntimePolicy(parent.workflow, runtimePolicies);
-  const delegation = policy.delegation;
-  if (!delegation?.flatMemberChildWorkflows?.includes(entry.workflow)) return false;
-  return (delegation.flatMemberSurface ?? "delegation-member") === "delegation-member";
-}
-
 function buildMembersByParentRunId(
   entries: TrackerEntry[],
   rootPersistingRunIds: Set<string>,
-  entriesByRunId: ReadonlyMap<string, TrackerEntry>,
-  runtimePolicies?: WorkflowRuntimePolicyLookup,
 ): Map<string, TrackerEntry[]> {
   const map = new Map<string, TrackerEntry[]>();
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
-    if (isPolicyFlatMemberChild(entry, entriesByRunId, runtimePolicies)) continue;
     if ((isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry)) && !rootPersistingRunIds.has(entry.parentRunId)) {
       continue; // grouped rows are anchors, not members
     }
@@ -130,19 +103,12 @@ function uniqueFlatEntries(entries: TrackerEntry[]): TrackerEntry[] {
   return [...byKey.values()];
 }
 
-export interface TrackerApprovalDelegationSurface {
-  kind: "approval-delegation";
+export interface TrackerPreviewSurface {
+  kind: "preview";
   parentRunId: string;
   parent: TrackerEntry;
   members: TrackerEntry[];
   approvalState: "awaiting-approval" | "approved" | "discarded";
-  titleOverride?: string;
-}
-
-export interface TrackerPassiveDelegationSurface {
-  kind: "passive-delegation";
-  parentRunId: string;
-  members: TrackerEntry[];
   titleOverride?: string;
 }
 
@@ -154,10 +120,7 @@ export interface TrackerBatchSurface {
   titleOverride?: string;
 }
 
-export type TrackerQueueGroupSurface =
-  | TrackerApprovalDelegationSurface
-  | TrackerPassiveDelegationSurface
-  | TrackerBatchSurface;
+export type TrackerQueueGroupSurface = TrackerPreviewSurface | TrackerBatchSurface;
 
 export interface TrackerQueueSurfaces {
   groupRows: TrackerQueueGroupSurface[];
@@ -189,31 +152,22 @@ function titleOverrideForAnchor(entry: TrackerEntry): string | undefined {
 /**
  * Canonical queue **surface** model: one group card + zero or more flat rows.
  * Shared by dashboard `buildQueueSurfaces` and sidebar / wfCounts aggregation
- * so digits never double-count delegated children that render inside a card.
+ * so digits never double-count children that render inside a card.
  */
 export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput): TrackerQueueSurfaces {
   const visibleEntries = input.entries.filter((entry) => !isDiscardedPreviewRow(entry));
   const visibleSources = input.delegationSourceEntries.filter(
     (entry) => !isDiscardedPreviewRow(entry),
   );
-  const entriesByRunId = buildEntriesByRunId(visibleSources);
   const rootPersistingRunIds = rootPersistingParentRunIds(visibleSources, input.runtimePolicies);
-  const membersByParentRunId = buildMembersByParentRunId(
-    visibleSources,
-    rootPersistingRunIds,
-    entriesByRunId,
-    input.runtimePolicies,
-  );
+  const membersByParentRunId = buildMembersByParentRunId(visibleSources, rootPersistingRunIds);
   const batchAnchors = visibleEntries.filter(isVisibleBatchAnchor);
   const previewAnchors = visibleEntries.filter(isVisiblePreviewAnchor);
   const batchAnchorRunIds = new Set(batchAnchors.map((entry) => entry.runId ?? entry.id));
   const previewAnchorRunIds = new Set(previewAnchors.map((entry) => entry.runId ?? entry.id));
   const anchoredParentRunIds = new Set([...batchAnchorRunIds, ...previewAnchorRunIds]);
   const approvalParentRunIds = new Set([...previewAnchorRunIds]);
-  const singleDelegationEntries: TrackerEntry[] = [];
-  const flatDelegationMemberEntries = visibleSources.filter((entry) =>
-    isPolicyFlatMemberChild(entry, entriesByRunId, input.runtimePolicies),
-  );
+  const singleChildEntries: TrackerEntry[] = [];
 
   const groupRows: TrackerQueueGroupSurface[] = [];
 
@@ -221,7 +175,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     const parentRunId = parent.runId ?? parent.id;
     const members = membersByParentRunId.get(parentRunId) ?? [];
     groupRows.push({
-      kind: "approval-delegation",
+      kind: "preview",
       parentRunId,
       parent,
       members,
@@ -244,8 +198,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   for (const [parentRunId, members] of membersByParentRunId) {
     if (anchoredParentRunIds.has(parentRunId)) continue;
     if (members.length === 1) {
-      const only = members[0]!;
-      singleDelegationEntries.push(only);
+      singleChildEntries.push(members[0]!);
       continue;
     }
     groupRows.push({
@@ -262,11 +215,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     if (entry.parentRunId && membersByParentRunId.has(entry.parentRunId)) return false;
     return true;
   });
-  const flatEntries = uniqueFlatEntries([
-    ...flatDelegationMemberEntries,
-    ...singleDelegationEntries,
-    ...visibleFlatEntries,
-  ]);
+  const flatEntries = uniqueFlatEntries([...singleChildEntries, ...visibleFlatEntries]);
 
   return { groupRows, flatEntries, membersByParentRunId, approvalParentRunIds };
 }

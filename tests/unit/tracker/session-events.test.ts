@@ -192,22 +192,22 @@ describe("rebuildSessionState — workflows", () => {
   });
 
   it("bootstraps ucpathIdle.lastTouchAt from auth_complete for ucpath (with system field)", () => {
-    emitSessionEvent({ type: "workflow_start", workflowInstance: "EID Lookup 1" }, dir);
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Person Lookup 1" }, dir);
     emitSessionEvent({
       type: "session_create",
-      workflowInstance: "EID Lookup 1",
+      workflowInstance: "Person Lookup 1",
       sessionId: "S1",
     }, dir);
     emitSessionEvent({
       type: "browser_launch",
-      workflowInstance: "EID Lookup 1",
+      workflowInstance: "Person Lookup 1",
       sessionId: "S1",
       browserId: "b-u",
       system: "ucpath",
     }, dir);
     emitSessionEvent({
       type: "auth_complete",
-      workflowInstance: "EID Lookup 1",
+      workflowInstance: "Person Lookup 1",
       browserId: "b-u",
       system: "ucpath",
     }, dir);
@@ -242,9 +242,9 @@ describe("rebuildSessionState — workflows", () => {
   });
 
   it("records ucpath_idle_signal refresh lifecycle + daemon_phase on workflow state", () => {
-    emitSessionEvent({ type: "workflow_start", workflowInstance: "EID Lookup 1" }, dir);
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Person Lookup 1" }, dir);
     emitSessionEvent(
-      { type: "ucpath_idle_signal", workflowInstance: "EID Lookup 1", data: { kind: "touch" } },
+      { type: "ucpath_idle_signal", workflowInstance: "Person Lookup 1", data: { kind: "touch" } },
       dir,
     );
     let state = rebuildSessionState(dir);
@@ -252,28 +252,28 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
 
     emitSessionEvent(
-      { type: "ucpath_idle_signal", workflowInstance: "EID Lookup 1", data: { kind: "refresh_start" } },
+      { type: "ucpath_idle_signal", workflowInstance: "Person Lookup 1", data: { kind: "refresh_start" } },
       dir,
     );
     state = rebuildSessionState(dir);
     assert.equal(state.workflows[0].ucpathIdle!.refreshing, true);
 
     emitSessionEvent(
-      { type: "ucpath_idle_signal", workflowInstance: "EID Lookup 1", data: { kind: "refresh_end" } },
+      { type: "ucpath_idle_signal", workflowInstance: "Person Lookup 1", data: { kind: "refresh_end" } },
       dir,
     );
     state = rebuildSessionState(dir);
     assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
 
     emitSessionEvent(
-      { type: "daemon_phase", workflowInstance: "EID Lookup 1", data: { phase: "keepalive" } },
+      { type: "daemon_phase", workflowInstance: "Person Lookup 1", data: { phase: "keepalive" } },
       dir,
     );
     state = rebuildSessionState(dir);
     assert.equal(state.workflows[0].daemonPhase, "keepalive");
 
     emitSessionEvent(
-      { type: "daemon_phase", workflowInstance: "EID Lookup 1", data: { phase: "idle" } },
+      { type: "daemon_phase", workflowInstance: "Person Lookup 1", data: { phase: "idle" } },
       dir,
     );
     state = rebuildSessionState(dir);
@@ -511,7 +511,7 @@ describe("rebuildSessionState — screenshot scenario", () => {
   let dir: string;
   beforeEach(() => { dir = tempDir(); });
 
-  it("reproduces the full Separation + EID Lookup dashboard state", () => {
+  it("reproduces the full Separation + Person Lookup dashboard state", () => {
     // Separation 1 with 3 browsers, NewKronos duo active
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Separation 1" }, dir);
     emitSessionEvent({ type: "session_create", workflowInstance: "Separation 1", sessionId: "Session 1" }, dir);
@@ -528,26 +528,26 @@ describe("rebuildSessionState — screenshot scenario", () => {
     emitSessionEvent({ type: "duo_request", workflowInstance: "Separation 1", system: "NewKronos", duoRequestId: "sep-req" }, dir);
     emitSessionEvent({ type: "duo_start", workflowInstance: "Separation 1", system: "NewKronos", duoRequestId: "sep-req" }, dir);
 
-    // EID Lookup 1 with UCPath queued
-    emitSessionEvent({ type: "workflow_start", workflowInstance: "EID Lookup 1" }, dir);
-    emitSessionEvent({ type: "session_create", workflowInstance: "EID Lookup 1", sessionId: "Session 1" }, dir);
+    // Person Lookup 1 with UCPath queued
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Person Lookup 1" }, dir);
+    emitSessionEvent({ type: "session_create", workflowInstance: "Person Lookup 1", sessionId: "Session 1" }, dir);
     emitSessionEvent({
-      type: "browser_launch", workflowInstance: "EID Lookup 1",
+      type: "browser_launch", workflowInstance: "Person Lookup 1",
       sessionId: "Session 1", browserId: "b-ucp", system: "UCPath",
     }, dir);
-    emitSessionEvent({ type: "auth_start", workflowInstance: "EID Lookup 1", browserId: "b-ucp", system: "UCPath" }, dir);
-    emitSessionEvent({ type: "item_start", workflowInstance: "EID Lookup 1", currentItemId: "Garcia, Maria" }, dir);
-    emitSessionEvent({ type: "duo_request", workflowInstance: "EID Lookup 1", system: "UCPath", duoRequestId: "eid-req" }, dir);
+    emitSessionEvent({ type: "auth_start", workflowInstance: "Person Lookup 1", browserId: "b-ucp", system: "UCPath" }, dir);
+    emitSessionEvent({ type: "item_start", workflowInstance: "Person Lookup 1", currentItemId: "Garcia, Maria" }, dir);
+    emitSessionEvent({ type: "duo_request", workflowInstance: "Person Lookup 1", system: "UCPath", duoRequestId: "person-req" }, dir);
 
     const state = rebuildSessionState(dir);
 
     // 2 workflows — both active (PID is our own process.pid, which is alive)
     assert.equal(state.workflows.length, 2);
     const sep = state.workflows.find((w) => w.instance === "Separation 1")!;
-    const eid = state.workflows.find((w) => w.instance === "EID Lookup 1")!;
-    assert.ok(sep && eid);
+    const personLookup = state.workflows.find((w) => w.instance === "Person Lookup 1")!;
+    assert.ok(sep && personLookup);
     assert.equal(sep.active, true);
-    assert.equal(eid.active, true);
+    assert.equal(personLookup.active, true);
 
     // Separation 1: 3 browsers (Kuali authed, OldKronos authed, NewKronos duo_waiting)
     const sepBrowsers = sep.sessions[0].browsers;
@@ -557,12 +557,12 @@ describe("rebuildSessionState — screenshot scenario", () => {
     assert.equal(sepBrowsers.find((b) => b.system === "NewKronos")!.authState, "duo_waiting");
     assert.equal(sep.currentItemId, "DOC-2024-001");
 
-    // EID Lookup 1: UCPath duo_waiting
-    const eidBrowsers = eid.sessions[0].browsers;
-    assert.equal(eidBrowsers.length, 1);
-    assert.equal(eidBrowsers[0].system, "UCPath");
-    assert.equal(eidBrowsers[0].authState, "duo_waiting");
-    assert.equal(eid.currentItemId, "Garcia, Maria");
+    // Person Lookup 1: UCPath duo_waiting
+    const personLookupBrowsers = personLookup.sessions[0].browsers;
+    assert.equal(personLookupBrowsers.length, 1);
+    assert.equal(personLookupBrowsers[0].system, "UCPath");
+    assert.equal(personLookupBrowsers[0].authState, "duo_waiting");
+    assert.equal(personLookup.currentItemId, "Garcia, Maria");
 
     // Duo queue: NewKronos active (#1), UCPath waiting (#2)
     assert.equal(state.duoQueue.length, 2);
@@ -581,7 +581,7 @@ describe("rebuildSessionState — screenshot scenario", () => {
 // the next free slot. A `workflow_start` without a matching `workflow_end`
 // keeps its slot locked — which used to be the right call (protect in-flight
 // runs) but also meant a crashed process (kill -9, pre-fix pool runner that
-// never emitted `workflow_end`) would lock "EID Lookup 1" forever. The
+// never emitted `workflow_end`) would lock "Person Lookup 1" forever. The
 // dead-pid + 60s heal below treats orphan starts as ended so legitimate new
 // runs reclaim the slot, while still blocking it briefly after a recent
 // start in case another process is racing.
@@ -602,52 +602,52 @@ test("generateInstanceName: ignores stale start whose pid is dead and >60s old",
   const oldTs = new Date(Date.now() - 120_000).toISOString();
   writeSessionsRaw(dir, [
     // Pid 2 is practically never alive on Unix; using 0 raises EINVAL, 2 raises ESRCH.
-    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: 2, timestamp: oldTs, runId: "x" },
+    { type: "workflow_start", workflowInstance: "Person Lookup 1", pid: 2, timestamp: oldTs, runId: "x" },
   ]);
-  const name = generateInstanceName("eid-lookup", dir);
-  assert.equal(name, "EID Lookup 1", "dead-pid stale start treated as ended");
+  const name = generateInstanceName("person-lookup", dir);
+  assert.equal(name, "Person Lookup 1", "dead-pid stale start treated as ended");
 });
 
 test("generateInstanceName: keeps fresh stale start (<60s) as active", () => {
   const dir = TMP();
   const freshTs = new Date(Date.now() - 5_000).toISOString();
   writeSessionsRaw(dir, [
-    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: 2, timestamp: freshTs, runId: "x" },
+    { type: "workflow_start", workflowInstance: "Person Lookup 1", pid: 2, timestamp: freshTs, runId: "x" },
   ]);
-  const name = generateInstanceName("eid-lookup", dir);
-  assert.equal(name, "EID Lookup 2", "young stale start still blocks the number");
+  const name = generateInstanceName("person-lookup", dir);
+  assert.equal(name, "Person Lookup 2", "young stale start still blocks the number");
 });
 
 test("generateInstanceName: keeps alive-pid start as active even if old", () => {
   const dir = TMP();
   const oldTs = new Date(Date.now() - 120_000).toISOString();
   writeSessionsRaw(dir, [
-    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: process.pid, timestamp: oldTs, runId: "x" },
+    { type: "workflow_start", workflowInstance: "Person Lookup 1", pid: process.pid, timestamp: oldTs, runId: "x" },
   ]);
-  const name = generateInstanceName("eid-lookup", dir);
-  assert.equal(name, "EID Lookup 2", "alive pid blocks the number regardless of age");
+  const name = generateInstanceName("person-lookup", dir);
+  assert.equal(name, "Person Lookup 2", "alive pid blocks the number regardless of age");
 });
 
 test("generateInstanceName: paired start+end frees the number", () => {
   const dir = TMP();
   const ts = new Date(Date.now() - 5_000).toISOString();
   writeSessionsRaw(dir, [
-    { type: "workflow_start", workflowInstance: "EID Lookup 1", pid: process.pid, timestamp: ts, runId: "x" },
-    { type: "workflow_end", workflowInstance: "EID Lookup 1", finalStatus: "done", pid: process.pid, timestamp: ts, runId: "x" },
+    { type: "workflow_start", workflowInstance: "Person Lookup 1", pid: process.pid, timestamp: ts, runId: "x" },
+    { type: "workflow_end", workflowInstance: "Person Lookup 1", finalStatus: "done", pid: process.pid, timestamp: ts, runId: "x" },
   ]);
-  const name = generateInstanceName("eid-lookup", dir);
-  assert.equal(name, "EID Lookup 1", "paired start+end frees the slot");
+  const name = generateInstanceName("person-lookup", dir);
+  assert.equal(name, "Person Lookup 1", "paired start+end frees the slot");
 });
 
 test("workflowNameFromInstance resolves newly daemonized workflow labels", () => {
-  assert.equal(workflowNameFromInstance("Active Check 1"), "active-check");
-  assert.equal(workflowNameFromInstance("active-check 1"), "active-check");
+  assert.equal(workflowNameFromInstance("Person Lookup 1"), "person-lookup");
+  assert.equal(workflowNameFromInstance("person-lookup 1"), "person-lookup");
   assert.equal(workflowNameFromInstance("Oath Upload 2"), "oath-upload");
 });
 
-test("generateInstanceName: active-check uses human label so dashboard stop controls can resolve it", () => {
+test("generateInstanceName: person-lookup uses human label so dashboard stop controls can resolve it", () => {
   const dir = TMP();
-  const name = generateInstanceName("active-check", dir);
+  const name = generateInstanceName("person-lookup", dir);
 
-  assert.equal(name, "Active Check 1");
+  assert.equal(name, "Person Lookup 1");
 });

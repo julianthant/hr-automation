@@ -34,6 +34,7 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
     isBatch: opts.isBatch,
     runId: opts.runId,
     workflow: opts.wf.config.name,
+    code: opts.wf.code,
     itemId: opts.itemId,
     emitScreenshotEvent: opts.emitScreenshotEvent,
     trackerDir: opts.trackerDir,

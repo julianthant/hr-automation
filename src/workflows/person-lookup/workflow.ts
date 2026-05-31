@@ -8,8 +8,9 @@
  *
  * Kernel-based (shared-context-pool mode). Each input-run batch launches one
  * UCPath browser (+ CRM browser), authenticates once per system, then fans out
- * N items across N tabs in each shared BrowserContext. Each item is a separate
- * kernel item so the dashboard shows one row per name/EID.
+ * N people across N tabs in each shared BrowserContext. One-person requests
+ * are single rows; multi-person requests are grouped as batch-member rows by
+ * the dashboard enqueue boundary.
  */
 
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
@@ -22,6 +23,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
+import { personLookupStatusExtensions } from "../../domain/person-lookup-status.js";
 import {
   deriveActiveCheckOutcome,
   resolvePersonLookupForEidLookup,
@@ -327,6 +329,9 @@ export const personLookupWorkflow = defineWorkflow({
   name: "person-lookup",
   label: "Person Lookup",
   archetype: "single",
+  queueRowKind: "person",
+  statusExtensions: personLookupStatusExtensions,
+  code: "pl",
   category: "Utils",
   iconName: "Search",
   systems: [

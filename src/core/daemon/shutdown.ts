@@ -20,29 +20,71 @@ import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype
 import { isStateDbReady, openStateDb } from '../../tracker/state/db.js'
 import type { ControlTaskStore } from '../task-store/index.js'
 import { emitItemCancelled } from '../../tracker/session-events.js'
+import { findLatestEntryForPredicate } from '../../tracker/find-latest-entry.js'
 import type { Daemon } from './types.js'
 import type { DaemonPhase, DaemonState } from './daemon-types.js'
+
+export interface ShutdownTrackerDataOpts {
+  /**
+   * The run's id. When provided, the frozen `data.__traceId` from this run's
+   * pending row is carried forward onto the rebuilt cancelled/shutdown row.
+   * The trace id is stamped once at pre-emit and embeds the original
+   * timestamp, so it cannot be regenerated from `input` here — rebuilding
+   * would mint a *different* id than the pending row displayed. Cancellation
+   * must change status only, never the row's trace-id identity, so we inherit
+   * the value instead of dropping it.
+   */
+  runId?: string
+  trackerDir?: string
+}
 
 export function buildShutdownTrackerData<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   input: unknown,
   parentRunId?: string,
+  opts?: ShutdownTrackerDataOpts,
 ): Record<string, string> {
+  let data: Record<string, string>
   try {
-    return buildHttpPendingData(wf, input, parentRunId)
+    data = buildHttpPendingData(wf, input, parentRunId)
   } catch (err) {
     log.warn(
       `[Daemon ${wf.config.name}] buildShutdownTrackerData fell back to minimal stamp: ${
         err instanceof Error ? err.message : String(err)
       }`,
     )
-    const data = buildTrackerDataForInput(input)
+    data = buildTrackerDataForInput(input)
     data.archetype = deriveRowArchetype(
       resolveArchetype(wf.config, input as TData),
       parentRunId,
     )
-    return data
   }
+  preserveFrozenTraceId(data, wf.config.name, opts)
+  return data
+}
+
+/**
+ * Carry the frozen `data.__traceId` from the run's pending row onto a rebuilt
+ * cancelled/shutdown row. `buildShutdownTrackerData` re-derives display fields
+ * from `input`, which reproduces name/EID/archetype/queueRowKind but NOT the
+ * trace id (it embeds the original pre-emit timestamp). Without this, a
+ * cancelled row would lose the trace-id subtitle/hover it showed while
+ * pending — cancellation would silently mutate row identity, not just status.
+ */
+function preserveFrozenTraceId(
+  data: Record<string, string>,
+  workflow: string,
+  opts: ShutdownTrackerDataOpts | undefined,
+): void {
+  if (!opts?.runId || data.__traceId) return
+  const prior = findLatestEntryForPredicate({
+    workflow,
+    ...(opts.trackerDir ? { trackerDir: opts.trackerDir } : {}),
+    lookbackDays: 2,
+    predicate: (entry) => entry.runId === opts.runId && Boolean(entry.data?.__traceId),
+  })
+  const priorTraceId = prior?.data?.__traceId
+  if (priorTraceId) data.__traceId = priorTraceId
 }
 
 export function createAbortLaunchAndKillSession<TData, TSteps extends readonly string[]>(
@@ -240,7 +282,10 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
               runId: inFlightSnapshot.runId,
               status: 'failed',
               step: 'cancelled',
-              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId) as StampedData,
+              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId, {
+                runId: inFlightSnapshot.runId,
+                trackerDir,
+              }) as StampedData,
               ...(parentRunId ? { parentRunId } : {}),
               error: cancelReason,
             },
@@ -316,7 +361,10 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
             // would override the pending row's hoisted fields with
             // `docId` + an opaque `prefilledData` JSON blob, hiding the
             // user's edits in the dashboard detail grid.
-            const data = buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData
+            const data = buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+              runId,
+              trackerDir,
+            }) as StampedData
             emitTrackerRow(
               {
                 workflow: wf.config.name,

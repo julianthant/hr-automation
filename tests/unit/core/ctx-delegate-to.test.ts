@@ -404,3 +404,115 @@ test("delegateToImpl fire-and-forget in-process result carries the assigned runI
   // Drain the child so the tracker file is fully written before teardown.
   await new Promise((r) => setTimeout(r, 50));
 });
+
+// Trace-id provenance (Part B): a delegated child's `data.__traceId` is
+// prefixed with the delegating PARENT's 2-char code (threaded as `rootCode`
+// from `buildDelegateApi`), so an operator can trace a child row back to the
+// workflow that spawned it. The parent below is "trace-parent" → code "tr";
+// the child is "trace-child" → its OWN code would be "tr" too, so we give the
+// child an explicit distinct code ("zz") to prove the prefix comes from the
+// PARENT, not the child.
+test("ctx.delegateTo stamps the child trace id with the parent's code (provenance)", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-trace-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  const child = defineWorkflow({
+    name: "trace-child-wf",
+    code: "zz",
+    queueRowKind: "person",
+    archetype: "single",
+    systems: [],
+    authSteps: false,
+    steps: ["work"] as const,
+    schema: z.object({ payload: z.string() }),
+    getName: (d) => d.payload ?? "",
+    getId: (d) => d.payload ?? "",
+    handler: async (ctx, input) => {
+      ctx.updateData({ payload: input.payload });
+      await ctx.step("work", async () => {});
+    },
+  });
+  const parent = defineWorkflow({
+    name: "trace-parent-wf",
+    code: "tr",
+    queueRowKind: "person",
+    archetype: "single",
+    systems: [],
+    authSteps: false,
+    steps: ["delegate"] as const,
+    schema: z.object({ parentPayload: z.string() }),
+    getName: (d) => d.parentPayload ?? "",
+    getId: (d) => d.parentPayload ?? "",
+    handler: async (ctx, input) => {
+      ctx.updateData({ parentPayload: input.parentPayload });
+      await ctx.step("delegate", async () => {
+        const c = ctx as unknown as { delegateTo: (...args: unknown[]) => Promise<unknown> };
+        await c.delegateTo(child, { payload: "hello-child" });
+      });
+    },
+  });
+
+  await runWorkflow(parent, { parentPayload: "p1" }, { trackerDir });
+
+  const childPending = readWorkflowLines(trackerDir, "trace-child-wf")
+    .find((l) => l.status === "pending");
+  assert.ok(childPending, "child pending row must be emitted");
+  const childTrace = (childPending!.data as { __traceId?: string }).__traceId;
+  assert.ok(childTrace, "child pending row must carry a trace id");
+  // Parent code "tr", NOT the child's own "zz".
+  assert.match(childTrace!, /^tr-\d{12}-[a-z0-9]{4}$/);
+
+  const parentPending = readWorkflowLines(trackerDir, "trace-parent-wf")
+    .find((l) => l.status === "pending");
+  // The parent is a root run — its own code "tr" is also "tr" here, but the
+  // point is it uses its OWN code, not an inherited one.
+  if (parentPending) {
+    const parentTrace = (parentPending.data as { __traceId?: string }).__traceId;
+    if (parentTrace) assert.match(parentTrace, /^tr-\d{12}-[a-z0-9]{4}$/);
+  }
+});
+
+// The rootCode also rides the child input's `__runtimeOptions` channel so it
+// survives the SQLite task store to a daemon worker's own re-emit. Pin that
+// `delegateToImpl` injects it for the in-process pending row's trace id when
+// passed explicitly.
+test("delegateToImpl threads an explicit rootCode into the child trace id", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-rootcode-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  const child = defineWorkflow({
+    name: "rootcode-child-wf",
+    code: "zz",
+    queueRowKind: "person",
+    archetype: "single",
+    systems: [],
+    authSteps: false,
+    steps: ["work"] as const,
+    schema: z.object({ payload: z.string() }),
+    getName: (d) => d.payload ?? "",
+    getId: (d) => d.payload ?? "",
+    handler: async (ctx, input) => {
+      ctx.updateData({ payload: input.payload });
+      await ctx.step("work", async () => {});
+    },
+  });
+
+  await delegateToImpl({
+    parentRunId: "rootcode-parent-run",
+    trackerDir,
+    child,
+    input: { payload: "x" },
+    itemId: "rootcode-item",
+    runId: "rootcode-run-abcd",
+    fireAndForget: false,
+    rootCode: "os",
+  });
+
+  const pending = readWorkflowLines(trackerDir, "rootcode-child-wf")
+    .find((l) => l.status === "pending");
+  assert.ok(pending, "child pending row must be emitted");
+  const trace = (pending!.data as { __traceId?: string }).__traceId;
+  assert.ok(trace, "child pending row must carry a trace id");
+  // Originating code "os", NOT the child's own "zz".
+  assert.match(trace!, /^os-\d{12}-root$/);
+});

@@ -169,7 +169,7 @@ function stateSignature(parts: {
  * Classify every live row into its queue surface. Feeds the same input shape
  * to `buildTrackerQueueSurfaces` the dashboard's server-side aggregation uses,
  * then maps each row id to a surface string:
- *  - `card:approval-delegation:<state>` / `card:batch` / `card:passive-delegation`
+ *  - `card:preview:<state>` / `card:batch`
  *  - `member:<kind>` — a sub-row rendered inside a card
  *  - `flat` — a top-level flat row
  *  - `discarded` — a discarded prep row, excluded from the queue
@@ -202,9 +202,9 @@ export function resolveRowSurfaces(
 
   for (const group of built.groupRows) {
     const memberIds = group.members.map((m) => m.id);
-    if (group.kind === "approval-delegation") {
+    if (group.kind === "preview") {
       out.set(group.parent.id, {
-        surface: `card:approval-delegation:${group.approvalState}`,
+        surface: `card:preview:${group.approvalState}`,
         memberIds,
       });
     } else {

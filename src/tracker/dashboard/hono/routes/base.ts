@@ -26,6 +26,7 @@ import {
 import { getDefaultWorkflow, type DashboardHonoDeps } from "../context.js";
 import { jsonResponse } from "../responses.js";
 import { buildWorkflowsHandler } from "../../workflows.js";
+import { filterRetiredDashboardWorkflows } from "../../../../domain/dashboard-run-surfaces.js";
 
 // Module-scoped throttle: prune work runs at most once per 60s per
 // process. The prune is idempotent, so caching its outcome between
@@ -41,7 +42,7 @@ export function __resetPreflightThrottleForTests(): void {
 }
 
 export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
-  app.get("/api/workflows", () => jsonResponse(listWorkflows(deps.dir)));
+  app.get("/api/workflows", () => jsonResponse(filterRetiredDashboardWorkflows(listWorkflows(deps.dir))));
 
   app.get("/api/workflow-definitions", () => jsonResponse(buildWorkflowsHandler()()));
 

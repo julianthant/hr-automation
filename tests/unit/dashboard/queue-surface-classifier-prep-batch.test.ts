@@ -30,7 +30,7 @@ test("pre-approval prep parent renders as preview surface without request child 
     workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.kind, "preview");
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
@@ -99,7 +99,7 @@ test("post-approval prep parent + single kernel child stays grouped", () => {
   // A single-signer PDF must remain a batch card after OCR approval — it
   // must not collapse into a flat single row.
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.kind, "preview");
   assert.equal(surfaces.groupRows[0]!.members.length, 1);
   assert.equal(surfaces.flatEntries.length, 0);
 });
@@ -112,7 +112,7 @@ test("prep parent with 0 members still renders as group surface (not flat)", () 
     workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.kind, "preview");
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
@@ -145,7 +145,7 @@ test("ocr-workflow awaiting-approval row renders as a group card (preview archet
     workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]?.kind, "preview");
   assert.equal(surfaces.groupRows[0]?.approvalState, "awaiting-approval");
   assert.equal(surfaces.flatEntries.length, 0);
 });

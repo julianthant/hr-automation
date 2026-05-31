@@ -1,6 +1,8 @@
 import type { RegisteredWorkflow } from "./kernel/types.js";
 import { buildInitialTrackerData } from "./kernel/workflow.js";
 import { deriveRowArchetype, resolveArchetype, type RowArchetype } from "../domain/row-archetype.js";
+import { resolveQueueRowKindFromValue } from "../domain/queue-row-kind.js";
+import { buildTraceId } from "../domain/queue-trace-id.js";
 import { operatorSubjectData } from "../domain/operator-subject.js";
 import { rootQueueTitleData } from "../domain/queue-title.js";
 import type { StampedData } from "../tracker/jsonl.js";
@@ -22,6 +24,16 @@ export interface BuildPendingTrackerDataOpts<TInput> {
   precomputedSeed?: Record<string, string>;
   nameIdStamp?: NameIdStamp;
   rowArchetype?: RowArchetype;
+  /** Run id for this row — stamps `data.__traceId` when provided. */
+  runId?: string;
+  /**
+   * Provenance code for the trace-id prefix — the ROOT run's workflow code so
+   * a delegated row traces back to where it came from. Defaults to this
+   * workflow's own `code`.
+   */
+  rootCode?: string;
+  /** Timestamp for the trace id; defaults to `new Date()`. Tests pass a fixed Date. */
+  at?: Date;
 }
 
 function stringifyExtra(extra: Record<string, unknown>): Record<string, string> {
@@ -90,6 +102,18 @@ export function buildPendingTrackerData<TInput>(
     resolveArchetype(wf.config, opts.input),
     opts.parentRunId,
   );
+
+  // Subject-semantics kind (drives queue title/subtitle). Static per row.
+  data.queueRowKind = resolveQueueRowKindFromValue(wf.queueRowKind, opts.input, wf.config.name);
+
+  // Human-readable, unique, log-greppable trace id — frozen once at pre-emit.
+  if (opts.runId) {
+    data.__traceId = buildTraceId({
+      code: opts.rootCode ?? wf.code,
+      runId: opts.runId,
+      at: opts.at ?? new Date(),
+    });
+  }
 
   return data as StampedData;
 }

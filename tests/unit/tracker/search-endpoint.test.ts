@@ -214,12 +214,12 @@ describe("buildSearchHandler", () => {
 
   it("includes displayStatus for queue/search pills", () => {
     const bucket = {
-      "eid-lookup": {
+      "person-lookup": {
         "2026-04-15": [
           entry({
-            workflow: "eid-lookup",
+            workflow: "person-lookup",
             id: "Nobody, Jane",
-            data: { emplId: "Not found", searchName: "Nobody, Jane" },
+            data: { activeStatus: "not-found", searchName: "Nobody, Jane" },
           }),
         ],
       },

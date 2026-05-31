@@ -39,8 +39,6 @@ describe("workflow runtime policies", () => {
     const policy = ocrWorkflow.metadata.runtimePolicy;
     assert.equal(policy?.preview?.rowTypeLabelSuffix, "Preview");
     assert.equal(policy?.preview?.alwaysAvailable, true);
-    assert.equal(policy?.delegation?.flatMemberSurface, undefined);
-    assert.equal(policy?.delegation?.flatMemberChildWorkflows, undefined);
   });
 
   it("registers Oath Signature file prep and person member rules", () => {

@@ -6,6 +6,18 @@ export function isPrepEntry(e: TrackerEntry): boolean {
 }
 
 /**
+ * Structural minimum the awaiting-approval predicates read. Lets both full
+ * `TrackerEntry` rows (tracker/dashboard) and the dashboard's lighter status
+ * shape (`StatusExtensionEntry`) call these without coercion.
+ */
+interface AwaitingApprovalEntry {
+  workflow: string;
+  status: string;
+  step?: string;
+  parentRunId?: string;
+}
+
+/**
  * OCR row in the "preview-ready, waiting for operator" state. Under the
  * new approval contract (2026-05-25) this is `status="running"` with
  * `step="awaiting-approval"` — the OCR row only reaches terminal `done`
@@ -14,7 +26,7 @@ export function isPrepEntry(e: TrackerEntry): boolean {
  * row as terminal at awaiting-approval; see
  * `src/services/ocr/approval-signal.ts` for the new contract.)
  */
-export function isOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
+export function isOcrAwaitingApprovalEntry(e: AwaitingApprovalEntry): boolean {
   return e.workflow === "ocr" && e.status === "running" && e.step === "awaiting-approval";
 }
 
@@ -24,7 +36,7 @@ export function isOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
  * delegated prep — standalone OCR prep awaiting-approval renders as an
  * ordinary in-flight prep row in the queue.
  */
-export function isDelegatedOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
+export function isDelegatedOcrAwaitingApprovalEntry(e: AwaitingApprovalEntry): boolean {
   return isOcrAwaitingApprovalEntry(e) && Boolean(e.parentRunId);
 }
 

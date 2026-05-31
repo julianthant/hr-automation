@@ -293,6 +293,11 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       nameIdStamp: 'always-on-seed',
       parentRunId: args.parentRunId,
       rowArchetype,
+      runId,
+      // Provenance prefix for the trace id — the delegating parent's code,
+      // carried through `__runtimeOptions` so it survives the task store to
+      // this worker re-emit. Falls back to the workflow's own code.
+      ...(runtimeOptions?.rootCode ? { rootCode: runtimeOptions.rootCode } : {}),
     })
     emitTrackerRow(
       {

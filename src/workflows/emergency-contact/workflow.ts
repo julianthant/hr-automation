@@ -79,6 +79,8 @@ export const emergencyContactWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Emergency Contact",
   archetype: "batch",
+  queueRowKind: "person",
+  code: "ec",
   category: "Onboarding",
   iconName: "Phone",
   systems: [
