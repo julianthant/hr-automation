@@ -34,6 +34,13 @@ export interface BuildPendingTrackerDataOpts<TInput> {
   rootCode?: string;
   /** Timestamp for the trace id; defaults to `new Date()`. Tests pass a fixed Date. */
   at?: Date;
+  /**
+   * Pre-frozen trace id to stamp verbatim. When set it wins over the
+   * `runId`/`at` computation, so a re-emit (e.g. a daemon worker re-emitting
+   * `pending` after the HTTP enqueue already stamped one) reuses the exact id
+   * the first row showed instead of minting a fresh, time-drifted one.
+   */
+  traceId?: string;
 }
 
 function stringifyExtra(extra: Record<string, unknown>): Record<string, string> {
@@ -107,7 +114,11 @@ export function buildPendingTrackerData<TInput>(
   data.queueRowKind = resolveQueueRowKindFromValue(wf.queueRowKind, opts.input, wf.config.name);
 
   // Human-readable, unique, log-greppable trace id — frozen once at pre-emit.
-  if (opts.runId) {
+  // A re-emit passes the already-frozen `traceId` so every row for a run shows
+  // the identical id; the `runId`/`at` compute path is the first-emit case.
+  if (opts.traceId) {
+    data.__traceId = opts.traceId;
+  } else if (opts.runId) {
     data.__traceId = buildTraceId({
       code: opts.rootCode ?? wf.code,
       runId: opts.runId,

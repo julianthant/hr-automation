@@ -2,6 +2,9 @@ import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
 import { buildPendingTrackerData } from '../pending-data.js'
 import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
+import { resolveQueueRowKindFromValue } from '../../domain/queue-row-kind.js'
+import { buildTraceId } from '../../domain/queue-trace-id.js'
+import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
@@ -305,6 +308,24 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     args.parentRunId,
     runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
   )
+  // Seed the subject-semantics axis (kind) + the frozen trace id onto the
+  // initial data so they ride EVERY row for this run — pending, the synthetic
+  // auth-timing `running` rows, and the handler's running/done/failed rows.
+  // Without this they'd live only on the pre-emit `pending` row (the only place
+  // `buildPendingTrackerData` runs), and the dashboard's latest-row-wins
+  // collapse would drop them the moment the run started → the queue row's
+  // kind-driven title/subtitle would fall back. The trace id is read back from
+  // the run's first pending row (frozen at the HTTP enqueue pre-emit) so a
+  // daemon worker re-emit reuses the exact id rather than minting a drifted one.
+  stringifiedSeed.queueRowKind = resolveQueueRowKindFromValue(
+    wf.queueRowKind,
+    handlerInput,
+    wf.config.name,
+  )
+  const frozenTraceId =
+    findFrozenTraceId({ workflow: wf.config.name, runId, ...(trackerDir ? { trackerDir } : {}) }) ??
+    buildTraceId({ code: runtimeOptions?.rootCode ?? wf.code, runId, at: new Date() })
+  stringifiedSeed.__traceId = frozenTraceId
   // Stamp the run-mode preset id on the seed so it's visible from the very
   // first tracker row (pending). The dashboard reads `data.__preset` to render
   // a small chip next to the row; absent on the implicit "Full" preset.
@@ -331,6 +352,9 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       parentRunId: args.parentRunId,
       rowArchetype,
       runId,
+      // Reuse the frozen trace id so this re-emit shows the same id as the
+      // HTTP enqueue pre-emit instead of a fresh, time-drifted one.
+      traceId: frozenTraceId,
       // Provenance prefix for the trace id — the delegating parent's code,
       // carried through `__runtimeOptions` so it survives the task store to
       // this worker re-emit. Falls back to the workflow's own code.

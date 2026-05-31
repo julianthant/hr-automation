@@ -40,7 +40,7 @@ Every workflow must declare `archetype` and `runtimePolicy`; architecture guards
 `archetype` (shape) is orthogonal to **kind** — the subject-semantics axis that drives only the queue row's title/subtitle. Every workflow must also declare `queueRowKind` and `code`; the `queue-row-kind-coverage` architecture guard fails if either is missing.
 
 - `queueRowKind`: `person | file | catalog`, or a resolver `(input) => kind` when the kind depends on the input variant (only oath-signature: `pdf`→file, `signer`→person). person = work-study/person-lookup/emergency-contact/onboarding/separations/crm-doc-download/kronos/oath-signature(signer); file = oath-upload/ocr/oath-signature(pdf); catalog = sharepoint-download.
-- `code`: a 2-char per-workflow string used as the trace-id prefix (e.g. `ou`, `pl`, `os`). Stamped into `data.__traceId` = `<code>-<mmddyyHHMMSS>-<runId4>` at pre-emit.
+- `code`: a 2-char per-workflow string used as the trace-id prefix (e.g. `ou`, `pl`, `os`). `data.__traceId` = `<code>-<mmddyyHHMMSS>-<runId4>` is **frozen once** at the first pre-emit and then rides EVERY row for the run (pending → running → terminal) — re-emits read it back via `findFrozenTraceId` rather than recomputing, so the id never drifts. `queueRowKind` likewise rides every row (seeded onto `stringifiedSeed` in `run-one-item.ts`), not just the pending pre-emit.
 - Title/subtitle resolve through `src/domain/queue-row-presentation.ts` — do **not** hardcode titles in the dashboard. No session-local ordinals in titles (`OATH 1`, `· #1234` are retired).
 
 ## Queue row status (statusExtensions)

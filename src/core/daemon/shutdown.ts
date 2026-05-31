@@ -21,7 +21,7 @@ import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype
 import { isStateDbReady, openStateDb } from '../../tracker/state/db.js'
 import type { ControlTaskStore } from '../task-store/index.js'
 import { emitItemCancelled } from '../../tracker/session-events.js'
-import { findLatestEntryForPredicate } from '../../tracker/find-latest-entry.js'
+import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import type { Daemon } from './types.js'
 import type { DaemonPhase, DaemonState } from './daemon-types.js'
 
@@ -78,13 +78,11 @@ function preserveFrozenTraceId(
   opts: ShutdownTrackerDataOpts | undefined,
 ): void {
   if (!opts?.runId || data.__traceId) return
-  const prior = findLatestEntryForPredicate({
+  const priorTraceId = findFrozenTraceId({
     workflow,
+    runId: opts.runId,
     ...(opts.trackerDir ? { trackerDir: opts.trackerDir } : {}),
-    lookbackDays: 2,
-    predicate: (entry) => entry.runId === opts.runId && Boolean(entry.data?.__traceId),
   })
-  const priorTraceId = prior?.data?.__traceId
   if (priorTraceId) data.__traceId = priorTraceId
 }
 
