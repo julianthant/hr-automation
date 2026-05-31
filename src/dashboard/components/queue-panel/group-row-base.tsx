@@ -29,7 +29,7 @@ const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boole
   failed: { Icon: AlertTriangle, color: "text-destructive", spin: false },
 };
 
-export type GroupRowVariant = "approval-delegation" | "passive-delegation" | "batch";
+export type GroupRowVariant = "preview" | "batch";
 
 export interface GroupRowBaseProps {
   /** Exposed as data-queue-group-kind for visual/debug inspection. */

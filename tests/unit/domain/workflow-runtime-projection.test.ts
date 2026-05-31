@@ -67,7 +67,7 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.runId, "work-study-run-1");
     assert.equal(projection.workflowId, "work-study");
     assert.equal(projection.title, "Doe, Jane");
-    assert.equal(projection.surfaceType, "normal");
+    assert.equal(projection.surfaceType, "single");
   });
 
   it("projects an OCR approval delegation surface", () => {
@@ -91,7 +91,7 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
 
-    assert.equal(projection.surfaceType, "approval-delegation");
+    assert.equal(projection.surfaceType, "preview");
     assert.equal(projection.runId, "ocr-run-1");
     assert.equal(projection.title, "oath-file.pdf");
   });
@@ -122,7 +122,7 @@ describe("workflow runtime projection adapters", () => {
       workflowLabels: new Map([["onboarding", "Onboarding"]]),
     });
 
-    assert.equal(projection.surfaceType, "batch-delegation");
+    assert.equal(projection.surfaceType, "batch");
     assert.deepEqual(
       projection.batchMembers.map((member) => member.runId),
       ["child-run-1", "child-run-2"],
@@ -149,8 +149,8 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {});
 
-    assert.equal(projection.surfaceType, "delegation-member");
-    assert.equal(projection.rowTypeLabel, "Delegation member");
+    assert.equal(projection.surfaceType, "single");
+    assert.equal(projection.rowTypeLabel, "Single");
   });
 
   it("does not expose a raw parent run id as the batch group subtitle", () => {
@@ -162,6 +162,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       data: {
         archetype: "single",
+        queueRowKind: "person",
         parentSubject: "Oath · 1234",
       },
     });
@@ -173,6 +174,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       data: {
         archetype: "single",
+        queueRowKind: "person",
         parentSubject: "Oath · 1234",
       },
     });
@@ -183,8 +185,10 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
 
-    assert.equal(projection.surfaceType, "batch-delegation");
-    assert.equal(projection.title, "person-lookup · #1234");
+    assert.equal(projection.surfaceType, "batch");
+    // Person batches carry no synthetic title (count badge + member preview
+    // identify the bag of people); session-local `· #1234` ordinals are retired.
+    assert.equal(projection.title, "");
     assert.notEqual(projection.subtitle, "oath-batch-run-1234");
     assert.equal(projection.subtitle, undefined);
   });
@@ -213,9 +217,9 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(projection.surfaceType, "approval-delegation");
+    assert.equal(projection.surfaceType, "preview");
     assert.equal(projection.title, "single-oath.pdf");
-    assert.equal(projection.rowTypeLabel, "Single delegation · Preview");
+    assert.equal(projection.rowTypeLabel, "Preview");
   });
 
   it("projects Oath Signature prep rows with PDF titles and file-run subtitles", () => {
@@ -286,7 +290,7 @@ describe("workflow runtime projection adapters", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 2);
-    assert.equal(projection.surfaceType, "batch-delegation");
+    assert.equal(projection.surfaceType, "batch");
     assert.equal(projection.title, "packet-a.pdf");
     assert.equal(projection.subtitle, "Oath · 1111");
     assert.deepEqual(projection.batchMembers, []);
@@ -360,7 +364,7 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Jane Doe");
     assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
   });
@@ -414,8 +418,8 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       const projection = buildWorkflowRunProjection(row, {
         runtimePolicies: phase5Policies,
       });
-      assert.equal(projection.surfaceType, "normal");
-      assert.equal(projection.rowTypeLabel, "Normal row");
+      assert.equal(projection.surfaceType, "single");
+      assert.equal(projection.rowTypeLabel, "Single");
       assert.deepEqual(projection.actions, [
         {
           ...DEFAULT_ROW_CANCEL_ACTION,
@@ -441,7 +445,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(row, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "normal");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Doe, Jane");
   });
 
@@ -461,7 +465,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(child, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Jane Doe");
   });
 
@@ -488,7 +492,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Jane Doe");
   });
 
@@ -518,7 +522,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       workflowLabels: new Map([["separations", "Separations"]]),
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "batch-delegation");
+    assert.equal(projection.surfaceType, "batch");
     assert.notEqual(projection.subtitle, "sep-batch-run-12345678");
     assert.deepEqual(projection.actions, [
       {
@@ -561,7 +565,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "onboarding-roster");
   });
 });

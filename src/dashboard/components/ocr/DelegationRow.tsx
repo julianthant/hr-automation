@@ -44,7 +44,7 @@ export function DelegationRow({
 
   return (
     <GroupRowBase
-      variant="approval-delegation"
+      variant="preview"
       title={projection?.title ?? title}
       parentRunId={runId}
       members={delegatedEntries}

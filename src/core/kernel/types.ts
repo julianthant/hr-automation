@@ -3,6 +3,8 @@ import type { ZodType } from 'zod'
 import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
+import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
+import type { WorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 
 export interface SystemConfig {
@@ -143,6 +145,31 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   label?: string
   /** Declarative row shape. Defaults to "batch" if `batch` is set, else "single". */
   archetype?: WorkflowArchetypeOrResolver<TData>
+  /**
+   * Subject-semantics kind for queue title/subtitle resolution — `person`,
+   * `file`, or `catalog`. Either a literal or a resolver `(input) => kind`
+   * for input-variant workflows (e.g. oath-signature: `pdf` → file, `signer`
+   * → person). Orthogonal to `archetype` (shape) and `parentRunId` (scope).
+   * See `domain/queue-row-kind.ts`.
+   */
+  queueRowKind?: QueueRowKindOrResolver<TData>
+  /**
+   * Optional per-workflow queue-row **status** rules — the status axis,
+   * orthogonal to `queueRowKind` (title/subtitle). Lets a workflow promote a
+   * row to a workflow-specific derived display status (e.g. person-lookup
+   * `notFound`, OCR `needsReview`) and/or render a supplemental status chip
+   * (e.g. person-lookup's A/IA tag), instead of teaching the generic dashboard
+   * `EntryItem` component to branch on `entry.workflow`. Omitted → the row uses
+   * the default base-status behavior unchanged. See `domain/queue-row-status.ts`.
+   */
+  statusExtensions?: WorkflowStatusExtensions
+  /**
+   * Short (2-char) workflow code used as the provenance prefix of a row's
+   * trace id (`<code>-<mmddyyHHMMSS>-<runId4>`, see `domain/queue-trace-id.ts`)
+   * and as the daemon instance prefix. Must be unique across workflows.
+   * Defaults to the first two letters of `name` when omitted.
+   */
+  code?: string
   /**
    * Display category for the dashboard's `WorkflowRail` grouping
    * (e.g. "Onboarding", "Separations", "Utils"). Workflows with the same
@@ -288,8 +315,8 @@ export interface DelegateOpts {
    * Projection hint for delegated rows. The child row's stamped archetype
    * still comes from the child workflow's resolved shape (`single` / `batch`)
    * plus the top-level `parentRunId` scope.
-   *   - "flat"    → flat delegation-member row
-   *   - "preview" → approval-delegation preview card
+   *   - "flat"    → flat single row
+   *   - "preview" → preview card row
    *   - "batch"   → grouped delegation member
    */
   renderAs?: DelegateRenderAs
@@ -454,6 +481,8 @@ export interface WorkflowMetadata {
   /** Human-readable workflow label for the dashboard (auto-derived from `name` when absent). */
   label: string
   archetype: WorkflowArchetype
+  /** 2-char workflow code — provenance prefix for trace ids and daemon instance names. */
+  code: string
   /** Dashboard-rail grouping (e.g. "Onboarding"). Absent → workflow lands in the rail's "Other" group. */
   category?: string
   /** Lucide-react icon name for `WorkflowBox`. Absent → frontend falls back to the generic `Workflow` icon. */
@@ -487,6 +516,10 @@ export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
   config: WorkflowConfig<TData, TSteps>
   metadata: WorkflowMetadata
   archetype: WorkflowArchetypeOrResolver<TData>
+  /** Resolved queue-row kind (literal or per-input resolver). See `domain/queue-row-kind.ts`. */
+  queueRowKind: QueueRowKindOrResolver<TData>
+  /** Resolved 2-char workflow code (provenance prefix for trace ids + daemon instance names). */
+  code: string
 }
 
 export interface BatchResult {

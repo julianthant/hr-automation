@@ -130,6 +130,7 @@ test("Hono /api/workflow-definitions returns registered workflow metadata", asyn
       systems: ["crm"],
       steps: ["one"],
       archetype: "single",
+      code: "lh",
       detailFields: [],
     });
     const db = openStateDb(dir);

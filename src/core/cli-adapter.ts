@@ -76,6 +76,8 @@ export function buildCliAdapter<TArgs extends readonly unknown[], TInput>(
               ...(extras ?? {}),
             },
             nameIdStamp: "omit",
+            runId,
+            at: new Date(now),
           });
           track({
             workflow: opts.workflow.config.name,

@@ -7,6 +7,10 @@ import { groupMergedTrackerEntries } from "../../queue-row-count.js";
 import { countTopLevelQueueSurfaceRows } from "../../queue-surfaces.js";
 import { log } from "../../../utils/log.js";
 import { isTrackerStatus, parseJsonObject, parseTypedDataJson, readStmts } from "./statements.js";
+import {
+  filterRetiredDashboardWorkflowCounts,
+  filterRetiredDashboardWorkflows,
+} from "../../../domain/dashboard-run-surfaces.js";
 
 // ── resolvedEmplIdMapFromRunEvents ────────────────────────────────────────────
 
@@ -149,7 +153,10 @@ export function queryEntriesPayload(
     };
   });
 
-  const workflows = (readStmts(db).selectDistinctWorkflowsForDate.all({ date: opts.date }) as Array<{ workflow: string }>).map((r) => r.workflow);
+  const workflows = filterRetiredDashboardWorkflows(
+    (readStmts(db).selectDistinctWorkflowsForDate.all({ date: opts.date }) as Array<{ workflow: string }>)
+      .map((r) => r.workflow),
+  );
 
   const resolvedEmplFromDay = resolvedEmplIdMapFromRunEvents(db, opts.date);
 
@@ -275,5 +282,11 @@ export function queryEntriesPayload(
     if (n > 0) failureCounts[wf] = n;
   }
 
-  return { entries, workflows, wfCounts, failureCounts, source: "sqlite" };
+  return {
+    entries,
+    workflows,
+    wfCounts: filterRetiredDashboardWorkflowCounts(wfCounts),
+    failureCounts: filterRetiredDashboardWorkflowCounts(failureCounts),
+    source: "sqlite",
+  };
 }

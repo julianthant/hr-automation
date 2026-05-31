@@ -34,7 +34,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
 
     assert.equal(result.groupRows.length, 1, "should produce one group card");
-    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(result.groupRows[0]?.kind, "preview");
     assert.equal(result.groupRows[0]?.approvalState, "awaiting-approval");
     assert.equal(result.groupRows[0]?.parentRunId, "ocr-run-1");
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
@@ -75,7 +75,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
 
     assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(result.groupRows[0]?.kind, "preview");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), []);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
@@ -110,7 +110,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
 
     assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(result.groupRows[0]?.kind, "preview");
     assert.equal(result.groupRows[0]?.approvalState, "approved");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["child-1", "child-2"]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
@@ -141,7 +141,7 @@ describe("buildTrackerQueueSurfaces", () => {
     // A single-signer PDF stays an OCR preview card after approval; signer
     // count does not change the preview row shape.
     assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(result.groupRows[0]?.kind, "preview");
     assert.equal(result.groupRows[0]?.approvalState, "approved");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["10000001"]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
@@ -214,7 +214,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
 
     assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "approval-delegation");
+    assert.equal(result.groupRows[0]?.kind, "preview");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), []);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
@@ -246,8 +246,8 @@ describe("buildTrackerQueueSurfaces", () => {
 
     assert.equal(result.groupRows.length, 2);
     assert.deepEqual(result.groupRows.map((surface) => surface.kind), [
-      "approval-delegation",
-      "approval-delegation",
+      "preview",
+      "preview",
     ]);
     assert.deepEqual(result.groupRows.map((surface) => surface.parentRunId), [
       "ocr-first-run",
