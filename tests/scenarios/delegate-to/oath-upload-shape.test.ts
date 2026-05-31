@@ -41,7 +41,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
 
     const ocrLikeChild = defineWorkflow({
       name: "scen-ocr-like",
-      archetype: "delegating-batch",
+      archetype: "preview",
       systems: [],
       authSteps: false,
       steps: ["prep"] as const,
@@ -82,6 +82,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
       getName: (d) => d.sessionId ?? "",
       getId: (d) => d.sessionId ?? "",
       handler: async (ctx, input) => {
+        ctx.updateData({ sessionId: input.sessionId });
         await ctx.step("ocr", async () => {
           const result = await ctx.delegateTo(
             ocrLikeChild,
@@ -111,6 +112,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
       getName: (d) => d.sessionId ?? "",
       getId: (d) => d.sessionId ?? "",
       handler: async (ctx, input) => {
+        ctx.updateData({ sessionId: input.sessionId });
         await ctx.step("delegate-signatures", async () => {
           const result = await ctx.delegateTo(
             oathSignaturePdfLike,
@@ -138,7 +140,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
     const pdfPending = pdfLines.find((l) => l.status === "pending");
     expect(pdfPending).toBeDefined();
     expect(pdfPending?.parentRunId).toBe(parentRunId);
-    expect((pdfPending?.data as { archetype?: string }).archetype).toBe("delegate-child");
+    expect((pdfPending?.data as { archetype?: string }).archetype).toBe("batch");
     expect(pdfPending?.input).toEqual({ sessionId: "sess-abc", eids: ["E1", "E2", "E3"] });
     expect(pdfPending?.id).toBe("sess-abc");
 
@@ -149,7 +151,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
     const ocrPending = ocrLines.find((l) => l.status === "pending");
     expect(ocrPending).toBeDefined();
     expect(ocrPending?.parentRunId).toBe(pdfRunId);
-    expect((ocrPending?.data as { archetype?: string }).archetype).toBe("delegate-child");
+    expect((ocrPending?.data as { archetype?: string }).archetype).toBe("preview");
     expect(ocrPending?.input).toEqual({ sessionId: "sess-abc" });
     expect(ocrPending?.id).toBe("sess-abc");
 
@@ -158,7 +160,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
     expect(sigPendings.length).toBe(3);
     for (const p of sigPendings) {
       expect(p.parentRunId).toBe(pdfRunId);
-      expect((p.data as { archetype?: string }).archetype).toBe("delegate-child");
+      expect((p.data as { archetype?: string }).archetype).toBe("batch-member");
       expect(p.input).toMatchObject({ emplId: expect.any(String) });
     }
     const sigEids = sigPendings.map((p) => (p.input as { emplId: string }).emplId).sort();

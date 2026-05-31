@@ -1,7 +1,17 @@
-import type { WorkflowConfig, RegisteredWorkflow, WorkflowMetadata, RunOpts, BatchResult } from './types.js'
+import type {
+  WorkflowConfig,
+  RegisteredWorkflow,
+  WorkflowMetadata,
+  WorkflowStepPreset,
+  WorkflowStepPresetMetadata,
+  RunOpts,
+  BatchResult,
+} from './types.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
+import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
+import { registerWorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import { Session } from './session.js'
 import { log } from '../../utils/log.js'
 import { runWorkflowPool } from './pool.js'
@@ -23,6 +33,57 @@ export {
 export { buildSessionObserver } from './session-observer.js'
 export { runWorkflow } from './run-workflow.js'
 
+/**
+ * Validate `WorkflowConfig.presets` and normalize to the wire shape.
+ * Throws on duplicate preset ids, empty / reserved ids, or skipSteps entries
+ * that aren't members of the workflow's declared `steps` tuple. `"full"` is
+ * reserved because the dashboard synthesizes it client-side as the implicit
+ * default preset — workflow files must not redeclare it.
+ */
+function validateAndNormalizePresets<TSteps extends readonly string[]>(
+  workflowName: string,
+  steps: TSteps,
+  presets: ReadonlyArray<WorkflowStepPreset<TSteps>>,
+): WorkflowStepPresetMetadata[] {
+  const declaredSteps = new Set<string>(steps)
+  const seenIds = new Set<string>()
+  return presets.map((p, i) => {
+    if (!p.id || typeof p.id !== 'string') {
+      throw new Error(`defineWorkflow('${workflowName}'): presets[${i}].id must be a non-empty string`)
+    }
+    if (p.id === 'full') {
+      throw new Error(
+        `defineWorkflow('${workflowName}'): presets[${i}].id 'full' is reserved for the implicit default preset; choose another id`,
+      )
+    }
+    if (seenIds.has(p.id)) {
+      throw new Error(`defineWorkflow('${workflowName}'): duplicate preset id '${p.id}'`)
+    }
+    seenIds.add(p.id)
+    if (!p.label || typeof p.label !== 'string') {
+      throw new Error(`defineWorkflow('${workflowName}'): presets[${i}].label must be a non-empty string`)
+    }
+    if (!Array.isArray(p.skipSteps) || p.skipSteps.length === 0) {
+      throw new Error(
+        `defineWorkflow('${workflowName}'): presets[${i}] ('${p.id}').skipSteps must be a non-empty array`,
+      )
+    }
+    const unknown = p.skipSteps.filter((s) => !declaredSteps.has(s))
+    if (unknown.length > 0) {
+      throw new Error(
+        `defineWorkflow('${workflowName}'): preset '${p.id}' references unknown step(s): ${unknown.join(', ')}. ` +
+        `Declared steps: ${[...declaredSteps].join(', ')}`,
+      )
+    }
+    return {
+      id: p.id,
+      label: p.label,
+      skipSteps: [...p.skipSteps],
+      ...(p.description ? { description: p.description } : {}),
+    }
+  })
+}
+
 export function defineWorkflow<TData, TSteps extends readonly string[]>(
   config: WorkflowConfig<TData, TSteps>,
 ): RegisteredWorkflow<TData, TSteps> {
@@ -35,10 +96,19 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     typeof archetype === 'function'
       ? (config.batch ? 'batch' : 'single')
       : archetype
+  // Subject-semantics kind (defaults to person — the majority shape; the
+  // architecture guard enforces an explicit declaration on every real
+  // workflow). Code is the trace-id/daemon provenance prefix.
+  const queueRowKind: QueueRowKindOrResolver<TData> = config.queueRowKind ?? 'person'
+  const code = (config.code ?? config.name.slice(0, 2)).toLowerCase()
+  const presetsMetadata = config.presets
+    ? validateAndNormalizePresets(config.name, config.steps, config.presets)
+    : undefined
   const metadata: WorkflowMetadata = {
     name: config.name,
     label: config.label ?? autoLabel(config.name),
     archetype: metadataArchetype,
+    code,
     steps: effectiveSteps,
     systems: config.systems.map((s) => s.id),
     detailFields: (config.detailFields ?? []).map(normalizeDetailField),
@@ -47,12 +117,16 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     ...(config.matchKey ? { matchKey: config.matchKey } : {}),
     hasOperatorSubject: Boolean(config.operatorSubject),
     ...(config.runtimePolicy ? { runtimePolicy: config.runtimePolicy } : {}),
+    ...(presetsMetadata && presetsMetadata.length > 0 ? { presets: presetsMetadata } : {}),
   }
   if (config.runtimePolicy) {
     setWorkflowRuntimePolicy(config.name, config.runtimePolicy)
   }
+  if (config.statusExtensions) {
+    registerWorkflowStatusExtensions(config.name, config.statusExtensions)
+  }
   register(metadata)
-  return { config: { ...config, archetype }, metadata, archetype }
+  return { config: { ...config, archetype, code }, metadata, archetype, queueRowKind, code }
 }
 
 export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
@@ -96,7 +170,6 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
     async ({ instance, markTerminated, makeObserver }) => {
       const { observer, getAuthTimings } = makeObserver('1')
       const session = await Session.launch(wf.config.systems, {
-        authChain: wf.config.authChain,
         launchFn: opts.launchFn,
         observer,
       })

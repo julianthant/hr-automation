@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
@@ -43,6 +44,10 @@ import {
   openTaskStore,
 } from "../../../src/tracker/tasks/store.js";
 import type { QueueEvent } from "../../../src/core/daemon/types.js";
+import {
+  resetDaemonSpawnStubs,
+  stubDaemonSpawn,
+} from "../../_utils/stub-daemon-spawn.js";
 
 let tmp: string;
 beforeEach(() => {
@@ -920,6 +925,18 @@ describe("buildCancelQueuedHandler", () => {
       runIds: ["sqlite-run-queued"],
     });
 
+    emitTrackerRow(
+      {
+        workflow: "separations",
+        timestamp: new Date().toISOString(),
+        id: "3930",
+        runId: "sqlite-run-queued",
+        status: "pending",
+        data: { archetype: "single", docId: "3930" },
+      },
+      tmp,
+    );
+
     const result = await buildCancelQueuedHandler(tmp)({
       workflow: "separations",
       id: "3930",
@@ -1038,6 +1055,29 @@ describe("buildCancelActiveBulkHandler", () => {
       runIds: ["sqlite-run-b"],
     });
 
+    emitTrackerRow(
+      {
+        workflow: "separations",
+        timestamp: new Date().toISOString(),
+        id: "3930",
+        runId: "sqlite-run-a",
+        status: "pending",
+        data: { archetype: "single", docId: "3930" },
+      },
+      tmp,
+    );
+    emitTrackerRow(
+      {
+        workflow: "separations",
+        timestamp: new Date().toISOString(),
+        id: "3932",
+        runId: "sqlite-run-b",
+        status: "pending",
+        data: { archetype: "single", docId: "3932" },
+      },
+      tmp,
+    );
+
     const result = await buildCancelActiveBulkHandler(tmp)({
       workflow: "separations",
       items: [
@@ -1084,6 +1124,18 @@ describe("buildCancelActiveBulkHandler", () => {
       deriveItemId: (input) => input.docId,
       runIds: ["run-queued"],
     });
+
+    emitTrackerRow(
+      {
+        workflow: "separations",
+        timestamp: new Date().toISOString(),
+        id: "4001",
+        runId: "run-queued",
+        status: "pending",
+        data: { archetype: "single", docId: "4001" },
+      },
+      tmp,
+    );
 
     const result = await buildCancelActiveBulkHandler(tmp)({
       workflow: "separations",
@@ -1300,6 +1352,13 @@ describe("dashboard worker command helpers", () => {
 });
 
 describe("buildRetryHandler SQLite lineage", () => {
+  beforeEach(() => {
+    stubDaemonSpawn(tmp);
+  });
+  afterEach(async () => {
+    await resetDaemonSpawnStubs();
+  });
+
   it("writes a completed retry_task command and creates the next attempt", async () => {
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
@@ -1316,6 +1375,18 @@ describe("buildRetryHandler SQLite lineage", () => {
       attemptId: enqueued.attemptId,
       error: "boom",
     });
+
+    emitTrackerRow(
+      {
+        workflow: "separations",
+        timestamp: new Date().toISOString(),
+        id: "6000",
+        runId: "run-failed",
+        status: "failed",
+        data: { archetype: "single", docId: "6000" },
+      },
+      tmp,
+    );
 
     const result = await buildRetryHandler(tmp)({
       workflow: "separations",
@@ -1361,6 +1432,17 @@ describe("buildRetryHandler SQLite lineage", () => {
         parentRunId: "old-parent-batch",
         status: "failed",
         data: { docId: "6000" },
+      },
+      tmp,
+    );
+    emitTrackerRow(
+      {
+        workflow: "separations",
+        timestamp: "2026-04-24T12:01:00.000Z",
+        id: "6000",
+        runId: "standalone-run",
+        status: "failed",
+        data: { archetype: "single", docId: "6000" },
       },
       tmp,
     );
@@ -1424,6 +1506,19 @@ describe("buildRetryHandler SQLite lineage", () => {
     });
     assert.equal(getDependencySummary(trackerStore, batch.parentTaskId).failed, 1);
 
+    emitTrackerRow(
+      {
+        workflow: "eid-lookup",
+        timestamp: new Date().toISOString(),
+        id: "ocr-oath-run-r0",
+        runId: "eid-run-failed",
+        parentRunId: "ocr-run-1",
+        status: "failed",
+        data: { archetype: "single", eid: "10424984" },
+      },
+      tmp,
+    );
+
     const result = await buildRetryHandler(tmp)({
       workflow: "eid-lookup",
       id: "ocr-oath-run-r0",
@@ -1455,6 +1550,19 @@ describe("buildRetryHandler SQLite lineage", () => {
       attemptId: enqueued.attemptId,
       error: "lookup failed",
     });
+
+    emitTrackerRow(
+      {
+        workflow: "eid-lookup",
+        timestamp: new Date().toISOString(),
+        id: "ocr-oath-run-r0",
+        runId: "eid-run-failed",
+        parentRunId: "ocr-run-1",
+        status: "failed",
+        data: { archetype: "single", eid: "10424984" },
+      },
+      tmp,
+    );
 
     const result = await buildRetryBulkHandler(tmp)({
       workflow: "eid-lookup",

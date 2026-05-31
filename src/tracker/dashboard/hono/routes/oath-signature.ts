@@ -9,7 +9,7 @@ import {
 import { saveUploadedPdf } from "../../oath-upload/http.js";
 import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
-import type { DashboardHonoDeps } from "../context.js";
+import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
 import { jsonResponse } from "../responses.js";
 
@@ -26,8 +26,14 @@ export function registerOathSignatureRoutes(app: Hono, deps: DashboardHonoDeps):
     const pdfPath = await saveUploadedPdf(file.data, pdfOriginalName, deps.dir);
     const pdfHash = createHash("sha256").update(file.data).digest("hex");
     const sessionId = multipart.parsed.fields.sessionId?.trim() || randomUUID();
-    const registered = deps.stateDb
-      ? registerLocalFile(deps.stateDb, {
+    // Resolve the projection DB handle per-request (mirrors the OCR route — see
+    // ocr.ts and context.ts:getProjectionDb). The cached `deps.stateDb` can
+    // outlive a `.tracker/state.db` delete/recreate or a `controlDb.close()`
+    // call from `watch-child-runs`; using it directly throws "database is not
+    // open" on the next write, which Hono surfaces as a plain-text 500.
+    const stateDb = getProjectionDb(deps);
+    const registered = stateDb
+      ? registerLocalFile(stateDb, {
           kind: "pdf",
           mimeType: "application/pdf",
           path: pdfPath,
@@ -37,8 +43,8 @@ export function registerOathSignatureRoutes(app: Hono, deps: DashboardHonoDeps):
           itemId: sessionId,
         })
       : null;
-    if (registered && deps.stateDb) {
-      void ensurePdfPageCache(deps.stateDb, {
+    if (registered && stateDb) {
+      void ensurePdfPageCache(stateDb, {
         trackerDir: deps.dir,
         fileId: registered.fileId,
         pdfPath,

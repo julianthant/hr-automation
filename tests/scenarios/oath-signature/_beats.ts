@@ -4,6 +4,9 @@ import type {
   OathPdfInput,
 } from "../../../src/workflows/oath-signature/schema.js";
 
+/** Populates the workflow `date` detailField in scenario tests. */
+export const SCENARIO_SIGNATURE_DATE = "05/01/2026";
+
 export interface OathSignatureBeatsOpts {
   /**
    * Step name to hold inside until the runtime releases or cancels. Only
@@ -43,7 +46,7 @@ export function oathSignatureBeats(
       data: {
         emplId: input.emplId,
         ...(input.name ? { name: input.name } : {}),
-        ...(input.date ? { date: input.date } : {}),
+        date: input.date ?? SCENARIO_SIGNATURE_DATE,
         ...(input.dryRun ? { dryRun: true } : {}),
       },
     },
@@ -126,16 +129,26 @@ export function oathPdfBeats(
  * `toMatchInlineSnapshot()` locks the shape across runs, not the specific id
  * values.
  */
-export function maskVolatile<T extends { runId: string; itemId: string; data: Record<string, string>; subtitle?: string | undefined }>(
+export function maskVolatile<T extends {
+  runId: string;
+  itemId: string;
+  data: Record<string, string>;
+  subtitle?: string | undefined;
+  parentRunId?: string | null;
+}>(
   snap: T,
 ): T {
   const subtitle = typeof snap.subtitle === "string"
     ? snap.subtitle.replace(/^Oath · [0-9a-f]{4}$/, "Oath · <last4>")
     : snap.subtitle;
+  const parentRunId = typeof snap.parentRunId === "string" && /#[0-9a-f]{8}$/.test(snap.parentRunId)
+    ? snap.parentRunId.replace(/#[0-9a-f]{8}$/, "#<run>")
+    : snap.parentRunId;
   return {
     ...snap,
     runId: "<runId>",
     itemId: "<itemId>",
+    ...(parentRunId !== undefined ? { parentRunId } : {}),
     ...(subtitle !== undefined ? { subtitle } : {}),
     data: { ...snap.data, instance: "<instance>" },
   };

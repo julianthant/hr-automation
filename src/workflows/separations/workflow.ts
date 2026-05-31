@@ -116,7 +116,9 @@ export function resolveJobSummaryResult(
 export const separationsWorkflow = defineWorkflow({
   name: "separations",
   label: "Separations",
-  archetype: "batch",
+  archetype: "single",
+  queueRowKind: "person",
+  code: "se",
   category: "Separations",
   iconName: "UserMinus",
   systems: [
@@ -177,7 +179,20 @@ export const separationsWorkflow = defineWorkflow({
   steps: separationsSteps,
   schema: SeparationInputSchema,
   runtimePolicy: SEPARATIONS_WORKFLOW_RUNTIME_POLICY,
-  authChain: "parallel-staggered",
+  // Dashboard input-run gear menu — operator-selectable "Run mode" presets.
+  // The implicit "Full" preset (all 5 steps) is synthesized client-side and
+  // not listed here. Each preset's `skipSteps` set surfaces in the handler via
+  // `ctx.shouldSkipStep(name)`; the handler folds the check into its existing
+  // skip branches (which already gate on Edit Data prefilled values).
+  presets: [
+    {
+      id: "transactions-only",
+      label: "Transactions only",
+      skipSteps: ["kronos-search", "ucpath-job-summary"],
+      description:
+        "Skips Kronos date verification and UCPath Job Summary. Assumes the Kuali form already has Last Day Worked, Separation Date, Dept, and Payroll Code filled correctly.",
+    },
+  ],
   batch: {
     mode: "sequential",
     betweenItems: ["reset"],
@@ -326,18 +341,22 @@ export const separationsWorkflow = defineWorkflow({
     let newKronosFound = false;
     let jobSummaryData: JobSummaryData | undefined;
 
-    if (lastDayWorkedPrefilled) {
-      // Edit-and-resume: user has supplied lastDayWorked — skip Kronos
-      // verification entirely. Job Summary lookup + Kuali timekeeper-name
-      // fill are also bypassed; both run on the original pass and either
-      // already filled the form (subsequent retry) or are non-fatal if
-      // missing (step 4 dept/payroll fill no-ops on undefined jobSummaryData;
-      // timekeeper name is filled here as a best-effort to keep the form
-      // complete on resume).
+    // Two reasons to skip kronos-search converge here:
+    //   1. Edit-and-resume prefilled `lastDayWorked` (existing path).
+    //   2. Operator selected the "Transactions only" preset from the
+    //      InputRunPanel gear menu (asserts the Kuali form is already correct).
+    // In both cases the handler falls back to `kualiData.lastDayWorked` (which
+    // kuali-extraction just read from the Kuali form) for downstream
+    // `resolveKronosDates`, so no extra plumbing is needed.
+    const presetSkippedKronos = ctx.shouldSkipStep("kronos-search");
+    if (lastDayWorkedPrefilled || presetSkippedKronos) {
       ctx.skipStep("kronos-search");
       log.step(
-        `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
-        `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`,
+        presetSkippedKronos
+          ? `[Step: kronos-search] SKIPPED — run mode 'Transactions only' ` +
+            `(operator asserts Kuali dates are correct — using kualiData.lastDayWorked='${kualiData.lastDayWorked}')`
+          : `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
+            `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`,
       );
       try {
         const kp = await ctx.page("kuali");
@@ -439,13 +458,23 @@ export const separationsWorkflow = defineWorkflow({
     // kronos-search skipped → jobSummaryData undefined).
     const hasUcpathFillData = !!jobSummaryData &&
       (!!jobSummaryData.departmentDescription || !!jobSummaryData.jobCode);
-    if (!hasUcpathFillData) {
+    // Three reasons to skip ucpath-job-summary:
+    //   1. No fillable data returned from the Phase-1 parallel fetch (existing).
+    //   2. Edit-and-resume prefilled lastDayWorked → kronos-search was
+    //      skipped above → jobSummaryData is undefined (existing).
+    //   3. Operator selected the "Transactions only" preset (new) — they
+    //      asserted dept/payroll are already in the Kuali form.
+    const presetSkippedJobSummary = ctx.shouldSkipStep("ucpath-job-summary");
+    if (!hasUcpathFillData || presetSkippedJobSummary) {
       ctx.skipStep("ucpath-job-summary");
       log.step(
-        lastDayWorkedPrefilled
-          ? `[Step: ucpath-job-summary] SKIPPED — manual input from edit-data ` +
-            `(lastDayWorked prefilled, no UCPath fetch ran)`
-          : `[Step: ucpath-job-summary] SKIPPED — UCPath Job Summary returned no fillable data`,
+        presetSkippedJobSummary
+          ? `[Step: ucpath-job-summary] SKIPPED — run mode 'Transactions only' ` +
+            `(operator asserts Kuali form has dept/payroll filled)`
+          : lastDayWorkedPrefilled
+            ? `[Step: ucpath-job-summary] SKIPPED — manual input from edit-data ` +
+              `(lastDayWorked prefilled, no UCPath fetch ran)`
+            : `[Step: ucpath-job-summary] SKIPPED — UCPath Job Summary returned no fillable data`,
       );
     } else {
       await ctx.step("ucpath-job-summary", () =>

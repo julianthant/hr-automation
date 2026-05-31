@@ -14,15 +14,16 @@ systems: [{
 }],
 ```
 
-`Session.launch` in `src/core/session.ts` calls each `login` in the configured `authChain` order (sequential or interleaved) with 3-attempt retry.
+`Session.launch` in `src/core/kernel/session.ts` calls each `login` with 3-attempt retry. There is one global auth strategy — no per-workflow `authChain` knob:
 
-## Files
+- **1 system** → fast path: `bringToFront` → `login` → done. No settle, no stagger.
+- **≥2 systems** → **parallel-staggered with concurrency cap**:
+  1. Every system's SSO form is navigated + filled in parallel via the optional `prepareLogin` hook (see `kualiNavigateAndFill`, `ucpathNavigateAndFill` etc.).
+  2. After all forms are filled, a `settleMs` pause (default **2000 ms**) before the first Submit click — gives the operator a moment to look at the phone.
+  3. Submit clicks fire with a `staggerMs` gap (default **5000 ms**) between each, so Duo push notifications arrive evenly spaced (avoids the cached multi-prompt collision documented below).
+  4. At most `maxConcurrentDuos` (default **1**) Duo pends at any moment. With ≥2 systems, additional ones wait until a slot frees on approval — the operator never sees more than 1 queued prompt on their phone.
 
-- `login.ts` — All login flows: `loginToUCPath`, `loginToACTCrm`, `loginToUKG` (split into `ukgNavigateAndFill` + `ukgSubmitAndWaitForDuo`), `loginToKuali`, `loginToNewKronos`
-- `duo-poll.ts` — `pollDuoApproval(page, options)` — unified Duo polling loop with URL match, successCheck, postApproval, recovery callbacks, and optional `systemLabel` for the voice-cue + Telegram hooks
-- `voice-cue.ts` — `cueDuo(systemId)` — best-effort macOS voice cue ("Duo for UCPath") spoken via `say` when `HR_AUTOMATION_VOICE_CUES=1`. No-op on non-darwin or when the env var is unset. Per-systemId 30s cooldown prevents rapid duplicates across auth retries. Never throws. `pollDuoApproval` calls this once per auth attempt before the polling loop starts
-- `telegram-notify.ts` — `notifyAuthEvent(ev)` — best-effort Telegram DM via Bot API on Duo `waiting` / `approved` / `timeout` / `resent`. Activated only when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are both in env; no-op otherwise. Mirrors `voice-cue.ts` (factory `createTelegramNotifier` + default instance, never throws). Workflow + runId pulled from `AsyncLocalStorage` log context so messages name the kernel item without per-call-site plumbing
-- `types.ts` — `AuthResult` (ucpath/actCrm booleans)
+Tuning knobs live on `LaunchOpts` (`staggerMs`, `settleMs`, `maxConcurrentDuos`) and are primarily for tests. Production callers don't pass them.
 
 ## Login Flows
 
@@ -46,7 +47,7 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 ## Gotchas
 
 - **Duo MFA is manual** — automation pauses and polls for user phone approval
-- **Duo serialization** — historically all sessions submitted Duo prompts strictly sequentially because simultaneous prompts collided. As of 2026-04-27 the kernel supports `authChain: "parallel-staggered"` which spaces submits 5s apart and lets prompts overlap; separations uses this mode. If a workflow needs guaranteed serialization (slow Duo provider, customer-policy reason, regression on the staggered path), keep `authChain: "sequential"` or `"interleaved"`
+- **Duo serialization** — historically all sessions submitted Duo prompts strictly sequentially because simultaneous prompts collided. The kernel now uses one global parallel-staggered chain for any ≥2-system workflow (5s submit gap, 2s pre-submit settle, 1-Duo concurrency cap). The legacy `authChain` field was removed on 2026-05-27 — there is no opt-out per workflow; tuning lives on `LaunchOpts` for tests.
 - UCPath may redirect back to campus discovery page after Duo — retry loop (3x) handles this
 - UKG `ukgNavigateAndFill` returns `true | false | "already_logged_in"` (string return for persistent session detection)
 - UKG is the only flow with network error retry logic (5s backoff for transient errors)
@@ -54,13 +55,11 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 - Debug screenshots saved to `.auth/debug-*.png` (ACTCrm flow only)
 - "Enroll in Two-Step Login" nav link has `role="button"` containing "Login" — causes selector collisions if not using `button[name=...]`
 
-## Verified Selectors
-
-SSO field fallbacks are documented in the selector pattern above and live inline in `fillSsoCredentials`. If a login selector changes, update this file and the relevant system `LESSONS.md` after searching/merging related entries.
-
 ## Lessons Learned
 
 - **2026-04-10: Duo pollDuoApproval auto-retry on timeout** — Duo MFA can time out if the user doesn't approve in time (e.g. phone not nearby). `pollDuoApproval` now auto-retries on timeout by clicking the "Try Again" button in the Duo iframe. This avoids the entire workflow failing because of a single missed Duo prompt.
 - **2026-04-28: Telegram bot for remote Duo approval.** Hooked into `pollDuoApproval` at four points (`duo-waiting` after `cueDuo`, `duo-resent` in the Try-Again branch, `duo-approved` in the success branch, `duo-timeout` after the loop exhausts) so every login flow benefits without per-flow opt-in. `notifyAuthEvent` reads `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` live from `process.env` on each call so dotenv reload mid-process picks up new values. Workflow + runId pulled from the log ALS via `getLogWorkflow()` / `getLogRunId()`. Auto-discovered `chat_id` via `/getUpdates` during the `npm run setup:telegram` wizard; phone number isn't stored in code or env — only the chat_id lives in `.env`. Token + chat_id required; missing either var → silent no-op (so unconfigured operators aren't blocked). Best-effort fire-and-forget — every error path swallowed; 5 s `AbortSignal.timeout` so a slow Telegram never blocks polling.
 - **2026-04-29: Pre-announce grace window suppresses cached-trust false positives.** Original `pollDuoApproval` fired `cueDuo` + `emitTelegram("duo-waiting")` + `log.waiting` unconditionally at the top of the function, before checking page state. With Duo's "Yes, this is my device" trust token cached, the SAML chain redirects straight to the success URL without pushing to Duo Mobile — so the operator got a Telegram message claiming a Duo prompt that never actually went to their phone. Fix: a silent pre-check loop runs first (default `DUO_PRE_CHECK_MS = 2000ms`, sampled every `DUO_PRE_CHECK_INTERVAL_MS = 500ms`), checking only `urlMatches` + optional `successCheck`. If the URL transitions to success during that window, log `"Duo skipped (cached trust)"` and return — no voice cue, no Telegram, no waiting log. If the window elapses without auto-success, the announce phase fires and the main poll loop runs as before. Tunable via `preCheckMs` / `preCheckIntervalMs` on `DuoPollOptions`; set `preCheckMs: 0` to restore legacy "notify immediately" behavior. Tradeoff: real Duo notifications arrive ≤2 s later than before, which is well below the user-perceptible threshold for "phone buzzes vs. operator looks at dashboard." Slow networks (cached pass-through > 2 s) still produce a false-positive Telegram, but this is now rare instead of universal.
 - **2026-05-15: SSO field selectors are inline in `fillSsoCredentials`.** The old selector getter was removed; keep the 3-level fallback chains directly beside the fill operations so the selector order and behavior stay obvious. If the selector set changes, test the login behavior or the fallback chain through `fillSsoCredentials`, not a detached getter.
+- **2026-05-27: Global auth chain — `authChain` field deleted.** The kernel had three modes (`sequential`, `interleaved`, `parallel-staggered`) selectable per workflow. As of 2026-05-27 the field is gone and `Session.launch` always uses one strategy: 1-system fast path, ≥2-system parallel-staggered with cap=1 + settle=2s + stagger=5s. Migration was mechanical (`authChain: "sequential"` lines removed from every workflow file) — there is no path back. If a workflow legitimately needs strict serialization in the future, restore the field on `WorkflowConfig` + the `sequential` branch in `Session.launch` rather than working around it in the handler.
+- **2026-05-27: Global auth queue cap reduced to one.** The default `LaunchOpts.maxConcurrentDuos` is now 1, so production multi-system auth keeps only one Duo prompt pending at a time. Tests may still pass `maxConcurrentDuos > 1` to exercise the semaphore path, but production callers should continue omitting the knob unless the operator intentionally wants concurrent phone prompts.

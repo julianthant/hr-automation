@@ -41,6 +41,43 @@ test('splitPrefilled: ignores prefilledData when not an object', () => {
   }
 })
 
+test('splitPrefilled: extracts runtimeOptions.skipSteps + preset and removes them', () => {
+  const input = {
+    docId: '3930',
+    __runtimeOptions: { skipSteps: ['kronos-search', 'ucpath-job-summary'], preset: 'transactions-only' },
+  }
+  const { cleaned, runtimeOptions } = splitPrefilled(input)
+  assert.deepEqual(cleaned, { docId: '3930' })
+  assert.deepEqual(runtimeOptions, {
+    skipSteps: ['kronos-search', 'ucpath-job-summary'],
+    preset: 'transactions-only',
+  })
+})
+
+test('splitPrefilled: skipSteps + prefilledData can ride together', () => {
+  const input = {
+    docId: '3930',
+    prefilledData: { eid: '12345' },
+    __runtimeOptions: { skipSteps: ['kronos-search'] },
+  }
+  const { cleaned, prefilled, runtimeOptions } = splitPrefilled(input)
+  assert.deepEqual(cleaned, { docId: '3930' })
+  assert.deepEqual(prefilled, { eid: '12345' })
+  assert.deepEqual(runtimeOptions, { skipSteps: ['kronos-search'] })
+})
+
+test('splitPrefilled: drops runtimeOptions when skipSteps is empty AND no preset', () => {
+  const input = { docId: '3930', __runtimeOptions: { skipSteps: [] } }
+  const { runtimeOptions } = splitPrefilled(input)
+  assert.equal(runtimeOptions, null)
+})
+
+test('splitPrefilled: ignores non-string skipSteps entries', () => {
+  const input = { docId: '3930', __runtimeOptions: { skipSteps: ['a', 42, 'b'] } }
+  const { runtimeOptions } = splitPrefilled(input)
+  assert.equal(runtimeOptions, null)
+})
+
 test('splitPrefilled: tolerates non-object input', () => {
   for (const v of ['string', 42, null, undefined, [1, 2]] as const) {
     const { cleaned, prefilled } = splitPrefilled(v)

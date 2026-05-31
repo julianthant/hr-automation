@@ -33,7 +33,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // handler-side `if (!ctx.data.foo) await ctx.step("extraction", ...)`
   // gates kick in. The full `data` (with channel) rides on the pending row
   // for retry.
-  const { cleaned: cleanedData, prefilled } = splitPrefilled(data)
+  const { cleaned: cleanedData, prefilled, runtimeOptions } = splitPrefilled(data)
   const inputForRow = toRecord(data)
 
   // 1. Validate data AND use the parsed value so Zod .transform/.default/
@@ -146,7 +146,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     let terminalWritten = false
     try {
       const session = await Session.launch(wf.config.systems, {
-        authChain: wf.config.authChain,
         launchFn: opts.launchFn,
         observer,
         onReady: (sess) => {
@@ -237,6 +236,11 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
     const seedData = buildInitialTrackerData(wf, handlerInput)
+    const rowArchetype = deriveRowArchetype(
+      resolveArchetype(wf.config, handlerInput),
+      opts.parentRunId,
+      runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
+    )
     await withTrackedWorkflow(
       wf.config.name,
       String(itemId),
@@ -265,10 +269,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         initialData: Object.keys(seedData).length > 0 ? seedData : undefined,
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
-        archetype: deriveRowArchetype(
-          resolveArchetype(wf.config, handlerInput),
-          opts.parentRunId,
-        ),
+        archetype: rowArchetype,
       },
     )
   }, opts.trackerDir)

@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   getInputRunConfig,
-  parseActiveCheckInputs,
+  parsePersonLookupInputs,
 } from "../../../src/dashboard/lib/input-run-registry.js";
 
-test("active-check input run accepts EIDs and names separated by semicolons", () => {
-  const parsed = parseActiveCheckInputs("10873698; Battistessa, Johnnie");
+test("person-lookup input run accepts EIDs and names separated by semicolons", () => {
+  const parsed = parsePersonLookupInputs("10873698; Battistessa, Johnnie");
 
   assert.deepEqual(parsed, {
     ok: true,
@@ -18,15 +18,15 @@ test("active-check input run accepts EIDs and names separated by semicolons", ()
   });
 });
 
-test("active-check input run rejects empty input", () => {
-  assert.deepEqual(parseActiveCheckInputs(" ; "), {
+test("person-lookup input run rejects empty input", () => {
+  assert.deepEqual(parsePersonLookupInputs(" ; "), {
     ok: false,
     error: "Enter at least one EID or name",
   });
 });
 
-test("active-check is visible in the dashboard input-run registry", () => {
-  const config = getInputRunConfig("active-check");
+test("person-lookup is visible in the dashboard input-run registry", () => {
+  const config = getInputRunConfig("person-lookup");
 
   assert.ok(config);
   assert.match(config.placeholder, /EIDs or names/);

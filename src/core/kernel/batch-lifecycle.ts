@@ -139,8 +139,7 @@ export interface BatchLifecycleOpts<TData = unknown> {
    * signalled via `markTerminated(runId)`. Daemon mode passes an empty
    * array — items arrive dynamically, and in-flight state is tracked by
    * the daemon loop itself. `parentRunId` (when set) flows onto the
-   * synthetic `failed` row so archetype derivation produces the right
-   * `delegate-child` / `passive-child` shape. */
+   * synthetic `failed` row so projection can classify delegated scope. */
   perItem: Array<{ item: unknown; itemId: string; runId: string; parentRunId?: string }>
   /** Tracker directory override — defaults to `.tracker` via DEFAULT_DIR. */
   trackerDir?: string

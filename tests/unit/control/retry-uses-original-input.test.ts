@@ -28,18 +28,25 @@ import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { trackEvent, readEntries } from "../../../src/tracker/jsonl.js";
 import { buildRetryHandler } from "../../../src/control/ops/retry.js";
+import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
+import {
+  resetDaemonSpawnStubs,
+  stubDaemonSpawn,
+} from "../../_utils/stub-daemon-spawn.js";
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "retry-original-"));
 });
-afterEach(() => {
+afterEach(async () => {
+  await resetDaemonSpawnStubs();
   closeStateDbForTests(tmp);
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
 
 describe("retry uses pristine original input (Contract 2)", () => {
   it("re-enqueues with the original input even when later tracker rows carry mutated data", async () => {
+    stubDaemonSpawn(tmp, { instanceIdPrefix: "retry" });
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
 
@@ -174,6 +181,48 @@ describe("retry uses pristine original input (Contract 2)", () => {
     // 7. Original input snapshot is preserved across the retry.
     const originalAfterRetry = taskStore.findOriginalInputForRunId(newPending.runId!);
     assert.deepEqual(originalAfterRetry, { emplId: "1234", effectiveDate: "2026-05-01" });
+  });
+
+  it("starts a daemon when retry requeues a failed task and no daemon is alive", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+
+    const [enqueued] = taskStore.enqueueTasks({
+      workflow: "work-study",
+      inputs: [{ emplId: "9876", effectiveDate: "2026-05-03" }],
+      deriveItemId: (input) => input.emplId,
+      runIds: ["failed-run-no-daemon"],
+    });
+
+    taskStore.claimNextTask({ workflow: "work-study", workerId: "w1" });
+    taskStore.markTaskFailed({
+      taskId: enqueued.taskId,
+      attemptId: enqueued.attemptId,
+      error: "transient failure",
+    });
+
+    emitTrackerRow(
+      {
+        workflow: "work-study",
+        timestamp: new Date().toISOString(),
+        id: "9876",
+        runId: "failed-run-no-daemon",
+        status: "failed",
+        data: { archetype: "single", emplId: "9876" },
+      },
+      tmp,
+    );
+
+    const { getSpawnCalls } = stubDaemonSpawn(tmp, { instanceIdPrefix: "retry" });
+
+    const result = await buildRetryHandler(tmp)({
+      workflow: "work-study",
+      id: "9876",
+      runId: "failed-run-no-daemon",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(getSpawnCalls(), 1, "retry must spawn one daemon when none is alive");
   });
 
   it("returns a structured error when both original and current task inputs are missing", async () => {

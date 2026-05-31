@@ -27,7 +27,9 @@ export const CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
 export const crmDocDownloadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "CRM Doc Download",
-  archetype: "utility",
+  archetype: "single",
+  queueRowKind: "person",
+  code: "cd",
   category: "Utils",
   iconName: "Download",
   systems: [
@@ -43,7 +45,6 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   steps: crmDocDownloadSteps,
   schema: CrmDocDownloadInputSchema,
   runtimePolicy: CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   batch: { mode: "pool", poolSize: 4, preEmitPending: true },
   detailFields: [
     { key: "emplId", label: "EID" },
@@ -147,12 +148,11 @@ export const runCrmDocDownloadCli = buildCliAdapter<[string[]], CrmDocDownloadIn
       id: itemId,
       runId,
       status: "failed",
-      // crm-doc-download is "utility" — when invoked as a delegate it
-      // surfaces as passive-child, otherwise single (deriveRowArchetype
-      // does the right thing for both cases).
+      // crm-doc-download is single-shaped; delegated presentation comes from
+      // the parent row's runtime policy rather than a separate utility archetype.
       data: {
         ...buildCrmDocDownloadPendingData(input),
-        archetype: deriveRowArchetype("utility", undefined),
+        archetype: deriveRowArchetype("single", undefined),
       },
       error: `Spawn failed before enqueue: ${errorMessage(error)}`,
     });

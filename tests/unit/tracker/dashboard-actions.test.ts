@@ -19,8 +19,12 @@ import { resolveActionTargets } from "../../../src/control/actions/resolve-targe
 import type { WorkflowActionRequest } from "../../../src/control/actions/types.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
-import { readEntries } from "../../../src/tracker/jsonl.js";
+import { readEntries, trackEvent } from "../../../src/tracker/jsonl.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
+import {
+  resetDaemonSpawnStubs,
+  stubDaemonSpawn,
+} from "../../_utils/stub-daemon-spawn.js";
 
 let dir: string;
 
@@ -28,7 +32,8 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "dash-actions-"));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await resetDaemonSpawnStubs();
   closeStateDbForTests(dir);
   if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 });
@@ -44,12 +49,28 @@ function seedQueued(workflow: string, items: Array<{ docId: string; runId: strin
   return { store, enqueued };
 }
 
+function seedPriorRow(workflow: string, id: string, runId: string, status: "pending" | "failed" = "pending") {
+  trackEvent(
+    {
+      workflow,
+      timestamp: new Date().toISOString(),
+      id,
+      runId,
+      status,
+      data: { archetype: "single" },
+      input: { docId: id },
+    },
+    dir,
+  );
+}
+
 describe("performWorkflowAction — cancel scope", () => {
   it("cancels exactly one queued run for scope=row", async () => {
     const { store, enqueued } = seedQueued("separations", [
       { docId: "3930", runId: "run-a" },
     ]);
     try {
+      seedPriorRow("separations", "3930", "run-a");
       const result = await performWorkflowAction({
         action: "cancel",
         scope: "row",
@@ -74,6 +95,8 @@ describe("performWorkflowAction — cancel scope", () => {
       { docId: "c", runId: "run-c" },
     ]);
     try {
+      seedPriorRow("separations", "a", "run-a");
+      seedPriorRow("separations", "b", "run-b");
       const result = await performWorkflowAction({
         action: "cancel",
         scope: "visible-view",
@@ -96,7 +119,48 @@ describe("performWorkflowAction — cancel scope", () => {
     }
   });
 
+  it("reports a clear error and leaves the task queued when cancel cannot find the prior tracker row", async () => {
+    const { store, enqueued } = seedQueued("separations", [
+      { docId: "missing-cancel-row", runId: "run-missing-cancel-row" },
+    ]);
+    try {
+      const result = await performWorkflowAction({
+        action: "cancel",
+        scope: "row",
+        source: "queue-panel",
+        workflowId: "separations",
+        targets: [
+          {
+            workflowId: "separations",
+            id: "missing-cancel-row",
+            runId: "run-missing-cancel-row",
+            status: "pending",
+          },
+        ],
+      }, { dir });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.count, 0);
+      assert.match(result.errors[0]?.error ?? "", /cannot cancel/i);
+      assert.match(result.errors[0]?.error ?? "", /prior tracker row/i);
+      assert.equal(store.getTask(enqueued[0].taskId)?.state, "queued");
+    } finally {
+      store.close();
+    }
+  });
+
   it("routes an OCR prep cancel to file-scope discard", async () => {
+    trackEvent(
+      {
+        workflow: "ocr",
+        timestamp: new Date().toISOString(),
+        id: "ocr-sess-1",
+        runId: "ocr-run-1",
+        status: "pending",
+        data: { archetype: "batch" },
+      },
+      dir,
+    );
     const result = await performWorkflowAction({
       action: "cancel",
       scope: "row",
@@ -123,6 +187,9 @@ describe("performWorkflowAction — retry scope", () => {
       { docId: "c", runId: "run-c" },
     ]);
     try {
+      stubDaemonSpawn(dir);
+      seedPriorRow("separations", "a", "run-a", "failed");
+      seedPriorRow("separations", "b", "run-b", "failed");
       const result = await performWorkflowAction({
         action: "retry",
         scope: "group",
@@ -140,6 +207,32 @@ describe("performWorkflowAction — retry scope", () => {
       assert.equal(store.listAttemptsForTask(enqueued[1].taskId).length, 2);
       // The third member was not in the group — no extra attempt created.
       assert.equal(store.listAttemptsForTask(enqueued[2].taskId).length, 1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reports a clear error when retry cannot find the prior tracker row", async () => {
+    const { store } = seedQueued("separations", [
+      { docId: "missing-row", runId: "run-missing-row" },
+    ]);
+    try {
+      const result = await performWorkflowAction({
+        action: "retry",
+        scope: "row",
+        source: "queue-panel",
+        workflowId: "separations",
+        targets: [{ workflowId: "separations", id: "missing-row", runId: "run-missing-row" }],
+      }, { dir });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.count, 0);
+      assert.match(result.errors[0]?.error ?? "", /cannot retry/i);
+      assert.match(result.errors[0]?.error ?? "", /prior tracker row/i);
+      assert.equal(store.listAttemptsForTask(store.findTaskByIdentity({
+        workflow: "separations",
+        itemId: "missing-row",
+      })!.taskId).length, 1);
     } finally {
       store.close();
     }

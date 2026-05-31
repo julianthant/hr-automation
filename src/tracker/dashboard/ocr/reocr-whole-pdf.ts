@@ -116,13 +116,13 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
           );
         } else {
           const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
-          const { eidLookupCrmWorkflow } = await import("../../../workflows/eid-lookup/index.js");
+          const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
           const inputs = enqueueItems.map((e) =>
             e.kind === "name"
               ? { name: spec.carryForwardKey(e.record as never) }
               : { emplId: extractRecordEid(e.record), keepNonHdh: true },
           );
-          await ensureDaemonsAndEnqueue(eidLookupCrmWorkflow, inputs as never, {}, {
+          await ensureDaemonsAndEnqueue(personLookupWorkflow, inputs as never, {}, {
             trackerDir,
             deriveItemId: (inp: { name?: string; emplId?: string }) => {
               const matched = enqueueItems.find((e) => {
@@ -154,7 +154,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             const { watchChildRuns: realWatchChildRuns } = await import("../../delegation/watch-child-runs.js");
             const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
             outcomes = await watchChildren({
-              workflow: "eid-lookup",
+              workflow: "person-lookup",
               expectedItemIds: capturedEnqueueItems.map((e) => e.itemId),
               trackerDir,
               date,
@@ -189,9 +189,8 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             records: JSON.stringify(records),
             failedPages: JSON.stringify([]),
             pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
-            // OCR prep parent rows are always batch-parent — required for
-            // emitTrackerRow's StampedData contract.
-            archetype: "batch-parent" as const,
+            // OCR prep parent rows are preview-shaped.
+            archetype: "preview" as const,
           };
           emit({
             workflow: WORKFLOW,

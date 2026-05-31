@@ -8,7 +8,7 @@ import {
 
 describe("resolveArchetype / resolveArchetypeFromValue", () => {
   it("returns the literal when archetype is a string", () => {
-    for (const v of ["single","batch","delegating","delegating-batch","utility"] as const) {
+    for (const v of ["single","preview","batch"] as const) {
       assert.equal(resolveArchetype({ name: "test", archetype: v }, {}), v);
     }
   });
@@ -22,7 +22,7 @@ describe("resolveArchetype / resolveArchetypeFromValue", () => {
   });
 
   it("returns each valid WorkflowArchetype value from a resolver", () => {
-    const all: WorkflowArchetype[] = ["single","batch","delegating","delegating-batch","utility"];
+    const all: WorkflowArchetype[] = ["single","preview","batch"];
     for (const value of all) {
       assert.equal(resolveArchetype({ name: "test", archetype: () => value }, undefined), value);
     }

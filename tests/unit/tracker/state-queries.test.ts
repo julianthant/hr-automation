@@ -57,14 +57,41 @@ test("queryEntriesPayload returns /events-compatible entries and counts", () => 
   }
 });
 
-test("queryEntriesPayload wfCounts merges same-day items that share emplId", () => {
+test("queryEntriesPayload hides retired workflows from dashboard rail metadata", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const day = "2026-05-04";
+    for (const workflow of ["active-check", "eid-lookup", "person-lookup"]) {
+      trackEvent({
+        workflow,
+        timestamp: `${day}T20:00:00.000Z`,
+        id: `${workflow}-row`,
+        runId: `${workflow}-run`,
+        status: "done",
+        data: { emplId: "10706431" },
+      }, dir);
+    }
+    const db = openStateDb(dir);
+    const payload = queryEntriesPayload(db, { workflow: "person-lookup", date: day });
+    assert.deepEqual(payload.workflows, ["person-lookup"]);
+    assert.equal(payload.wfCounts["person-lookup"], 1);
+    assert.equal(payload.wfCounts["active-check"], undefined);
+    assert.equal(payload.wfCounts["eid-lookup"], undefined);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryEntriesPayload wfCounts merges same-day person-lookup items that share emplId", () => {
   const dir = tmpTracker();
   try {
     openStateDb(dir);
     const day = "2026-05-09";
     trackEvent(
       {
-        workflow: "active-check",
+        workflow: "person-lookup",
         timestamp: `${day}T18:00:00.000Z`,
         id: "Doe, Jane",
         runId: "Doe, Jane#1",
@@ -75,7 +102,7 @@ test("queryEntriesPayload wfCounts merges same-day items that share emplId", () 
     );
     trackEvent(
       {
-        workflow: "active-check",
+        workflow: "person-lookup",
         timestamp: `${day}T18:05:00.000Z`,
         id: "10999999",
         runId: "10999999#1",
@@ -85,8 +112,8 @@ test("queryEntriesPayload wfCounts merges same-day items that share emplId", () 
       dir,
     );
     const db = openStateDb(dir);
-    const payload = queryEntriesPayload(db, { workflow: "active-check", date: day });
-    assert.equal(payload.wfCounts["active-check"], 1);
+    const payload = queryEntriesPayload(db, { workflow: "person-lookup", date: day });
+    assert.equal(payload.wfCounts["person-lookup"], 1);
     assert.equal(payload.entries.length, 2, "stream still lists latest event rows per run, not merged");
   } finally {
     closeStateDbForTests(dir);
@@ -94,7 +121,7 @@ test("queryEntriesPayload wfCounts merges same-day items that share emplId", () 
   }
 });
 
-test("queryEntriesPayload wfCounts carries emplId from earlier events when latest items row drops it", () => {
+test("queryEntriesPayload wfCounts carries emplId from earlier person-lookup events when latest items row drops it", () => {
   const dir = tmpTracker();
   try {
     openStateDb(dir);
@@ -102,7 +129,7 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
     // Final row has no emplId (e.g. cancel cleanup), but earlier row resolved one — merges with sibling EID item.
     trackEvent(
       {
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         timestamp: `${day}T10:00:00.000Z`,
         id: "Runwithdata, Test",
         runId: "Runwithdata, Test#1",
@@ -114,7 +141,7 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
     );
     trackEvent(
       {
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         timestamp: `${day}T10:01:00.000Z`,
         id: "Runwithdata, Test",
         runId: "Runwithdata, Test#1",
@@ -126,7 +153,7 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
     );
     trackEvent(
       {
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         timestamp: `${day}T11:01:00.000Z`,
         id: "77777001",
         runId: "77777001#1",
@@ -136,9 +163,9 @@ test("queryEntriesPayload wfCounts carries emplId from earlier events when lates
       dir,
     );
     const db = openStateDb(dir);
-    const payload = queryEntriesPayload(db, { workflow: "eid-lookup", date: day });
+    const payload = queryEntriesPayload(db, { workflow: "person-lookup", date: day });
     assert.equal(
-      payload.wfCounts["eid-lookup"],
+      payload.wfCounts["person-lookup"],
       1,
       "SQLite rail count respects cross-event emplId carry + merge-by-emplId",
     );
@@ -166,7 +193,7 @@ test("queryEntriesPayload wfCounts excludes approved OCR prep rows (new approval
           runId: `${id}#1`,
           status: "done",
           step: "approved",
-          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "batch-parent" },
+          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "batch" },
         },
         dir,
       );

@@ -90,3 +90,19 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Read `personOrgSummary.personNameValue` first, then use the old leaf-text heuristic only as a fallback for legacy renderings. The fallback label list now contains UI copy only.
 **Selector:** `personOrgSummary.personNameValue` in `selectors.ts`
 **Tags:** person-org-summary, name, detail, header, heuristic, selector
+
+## 2026-05-27 — Smart HR Transactions text selector also matches SS Smart HR Transactions
+
+**Tried:** Clicking the Smart HR Templates child with `getByText("Smart HR Transactions")`.
+**Failed because:** Live UCPath renders both "Smart HR Transactions" and "SS Smart HR Transactions" in the expanded Smart HR Templates group; the loose text selector matches four text nodes and Playwright strict mode aborts before the transaction form loads.
+**Fix:** Use `getByRole("link", { name: "Smart HR Transactions", exact: true })` for `hrTasks.smartHRTransactionsLink`.
+**Selector:** `hrTasks.smartHRTransactionsLink` in `selectors.ts`
+**References:** separations docs 3917 and 4025 failed on 2026-05-27 with `ucpath-transaction-failed` after this strict-mode collision.
+**Tags:** smart-hr, transactions, sidebar, strict-mode, exact, role, ss-smart-hr
+
+## 2026-05-27 — Submitted transaction ID is below the visible viewport
+
+**Tried:** Reopening the submitted Smart HR transaction and taking the normal workflow screenshot from the top of the Enter Transaction Information page.
+**Failed because:** The `Transaction ID: T...` field and the approval strip (`Transaction: T..., ID: ...`) are below the comments/save area. A top-positioned screenshot hides the usable T-number, and a failed parse returned before any submitted-page evidence screenshot was captured.
+**Fix:** Scroll the Smart HR iframe to transaction readback markers before parsing and before workflow screenshots. Parse both lower-page shapes via `extractSmartHrTransactionNumber`, and capture `ucpath-transaction-submitted-missing-number` when UCPath accepted the submit but parsing still returns empty.
+**Tags:** transaction, readback, screenshot, scroll, smart-hr, separations

@@ -21,12 +21,18 @@ import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { buildRetryHandler } from "../../../src/control/ops/retry.js";
+import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
+import {
+  resetDaemonSpawnStubs,
+  stubDaemonSpawn,
+} from "../../_utils/stub-daemon-spawn.js";
 
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "retry-state-guard-"));
 });
-afterEach(() => {
+afterEach(async () => {
+  await resetDaemonSpawnStubs();
   closeStateDbForTests(tmp);
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
@@ -139,6 +145,7 @@ describe("retry state guard — blocks retry against active attempts", () => {
   });
 
   it("allows retry against a `failed` task (terminal — guard does not fire)", async () => {
+    stubDaemonSpawn(tmp, { instanceId: "retry-state-guard" });
     const control = openControlDb({ trackerDir: tmp });
     const taskStore = createTaskStore(control);
 
@@ -155,6 +162,18 @@ describe("retry state guard — blocks retry against active attempts", () => {
       attemptId: enqueued.attemptId,
       error: "transient failure",
     });
+
+    emitTrackerRow(
+      {
+        workflow: "work-study",
+        timestamp: new Date().toISOString(),
+        id: "5555",
+        runId: "failed-run",
+        status: "failed",
+        data: { archetype: "single", emplId: "5555" },
+      },
+      tmp,
+    );
 
     const result = await buildRetryHandler(tmp)({
       workflow: "work-study",

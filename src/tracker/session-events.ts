@@ -465,14 +465,13 @@ const STALE_START_THRESHOLD_MS = 60_000;
 export const INSTANCE_LABELS: Record<string, string> = {
   onboarding: "Onboarding",
   separations: "Separation",
-  "eid-lookup": "EID Lookup",
+  "person-lookup": "Person Lookup",
   "kronos-reports": "Kronos",
   "work-study": "Work Study",
   "emergency-contact": "Emergency Contact",
   "sharepoint-download": "SharePoint Download",
   "oath-signature": "Oath Signature",
   "oath-upload": "Oath Upload",
-  "active-check": "Active Check",
   ocr: "OCR",
 };
 

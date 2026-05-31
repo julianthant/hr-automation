@@ -38,8 +38,11 @@ node_modules/
 # Playwright MCP (snapshots, console logs)
 .playwright-mcp/
 
-# Docs
-docs/
+# Docs: ignore ad hoc docs by default, but keep canonical workflow docs trackable.
+docs/*
+!docs/README.md
+!docs/workflow/
+!docs/workflow/**
 
 # Tracker data (local runtime)
 .tracker/
@@ -79,4 +82,3 @@ Thumbs.db
 
 # claude-mem session artifacts (regenerated each session for Codex context injection)
 AGENTS.md
-

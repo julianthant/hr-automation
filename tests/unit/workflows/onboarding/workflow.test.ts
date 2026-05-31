@@ -56,7 +56,6 @@ test("runWorkflowBatch (pool): onboarding-shaped onPreEmitPending paired with ru
       "transaction",
     ] as const,
     schema: z.object({ email: z.string().email() }),
-    authChain: "sequential",
     batch: { mode: "pool", poolSize: 2, preEmitPending: true },
     handler: async (ctx) => {
       await ctx.step("crm-auth", async () => {

@@ -40,8 +40,12 @@ test('integration: mock workflow with 2 systems runs end-to-end', async () => {
     { launchFn: () => Promise.resolve(fakeSlot()), trackerStub: true },
   )
 
-  // Auth happened first (interleaved), then handler ran.
-  assert.ok(events.indexOf('login-A') < events.indexOf('extract:Alice'))
+  // With parallel-staggered auth, Session.launch returns once readyPromises
+  // are registered (not when logins complete), so the handler can start
+  // running before either login finishes. Auth only gates the handler when
+  // it calls `ctx.page(id)`. By the time `submit:true:true` is pushed, both
+  // `ctx.page` calls have resolved — so both logins must have completed.
+  assert.ok(events.indexOf('login-A') < events.indexOf('submit:true:true'))
   assert.ok(events.indexOf('login-B') < events.indexOf('submit:true:true'))
   assert.ok(events.includes('extract:Alice'))
   assert.ok(events.includes('submit:true:true'))

@@ -14,7 +14,7 @@ function ocrPrep(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
     status: "running",
     step: "awaiting-approval",
     data: {
-      archetype: "batch-parent",
+      archetype: "preview",
       mode: "prepare",
       formType: "oath",
       recordCount: "2",
@@ -33,7 +33,7 @@ function eidChild(id: string, parentRunId: string): TrackerEntry {
     parentRunId,
     status: "done",
     data: {
-      archetype: "passive-child",
+      archetype: "single",
       emplId: id,
     },
   } as TrackerEntry;
@@ -45,11 +45,11 @@ test("OCR prep row type uses file count, not record/EID child count", () => {
 
   assert.equal(
     deriveQueueRowTypeLabel(prep, children, [prep, ...children], true),
-    "Single delegation · Preview",
+    "Preview",
   );
 });
 
-test("OCR prep row type becomes batch only when multiple OCR file prep rows share a parent batch", () => {
+test("OCR prep row type stays preview even when multiple OCR file prep rows share a parent", () => {
   const first = ocrPrep({
     id: "ocr-session-1",
     runId: "ocr-run-1",
@@ -63,11 +63,11 @@ test("OCR prep row type becomes batch only when multiple OCR file prep rows shar
 
   assert.equal(
     deriveQueueRowTypeLabel(first, [], [first, second], true),
-    "Batch delegation · Preview",
+    "Preview",
   );
 });
 
-test("OCR EID lookup child remains a delegation member projection", () => {
+test("OCR person-lookup child projects as a single row", () => {
   const child = {
     workflow: "eid-lookup",
     timestamp: "2026-05-19T18:01:00.000Z",
@@ -76,7 +76,7 @@ test("OCR EID lookup child remains a delegation member projection", () => {
     parentRunId: "ocr-run-1",
     status: "done",
     data: {
-      archetype: "delegate-child",
+      archetype: "single",
       searchName: "Doe, Jane",
       emplId: "10000001",
     },
@@ -84,6 +84,6 @@ test("OCR EID lookup child remains a delegation member projection", () => {
 
   assert.equal(
     deriveQueueRowTypeLabel(child, [], [child], false),
-    "Delegation member",
+    "Single",
   );
 });

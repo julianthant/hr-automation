@@ -32,9 +32,8 @@ describe("exportSchemas", () => {
     // Spot-check a few expected workflow names — matches the SCHEMA_REGISTRY.
     const byName = new Set(results.map((r) => r.workflowName));
     for (const expected of [
-      "active-check",
+      "person-lookup",
       "crm-doc-download",
-      "eid-lookup",
       "emergency-contact",
       "kronos-reports",
       "oath-signature",

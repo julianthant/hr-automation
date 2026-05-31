@@ -2,7 +2,7 @@
 
 exports[`oath-signature scenario: pdf branch happy path > pdf-branch row completes through ocr + fan-out 1`] = `
 {
-  "archetype": "batch-parent",
+  "archetype": "batch",
   "data": {
     "__id": "scenario-pdf-001",
     "__name": "oath-test.pdf",
@@ -10,7 +10,7 @@ exports[`oath-signature scenario: pdf branch happy path > pdf-branch row complet
     "__queueTitleKind": "single",
     "__subject": "Oath Signature oath-test.pdf",
     "__subjectKind": "pdf",
-    "archetype": "batch-parent",
+    "archetype": "batch",
     "instance": "<instance>",
     "pdfOriginalName": "oath-test.pdf",
     "sessionId": "scenario-pdf-001",
@@ -18,15 +18,15 @@ exports[`oath-signature scenario: pdf branch happy path > pdf-branch row complet
   "displayId": "scenario-pdf-001",
   "itemId": "<itemId>",
   "parentRunId": null,
-  "rowTypeLabel": "Normal row",
+  "rowTypeLabel": "Batch",
   "runId": "<runId>",
   "status": "done",
   "statusLabel": "Done",
   "step": undefined,
   "subtitle": "Oath · <last4>",
   "surfacePlacement": "grouped",
-  "surfaceType": "normal",
-  "title": "Oath Signature oath-test.pdf",
+  "surfaceType": "batch",
+  "title": "oath-test.pdf",
   "workflow": "oath-signature",
 }
 `;

@@ -11,8 +11,7 @@ import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow
 import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-signature/workflow.js";
 import { OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-upload/workflow.js";
 import { EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/emergency-contact/workflow.js";
-import { EID_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/eid-lookup/workflow.js";
-import { ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/active-check/workflow.js";
+import { PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/person-lookup/workflow.js";
 import { CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/crm-doc-download/workflow.js";
 import { SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/sharepoint-download/workflow.js";
 import { SEPARATIONS_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/separations/workflow.js";
@@ -34,8 +33,7 @@ const phase4Policies = new Map([
 
 const phase5Policies = new Map([
   ...phase4Policies,
-  ["eid-lookup", EID_LOOKUP_WORKFLOW_RUNTIME_POLICY],
-  ["active-check", ACTIVE_CHECK_WORKFLOW_RUNTIME_POLICY],
+  ["person-lookup", PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY],
   ["crm-doc-download", CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY],
   ["sharepoint-download", SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY],
   ["separations", SEPARATIONS_WORKFLOW_RUNTIME_POLICY],
@@ -69,7 +67,7 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.runId, "work-study-run-1");
     assert.equal(projection.workflowId, "work-study");
     assert.equal(projection.title, "Doe, Jane");
-    assert.equal(projection.surfaceType, "normal");
+    assert.equal(projection.surfaceType, "single");
   });
 
   it("projects an OCR approval delegation surface", () => {
@@ -80,7 +78,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "awaiting-approval",
       data: {
-        archetype: "batch-parent",
+        archetype: "batch",
         mode: "prepare",
         formType: "oath",
         pdfOriginalName: "oath-file.pdf",
@@ -93,7 +91,7 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
 
-    assert.equal(projection.surfaceType, "approval-delegation");
+    assert.equal(projection.surfaceType, "preview");
     assert.equal(projection.runId, "ocr-run-1");
     assert.equal(projection.title, "oath-file.pdf");
   });
@@ -124,22 +122,22 @@ describe("workflow runtime projection adapters", () => {
       workflowLabels: new Map([["onboarding", "Onboarding"]]),
     });
 
-    assert.equal(projection.surfaceType, "batch-delegation");
+    assert.equal(projection.surfaceType, "batch");
     assert.deepEqual(
       projection.batchMembers.map((member) => member.runId),
       ["child-run-1", "child-run-2"],
     );
   });
 
-  it("keeps OCR utility EID lookup children as delegation members", () => {
+  it("keeps OCR utility person-lookup children as delegation members", () => {
     const child = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "lookup-1",
       runId: "lookup-run-1",
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "delegate-child",
+        archetype: "single",
         __queueTitle: "Doe, Jane",
         __queueTitleKind: "single",
       },
@@ -151,36 +149,32 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {});
 
-    assert.equal(projection.surfaceType, "delegation-member");
-    assert.equal(projection.rowTypeLabel, "Delegation member");
+    assert.equal(projection.surfaceType, "single");
+    assert.equal(projection.rowTypeLabel, "Single");
   });
 
   it("does not expose a raw parent run id as the batch group subtitle", () => {
     const first = entry({
-      workflow: "ocr",
-      id: "ocr-first",
-      runId: "ocr-first-run",
+      workflow: "person-lookup",
+      id: "lookup-first",
+      runId: "lookup-first-run",
       parentRunId: "oath-batch-run-1234",
       status: "running",
-      step: "awaiting-approval",
       data: {
-        archetype: "batch-parent",
-        mode: "prepare",
-        formType: "oath",
+        archetype: "single",
+        queueRowKind: "person",
         parentSubject: "Oath · 1234",
       },
     });
     const second = entry({
-      workflow: "ocr",
-      id: "ocr-second",
-      runId: "ocr-second-run",
+      workflow: "person-lookup",
+      id: "lookup-second",
+      runId: "lookup-second-run",
       parentRunId: "oath-batch-run-1234",
       status: "running",
-      step: "awaiting-approval",
       data: {
-        archetype: "batch-parent",
-        mode: "prepare",
-        formType: "oath",
+        archetype: "single",
+        queueRowKind: "person",
         parentSubject: "Oath · 1234",
       },
     });
@@ -191,8 +185,10 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
 
-    assert.equal(projection.surfaceType, "batch-delegation");
-    assert.equal(projection.title, "Oath · 1234");
+    assert.equal(projection.surfaceType, "batch");
+    // Person batches carry no synthetic title (count badge + member preview
+    // identify the bag of people); session-local `· #1234` ordinals are retired.
+    assert.equal(projection.title, "");
     assert.notEqual(projection.subtitle, "oath-batch-run-1234");
     assert.equal(projection.subtitle, undefined);
   });
@@ -205,7 +201,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "awaiting-approval",
       data: {
-        archetype: "batch-parent",
+        archetype: "preview",
         mode: "prepare",
         formType: "oath",
         pdfOriginalName: "single-oath.pdf",
@@ -221,9 +217,9 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(projection.surfaceType, "approval-delegation");
+    assert.equal(projection.surfaceType, "preview");
     assert.equal(projection.title, "single-oath.pdf");
-    assert.equal(projection.rowTypeLabel, "Single delegation · Preview");
+    assert.equal(projection.rowTypeLabel, "Preview");
   });
 
   it("projects Oath Signature prep rows with PDF titles and file-run subtitles", () => {
@@ -234,7 +230,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "ocr",
       data: {
-        archetype: "batch-parent",
+        archetype: "batch",
         mode: "prepare",
         pdfOriginalName: "packet-a.pdf",
         __queueTitle: "Oath · 1111",
@@ -250,7 +246,7 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.subtitle, "Oath · 9876");
   });
 
-  it("projects multiple Oath prep files as grouped singles with per-file subtitles", () => {
+  it("projects multiple Oath PDF rows as independent batch anchors", () => {
     const first = entry({
       workflow: "oath-signature",
       id: "ocr-prep-a",
@@ -259,7 +255,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "ocr",
       data: {
-        archetype: "batch-parent",
+        archetype: "batch",
         mode: "prepare",
         pdfOriginalName: "packet-a.pdf",
         parentSubject: "Oath · 9999",
@@ -275,7 +271,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "ocr",
       data: {
-        archetype: "batch-parent",
+        archetype: "batch",
         mode: "prepare",
         pdfOriginalName: "packet-b.pdf",
         parentSubject: "Oath · 9999",
@@ -293,50 +289,59 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(projection.surfaceType, "batch-delegation");
-    assert.equal(projection.title, "Oath · 9999");
-    assert.deepEqual(
-      projection.batchMembers.map((member) => [member.title, member.subtitle]),
-      [
-        ["packet-a.pdf", "Oath · 1111"],
-        ["packet-b.pdf", "Oath · 2222"],
-      ],
-    );
+    assert.equal(surfaces.groupRows.length, 2);
+    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.title, "packet-a.pdf");
+    assert.equal(projection.subtitle, "Oath · 1111");
+    assert.deepEqual(projection.batchMembers, []);
   });
 
-  it("folds passive OCR utility rows by row archetype", () => {
+  it("groups multiple OCR utility rows by parent run", () => {
+    const ocr = entry({
+      workflow: "ocr",
+      id: "ocr-session-1",
+      runId: "ocr-run-1",
+      status: "running",
+      step: "awaiting-approval",
+      data: {
+        archetype: "preview",
+        mode: "prepare",
+        formType: "oath",
+      },
+    });
     const lookup = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "lookup-1",
       runId: "lookup-run-1",
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         searchName: "Doe, Jane",
       },
     });
     const active = entry({
-      workflow: "active-check",
+      workflow: "person-lookup",
       id: "active-1",
       runId: "active-run-1",
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         emplId: "10000001",
       },
     });
 
     const surfaces = buildTrackerQueueSurfaces({
       entries: [],
-      delegationSourceEntries: [lookup, active],
+      delegationSourceEntries: [ocr, lookup, active],
       runtimePolicies: phase4Policies,
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
+    assert.equal(surfaces.groupRows[0]?.kind, "batch");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((row) => row.id), ["lookup-1", "active-1"]);
+    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), []);
   });
 
   it("projects final Oath Signature rows as person-titled delegation members", () => {
@@ -347,7 +352,7 @@ describe("workflow runtime projection adapters", () => {
       parentRunId: "oath-file-run-9876",
       status: "pending",
       data: {
-        archetype: "delegate-child",
+        archetype: "single",
         name: "Jane Doe",
         emplId: "10000001",
         __queueTitle: "Oath · 9876",
@@ -359,16 +364,15 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
 
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Jane Doe");
     assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 
   it("renders the Oath Upload row as a single-row card with no nested children", () => {
     // Oath Upload is `archetype: "single"` and does NOT parent OCR / signature
-    // children — the OCR + per-signer batch lives under a synthesized
-    // batch-parent in the oath-signature tab. oath-upload just watches the
-    // batch from afar and files the ServiceNow ticket when done.
+    // descendants directly. It delegates one oath-signature PDF stage, waits,
+    // and files the ServiceNow ticket when the delegated stage is done.
     const root = entry({
       workflow: "oath-upload",
       id: "upload-session-1",
@@ -414,8 +418,8 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       const projection = buildWorkflowRunProjection(row, {
         runtimePolicies: phase5Policies,
       });
-      assert.equal(projection.surfaceType, "normal");
-      assert.equal(projection.rowTypeLabel, "Normal row");
+      assert.equal(projection.surfaceType, "single");
+      assert.equal(projection.rowTypeLabel, "Single");
       assert.deepEqual(projection.actions, [
         {
           ...DEFAULT_ROW_CANCEL_ACTION,
@@ -430,9 +434,9 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     }
   });
 
-  it("projects a direct eid-lookup row as a normal utility surface", () => {
+  it("projects a direct person-lookup row as a normal utility surface", () => {
     const row = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "Doe, Jane",
       runId: "lookup-direct-run",
       status: "pending",
@@ -441,19 +445,19 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(row, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "normal");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Doe, Jane");
   });
 
-  it("titles OCR eid-lookup children by resolved person name instead of technical ids", () => {
+  it("titles OCR person-lookup children by resolved person name instead of technical ids", () => {
     const child = entry({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       id: "ocr-oath-technical-r0",
       runId: "lookup-run-1",
       parentRunId: "ocr-run-1",
       status: "done",
       data: {
-        archetype: "delegate-child",
+        archetype: "single",
         searchName: "Jane Doe",
         emplId: "10000001",
       },
@@ -461,19 +465,19 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(child, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Jane Doe");
   });
 
-  it("projects OCR active-check utility children as flat delegation members", () => {
+  it("projects OCR person-lookup utility children as flat delegation members", () => {
     const child = entry({
-      workflow: "active-check",
+      workflow: "person-lookup",
       id: "ocr-active-1",
       runId: "active-run-1",
       parentRunId: "ocr-run-1",
       status: "pending",
       data: {
-        archetype: "delegate-child",
+        archetype: "single",
         searchName: "Jane Doe",
         emplId: "10000001",
       },
@@ -488,7 +492,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "delegation-member");
+    assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "Jane Doe");
   });
 
@@ -497,7 +501,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       workflow: "separations",
       id: "3927",
       runId: "sep-run-1",
-      parentRunId: "sep-batch-parent-run-12345678",
+      parentRunId: "sep-batch-run-12345678",
       status: "pending",
       data: { __queueTitle: "Avery Admin", docId: "3927" },
     });
@@ -505,7 +509,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       workflow: "separations",
       id: "3924",
       runId: "sep-run-2",
-      parentRunId: "sep-batch-parent-run-12345678",
+      parentRunId: "sep-batch-run-12345678",
       status: "running",
       data: { __queueTitle: "Bailey Benefits", docId: "3924" },
     });
@@ -518,8 +522,8 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       workflowLabels: new Map([["separations", "Separations"]]),
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "batch-delegation");
-    assert.notEqual(projection.subtitle, "sep-batch-parent-run-12345678");
+    assert.equal(projection.surfaceType, "batch");
+    assert.notEqual(projection.subtitle, "sep-batch-run-12345678");
     assert.deepEqual(projection.actions, [
       {
         ...DEFAULT_GROUP_RETRY_ACTION,
@@ -538,7 +542,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     ]);
   });
 
-  it("folds SharePoint roster downloads under OCR as passive delegation", () => {
+  it("projects a single SharePoint roster download child as a delegation member", () => {
     const roster = entry({
       workflow: "sharepoint-download",
       id: "onboarding-roster",
@@ -546,7 +550,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       parentRunId: "ocr-run-1",
       status: "running",
       data: {
-        archetype: "passive-child",
+        archetype: "single",
         label: "Onboarding Roster",
         parentSubject: "Emergency Contact · 5678",
       },
@@ -556,12 +560,12 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       delegationSourceEntries: [roster],
       runtimePolicies: phase5Policies,
     });
-    assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "passive-delegation");
-    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+    assert.equal(surfaces.groupRows.length, 0);
+    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), ["onboarding-roster"]);
+    const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "passive-delegation");
-    assert.equal(projection.title, "Emergency Contact · 5678");
+    assert.equal(projection.surfaceType, "single");
+    assert.equal(projection.title, "onboarding-roster");
   });
 });

@@ -161,7 +161,7 @@ export function buildOathUploadCancelHandler(opts: CancelHandlerOpts = {}) {
         body: { ok: false, error: "no active oath-upload row for sessionId" },
       };
     }
-    // oath-upload is the top-level batch parent — inherit from the latest
+    // oath-upload is a top-level single row — inherit from the latest
     // row so we don't accidentally flip its archetype.
     const priorOathRow = findLatestEntryForPredicate({
       workflow: WORKFLOW,
@@ -169,7 +169,7 @@ export function buildOathUploadCancelHandler(opts: CancelHandlerOpts = {}) {
       lookbackDays: 7,
       predicate: (e) => e.id === input.sessionId && e.runId === runId,
     });
-    const oathArchetype = priorOathRow ? resolveRowArchetype(priorOathRow) : "batch-parent";
+    const oathArchetype = priorOathRow ? resolveRowArchetype(priorOathRow) : "single";
     emitTrackerRow(
       {
         workflow: WORKFLOW,

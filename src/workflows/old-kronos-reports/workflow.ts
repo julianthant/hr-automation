@@ -165,6 +165,8 @@ export const kronosReportsWorkflow = defineWorkflow({
   name: "kronos-reports",
   label: "Kronos Reports",
   archetype: "batch",
+  queueRowKind: "person",
+  code: "kr",
   category: "Timekeeping",
   iconName: "FileText",
   systems: [
@@ -184,7 +186,6 @@ export const kronosReportsWorkflow = defineWorkflow({
   steps: kronosSteps,
   schema: KronosItemSchema,
   runtimePolicy: KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   batch: {
     mode: "pool",
     poolSize: 4,

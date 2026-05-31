@@ -7,9 +7,9 @@
  *   - Stamps `parentRunId` from `ctx.runId` on every child row.
  *   - Pre-emits the child's pending row through `emitTrackerRow` with
  *     `data.archetype` stamped (Contract 1).
- *   - Persists the child's pristine original input on the task store for
- *     the daemon path (Contract 2 tier 1); for in-process delegation, the
- *     input rides on the pending row's `input` field (Contract 2 tier 2).
+ *   - Persists the child input on the task store for the daemon path
+ *     (Contract 2 tier 1); for in-process delegation, the input rides on
+ *     the pending row's `input` field (Contract 2 tier 2).
  *   - Awaits the child's terminal status (`done` / `failed` /
  *     `cancelled`) and returns a typed `ChildRunResult`. With
  *     `fireAndForget: true`, returns immediately after enqueue/launch with
@@ -26,7 +26,7 @@
  *   - `delegateTo(child, input, opts)` runs the child IN-PROCESS via
  *     `runWorkflow`. Use for single sequential children where the parent
  *     consumes the result immediately (OCR's roster-download, oath-upload's
- *     OCR delegation). The child can be daemon-capable or not; in-process
+ *     signature delegation). The child can be daemon-capable or not; in-process
  *     delegation skips the daemon round-trip.
  *   - `delegateToAll(child, inputs, opts)` dispatches via
  *     `ensureDaemonsAndEnqueue` when the child workflow is daemon-capable
@@ -35,19 +35,13 @@
  *     for the daemon path; for the in-process path, terminal status comes
  *     from the per-run resolved/rejected promise.
  *
- * `renderAs` overrides:
- *   - "flat"    → stamps `archetype: "passive-child"` so projections render
- *                 the child through the passive-delegation surface model.
- *   - "preview" → child renders as an `approval-delegation` preview row.
- *                 Stamps the child's natural archetype (`delegate-child`
- *                 for non-utility children); the preview affordance comes
- *                 from the child workflow's `runtimePolicy.preview`.
- *   - "batch"   → child renders as a `batch-delegation` group member.
- *                 Stamps `archetype: "delegate-child"`. Use for fan-outs
- *                 where many children belong to one parent card.
+ * `renderAs` controls how delegated child rows relate to the parent:
+ *   - "flat"    → child renders as a flat single row.
+ *   - "preview" → child renders as a preview card row.
+ *   - "batch"   → child is stamped as a batch-member under the parent row.
  *
- * When `renderAs` is omitted, the kernel derives the row archetype via
- * `deriveRowArchetype(child.archetype, parentRunId)`.
+ * The kernel always derives the row archetype via
+ * `deriveRowArchetype(child.archetype, parentRunId, opts)`.
  */
 import type {
   RegisteredWorkflow,
@@ -58,8 +52,11 @@ import type {
   DelegateRenderAs,
 } from "./kernel/types.js"
 import { runWorkflow } from "./kernel/run-workflow.js"
-import type { RowArchetype } from "../domain/row-archetype.js"
-import { deriveRowArchetype, resolveArchetype } from "../domain/row-archetype.js"
+import {
+  deriveRowArchetype,
+  resolveArchetype,
+  type RowArchetype,
+} from "../domain/row-archetype.js"
 import { listWorkflowNames } from "./workflow-loaders.js"
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js"
 import { watchChildRuns, type ChildOutcome } from "../tracker/delegation/watch-child-runs.js"
@@ -86,6 +83,14 @@ interface DelegateCoreArgs<TChildData, TChildSteps extends readonly string[]> {
   itemId?: string
   runId?: string
   /**
+   * Provenance code for the child's trace-id prefix — the delegating parent's
+   * 2-char workflow `code`, so a delegated row traces back to the workflow that
+   * spawned it. Threaded from `buildDelegateApi` (the parent ctx's code). When
+   * absent (top-level run), the child stamps its own code. See the root-vs-
+   * immediate-parent note in `buildDelegateApi`.
+   */
+  rootCode?: string
+  /**
    * Parent run's `AbortSignal`. Forwarded into `runWorkflow`'s `parentSignal`
    * opt so the child's per-run controller aborts when the parent cancels —
    * closes the Contract 5 gap for in-process delegated children (OCR,
@@ -96,16 +101,52 @@ interface DelegateCoreArgs<TChildData, TChildSteps extends readonly string[]> {
   parentSignal?: AbortSignal
 }
 
-/** Map a `renderAs` override to the canonical `RowArchetype` to stamp. */
 function resolveDelegateArchetype<TData, TSteps extends readonly string[]>(
   child: RegisteredWorkflow<TData, TSteps>,
   input: TData,
   parentRunId: string,
   renderAs?: DelegateRenderAs,
 ): RowArchetype {
-  if (renderAs === "flat") return "passive-child"
-  if (renderAs === "batch" || renderAs === "preview") return "delegate-child"
-  return deriveRowArchetype(resolveArchetype(child.config, input), parentRunId)
+  return deriveRowArchetype(
+    resolveArchetype(child.config, input),
+    parentRunId,
+    renderAs === "batch" ? { member: true } : undefined,
+  )
+}
+
+function withBatchMemberRuntimeOptions<TInput>(input: TInput, renderAs?: DelegateRenderAs): TInput {
+  if (renderAs !== "batch" || !input || typeof input !== "object" || Array.isArray(input)) {
+    return input
+  }
+  const current = (input as Record<string, unknown>).__runtimeOptions
+  return {
+    ...(input as Record<string, unknown>),
+    __runtimeOptions: {
+      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
+      rowShape: "batch-member",
+    },
+  } as TInput
+}
+
+/**
+ * Carry the delegating parent's `code` on the child input's `__runtimeOptions`
+ * channel so it survives the SQLite task store to the daemon worker's own
+ * pre-emit (`run-one-item.ts` reads `runtimeOptions.rootCode`). Without this,
+ * the worker re-emits a pending row prefixed with the child's own code,
+ * dropping the parent provenance the delegation-time pre-emit stamped.
+ */
+function withRootCodeRuntimeOption<TInput>(input: TInput, rootCode?: string): TInput {
+  if (!rootCode || !input || typeof input !== "object" || Array.isArray(input)) {
+    return input
+  }
+  const current = (input as Record<string, unknown>).__runtimeOptions
+  return {
+    ...(input as Record<string, unknown>),
+    __runtimeOptions: {
+      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
+      rootCode,
+    },
+  } as TInput
 }
 
 function isDaemonCapable(workflowName: string): boolean {
@@ -128,6 +169,8 @@ function preEmitPendingForChild<TChildData, TChildSteps extends readonly string[
   runId: string
   archetype: RowArchetype
   trackerDir: string | undefined
+  /** Delegating parent's code — provenance prefix for the child trace id. */
+  rootCode?: string
 }): void {
   const data = buildPendingTrackerData({
     workflow: args.child,
@@ -135,6 +178,10 @@ function preEmitPendingForChild<TChildData, TChildSteps extends readonly string[
     parentRunId: args.parentRunId,
     useInitialTrackerSeed: true,
     nameIdStamp: "always-on-seed",
+    // Trace id keyed on the parent's code for provenance (falls back to the
+    // child's own code when undefined).
+    runId: args.runId,
+    ...(args.rootCode ? { rootCode: args.rootCode } : {}),
   })
   const stamped: StampedData = { ...data, archetype: args.archetype }
   emitTrackerRow(
@@ -203,12 +250,13 @@ async function runInProcessAndCollectResult<TChildData, TChildSteps extends read
 export async function delegateToImpl<TChildData, TChildSteps extends readonly string[]>(
   args: DelegateCoreArgs<TChildData, TChildSteps>,
 ): Promise<ChildRunResult<TChildData>> {
+  const childInput = withBatchMemberRuntimeOptions(args.input, args.renderAs)
   const childItemId =
     args.itemId
     ?? args.child.config.deriveItemId?.(args.input)
     ?? `delegate-${randomUUID().slice(0, 8)}`
   const childRunId = args.runId ?? randomUUID()
-  const archetype = resolveDelegateArchetype(args.child, args.input, args.parentRunId, args.renderAs)
+  const archetype = resolveDelegateArchetype(args.child, childInput, args.parentRunId, args.renderAs)
 
   // Route daemon-capable, non-fire-and-forget children through the daemon
   // path so SQLite `tasks.original_input_json` lands (Contract 2 tier 1).
@@ -221,27 +269,29 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
       parentRunId: args.parentRunId,
       trackerDir: args.trackerDir,
       child: args.child,
-      inputs: [args.input],
+      inputs: [childInput],
       renderAs: args.renderAs,
       fireAndForget: false,
       deriveItemId: args.itemId ? () => childItemId : undefined,
+      ...(args.rootCode ? { rootCode: args.rootCode } : {}),
     })
     return results[0]
   }
 
   preEmitPendingForChild({
     child: args.child,
-    input: args.input,
+    input: childInput,
     parentRunId: args.parentRunId,
     itemId: childItemId,
     runId: childRunId,
     archetype,
     trackerDir: args.trackerDir,
+    ...(args.rootCode ? { rootCode: args.rootCode } : {}),
   })
 
   if (args.fireAndForget) {
     // Spawn the child but don't await it — caller asked us not to.
-    void runWorkflow(args.child, args.input, {
+    void runWorkflow(args.child, childInput, {
       itemId: childItemId,
       preAssignedRunId: childRunId,
       trackerDir: args.trackerDir,
@@ -291,6 +341,7 @@ export async function delegateToImpl<TChildData, TChildSteps extends readonly st
 
   return runInProcessAndCollectResult({
     ...args,
+    input: childInput,
     itemId: childItemId,
     runId: childRunId,
   })
@@ -334,6 +385,7 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
   fireAndForget: boolean
   concurrency?: number
   parentSignal?: AbortSignal
+  rootCode?: string
 }): Promise<ChildRunResult<TChildData>[]> {
   const results: ChildRunResult<TChildData>[] = new Array(args.inputs.length)
   const concurrency = Math.max(1, args.concurrency ?? args.inputs.length)
@@ -349,6 +401,7 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
         input: args.inputs[i],
         renderAs: args.renderAs,
         fireAndForget: args.fireAndForget,
+        ...(args.rootCode ? { rootCode: args.rootCode } : {}),
         ...(args.parentSignal ? { parentSignal: args.parentSignal } : {}),
       })
     }
@@ -377,9 +430,14 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   deriveItemId?: (input: TChildData) => string
   buildPendingExtras?: (input: TChildData, itemId: string) => Record<string, unknown>
   onPreparedItems?: (items: Array<{ itemId: string; runId: string; input: TChildData }>) => Promise<void> | void
+  /** Delegating parent's code — provenance prefix for the child trace id. */
+  rootCode?: string
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
 
+  const queuedInputs = args.inputs.map((input) =>
+    withRootCodeRuntimeOption(withBatchMemberRuntimeOptions(input, args.renderAs), args.rootCode),
+  )
   const expectedItemIds: string[] = []
   // Parallel to expectedItemIds: index → assigned childRunId from the
   // daemon enqueue path. Captured here so the fire-and-forget branch can
@@ -389,7 +447,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 
   await ensureDaemonsAndEnqueue(
     args.child,
-    args.inputs as TChildData[],
+    queuedInputs as TChildData[],
     {},
     {
       trackerDir: args.trackerDir,
@@ -408,12 +466,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
       onPreEmitPending: (item, childRunId, parentRunIdFwd, itemId) => {
         expectedItemIds.push(itemId)
         expectedRunIds.push(childRunId)
-        const archetype = resolveDelegateArchetype(
-          args.child,
-          item as TChildData,
-          args.parentRunId,
-          args.renderAs,
-        )
+        const archetype = resolveDelegateArchetype(args.child, item as TChildData, args.parentRunId, args.renderAs)
         const extras = args.buildPendingExtras?.(item as TChildData, itemId) ?? {}
         const data = buildPendingTrackerData({
           workflow: args.child,
@@ -422,6 +475,10 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
           useInitialTrackerSeed: true,
           nameIdStamp: "always-on-seed",
           extraData: extras,
+          // Stamp the trace id with the delegating parent's code for
+          // provenance (falls back to the child's own code when undefined).
+          runId: childRunId,
+          ...(args.rootCode ? { rootCode: args.rootCode } : {}),
         })
         const stamped: StampedData = { ...data, archetype }
         emitTrackerRow(
@@ -527,6 +584,8 @@ export async function delegateToAllImpl<TChildData, TChildSteps extends readonly
   buildPendingExtras?: (input: TChildData, itemId: string) => Record<string, unknown>
   onPreparedItems?: (items: Array<{ itemId: string; runId: string; input: TChildData }>) => Promise<void> | void
   parentSignal?: AbortSignal
+  /** Delegating parent's code — provenance prefix for child trace ids. */
+  rootCode?: string
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
   if (isDaemonCapable(args.child.config.name)) {
@@ -553,6 +612,21 @@ export function buildDelegateApi(parent: {
    * setups).
    */
   signal?: AbortSignal
+  /**
+   * The delegating parent's 2-char workflow `code`. Threaded onto every
+   * delegated child as `rootCode` so the child's trace id is prefixed with
+   * the workflow that spawned it (provenance), not the child's own code.
+   *
+   * Root-vs-immediate-parent: this is the **immediate** parent's code. It is
+   * the only provenance available without a new uniform input channel — the
+   * parent ctx knows its own code but not, transitively, the code of the run
+   * that started the chain (unlike `parentSubject`, which each level forwards
+   * through the child input schema). For the common one-level delegations
+   * (OCR → person-lookup, oath-upload → oath-signature) the immediate parent
+   * IS the root, so the trace id correctly names the originating workflow.
+   * Optional for backwards compat with test setups that omit it.
+   */
+  code?: string
 }): Pick<Ctx<readonly string[], unknown>, "delegateTo" | "delegateToAll"> {
   const delegateTo = <TChildData, TChildSteps extends readonly string[]>(
     child: RegisteredWorkflow<TChildData, TChildSteps>,
@@ -568,6 +642,7 @@ export function buildDelegateApi(parent: {
       fireAndForget: opts.fireAndForget ?? false,
       itemId: opts.itemId,
       runId: opts.runId,
+      ...(parent.code ? { rootCode: parent.code } : {}),
       ...(parent.signal ? { parentSignal: parent.signal } : {}),
     })
 
@@ -584,6 +659,7 @@ export function buildDelegateApi(parent: {
       renderAs: opts.renderAs,
       fireAndForget: opts.fireAndForget ?? false,
       concurrency: opts.concurrency,
+      ...(parent.code ? { rootCode: parent.code } : {}),
       ...(parent.signal ? { parentSignal: parent.signal } : {}),
     })
 

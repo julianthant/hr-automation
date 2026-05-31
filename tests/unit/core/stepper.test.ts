@@ -41,6 +41,30 @@ test('stepper.step: emits failed on throw, rethrows', async () => {
   assert.equal(events[1].step, 'extraction')
 })
 
+test('stepper.shouldSkipStep: false when skipSteps omitted', async () => {
+  const { stepper } = mkStepper()
+  assert.equal(stepper.shouldSkipStep('extraction'), false)
+})
+
+test('stepper.shouldSkipStep: true for names in the skipSteps set, false otherwise', async () => {
+  const events: RecordedEvent[] = []
+  const stepper = new Stepper({
+    workflow: 'wf',
+    itemId: 'id-1',
+    runId: 'run-1',
+    emitStep: (name) => events.push({ kind: 'step', step: name }),
+    emitData: (data) => events.push({ kind: 'data', data }),
+    emitFailed: (step, error) => events.push({ kind: 'failed', step, error }),
+    skipSteps: new Set(['kronos-search', 'ucpath-job-summary']),
+  })
+  assert.equal(stepper.shouldSkipStep('kronos-search'), true)
+  assert.equal(stepper.shouldSkipStep('ucpath-job-summary'), true)
+  assert.equal(stepper.shouldSkipStep('kuali-extraction'), false)
+  assert.equal(stepper.shouldSkipStep('ucpath-transaction'), false)
+  // Decision-only — calling shouldSkipStep does NOT emit anything to tracker.
+  assert.equal(events.length, 0)
+})
+
 test('stepper.updateData: merges into pending data and emits', async () => {
   const { stepper, events } = mkStepper()
   stepper.updateData({ name: 'Alice' })

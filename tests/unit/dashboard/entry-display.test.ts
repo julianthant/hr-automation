@@ -77,7 +77,7 @@ test("buildDisplayNameMap falls back to the workflow label when no employee name
   assert.equal(resolveEntryName(row, displayNames), "Separation separation-doc-1");
 });
 
-test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from formType", () => {
+test("buildDisplayNameMap labels OCR prep rows with bare OATH / EMPL bases from formType (no ordinals)", () => {
   const first = entry("ocr-session-1", { __id: "ocr-session-1", formType: "oath" }, "2026-05-05T12:00:00.000Z");
   first.workflow = "ocr";
   const second = entry("ocr-session-2", { __id: "ocr-session-2", formType: "emergency-contact" }, "2026-05-05T12:01:00.000Z");
@@ -85,8 +85,8 @@ test("buildDisplayNameMap ordinals OCR prep rows using OATH / EMPL prefixes from
 
   const displayNames = buildDisplayNameMap([second, first], "OCR");
 
-  assert.equal(resolveEntryName(first, displayNames), "OATH 1");
-  assert.equal(resolveEntryName(second, displayNames), "EMPL 1");
+  assert.equal(resolveEntryName(first, displayNames), "OATH");
+  assert.equal(resolveEntryName(second, displayNames), "EMPL");
 });
 
 test("OCR parent rows use parentSubject while lookup children keep person titles", () => {
@@ -129,7 +129,7 @@ test("delegated OCR prep rows use PDF name as title and inherited Oath title as 
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "running",
     data: {
-      archetype: "batch-parent",
+      archetype: "batch",
       mode: "prepare",
       pdfOriginalName: "packet.pdf",
       __queueTitle: "Oath · 1234",
@@ -145,6 +145,28 @@ test("delegated OCR prep rows use PDF name as title and inherited Oath title as 
   assert.equal(resolveEntryId(entry as never), "Oath · 1234");
 });
 
+test("delegated oath-signature PDF batch rows use the PDF name instead of the workflow-prefixed queue title", () => {
+  const row = {
+    workflow: "oath-signature",
+    id: "oath-session-1",
+    runId: "oath-pdf-run-1",
+    parentRunId: "oath-upload-run-1",
+    timestamp: "2026-05-18T12:00:00.000Z",
+    status: "running",
+    data: {
+      archetype: "batch",
+      pdfOriginalName: "upload-packet.pdf",
+      __name: "upload-packet.pdf",
+      __id: "oath-session-1",
+      __queueTitle: "Oath Signature upload-packet.pdf",
+      __queueTitleKind: "single",
+    },
+  } as const;
+
+  const names = buildDisplayNameMap([row], "Oath Signature");
+  assert.equal(resolveEntryName(row as never, names), "upload-packet.pdf");
+});
+
 test("dispatch rows can show an explicit queue subtitle", () => {
   const entry = {
     workflow: "oath-signature",
@@ -154,7 +176,7 @@ test("dispatch rows can show an explicit queue subtitle", () => {
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "done",
     data: {
-      archetype: "dispatch",
+      archetype: "single", delegationRole: "dispatch",
       __name: "Delegation Request",
       __queueSubtitle: "Oath request sent",
       __queueRootTitle: "Oath · 1234",
@@ -167,7 +189,7 @@ test("dispatch rows can show an explicit queue subtitle", () => {
 
 test("delegated person rows keep the person name instead of inheriting the parent title", () => {
   const row = entry("10874100", {
-    archetype: "delegate-child",
+    archetype: "single",
     name: "Barahona Martell, Carlos D",
     emplId: "10874100",
     __name: "Barahona Martell, Carlos D",
@@ -239,8 +261,8 @@ test("delegated utility person rows keep their own person display name", () => {
 
   const displayNames = buildDisplayNameMap([child, secondParent, firstParent], "OCR");
 
-  assert.equal(resolveEntryName(firstParent, displayNames), "OATH 1");
-  assert.equal(resolveEntryName(secondParent, displayNames), "EMPL 1");
+  assert.equal(resolveEntryName(firstParent, displayNames), "OATH");
+  assert.equal(resolveEntryName(secondParent, displayNames), "EMPL");
   assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 
@@ -266,7 +288,7 @@ test("delegated final oath-signature rows keep their own person display name", (
 
   const displayNames = buildDisplayNameMap([child, parent], "OCR");
 
-  assert.equal(resolveEntryName(parent, displayNames), "OATH 1");
+  assert.equal(resolveEntryName(parent, displayNames), "OATH");
   assert.equal(resolveEntryName(child, displayNames), "Barahona Martell, Carlos D");
 });
 

@@ -1,9 +1,16 @@
 import { readQueueTitle } from "../queue-title.js";
+import { resolveQueueRowPresentation } from "../queue-row-presentation.js";
+import { resolveQueueRowKind } from "../queue-row-kind.js";
 import {
+  archetypeRowTypeLabel,
+  hasDelegationRole,
   resolveRowArchetype,
 } from "../row-archetype.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
-import { buildTrackerQueueSurfaces } from "../../tracker/queue-surfaces.js";
+import {
+  buildTrackerQueueSurfaces,
+  classifyTrackerRow,
+} from "../../tracker/queue-surfaces.js";
 import type { TrackerQueueGroupSurface } from "../../tracker/queue-surfaces.js";
 import {
   getWorkflowRuntimePolicy,
@@ -93,7 +100,8 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
 
 function isPrepRow(entry: TrackerEntry): boolean {
   const data = entry.data ?? {};
-  return resolveRowArchetype(entry) === "batch-parent" && (
+  const shape = classifyTrackerRow(entry).shape;
+  return (shape === "batch" || shape === "preview") && (
     data.mode === "prepare" || Boolean(data.pdfOriginalName)
   );
 }
@@ -136,8 +144,7 @@ function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolic
   if (policy.subtitleTemplate && !entry.parentRunId && !isPrepRow(entry)) {
     return interpolateTemplate(policy.subtitleTemplate, entry);
   }
-  const archetype = resolveRowArchetype(entry);
-  if (archetype === "dispatch") {
+  if (hasDelegationRole(entry, "dispatch")) {
     return firstNonBlank(data.__queueSubtitle, data.__queueRootTitle, data.parentSubject, data.__id, entry.id)
       || undefined;
   }
@@ -148,30 +155,14 @@ function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolic
   return firstNonBlank(data.__id, data.__name, entry.id) || undefined;
 }
 
-function rowSurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
-  return entry.parentRunId ? "delegation-member" : "normal";
+/** Map stamped row archetype to queue surface type; batch-member renders as single. */
+export function entrySurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
+  const archetype = resolveRowArchetype(entry);
+  return archetype === "batch-member" ? "single" : archetype;
 }
 
-function rowTypeLabelFor(
-  surfaceType: WorkflowSurfaceType,
-  policy: WorkflowRuntimePolicy,
-): string {
-  const withPreview = (label: string): string => {
-    const suffix = policy.preview?.rowTypeLabelSuffix;
-    return policy.preview?.alwaysAvailable && suffix ? `${label} · ${suffix}` : label;
-  };
-  switch (surfaceType) {
-    case "normal":
-      return "Normal row";
-    case "approval-delegation":
-      return withPreview("Single delegation");
-    case "batch-delegation":
-      return withPreview("Batch delegation");
-    case "passive-delegation":
-      return "Passive delegation";
-    case "delegation-member":
-      return "Delegation member";
-  }
+function rowTypeLabelFor(surfaceType: WorkflowSurfaceType): string {
+  return archetypeRowTypeLabel(surfaceType);
 }
 
 function batchGroupTitle(
@@ -182,18 +173,30 @@ function batchGroupTitle(
   const overridden = firstNonBlank(context.resolveGroupTitle?.(surface), surface.titleOverride);
   if (overridden) return overridden;
 
-  if (surface.kind === "approval-delegation") {
-    return context.resolveEntryTitle?.(surface.parent) ?? fallbackEntryTitle(surface.parent, policy);
+  const anchor = surface.kind === "preview"
+    ? surface.parent
+    : surface.kind === "batch"
+      ? surface.parent
+      : undefined;
+
+  // Person batches carry no synthetic title — the count badge + member-name
+  // preview already identify the bag of people. Session-local ordinals
+  // ("Oath 1", "<label> · #1234") are retired across all batch kinds.
+  const kindEntry = anchor ?? surface.members[0];
+  if (kindEntry && resolveQueueRowKind(kindEntry) === "person") return "";
+
+  if (anchor) {
+    return context.resolveEntryTitle?.(anchor)
+      ?? resolveQueueRowPresentation(anchor)?.title
+      ?? fallbackEntryTitle(anchor, policy);
   }
 
   const first = surface.members[0];
-  const label = first ? workflowLabel(first.workflow, context.workflowLabels) : "Batch";
-  const rawOrdinal = surface.members
-    .map((member) => member.data?.batchDisplayOrdinal)
-    .find((value) => value != null && value !== "");
-  const ordinal = rawOrdinal === undefined ? Number.NaN : Number.parseInt(rawOrdinal, 10);
-  if (Number.isFinite(ordinal) && ordinal > 0) return `${label} ${ordinal}`;
-  return `${label} · #${surface.parentRunId.slice(-4)}`;
+  if (first) {
+    return resolveQueueRowPresentation(first)?.title
+      ?? workflowLabel(first.workflow, context.workflowLabels);
+  }
+  return "Batch";
 }
 
 export function buildWorkflowRunProjection(
@@ -202,20 +205,24 @@ export function buildWorkflowRunProjection(
   overrides: ProjectionOverrides = {},
 ): WorkflowRunProjection {
   const policy = context.policy ?? getWorkflowRuntimePolicy(entry.workflow, context.runtimePolicies);
-  const surfaceType = overrides.surfaceType ?? rowSurfaceType(entry);
+  const surfaceType = overrides.surfaceType ?? entrySurfaceType(entry);
   const runId = runIdFor(entry);
   const targets = actionTargets([entry]);
+  // Kind-based title/subtitle (person/file/catalog) takes precedence over the
+  // legacy fallbacks but yields to explicit overrides + context resolvers.
+  const presentation = resolveQueueRowPresentation(entry);
   return {
     runId,
     workflowId: entry.workflow,
     itemId: entry.id,
     parentRunId: entry.parentRunId,
-    title: overrides.title ?? context.resolveEntryTitle?.(entry) ?? fallbackEntryTitle(entry, policy),
-    subtitle: overrides.subtitle ?? context.resolveEntrySubtitle?.(entry) ?? fallbackEntrySubtitle(entry, policy),
+    title: overrides.title ?? context.resolveEntryTitle?.(entry) ?? presentation?.title ?? fallbackEntryTitle(entry, policy),
+    subtitle: overrides.subtitle ?? context.resolveEntrySubtitle?.(entry)
+      ?? (presentation ? presentation.subtitle : fallbackEntrySubtitle(entry, policy)),
     status: context.resolveEntryStatus?.(entry) ?? entry.status,
     step: entry.step,
     surfaceType,
-    rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType, policy),
+    rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType),
     actions: overrides.actions ?? withTargets(policy.rowActions, targets),
     batchMembers: overrides.batchMembers ?? [],
   };
@@ -242,7 +249,7 @@ export function deriveRowTypeLabelForEntry(
   });
   const surface = surfaces.groupRows.find((candidate) => {
     if (candidate.parentRunId === runId) return true;
-    if (candidate.kind === "approval-delegation" && (candidate.parent.runId ?? candidate.parent.id) === runId) {
+    if (candidate.kind === "preview" && (candidate.parent.runId ?? candidate.parent.id) === runId) {
       return true;
     }
     return candidate.members.some((member) => (member.runId ?? member.id) === runId);
@@ -250,27 +257,31 @@ export function deriveRowTypeLabelForEntry(
   const label = surface
     ? buildProjectionFromQueueSurface(surface, { runtimePolicies }).rowTypeLabel
     : buildWorkflowRunProjection(entry, { runtimePolicies }).rowTypeLabel;
-  return previewAvailable && !label.endsWith("· Preview") ? `${label} · Preview` : label;
+  if (previewAvailable && label !== "Preview" && !label.endsWith("· Preview")) {
+    return `${label} · Preview`;
+  }
+  return label;
 }
 
 export function buildProjectionFromQueueSurface(
   surface: TrackerQueueGroupSurface,
   context: WorkflowProjectionContext,
 ): WorkflowRunProjection {
-  const surfaceType: WorkflowSurfaceType =
-    surface.kind === "approval-delegation"
-      ? "approval-delegation"
-      : surface.kind === "passive-delegation"
-        ? "passive-delegation"
-        : "batch-delegation";
+  const surfaceType: WorkflowSurfaceType = surface.kind;
   const members = surface.members.map((member) =>
-    buildWorkflowRunProjection(member, context, { surfaceType: "delegation-member" }),
+    buildWorkflowRunProjection(member, context, { surfaceType: "single" }),
   );
-  const anchor = surface.kind === "approval-delegation" ? surface.parent : surface.members[0];
+  const anchor = surface.kind === "preview"
+    ? surface.parent
+    : surface.kind === "batch" && surface.parent
+      ? surface.parent
+      : surface.members[0];
   const fallbackWorkflow = anchor?.workflow ?? "workflow";
   const policy = context.policy ?? getWorkflowRuntimePolicy(fallbackWorkflow, context.runtimePolicies);
-  const status = surface.kind === "approval-delegation"
+  const status = surface.kind === "preview"
     ? surface.parent.status
+    : surface.kind === "batch" && surface.parent && surface.parent.status !== "done"
+      ? surface.parent.status
     : surface.members.some((member) => member.status === "running")
       ? "running"
       : surface.members.some((member) => member.status === "pending" || member.status === "skipped")
@@ -280,12 +291,14 @@ export function buildProjectionFromQueueSurface(
           : "done";
   const targetEntries = surface.members.length > 0
     ? surface.members
-    : surface.kind === "approval-delegation"
+    : surface.kind === "preview"
       ? [surface.parent]
-      : [];
-  const rowTargetEntries = surface.kind === "approval-delegation" ? [surface.parent] : [];
+      : surface.kind === "batch" && surface.parent
+        ? [surface.parent]
+        : [];
+  const rowTargetEntries = surface.kind === "preview" ? [surface.parent] : [];
   const groupActions = withTargets(policy.groupActions, actionTargets(targetEntries));
-  const actions = surface.kind === "approval-delegation"
+  const actions = surface.kind === "preview"
     ? [
         ...withTargets(policy.rowActions, actionTargets(rowTargetEntries)),
         ...groupActions,
@@ -294,17 +307,18 @@ export function buildProjectionFromQueueSurface(
   const anchorProjection = anchor
     ? buildWorkflowRunProjection(anchor, context, { surfaceType })
     : undefined;
+  const batchParent = surface.kind === "batch" ? surface.parent : undefined;
 
   return {
     runId: surface.parentRunId,
     workflowId: fallbackWorkflow,
-    itemId: surface.kind === "approval-delegation" ? surface.parent.id : surface.parentRunId,
+    itemId: surface.kind === "preview" ? surface.parent.id : batchParent?.id ?? surface.parentRunId,
     title: batchGroupTitle(surface, context, policy),
-    subtitle: surface.kind === "approval-delegation" ? anchorProjection?.subtitle : undefined,
+    subtitle: surface.kind === "preview" || batchParent ? anchorProjection?.subtitle : undefined,
     status,
-    step: surface.kind === "approval-delegation" ? surface.parent.step : undefined,
+    step: surface.kind === "preview" ? surface.parent.step : batchParent?.step,
     surfaceType,
-    rowTypeLabel: rowTypeLabelFor(surfaceType, policy),
+    rowTypeLabel: rowTypeLabelFor(surfaceType),
     actions,
     batchMembers: members,
   };

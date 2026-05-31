@@ -11,6 +11,7 @@ import {
   fillComments,
   clickSaveAndSubmit,
   findExistingTerminationTransaction,
+  scrollToTransactionReadbackArea,
 } from "../../../systems/ucpath/index.js";
 import { ssSmartHRTransactions } from "../../../systems/ucpath/selectors.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
@@ -98,6 +99,8 @@ export async function runUcpathTransaction(
       }
       if (!transactionNumber) {
         submittedWithoutTxnNumber = true;
+        await scrollToTransactionReadbackArea(getContentFrame(ucpathPage));
+        await ctx.screenshot({ kind: 'error', label: 'ucpath-transaction-submitted-missing-number' });
         return { transactionNumber, submittedWithoutTxnNumber };
       }
       // Persist txn # immediately so kuali-finalization failures don't

@@ -18,20 +18,6 @@ Kernel workflow for pulling a shared SharePoint / Excel Online file to a local `
 
 The **emergency-contact preflight + standalone CLI** deliberately bypass the kernel — they call `downloadSharePointFile()` directly. No dashboard context, no tracker row, silent on `sessions.jsonl`. Preflight runs *inside* the emergency-contact kernel workflow, so nesting would be wrong; CLI runs have no UI to surface into.
 
-## Files
-
-- `schema.ts` — `SharePointDownloadInputSchema = { id, label, url, outDir? }`. Zod shape validated by `runWorkflow`. `id` + `label` come from the registry; `url` is resolved at handler time from `process.env[spec.envVar]`.
-- `workflow.ts` — `defineWorkflow(...)` → `sharepointDownloadWorkflow` + CLI adapter `runSharePointDownload`. `systems[0].login` is `sharepointLogin` which reads a module-level `pendingLandingUrl` (set by the handler before `runWorkflow` fires — see "URL injection" below). Handler has two steps: `navigate` (sanity check the post-auth URL) and `download` (Excel File menu + `saveAs`).
-- `download.ts` — three exports used by the kernel + the non-kernel callers:
-  - `loginToSharePoint(page, url, { instance? })` — full auth chain (AAD → Shibboleth → Duo → KMSI). When `instance` is provided it routes Duo through `requestDuoApproval` so the Sessions rail's Duo chip lights up and a row appears in the Duo tray; otherwise falls back to `pollDuoApproval` silently.
-  - `captureExcelDownload(page, outDir, opts?)` — assumes page is authed and on the Excel viewer; clicks File → Create a Copy (hover) → Download a Copy and `saveAs`s into `outDir`. Returns `{ path, filename }`.
-  - `downloadSharePointFile({ url, outDir, ... })` — end-to-end convenience wrapper (launch browser → login → download → close). Used by non-kernel callers only.
-- `registry.ts` — `SHAREPOINT_DOWNLOADS: readonly SharePointDownloadSpec[]`. Single source of truth for the dropdown. Each spec: `{ id, label, description?, envVar, outDir? }`. Adding a spreadsheet is one new entry here + one line in `.env.example`.
-- `handler.ts` — Two HTTP-layer factories:
-  - `buildSharePointListHandler({ getEnv? })` — returns `() => SharePointDownloadListItem[]` (registry rows + `configured: boolean` derived from env). Backs `GET /api/sharepoint-download/list`.
-  - `buildSharePointRosterDownloadHandler({ outDir?, runWorkflowFn?, getEnv? })` — returns `(input: { id? }) => Promise<RosterDownloadResponse>`. Looks up the spec, reads `process.env[spec.envVar]`, flips the in-flight lock, seeds `pendingLandingUrl`, then fires `runWorkflow(sharepointDownloadWorkflow, ...)` **fire-and-forget** (no `await`). Returns 202 immediately with `{ok, id, label, status: "launched"}` so the HTTP socket isn't held open for 2-3 min during Duo tap. Status taxonomy: 202 launched / 400 missing id or unset env / 404 unknown id / 409 in-flight / 500 synchronous pre-launch failure. Post-launch failures surface on the tracker row, not HTTP.
-- `index.ts` — Barrel. Importing it side-effects the `defineWorkflow` registration.
-
 ## URL injection
 
 `SystemConfig.login` is `(page, instance?) => Promise<void>` — the kernel does not pass `input` to the login function. To thread the per-run URL in, `workflow.ts` keeps a module-level `pendingLandingUrl` that the HTTP handler sets via `_setPendingLandingUrl(url)` before calling `runWorkflow`, and clears in `.finally()`.

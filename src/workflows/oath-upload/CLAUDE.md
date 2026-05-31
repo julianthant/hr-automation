@@ -40,38 +40,6 @@ Before mapping a new selector, run `npm run selector:search "<intent>"`.
 - [`src/systems/servicenow/SELECTORS.md`](../../systems/servicenow/SELECTORS.md)
 - [`src/systems/servicenow/common-intents.txt`](../../systems/servicenow/common-intents.txt)
 
-## Files
-
-- `schema.ts` — `OathUploadInputSchema` (pdfPath, pdfOriginalName, sessionId, pdfHash, mode, rosterMode, rosterPath, dryRun)
-- `handler.ts` — single-row handler: `delegate-signatures` → ServiceNow steps + ServiceNow duplicate-ticket probe
-- `fill-form.ts` — Playwright form-fill + submit + ticket-number parser
-- `duplicate-check.ts` — SHA-256 + prior-run scanner for the dashboard pre-flight
-- `workflow.ts` — `defineWorkflow` + `runOathUpload` + `runOathUploadCli`
-- `index.ts` — barrel
-
-## Kernel Config
-
-| Field         | Value |
-| ------------- | ----- |
-| `systems`     | `[{ id: "servicenow", login: async () => {} }]` |
-| `authSteps`   | `false` — the handler launches `ctx.page("servicenow")` lazily, after `delegate-signatures` |
-| `steps`       | `["delegate-signatures", "servicenow-auth", "open-hr-form", "fill-form", "submit"]` |
-| `schema`      | `{ pdfPath, pdfOriginalName, sessionId, pdfHash, mode, rosterMode, rosterPath, dryRun }` |
-| `archetype`   | `"single"` — the oath-upload row is a single top-level row |
-| `batch`       | `{ mode: "sequential", preEmitPending: true, betweenItems: ["reset"] }` — daemon batches multiple PDFs per invocation |
-| `authChain`   | `"sequential"` |
-| `detailFields`| PDF / Signers / HR ticket # / Filed / Status. `data.uploadMode` carries `"full"` / `"upload-only"` |
-| `runtimePolicy.subtitleTemplate` | `"Oath · <last4 run id>"` |
-
-### Row archetypes emitted
-
-| Row | Workflow tab | Row primitive | Notes |
-| --- | --- | --- | --- |
-| Oath-upload daemon item | oath-upload | single row | Files the HR ticket after delegation completes |
-| Delegated oath-signature PDF run | oath-signature | delegated batch | Owns OCR approval and signer fan-out |
-| Oath-signature signer rows | oath-signature | batch members when N >= 2; single row when N = 1 | Produced by the delegated PDF run |
-| ServiceNow ticket | oath-upload | same single row | Terminal data update; no new row |
-
 ## Dupe-protection
 
 The dashboard's Run modal calls `/api/oath-upload/check-duplicate?hash=<sha256>`
@@ -107,6 +75,7 @@ a retry after a submitted ticket does not file a duplicate HR inquiry.
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section and `src/workflows/oath-signature/CLAUDE.md` before adding oath-upload delegation lessons. Keep the local model aligned with `docs/engineering/workflow-vocabulary.md`.
+- **2026-05-27: Oath Upload delegates to oath-signature, not OCR/signature internals.** Full-mode uploads delegate one `{ kind: "pdf" }` child to oath-signature and wait for that delegated batch-stage row to finish. Oath-signature owns its normal PDF branch after that: OCR preview, EID lookup/verification, approval, and signer fan-out. The parented PDF row keeps `archetype: "batch"` plus `parentRunId`; delegated scope is not a separate row archetype.
 - **2026-05-26: Oath Upload collapsed onto kernel delegation.** Plan A Commit 4 removed the local OCR prepare call, `waitForOcrApproval`, and `watchChildRuns` polling from the handler. Full-mode uploads now run one `delegate-signatures` step that delegates `{ kind: "pdf", ... }` to oath-signature with `itemId: input.sessionId`; oath-signature owns OCR approval and signer fan-out. Oath-upload only resumes to file ServiceNow after the delegated run is terminal.
 - **2026-05-24: Oath Upload is a single row.** The row stays flat in the oath-upload tab. Delegated signature work appears in oath-signature's tab; do not nest children under the oath-upload row.
 - **OCR-delegating workflows need the roster picker.** Any Run modal for a workflow that depends on OCR roster matching must expose the same roster controls as the OCR modal. Never hardcode `rosterMode` at the dispatch site; thread `rosterMode` and `rosterPath` into the delegated PDF input.

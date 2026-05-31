@@ -17,8 +17,7 @@
     "work-study:stop": "tsx --env-file=.env src/cli.ts daemon-stop work-study",
     "oath-signature:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-signature",
     "oath-upload:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-upload",
-    "eid-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop eid-lookup",
-    "active-check:stop": "tsx --env-file=.env src/cli.ts daemon-stop active-check",
+    "person-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop person-lookup",
     "emergency-contact:stop": "tsx --env-file=.env src/cli.ts daemon-stop emergency-contact",
     "dashboard": "tsx --env-file=.env src/cli.ts dashboard",
     "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
@@ -36,9 +35,11 @@
     "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "test": "vitest run",
+    "test": "vitest run --reporter=dot",
+    "test:stderr-audit": "vitest run --reporter=dot",
+    "test:verbose": "vitest run --reporter=verbose",
     "test:watch": "vitest",
-    "test:architecture": "vitest run tests/unit/architecture"
+    "test:architecture": "vitest run tests/unit/architecture --reporter=dot"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -686,7 +686,11 @@ export async function readLatestTransactionNumber(
   }))) return "";
   await page.waitForTimeout(8_000);
 
-  // Extract "Transaction ID: T002XXXXXX" from the re-opened form
+  // Extract "Transaction ID: T002XXXXXX" from the re-opened form.
+  // The ID is below the comments/save area on the readback page, so
+  // scroll there first. This also leaves the page positioned where the
+  // workflow-level audit screenshot can show the T-number.
+  await scrollToTransactionReadbackArea(txnFrame);
   const txnNumber = await readTxnNumberFromDetailPage(txnFrame);
   if (txnNumber) {
     log.step(`Transaction number: ${txnNumber}`);
@@ -781,11 +785,37 @@ export async function findExistingTerminationTransaction(
   }
 }
 
+export function extractSmartHrTransactionNumber(text: string): string | null {
+  const normalized = text
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ");
+  const match =
+    normalized.match(/Transaction\s+ID\s*:?\s*(T\d{6,})/i)
+    ?? normalized.match(/Transaction\s*:?\s*(T\d{6,})/i)
+    ?? normalized.match(/\b(T\d{6,})\b/i);
+  return match?.[1]?.toUpperCase() ?? null;
+}
+
 async function readTxnNumberFromDetailPage(frame: FrameLocator): Promise<string | null> {
-  const bodyText = await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => ""); // allow-inline-selector -- body innerText readback for regex scrape
-  const match = bodyText.match(/Transaction ID:\s*(T\d+)/)
-    ?? bodyText.match(/Transaction:\s*(T\d+)/i);
-  return match?.[1] ?? null;
+  const body = frame.locator("body"); // allow-inline-selector -- body readback for PeopleSoft transaction detail scrape
+  const bodyText = await body.innerText({ timeout: 5_000 }).catch(() => "");
+  const textContent = await body.evaluate((el) => el.textContent ?? "").catch(() => "");
+  return extractSmartHrTransactionNumber(`${bodyText}\n${textContent}`);
+}
+
+export async function scrollToTransactionReadbackArea(frame: FrameLocator): Promise<boolean> {
+  return await frame.locator("body").evaluate((body) => { // allow-inline-selector -- body-scoped scroll to Smart HR readback markers
+    const markerRe = /Transaction\s*(?:ID)?\s*:|\bT\d{6,}\b/i;
+    const all = Array.from(body.querySelectorAll<HTMLElement>("span, div, td, th, label, a, textarea"));
+    const target = all.find((el) => markerRe.test(el.textContent ?? ""));
+    if (target) {
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      return true;
+    }
+    const doc = body.ownerDocument;
+    doc.defaultView?.scrollTo(0, Math.max(body.scrollHeight, doc.documentElement.scrollHeight));
+    return false;
+  }).catch(() => false);
 }
 
 /**

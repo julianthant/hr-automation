@@ -36,6 +36,10 @@ import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js"
 import { ttlMemoize } from "../memo.js";
 import { isStateDbReady, openStateDb } from "../../../state/db.js";
 import { getWorkflowRuntimePolicy } from "../../../../domain/workflow-runtime/registry.js";
+import {
+  filterRetiredDashboardWorkflowCounts,
+  filterRetiredDashboardWorkflows,
+} from "../../../../domain/dashboard-run-surfaces.js";
 
 // ── Cross-workflow counts cache ───────────────────────────────────────────────
 
@@ -72,7 +76,11 @@ const getCrossWorkflowCounts = ttlMemoize(
       const failures = computeFailureCounts(all);
       if (failures > 0) failureCounts[wf] = failures;
     }
-    return { workflows, wfCounts, failureCounts };
+    return {
+      workflows: filterRetiredDashboardWorkflows(workflows),
+      wfCounts: filterRetiredDashboardWorkflowCounts(wfCounts),
+      failureCounts: filterRetiredDashboardWorkflowCounts(failureCounts),
+    };
   },
 );
 

@@ -80,14 +80,20 @@ test("buildCliAdapter merges pendingExtras after standard pending data", async (
 
   await runner("A");
 
-  assert.deepEqual((seen[0] as { data: Record<string, string> }).data, {
+  const seenData = (seen[0] as { data: Record<string, string> }).data;
+  // Trace id is non-deterministic (timestamp + runId fragment) — match its
+  // shape, then deepEqual the rest of the stamped record.
+  assert.match(seenData.__traceId, /^cl-\d{12}-runa$/);
+  const { __traceId, ...rest } = seenData;
+  assert.deepEqual(rest, {
     id: "A",
     batchDisplayOrdinal: "7",
     __subject: "Doc A",
     __subjectKind: "document",
     runIdEcho: "run-A",
     parentRunId: "parent-A",
-    archetype: "delegate-child",
+    archetype: "single",
+    queueRowKind: "person",
   });
 });
 

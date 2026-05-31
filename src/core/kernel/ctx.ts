@@ -16,6 +16,8 @@ export interface MakeCtxOpts {
   isBatch: boolean
   runId: string
   workflow: string
+  /** Parent workflow's 2-char code — forwarded to delegated children as the trace-id provenance prefix. */
+  code?: string
   itemId: string
   emitScreenshotEvent: (event: ScreenshotEvent) => void
   trackerDir?: string
@@ -72,7 +74,7 @@ export async function tryScreenshot(
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, itemId, emitScreenshotEvent, trackerDir, signal } = opts
+  const { session, stepper, isBatch, runId, workflow, code, itemId, emitScreenshotEvent, trackerDir, signal } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
 
@@ -85,7 +87,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     currentStep: () => stepper.getCurrentStep(),
   })
 
-  const delegateApi = buildDelegateApi({ runId, trackerDir, signal })
+  const delegateApi = buildDelegateApi({ runId, trackerDir, signal, ...(code ? { code } : {}) })
 
   // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's
   // signal-injecting Proxy (see `page-proxy.ts`). The wrapper merges
@@ -104,6 +106,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     step: <R>(name: string, fn: () => Promise<R>) => stepper.step(name, fn),
     markStep: (name: string) => stepper.markStep(name),
     skipStep: (name: string) => stepper.skipStep(name),
+    shouldSkipStep: (name: string) => stepper.shouldSkipStep(name),
     parallel: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallel(tasks),
     parallelAll: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallelAll(tasks),
     retry,

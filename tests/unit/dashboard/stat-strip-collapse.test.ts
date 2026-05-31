@@ -23,7 +23,7 @@ function row(
 }
 
 test("collapseEntriesForStatStrip merges same-parent daemon members into one row", () => {
-  const pid = "batch-parent-run";
+  const pid = "batch-run";
   const input = [
     row("id1", "done", { parentRunId: pid }),
     row("id2", "done", { parentRunId: pid }),

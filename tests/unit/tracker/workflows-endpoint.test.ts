@@ -1,4 +1,4 @@
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
@@ -23,6 +23,22 @@ test('GET /api/workflow-definitions returns registered metadata', () => {
   assert.deepEqual(result[0].steps, ['s1', 's2'])
   // auto-label falls back to title-cased name when label omitted
   assert.equal(result[0].label, 'Wf A')
+})
+
+test('GET /api/workflow-definitions registers every shipped dashboard workflow on module load', async () => {
+  vi.resetModules()
+  const [{ buildWorkflowsHandler }, { listWorkflowNames }] = await Promise.all([
+    import('../../../src/tracker/dashboard/workflows.js'),
+    import('../../../src/core/workflow-loaders.js'),
+  ])
+
+  const result = buildWorkflowsHandler()()
+  const names = new Set(result.map((workflow) => workflow.name))
+  const expected = [...listWorkflowNames(), 'ocr', 'sharepoint-download']
+
+  for (const name of expected) {
+    assert.ok(names.has(name), `expected ${name} in dashboard workflow metadata`)
+  }
 })
 
 test('GET /api/workflow-definitions normalizes legacy detailFields (string[]) to labeled shape', () => {
@@ -69,6 +85,53 @@ test('GET /api/workflow-definitions passes through labeled detailFields verbatim
   ])
 })
 
+test('GET /api/workflow-definitions surfaces presets for the InputRunPanel gear menu', () => {
+  clear()
+  defineWorkflow({
+    name: 'wf-with-presets',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    authSteps: false,
+    steps: ['extract', 'kronos-check', 'lookup', 'transact', 'finalize'] as const,
+    schema: z.object({}),
+    presets: [
+      {
+        id: 'transactions-only',
+        label: 'Transactions only',
+        skipSteps: ['kronos-check', 'lookup'],
+        description: 'For docs whose form is already filled.',
+      },
+    ],
+    handler: async () => {},
+  })
+  const handler = buildWorkflowsHandler()
+  const wf = handler().find((w) => w.name === 'wf-with-presets')
+  assert.ok(wf)
+  assert.deepEqual(wf?.presets, [
+    {
+      id: 'transactions-only',
+      label: 'Transactions only',
+      skipSteps: ['kronos-check', 'lookup'],
+      description: 'For docs whose form is already filled.',
+    },
+  ])
+})
+
+test('GET /api/workflow-definitions omits presets field when workflow declared none', () => {
+  clear()
+  defineWorkflow({
+    name: 'wf-no-presets',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    authSteps: false,
+    steps: ['only'] as const,
+    schema: z.object({}),
+    handler: async () => {},
+  })
+  const handler = buildWorkflowsHandler()
+  const wf = handler().find((w) => w.name === 'wf-no-presets')
+  assert.ok(wf)
+  assert.equal(wf?.presets, undefined)
+})
+
 test('GET /api/workflow-definitions returns metadata registered via register()', () => {
   clear()
   register({
@@ -77,6 +140,7 @@ test('GET /api/workflow-definitions returns metadata registered via register()',
     systems: ['old-kronos'],
     steps: ['searching', 'extracting', 'downloading'],
     archetype: 'batch',
+    code: 'kr',
     detailFields: [
       { key: 'employee', label: 'Employee' },
       { key: 'id', label: 'ID' },

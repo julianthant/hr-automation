@@ -2,18 +2,6 @@
 
 PeopleSoft HR automation: Smart HR transactions, person search, job summary extraction, emergency contact forms, and the ActionPlan execution pattern. Used by onboarding, work-study, emergency-contact, eid-lookup, and separations workflows.
 
-## Files
-
-- `action-plan.ts` — `ActionPlan` class: queue-based step collector with `add()`, `preview()` (dry-run), and `execute()` (sequential with error wrapping as `TransactionError`)
-- `navigate.ts` — `getContentFrame(page)` (iframe `#main_target_win0`), `waitForPeopleSoftProcessing(frame)`, `searchPerson(page, ssn, firstName, lastName, dob)`, `navigateToSmartHR(page)` (direct URL preferred, menu fallback)
-- `person-org-summary.ts` — Person Organizational Summary search/read helpers used by eid-lookup and related flows (registry-backed name read — see Lessons Learned)
-- `transaction.ts` — Full Smart HR flow: template selection, effective date, create transaction, reason code, personal data, comments, job data tabs, save/submit. Exports ~15 individual step functions
-- `personal-data.ts` — Emergency Contact standalone component: `navigateToEmergencyContact(page, emplId)`, `readExistingContactNames(page)`, `demoteExistingContact(page, existingName)`
-- `job-summary.ts` — `getJobSummaryData(page, emplId)`: navigates to Workforce Job Summary, searches by EID, extracts work location (deptId, description) and job info (jobCode, description). Throws with a clear "verify EID in upstream record" message when Workforce returns no results — no cross-source auto-fallback by design.
-- `selectors.ts` — **Selector registry** (Subsystem A). All Playwright locators grouped by flow: `smartHR`, `personalData`, `comments`, `jobData`, `personSearch`, `jobSummary`, `hrTasks`, `emergencyContact`. Callers import group-level namespaces and invoke `selector(root)` to get a Locator.
-- `types.ts` — `TransactionResult`, `TransactionError`, `PlannedAction`, `PersonSearchResult`, `PersonalDataInput`, `JobDataInput`, `JobSummaryData`
-- `index.ts` — Barrel exports (includes `ucpathSelectors` registry barrel)
-
 ## Before mapping a new selector
 
 1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.
@@ -48,7 +36,7 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 7. `fillComments` — both Comments and Initiator Comments textareas
 8. `clickJobDataTab` / `fillJobData` — position, classification, comp rate, rate value, end date
 9. `clickEarnsDistTab` / `clickEmployeeExperienceTab` — visit only (no fill)
-10. `clickSaveAndSubmit` — extracts transaction number from confirmation text
+10. `clickSaveAndSubmit` — after confirmation OK, reopens the Smart HR row, scrolls to the lower readback area, and extracts the `T...` transaction number
 
 ## Gotchas
 
@@ -56,28 +44,12 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 - Every form fill has `{ timeout: 10_000 }` and 2-5s waits for PeopleSoft roundtrips
 - Error detection: `.PSERROR`, `#ALERTMSG`, `.ps_alert-error` selectors
 - Person search: discriminates new hires (dialog) vs rehires (results table) by UI presence
+- Person Org Summary: detail pages with multiple Employment Instances must click `View All` when present and select the preferred assignment row (active first, HDH-active before non-HDH, then highest empl record). Do not derive active/inactive from the first visible assignment row.
 - Modal dialogs dismissed via `frame.evaluate()` + `document.getElementById("#ICOK")` (Playwright can't click behind PeopleSoft overlay)
 - `parsePayRate("$17.75 per hour")` → `"17.75"`
 - Phone/email grid indices hardcoded: `$6` for phone type, `$7` for email type
 - SSN is optional (international students), address is required
-- Transaction number extraction: regex for 7+ digit number in confirmation text
-
-## Verified Selectors
-
-All Playwright selectors for this system live in [`selectors.ts`](./selectors.ts),
-grouped by page/flow. Each selector carries a `// verified YYYY-MM-DD` inline
-comment. Grid-index-mutating selectors (PeopleSoft `$0`/`$11` shifts around
-position-number refresh — Comp Rate Code, Compensation Rate) use 5-deep
-`.or()` fallback chains.
-
-**Do not add inline selectors outside `selectors.ts`.** The
-[`tests/unit/systems/inline-selectors.test.ts`](../../../tests/unit/systems/inline-selectors.test.ts)
-guard will reject PRs that do. Dynamic regex-based employee-name lookups and
-JS-eval paths (e.g. `#ICOK` dialog dismiss, `#processing` spinner probe) are
-whitelisted via end-of-line `// allow-inline-selector` comments.
-
-When you verify a selector via playwright-cli, update the `// verified`
-comment in `selectors.ts` to today's date.
+- Transaction number extraction: parse the reopened Smart HR readback page, accepting both `Transaction ID: T...` and the approval strip `Transaction: T...`; scroll to that lower section before workflow screenshots
 
 ## No cross-source auto-fallbacks
 
@@ -95,6 +67,9 @@ Auto-correction via cross-source name matching is a correctness risk: names aren
 
 ## Lessons Learned
 
+- **2026-05-28: Person Org Summary multiple employment instances need active-row selection.** UCPath can open Person Org detail on an inactive instance while an active instance is hidden behind the Employment Instances `View All` link. `person-org-summary.ts` now expands the detail view when possible and selects the preferred assignment row before Active Check / EID Lookup derive status.
+- **2026-05-27: Smart HR Transactions sidebar selector must be exact.** UCPath renders both "Smart HR Transactions" and "SS Smart HR Transactions" under Smart HR Templates; loose `getByText("Smart HR Transactions")` matches both and fails strict mode before separations can create transactions. Keep `hrTasks.smartHRTransactionsLink` on an exact link role selector.
+- **2026-05-27: Transaction readback lives below the fold.** The submitted Smart HR readback page shows `Transaction ID: T...` and the approval strip below the comments/save area. `readLatestTransactionNumber` scrolls to that section before parsing, and separations captures `ucpath-transaction-submitted-missing-number` if UCPath accepted the submit but no T-number was parsed.
 - **2026-05-15: Person Org Summary name lookup moved to a registry selector.** `person-org-summary.ts` now reads `personOrgSummary.personNameValue` before falling back to generic leaf-text heuristics. Do not add personal names to skip lists; if the name readback fails, fix or extend the selector chain and record a selector lesson.
 - **2026-05-15: UCPath driver interactions use `safeClick`/`safeFill`.** Registry-locator clicks/fills in UCPath system modules should stay wrapped so the dashboard selector health panel can aggregate fallback/stall warnings by label. JS-eval and element-handle escape hatches remain documented inline.
 - **2026-04-23: `page.screenshot` outlier removed from `transaction.ts`.** `clickSaveAndSubmit` no longer captures its own ad-hoc `.screenshots/save-disabled-*.png` on waitForSaveEnabled timeout. Workflow handlers that want diagnostic captures call `ctx.screenshot({ kind: 'error', label: ... })` from their catch block — keeps the system module ctx-free and routes the image through the structured tracker pipeline.

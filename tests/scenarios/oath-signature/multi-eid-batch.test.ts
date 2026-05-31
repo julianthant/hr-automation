@@ -7,30 +7,46 @@ import { oathSignatureBeats, maskVolatile } from "./_beats.js";
 
 /**
  * Scenario: operator enqueues N EIDs in one dashboard input run. Because
- * oath-signature is `archetype: "single"`, each EID
- * becomes its own independent flat queue row — there is no batch-parent
- * card grouping them.
+ * the run contains multiple people, each EID becomes a batch member
+ * under the input-run batch card.
  *
  * Dashboard contract:
- *   - N rows on the flat queue surface, each independent.
+ *   - One batch group card with N member rows.
  *   - Each row's title comes from the per-row `__queueTitle` (operator
  *     subject), so the queue reads as a stack of "Oath Signature EID …".
- *   - No `parentRunId` on any of them (no batch-parent).
+ *   - Every member carries the shared input-run `parentRunId`.
  */
 describe("oath-signature scenario: multi-EID batch", () => {
-  test("three EIDs enqueued together — three independent rows complete", async (t) => {
+  test("three EIDs enqueued together — three batch-member rows complete", async (t) => {
     const rt = await createScenarioRuntime({ workflow: oathSignatureWorkflow });
     t.onTestFinished(() => rt.cleanup());
 
+    const parentRunId = "scenario-input-batch-1";
     const inputs = [
-      { kind: "signer" as const, emplId: "10000001", name: "Alice Smith" },
-      { kind: "signer" as const, emplId: "10000002", name: "Bob Jones" },
-      { kind: "signer" as const, emplId: "10000003", name: "Carol Lee" },
+      {
+        kind: "signer" as const,
+        emplId: "10000001",
+        name: "Alice Smith",
+        __runtimeOptions: { rowShape: "batch-member" as const },
+      },
+      {
+        kind: "signer" as const,
+        emplId: "10000002",
+        name: "Bob Jones",
+        __runtimeOptions: { rowShape: "batch-member" as const },
+      },
+      {
+        kind: "signer" as const,
+        emplId: "10000003",
+        name: "Carol Lee",
+        __runtimeOptions: { rowShape: "batch-member" as const },
+      },
     ];
 
     const handles = inputs.map((input) =>
       rt.enqueue(input, {
         itemId: input.emplId,
+        parentRunId,
         beats: oathSignatureBeats(input),
       }),
     );
@@ -50,7 +66,7 @@ describe("oath-signature scenario: multi-EID batch", () => {
     expect(snaps).toMatchInlineSnapshot(`
       [
         {
-          "archetype": "single",
+          "archetype": "batch-member",
           "data": {
             "__id": "10000001",
             "__name": "Alice Smith",
@@ -58,27 +74,28 @@ describe("oath-signature scenario: multi-EID batch", () => {
             "__queueTitleKind": "single",
             "__subject": "Oath Signature EID 10000001",
             "__subjectKind": "eid",
-            "archetype": "single",
+            "archetype": "batch-member",
+            "date": "05/01/2026",
             "emplId": "10000001",
             "instance": "<instance>",
             "name": "Alice Smith",
           },
           "displayId": "10000001",
           "itemId": "<itemId>",
-          "parentRunId": null,
-          "rowTypeLabel": "Normal row",
+          "parentRunId": "scenario-input-batch-1",
+          "rowTypeLabel": "Single",
           "runId": "<runId>",
           "status": "done",
           "statusLabel": "Done",
           "step": undefined,
           "subtitle": "10000001",
-          "surfacePlacement": "flat",
-          "surfaceType": "normal",
-          "title": "Oath Signature EID 10000001",
+          "surfacePlacement": "grouped",
+          "surfaceType": "single",
+          "title": "Alice Smith",
           "workflow": "oath-signature",
         },
         {
-          "archetype": "single",
+          "archetype": "batch-member",
           "data": {
             "__id": "10000002",
             "__name": "Bob Jones",
@@ -86,27 +103,28 @@ describe("oath-signature scenario: multi-EID batch", () => {
             "__queueTitleKind": "single",
             "__subject": "Oath Signature EID 10000002",
             "__subjectKind": "eid",
-            "archetype": "single",
+            "archetype": "batch-member",
+            "date": "05/01/2026",
             "emplId": "10000002",
             "instance": "<instance>",
             "name": "Bob Jones",
           },
           "displayId": "10000002",
           "itemId": "<itemId>",
-          "parentRunId": null,
-          "rowTypeLabel": "Normal row",
+          "parentRunId": "scenario-input-batch-1",
+          "rowTypeLabel": "Single",
           "runId": "<runId>",
           "status": "done",
           "statusLabel": "Done",
           "step": undefined,
           "subtitle": "10000002",
-          "surfacePlacement": "flat",
-          "surfaceType": "normal",
-          "title": "Oath Signature EID 10000002",
+          "surfacePlacement": "grouped",
+          "surfaceType": "single",
+          "title": "Bob Jones",
           "workflow": "oath-signature",
         },
         {
-          "archetype": "single",
+          "archetype": "batch-member",
           "data": {
             "__id": "10000003",
             "__name": "Carol Lee",
@@ -114,23 +132,24 @@ describe("oath-signature scenario: multi-EID batch", () => {
             "__queueTitleKind": "single",
             "__subject": "Oath Signature EID 10000003",
             "__subjectKind": "eid",
-            "archetype": "single",
+            "archetype": "batch-member",
+            "date": "05/01/2026",
             "emplId": "10000003",
             "instance": "<instance>",
             "name": "Carol Lee",
           },
           "displayId": "10000003",
           "itemId": "<itemId>",
-          "parentRunId": null,
-          "rowTypeLabel": "Normal row",
+          "parentRunId": "scenario-input-batch-1",
+          "rowTypeLabel": "Single",
           "runId": "<runId>",
           "status": "done",
           "statusLabel": "Done",
           "step": undefined,
           "subtitle": "10000003",
-          "surfacePlacement": "flat",
-          "surfaceType": "normal",
-          "title": "Oath Signature EID 10000003",
+          "surfacePlacement": "grouped",
+          "surfaceType": "single",
+          "title": "Carol Lee",
           "workflow": "oath-signature",
         },
       ]

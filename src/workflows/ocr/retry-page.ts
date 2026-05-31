@@ -179,18 +179,18 @@ export async function runOcrRetryPage(
       );
     } else {
       // Contract 3 (Finding #23): route through delegateToAllImpl so
-      // parentRunId stamping, archetype derivation, and child pending pre-emit
+      // parentRunId stamping, canonical archetype derivation, and child pending pre-emit
       // share one code path with the OCR orchestrator's eid-lookup fan-out.
-      //   - `renderAs: "flat"` → stamps archetype "passive-child" so children
-      //     render as `delegation-member` rows (OCR runtime policy's
-      //     `utilityChildSurface: "delegation-member"`).
+      //   - `renderAs: "flat"` remains a projection hint; eid-lookup rows
+      //     stamp `single`, parentRunId marks delegated scope, and one vs
+      //     many children controls single vs batch grouping.
       //   - `fireAndForget: true` because the `watchChildren` call below
       //     drives the wait — wrapping a second wait inside delegateToAllImpl
       //     would double-count.
       //   - `parentRunId: input.runId` so the OCR session row is the parent
       //     of each eid-lookup child row.
       const { delegateToAllImpl } = await import("../../core/delegate.js");
-      const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+      const { personLookupWorkflow } = await import("../person-lookup/index.js");
       const inputs = enqueueItems.map((e) =>
         e.kind === "name"
           ? { name: extractOcrRecordName(e.record, spec) }
@@ -212,11 +212,11 @@ export async function runOcrRetryPage(
       await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
         parentRunId: input.runId,
         trackerDir,
-        // eidLookupCrmWorkflow's exact generic param is a union of name-only /
+        // personLookupWorkflow's exact generic param is a union of name-only /
         // emplId-only variants; the local `EidLookupChildInput` widens both
         // into one optional-fields shape, so cast through unknown — the
         // runtime schema validates either variant.
-        child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+        child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
         inputs,
         renderAs: "flat",
         fireAndForget: true,
@@ -229,7 +229,7 @@ export async function runOcrRetryPage(
     }
 
     const outcomes = await watchChildren({
-      workflow: "eid-lookup",
+      workflow: "person-lookup",
       expectedItemIds: enqueueItems.map((e) => e.itemId),
       trackerDir,
       date,
@@ -470,8 +470,8 @@ function emitRow(args: {
     failedPages: args.failedPages,
     pageStatusSummary: args.summary,
     // Mirror the orchestrator's awaiting-approval stamp so dashboard
-    // surfaces the preview-tab affordance and batch label on retried rows.
-    archetype: "batch-parent",
+    // surfaces the preview-tab affordance on retried rows.
+    archetype: "preview",
     mode: "prepare",
     __id: args.sessionId,
     __name: priorName,
@@ -508,4 +508,3 @@ function patchUnresolved(records: unknown[], idx: number): void {
     rec.warnings = warnings;
   }
 }
-

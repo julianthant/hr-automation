@@ -10,7 +10,7 @@ import type { TrackerEntry } from "../../../src/dashboard/components/shared/type
 
 function entry(partial: Partial<TrackerEntry> & Pick<TrackerEntry, "id">): TrackerEntry {
   return {
-    workflow: "active-check",
+    workflow: "person-lookup",
     timestamp: "2026-05-11T12:00:00.000Z",
     status: "done",
     ...partial,
@@ -134,7 +134,7 @@ test("sortDaemonBatchParentIds orders by batch title for label-asc", () => {
     ["p-later", "p-earlier"],
     membersByParent,
     "label-asc",
-    "Active Check",
+    "Person Lookup",
   );
   assert.deepEqual(ids, ["p-earlier", "p-later"]);
 });
@@ -186,7 +186,7 @@ test("sortDaemonBatchParentIds time sort orders all–not-found batches by time 
     ["nf", "ok"],
     membersByParent,
     "start-newest",
-    "Active Check",
+    "Person Lookup",
   );
   assert.deepEqual(ids, ["nf", "ok"]);
 });
@@ -213,7 +213,7 @@ test("sortDaemonBatchParentIds label sort still sinks all–not-found batches la
     ["p-nf", "p-ok"],
     membersByParent,
     "label-asc",
-    "Active Check",
+    "Person Lookup",
   );
   assert.deepEqual(ids, ["p-ok", "p-nf"]);
 });

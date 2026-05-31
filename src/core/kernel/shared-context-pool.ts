@@ -56,7 +56,6 @@ export async function runWorkflowSharedContextPool<TData, TSteps extends readonl
       const { observer, getAuthTimings } = makeObserver('1')
 
       const parent = await Session.launch(wf.config.systems, {
-        authChain: wf.config.authChain,
         launchFn: opts.launchFn,
         observer,
       })
