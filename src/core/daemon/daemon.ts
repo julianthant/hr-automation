@@ -4,7 +4,7 @@ import type { RegisteredWorkflow } from '../kernel/types.js'
 import { Session } from '../kernel/session.js'
 import { runOneItem } from '../kernel/run-one-item.js'
 import { withBatchLifecycle } from '../kernel/batch-lifecycle.js'
-import { log } from '../../utils/log.js'
+import { log, enterDaemonLogContext } from '../../utils/log.js'
 import {
   lockfilePath,
   randomInstanceId,
@@ -96,6 +96,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
   ensureDaemonsDir(trackerDir)
   const instanceId = randomInstanceId(wf.config.name)
+  enterDaemonLogContext(wf.config.name, instanceId, trackerDir)
 
   const state: DaemonState = {
     wakeResolve: null,
