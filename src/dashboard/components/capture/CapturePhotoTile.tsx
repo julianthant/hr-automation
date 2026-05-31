@@ -77,7 +77,7 @@ export function CapturePhotoTile({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
         !disabled && "cursor-pointer hover:shadow-md",
         disabled && "opacity-60 cursor-not-allowed",
-        justArrived && "capture-anim-thumb-enter",
+        justArrived && "motion-safe:animate-pulse",
       )}
       style={{
         backgroundColor: "var(--capture-bg-raised)",
@@ -91,6 +91,8 @@ export function CapturePhotoTile({
       {!imageError ? (
         <img
           src={imageSrc}
+          srcSet={imageSrc}
+          sizes="96px"
           alt={`Photo ${photo.index + 1}`}
           loading="lazy"
           decoding="async"
@@ -110,7 +112,7 @@ export function CapturePhotoTile({
       {photo.blurFlagged && (
         <span
           key={flashKey}
-          className="capture-anim-blur-flash absolute right-1.5 bottom-1.5 font-sans text-[9px] uppercase tracking-[0.08em] font-medium"
+          className="absolute right-1.5 bottom-1.5 font-sans text-[9px] uppercase tracking-[0.08em] font-medium motion-safe:animate-pulse"
           style={{ color: "var(--capture-warn)" }}
         >
           blurry

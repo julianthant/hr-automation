@@ -35,10 +35,15 @@ export function ExpiryFooter({
         <span
           className={cn(
             "font-mono tabular-nums transition-colors",
-            warning && "capture-anim-expiry-warn",
-            critical && "capture-anim-expiry-critical",
+            (warning || critical) && "motion-safe:animate-pulse",
           )}
-          style={{ color: "var(--capture-fg-secondary)" }}
+          style={{
+            color: critical
+              ? "var(--capture-error)"
+              : warning
+                ? "var(--capture-warn)"
+                : "var(--capture-fg-secondary)",
+          }}
         >
           {mm}:{ss}
         </span>

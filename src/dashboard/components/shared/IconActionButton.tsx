@@ -49,7 +49,7 @@ export function IconActionButton({
       disabled={disabled || pending}
       className={cn(
         SIZE_CLASS[size],
-        "inline-flex flex-shrink-0 items-center justify-center rounded-md cursor-pointer transition-colors outline-none",
+        "inline-flex shrink-0 items-center justify-center rounded-md cursor-pointer transition-colors outline-none",
         "focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-card",
         "disabled:opacity-60 disabled:cursor-wait",
         TONE_CLASS[tone],
@@ -57,7 +57,7 @@ export function IconActionButton({
       )}
     >
       {pending ? (
-        <Loader2 aria-hidden className={cn("h-3.5 w-3.5 animate-spin", spinnerClassName)} />
+        <Loader2 aria-hidden className={cn("h-3.5 w-3.5 animate-spin motion-reduce:animate-none", spinnerClassName)} />
       ) : (
         icon
       )}

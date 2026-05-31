@@ -68,14 +68,14 @@ export function BatchQueueToolbar({
   const time = formatBatchToolbarTime(batchAnchor.timestamp);
   const startedLabel = anchorKind === "prep" ? "Approved" : "Started";
   return (
-    <div className="h-[69.5px] flex flex-col justify-center px-3 min-[1440px]:px-4 border-b border-border bg-card/60 flex-shrink-0 gap-1">
+    <div className="h-[69.5px] flex flex-col justify-center px-3 min-[1440px]:px-4 border-b border-border bg-card/60 shrink-0 gap-1">
       <div className="flex items-center gap-2 min-w-0">
         <button
           type="button"
           onClick={onBack}
           aria-label="Back to queue"
           title="Back to queue"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary/40 text-foreground hover:bg-secondary/70 flex-shrink-0"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary/40 text-foreground hover:bg-secondary/70 shrink-0"
         >
           ←
         </button>

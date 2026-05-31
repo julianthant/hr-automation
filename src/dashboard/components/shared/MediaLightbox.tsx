@@ -240,7 +240,7 @@ function CaptureLightboxShell({
       aria-modal="true"
       aria-label={ariaLabel}
       onClick={onClose}
-      className="fixed inset-0 z-[60] flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ backgroundColor: "hsl(15 11% 4% / 0.92)" }}
     >
       <button

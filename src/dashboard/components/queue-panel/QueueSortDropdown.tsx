@@ -43,7 +43,7 @@ export function QueueSortDropdown({
           )}
         >
           <span className="truncate">{active}</span>
-          <ArrowDownWideNarrow aria-hidden className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+          <ArrowDownWideNarrow aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-[12rem]">
           {QUEUE_SORT_OPTIONS.map((opt) => (

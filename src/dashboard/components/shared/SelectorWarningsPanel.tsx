@@ -89,7 +89,7 @@ export function SelectorWarningsPanel({ days = 7, pollIntervalMs = 30_000 }: Pro
       >
         <span className="flex items-center gap-1.5 min-w-0">
           <AlertTriangle
-            className={cn("w-3.5 h-3.5 flex-shrink-0", !hasWarnings && "opacity-70")}
+            className={cn("w-3.5 h-3.5 shrink-0", !hasWarnings && "opacity-70")}
             aria-hidden
           />
           <span className="truncate">Selector Health</span>
@@ -102,7 +102,7 @@ export function SelectorWarningsPanel({ days = 7, pollIntervalMs = 30_000 }: Pro
         <ChevronDown
           aria-hidden
           className={cn(
-            "w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200",
+            "w-3.5 h-3.5 shrink-0 transition-transform duration-200",
             !expanded && "-rotate-90",
           )}
         />

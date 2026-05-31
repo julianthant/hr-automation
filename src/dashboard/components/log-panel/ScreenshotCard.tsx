@@ -40,11 +40,13 @@ export function ScreenshotCard({
           <button
             key={f.path}
             type="button"
-            className="flex-shrink-0 text-xs text-muted-foreground hover:ring-2 hover:ring-primary/50 rounded transition-shadow"
+            className="shrink-0 text-xs text-muted-foreground hover:ring-2 hover:ring-primary/50 rounded transition-shadow"
             onClick={() => onOpen(entry, i)}
           >
             <img
               src={f.url}
+              srcSet={f.url}
+              sizes="128px"
               alt={f.system}
               className="w-32 h-20 object-cover border-b border-r rounded"
               loading="lazy"

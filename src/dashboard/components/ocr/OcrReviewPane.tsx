@@ -759,7 +759,7 @@ function useOcrReviewPrepApi(
                   )}
                 >
                   {submitting ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
                   ) : (
                     <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   )}
@@ -974,7 +974,7 @@ function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sess
             disabled={busy}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-50"
           >
-            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+            {busy && <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />}
             {busy ? "Re-running…" : "Re-OCR whole PDF"}
           </button>
         </DialogFooter>
@@ -1074,7 +1074,7 @@ function renderFormCard(args: {
               "disabled:cursor-wait disabled:opacity-60",
             )}
           >
-            <RotateCw className={cn("h-3.5 w-3.5", isResearching && "animate-spin")} aria-hidden />
+            <RotateCw className={cn("h-3.5 w-3.5", isResearching && "animate-spin motion-reduce:animate-none")} aria-hidden />
           </button>
         ) : undefined
       }

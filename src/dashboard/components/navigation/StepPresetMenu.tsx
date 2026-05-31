@@ -44,7 +44,7 @@ export function StepPresetMenu({ presets, selectedId, onSelect, workflowLabel }:
           aria-label={`Run mode for ${workflowLabel}`}
           title={`Run mode: ${isDefault ? "Full" : selected?.label ?? "(unknown)"}`}
           className={cn(
-            "relative flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
+            "relative shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
             "border focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
             "cursor-pointer",
             isDefault
@@ -121,7 +121,7 @@ function PresetItem({ id, label, description, selected, onSelect }: PresetItemPr
         <span
           aria-hidden
           className={cn(
-            "mt-0.5 flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-full border",
+            "mt-0.5 shrink-0 w-4 h-4 flex items-center justify-center rounded-full border",
             selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-transparent",
           )}
         >

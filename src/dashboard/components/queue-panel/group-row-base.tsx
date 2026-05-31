@@ -121,7 +121,7 @@ export function GroupRowBase({
             </span>
             <span
               className={cn(
-                "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide flex-shrink-0",
+                "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide shrink-0",
                 countTone === "warning"
                   ? "bg-warning/12 text-warning border border-warning/40"
                   : "bg-secondary/80 text-secondary-foreground border border-border",
@@ -165,7 +165,7 @@ export function GroupRowBase({
                     <div key={kid.id} className="flex items-center gap-2 min-w-0">
                       <Icon
                         className={cn(
-                          "w-3 h-3 flex-shrink-0",
+                          "w-3 h-3 shrink-0",
                           cfg.color,
                           cfg.spin && "animate-spin motion-reduce:animate-none",
                         )}
@@ -175,7 +175,7 @@ export function GroupRowBase({
                         {kid.name}
                       </span>
                       {kid.emplId && (
-                        <span className="text-muted-foreground text-[9.5px] flex-shrink-0 tabular-nums">
+                        <span className="text-muted-foreground text-[9.5px] shrink-0 tabular-nums">
                           {kid.emplId}
                         </span>
                       )}
@@ -197,8 +197,8 @@ export function GroupRowBase({
                 "cursor-pointer focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset rounded-sm",
             )}
           >
-            <span className="tabular-nums flex-shrink-0">{rowTime}</span>
-            <span className="bg-secondary/80 px-1.5 py-px rounded font-medium flex-shrink-0 tabular-nums">
+            <span className="tabular-nums shrink-0">{rowTime}</span>
+            <span className="bg-secondary/80 px-1.5 py-px rounded font-medium shrink-0 tabular-nums">
               #{runNumber}
             </span>
             {footerSecondaryId && (
@@ -213,7 +213,7 @@ export function GroupRowBase({
             {elapsedLabel && (
               <span
                 className={cn(
-                  "tabular-nums flex-shrink-0",
+                  "tabular-nums shrink-0",
                   elapsed?.frozen ? "" : "text-primary",
                 )}
               >
@@ -222,7 +222,7 @@ export function GroupRowBase({
             )}
           </div>
           {footerActions ? (
-            <div className="flex items-center gap-1 flex-shrink-0">{footerActions}</div>
+            <div className="flex items-center gap-1 shrink-0">{footerActions}</div>
           ) : null}
         </div>
       </div>

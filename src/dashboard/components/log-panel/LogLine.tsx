@@ -54,7 +54,7 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
       onClick={() => onCopy(`${ts} ${message}`)}
     >
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{ts}</span>
-      <Icon className={cn("w-[14px] h-[14px] flex-shrink-0", color)} />
+      <Icon className={cn("w-[14px] h-[14px] shrink-0", color)} />
       <span className={cn(
         "flex-1 break-words",
         category === "success" && "text-[#4ade80]",
@@ -66,7 +66,7 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
         {message}
       </span>
       {entry.count > 1 && (
-        <span className="text-[11px] bg-accent text-accent-foreground px-1.5 py-px rounded font-semibold flex-shrink-0">
+        <span className="text-[11px] bg-accent text-accent-foreground px-1.5 py-px rounded font-semibold shrink-0">
           x{entry.count}
         </span>
       )}
@@ -136,7 +136,7 @@ function EventLine({ event }: { event: RunEvent }) {
     <div className="flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{time}</span>
       <span
-        className="flex-shrink-0 text-center"
+        className="shrink-0 text-center"
         style={{ color: v.color, width: 14, fontSize: 14 }}
       >
         {v.glyph}

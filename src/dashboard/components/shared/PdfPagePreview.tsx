@@ -187,7 +187,7 @@ export function PdfPagePreview({
     >
       {state === "loading" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted text-xs text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" />
           <span>Loading page {page}…</span>
           <a
             href={src}
@@ -220,6 +220,8 @@ export function PdfPagePreview({
           ref={imgRef}
           key={src}
           src={src}
+          srcSet={src}
+          sizes="100vw"
           alt={`PDF page ${page}`}
           decoding="async"
           fetchPriority="high"

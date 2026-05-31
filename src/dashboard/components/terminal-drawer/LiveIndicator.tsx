@@ -14,7 +14,7 @@ export function LiveIndicator({ connected }: { connected: boolean }) {
       role="status"
       aria-live="polite"
       className={cn(
-        "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium leading-none flex-shrink-0",
+        "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium leading-none shrink-0",
         connected
           ? "bg-[#4ade80]/8 border border-[#4ade80]/20 text-[#4ade80]"
           : "bg-destructive/8 border border-destructive/20 text-destructive",
@@ -24,7 +24,7 @@ export function LiveIndicator({ connected }: { connected: boolean }) {
         aria-hidden
         className={cn(
           "w-[6px] h-[6px] rounded-full",
-          connected ? "bg-[#4ade80] animate-pulse" : "bg-destructive",
+          connected ? "bg-[#4ade80] motion-safe:animate-pulse" : "bg-destructive",
         )}
       />
       Live

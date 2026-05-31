@@ -100,7 +100,7 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
         title="Download a SharePoint spreadsheet"
         disabled={downloading || !hasOptions}
         className={cn(
-          "flex-shrink-0 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground transition-colors outline-none",
+          "shrink-0 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground transition-colors outline-none",
           size,
           "hover:text-foreground hover:bg-accent hover:border-primary",
           "data-[state=open]:text-foreground data-[state=open]:bg-accent data-[state=open]:border-primary",
@@ -109,7 +109,7 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
         )}
       >
         {downloading ? (
-          <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin" />
+          <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin motion-reduce:animate-none" />
         ) : (
           <Download aria-hidden className="w-3.5 h-3.5" />
         )}
@@ -145,7 +145,7 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
               >
                 <span className="font-medium text-[13px]">{opt.label}</span>
                 {isRunning ? (
-                  <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin text-primary" />
+                  <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin motion-reduce:animate-none text-primary" />
                 ) : !opt.configured ? (
                   <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
                     unset

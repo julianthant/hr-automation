@@ -75,7 +75,7 @@ export function ActionRow({
           style={{ gridColumn: "span 3" }}
         >
           {retrying ? (
-            <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
           ) : (
             <RefreshCw aria-hidden className="h-3.5 w-3.5" />
           )}
@@ -113,11 +113,8 @@ function FinalizingBar() {
       aria-busy="true"
     >
       <div
-        className="absolute inset-y-0 left-0 w-1/2 rounded-full"
-        style={{
-          backgroundColor: "var(--capture-fg-body)",
-          animation: "finalizing-strip 1.6s var(--cap-ease-smooth) infinite",
-        }}
+        className="absolute inset-y-0 left-0 w-1/2 rounded-full motion-safe:animate-pulse"
+        style={{ backgroundColor: "var(--capture-fg-body)" }}
       />
     </div>
   );

@@ -35,8 +35,12 @@ export function ScreenshotLightbox({
         return (
           <img
             src={file.url}
+            srcSet={file.url}
+            sizes="85vw"
             alt={file.system}
-            className="max-w-full max-h-[85vh] rounded"
+            loading="lazy"
+            decoding="async"
+            className="max-w-full max-h-[85vh] rounded object-contain"
           />
         );
       }}

@@ -81,7 +81,7 @@ export function TopBar({
   return (
     <div
       className={cn(
-        "relative z-20 flex items-center justify-between gap-4 px-6 py-2 bg-card flex-shrink-0 border-b border-border",
+        "relative z-20 flex items-center justify-between gap-4 px-6 py-2 bg-card shrink-0 border-b border-border",
       )}
     >
       {/* ── Brand — left edge ──────────────────────────────────── */}

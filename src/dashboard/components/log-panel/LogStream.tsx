@@ -234,7 +234,7 @@ export function LogStream({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Filter tabs + maximize toggle */}
-      <div className="flex items-center gap-0.5 px-6 py-2 border-b border-border flex-shrink-0">
+      <div className="flex items-center gap-0.5 px-6 py-2 border-b border-border shrink-0">
         {visibleTabs.map((tab) => (
           <button
             key={tab.key}
@@ -269,7 +269,7 @@ export function LogStream({
       {previewVisible && (
         <>
           {previewHeader ? (
-            <div className="flex-shrink-0 border-b border-border bg-card/95 px-6 py-4 backdrop-blur">
+            <div className="shrink-0 border-b border-border bg-card/95 px-6 py-4 backdrop-blur">
               {previewHeader}
             </div>
           ) : null}
@@ -311,9 +311,9 @@ export function LogStream({
           <div className="space-y-[6px] px-6 py-3">
             {Array.from({ length: 12 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3.5 py-[3px]">
-                <div className="h-3 w-[72px] rounded bg-muted animate-pulse" />
-                <div className="h-3.5 w-3.5 rounded bg-muted animate-pulse" />
-                <div className="h-3 rounded bg-muted animate-pulse" style={{ width: `${100 + (i % 5) * 60}px` }} />
+                <div className="h-3 w-[72px] rounded bg-muted motion-safe:animate-pulse" />
+                <div className="h-3.5 w-3.5 rounded bg-muted motion-safe:animate-pulse" />
+                <div className="h-3 rounded bg-muted motion-safe:animate-pulse" style={{ width: `${100 + (i % 5) * 60}px` }} />
               </div>
             ))}
           </div>
@@ -372,13 +372,13 @@ export function LogStream({
           Streaming/auto-scroll affordances hide when a non-log slot owns
           the panel, but run controls stay available after the header is
           removed. */}
-      <div className="h-12 flex items-center justify-between gap-3 px-6 text-[12px] text-muted-foreground flex-shrink-0">
+      <div className="h-12 flex items-center justify-between gap-3 px-6 text-[12px] text-muted-foreground shrink-0">
         {tab?.source === "screenshots" || tab?.source === "edit-data" || tab?.source === "preview" ? (
           <div />
         ) : (
           <div className="flex items-center gap-2 leading-none">
             <span className="relative flex items-center justify-center w-[7px] h-[7px]">
-              <span className="absolute inset-0 rounded-full bg-primary/50 animate-ping" />
+              <span className="absolute inset-0 rounded-full bg-primary/50 motion-safe:animate-ping" />
               <span className="relative w-[7px] h-[7px] rounded-full bg-primary" />
             </span>
             <span className="font-medium">Streaming</span>
@@ -395,7 +395,7 @@ export function LogStream({
           </div>
         )}
         {rowTypeLabel && (
-          <span className="px-2 py-0.5 rounded-md bg-secondary text-[11px] font-mono text-muted-foreground border border-border/60 whitespace-nowrap flex-shrink-0">
+          <span className="px-2 py-0.5 rounded-md bg-secondary text-[11px] font-mono text-muted-foreground border border-border/60 whitespace-nowrap shrink-0">
             {rowTypeLabel}
           </span>
         )}

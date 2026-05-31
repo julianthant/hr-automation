@@ -338,7 +338,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
           )}
         >
           {pending === "refresh" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
           ) : (
             <RefreshCcw className="h-3.5 w-3.5" />
           )}
@@ -374,7 +374,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
           )}
         >
           {pending === "save" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
           ) : (
             <Save className="h-3.5 w-3.5" />
           )}
@@ -394,7 +394,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
           )}
         >
           {pending === "run" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
           ) : (
             <Play className="h-3.5 w-3.5" />
           )}
@@ -550,7 +550,7 @@ function CopyFromPriorButton({
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Prior runs · {keyField} = {keyValue}
           </div>
-          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none text-muted-foreground" />}
         </div>
         <div className="flex-1 overflow-y-auto">
           {error ? (
