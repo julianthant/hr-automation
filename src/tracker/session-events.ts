@@ -24,7 +24,8 @@ export type SessionEventType =
   | "screenshot"
   | "telegram_sent"
   | "ucpath_idle_signal"
-  | "daemon_phase";
+  | "daemon_phase"
+  | "daemon_log";
 
 export interface ScreenshotSessionEvent {
   type: "screenshot";
@@ -394,6 +395,24 @@ export function emitUcpathIdleSignal(
 export function emitDaemonPhase(instance: string, phase: "idle" | "keepalive", dir?: string): void {
   emitSessionEvent(
     { type: "daemon_phase", workflowInstance: instance, data: { phase } },
+    dir,
+  );
+}
+
+/**
+ * A log line the daemon writes about itself (startup, claim loop, shutdown).
+ * Stored in the session log because it is machine-scoped, not tied to one run.
+ * `level` is the log level: "step"|"success"|"warn"|"error"|"waiting"|"debug".
+ */
+export function emitDaemonLog(
+  instance: string,
+  level: string,
+  message: string,
+  dir?: string,
+  data: Record<string, string> = {},
+): void {
+  emitSessionEvent(
+    { type: "daemon_log", workflowInstance: instance, data: { level, message, ...data } },
     dir,
   );
 }
