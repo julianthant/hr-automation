@@ -41,11 +41,13 @@ describe("oath-signature scenario: happy path (single EID)", () => {
           "__queueTitleKind": "single",
           "__subject": "Oath Signature EID 10873698",
           "__subjectKind": "eid",
+          "__traceId": "<traceId>",
           "archetype": "single",
           "date": "05/01/2026",
           "emplId": "10873698",
           "instance": "<instance>",
           "name": "Jane Doe",
+          "queueRowKind": "person",
         },
         "displayId": "10873698",
         "itemId": "<itemId>",
@@ -58,7 +60,7 @@ describe("oath-signature scenario: happy path (single EID)", () => {
         "subtitle": "10873698",
         "surfacePlacement": "flat",
         "surfaceType": "single",
-        "title": "Oath Signature EID 10873698",
+        "title": "Jane Doe",
         "workflow": "oath-signature",
       }
     `);

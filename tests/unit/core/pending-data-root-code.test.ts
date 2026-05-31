@@ -68,3 +68,23 @@ test("buildPendingTrackerData omits the trace id entirely when no runId is suppl
 
   assert.equal(data.__traceId, undefined);
 });
+
+test("buildPendingTrackerData reuses a pre-frozen traceId verbatim instead of recomputing", () => {
+  // A daemon worker re-emit passes the trace id frozen on the run's first
+  // pending row (stamped seconds earlier at HTTP enqueue). It must reuse that
+  // id, not mint a fresh one off `runId`+`at` — otherwise the same run shows
+  // two different ids and the dashboard's latest-row-wins collapse flickers.
+  const frozen = "os-053026143012-abcd";
+  const data = buildPendingTrackerData({
+    workflow: childWorkflow,
+    input: { emplId: "10000050" },
+    useInitialTrackerSeed: true,
+    nameIdStamp: "always-on-seed",
+    runId: "abcd-1234-5678",
+    rootCode: "os",
+    at: new Date("2026-05-30T14:31:45.000Z"), // 93s later — would drift the compute
+    traceId: frozen,
+  });
+
+  assert.equal(data.__traceId, frozen);
+});

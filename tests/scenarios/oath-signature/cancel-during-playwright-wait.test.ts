@@ -96,10 +96,12 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
           "__queueTitleKind": "single",
           "__subject": "Oath Signature EID 10873698",
           "__subjectKind": "eid",
+          "__traceId": "<traceId>",
           "archetype": "single",
           "emplId": "10873698",
           "instance": "<instance>",
           "name": "Jane Doe",
+          "queueRowKind": "person",
         },
         "displayId": "10873698",
         "error": "Cancelled by user before step 'cancelled'",
@@ -113,7 +115,7 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
         "subtitle": "10873698",
         "surfacePlacement": "flat",
         "surfaceType": "single",
-        "title": "Oath Signature EID 10873698",
+        "title": "Jane Doe",
         "workflow": "oath-signature",
       }
     `);

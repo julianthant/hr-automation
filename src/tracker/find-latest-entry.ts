@@ -189,3 +189,28 @@ export function findLatestEntryForPredicate(
   }
   return null;
 }
+
+/**
+ * Read back the trace id frozen on a run's earliest row that carries one.
+ * `data.__traceId` embeds the original pre-emit wall-clock timestamp, so any
+ * later re-emit or rebuild for the same run MUST reuse this value rather than
+ * minting a fresh one (which would drift the id by however many seconds elapsed
+ * between emissions). Returns `undefined` when no prior row carries a trace id;
+ * the caller then computes the canonical one itself.
+ */
+export function findFrozenTraceId(opts: {
+  workflow: string;
+  runId: string;
+  trackerDir?: string;
+  db?: Database;
+}): string | undefined {
+  const prior = findLatestEntryForPredicate({
+    workflow: opts.workflow,
+    ...(opts.trackerDir ? { trackerDir: opts.trackerDir } : {}),
+    ...(opts.db ? { db: opts.db, runId: opts.runId } : {}),
+    lookbackDays: 2,
+    predicate: (entry) => entry.runId === opts.runId && Boolean(entry.data?.__traceId),
+  });
+  const id = prior?.data?.__traceId;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}

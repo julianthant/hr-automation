@@ -50,11 +50,13 @@ describe("oath-signature scenario: fail during transaction", () => {
           "__queueTitleKind": "single",
           "__subject": "Oath Signature EID 10873698",
           "__subjectKind": "eid",
+          "__traceId": "<traceId>",
           "archetype": "single",
           "date": "05/01/2026",
           "emplId": "10873698",
           "instance": "<instance>",
           "name": "Jane Doe",
+          "queueRowKind": "person",
         },
         "displayId": "10873698",
         "error": "UCPath Save button was not visible after 10s",
@@ -68,7 +70,7 @@ describe("oath-signature scenario: fail during transaction", () => {
         "subtitle": "10873698",
         "surfacePlacement": "flat",
         "surfaceType": "single",
-        "title": "Oath Signature EID 10873698",
+        "title": "Jane Doe",
         "workflow": "oath-signature",
       }
     `);
