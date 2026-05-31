@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import { makeTailState, tailIncremental } from "./tail-incremental.js";
-import { getLogRunId } from "../utils/log.js";
+import { getLogRunId } from "../utils/log-context.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applySessionEventLive } from "./state/runtime.js";
 import { isStateDbReady, openStateDb } from "./state/db.js";

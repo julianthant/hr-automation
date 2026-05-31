@@ -1,16 +1,13 @@
 import { styleText } from "node:util";
-import { AsyncLocalStorage } from "async_hooks";
 import { appendLogEntry, type LogEntry } from "../tracker/jsonl.js";
+import { getLogContext } from "./log-context.js";
+import { emitDaemonLog } from "../tracker/session-events.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
 
-interface LogContext {
-  workflow: string;
-  itemId: string;
-  runId?: string;
-  dir?: string;
-}
-
-const logStore = new AsyncLocalStorage<LogContext>();
+export {
+  setLogRunId, getLogRunId, getLogWorkflow,
+  withLogContext, withDaemonLogContext, enterDaemonLogContext,
+} from "./log-context.js";
 
 function envBool(name: string): boolean {
   return process.env[name] === "true" || process.env[name] === "1";
@@ -31,17 +28,30 @@ function structuredFields(input: LogMessage): Omit<StructuredLogEvent, "level" |
   return rest;
 }
 
+function toStringData(extra: Omit<StructuredLogEvent, "level" | "message">): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(extra)) {
+    if (v === undefined || v === null) continue;
+    out[k] = typeof v === "string" ? v : String(v);
+  }
+  return out;
+}
+
 function appendFromContext(
   level: LogEntry["level"],
   message: string,
   extra: Omit<StructuredLogEvent, "level" | "message"> = {},
 ): void {
-  const ctx = logStore.getStore();
+  const ctx = getLogContext();
   if (!ctx) return;
+  if (ctx.kind === "daemon") {
+    emitDaemonLog(ctx.instance ?? ctx.workflow, level, message, ctx.dir, toStringData(extra));
+    return;
+  }
   appendLogEntry(
     {
       workflow: ctx.workflow,
-      itemId: ctx.itemId,
+      itemId: ctx.itemId ?? "",
       ...(ctx.runId ? { runId: ctx.runId } : {}),
       level,
       message,
@@ -93,28 +103,3 @@ export const log = {
   e2e: (category: string, payload: string | Record<string, unknown>): void =>
     emitE2e(category, payload),
 };
-
-/** Update the current log context with a runId (called from withTrackedWorkflow). */
-export function setLogRunId(runId: string): void {
-  const ctx = logStore.getStore();
-  if (ctx) ctx.runId = runId;
-}
-
-/** Read the runId from the current AsyncLocalStorage log context, if set. */
-export function getLogRunId(): string | undefined {
-  return logStore.getStore()?.runId;
-}
-
-/** Read the workflow name from the current AsyncLocalStorage log context, if set. */
-export function getLogWorkflow(): string | undefined {
-  return logStore.getStore()?.workflow;
-}
-
-export function withLogContext<T>(
-  workflow: string,
-  itemId: string,
-  fn: () => Promise<T>,
-  dir?: string,
-): Promise<T> {
-  return logStore.run({ workflow, itemId, dir }, fn);
-}
