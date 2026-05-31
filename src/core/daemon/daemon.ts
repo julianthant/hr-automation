@@ -527,7 +527,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       // buildShutdownTrackerData always stamps `data.archetype`
                       // (via buildHttpPendingData or its fallback path) so the
                       // returned record satisfies StampedData at runtime.
-                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData,
+                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                        runId,
+                        trackerDir,
+                      }) as StampedData,
                       ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                       error: cancelError,
                     },
