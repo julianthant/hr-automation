@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import {
   emitSessionEvent,
+  emitDaemonLog,
   generateInstanceName,
   readSessionEvents,
   getSessionsFilePath,
@@ -650,4 +651,19 @@ test("generateInstanceName: person-lookup uses human label so dashboard stop con
   const name = generateInstanceName("person-lookup", dir);
 
   assert.equal(name, "Person Lookup 1");
+});
+
+describe("emitDaemonLog", () => {
+  it("writes a daemon_log session event with correct type, workflowInstance, level, and message", () => {
+    const dir = TMP();
+    emitDaemonLog("Onboarding 1", "warn", "queue stalled", dir);
+
+    const events = readSessionEvents(dir);
+    assert.equal(events.length, 1);
+    const e = events[0];
+    assert.equal(e.type, "daemon_log");
+    assert.equal(e.workflowInstance, "Onboarding 1");
+    assert.equal(e.data?.level, "warn");
+    assert.equal(e.data?.message, "queue stalled");
+  });
 });
