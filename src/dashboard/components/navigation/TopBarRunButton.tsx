@@ -30,7 +30,7 @@ export function TopBarRunButton({ activeWorkflow, busyCount = 0 }: TopBarRunButt
             : `Upload PDF for ${activeWorkflow}`
         }
         className={cn(
-          "relative flex-shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg",
+          "relative shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg",
           "bg-primary text-primary-foreground border border-primary",
           "hover:bg-primary/90 hover:border-primary/90",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",

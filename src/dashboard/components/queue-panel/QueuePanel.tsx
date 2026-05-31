@@ -138,7 +138,7 @@ function QueueSortToolbar({
         className="flex-1 min-w-0"
       />
       {actions ? (
-        <div className="flex flex-shrink-0 items-center gap-1">{actions}</div>
+        <div className="flex shrink-0 items-center gap-1">{actions}</div>
       ) : null}
     </div>
   );
@@ -150,11 +150,11 @@ function QueueLoadingSkeleton() {
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="px-5 py-3.5 border-b border-border">
           <div className="flex justify-between mb-2">
-            <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-16 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-32 rounded bg-muted motion-safe:animate-pulse" />
+            <div className="h-4 w-16 rounded bg-muted motion-safe:animate-pulse" />
           </div>
-          <div className="h-3 w-48 rounded bg-muted animate-pulse mt-1" />
-          <div className="h-3 w-24 rounded bg-muted animate-pulse mt-2" />
+          <div className="h-3 w-48 rounded bg-muted motion-safe:animate-pulse mt-1" />
+          <div className="h-3 w-24 rounded bg-muted motion-safe:animate-pulse mt-2" />
         </div>
       ))}
     </div>
@@ -485,7 +485,7 @@ export function QueuePanel({
   ];
 
   return (
-    <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] flex-shrink-0 flex flex-col bg-background">
+    <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] shrink-0 flex flex-col bg-background">
       {batchQueueParentRunId && resolvedBatchToolbarEntry ? (
         <BatchQueueToolbar
           batchAnchor={resolvedBatchToolbarEntry}
@@ -511,7 +511,7 @@ export function QueuePanel({
           }
         />
       ) : (
-        <div className="flex flex-col flex-shrink-0 border-b border-border bg-card/60">
+        <div className="flex flex-col shrink-0 border-b border-border bg-card/60">
           <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2">
             <StatPills
               entries={collapsedStatPillEntries}
@@ -532,7 +532,7 @@ export function QueuePanel({
       )}
 
       {batchQueueParentRunId ? (
-        <div className="flex-shrink-0 px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/50">
+        <div className="shrink-0 px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/50">
           <QueueSortToolbar
             value={queueSortMode}
             onChange={onQueueSortModeChange}
@@ -592,7 +592,7 @@ export function QueuePanel({
       </div>
 
       {runControlsSlot && (
-        <div className="flex h-12 w-full min-w-0 items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 flex-shrink-0">
+        <div className="flex h-12 w-full min-w-0 items-center gap-2 px-3 min-[1440px]:px-4 bg-card/40 shrink-0">
           {runControlsSlot}
         </div>
       )}

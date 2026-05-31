@@ -63,7 +63,7 @@ export function WorkflowRail({
   return (
     <nav
       aria-label="Workflows"
-      className="w-[200px] flex-shrink-0 bg-card flex flex-col"
+      className="w-[200px] shrink-0 bg-card flex flex-col"
     >
       <div className="flex-1 overflow-y-auto py-3">
         {displayGroups.map((group, idx) => (
@@ -113,7 +113,7 @@ export function WorkflowRail({
                           {labelFor(wf)}
                         </span>
                       </span>
-                      <span className="flex-shrink-0 flex items-center gap-1.5">
+                      <span className="shrink-0 flex items-center gap-1.5">
                         {queued > 0 && (
                           <span
                             className="px-1 py-0.5 rounded-sm bg-[#fbbf24]/15 text-[#fbbf24] text-[9px] font-mono font-semibold tabular-nums leading-none"

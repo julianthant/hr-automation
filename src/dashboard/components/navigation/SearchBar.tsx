@@ -109,7 +109,7 @@ export function SearchBar({ onSelect }: SearchBarProps) {
       <div
         className="flex items-center gap-2 bg-secondary border border-border rounded-lg h-8 px-3 w-full focus-within:border-primary transition-colors"
       >
-        <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
         <input
           ref={inputRef}
           type="text"
@@ -121,12 +121,12 @@ export function SearchBar({ onSelect }: SearchBarProps) {
           className="flex-1 bg-transparent border-none outline-none text-foreground text-xs font-sans placeholder:text-muted-foreground min-w-0"
         />
         {loading ? (
-          <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin flex-shrink-0" />
+          <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin motion-reduce:animate-none shrink-0" />
         ) : q ? (
           <button
             type="button"
             onClick={clearQuery}
-            className="flex-shrink-0 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors p-0.5"
+            className="shrink-0 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors p-0.5"
             aria-label="Clear search"
           >
             <X className="w-3.5 h-3.5" />

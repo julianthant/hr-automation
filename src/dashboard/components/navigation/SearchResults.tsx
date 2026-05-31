@@ -85,7 +85,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
               </span>
               <span
                 className={cn(
-                  "text-[10px] font-semibold px-2 py-0.5 rounded-xl uppercase tracking-wide font-mono flex-shrink-0",
+                  "text-[10px] font-semibold px-2 py-0.5 rounded-xl uppercase tracking-wide font-mono shrink-0",
                   statusBadgeClass(row.displayStatus) || "bg-secondary text-muted-foreground",
                 )}
               >
@@ -103,7 +103,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
               <span className="text-[12px] font-mono text-muted-foreground truncate">
                 {row.id}
               </span>
-              <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0 flex items-center gap-2">
+              <span className="text-[11px] font-mono text-muted-foreground shrink-0 flex items-center gap-2">
                 <span>{shortDate(row.date)}</span>
                 <span className="w-px h-3 bg-border" />
                 <span>{shortTime(row.lastTs)}</span>

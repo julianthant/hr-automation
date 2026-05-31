@@ -67,7 +67,7 @@ function StateDot({ kind }: { kind: KeyStateKind }) {
   return (
     <span
       className={cn(
-        "inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 mt-px",
+        "inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-px",
         kind === "available" && "bg-emerald-400",
         kind === "throttled" && "bg-amber-400",
         kind === "quota-exhausted" && "bg-orange-500",
@@ -113,7 +113,7 @@ function KeyRow({ status }: { status: OcrKeyStatus }) {
         <StateChip state={status.state} />
       </div>
       {status.dailyCount !== undefined && (
-        <span className="font-mono text-[11px] text-muted-foreground/60 flex-shrink-0 tabular-nums">
+        <span className="font-mono text-[11px] text-muted-foreground/60 shrink-0 tabular-nums">
           {status.dailyCount}&thinsp;req
         </span>
       )}
@@ -189,7 +189,7 @@ export function ApiLimitsIndicator() {
           {/* Health dot */}
           <span
             className={cn(
-              "w-[5px] h-[5px] rounded-full flex-shrink-0 transition-colors",
+              "w-[5px] h-[5px] rounded-full shrink-0 transition-colors",
               !loading && health === "good" && "bg-emerald-400",
               !loading && health === "warn" && "bg-amber-400",
               !loading && health === "critical" && "bg-destructive",

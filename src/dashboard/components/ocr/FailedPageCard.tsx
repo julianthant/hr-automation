@@ -98,7 +98,7 @@ export function FailedPageCard({ failedPage, totalPages, sessionId, runId, onRet
                 "disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
-              {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {retrying ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" /> : <RefreshCw className="h-3 w-3" />}
               {retrying ? "Retrying…" : "Retry page"}
             </button>
             <button

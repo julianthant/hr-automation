@@ -137,7 +137,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
         aria-label={`Run ${workflow}`}
         title={`Enqueue ${workflow} items`}
         className={cn(
-          "flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
+          "shrink-0 h-8 w-8 flex items-center justify-center rounded-lg transition-colors outline-none",
           "bg-primary text-primary-foreground border border-primary",
           "hover:bg-primary/90 hover:border-primary/90",
           "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
@@ -145,7 +145,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
         )}
       >
         {submitting ? (
-          <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin" />
+          <Loader2 aria-hidden className="w-3.5 h-3.5 animate-spin motion-reduce:animate-none" />
         ) : (
           <Play aria-hidden className="w-3.5 h-3.5" />
         )}

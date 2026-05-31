@@ -249,13 +249,13 @@ function EntryItemImpl({
             <div className="flex items-center gap-2 min-w-0">
               <StatusIcon
                 aria-hidden
-                className={cn("w-3.5 h-3.5 flex-shrink-0", cfg.iconClass, cfg.iconColor)}
+                className={cn("w-3.5 h-3.5 shrink-0", cfg.iconClass, cfg.iconColor)}
               />
               <span className="font-semibold text-[14px] text-foreground truncate">
                 {name || entry.id}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               {presetId && (
                 <span
                   title={`Run mode: ${presetId}`}
@@ -290,7 +290,7 @@ function EntryItemImpl({
             <div className="mt-1.5 ml-5 text-[11px] font-mono min-w-0">
               {isFailed && entry.error ? (
                 <span className="flex items-center gap-1.5 text-destructive truncate min-w-0">
-                  <X className="w-3 h-3 flex-shrink-0" aria-hidden />
+                  <X className="w-3 h-3 shrink-0" aria-hidden />
                   <span className="truncate">{entry.error}</span>
                 </span>
               ) : (
@@ -304,8 +304,8 @@ function EntryItemImpl({
 
         {/* Footer zone — meta + inline ops, slightly tinted */}
         <div className="px-3.5 py-1.5 bg-secondary/20 flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
-          <span className="tabular-nums flex-shrink-0">{time}</span>
-          <span className="bg-secondary/80 px-1.5 py-px rounded font-medium flex-shrink-0 tabular-nums">
+          <span className="tabular-nums shrink-0">{time}</span>
+          <span className="bg-secondary/80 px-1.5 py-px rounded font-medium shrink-0 tabular-nums">
             #{runNumber}
           </span>
           {footerSecondaryId && footerSecondaryId !== name && (
@@ -318,13 +318,13 @@ function EntryItemImpl({
           )}
           <span className="flex-1" />
           {isDaemonRunning && elapsed && (
-            <span className="text-primary tabular-nums flex-shrink-0">{elapsed}</span>
+            <span className="text-primary tabular-nums shrink-0">{elapsed}</span>
           )}
           {(isDone || isFailed || isOcrDelegatedNeedsReview) && duration && (
-            <span className="tabular-nums flex-shrink-0">{duration}</span>
+            <span className="tabular-nums shrink-0">{duration}</span>
           )}
           {(isFailed || isCancelled || isOcrDelegatedNeedsReview) && (
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               <RetryButton
                 workflow={entry.workflow}
                 id={entry.id}
@@ -350,7 +350,7 @@ function EntryItemImpl({
               date={date}
               actions={projectedActions}
               onDeleted={onDelete}
-              className="flex-shrink-0"
+              className="shrink-0"
             />
           )}
           {isDaemonRunning && entry.runId && (
@@ -361,7 +361,7 @@ function EntryItemImpl({
                 subject={subject}
                 entry={entry}
                 actions={projectedActions}
-                className="flex-shrink-0 ml-1"
+                className="shrink-0 ml-1"
               />
             )}
           {isPending && (
@@ -372,7 +372,7 @@ function EntryItemImpl({
               subject={subject}
               entry={entry}
               actions={projectedActions}
-              className="flex-shrink-0 ml-1"
+              className="shrink-0 ml-1"
             />
           )}
         </div>

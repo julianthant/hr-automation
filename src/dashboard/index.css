@@ -238,33 +238,6 @@
   color: hsl(22.5 7% 55%);
 }
 
-@keyframes duo-glow {
-  0%, 100% { box-shadow: 0 0 4px rgba(251, 191, 36, 0.2); }
-  50% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.5); }
-}
-
-.animate-duo-glow {
-  animation: duo-glow 2s ease-in-out infinite;
-}
-
-/* Stop-confirm pulse — fires on the WorkflowBox `× kill` pill when the
-   user is in the 4-second force-stop confirm window. Subtle outer ring
-   pulse rather than a flashy color cycle so it reads as "armed" not
-   "alarming". Pairs with the destructive-tinted bg + border on the pill. */
-@keyframes stop-confirm {
-  0%, 100% { box-shadow: 0 0 0 0 hsl(0 84% 60% / 0); }
-  50%      { box-shadow: 0 0 0 3px hsl(0 84% 60% / 0.18); }
-}
-.animate-stop-confirm {
-  animation: stop-confirm 1.2s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-duo-glow,
-  .animate-stop-confirm,
-  .terminal-drawer { animation: none !important; transition: none !important; }
-}
-
 /* ========================================================================
    Capture surface tokens
    ========================================================================
@@ -316,51 +289,6 @@
   --cap-ease-smooth: cubic-bezier(0.45, 0, 0.55, 1);
 }
 
-@keyframes capture-thumb-enter {
-  from { opacity: 0; transform: translateY(-4px) scale(0.92); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes capture-blur-flash {
-  0%   { box-shadow: 0 0 0 0 rgba(212, 166, 74, 0); }
-  50%  { box-shadow: 0 0 0 4px rgba(212, 166, 74, 0.45); }
-  100% { box-shadow: 0 0 0 0 rgba(212, 166, 74, 0); }
-}
-
-@keyframes capture-expiry-warn {
-  0%, 100% { color: var(--capture-fg-muted); }
-  50%      { color: var(--capture-warn); }
-}
-
-@keyframes capture-expiry-critical {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
-}
-
-@keyframes finalizing-strip {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(220%); }
-}
-
-.capture-anim-thumb-enter {
-  animation: capture-thumb-enter 320ms var(--cap-ease-bounce) both;
-}
-.capture-anim-blur-flash {
-  animation: capture-blur-flash 800ms var(--cap-ease-smooth) 1;
-}
-.capture-anim-expiry-warn {
-  animation: capture-expiry-warn 1s var(--cap-ease-smooth) infinite;
-}
-.capture-anim-expiry-critical {
-  animation: capture-expiry-critical 0.6s linear infinite;
-  color: var(--capture-error);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .capture-anim-thumb-enter,
-  .capture-anim-blur-flash,
-  .capture-anim-expiry-warn,
-  .capture-anim-expiry-critical {
-    animation: none !important;
-  }
+  .terminal-drawer { transition: none !important; }
 }

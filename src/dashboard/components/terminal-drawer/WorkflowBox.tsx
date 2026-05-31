@@ -38,7 +38,7 @@ const authBg: Record<AuthState, string> = {
   idle: "bg-muted/20 border-border/60",
   authenticating: "bg-[#2563eb]/10 border-[#2563eb]/30",
   authed: "bg-[#16a34a]/10 border-[#16a34a]/30",
-  duo_waiting: "bg-[#eab308]/10 border-[#eab308]/40 animate-duo-glow",
+  duo_waiting: "bg-[#eab308]/10 border-[#eab308]/40 motion-safe:animate-pulse",
   failed: "bg-[#ef4444]/10 border-[#ef4444]/40",
 };
 
@@ -67,7 +67,7 @@ function AuthIcon({ state, className }: { state: AuthState; className?: string }
     case "authed":
       return <Check className={cls} strokeWidth={3} />;
     case "authenticating":
-      return <Loader2 className={cn(cls, "animate-spin")} />;
+      return <Loader2 className={cn(cls, "animate-spin motion-reduce:animate-none")} />;
     case "duo_waiting":
       return <KeyRound className={cls} />;
     case "failed":
@@ -90,7 +90,7 @@ function UcpathIdleCountdownRing({
   if (refreshing) {
     return (
       <Loader2
-        className="w-[13px] h-[13px] flex-shrink-0 animate-spin text-zinc-300/85"
+        className="w-[13px] h-[13px] shrink-0 animate-spin motion-reduce:animate-none text-zinc-300/85"
         aria-label="UCPath idle refresh in progress"
       />
     );
@@ -127,7 +127,7 @@ function UcpathIdleCountdownRing({
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
-      className="flex-shrink-0 -rotate-90"
+      className="shrink-0 -rotate-90"
       aria-label={aria}
       role="img"
     >
@@ -341,7 +341,7 @@ function StopPill({
       )}
     >
       {sending ? (
-        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+        <Loader2 className="w-2.5 h-2.5 animate-spin motion-reduce:animate-none" />
       ) : (
         <span aria-hidden className="text-[11px] leading-none opacity-90">×</span>
       )}
@@ -413,14 +413,14 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     return (
       <div
         className={cn(
-          "flex-shrink-0 w-[290px] rounded-xl border border-destructive/30 bg-destructive/5 p-2.5",
+          "shrink-0 w-[290px] rounded-xl border border-destructive/30 bg-destructive/5 p-2.5",
           "flex flex-col cursor-pointer transition-colors",
           isFocused && "ring-1 ring-primary",
         )}
         onClick={() => setFocusedInstance(instance)}
       >
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full flex-shrink-0 bg-destructive" />
+          <span className="w-2 h-2 rounded-full shrink-0 bg-destructive" />
           <span className="text-[14px] font-semibold text-foreground truncate flex-1" title={instance}>{displayInstance(instance)}</span>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive">
             Launch failed
@@ -484,7 +484,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   return (
     <div
       className={cn(
-        "flex-shrink-0 w-[290px] rounded-xl border bg-card/60 transition-[border-color,box-shadow,opacity]",
+        "shrink-0 w-[290px] rounded-xl border bg-card/60 transition-[border-color,box-shadow,opacity]",
         "flex flex-col cursor-pointer",
         active ? "" : "opacity-55",
         borderClass,
@@ -500,7 +500,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
             <div className="flex items-center gap-1.5 min-w-0">
               <Icon
                 aria-hidden
-                className="w-3 h-3 flex-shrink-0 text-muted-foreground"
+                className="w-3 h-3 shrink-0 text-muted-foreground"
                 strokeWidth={2}
               />
               <span
@@ -520,7 +520,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
 
           {/* Right-stack: × stop on top, elapsed below. Both share width
               via min-w on the column so they read as one anchored unit. */}
-          <div className="flex flex-col gap-1 items-stretch flex-shrink-0 min-w-[64px]">
+          <div className="flex flex-col gap-1 items-stretch shrink-0 min-w-[64px]">
             {active && pidAlive && workflowName ? (
               <StopPill
                 workflow={workflowName}
@@ -570,7 +570,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                   <div className="flex items-center gap-1 min-w-0">
                     <AuthIcon
                       state={b.authState}
-                      className={cn("w-3 h-3 flex-shrink-0", authColor[b.authState])}
+                      className={cn("w-3 h-3 shrink-0", authColor[b.authState])}
                     />
                     <span className="text-[11px] font-mono text-foreground truncate leading-none">
                       {b.system}
@@ -622,7 +622,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                 <span key={s} className="flex items-center flex-1 last:flex-none">
                   <span
                     className={cn(
-                      "w-1.5 h-1.5 rounded-full flex-shrink-0",
+                      "w-1.5 h-1.5 rounded-full shrink-0",
                       done && "bg-[#4ade80]/85",
                       running && "bg-primary shadow-[0_0_0_2px_rgba(184,135,82,0.18)]",
                       !done && !running && "bg-muted border border-border",
@@ -650,7 +650,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
             >
               <ChevronRight
                 className={cn(
-                  "w-2.5 h-2.5 flex-shrink-0 transition-transform",
+                  "w-2.5 h-2.5 shrink-0 transition-transform",
                   logsOpen && "rotate-90",
                 )}
               />
@@ -677,7 +677,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                       className="flex items-start gap-1.5 font-mono text-[9.5px] leading-[1.35]"
                     >
                       {timeStr && (
-                        <span className="flex-shrink-0 text-muted-foreground/50 tabular-nums">
+                        <span className="shrink-0 text-muted-foreground/50 tabular-nums">
                           {timeStr}
                         </span>
                       )}

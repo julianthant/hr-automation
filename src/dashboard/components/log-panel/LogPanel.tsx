@@ -203,7 +203,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const renderDetailValue = (key: string): string => formatTrackerValue(detailEntry, key);
 
   const Skeleton = ({ className }: { className?: string }) => (
-    <div className={cn("rounded bg-muted animate-pulse", className)} />
+    <div className={cn("rounded bg-muted motion-safe:animate-pulse", className)} />
   );
 
   // Show skeleton while logs are loading and we have no data yet
@@ -220,7 +220,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           auto-adapts to any workflow's detailFields declaration. Wraps to
           rows of 4. */}
       {!hideDetailGrid && (
-        <div className="grid grid-cols-4 flex-shrink-0">
+        <div className="grid grid-cols-4 shrink-0">
           {allDetailFields.map((f) => {
             const value = renderDetailValue(f.key);
             const mono = isMonospaceKey(f.key);

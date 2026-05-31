@@ -67,7 +67,7 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
       aria-label="Active sessions drawer"
       className={cn(
         "terminal-drawer",
-        "flex-shrink-0 bg-background overflow-hidden flex flex-col",
+        "shrink-0 bg-background overflow-hidden flex flex-col",
       )}
       style={{
         // Height transition uses ease-out-expo for a snappy open. Closing
@@ -94,11 +94,11 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
           "hover:bg-white/5 transition-colors",
           "outline-none focus-visible:bg-white/5",
           "select-none cursor-pointer",
-          "flex-shrink-0",
+          "shrink-0",
         )}
       >
         <span className="flex items-center gap-3 min-w-0">
-          <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" strokeWidth={2} />
+          <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
           <CountBadge count={count} />
         </span>
@@ -106,7 +106,7 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
             clock so the operator's eye lands on connection state first
             when scanning the screen's bottom-right corner — the clock is
             ambient and only checked on demand. */}
-        <span className="flex items-center gap-3 flex-shrink-0">
+        <span className="flex items-center gap-3 shrink-0">
           <LiveIndicator connected={connected} />
           <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none">
             {clock}
@@ -165,7 +165,7 @@ function CountBadge({ count, noun = "active" }: { count: number; noun?: string }
         aria-hidden
         className={cn(
           "w-1.5 h-1.5 rounded-full bg-current",
-          tone === "active" ? "animate-pulse" : "opacity-40",
+          tone === "active" ? "motion-safe:animate-pulse" : "opacity-40",
         )}
       />
       <span className="font-mono tabular-nums">{count} {noun}</span>

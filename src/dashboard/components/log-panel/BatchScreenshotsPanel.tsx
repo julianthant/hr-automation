@@ -149,6 +149,8 @@ function BatchScreenshotRow({
                   <figure key={file.path} className="space-y-2">
                     <img
                       src={file.url}
+                      srcSet={file.url}
+                      sizes="calc(100vw - 24rem)"
                       alt={`${displayName} ${file.system} screenshot`}
                       className="block w-full rounded-md border border-border bg-black/30 object-contain"
                       loading="lazy"

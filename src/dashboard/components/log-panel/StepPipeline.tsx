@@ -211,7 +211,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
             {isActive && (
               <div
                 aria-hidden
-                className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary animate-[pulse_1.6s_ease-in-out_infinite]"
+                className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary motion-safe:animate-pulse"
               />
             )}
           </div>
@@ -420,7 +420,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
                 {isActive && (
                   <div
                     aria-hidden
-                    className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary animate-[pulse_1.6s_ease-in-out_infinite]"
+                    className="absolute inset-y-0 left-0 w-1/2 rounded-full bg-primary motion-safe:animate-pulse"
                   />
                 )}
               </div>

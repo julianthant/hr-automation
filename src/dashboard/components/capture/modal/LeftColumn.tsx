@@ -54,7 +54,7 @@ export function LeftColumn({
 function StartingPanel() {
   return (
     <div className="flex w-full flex-col items-center justify-center gap-3 py-12">
-      <Loader2 aria-hidden className="h-6 w-6 animate-spin" style={{ color: "var(--capture-fg-muted)" }} />
+      <Loader2 aria-hidden className="h-6 w-6 animate-spin motion-reduce:animate-none" style={{ color: "var(--capture-fg-muted)" }} />
       <span className="font-sans text-[12px]" style={{ color: "var(--capture-fg-muted)" }}>
         Generating QR code…
       </span>
