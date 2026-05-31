@@ -12,7 +12,7 @@ import {
   getSessionsFilePath,
   workflowNameFromInstance,
 } from "../../../src/tracker/session-events.js";
-import { filterLiveSessionState, rebuildSessionState } from "../../../src/tracker/dashboard.js";
+import { filterEventsForRun, filterLiveSessionState, rebuildSessionState } from "../../../src/tracker/dashboard.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 
 function tempDir(): string {
@@ -665,5 +665,88 @@ describe("emitDaemonLog", () => {
     assert.equal(e.workflowInstance, "Onboarding 1");
     assert.equal(e.data?.level, "warn");
     assert.equal(e.data?.message, "queue stalled");
+  });
+});
+
+describe("rebuildSessionState — recentDaemonLogs", () => {
+  let dir: string;
+  beforeEach(() => { dir = tempDir(); });
+
+  it("populates recentDaemonLogs in order and caps at 30", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Onboarding 1" }, dir);
+    // Emit 35 daemon_log events — expect only the last 30 to be retained.
+    for (let i = 1; i <= 35; i++) {
+      emitDaemonLog("Onboarding 1", "step", `msg ${i}`, dir);
+    }
+
+    const state = rebuildSessionState(dir);
+    const wf = state.workflows.find((w) => w.instance === "Onboarding 1");
+    assert.ok(wf, "workflow state should exist");
+    assert.ok(wf!.recentDaemonLogs, "recentDaemonLogs should be populated");
+    assert.equal(wf!.recentDaemonLogs!.length, 30, "capped at 30 entries");
+    // The last entry must be the newest message (msg 35).
+    assert.equal(
+      wf!.recentDaemonLogs![29].message,
+      "msg 35",
+      "last entry is the most recent daemon log line",
+    );
+    // The first retained entry must be msg 6 (35 - 30 + 1).
+    assert.equal(
+      wf!.recentDaemonLogs![0].message,
+      "msg 6",
+      "first retained entry is the oldest within the cap window",
+    );
+  });
+
+  it("filterEventsForRun does not include daemon_log events even when workflowInstance matches and ts is in window", () => {
+    const instance = "Onboarding 1";
+    const runId = "run-A";
+    const base = "2026-05-31T10:00:00Z";
+
+    // One direct run event and one daemon_log event for the same instance.
+    // daemon_log events are machine-scoped session-log entries (no runId) and
+    // must never be attributed to a per-run Events tab.
+    const events = [
+      {
+        pid: 1234,
+        timestamp: base,
+        type: "item_start",
+        workflowInstance: instance,
+        runId,
+        currentItemId: "alice",
+      },
+      {
+        pid: 1234,
+        timestamp: "2026-05-31T10:00:01Z",
+        type: "daemon_log",
+        workflowInstance: instance,
+        // No runId — machine-scoped.
+        data: { level: "step", message: "keepalive ping" },
+      },
+    ] as Parameters<typeof filterEventsForRun>[0];
+
+    const trackers: Parameters<typeof filterEventsForRun>[1] = [
+      {
+        timestamp: base,
+        runId,
+        status: "running",
+        data: { instance },
+      },
+    ];
+
+    const out = filterEventsForRun(
+      events,
+      trackers,
+      runId,
+      Date.parse("2026-05-31T10:01:00Z"),
+    );
+
+    assert.equal(
+      out.some((e) => e.type === "daemon_log"),
+      false,
+      "daemon_log must never appear in per-run Events (machine-scoped session-log)",
+    );
+    assert.equal(out.length, 1, "only the direct run event should be included");
+    assert.equal(out[0].type, "item_start");
   });
 });

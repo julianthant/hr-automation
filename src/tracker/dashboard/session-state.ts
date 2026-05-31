@@ -112,6 +112,10 @@ export function filterEventsForRun(
             runEndFallback,
           );
       batchScope = events.filter((e) => {
+        // daemon_log events are machine-scoped (no runId, one daemon spans many
+        // runs). Never attribute them to a per-run Events tab — they belong in
+        // the terminal drawer's recentDaemonLogs section only.
+        if (e.type === "daemon_log") return false;
         if (e.runId) return false;
         if (e.workflowInstance !== instance) return false;
         const ets = new Date(getEventSortKey(e)).getTime();
@@ -177,6 +181,12 @@ export interface WorkflowInstanceState {
    * Refines the session-drawer subline between queued items.
    */
   daemonPhase?: "idle" | "keepalive";
+  /**
+   * Recent daemon log lines (session-log `daemon_log` events) for this
+   * instance, oldest→newest, capped to the last 30. Machine-scoped: shown
+   * in the terminal drawer, never attributed to a per-run Events tab.
+   */
+  recentDaemonLogs?: Array<{ ts: string; level: string; message: string }>;
   /**
    * UCPath idle-refresh observability (`ucpath_idle_signal` events).
    * Drives the countdown ring on the ucpath browser chip.
@@ -300,6 +310,19 @@ export function rebuildSessionState(dir?: string): SessionState {
       const wf = wfMap.get(inst);
       const p = e.data.phase;
       if (wf && (p === "idle" || p === "keepalive")) wf.daemonPhase = p;
+    }
+    if (e.type === "daemon_log" && e.data?.message) {
+      const wf = wfMap.get(inst);
+      if (wf) {
+        (wf.recentDaemonLogs ??= []).push({
+          ts: getEventSortKey(e),
+          level: e.data.level ?? "step",
+          message: e.data.message,
+        });
+        if (wf.recentDaemonLogs.length > 30) {
+          wf.recentDaemonLogs = wf.recentDaemonLogs.slice(-30);
+        }
+      }
     }
     if (e.type === "ucpath_idle_signal") {
       const wf = wfMap.get(inst);
