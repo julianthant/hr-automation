@@ -32,7 +32,7 @@
     "selectors:catalog": "tsx src/scripts/selectors/catalog.ts",
     "selector:search": "tsx src/scripts/selectors/search.ts",
     "typecheck": "tsc --noEmit",
-    "typecheck:all": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck:all": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "test": "vitest run --reporter=dot",
