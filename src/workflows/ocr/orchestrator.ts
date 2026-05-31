@@ -20,7 +20,7 @@ import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { emitTrackerRow, dateLocal, stampArchetypeForRow, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
@@ -115,7 +115,7 @@ export interface OcrOrchestratorOpts {
   _createDependencyBatchOverride?: (input: {
     parent: { workflow: "ocr"; itemId: string; runId: string; formType: string };
     children: Array<{
-      workflow: "eid-lookup";
+      workflow: "person-lookup";
       itemId: string;
       runId: string;
       recordIndex: number;
@@ -210,8 +210,8 @@ export async function runOcrOrchestrator(
     // surfaces these rows in oath-signature / emergency-contact queues
     // where the workflow-label fallback in `buildDisplayNameMap` would
     // otherwise label them with the downstream workflow's name. Hardcoding
-    // "OCR" keeps the row labeled "OCR 1" / "OCR 2" no matter which queue
-    // surfaces it.
+    // "OCR" keeps the row labeled "OCR" no matter which queue surfaces it
+    // (OCR rows now resolve their title from queue row kind anyway).
     // mode: "prepare" makes the dashboard render this row with the
     // preview-tab affordance (gated on workflow === "ocr").
     const flat = flattenForData({
@@ -221,7 +221,7 @@ export async function runOcrOrchestrator(
     });
     flat.__id = input.sessionId ?? "";
     flat.__name = cachedParentSubject ?? "OCR";
-    flat.archetype = "batch-parent";
+    flat.archetype = "preview";
     if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,
@@ -676,7 +676,7 @@ export async function runOcrOrchestrator(
           }
         },
         buildChild: (itemId, childRunId, item) => ({
-          workflow: "eid-lookup",
+          workflow: "person-lookup",
           itemId,
           runId: childRunId,
           recordIndex: item.index,
@@ -699,7 +699,7 @@ export async function runOcrOrchestrator(
             }
           : undefined,
         preEmitPendingForOverride: async () => {
-          const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+          const { personLookupWorkflow } = await import("../person-lookup/index.js");
           for (const e of eidLookupEnqueueItems) {
             const item = e.kind === "name"
               ? {
@@ -713,19 +713,12 @@ export async function runOcrOrchestrator(
                   taskGroupId: input.sessionId,
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 };
-            // Explicitly stamp archetype via stampArchetypeForRow so the
-            // type-level Contract 1 guarantee is enforced (no unsafe
-            // `as StampedData` cast). The real fan-out below uses
-            // renderAs: "flat" → passive-child via delegateToAllImpl; the
-            // override branch (test-mode / early enqueue) must produce the
-            // same row archetype so dashboard projections classify these
-            // rows identically.
-            const overrideData = stampArchetypeForRow(
-              buildHttpPendingData(eidLookupCrmWorkflow, item, runId),
-              { override: "passive-child" },
-            );
+            // Keep the override branch on the same write path shape as the
+            // real fan-out below: eid-lookup children are `single` rows and
+            // delegated scope is represented by parentRunId.
+            const overrideData = buildHttpPendingData(personLookupWorkflow, item, runId);
             emitTrackerRow({
-              workflow: eidLookupCrmWorkflow.config.name,
+              workflow: personLookupWorkflow.config.name,
               timestamp: new Date().toISOString(),
               id: e.itemId,
               runId: `override-${e.itemId}`,
@@ -738,13 +731,13 @@ export async function runOcrOrchestrator(
         },
         realEnqueue: async (onPreparedItems) => {
           // Contract 3: route the eid-lookup fan-out through the kernel's
-          // delegateToAllImpl primitive so parentRunId stamping, archetype
-          // derivation, and pending-row pre-emit share one code path with
+          // delegateToAllImpl primitive so parentRunId stamping, canonical
+          // archetype derivation, and pending-row pre-emit share one code path with
           // every other delegation site. Behavioural equivalence vs the
           // pre-Contract-3 ensureDaemonsAndEnqueue call:
-          //   - `renderAs: "flat"` stamps archetype "passive-child" so the
-          //     children render as `delegation-member` rows — matching the
-          //     OCR runtime policy's `utilityChildSurface: "delegation-member"`.
+          //   - `renderAs: "flat"` remains a projection hint; the child row
+          //     stamp is `single`, parentRunId marks it as delegated, and
+          //     one vs many children controls single vs batch grouping.
           //   - `onPreparedItems` is forwarded verbatim so the SQLite task
           //     dependency batch is still created in the same lifecycle slot.
           //   - `fireAndForget: true` because the orchestrator's own
@@ -752,7 +745,7 @@ export async function runOcrOrchestrator(
           //     await — wrapping a second wait inside delegateToAllImpl
           //     would double-count and re-watch the same children.
           const { delegateToAllImpl } = await import("../../core/delegate.js");
-          const { eidLookupCrmWorkflow } = await import("../eid-lookup/index.js");
+          const { personLookupWorkflow } = await import("../person-lookup/index.js");
           const inputs = eidLookupEnqueueItems.map((e) =>
             e.kind === "name"
               ? {
@@ -779,11 +772,11 @@ export async function runOcrOrchestrator(
           await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
             parentRunId: runId,
             trackerDir,
-            // eidLookupCrmWorkflow's exact generic param doesn't line up
+            // personLookupWorkflow's exact generic param doesn't line up
             // with the union type of `inputs` (name-only vs emplId-only
             // variants), so cast through unknown — the runtime schema
             // validates both shapes.
-            child: eidLookupCrmWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
+            child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
             inputs,
             renderAs: "flat",
             fireAndForget: true,
@@ -793,7 +786,7 @@ export async function runOcrOrchestrator(
             // so the dashboard's queue-surface dispatcher has everything it
             // needs to title/group the rows.
             buildPendingExtras: (childItem, _itemId) => {
-              const base = buildHttpPendingData(eidLookupCrmWorkflow, childItem, runId);
+              const base = buildHttpPendingData(personLookupWorkflow, childItem, runId);
               // buildPendingTrackerData stamps __name/__id + parentSubject
               // again, so strip ours to avoid duplicate keys winning the
               // wrong write order. The remaining buildHttpPendingData fields
@@ -887,7 +880,7 @@ export async function runOcrOrchestrator(
 // ─── Helpers (private) ──────────────────────────────────────
 
 interface FanOutChildSpec {
-  workflow: "eid-lookup";
+  workflow: "person-lookup";
   itemId: string;
   runId: string;
   recordIndex: number;

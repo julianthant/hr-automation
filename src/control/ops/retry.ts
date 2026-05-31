@@ -11,6 +11,7 @@ import { listRosters, resolveRosterDirs } from "../../services/matching/roster-l
 import { byTimestampAsc, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
+import { ensureDaemonsAvailable } from "../../core/daemon/client.js";
 import type { Database } from "../../infra/sqlite/index.js";
 import {
   findRetryInputFromTaskStore,
@@ -21,7 +22,7 @@ import {
   openControlStores,
   appendQueueEnqueueAudit,
 } from "./shared.js";
-import { emitInheritedRow } from "./emit-inherited.js";
+import { emitInheritedRow, findInheritedPriorEntry } from "./emit-inherited.js";
 import { log } from "../../utils/log.js";
 
 /**
@@ -357,6 +358,20 @@ async function reEnqueueEntry(
         requestedParent ??
         task.parentRunId ??
         extractLatestParentRunId(readEntriesForRetryItem(wf, id, resolvedRunId, dir, date).scoped);
+      const priorEntry = findInheritedPriorEntry({
+        workflow: wf,
+        trackerDir: dir,
+        id,
+        inheritFrom: { id, runId: resolvedRunId },
+        status: "pending",
+        db: stores.taskStore.db,
+      });
+      if (!priorEntry) {
+        return {
+          ok: false,
+          error: `cannot retry: prior tracker row is missing for workflow=${wf} id=${id} runId=${resolvedRunId}`,
+        };
+      }
       const retried = stores.taskStore.retryTaskFromAttempt({ runId: resolvedRunId });
       resetRetriedOcrDependencies(stores.taskStore.db, retried.taskId);
       if (resolvedParent) {
@@ -375,7 +390,7 @@ async function reEnqueueEntry(
       appendQueueEnqueueAudit(wf, retried.itemId, input, retried.runId, dir);
       // Inherit archetype from the failed run's latest row so the retry's
       // pending row surfaces with the same row type (batch-member, single,
-      // delegate-child, etc.). Without the inheritance the new pending row
+      // delegated single, etc.). Without the inheritance the new pending row
       // would default to deriveRowArchetype("single", parentRunId) — wrong
       // for any batch-member retry, which is one of the bugs this contract
       // is designed to prevent.
@@ -386,22 +401,31 @@ async function reEnqueueEntry(
       // retry's pending row shows up nameless in the dashboard until the
       // daemon claims it and rewrites — the same pattern emitDashboardCancelTrackerRow
       // would have used but applied to retry.
-      emitInheritedRow({
-        workflow: wf,
-        trackerDir: dir,
-        id: retried.itemId,
-        runId: retried.runId,
-        inheritFrom: { id, runId: resolvedRunId },
-        status: "pending",
-        input,
-        fallbackArchetype: "single",
-        data: { __retriedFrom: resolvedRunId },
-        // SQLite fast-path: prior-row lookup uses indexed runs.run_id
-        // instead of a 30-day JSONL scan. Bulk retry calls this per row;
-        // without the hint, perf is O(K*D*L) on JSONL (Finding #13).
-        db: stores.taskStore.db,
-        ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
-      });
+      try {
+        emitInheritedRow({
+          workflow: wf,
+          trackerDir: dir,
+          id: retried.itemId,
+          runId: retried.runId,
+          inheritFrom: { id, runId: resolvedRunId },
+          status: "pending",
+          input,
+          data: { __retriedFrom: resolvedRunId },
+          // SQLite fast-path: prior-row lookup uses indexed runs.run_id
+          // instead of a 30-day JSONL scan. Bulk retry calls this per row;
+          // without the hint, perf is O(K*D*L) on JSONL (Finding #13).
+          db: stores.taskStore.db,
+          ...(resolvedParent ? { parentRunId: resolvedParent } : {}),
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error
+            ? err.message
+            : "retry: failed to emit inherited pending row for retried run",
+        };
+      }
+      await ensureDaemonsAvailable(wf, {}, { trackerDir: dir });
       return { ok: true };
     }
   }

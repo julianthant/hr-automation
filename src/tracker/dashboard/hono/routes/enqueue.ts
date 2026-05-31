@@ -5,6 +5,7 @@ import {
   enqueueFromHttp,
   validateEnqueueRequest,
 } from "../../../../core/daemon/enqueue-dispatch.js";
+import { loadWorkflow } from "../../../../core/workflow-loaders.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -19,7 +20,13 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
         return jsonResponse({ ok: false, error: parsed.error }, 400);
       }
 
-      const input = parsed.body as { workflow?: string; inputs?: unknown[]; parentRunId?: unknown };
+      const input = parsed.body as {
+        workflow?: string;
+        inputs?: unknown[];
+        parentRunId?: unknown;
+        skipSteps?: unknown;
+        preset?: unknown;
+      };
       const workflow = input.workflow?.trim();
       if (!workflow) return jsonResponse({ ok: false, error: "workflow is required" }, 400);
       if (!isDashboardInputRunWorkflow(workflow)) {
@@ -39,12 +46,65 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
         return jsonResponse({ ok: false, error: PARENT_RUN_ID_VALIDATION_HINT }, 400);
       }
 
+      // Step-preset gear: validate `skipSteps` is a string[] subset of the
+      // workflow's declared handler steps (NOT auth steps), and `preset` is
+      // a string. The kernel re-validates skipSteps in run-one-item (defense
+      // in depth) but a 400 here surfaces a precise error to the operator
+      // instead of a generic background-task failure.
+      let skipSteps: string[] | undefined;
+      let preset: string | undefined;
+      if (input.skipSteps !== undefined && input.skipSteps !== null) {
+        if (!Array.isArray(input.skipSteps) || !input.skipSteps.every((s) => typeof s === "string")) {
+          return jsonResponse({ ok: false, error: "skipSteps must be a string[]" }, 400);
+        }
+        if (input.skipSteps.length > 0) {
+          const wf = await loadWorkflow(workflow);
+          if (!wf) {
+            return jsonResponse({ ok: false, error: `unknown workflow: ${workflow}` }, 400);
+          }
+          const declared = new Set<string>(wf.config.steps);
+          const unknown = input.skipSteps.filter((s: string) => !declared.has(s));
+          if (unknown.length > 0) {
+            return jsonResponse({
+              ok: false,
+              error: `skipSteps contains unknown step name(s) for '${workflow}': ${unknown.join(", ")}`,
+            }, 400);
+          }
+          skipSteps = [...input.skipSteps] as string[];
+        }
+      }
+      if (input.preset !== undefined && input.preset !== null) {
+        if (typeof input.preset !== "string" || input.preset.trim().length === 0) {
+          return jsonResponse({ ok: false, error: "preset must be a non-empty string" }, 400);
+        }
+        preset = input.preset.trim();
+      }
+
       const validation = await validateEnqueueRequest(workflow, input.inputs);
       if (!validation.ok) {
         return jsonResponse({ ok: false, workflow, enqueued: 0, error: validation.error }, 400);
       }
 
-      const enqueueInputs = input.inputs;
+      // Fold the runtime channel into each input so it rides on `input_json`
+      // (same shape as the existing `prefilledData` channel). The kernel's
+      // `splitPrefilled` strips it before schema validation and surfaces it
+      // via `ctx.shouldSkipStep(name)` + `data.__preset` stamping.
+      const enqueueInputs =
+        skipSteps || preset
+          ? input.inputs.map((item) => {
+              const base =
+                item && typeof item === "object" && !Array.isArray(item)
+                  ? (item as Record<string, unknown>)
+                  : { value: item };
+              return {
+                ...base,
+                __runtimeOptions: {
+                  ...(skipSteps ? { skipSteps } : {}),
+                  ...(preset ? { preset } : {}),
+                },
+              };
+            })
+          : input.inputs;
       void enqueueFromHttp(workflow, enqueueInputs, {
         trackerDir: deps.dir,
         ...(parentRunId ? { parentRunId } : {}),

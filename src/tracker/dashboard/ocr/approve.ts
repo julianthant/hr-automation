@@ -133,7 +133,7 @@ export function buildOcrApproveHandler(
                 data: {
                   ...buildFallbackPendingData(item),
                   ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                  archetype: "delegate-child",
+                  archetype: "single",
                 },
                 ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
                 ...(childInput ? { input: childInput } : {}),
@@ -227,7 +227,7 @@ export function buildOcrApproveHandler(
             step: "approved",
             data: {
               ...latestReviewData,
-              archetype: "batch-parent",
+              archetype: "preview",
               mode: "prepare",
               formType,
               sessionId: input.sessionId,
@@ -269,8 +269,8 @@ export function buildOcrApproveHandler(
             ...(parentRunId ? { parentRunId } : {}),
             status: "failed",
             step: "approve-failed",
-            // OCR prep parent is always batch-parent.
-            data: { archetype: "batch-parent" },
+            // OCR prep parent is preview-shaped.
+            data: { archetype: "preview" },
             error: msg,
           },
           trackerDir,

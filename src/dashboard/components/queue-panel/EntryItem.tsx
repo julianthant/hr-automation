@@ -21,10 +21,11 @@ import {
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
-import { isTerminalNotFoundEntry } from "../../../domain/tracker-terminal-display.js";
-import {
-  isDelegatedOcrAwaitingApprovalEntry,
-} from "../../../tracker/dashboard/prep-rows.js";
+import { resolveQueueRowStatus } from "../../../domain/queue-row-status.js";
+// Side-effect import: registers each workflow's status extensions into the
+// queue-row-status registry for the client bundle (defineWorkflow doesn't run
+// here). Keep this even though no symbol is used directly.
+import "../../../domain/queue-row-status-index.js";
 import { QueueItemControls } from "./QueueItemControls";
 import { CancelRunningButton } from "./CancelRunningButton";
 import type {
@@ -101,7 +102,7 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconColor: "text-sky-600 dark:text-sky-400",
     label: "Needs review",
   },
-  /** EID lookup / Active Check — UCPath had no matching row (tracker status is still `done`). */
+  /** Person Lookup — UCPath had no matching row (tracker status is still `done`). */
   notFound: {
     badge: "bg-secondary/90 text-muted-foreground border border-border/80",
     icon: SearchX,
@@ -111,47 +112,21 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
   },
 };
 
-function resolveStatusConfig(entry: TrackerEntry): StatusConfig {
+/**
+ * Universal status resolution. The `cancelled` override (failed + step
+ * "cancelled") and the five base statuses live here because they apply to every
+ * workflow. Workflow-specific *derived* statuses (person-lookup `notFound`, OCR
+ * `needsReview`) arrive pre-resolved as `derivedStatus` from
+ * `resolveQueueRowStatus` — this component never names a workflow.
+ */
+function resolveStatusConfig(entry: TrackerEntry, derivedStatus: string | null): StatusConfig {
   if (entry.status === "failed" && entry.step === "cancelled") {
     return STATUS_CONFIG.cancelled;
   }
-  if (entry.status === "done" && isTerminalNotFoundEntry(entry)) {
-    return STATUS_CONFIG.notFound;
-  }
-  if (isDelegatedOcrAwaitingApprovalEntry(entry)) {
-    return STATUS_CONFIG.needsReview;
+  if (derivedStatus && STATUS_CONFIG[derivedStatus]) {
+    return STATUS_CONFIG[derivedStatus];
   }
   return STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
-}
-
-function deriveActiveCheckTag(entry: TrackerEntry, isDone: boolean): null | {
-  text: string;
-  title: string;
-  className: string;
-} {
-  const activeCheckStatus =
-    entry.workflow === "active-check" && typeof entry.data?.activeStatus === "string"
-      ? entry.data.activeStatus
-      : null;
-  if (activeCheckStatus === "inactive") {
-    return {
-      text: "IA",
-      title: "Inactive",
-      className: "bg-warning/12 text-warning border border-warning/30",
-    };
-  }
-  if (
-    activeCheckStatus === "active" ||
-    activeCheckStatus === "non-hdh" ||
-    (isDone && entry.data?.isActive === "true")
-  ) {
-    return {
-      text: "A",
-      title: activeCheckStatus === "non-hdh" ? "Active (non-HDH dept)" : "Active",
-      className: "bg-success/12 text-success border border-success/30",
-    };
-  }
-  return null;
 }
 
 interface EntryItemProps {
@@ -161,7 +136,7 @@ interface EntryItemProps {
   subtitle?: string;
   statusLabel?: string;
   actions?: WorkflowActionDescriptor[];
-  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  /** Per-entry base-name labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   selected: boolean;
   /**
@@ -197,7 +172,12 @@ function EntryItemImpl({
   // discriminator. Kernel writes step="cancelled" via Stepper.step's pre-emit
   // when the daemon's cancel flag is set; cancel-queued's handler does the
   // same on a queued item.
-  const isOcrDelegatedNeedsReview = isDelegatedOcrAwaitingApprovalEntry(entry);
+  // Workflow-specific status — resolved generically. `derivedStatus`
+  // (notFound / needsReview) replaces the base badge; `secondaryTag` (A/IA)
+  // renders alongside it. EntryItem stays workflow-agnostic: the per-workflow
+  // rules live in each workflow's `statusExtensions` declaration.
+  const derivedStatus = resolveQueueRowStatus(entry, { isDone: false }).derivedStatus;
+  const isOcrDelegatedNeedsReview = derivedStatus === "needsReview";
   const isDaemonRunning = entry.status === "running";
   const isCancelled = entry.status === "failed" && entry.step === "cancelled";
   const projectedActions = projection?.actions ?? actions;
@@ -205,7 +185,7 @@ function EntryItemImpl({
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done" && !isOcrDelegatedNeedsReview;
   const isPending = entry.status === "pending";
-  const cfg = resolveStatusConfig(entry);
+  const cfg = resolveStatusConfig(entry, derivedStatus);
   const StatusIcon = cfg.icon;
 
   const firstTs = entry.firstLogTs || entry.startTimestamp || entry.timestamp;
@@ -222,6 +202,10 @@ function EntryItemImpl({
     : "";
 
   const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
+  // Run-mode preset chip — present only when the row was started with a
+  // non-default preset via the InputRunPanel gear menu. Read from the kernel-
+  // stamped `data.__preset` (set at runOneItem startup).
+  const presetId = typeof entry.data?.__preset === "string" ? entry.data.__preset : undefined;
   const footerSecondaryId = projection?.subtitle ?? subtitle ?? resolveEntryId(entry);
   const showLiveRow =
     (isFailed && Boolean(entry.error)) ||
@@ -229,7 +213,7 @@ function EntryItemImpl({
       (isDaemonRunning || isPending || isOcrDelegatedNeedsReview) && entry.lastLogMessage,
     );
 
-  const activeCheckTag = deriveActiveCheckTag(entry, isDone);
+  const personLookupStatusTag = resolveQueueRowStatus(entry, { isDone }).secondaryTag;
 
   return (
     <div className="px-3 pt-2 first:pt-3">
@@ -239,8 +223,8 @@ function EntryItemImpl({
         tabIndex={0}
         aria-pressed={selected}
         aria-label={
-          activeCheckTag
-            ? `${name || entry.id} — ${activeCheckTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
+          personLookupStatusTag
+            ? `${name || entry.id} — ${personLookupStatusTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
             : `${name || entry.id} — ${(statusLabel ?? cfg.label).toLowerCase()}`
         }
         data-queue-entry-id={entry.id}
@@ -272,15 +256,23 @@ function EntryItemImpl({
               </span>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {activeCheckTag && (
+              {presetId && (
                 <span
-                  title={activeCheckTag.title}
+                  title={`Run mode: ${presetId}`}
+                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans bg-primary/15 text-primary"
+                >
+                  {presetId}
+                </span>
+              )}
+              {personLookupStatusTag && (
+                <span
+                  title={personLookupStatusTag.title}
                   className={cn(
                     "text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans tabular-nums",
-                    activeCheckTag.className,
+                    personLookupStatusTag.className,
                   )}
                 >
-                  {activeCheckTag.text}
+                  {personLookupStatusTag.text}
                 </span>
               )}
               <span

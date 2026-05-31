@@ -134,7 +134,6 @@ export function emitDashboardCancelTrackerRow(
     runId,
     status: "failed",
     step: "cancelled",
-    fallbackArchetype: "single",
     error: DASHBOARD_CANCEL_ERROR,
     ...(db ? { db } : {}),
   });

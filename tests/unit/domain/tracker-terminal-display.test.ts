@@ -8,44 +8,22 @@ import {
 } from "../../../src/domain/tracker-terminal-display.js";
 
 describe("tracker-terminal-display", () => {
-  it("eid-lookup name path marks emplId Not found", () => {
+  it("person-lookup marks activeStatus not-found", () => {
     assert.equal(
       isTerminalNotFoundEntry({
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         status: "done",
-        data: { emplId: "Not found", searchName: "Nobody, Jane" },
+        data: { activeStatus: "not-found", searchName: "Nobody, Jane" },
       }),
       true,
     );
     assert.equal(
       queueStatusDisplayLabel({
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         status: "done",
-        data: { emplId: "Not found" },
+        data: { activeStatus: "not-found" },
       }),
       TERMINAL_NOT_FOUND_LABEL,
-    );
-  });
-
-  it("eid-lookup EID path marks hrStatus Not found", () => {
-    assert.equal(
-      isTerminalNotFoundEntry({
-        workflow: "eid-lookup",
-        status: "done",
-        data: { emplId: "10873698", hrStatus: "Not found" },
-      }),
-      true,
-    );
-  });
-
-  it("active-check uses activeStatus not-found or hrStatus", () => {
-    assert.equal(
-      isTerminalNotFoundEntry({
-        workflow: "active-check",
-        status: "done",
-        data: { activeStatus: "not-found", hrStatus: "Not found" },
-      }),
-      true,
     );
   });
 
@@ -53,9 +31,9 @@ describe("tracker-terminal-display", () => {
     assert.equal(isTerminalNotFoundEntry({ workflow: "onboarding", status: "done", data: {} }), false);
     assert.equal(
       isTerminalNotFoundEntry({
-        workflow: "eid-lookup",
+        workflow: "person-lookup",
         status: "running",
-        data: { emplId: "Not found" },
+        data: { activeStatus: "not-found" },
       }),
       false,
     );

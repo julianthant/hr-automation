@@ -16,8 +16,6 @@ import {
 } from "./batch-queue-view";
 import { DaemonBatchRow } from "./DaemonBatchRow";
 import { DelegationRow } from "@/components/ocr/DelegationRow";
-import { GroupRowBase } from "./group-row-base";
-import { BatchFooterActions } from "./BatchFooterActions";
 import type { TrackerEntry } from "@/components/shared/types";
 import { isDiscardedPrepRow } from "@/components/ocr/types";
 import {
@@ -56,7 +54,7 @@ interface QueuePanelProps {
   workflow: string;
   /** Registry label for batch summary cards / synthetic batch toolbar titles. */
   workflowLabel: string;
-  /** Per-entry "<base> <ordinal>" labels from `buildDisplayNameMap`. */
+  /** Per-entry base-name labels from `buildDisplayNameMap`. */
   displayNames?: Map<string, string>;
   /** Per-workflow runtime policies from workflow metadata. */
   runtimePolicies?: WorkflowRuntimePolicyLookup;
@@ -245,12 +243,12 @@ export function QueuePanel({
    */
   const resolvedBatchToolbarEntry = useMemo(() => {
     if (!batchQueueParentRunId) return null;
-    const approvalSurface = queueSurfaces.groupRows.find(
+    const previewSurface = queueSurfaces.groupRows.find(
       (surface) =>
-        surface.kind === "approval-delegation" &&
+        surface.kind === "preview" &&
         surface.parentRunId === batchQueueParentRunId,
     );
-    if (approvalSurface?.parent) return approvalSurface.parent;
+    if (previewSurface?.parent) return previewSurface.parent;
     const members = batchMembersByParentRunId.get(batchQueueParentRunId) ?? [];
     return buildSyntheticBatchQueueAnchor(
       batchQueueParentRunId,
@@ -282,7 +280,7 @@ export function QueuePanel({
         batchQueueParentRunId &&
           queueSurfaces.groupRows.some(
             (surface) =>
-              surface.kind === "approval-delegation" &&
+              surface.kind === "preview" &&
               surface.parentRunId === batchQueueParentRunId,
           ),
       ),
@@ -297,27 +295,27 @@ export function QueuePanel({
     [batchQueueParentRunId, batchMembersByParentRunId],
   );
 
-  const approvalDelegationSurfaces = useMemo(
+  const previewSurfaces = useMemo(
     () =>
-      pickProjectionRows(queueProjectionRows.groupRows, "approval-delegation")
-        .filter((row): row is QueueGroupProjectionRow & { surface: Extract<QueueGroupSurface, { kind: "approval-delegation" }> & { parent: TrackerEntry } } =>
+      pickProjectionRows(queueProjectionRows.groupRows, "preview")
+        .filter((row): row is QueueGroupProjectionRow & { surface: Extract<QueueGroupSurface, { kind: "preview" }> & { parent: TrackerEntry } } =>
           Boolean(row.surface.parent),
         ),
     [queueProjectionRows.groupRows],
   );
 
-  const sortedApprovalDelegationSurfaces = useMemo(() => {
+  const sortedPreviewSurfaces = useMemo(() => {
     const sortedParents = sortQueueEntriesForDisplay(
-      approvalDelegationSurfaces.map((row) => row.surface.parent),
+      previewSurfaces.map((row) => row.surface.parent),
       queueSortMode,
       displayNames,
     );
     return reorderByIds(
-      approvalDelegationSurfaces,
+      previewSurfaces,
       (row) => row.surface.parentRunId,
       sortedParents.map((parent) => parent.runId ?? parent.id),
     );
-  }, [approvalDelegationSurfaces, queueSortMode, displayNames]);
+  }, [previewSurfaces, queueSortMode, displayNames]);
 
   const batchSurfaces = useMemo(
     () => pickProjectionRows(queueProjectionRows.groupRows, "batch"),
@@ -335,13 +333,13 @@ export function QueuePanel({
     return reorderByIds(batchSurfaces, (row) => row.surface.parentRunId, ids);
   }, [batchSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
 
-  /** Delegation cards respect StatPills — show when parent or any child matches. */
-  const visibleApprovalDelegationSurfaces = useMemo(
+  /** Preview cards respect StatPills — show when parent or any child matches. */
+  const visiblePreviewSurfaces = useMemo(
     () =>
-      sortedApprovalDelegationSurfaces.filter((surface) => {
+      sortedPreviewSurfaces.filter((surface) => {
         return queueGroupMatchesStatusFilter(statusFilter, surface.surface.members, surface.surface.parent);
       }),
-    [sortedApprovalDelegationSurfaces, statusFilter],
+    [sortedPreviewSurfaces, statusFilter],
   );
 
   /** Daemon batch cards: visible when any member matches the status filter. */
@@ -353,12 +351,10 @@ export function QueuePanel({
     [sortedBatchSurfaces, statusFilter],
   );
 
-  const visiblePassiveDelegationSurfaces = useMemo(
-    () =>
-      pickProjectionRows(queueProjectionRows.groupRows, "passive-delegation")
-        .filter((row) => queueGroupMatchesStatusFilter(statusFilter, row.surface.members)),
-    [queueProjectionRows.groupRows, statusFilter],
-  );
+  /** Group cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
+  const hasGroupQueueCards =
+    visiblePreviewSurfaces.length > 0 ||
+    visibleBatchSurfaces.length > 0;
 
   const filtered = useMemo(() => {
     let result = queueProjectionRows.flatEntries;
@@ -385,12 +381,6 @@ export function QueuePanel({
       sortQueueEntriesForDisplay(batchQueueMembers, queueSortMode, displayNames),
     [batchQueueMembers, queueSortMode, displayNames],
   );
-
-  /** Batch/delegation cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
-  const hasBatchOrDelegationQueueCards =
-    visibleApprovalDelegationSurfaces.length > 0 ||
-    visibleBatchSurfaces.length > 0 ||
-    visiblePassiveDelegationSurfaces.length > 0;
 
   const statPillSource = statPanelEntries ?? visibleEntries;
 
@@ -453,10 +443,10 @@ export function QueuePanel({
   const renderQueueGroupSurface = (row: QueueGroupProjectionRow): ReactNode => {
     const { surface, projection } = row;
     switch (surface.kind) {
-      case "approval-delegation":
+      case "preview":
         return (
           <DelegationRow
-            key={`delegation-${surface.parentRunId}`}
+            key={`preview-${surface.parentRunId}`}
             parent={surface.parent}
             delegatedEntries={surface.members}
             projection={projection}
@@ -484,41 +474,14 @@ export function QueuePanel({
             onDeletedIds={onBulkDeleted}
           />
         );
-      case "passive-delegation":
-        return (
-          <GroupRowBase
-            key={`passive-delegation-${surface.parentRunId}`}
-            variant="passive-delegation"
-            title={projection.title}
-            parentRunId={surface.parentRunId}
-            members={surface.members}
-            countTone="neutral"
-            footerSecondaryId={projection.subtitle}
-            firstTimestamp={surface.members[0]?.timestamp}
-            isFocused={batchQueueParentRunId === surface.parentRunId}
-            drillInEnabled={!batchQueueParentRunId}
-            onEnter={(runId) => onEnterBatchQueue?.(runId)}
-            footerActions={
-              <BatchFooterActions
-                workflow={workflow}
-                date={date}
-                batchParentRunId={surface.parentRunId}
-                memberEntries={surface.members}
-                projection={projection}
-                onDeletedIds={onBulkDeleted}
-              />
-            }
-          />
-        );
       default:
         return assertNeverSurface(surface);
     }
   };
 
   const visibleGroupSurfaces: QueueGroupProjectionRow[] = [
-    ...visibleApprovalDelegationSurfaces,
+    ...visiblePreviewSurfaces,
     ...visibleBatchSurfaces,
-    ...visiblePassiveDelegationSurfaces,
   ];
 
   return (
@@ -604,7 +567,7 @@ export function QueuePanel({
             {loading ? (
               <QueueLoadingSkeleton />
             ) : sortedFiltered.length === 0 &&
-              !hasBatchOrDelegationQueueCards ? (
+              !hasGroupQueueCards ? (
               <EmptyState
                 icon={Inbox}
                 title="No entries yet"

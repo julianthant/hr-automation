@@ -31,6 +31,7 @@ import {
   emitDashboardCancelRequestedLog,
   currentAttemptWorker,
 } from "./shared.js";
+import { findInheritedPriorEntry } from "./emit-inherited.js";
 
 export interface CancelQueuedRequest {
   workflow: string;
@@ -102,6 +103,23 @@ export function buildCancelQueuedHandler(dir: string) {
       if (task.state !== "queued") {
         return { ok: false as const, error: `cannot cancel item in state ${task.state}`, status: 409 };
       }
+      const auditRunId = req.runId ?? task.currentRunId ?? task.runId;
+      const priorEntry = findInheritedPriorEntry({
+        workflow: req.workflow,
+        trackerDir: dir,
+        id: req.id,
+        ...(auditRunId ? { runId: auditRunId } : {}),
+        status: "failed",
+        db: stores.taskStore.db,
+      });
+      if (!priorEntry) {
+        return {
+          ok: false as const,
+          error: `cannot cancel: prior tracker row is missing for workflow=${req.workflow} id=${req.id}` +
+            (auditRunId ? ` runId=${auditRunId}` : ""),
+          status: 404,
+        };
+      }
       stores.workerStore.enqueueWorkerCommand({
         commandType: "cancel_task",
         workflow: req.workflow,
@@ -119,7 +137,6 @@ export function buildCancelQueuedHandler(dir: string) {
         childTaskId: task.taskId,
         childState: "cancelled",
       });
-      const auditRunId = req.runId ?? task.currentRunId ?? task.runId;
       appendQueueFailedAudit(req.workflow, req.id, auditRunId, DASHBOARD_CANCEL_ERROR, dir);
       // SQLite fast-path hint: bulk cancel goes O(K*D*L) on the prior-row
       // lookup without it (Finding #13). Single-row callers still benefit.

@@ -20,12 +20,11 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/work-study/index.js");
     return mod.workStudyWorkflow as unknown as AnyRegisteredWorkflow;
   },
-  // EID Lookup loader returns the CRM-on variant (UCPath + CRM, no I-9) — the
-  // default flag combo. --no-crm / --i9 paths don't share a long-lived daemon
-  // and aren't reachable from the dashboard enqueue UI.
-  "eid-lookup": async () => {
-    const mod = await import("../workflows/eid-lookup/index.js");
-    return mod.eidLookupCrmWorkflow as unknown as AnyRegisteredWorkflow;
+  // Person Lookup (UCPath + CRM) resolves an employee by name or EID and
+  // derives active / HDH status. Merges the former EID Lookup + Active Check.
+  "person-lookup": async () => {
+    const mod = await import("../workflows/person-lookup/index.js");
+    return mod.personLookupWorkflow as unknown as AnyRegisteredWorkflow;
   },
   onboarding: async () => {
     const mod = await import("../workflows/onboarding/index.js");
@@ -46,10 +45,6 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
   "oath-upload": async () => {
     const mod = await import("../workflows/oath-upload/index.js");
     return mod.oathUploadWorkflow as unknown as AnyRegisteredWorkflow;
-  },
-  "active-check": async () => {
-    const mod = await import("../workflows/active-check/index.js");
-    return mod.activeCheckWorkflow as unknown as AnyRegisteredWorkflow;
   },
 };
 

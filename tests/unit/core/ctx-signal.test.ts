@@ -116,7 +116,8 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
       detailFields: [{ key: 'payload', label: 'Payload' }],
       getName: (d) => d.payload ?? '',
       getId: (d) => d.payload ?? '',
-      handler: async (ctx) => {
+      handler: async (ctx, input) => {
+        ctx.updateData({ payload: input.payload })
         childCtxRef.signal = ctx.signal
         await ctx.step('wait', async () => {
           // Signal the test we're inside the handler, then await an
@@ -173,7 +174,8 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
       detailFields: [{ key: 'payload', label: 'Payload' }],
       getName: (d) => d.payload ?? '',
       getId: (d) => d.payload ?? '',
-      handler: async (ctx) => {
+      handler: async (ctx, input) => {
+        ctx.updateData({ payload: input.payload })
         // Capture state synchronously at handler entry.
         childCtxSignalAborted = ctx.signal.aborted
         await ctx.step('noop', async () => {})

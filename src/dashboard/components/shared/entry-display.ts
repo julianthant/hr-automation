@@ -1,7 +1,8 @@
 import type { TrackerEntry } from "./types";
 import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
 import { readQueueTitle } from "../../../domain/queue-title.js";
-import { resolveRowArchetype } from "../../../domain/row-archetype.js";
+import { resolveQueueRowPresentation } from "../../../domain/queue-row-presentation.js";
+import { hasDelegationRole, resolveRowArchetype } from "../../../domain/row-archetype.js";
 export {
   groupMergedTrackerEntries as groupMergedEntries,
   type MergedEntryGroup,
@@ -42,8 +43,8 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
  * `data.__name` or workflow-owned name fields.
  *
  * When a `displayNames` map is supplied (built via `buildDisplayNameMap`),
- * the precomputed "<base> <ordinal>" label takes precedence so the queue
- * shows "OATH 1", "EMPL 2", "Onboarding Roster 2", etc.
+ * its precomputed base-name label is used for rows with no stamped queue row
+ * kind (legacy / unmigrated) — session-local ordinals are retired.
  *
  * Single source of truth for "what's this entry called" — used by QueuePanel,
  * LogPanel, and the toast system.
@@ -52,10 +53,18 @@ export function resolveEntryName(
   entry: TrackerEntry,
   displayNames?: Map<string, string>,
 ): string {
+  // Kind-based title (person/file/catalog) is the canonical contract and wins
+  // over the legacy display-name map (which only carried session-local
+  // ordinals like "OATH 1" / "Onboarding Roster 2" — now retired). The map and
+  // the fallbacks below only run for rows with no stamped queueRowKind.
+  const presentation = resolveQueueRowPresentation(entry);
+  if (presentation) return presentation.title;
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
-  if (d.mode === "prepare" && d.pdfOriginalName) return d.pdfOriginalName;
+  if ((d.mode === "prepare" || resolveRowArchetype(entry) === "batch") && d.pdfOriginalName) {
+    return d.pdfOriginalName;
+  }
   if (entry.parentRunId) {
     const personName = resolveEmployeeLabel(d);
     if (personName) return personName;
@@ -111,10 +120,12 @@ export function deduplicateByResolvedId(entries: TrackerEntry[]): TrackerEntry[]
  * `getId` result (`data.__id`), falls back to `entry.id`.
  */
 export function resolveEntryId(entry: TrackerEntry): string {
+  const presentation = resolveQueueRowPresentation(entry);
+  if (presentation) return presentation.subtitle ?? "";
   const d = entry.data ?? {};
   // Dispatch rows use the group context label as the secondary footer ID
   // rather than the technical request item ID.
-  if (resolveRowArchetype(entry) === "dispatch") {
+  if (hasDelegationRole(entry, "dispatch")) {
     if (d.__queueSubtitle) return d.__queueSubtitle;
     return d.__queueRootTitle || d.parentSubject || d.__id || entry.id;
   }
@@ -144,17 +155,21 @@ export function formatEntryTime(ts: string): string {
  * Build a per-entry display label map.
  *
  * The base name is the entry's existing display name (data.__subject /
- * data.__name / .name / .employeeName) when present, else the workflow's registry label as a
- * fallback. Person rows keep their literal operator-facing name. Workflow-level
- * rows are bucketed by base name and assigned a 1-indexed ordinal in
- * chronological order of their earliest tracker timestamp (firstLogTs when
- * known, else the entry's `timestamp`). This way:
+ * data.__name / .name / .employeeName) when present, else the workflow's
+ * registry label as a fallback. Person rows keep their literal operator-facing
+ * name; PDF/batch rows keep their filename; queue-title rows keep their title.
  *
- *   - EID rows render as "Zaw, Hein Thant" rather than "Zaw, Hein Thant 1".
- *   - OCR rows use {@link ocrQueueDisplayBase}: "OATH 1", "EMPL 2", …
- *     (fallback: workflow label from registry if formType is missing).
- *   - SharePoint rows carry `__name = "Onboarding Roster"` (or whatever the
- *     spec label is), so they render as "Onboarding Roster 1", ...
+ * Session-local ordinal suffixes ("OATH 1", "Onboarding Roster 2") are retired:
+ * stamped rows resolve their title from {@link resolveQueueRowPresentation}
+ * (queue row kind), which wins inside {@link resolveEntryName} before this map
+ * is ever consulted. The map now only supplies a bare base name for legacy /
+ * unstamped rows and the delegated-label inheritance below.
+ *
+ * The one remaining nuance is the **workflow-label fallback**: a lone
+ * non-explicit row (e.g. a single "Separation" doc with no person name) is
+ * deliberately omitted from the map so {@link resolveEntryName} falls through
+ * to its richer `__subject` ("Separation separation-doc-1") instead of the bare
+ * registry label.
  *
  * Pass the result as the second arg to `resolveEntryName`.
  */
@@ -162,72 +177,58 @@ export function buildDisplayNameMap(
   entries: TrackerEntry[],
   workflowLabel: string,
 ): Map<string, string> {
-  const displayFor = (e: TrackerEntry): { base: string; ordinal: boolean; explicitWorkflowName: boolean } => {
+  // `suppressWhenSingularFallback` marks the bare workflow-label fallback so a
+  // lone such row is omitted from the map (callers fall through to `__subject`).
+  const displayFor = (
+    e: TrackerEntry,
+  ): { base: string; suppressWhenSingularFallback: boolean } => {
     const d = e.data ?? {};
-    if (d.mode === "prepare" && d.pdfOriginalName) {
-      return { base: d.pdfOriginalName, ordinal: false, explicitWorkflowName: false };
+    if ((d.mode === "prepare" || resolveRowArchetype(e) === "batch") && d.pdfOriginalName) {
+      return { base: d.pdfOriginalName, suppressWhenSingularFallback: false };
     }
     const personName = resolveEmployeeLabel(d);
     if (e.parentRunId && personName) {
-      return { base: personName, ordinal: false, explicitWorkflowName: false };
+      return { base: personName, suppressWhenSingularFallback: false };
     }
     const queueTitle = readQueueTitle(d);
     if (queueTitle) {
-      return {
-        base: queueTitle,
-        ordinal: false,
-        explicitWorkflowName: d.__queueTitleKind === "batch" || d.__queueTitleKind === "delegation",
-      };
+      return { base: queueTitle, suppressWhenSingularFallback: false };
     }
-    if (personName) return { base: personName, ordinal: false, explicitWorkflowName: false };
+    if (personName) return { base: personName, suppressWhenSingularFallback: false };
     const parentSubject = firstNonBlank(d.parentSubject);
-    if (parentSubject) return { base: parentSubject, ordinal: false, explicitWorkflowName: true };
+    if (parentSubject) return { base: parentSubject, suppressWhenSingularFallback: false };
     const ocrBase = ocrQueueDisplayBase(e);
-    if (ocrBase) return { base: ocrBase, ordinal: true, explicitWorkflowName: true };
-    // Batch-parent rows already have a unique batch id in __name (e.g. "Oath · 7596").
-    // No ordinal suffix needed. OCR batch-parent rows are handled above by ocrQueueDisplayBase.
-    if (resolveRowArchetype(e) === "batch-parent") {
+    if (ocrBase) return { base: ocrBase, suppressWhenSingularFallback: false };
+    // Batch rows already have a unique batch id in __name (e.g. "Oath · 7596").
+    if (resolveRowArchetype(e) === "batch") {
       const workflowName = firstNonBlank(d.__name);
-      return { base: workflowName || workflowLabel, ordinal: false, explicitWorkflowName: Boolean(workflowName) };
+      return { base: workflowName || workflowLabel, suppressWhenSingularFallback: false };
     }
     const workflowName = firstNonBlank(d.__name);
-    return { base: workflowName || workflowLabel, ordinal: true, explicitWorkflowName: Boolean(workflowName) };
+    return {
+      base: workflowName || workflowLabel,
+      // Only the bare registry-label fallback is suppressible; an explicit
+      // `__name` is a real label and stays in the map.
+      suppressWhenSingularFallback: !workflowName,
+    };
   };
   const sortKey = (e: TrackerEntry): string => e.firstLogTs || e.timestamp || "";
   const sorted = [...entries].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
-  // First pass: count how many ordinal entries share each base name.
-  // Ordinals are only meaningful when more than one entry shares the same base.
-  const totals = new Map<string, number>();
-  for (const e of sorted) {
-    if (e.parentRunId) continue;
-    const { base, ordinal } = displayFor(e);
-    if (ordinal) totals.set(base, (totals.get(base) ?? 0) + 1);
-  }
-
-  // Second pass: build own labels for non-delegated rows.
-  const counters = new Map<string, number>();
+  // Build own labels for non-delegated rows. The bare workflow-label fallback is
+  // omitted so resolveEntryName falls through to data fields / entry.id rather
+  // than showing a contentless registry label.
   const result = new Map<string, string>();
   for (const e of sorted) {
     if (e.parentRunId) continue;
-    const { base, ordinal, explicitWorkflowName } = displayFor(e);
-    if (!ordinal) {
-      result.set(e.id, base);
-      continue;
-    }
-    // Only one entry with this base — omit from map so resolveEntryName falls
-    // through to data fields / entry.id, avoiding a pointless "Active Check 1".
-    // Explicit workflow-level names (incl. OATH/EMPL) still get an ordinal so the
-    // parent row and all delegated children share the same numbered label as the OCR run.
-    if ((totals.get(base) ?? 0) <= 1 && !explicitWorkflowName) continue;
-    const next = (counters.get(base) ?? 0) + 1;
-    counters.set(base, next);
-    result.set(e.id, `${base} ${next}`);
+    const { base, suppressWhenSingularFallback } = displayFor(e);
+    if (suppressWhenSingularFallback) continue;
+    result.set(e.id, base);
   }
 
   // Final pass: delegated rows use the root parent's display label. This is
   // intentionally transitive: a parent workflow can delegate to OCR, and OCR
-  // can delegate onward to EID lookup / downstream daemon rows.
+  // can delegate onward to Person Lookup / downstream daemon rows.
   //
   // Single-pass walk with path compression: build runId → parentRunId, then
   // for each delegated entry walk up to a labeled root and cache the result
@@ -276,7 +277,7 @@ export function buildDisplayNameMap(
     if (!parentLabel) continue;
     // Dispatch rows are named notification rows; keep their own __name rather
     // than inheriting the parent batch label.
-    if (resolveRowArchetype(e) === "dispatch") {
+    if (hasDelegationRole(e, "dispatch")) {
       const ownName = firstNonBlank(d?.__name);
       if (ownName) {
         result.set(e.id, ownName);

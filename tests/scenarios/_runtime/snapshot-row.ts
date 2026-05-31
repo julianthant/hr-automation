@@ -57,6 +57,24 @@ function readTrackerEntries(dir: string, workflow: string): TrackerEntry[] {
     .map((line) => JSON.parse(line) as TrackerEntry);
 }
 
+/**
+ * Trace ids (`<code>-<mmddyyHHMMSS>-<runId4>`) embed a wall-clock timestamp +
+ * a slice of the random run UUID, so they're non-deterministic. Redact them to
+ * a stable placeholder so snapshots lock in the *shape* without churning every
+ * run. Applies to `data.__traceId` and any title/subtitle/id that renders one.
+ */
+const TRACE_ID_RE = /\b[a-z0-9]{2,}-\d{12}-[a-z0-9]{4}\b/g;
+function scrubTraceId(value: string | undefined): string | undefined {
+  return value === undefined ? undefined : value.replace(TRACE_ID_RE, "<traceId>");
+}
+
+/** Redact the non-deterministic `__traceId` field from a snapshotted data record. */
+function scrubData(data: Record<string, string>): Record<string, string> {
+  const out = { ...data };
+  if (typeof out.__traceId === "string") out.__traceId = "<traceId>";
+  return out;
+}
+
 function latestEntryForRunId(entries: TrackerEntry[], runId: string): TrackerEntry | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;
@@ -148,7 +166,7 @@ export function snapshotRow(opts: SnapshotRowOpts): RowSnapshot {
   const inGroup = surfaces.groupRows.some((group) =>
     group.parentRunId === runIdKey
       || group.members.some((m) => (m.runId ?? m.id) === runIdKey)
-      || (group.kind === "approval-delegation"
+      || (group.kind === "preview"
         && (group.parent.runId ?? group.parent.id) === runIdKey),
   );
   const surfacePlacement: RowSnapshot["surfacePlacement"] = inFlat
@@ -165,14 +183,14 @@ export function snapshotRow(opts: SnapshotRowOpts): RowSnapshot {
     statusLabel: statusLabelFor(entry),
     step: entry.step,
     archetype: resolveRowArchetype(entry),
-    title,
-    displayId,
-    subtitle: projection.subtitle,
+    title: scrubTraceId(title)!,
+    displayId: scrubTraceId(displayId)!,
+    subtitle: scrubTraceId(projection.subtitle),
     surfaceType: projection.surfaceType,
     rowTypeLabel: projection.rowTypeLabel,
     surfacePlacement,
     parentRunId: entry.parentRunId ?? null,
-    data: { ...(entry.data ?? {}) },
+    data: scrubData(entry.data ?? {}),
     ...(entry.error ? { error: entry.error } : {}),
   };
 }

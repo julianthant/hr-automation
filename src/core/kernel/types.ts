@@ -3,6 +3,8 @@ import type { ZodType } from 'zod'
 import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
+import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
+import type { WorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 
 export interface SystemConfig {
@@ -102,6 +104,40 @@ export type WorkflowQueueTitleConfig<TData> =
   | { kind: 'single' }
   | { kind: 'batch'; label?: string; labelFromInput?: (input: TData) => string | undefined }
 
+/**
+ * Named "run mode" preset for a workflow. Surfaced in the dashboard's input-run
+ * gear menu so the operator can pick a non-default execution profile (e.g.
+ * "Transactions only" → skip Kronos search + UCPath Job Summary). The kernel
+ * routes the selected `skipSteps` through `ctx.shouldSkipStep(name)`; handlers
+ * must explicitly OR the check into their existing skip branches.
+ *
+ * The implicit default preset (no skips, label "Full") is synthesized by the
+ * dashboard when this list is non-empty — workflow files only declare the
+ * non-default presets. Empty/omitted `presets` → no gear icon for that workflow.
+ *
+ * Each `skipSteps` entry must be a member of `WorkflowConfig.steps` (the
+ * workflow's declared handler-step list, NOT auth steps). Enforced at type
+ * level via `TSteps[number]` and at runtime via the registry validator.
+ */
+export interface WorkflowStepPreset<TSteps extends readonly string[]> {
+  /** Stable identifier (e.g. "transactions-only"). Used as `data.__preset` and over the wire. */
+  id: string
+  /** Operator-facing label (e.g. "Transactions only"). */
+  label: string
+  /** Steps the handler should treat as skipped when this preset is active. */
+  skipSteps: ReadonlyArray<TSteps[number]>
+  /** Optional one-line tooltip / description rendered under the label. */
+  description?: string
+}
+
+/** Wire-shape preset (post-registry normalization). `skipSteps` is plain `string[]`. */
+export interface WorkflowStepPresetMetadata {
+  id: string
+  label: string
+  skipSteps: string[]
+  description?: string
+}
+
 export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   name: string
   version?: string
@@ -109,6 +145,31 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   label?: string
   /** Declarative row shape. Defaults to "batch" if `batch` is set, else "single". */
   archetype?: WorkflowArchetypeOrResolver<TData>
+  /**
+   * Subject-semantics kind for queue title/subtitle resolution — `person`,
+   * `file`, or `catalog`. Either a literal or a resolver `(input) => kind`
+   * for input-variant workflows (e.g. oath-signature: `pdf` → file, `signer`
+   * → person). Orthogonal to `archetype` (shape) and `parentRunId` (scope).
+   * See `domain/queue-row-kind.ts`.
+   */
+  queueRowKind?: QueueRowKindOrResolver<TData>
+  /**
+   * Optional per-workflow queue-row **status** rules — the status axis,
+   * orthogonal to `queueRowKind` (title/subtitle). Lets a workflow promote a
+   * row to a workflow-specific derived display status (e.g. person-lookup
+   * `notFound`, OCR `needsReview`) and/or render a supplemental status chip
+   * (e.g. person-lookup's A/IA tag), instead of teaching the generic dashboard
+   * `EntryItem` component to branch on `entry.workflow`. Omitted → the row uses
+   * the default base-status behavior unchanged. See `domain/queue-row-status.ts`.
+   */
+  statusExtensions?: WorkflowStatusExtensions
+  /**
+   * Short (2-char) workflow code used as the provenance prefix of a row's
+   * trace id (`<code>-<mmddyyHHMMSS>-<runId4>`, see `domain/queue-trace-id.ts`)
+   * and as the daemon instance prefix. Must be unique across workflows.
+   * Defaults to the first two letters of `name` when omitted.
+   */
+  code?: string
   /**
    * Display category for the dashboard's `WorkflowRail` grouping
    * (e.g. "Onboarding", "Separations", "Utils"). Workflows with the same
@@ -129,7 +190,6 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   systems: SystemConfig[]
   steps: TSteps
   schema: ZodType<TData>
-  authChain?: 'sequential' | 'interleaved' | 'parallel-staggered'
   batch?: BatchConfig
   /**
    * When true (default), the kernel auto-prepends `auth:<id>` step names to
@@ -193,6 +253,14 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    */
   runtimePolicy?: WorkflowRuntimePolicy
   /**
+   * Optional named "run mode" presets surfaced in the dashboard's input-run
+   * gear menu. Empty/omitted → no gear icon. The implicit default "Full"
+   * preset (no skips) is synthesized by the dashboard when this is non-empty.
+   * The handler must opt into honoring each preset's `skipSteps` entry via
+   * `ctx.shouldSkipStep(name)`; the kernel only carries the selection.
+   */
+  presets?: ReadonlyArray<WorkflowStepPreset<TSteps>>
+  /**
    * Derive a stable tracker/queue item id from raw workflow input. The kernel
    * has a generic top-level id/docId/email fallback, but dashboard HTTP
    * launches and daemon queue rows need workflow-specific ids for inputs like
@@ -244,13 +312,12 @@ export type DelegateRenderAs = "batch" | "preview" | "flat"
 
 export interface DelegateOpts {
   /**
-   * Override the child's derived row archetype for this delegation. Maps
-   * to the surface types the dashboard renders:
-   *   - "flat"    → `delegation-member` flat row (passive-child stamp)
-   *   - "preview" → approval-delegation preview card (delegate-child stamp)
-   *   - "batch"   → batch-delegation group member (delegate-child stamp)
-   * Omitted → use the child workflow's declared archetype + `parentRunId`
-   * to derive the archetype (default kernel behavior).
+   * Projection hint for delegated rows. The child row's stamped archetype
+   * still comes from the child workflow's resolved shape (`single` / `batch`)
+   * plus the top-level `parentRunId` scope.
+   *   - "flat"    → flat single row
+   *   - "preview" → preview card row
+   *   - "batch"   → grouped delegation member
    */
   renderAs?: DelegateRenderAs
   /**
@@ -304,6 +371,24 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    * pipeline correctly.
    */
   skipStep(name: TSteps[number]): void
+  /**
+   * True when the caller (dashboard step-preset gear, future CLI flag, etc.)
+   * requested this step be skipped via the `runtimeOptions.skipSteps` channel.
+   * Pair with `ctx.skipStep(name)` inside the handler's existing skip branches:
+   *
+   *   if (somePrefillCheck || ctx.shouldSkipStep("kronos-search")) {
+   *     ctx.skipStep("kronos-search")
+   *     // ...provide fallback values for any downstream code...
+   *   } else {
+   *     await ctx.step("kronos-search", () => ...)
+   *   }
+   *
+   * The kernel does NOT auto-bypass `ctx.step(name, fn)` calls — handlers are
+   * responsible for substituting fallback values (e.g. carrying the field
+   * forward from a prior step) because step bodies frequently set closure
+   * variables that downstream code consumes.
+   */
+  shouldSkipStep(name: TSteps[number]): boolean
   /**
    * Snapshot of the accumulated tracker data as written so far via
    * `updateData(...)`. Includes anything the kernel pre-merged from the
@@ -396,6 +481,8 @@ export interface WorkflowMetadata {
   /** Human-readable workflow label for the dashboard (auto-derived from `name` when absent). */
   label: string
   archetype: WorkflowArchetype
+  /** 2-char workflow code — provenance prefix for trace ids and daemon instance names. */
+  code: string
   /** Dashboard-rail grouping (e.g. "Onboarding"). Absent → workflow lands in the rail's "Other" group. */
   category?: string
   /** Lucide-react icon name for `WorkflowBox`. Absent → frontend falls back to the generic `Workflow` icon. */
@@ -417,12 +504,22 @@ export interface WorkflowMetadata {
   hasOperatorSubject?: boolean
   /** Serializable row/action policy consumed by workflow runtime projections. */
   runtimePolicy?: WorkflowRuntimePolicy
+  /**
+   * Named run-mode presets surfaced in the dashboard's input-run gear menu.
+   * Omitted when the workflow declared none. The implicit "Full" preset is
+   * synthesized client-side and never appears here.
+   */
+  presets?: WorkflowStepPresetMetadata[]
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
   config: WorkflowConfig<TData, TSteps>
   metadata: WorkflowMetadata
   archetype: WorkflowArchetypeOrResolver<TData>
+  /** Resolved queue-row kind (literal or per-input resolver). See `domain/queue-row-kind.ts`. */
+  queueRowKind: QueueRowKindOrResolver<TData>
+  /** Resolved 2-char workflow code (provenance prefix for trace ids + daemon instance names). */
+  code: string
 }
 
 export interface BatchResult {

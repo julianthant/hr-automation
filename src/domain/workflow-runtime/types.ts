@@ -1,9 +1,5 @@
-export type WorkflowSurfaceType =
-  | "normal"
-  | "approval-delegation"
-  | "batch-delegation"
-  | "passive-delegation"
-  | "delegation-member";
+/** Queue/card surface shape — mirrors row archetypes; batch-member rows render as `single`. */
+export type WorkflowSurfaceType = "single" | "preview" | "batch";
 
 export type WorkflowActionKind =
   | "cancel"
@@ -71,20 +67,6 @@ export interface WorkflowRunProjection {
  */
 export interface WorkflowDelegationPolicy {
   /**
-   * OCR utility fan-out (EID Lookup, Active Check spawned by an OCR prep
-   * row) must stay as `delegation-member` rows even when 2+ children share
-   * one parentRunId — they should never be promoted to a batch-delegation
-   * group. Default: "delegation-member".
-   */
-  utilityChildSurface?: "delegation-member" | "batch-delegation";
-  /**
-   * Workflows that count as utility children for `utilityChildSurface`.
-   * OCR uses this to keep EID Lookup / Active Check fan-out flat while
-   * still allowing approved target workflow rows to render as normal
-   * delegation members or groups.
-   */
-  utilityChildWorkflows?: string[];
-  /**
    * One failed approval-dependency child blocks the parent task until the
    * child is retried/cancelled. Mirrors the `block_parent` setting that
    * Oath Upload's approval dependencies create in `task_dependencies`.
@@ -99,14 +81,12 @@ export interface WorkflowDelegationPolicy {
 }
 
 /**
- * Approval / preview affordances for an approval-delegation surface.
- * Used by the log panel's row-type chip and by tests that need to assert
- * the rendered label without re-deriving it from `previewAvailable`.
+ * Preview-surface affordances for log-panel labels and tests.
  */
 export interface WorkflowPreviewPolicy {
   /** Suffix appended to the row-type label when preview is available. Defaults to "Preview". */
   rowTypeLabelSuffix?: string;
-  /** True when this workflow's approval-delegation surface always has a preview tab. */
+  /** True when this workflow's preview surface always has a preview tab. */
   alwaysAvailable?: boolean;
 }
 
@@ -118,8 +98,8 @@ export interface WorkflowPreviewPolicy {
 export interface WorkflowMemberRowPolicy {
   /**
    * Prefer the person/employee name fallback over `__name`/`__id` for
-   * delegation-member titles. Phase 4 uses this for oath-signature and
-   * emergency-contact final rows so post-approval rows read as a person's
+   * batch-member titles. Used by oath-signature and emergency-contact final
+   * rows so post-approval rows read as a person's
    * name rather than a technical retry id.
    */
   titleSource?: "person" | "default";

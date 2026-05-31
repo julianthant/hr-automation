@@ -11,6 +11,10 @@ import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { dateLocal, trackEventForDate } from "../../../src/tracker/jsonl.js";
+import {
+  resetDaemonSpawnStubs,
+  stubDaemonSpawn,
+} from "../../_utils/stub-daemon-spawn.js";
 
 let dir: string;
 
@@ -18,7 +22,8 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "hono-ops-"));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await resetDaemonSpawnStubs();
   closeStateDbForTests(dir);
   if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 });
@@ -45,6 +50,15 @@ test("Hono /api/cancel-queued cancels a queued task", async () => {
       deriveItemId: (input) => input.docId,
       runIds: ["run-queued"],
     });
+    trackEventForDate({
+      workflow: "separations",
+      timestamp: new Date().toISOString(),
+      id: "3930",
+      runId: "run-queued",
+      status: "pending",
+      data: { archetype: "single" },
+      input: { docId: "3930" },
+    }, dateLocal(), dir);
 
     const res = await app().request("/api/cancel-queued", jsonRequest({
       workflow: "separations",
@@ -85,7 +99,7 @@ test("Hono /api/cancel-queued honors explicit tree scope for descendants", async
       id: "oath-parent",
       runId: "oath-parent-run",
       status: "pending",
-      data: { archetype: "batch-parent" },
+      data: { archetype: "batch" },
     }, date, dir);
     trackEventForDate({
       workflow: "oath-signature",
@@ -113,6 +127,23 @@ test("Hono /api/cancel-queued honors explicit tree scope for descendants", async
 });
 
 test("Hono /api/cancel-queued routes OCR discard context through workflow actions", async () => {
+  trackEventForDate({
+    workflow: "ocr",
+    timestamp: new Date().toISOString(),
+    id: "ocr-session",
+    runId: "ocr-run",
+    status: "pending",
+    data: { archetype: "batch" },
+  }, dateLocal(), dir);
+  trackEventForDate({
+    workflow: "oath-upload",
+    timestamp: new Date().toISOString(),
+    id: "oath-parent",
+    runId: "parent-run",
+    status: "running",
+    data: { archetype: "single" },
+  }, dateLocal(), dir);
+
   const res = await app().request("/api/cancel-queued", jsonRequest({
     workflow: "oath-upload",
     id: "oath-parent",
@@ -203,6 +234,16 @@ test("Hono bulk routes ignore unsupported source and scope values", async () => 
       deriveItemId: (input) => input.docId,
       runIds: ["visible-run"],
     });
+    stubDaemonSpawn(dir);
+    trackEventForDate({
+      workflow: "separations",
+      timestamp: new Date().toISOString(),
+      id: "visible",
+      runId: "visible-run",
+      status: "failed",
+      data: { archetype: "single" },
+      input: { docId: "visible" },
+    }, dateLocal(), dir);
 
     const retry = await app().request("/api/retry-bulk", jsonRequest({
       workflow: "separations",

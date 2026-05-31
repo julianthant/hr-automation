@@ -35,36 +35,30 @@ function toDashboardEntry(entry: TrackerEntryJsonl): TrackerEntry {
 
 function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {
   switch (surface.kind) {
-    case "approval-delegation":
+    case "preview":
       return {
-        kind: "approval-delegation",
+        kind: "preview",
         parentRunId: surface.parentRunId,
         parent: toDashboardEntry(surface.parent),
         members: surface.members.map(toDashboardEntry),
         approvalState: surface.approvalState,
         titleOverride: surface.titleOverride,
       };
-    case "passive-delegation":
-      return {
-        kind: "passive-delegation",
-        parentRunId: surface.parentRunId,
-        members: surface.members.map(toDashboardEntry),
-        titleOverride: surface.titleOverride,
-      };
     case "batch":
       return {
         kind: "batch",
         parentRunId: surface.parentRunId,
+        ...(surface.parent ? { parent: toDashboardEntry(surface.parent) } : {}),
         members: surface.members.map(toDashboardEntry),
         titleOverride: surface.titleOverride,
       };
   }
 }
 
-export type QueueGroupSurfaceKind = "approval-delegation" | "passive-delegation" | "batch";
+export type QueueGroupSurfaceKind = "preview" | "batch";
 
-export interface ApprovalDelegationSurface {
-  kind: "approval-delegation";
+export interface PreviewSurface {
+  kind: "preview";
   parentRunId: string;
   parent: TrackerEntry;
   members: TrackerEntry[];
@@ -72,24 +66,15 @@ export interface ApprovalDelegationSurface {
   titleOverride?: string;
 }
 
-export interface PassiveDelegationSurface {
-  kind: "passive-delegation";
-  parentRunId: string;
-  members: TrackerEntry[];
-  titleOverride?: string;
-}
-
 export interface BatchSurface {
   kind: "batch";
   parentRunId: string;
+  parent?: TrackerEntry;
   members: TrackerEntry[];
   titleOverride?: string;
 }
 
-export type QueueGroupSurface =
-  | ApprovalDelegationSurface
-  | PassiveDelegationSurface
-  | BatchSurface;
+export type QueueGroupSurface = PreviewSurface | BatchSurface;
 
 export interface BuildQueueSurfacesInput {
   entries: TrackerEntry[];

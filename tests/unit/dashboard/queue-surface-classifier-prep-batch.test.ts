@@ -5,15 +5,15 @@ import type { TrackerEntry } from "../../../src/dashboard/components/shared/type
 
 function prepParent(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
   return {
-    workflow: "oath-signature",
+    workflow: "ocr",
     timestamp: "2026-05-14T06:00:00Z",
     id: "ocr-prep-abc",
     runId: "parent-1234",
     status: "running",
     step: "ocr",
     data: {
-      archetype: "batch-parent",
-      __name: "Oath Signature · #1234",
+      archetype: "preview",
+      __name: "OCR · #1234",
       __id: "ocr-prep-abc",
       mode: "prepare",
       pdfOriginalName: "x.pdf",
@@ -22,15 +22,15 @@ function prepParent(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
   } as TrackerEntry;
 }
 
-test("pre-approval prep parent renders as batch surface without request child rows", () => {
+test("pre-approval prep parent renders as preview surface without request child rows", () => {
   const surfaces = buildQueueSurfaces({
     entries: [prepParent()],
     delegationSourceEntries: [],
-    workflow: "oath-signature",
-    workflowLabel: "Oath Signature",
+    workflow: "ocr",
+    workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.kind, "preview");
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
@@ -67,8 +67,8 @@ test("post-approval prep parent + multiple kernel children stays grouped", () =>
   const surfaces = buildQueueSurfaces({
     entries: [approved, child1, child2],
     delegationSourceEntries: [child1, child2],
-    workflow: "oath-signature",
-    workflowLabel: "Oath Signature",
+    workflow: "ocr",
+    workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
   assert.equal(surfaces.groupRows[0]!.members.length, 2);
@@ -93,13 +93,13 @@ test("post-approval prep parent + single kernel child stays grouped", () => {
   const surfaces = buildQueueSurfaces({
     entries: [approved, child1],
     delegationSourceEntries: [child1],
-    workflow: "oath-signature",
-    workflowLabel: "Oath Signature",
+    workflow: "ocr",
+    workflowLabel: "OCR",
   });
   // A single-signer PDF must remain a batch card after OCR approval — it
   // must not collapse into a flat single row.
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.kind, "preview");
   assert.equal(surfaces.groupRows[0]!.members.length, 1);
   assert.equal(surfaces.flatEntries.length, 0);
 });
@@ -108,11 +108,11 @@ test("prep parent with 0 members still renders as group surface (not flat)", () 
   const surfaces = buildQueueSurfaces({
     entries: [prepParent()],
     delegationSourceEntries: [],
-    workflow: "oath-signature",
-    workflowLabel: "Oath Signature",
+    workflow: "ocr",
+    workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]!.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]!.kind, "preview");
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
@@ -121,14 +121,14 @@ test("discarded prep parent is excluded from all surfaces", () => {
   const surfaces = buildQueueSurfaces({
     entries: [discarded],
     delegationSourceEntries: [],
-    workflow: "oath-signature",
-    workflowLabel: "Oath Signature",
+    workflow: "ocr",
+    workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 0);
   assert.equal(surfaces.flatEntries.length, 0);
 });
 
-test("ocr-workflow awaiting-approval row renders as a group card (batch-parent archetype)", () => {
+test("ocr-workflow awaiting-approval row renders as a group card (preview archetype)", () => {
   const ocrRow: TrackerEntry = {
     workflow: "ocr",
     timestamp: "2026-05-14T06:00:00Z",
@@ -136,7 +136,7 @@ test("ocr-workflow awaiting-approval row renders as a group card (batch-parent a
     runId: "ocr-run-x",
     status: "running",
     step: "awaiting-approval",
-    data: { archetype: "batch-parent", mode: "prepare", formType: "oath" },
+    data: { archetype: "preview", mode: "prepare", formType: "oath" },
   } as TrackerEntry;
   const surfaces = buildQueueSurfaces({
     entries: [ocrRow],
@@ -145,7 +145,7 @@ test("ocr-workflow awaiting-approval row renders as a group card (batch-parent a
     workflowLabel: "OCR",
   });
   assert.equal(surfaces.groupRows.length, 1);
-  assert.equal(surfaces.groupRows[0]?.kind, "approval-delegation");
+  assert.equal(surfaces.groupRows[0]?.kind, "preview");
   assert.equal(surfaces.groupRows[0]?.approvalState, "awaiting-approval");
   assert.equal(surfaces.flatEntries.length, 0);
 });

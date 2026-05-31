@@ -53,9 +53,9 @@ describe("oath-signature scenario: pdf branch — cancel during ocr approval", (
     });
     assert.equal(snap.status, "failed");
     assert.equal(snap.step, "cancelled");
-    // Cancel preserves the row's batch-parent archetype — the cancel
+    // Cancel preserves the row's batch archetype — the cancel
     // marker is a status change, not a row-type change.
-    assert.equal(snap.archetype, "batch-parent");
+    assert.equal(snap.archetype, "batch");
 
     expect(maskVolatile(snap)).toMatchSnapshot();
   });

@@ -36,29 +36,6 @@ function cleanupWorkflow(workflow: string) {
   }
 }
 
-test("separations shape: 4-system interleaved authChain declares correctly", () => {
-  const wf = defineWorkflow({
-    name: `separations-auth-${Date.now()}`,
-    systems: [
-      { id: "kuali", login: async () => {} },
-      { id: "old-kronos", login: async () => {} },
-      { id: "new-kronos", login: async () => {} },
-      { id: "ucpath", login: async () => {} },
-    ],
-    steps: ["launching", "authenticating"] as const,
-    schema: z.object({ docId: z.string() }),
-    authChain: "interleaved",
-    handler: async () => {},
-  });
-
-  assert.equal(wf.config.authChain, "interleaved");
-  assert.equal(wf.config.systems.length, 4);
-  assert.deepEqual(
-    wf.config.systems.map((s) => s.id),
-    ["kuali", "old-kronos", "new-kronos", "ucpath"],
-  );
-});
-
 test("separations shape: ctx.parallel returns 4-keyed PromiseSettledResult (Phase-1 pattern)", async (t) => {
   const wfName = `separations-parallel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   t.onTestFinished(() => cleanupWorkflow(wfName));
@@ -126,7 +103,6 @@ test("separations shape: runWorkflowBatch (sequential) + deriveItemId threads do
       "kuali-finalization",
     ] as const,
     schema: z.object({ docId: z.string().min(1) }),
-    authChain: "interleaved",
     batch: { mode: "sequential", preEmitPending: true, betweenItems: ["reset"] },
     detailFields: [
       { key: "name", label: "Employee" },

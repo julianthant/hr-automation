@@ -9,21 +9,17 @@ import {
 
 const CANONICAL: RowArchetype[] = [
   "single",
-  "batch-parent",
+  "preview",
   "batch-member",
-  "dispatch",
-  "delegate-child",
-  "passive-child",
+  "batch",
 ];
 
 describe("row-archetype", () => {
   it("archetypeRowTypeLabel returns the canonical label per archetype", () => {
     assert.equal(archetypeRowTypeLabel("single"), "Single");
-    assert.equal(archetypeRowTypeLabel("batch-parent"), "Batch parent");
+    assert.equal(archetypeRowTypeLabel("preview"), "Preview");
+    assert.equal(archetypeRowTypeLabel("batch"), "Batch");
     assert.equal(archetypeRowTypeLabel("batch-member"), "Batch member");
-    assert.equal(archetypeRowTypeLabel("dispatch"), "Dispatch");
-    assert.equal(archetypeRowTypeLabel("delegate-child"), "Delegated");
-    assert.equal(archetypeRowTypeLabel("passive-child"), "Passive");
   });
 
   it("resolveRowArchetype returns every canonical data.archetype value", () => {
@@ -37,8 +33,8 @@ describe("row-archetype", () => {
     assert.equal(resolveRowArchetype({}), "single");
   });
 
-  it("resolveRowArchetype defaults to delegate-child when parentRunId is set", () => {
-    assert.equal(resolveRowArchetype({ parentRunId: "parent-run-1", data: {} }), "delegate-child");
+  it("resolveRowArchetype defaults to single when parentRunId is set", () => {
+    assert.equal(resolveRowArchetype({ parentRunId: "parent-run-1", data: {} }), "single");
   });
 
   it("resolveRowArchetype throws when data.archetype is set but invalid", () => {
@@ -54,20 +50,22 @@ describe("row-archetype", () => {
     );
   });
 
-  it("deriveRowArchetype: batch without parentRunId → batch-parent", () => {
-    assert.equal(deriveRowArchetype("batch"), "batch-parent");
-    assert.equal(deriveRowArchetype("batch", undefined), "batch-parent");
+  it("deriveRowArchetype: batch without parentRunId → batch", () => {
+    assert.equal(deriveRowArchetype("batch"), "batch");
+    assert.equal(deriveRowArchetype("batch", undefined), "batch");
   });
 
-  it("deriveRowArchetype: batch with parentRunId → delegate-child", () => {
-    assert.equal(deriveRowArchetype("batch", "parent-run-1"), "delegate-child");
+  it("deriveRowArchetype: preview → preview", () => {
+    assert.equal(deriveRowArchetype("preview"), "preview");
+    assert.equal(deriveRowArchetype("preview", "parent-run-1"), "preview");
   });
 
-  it("deriveRowArchetype: utility with parentRunId → passive-child", () => {
-    assert.equal(deriveRowArchetype("utility", "parent-run-1"), "passive-child");
+  it("deriveRowArchetype: batch with parentRunId → batch", () => {
+    assert.equal(deriveRowArchetype("batch", "parent-run-1"), "batch");
   });
 
-  it("deriveRowArchetype: utility without parentRunId → single", () => {
-    assert.equal(deriveRowArchetype("utility"), "single");
+  it("deriveRowArchetype: member option → batch-member", () => {
+    assert.equal(deriveRowArchetype("single", "parent-run-1", { member: true }), "batch-member");
+    assert.equal(deriveRowArchetype("batch", undefined, { member: true }), "batch-member");
   });
 });

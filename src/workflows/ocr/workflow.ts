@@ -4,6 +4,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { runOcrOrchestrator } from "./orchestrator.js";
+import { ocrStatusExtensions } from "../../tracker/dashboard/ocr-status.js";
 import { OcrInputSchema, type OcrInput } from "./schema.js";
 import {
   subscribeToApproval,
@@ -19,20 +20,16 @@ import { CancelledError } from "../../core/kernel/types.js";
  * Captures the dashboard rules that previously lived as inline special
  * cases (`isOcrDaemonPrepFanoutChild`, the log panel's `· Preview`
  * suffix, etc.):
- *  - Single PDF → approval-delegation surface with `Single delegation`,
- *    suffixed by `· Preview` when the preview tab is rendered.
- *  - Multiple PDFs → batch delegation over single-file prep rows.
- *  - OCR utility EID/active-check fan-out children stay as delegation
- *    members instead of being promoted to a batch-delegation group.
+ *  - Single PDF → preview surface card.
+ *  - Multiple PDFs → batch cards over single-file prep rows.
+ *  - OCR utility EID/active-check fan-out children use normal delegated
+ *    grouping: one child stays a single row, multiple children render as a
+ *    batch surface.
  *  - File-scope cancel routes through OCR discard so the prep run AND
  *    its delegated children are cleaned up together.
  */
 export const OCR_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  delegation: {
-    utilityChildSurface: "delegation-member",
-    utilityChildWorkflows: ["eid-lookup", "active-check"],
-  },
   preview: {
     rowTypeLabelSuffix: "Preview",
     alwaysAvailable: true,
@@ -55,7 +52,10 @@ const ocrSteps = [
 export const ocrWorkflow = defineWorkflow({
   name: "ocr",
   label: "OCR",
-  archetype: "delegating-batch",
+  archetype: "preview",
+  queueRowKind: "file",
+  statusExtensions: ocrStatusExtensions,
+  code: "oc",
   category: "Utils",
   iconName: "FileScan",
   systems: [],
@@ -67,7 +67,6 @@ export const ocrWorkflow = defineWorkflow({
     kind: "batch",
     labelFromInput: (input) => input.formType === "emergency-contact" ? "Emergency Contact" : "Oath",
   },
-  authChain: "sequential",
   detailFields: [{ key: "recordCount", label: "Records" }],
   getName: (d) => d.pdfOriginalName ?? "",
   getId:   (d) => d.sessionId ?? "",

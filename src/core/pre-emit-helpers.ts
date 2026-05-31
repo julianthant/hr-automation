@@ -49,6 +49,8 @@ export function buildBatchPreEmitPending<TData>(opts: {
       input: typed,
       extraData: opts.buildPendingData(typed, runId),
       nameIdStamp: "omit",
+      runId,
+      at: new Date(now),
     });
     emitTrackerRow(
       {

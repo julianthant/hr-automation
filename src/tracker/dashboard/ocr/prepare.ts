@@ -81,7 +81,7 @@ export function buildOcrPrepareHandler(
 
     if (input.isReupload && input.previousRunId) {
       // The supersede marker rides on the previous run's row; inherit its
-      // archetype so the cancelled-by-reupload row keeps the OCR batch
+      // archetype so the cancelled-by-reupload row keeps the OCR preview
       // shape.
       const supersededRow = findLatestEntryForPredicate({
         workflow: WORKFLOW,
@@ -89,7 +89,7 @@ export function buildOcrPrepareHandler(
         lookbackDays: 7,
         predicate: (e) => e.id === sessionId && e.runId === input.previousRunId,
       });
-      const supersededArchetype = supersededRow ? resolveRowArchetype(supersededRow) : "batch-parent";
+      const supersededArchetype = supersededRow ? resolveRowArchetype(supersededRow) : "batch";
       emitTrackerRow(
         {
           workflow: WORKFLOW,

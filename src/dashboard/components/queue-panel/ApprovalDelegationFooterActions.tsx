@@ -31,7 +31,7 @@ function shouldShowDeleteOnly(entry: TrackerEntry): boolean {
 }
 
 /**
- * Footer controls for approval-delegation group cards. Single-signer (and
+ * Footer controls for preview group cards. Single-signer (and
  * prep-only) cards reuse the same retry/delete affordances as {@link EntryItem};
  * multi-member cards keep batch-scoped bulk actions and delete the prep parent
  * together with its delegated children.

@@ -37,6 +37,13 @@ export interface WorkflowMetadata {
   matchKey?: string
   /** Serializable workflow runtime policy for queue projections/actions. */
   runtimePolicy?: WorkflowRuntimePolicy
+  /**
+   * Named run-mode presets for the InputRunPanel gear menu. Each entry maps
+   * an operator label to a set of step names to skip. The implicit "Full"
+   * preset (no skips) is synthesized client-side; absent presets → no gear
+   * icon. Source: `defineWorkflow({ presets: [...] })`.
+   */
+  presets?: Array<{ id: string; label: string; skipSteps: string[]; description?: string }>
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
@@ -61,6 +68,16 @@ function isWorkflowMetadata(item: unknown): item is WorkflowMetadata {
     o.runtimePolicy !== undefined &&
     (!o.runtimePolicy || typeof o.runtimePolicy !== "object" || Array.isArray(o.runtimePolicy))
   ) return false
+  if (o.presets !== undefined) {
+    if (!Array.isArray(o.presets)) return false
+    for (const preset of o.presets) {
+      if (!preset || typeof preset !== "object" || Array.isArray(preset)) return false
+      const p = preset as Record<string, unknown>
+      if (typeof p.id !== "string" || typeof p.label !== "string") return false
+      if (!Array.isArray(p.skipSteps) || !p.skipSteps.every((s) => typeof s === "string")) return false
+      if (p.description !== undefined && typeof p.description !== "string") return false
+    }
+  }
   return true
 }
 

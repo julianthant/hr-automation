@@ -12,40 +12,6 @@ This workflow touches one system: **ucpath**.
 - Per-system lessons (read before re-mapping): [`src/systems/ucpath/LESSONS.md`](../../systems/ucpath/LESSONS.md)
 - Per-system catalog (auto-generated): [`src/systems/ucpath/SELECTORS.md`](../../systems/ucpath/SELECTORS.md)
 
-## Files
-
-- `schema.ts` — Zod `WorkStudyInput` schema (emplId: 5+ digits, effectiveDate: MM/DD/YYYY)
-- `enter.ts` — Builds `ActionPlan` for the PayPath transaction: navigate → collapse sidebar → search by Empl ID → fill position data (reason "JRL", pool "F") → fill Job Data/Additional Pay comments → save/submit
-- `workflow.ts` — Kernel definition (`workStudyWorkflow`) + adapters (`runWorkStudy`, `runWorkStudyCli`). `runWorkStudyCli` forwards `{emplId, effectiveDate}` to `ensureDaemonsAndEnqueue`; `runWorkStudy` is the in-process path used by tests/scripts.
-- `index.ts` — Barrel exports
-
-## Kernel Config
-
-| Field | Value |
-|-------|-------|
-| `systems` | `[{ id: "ucpath", login: loginToUCPath-wrapped }]` |
-| `steps` | `["ucpath-auth", "transaction"] as const` |
-| `authChain` | `"sequential"` |
-| `tiling` | `"single"` |
-| `detailFields` | `name` (Employee), `emplId` (Empl ID), `effectiveDate` (Effective Date) — see `workflow.ts` |
-
-## Data Flow
-
-```
-Future dashboard input run:
-  → /api/enqueue
-    → ensureDaemonsAndEnqueue(workStudyWorkflow, [{emplId, effectiveDate}])
-      - Discovers alive daemons via .tracker/daemons/work-study-*.lock.json + /whoami
-      - Spawns a daemon when none is alive; validates input; enqueues; POST /wake
-      - Daemon runs the handler below in a loop (one Session, Duo once, reused across items)
-
-In-process path (tests/scripts — call runWorkStudy directly):
-  → runWorkflow(workStudyWorkflow, input)
-    → Kernel Session.launch: 1 browser, UCPath auth (Duo)
-    → Handler step "ucpath-auth" (marker — auth already resolved by Session)
-    → Handler step "transaction" → executes PayPath ActionPlan → updateData({ name })
-```
-
 ## Gotchas
 
 - Position Pool hardcoded to `"F"`, Position Change Reason to `"JRL"`
@@ -63,10 +29,6 @@ In-process path (tests/scripts — call runWorkStudy directly):
 The fix lives in this workflow, not the kernel: scan the Smart HR Transactions list for an existing pending/in-flight transaction for this `(emplId, effectiveDate)` before submitting. Pattern reference: separations' `findExistingTerminationTransaction` (in `src/workflows/separations/`).
 
 Until that probe lands, operators retrying work-study are responsible for confirming PayPath doesn't already have a pending transaction for the EID/date before clicking Retry. The kernel does not gate this — no `supportsRetry` flag, no "not retryable" error; idempotency belongs in the workflow.
-
-## Verified Selectors
-
-No workflow-local selectors live here. Use the UCPath selector catalog listed above; add selector lessons to `src/systems/ucpath/LESSONS.md` after searching/updating existing entries.
 
 ## Lessons Learned
 

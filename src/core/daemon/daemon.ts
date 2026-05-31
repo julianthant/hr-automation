@@ -321,7 +321,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         let session: Session
         try {
           session = await launchFn(wf.config.systems, {
-            authChain: wf.config.authChain,
             observer,
             abortSignal: state.launchAbort.signal,
             onReady: (readySession) => {
@@ -563,7 +562,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       // buildShutdownTrackerData always stamps `data.archetype`
                       // (via buildHttpPendingData or its fallback path) so the
                       // returned record satisfies StampedData at runtime.
-                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId) as StampedData,
+                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                        runId,
+                        trackerDir,
+                      }) as StampedData,
                       ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                       error: cancelError,
                     },

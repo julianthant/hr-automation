@@ -17,3 +17,7 @@ This folder is organized by dashboard area. Keep files near the UI surface that 
 | `shared/` | Cross-area components, shared display helpers, styles, and tracker/dashboard API types. | `EmptyState.tsx`, `RetryButton.tsx`, `PdfPagePreview.tsx`, `MediaLightbox.tsx`, `types.ts`, `entry-display.ts` |
 | `hooks/` | React hooks that own client-side state, polling, SSE subscriptions, cache warming, or toast effects. Hooks should not render JSX. | `useEntries.ts`, `useLogs.ts`, `useSessions.ts`, `useRosters.ts` |
 | `ui/` | Local shadcn/HeroUI-style primitives only. These should stay generic and workflow-agnostic. | `dialog.tsx`, `popover.tsx`, `tooltip.tsx`, `calendar.tsx` |
+
+## Lessons Learned
+
+- **2026-05-27: Batch PDF rows title by filename before queue title.** `shared/entry-display.ts` must prefer `data.pdfOriginalName` for any `batch` row, not only legacy `mode: "prepare"` rows. This keeps direct and delegated Oath Signature PDF rows titled as the bare PDF filename even when `__queueTitle` carries a workflow-prefixed subject for other surfaces.

@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
+import { recordConsoleLog } from "./tests/log-audit-core.js";
 
 export default defineConfig({
   // Vite's resolver runs on test files too. The `@/` alias is wired the same
@@ -24,7 +25,14 @@ export default defineConfig({
     // setupFiles run before each test file's imports.
     // - env-bootstrap stamps TIMEKEEPER_NAME so src/config.ts loads.
     // - setup.ts registers a beforeEach that resets dashboard caches.
-    setupFiles: ["./tests/env-bootstrap.ts", "./tests/setup.ts"],
+    setupFiles: [
+      "./tests/env-bootstrap.ts",
+      "./tests/setup.ts",
+      "./tests/log-audit.ts",
+    ],
+    onConsoleLog(log, type, entity) {
+      recordConsoleLog(log, type, entity);
+    },
     // node:assert/strict carries assertions; vitest's `expect` is not used.
     globals: false,
     // node:test had effectively no per-test timeout for short waits; vitest

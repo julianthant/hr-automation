@@ -23,8 +23,8 @@ function renderDelegationRow(
     workflowLabel,
   });
   const row = rows.groupRows[0];
-  assert.ok(row, "expected an approval-delegation group row");
-  if (row.surface.kind !== "approval-delegation") throw new Error("expected approval-delegation surface");
+  assert.ok(row, "expected an preview group row");
+  if (row.surface.kind !== "preview") throw new Error("expected preview surface");
   return renderToStaticMarkup(
     React.createElement(
       TooltipProvider,
@@ -42,7 +42,7 @@ function renderDelegationRow(
   );
 }
 
-test("prep-only approval-delegation card shows duration and row retry/delete footer", () => {
+test("prep-only preview card shows duration and row retry/delete footer", () => {
   // New approval contract (2026-05-25): the OCR row stays status="running"
   // step="awaiting-approval" until operator approves. While running, the
   // batch timer is live; while live, the rendered label uses useElapsed
@@ -58,7 +58,7 @@ test("prep-only approval-delegation card shows duration and row retry/delete foo
       step: "awaiting-approval",
       firstLogTs: "2026-05-19T12:53:20.000Z",
       lastLogTs: "2026-05-19T12:54:08.000Z",
-      data: { mode: "prepare", archetype: "batch-parent", formType: "oath" },
+      data: { mode: "prepare", archetype: "preview", formType: "oath" },
     } as TrackerEntry,
     [],
     "ocr",
@@ -74,7 +74,7 @@ test("prep-only approval-delegation card shows duration and row retry/delete foo
 test("single-signer approved batch card shows duration and child row retry/delete footer", () => {
   const html = renderDelegationRow(
     {
-      workflow: "oath-signature",
+      workflow: "ocr",
       timestamp: "2026-05-19T12:54:08.000Z",
       id: "prep",
       runId: "parent-901e",
@@ -84,14 +84,14 @@ test("single-signer approved batch card shows duration and child row retry/delet
       lastLogTs: "2026-05-19T12:54:08.000Z",
       data: {
         mode: "prepare",
-        archetype: "batch-parent",
+        archetype: "preview",
         pdfOriginalName: "test.pdf",
         __name: "Oath · 901e",
       },
     } as TrackerEntry,
     [
       {
-        workflow: "oath-signature",
+        workflow: "emergency-contact",
         timestamp: "2026-05-19T12:55:00.000Z",
         id: "10874100",
         runId: "kernel-1",
@@ -99,11 +99,11 @@ test("single-signer approved batch card shows duration and child row retry/delet
         status: "failed",
         firstLogTs: "2026-05-19T12:55:00.000Z",
         lastLogTs: "2026-05-19T12:56:00.000Z",
-        data: { archetype: "delegate-child", emplId: "10874100", name: "Correa Dinora" },
+        data: { archetype: "batch-member", emplId: "10874100", name: "Correa Dinora" },
       } as TrackerEntry,
     ],
-    "oath-signature",
-    "Oath Signature",
+    "ocr",
+    "OCR",
   );
 
   assert.match(html, /\d+m \d+s/);
@@ -114,7 +114,7 @@ test("single-signer approved batch card shows duration and child row retry/delet
 test("running single-signer child keeps duration without premature retry/delete icons", () => {
   const html = renderDelegationRow(
     {
-      workflow: "oath-signature",
+      workflow: "ocr",
       timestamp: "2026-05-19T12:54:08.000Z",
       id: "prep",
       runId: "parent-901e",
@@ -122,22 +122,22 @@ test("running single-signer child keeps duration without premature retry/delete 
       step: "approved",
       firstLogTs: "2026-05-19T12:53:20.000Z",
       lastLogTs: "2026-05-19T12:54:08.000Z",
-      data: { mode: "prepare", archetype: "batch-parent", __name: "Oath · 901e" },
+      data: { mode: "prepare", archetype: "preview", __name: "Oath · 901e" },
     } as TrackerEntry,
     [
       {
-        workflow: "oath-signature",
+        workflow: "emergency-contact",
         timestamp: "2026-05-19T12:55:00.000Z",
         id: "10874100",
         runId: "kernel-1",
         parentRunId: "parent-901e",
         status: "running",
         firstLogTs: "2026-05-19T12:55:00.000Z",
-        data: { archetype: "delegate-child", emplId: "10874100", name: "Correa Dinora" },
+        data: { archetype: "batch-member", emplId: "10874100", name: "Correa Dinora" },
       } as TrackerEntry,
     ],
-    "oath-signature",
-    "Oath Signature",
+    "ocr",
+    "OCR",
   );
 
   assert.match(html, /\d+m \d+s|\d+s/);

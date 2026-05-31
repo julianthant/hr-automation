@@ -5,6 +5,7 @@ import {
   PERSON_ORG_NAME_LABELS,
   deriveAssignmentDetailsFromCells,
   parsePersonOrgNameInput,
+  selectPreferredAssignmentDetails,
   selectPersonName,
 } from "../../../../src/systems/ucpath/person-org-summary.js";
 
@@ -86,6 +87,43 @@ describe("deriveAssignmentDetailsFromCells", () => {
       ]),
       null,
     );
+  });
+});
+
+describe("selectPreferredAssignmentDetails", () => {
+  it("chooses active employment over an older inactive employment for the same Person Org detail page", () => {
+    const inactive = deriveAssignmentDetailsFromCells([
+      "0",
+      "04/13/2026",
+      "Inactive",
+      "SDCMP",
+      "41088109",
+      "000167",
+      "TEMPORARY EMPLOYMENT SERVICES",
+      "005116",
+      "CUSTODIAN SR",
+      "07/31/2026",
+      "1.000000",
+      "Staff: Floater",
+    ]);
+    const active = deriveAssignmentDetailsFromCells([
+      "1",
+      "04/13/2026",
+      "Active",
+      "SDCMP",
+      "40969805",
+      "000412",
+      "HOUSING/DINING/HOSPITALITY",
+      "005116",
+      "CUSTODIAN SR",
+      "",
+      "1.000000",
+      "Staff: Career",
+    ]);
+
+    assert.ok(inactive);
+    assert.ok(active);
+    assert.equal(selectPreferredAssignmentDetails([inactive, active])?.emplRecord, "1");
   });
 });
 

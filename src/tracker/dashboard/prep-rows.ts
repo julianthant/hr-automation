@@ -2,7 +2,19 @@ import type { TrackerEntry } from "../jsonl.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 export function isPrepEntry(e: TrackerEntry): boolean {
-  return resolveRowArchetype(e) === "batch-parent";
+  return resolveRowArchetype(e) === "batch";
+}
+
+/**
+ * Structural minimum the awaiting-approval predicates read. Lets both full
+ * `TrackerEntry` rows (tracker/dashboard) and the dashboard's lighter status
+ * shape (`StatusExtensionEntry`) call these without coercion.
+ */
+interface AwaitingApprovalEntry {
+  workflow: string;
+  status: string;
+  step?: string;
+  parentRunId?: string;
 }
 
 /**
@@ -14,7 +26,7 @@ export function isPrepEntry(e: TrackerEntry): boolean {
  * row as terminal at awaiting-approval; see
  * `src/services/ocr/approval-signal.ts` for the new contract.)
  */
-export function isOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
+export function isOcrAwaitingApprovalEntry(e: AwaitingApprovalEntry): boolean {
   return e.workflow === "ocr" && e.status === "running" && e.step === "awaiting-approval";
 }
 
@@ -24,7 +36,7 @@ export function isOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
  * delegated prep — standalone OCR prep awaiting-approval renders as an
  * ordinary in-flight prep row in the queue.
  */
-export function isDelegatedOcrAwaitingApprovalEntry(e: TrackerEntry): boolean {
+export function isDelegatedOcrAwaitingApprovalEntry(e: AwaitingApprovalEntry): boolean {
   return isOcrAwaitingApprovalEntry(e) && Boolean(e.parentRunId);
 }
 

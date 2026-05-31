@@ -35,6 +35,14 @@ export interface StepperOpts {
    * for cancellation, preserving today's behavior verbatim.
    */
   isCancelRequested?: () => boolean
+  /**
+   * Names of steps the caller (dashboard step-preset gear, etc.) marked
+   * skipped via the `runtimeOptions.skipSteps` channel. Exposed to the
+   * handler via `ctx.shouldSkipStep(name)`. The Stepper does NOT auto-bypass
+   * `step(name, fn)` calls — handlers must explicitly substitute fallbacks
+   * because step bodies set closure variables downstream code depends on.
+   */
+  skipSteps?: ReadonlySet<string>
 }
 
 export class Stepper {
@@ -124,6 +132,15 @@ export class Stepper {
    */
   skipStep(name: string): void {
     this.announce(name, (step) => this.opts.emitSkipped?.(step))
+  }
+
+  /**
+   * True when the caller's `skipSteps` set contains this step name. Surfaced
+   * on the handler `Ctx` as `ctx.shouldSkipStep(name)`. Returns false when
+   * `skipSteps` is omitted (default — no preset active).
+   */
+  shouldSkipStep(name: string): boolean {
+    return this.opts.skipSteps?.has(name) ?? false
   }
 
   updateData(patch: Record<string, unknown>): void {

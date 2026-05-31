@@ -72,9 +72,9 @@ export function callerPreEmitsPending<TData, TSteps extends readonly string[]>(
  * and does not need this loop to throw.
  *
  * Must be called BEFORE snapshotting authTimings via the observer's
- * `getAuthTimings()` — `Session.launch` with `authChain: 'interleaved'`
- * returns once the FIRST system is ready, so timings for systems 2..N
- * are still being captured asynchronously.
+ * `getAuthTimings()` — `Session.launch` returns once every system has its
+ * `readyPromise` registered, but Duo approvals for systems 2..N are still
+ * pending in the background under the parallel-staggered chain.
  */
 export async function awaitAllSystemsReady(
   session: Session,

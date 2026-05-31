@@ -4,21 +4,6 @@ Workflow control plane handlers that sit above both the workflow kernel (`src/co
 
 Dashboard HTTP routes should stay thin: parse/validate request bodies, call this module, then map results back to route-specific response shapes. Do not put cancel/retry/delete/bump blast-radius logic in `src/tracker/dashboard/`.
 
-## Files
-
-- `actions/perform-workflow-action.ts` — `performWorkflowAction` dispatcher for operator cancel / retry / delete / bump.
-- `actions/resolve-targets.ts` — resolves action scope into concrete targets. `tree` may walk tracker projection parent/child runs; `row`, `group`, and `visible-view` use caller-provided targets.
-- `actions/types.ts` — `WorkflowActionRequest`, `WorkflowActionResult`, and related contracts.
-- `ops/cancel.ts` — low-level queued/running/bulk cancel handlers.
-- `ops/retry.ts` — low-level retry/re-enqueue and edit-and-resume handlers.
-- `ops/delete.ts` — low-level tracker row, screenshot, and delegated-child deletion.
-- `ops/emit-inherited.ts` — private helper for control-layer tracker rows that must inherit display metadata, `parentRunId`, and row archetype from a prior row.
-- `ops/queue.ts` — queue bump, save-data, queue-depth, and prior-entry lookup handlers.
-- `ops/worker-control.ts` — daemon/worker/browser operational controls.
-- `ops/shared.ts` — shared handler helpers; keep private to `ops/`.
-- `ocr/discard.ts` — OCR prep discard/cancel glue. It remains here because discard is routed through central workflow cancel and also needs delegated-child cleanup.
-- `index.ts` — public barrel for routes and tests.
-
 ## Boundaries
 
 - `src/control/` may import from `src/core/`, `src/tracker/`, `src/services/`, `src/infra/`, and workflow handlers when an existing in-process retry path requires it.
@@ -46,11 +31,14 @@ Retry is **uniform kernel behavior**, not a per-workflow capability:
 - The pristine input lives in `tasks.original_input_json` (SQLite, migration 11). `enqueueTasks` writes it on INSERT and preserves it on adopt-existing via `COALESCE`. `retryTaskFromAttempt` deliberately resets `input_json ← original_input_json` so the daemon's claim path hands the handler the original payload.
 - `reEnqueueEntry` (`ops/retry.ts`) implements a three-way split for input resolution: (1) **SQLite-happy** — `findOriginalInputForRunId` returns the pristine original input, used directly; (2) **SQLite-null-original** — row exists but `original_input_json` is null, returns a structured error (bug, not legacy state, since migration 11 always stamps at enqueue); (3) **SQLite-pruned** — task record deleted by cleanup, falls back to JSONL reconstruction via `findEntryInput` + `mergeAccumulatedTrackerStrings` + `enqueueFromHttp`. `findEntryInput` is also used for edit-and-resume `prefilledData`, which legitimately needs to fold previously-extracted fields into the prefill channel. It uses a raw SQLite snapshot before mapped task reads so a corrupt row with both columns null returns a structured error instead of throwing while parsing `input_json`.
 - The new pending row carries `data.__retriedFrom = <prior runId>` for dashboard provenance and uses `ops/emit-inherited.ts` to preserve prior display metadata + row archetype while emitting the fresh retry `runId`.
+- SQLite-backed retries requeue an existing task row rather than calling `ensureDaemonsAndEnqueue`, so they must call `ensureDaemonsAvailable` after emitting the retry pending row. Otherwise a retry with zero alive daemons sits queued until the dashboard orphan sweep marks it failed with "No alive daemon available".
 
 There is **no `supportsRetry` flag**, no `WorkflowDoesNotSupportRetryError`, no per-workflow gate. If a workflow's step has irreversible side effects, the workflow is responsible for probing live system state before re-executing (the standard pattern is `findExistingTerminationTransaction`-style; see `src/workflows/separations/`). Known idempotency gaps are documented per-workflow in `src/workflows/{onboarding,work-study,oath-upload,old-kronos-reports}/CLAUDE.md` → "Retry safety".
 
 ## Lessons Learned
 
+- **2026-05-27: SQLite retry must start or wake a daemon.** `retryTaskFromAttempt` only resets the existing task row to `queued`; it does not pass through the normal HTTP enqueue path that guarantees a daemon. Keep `ops/retry.ts` wired to `ensureDaemonsAvailable` after the pending retry row is emitted.
+- **2026-05-27: `emitInheritedRow` fails loud when the prior row is missing.** Cancel, retry, and OCR discard inherit display metadata and row archetype from the existing tracker row. If the lookup finds nothing, throw `PriorTrackerRowNotFoundError` — do not stamp a fallback archetype. Callers return operator-facing errors (`404` cancel, `400` discard, `{ ok: false }` retry) instead of emitting a misleading replacement row.
 - **2026-05-24: Control-layer replacement rows should use `emitInheritedRow`.** Cancel, OCR discard, and retry pending rows are replacement/status rows, not fresh workflow output. Route them through `ops/emit-inherited.ts` so they preserve prior display metadata, inherit `parentRunId` unless explicitly overridden, and keep the prior row archetype final after caller data is merged.
 - **2026-05-24: Retry corruption checks must avoid mapped task reads.** `TaskRow` mapping parses `tasks.input_json`, so retry control code that is classifying missing-input corruption should read the raw SQLite columns first; otherwise a row with both `original_input_json` and `input_json` null throws before the handler can return its structured operator-facing error.
 - **2026-05-22: Workflow control moved out of tracker.** `src/tracker/` owns JSONL/projection/SSE observability. Operator action dispatch and low-level cancel/retry/delete/queue handlers live in `src/control/` because they mutate SQLite control state, enqueue work, issue worker commands, and also need tracker audit/projection reads. Keep future workflow control behavior in this module and leave dashboard routes as adapters.

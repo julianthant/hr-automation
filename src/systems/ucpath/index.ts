@@ -25,6 +25,8 @@ export {
   clickSaveAndSubmit,
   readLatestTransactionNumber,
   findExistingTerminationTransaction,
+  extractSmartHrTransactionNumber,
+  scrollToTransactionReadbackArea,
   parsePayRate,
   buildCommentsText,
 } from "./transaction.js";

@@ -29,6 +29,22 @@ function todayLocal(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function seedOcrPriorRow(dir: string, sessionId: string, runId: string): void {
+  trackEventForDate(
+    {
+      workflow: "ocr",
+      timestamp: new Date().toISOString(),
+      id: sessionId,
+      runId,
+      status: "running",
+      step: "awaiting-approval",
+      data: { archetype: "batch" },
+    },
+    todayLocal(),
+    dir,
+  );
+}
+
 test("GET /api/ocr/forms returns registry listing", () => {
   const handler = buildOcrFormsHandler();
   const result = handler();
@@ -129,6 +145,7 @@ test("POST /api/ocr/reupload requires sessionId + previousRunId", async () => {
 
 test("POST /api/ocr/discard-prepare emits failed step=discarded", async () => {
   const dir = setup();
+  seedOcrPriorRow(dir, "s1", "r1");
   const handler = buildOcrDiscardHandler({ trackerDir: dir });
   const resp = await handler({ sessionId: "s1", runId: "r1", reason: "user clicked" });
   assert.equal(resp.status, 200);
@@ -138,6 +155,39 @@ test("POST /api/ocr/discard-prepare emits failed step=discarded", async () => {
   const last = JSON.parse(lines[lines.length - 1]);
   assert.equal(last.status, "failed");
   assert.equal(last.step, "discarded");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("POST /api/ocr/discard-prepare reports missing OCR history without deleting delegated children", async () => {
+  const dir = setup();
+  const date = todayLocal();
+  trackEventForDate(
+    {
+      workflow: "eid-lookup",
+      timestamp: new Date().toISOString(),
+      id: "child-that-must-remain",
+      runId: "eid-child-stays",
+      parentRunId: "missing-ocr-run",
+      status: "done",
+    },
+    date,
+    dir,
+  );
+
+  const handler = buildOcrDiscardHandler({ trackerDir: dir });
+  const resp = await handler({
+    sessionId: "missing-ocr-session",
+    runId: "missing-ocr-run",
+    reason: "operator discarded OCR row",
+  });
+
+  assert.equal(resp.status, 400);
+  assert.match(resp.body.error ?? "", /cannot discard OCR prep/i);
+  assert.match(resp.body.error ?? "", /prior tracker row/i);
+
+  const eidFile = join(dir, `eid-lookup-${date}.jsonl`);
+  const remaining = readFileSync(eidFile, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  assert.deepEqual(remaining.map((row) => row.id), ["child-that-must-remain"]);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -152,6 +202,7 @@ test("POST /api/ocr/discard-prepare deletes delegated EID lookup child rows", as
       runId: "ocr-run-children",
       status: "running",
       step: "awaiting-approval",
+      data: { archetype: "batch" },
     },
     date,
     dir,
@@ -188,6 +239,7 @@ test("POST /api/ocr/discard-prepare deletes delegated EID lookup child rows", as
 test("POST /api/ocr/discard-prepare deletes children for that OCR run only", async () => {
   const dir = setup();
   const date = todayLocal();
+  seedOcrPriorRow(dir, "ocr-session-discarded", "ocr-run-discarded");
   trackEventForDate(
     {
       workflow: "eid-lookup",
@@ -232,8 +284,22 @@ test("POST /api/ocr/discard-prepare deletes children for that OCR run only", asy
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("POST /api/ocr/discard-prepare mirrors explicit parent row without OCR history", async () => {
+test("POST /api/ocr/discard-prepare mirrors explicit parent row with OCR and parent history", async () => {
   const dir = setup();
+  seedOcrPriorRow(dir, "s-parent", "r-ocr");
+  trackEventForDate(
+    {
+      workflow: "oath-signature",
+      timestamp: new Date().toISOString(),
+      id: "ocr-prep-s-parent",
+      runId: "r-parent",
+      status: "running",
+      step: "delegated-to-ocr",
+      data: { archetype: "single" },
+    },
+    todayLocal(),
+    dir,
+  );
   const handler = buildOcrDiscardHandler({ trackerDir: dir });
   const resp = await handler({
     sessionId: "s-parent",
@@ -267,6 +333,7 @@ test("POST /api/ocr/discard-prepare mirrors explicit parent row without OCR hist
 test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row when parent was itself a delegation child", async () => {
   const dir = setup();
   const date = todayLocal();
+  seedOcrPriorRow(dir, "s-inh", "r-ocr-inh");
   // Pre-emit a prior parent-workflow row that carries `parentRunId` —
   // models the case where oath-signature is itself a child of a
   // batch-orchestrator workflow (e.g. oath-upload's fan-out).
@@ -279,7 +346,7 @@ test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row 
       parentRunId: "grandparent-run-inh",
       status: "running",
       step: "delegated-to-ocr",
-      data: { archetype: "delegate-child" },
+      data: { archetype: "single" },
     },
     date,
     dir,
@@ -309,8 +376,8 @@ test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row 
   );
   assert.equal(
     lastParent.data?.archetype,
-    "delegate-child",
-    "discard row must inherit the parent's prior archetype (delegate-child)",
+    "single",
+    "discard row must inherit the parent's prior archetype (single)",
   );
   rmSync(dir, { recursive: true, force: true });
 });

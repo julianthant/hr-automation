@@ -118,7 +118,9 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
 > = defineWorkflow({
   name: "sharepoint-download",
   label: "SharePoint Download",
-  archetype: "utility",
+  archetype: "single",
+  queueRowKind: "catalog",
+  code: "sp",
   category: "Utils",
   iconName: "Download",
   systems: [
@@ -132,7 +134,6 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   steps: sharepointDownloadSteps,
   schema: SharePointDownloadInputSchema,
   runtimePolicy: SHAREPOINT_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   detailFields: [
     { key: "label", label: "Spreadsheet" },
     { key: "filename", label: "File" },

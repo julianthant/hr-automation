@@ -5,7 +5,7 @@ import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
-import { withLogContext } from '../../utils/log.js'
+import { withLogContext, log } from '../../utils/log.js'
 import { classifyError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
 import { runWorkflowHandler } from './handler-runner.js'
@@ -14,7 +14,12 @@ import { runRegistry, type RunHandle } from '../run-registry.js'
 export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
   wf: RegisteredWorkflow<TData, TSteps>
   session: Session
-  item: TData
+  /**
+   * Raw queued input. It may include kernel-only channels such as
+   * `prefilledData` or `__runtimeOptions`; `runOneItem` strips those channels
+   * and validates the cleaned value before invoking the typed handler.
+   */
+  item: unknown
   itemId: string
   runId: string
   trackerStub?: boolean
@@ -122,16 +127,32 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   args: RunOneItemOpts<TData, TSteps>,
 ): Promise<RunOneItemResult> {
   const { wf, session, item, itemId, runId, trackerDir, callerPreEmits } = args
-  // Strip the kernel-level prefilledData channel out of the input before it
-  // reaches the handler. `cleaned` is what the handler sees; `prefilled`
-  // gets merged into ctx.data via updateData(...) before invocation so the
-  // handler's gating checks (`if (!ctx.data.foo) ...`) see the prefilled
-  // values and skip extraction. The original `item` reference (still
-  // including prefilledData) is preserved for the pending row's `input`
-  // field — retry recovers the channel verbatim, so the next run is
-  // idempotent without the dashboard remembering it had to re-attach the
-  // channel.
-  const { cleaned: cleanedItem, prefilled } = splitPrefilled(item)
+  // Strip the kernel-level prefilledData + __runtimeOptions channels out of
+  // the input before it reaches the handler. `cleaned` is what the handler
+  // sees. `prefilled` gets merged into ctx.data via updateData(...) before
+  // invocation so the handler's gating checks (`if (!ctx.data.foo) ...`) see
+  // the prefilled values and skip extraction. `runtimeOptions.skipSteps`
+  // surfaces on the handler as `ctx.shouldSkipStep(name)` for the dashboard's
+  // step-preset gear. The original `item` reference (still including both
+  // channels) is preserved for the pending row's `input` field — retry
+  // recovers them verbatim, so the next run is idempotent without the
+  // dashboard remembering it had to re-attach the channels.
+  const { cleaned: cleanedItem, prefilled, runtimeOptions } = splitPrefilled(item)
+  // Validate skipSteps against the workflow's declared steps so a stale or
+  // hand-crafted runtime option can't silently no-op (e.g. typo'd step name).
+  // Auth steps are excluded — they're always required.
+  const skipStepsSet: Set<string> | undefined = (() => {
+    const requested = runtimeOptions?.skipSteps
+    if (!requested || requested.length === 0) return undefined
+    const declared = new Set<string>(wf.config.steps)
+    const unknown = requested.filter((s) => !declared.has(s))
+    if (unknown.length > 0) {
+      throw new Error(
+        `runtimeOptions.skipSteps contains unknown step name(s) for workflow '${wf.config.name}': ${unknown.join(', ')}`,
+      )
+    }
+    return new Set(requested)
+  })()
 
   // Validate the cleaned item against the workflow schema BEFORE handing it to
   // the handler. Catches stale task_store rows whose shape predates a schema
@@ -221,6 +242,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitFailed: emitters.emitFailed,
       emitSkipped: emitters.emitSkipped,
       isCancelRequested: isCancelRequestedWithAbort,
+      ...(skipStepsSet ? { skipSteps: skipStepsSet } : {}),
     })
     await runWorkflowHandler({
       wf,
@@ -278,6 +300,24 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // row before the first step runs; withTrackedWorkflow skips its own pending
   // emit when preAssignedRunId is provided.
   const stringifiedSeed = buildInitialTrackerData(wf, handlerInput)
+  const rowArchetype = deriveRowArchetype(
+    resolveArchetype(wf.config, handlerInput),
+    args.parentRunId,
+    runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
+  )
+  // Stamp the run-mode preset id on the seed so it's visible from the very
+  // first tracker row (pending). The dashboard reads `data.__preset` to render
+  // a small chip next to the row; absent on the implicit "Full" preset.
+  if (runtimeOptions?.preset) {
+    stringifiedSeed.__preset = runtimeOptions.preset
+  }
+  // One-shot log so the operator sees the active preset in the log stream
+  // without having to inspect data.
+  if (runtimeOptions && (runtimeOptions.preset || skipStepsSet)) {
+    const presetLabel = runtimeOptions.preset ?? '(custom)'
+    const skipList = skipStepsSet ? Array.from(skipStepsSet).join(', ') : '(none)'
+    log.step(`Run mode: ${presetLabel} — skipping ${skipList}`)
+  }
   // The full input (including any prefilledData channel) rides on the
   // pending row so retry / edit-and-resume can reconstruct the call.
   const inputForRow = toRecord(item)
@@ -289,6 +329,12 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       precomputedSeed: stringifiedSeed,
       nameIdStamp: 'always-on-seed',
       parentRunId: args.parentRunId,
+      rowArchetype,
+      runId,
+      // Provenance prefix for the trace id — the delegating parent's code,
+      // carried through `__runtimeOptions` so it survives the task store to
+      // this worker re-emit. Falls back to the workflow's own code.
+      ...(runtimeOptions?.rootCode ? { rootCode: runtimeOptions.rootCode } : {}),
     })
     emitTrackerRow(
       {
@@ -322,7 +368,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           runId,
           status: 'running',
           step: `auth:${systemId}`,
-          data: { ...stringifiedSeed, archetype: deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId) },
+          data: { ...stringifiedSeed, archetype: rowArchetype },
         },
         trackerDir,
       )
@@ -354,7 +400,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           // input is already on that row — no need to re-stamp.
           ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
           ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-          archetype: deriveRowArchetype(resolveArchetype(wf.config, handlerInput), args.parentRunId),
+          archetype: rowArchetype,
         },
       )
     }, trackerDir)

@@ -237,10 +237,10 @@ describe("normalizeAuthEventForTelegram", () => {
     const normalized = normalizeAuthEventForTelegram({
       ...sampleEvent,
       workflow: "(unknown)",
-      instance: "EID Lookup 1",
+      instance: "Person Lookup 1",
     });
 
-    assert.equal(normalized.workflow, "eid-lookup");
+    assert.equal(normalized.workflow, "person-lookup");
   });
 });
 
@@ -369,16 +369,16 @@ describe("createTelegramNotifier — session-event routing (`dir` + `instance`)"
       dir,
     });
 
-    await notify({ ...sampleEvent, workflow: "(unknown)", instance: "EID Lookup 1" });
+    await notify({ ...sampleEvent, workflow: "(unknown)", instance: "Person Lookup 1" });
 
     const body = JSON.parse(String(calls[0].init?.body));
-    assert.match(body.text, /eid-lookup/);
+    assert.match(body.text, /person-lookup/);
 
     // After rotation, events go to sessions-YYYY-MM-DD.jsonl — use readSessionEvents.
     const events = readSessionEvents(dir);
     assert.equal(events.length, 1);
-    assert.equal(events[0].workflowInstance, "EID Lookup 1");
-    assert.equal((events[0] as any).data.workflow, "eid-lookup");
+    assert.equal(events[0].workflowInstance, "Person Lookup 1");
+    assert.equal((events[0] as any).data.workflow, "person-lookup");
   });
 });
 

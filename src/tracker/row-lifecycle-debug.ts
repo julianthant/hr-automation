@@ -169,7 +169,7 @@ function stateSignature(parts: {
  * Classify every live row into its queue surface. Feeds the same input shape
  * to `buildTrackerQueueSurfaces` the dashboard's server-side aggregation uses,
  * then maps each row id to a surface string:
- *  - `card:approval-delegation:<state>` / `card:batch` / `card:passive-delegation`
+ *  - `card:preview:<state>` / `card:batch`
  *  - `member:<kind>` — a sub-row rendered inside a card
  *  - `flat` — a top-level flat row
  *  - `discarded` — a discarded prep row, excluded from the queue
@@ -186,7 +186,7 @@ export function resolveRowSurfaces(
     if (
       entry.status === "failed" &&
       entry.step === "discarded" &&
-      resolveRowArchetype(entry) === "batch-parent"
+      resolveRowArchetype(entry) === "preview"
     ) {
       out.set(entry.id, { surface: "discarded", memberIds: [] });
     }
@@ -202,9 +202,9 @@ export function resolveRowSurfaces(
 
   for (const group of built.groupRows) {
     const memberIds = group.members.map((m) => m.id);
-    if (group.kind === "approval-delegation") {
+    if (group.kind === "preview") {
       out.set(group.parent.id, {
-        surface: `card:approval-delegation:${group.approvalState}`,
+        surface: `card:preview:${group.approvalState}`,
         memberIds,
       });
     } else {
@@ -349,7 +349,8 @@ function observeRow(args: ObserveArgs): void {
       cause = "discard";
     } else if (
       live.status === "done" &&
-      archetype === "batch-parent" &&
+      archetype === "batch" &&
+      live.workflow === "ocr" &&
       // New approval contract (2026-05-25): the approve route writes
       // `done step=approved`; the kernel-path handler also returns,
       // letting the kernel emit a follow-up `done` with no step. Both
@@ -411,7 +412,7 @@ function observeRow(args: ObserveArgs): void {
   else delete cycle.currentStep;
   cycle.currentSurface = surface;
   cycle.memberIds = memberIds;
-  cycle.isAnchor = archetype === "batch-parent" || memberIds.length > 0;
+  cycle.isAnchor = archetype === "batch" || memberIds.length > 0;
   cycle.endState = { status: live.status, ...(live.step ? { step: live.step } : {}), surface };
   if (live.parentRunId) cycle.parentRunId = live.parentRunId;
   if (live.input) cycle.input = live.input;

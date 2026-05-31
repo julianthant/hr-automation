@@ -20,7 +20,7 @@ Use this file to decide **what counts as maintained codebase documentation** ver
 **Target size**: root CLAUDE.md ≤ 15k chars; module CLAUDE.md files ≤ 8k chars.  
 **Why**: at ~40k combined chars the Claude Code prompt performance warning fires. When working in `src/dashboard/`, three CLAUDE.md files load (global 14k + root 19k + module): the module budget is ~7k before the threshold.
 
-**`docs/engineering/`** is the right home for full reference material that you consult when building or debugging — not on every session start.
+**`docs/engineering/`** is the right home for full reference material that you consult when building or debugging — not on every session start. **`docs/workflow/`** is the canonical workflow behavior and delegation map.
 
 ## Git and `.gitignore`
 
@@ -33,6 +33,7 @@ Use this file to decide **what counts as maintained codebase documentation** ver
 | Path | Kind |
 |------|------|
 | `docs/engineering/` | Canonical — conventions + long-form architecture + module reference |
+| `docs/workflow/` | Canonical — workflow behavior, row shapes, delegation, and cancel/retry scopes |
 | `docs/historical/` | Frozen dated snapshots (e.g. old backlog lists) — not current truth |
 | `docs/superpowers/` | Specs, plans, sketches, **session handoffs** (`handoffs/`) — tool/session output — ephemeral |
 | `.superpowers/` | Brainstorm mockups — gitignored — ephemeral |
@@ -49,6 +50,8 @@ These should stay accurate relative to the code and are fair game for stale-doc 
 | `docs/engineering/tracker-reference.md` | Tracker module internals: file-by-file, JSONL format, cleanup, withTrackedWorkflow |
 | `docs/engineering/core-internals.md` | Kernel internals: kernel/, daemon/, task-store/ file-by-file |
 | `docs/engineering/workflow-patterns.md` | Daemon-mode conversion template, edit-data opt-in recipe |
+| `docs/workflow/README.md` | Workflow delegation index: row units, global actions, cancellation rules, workflow inventory |
+| `docs/workflow/*.md` | Per-workflow behavior, delegation, row shape, and cancel/retry scope notes |
 | `CLAUDE.md` (repo root) | Commands, kernel primer, high-level map (≤15k) |
 | `src/**/CLAUDE.md` | Module/workflow/system gotchas, invariants, lessons (≤8k each) |
 | `LESSONS.md` (repo root) | Cross-cutting operational lessons |

@@ -28,6 +28,8 @@ export const oathUploadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Upload",
   archetype: "single",
+  queueRowKind: "file",
+  code: "ou",
   category: "Onboarding",
   iconName: "UploadCloud",
   systems: [
@@ -46,7 +48,6 @@ export const oathUploadWorkflow = defineWorkflow({
   steps: oathUploadSteps,
   schema: OathUploadInputSchema,
   runtimePolicy: OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY,
-  authChain: "sequential",
   batch: {
     mode: "sequential",
     preEmitPending: true,

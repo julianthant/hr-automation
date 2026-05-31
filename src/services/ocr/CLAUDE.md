@@ -1,133 +1,39 @@
-# OCR Service — `src/services/ocr/`
+# OCR Service
 
-Generic, schema-bound OCR primitive. Used by emergency-contact's prepare
-phase; reusable by future workflows that need to extract structured data
-from PDFs (or other documents the providers support).
+Schema-bound OCR primitive used by OCR-backed workflows. Prep workflows default to per-page parallel OCR across configured vision providers; whole-PDF OCR is operator-triggered only.
 
-Two execution paths share the same `OcrResult<T[]>` contract:
+## Contracts
 
-1. **Per-page parallel** (`pipeline.ts` → `per-page.ts`) — when a multi-
-   provider key pool is configured, the PDF is split into per-page
-   PNGs and every page is dispatched in parallel across all available
-   keys (Gemini + Mistral + Groq + Sambanova). Default path for the
-   prep workflows (emergency-contact + oath-signature).
-2. **Whole-PDF** (`index.ts` → `ocrDocument`) — single Gemini call
-   with the full PDF as inline `application/pdf`. **Results are not
-   cached** (operators repeatedly needed re-extraction after prompt or
-   model changes; cache hits silently bypassed both). Reached today only
-   via the operator-initiated `/api/ocr/reocr-whole-pdf` endpoint —
-   `pipeline.ts` no longer falls back to whole-PDF on partial per-page
-   failure (see Lessons 2026-05-01).
+- `ocrDocument` returns `OcrResult<T[]>`; whole-PDF results are never cached.
+- `.ocr-cache/` is retained only for provider key rotation state, not extracted OCR results.
+- Per-page OCR dispatches pages across all configured keys/providers with concurrency capped by `OCR_PAGE_CONCURRENCY`.
+- Per-page failures stay visible as failed pages; the pipeline should not silently fall back to whole-PDF on partial failure.
+- Whole-PDF OCR is reached through `/api/ocr/reocr-whole-pdf`.
+- Cohere is intentionally not in the vision pool.
 
-## Files
+## Key Rotation
 
-- `pipeline.ts` — `runOcrPipeline()` — picks per-page vs whole-PDF and
-  unifies the result. The single entry point prep workflows should use.
-- `per-page.ts` — `runOcrPerPage()` — fans pre-rendered PNGs across the
-  multi-provider pool with round-robin dispatch + per-page failover.
-- `per-page-pool.ts` — `buildVisionPool()` reads env vars and returns
-  a flat `PoolKey[]` of every available vision-capable key across
-  Gemini / Mistral / Groq / Sambanova. Pool composition is dynamic.
-- `render-pages.ts` — `renderPdfPagesToPngs()` — `pdf-to-img` wrapper.
-  Returns `[]` on render failure (caller falls back).
-- `index.ts` — public `ocrDocument<T>()` whole-PDF orchestrator (uncached; `result.cached` is always `false`).
-- `types.ts` — `OcrRequest`, `OcrResult`, `OcrProvider`, error classes.
-- `rotation.ts` — per-key state machine + persisted state (used by
-  the whole-PDF path; per-page path has its own simpler retry loop).
-- `eid-lookup-results.ts` / `records-stats.ts` / `tracker-data.ts` — shared OCR helpers (records patching, verified-count, tracker `data` flattening) consumed by workflow code (`orchestrator`, `retry-page`, `force-research`, `oath-upload`, `eid-lookup`). See `index.ts` for the public barrel.
-- `prompts.ts` — schema → Gemini prompt template.
-- `providers/gemini.ts` — Gemini 2.5 Flash multi-modal call.
+`KeyRotation` persists provider key state at `.ocr-cache/rotation-state-{provider}.json`.
 
-## Public API
+- 429/rate-limit text → throttled briefly.
+- quota/exhaustion text → quota-exhausted until next UTC day.
+- auth/invalid-key text → dead for this session.
+- timeouts/network resets → transient throttle, then rotate.
 
-```ts
-import { ocrDocument } from "src/services/ocr";
-import { z } from "zod/v4";
-
-const Schema = z.array(z.object({ name: z.string(), age: z.number() }));
-const result = await ocrDocument({
-  pdfPath: "/path/to/scan.pdf",
-  schema: Schema,
-  schemaName: "Person", // used for cache key + prompt label
-});
-result.data; // validated T (here: { name; age }[])
-result.cached; // always false (whole-PDF results are uncached)
-result.attempts; // how many provider calls were made
-```
-
-## Cache directory
-
-`.ocr-cache/` is retained for `KeyRotation` per-key state files
-(`rotation-state-{provider}.json`) — those persist across runs so
-throttle/quota state doesn't reset on every process boot. **OCR
-results are never cached.** The `bustCache` option exists on the
-request type for backwards compatibility but no longer has an effect
-on whole-PDF orchestration.
-
-## Rotation
-
-`KeyRotation` tracks per-key `available | throttled | quota-exhausted | dead`
-states, persisted at `.ocr-cache/rotation-state-{provider}.json`. The
-day-rollover (UTC midnight) clears `quota-exhausted` and resets daily
-counts. Throttle expiry is checked on each `pickNext()`.
-
-Detection rules (Gemini error message patterns):
-
-- `429` / "rate limit" / "too many" → throttled +60s
-- "quota" / "exceed" / "exhaust" → quota-exhausted until next UTC midnight
-- `401` / "unauthorized" / "invalid api key" → dead (this session)
-- timeout / `ECONNRESET` / `EAI_AGAIN` → transient (5s throttle, then rotate)
+Gemini text helpers used by OCR matching/disambiguation should share this rotation path, not hand-roll key loops.
 
 ## Providers
 
-**Whole-PDF path** (`index.ts` / `OcrProvider` interface): Gemini only.
-Adding a second whole-PDF provider would mean implementing `OcrProvider`
-and registering in `index.ts`'s `getProvider()` selector — currently
-deferred (no caller needs cross-provider whole-PDF fallback).
+Whole-PDF path is Gemini-only. Per-page path uses configured keys for Gemini, Mistral, Groq, and Sambanova. Model names and overrides live in code/env; read the provider modules instead of copying them here.
 
-**Per-page path** (`per-page-pool.ts`): all four configured. Each
-provider contributes one or more keys based on env vars set:
+## Tests
 
-| Provider | Env var prefix | Default model | Override env |
-|---|---|---|---|
-| Gemini    | `GEMINI_API_KEY` (+`GEMINI_API_KEY2..6`)       | `gemini-2.5-flash`                              | `OCR_GEMINI_MODEL`     |
-| Mistral   | `MISTRAL_API_KEY` (+`MISTRAL_API_KEY2..N`)     | `pixtral-12b-2409`                              | `OCR_MISTRAL_MODEL`    |
-| Groq      | `GROQ_API_KEY` (+`GROQ_API_KEY2..N`)           | `meta-llama/llama-4-scout-17b-16e-instruct`     | `OCR_GROQ_MODEL`       |
-| Sambanova | `SAMBANOVA_API_KEY` (+`SAMBANOVA_API_KEY2..N`) | `Llama-3.2-90B-Vision-Instruct`                 | `OCR_SAMBANOVA_MODEL`  |
-
-Pool size = sum of all set keys across all providers. The per-page
-driver dispatches `pages.length` work items with concurrency capped at
-`min(pool.length, OCR_PAGE_CONCURRENCY ?? pool.length)`. Per-page
-failover walks `OCR_PER_PAGE_MAX_RETRIES` (default 2) alternate keys
-before marking the page failed; `pipeline.ts` then drops to the
-whole-PDF path if `< 50%` of pages succeeded.
-
-Cohere is the only key in the env that has no vision-capable model
-exposed — it's intentionally not in the pool.
-
-## Test recipe
-
-```ts
-import {
-  __setCacheDirForTests,
-  __setProviderForTests,
-  ocrDocument,
-} from "src/services/ocr";
-
-beforeEach(() => __setCacheDirForTests(tmpDir));
-afterEach(() => {
-  __setCacheDirForTests(undefined);
-  __setProviderForTests(undefined);
-});
-
-const fake = { id: "gemini", call: async () => happyResult(/* ... */) };
-__setProviderForTests(fake);
-```
+Use `__setCacheDirForTests` and `__setProviderForTests` to isolate cache paths and stub providers. Reset both after each test.
 
 ## Lessons Learned
 
-- **2026-05-19: Oath approve payloads normalize OCR names before daemon enqueue.** `oathOcrFormSpec.approveTo.deriveInput` runs OCR `printedName` through `displayPersonName` before building the `oath-signature` child input. This keeps queue rows/detail fields from showing all-caps OCR text such as `CORREA DINORA` or `ABUTIN, JASON, L`; the raw extracted record still remains in the OCR prep payload for source review.
-- **2026-05-18: Oath UPAY585 EIDs may be handwritten in the top page margin.** The oath form prompt must scan the whole page for UCPath IDs, including standalone handwritten 8-digit numbers above the form header, before returning `employeeId: null`. Some legacy scans have a faint/clipped printed Employee ID box while the operator-readable EID is written in the white margin at the top of the page.
-- **2026-05-01: Per-page is the only auto path.** `runOcrPipeline` no longer falls back to whole-PDF on partial failure (`<50%` ratio branch removed). Failed pages propagate up via `pages[]` in the result; the orchestrator surfaces them as `data.failedPages` on the awaiting-approval row. Whole-PDF lives in `runOcrWholePdf` and is only reached via the operator-initiated `/api/ocr/reocr-whole-pdf` endpoint. Retry-page is a single-page mini-orchestrator at `src/workflows/ocr/retry-page.ts`. Records carry `sourcePage`; the dashboard's `OcrReviewPane` interleaves successful page groups with `FailedPageCard` instances sorted by page number, with a manual `Re-OCR whole PDF` confirm-dialog escape hatch in the header that wipes per-record edits + replaces records.
-- **2026-05-03: Per-page runner injects rowIndex + employeeSigned defaults.** LLM providers occasionally omit fields the prompt asks for (especially `rowIndex` on single-record pages). Schema-validation drops were silently cascading to "0 records" in the operator preview. The runner now injects `rowIndex` from array position and `employeeSigned: true` before `safeParse`, mirroring the long-standing `sourcePage` injection. LLM-supplied values still win via spread order. Records still missing the anchor field (`printedName`) are still dropped. See `per-page.ts:177-200`.
-- **2026-05-15: Disambiguation uses the same Gemini key rotation state as OCR.** `disambiguateMatch` now picks keys via `KeyRotation` and marks rate-limit/quota/auth/transient failures on the affected key before trying the next one. Keep future Gemini text helpers on the same rotation path; naive `GEMINI_API_KEY, GEMINI_API_KEY2, ...` loops bias traffic back to key 1 under concurrent OCR sessions.
+- **2026-05-19: Oath approve payloads normalize OCR names before daemon enqueue.** Queue rows should show display-case names, while raw OCR records remain in prep payloads for review.
+- **2026-05-18: Oath UPAY585 EIDs may be handwritten in the top page margin.** Prompts must scan the whole page, not only printed boxes.
+- **2026-05-01: Per-page is the only auto path.** Failed pages surface to review; whole-PDF is a manual recovery action.
+- **2026-05-03: Per-page runner injects rowIndex and employeeSigned defaults.** Provider omissions should not drop otherwise valid records.
+- **2026-05-15: Disambiguation uses OCR key rotation.** Future Gemini text helpers should do the same.

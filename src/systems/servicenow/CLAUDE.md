@@ -7,14 +7,6 @@ HR General Inquiry catalog item, used by `oath-upload` to file a
 ticket after every paper-roster signing ceremony is completed in
 UCPath.
 
-## Files
-
-- `selectors.ts` — `hrInquiry`, `ssoFields` selector groups
-- `navigate.ts` — `gotoHrInquiryForm`, `verifyOnInquiryForm`,
-  `HR_INQUIRY_FORM_URL`
-- `SELECTORS.md` — auto-generated catalog (`npm run selectors:catalog`)
-- `LESSONS.md` — structured selector lessons file. Search/update existing related entries before adding a new one; substantive workflow notes may appear in § Lessons Learned below until migrated.
-
 ## Auth
 
 `loginToServiceNow` in `src/infra/auth/login.ts` mirrors `loginToUCPath`:
