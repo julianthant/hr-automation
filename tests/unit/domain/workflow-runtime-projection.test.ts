@@ -21,7 +21,10 @@ import { KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/o
 import {
   DEFAULT_GROUP_DELETE_ACTION,
   DEFAULT_GROUP_RETRY_ACTION,
+  DEFAULT_ROW_BUMP_ACTION,
   DEFAULT_ROW_CANCEL_ACTION,
+  DEFAULT_ROW_DELETE_ACTION,
+  DEFAULT_ROW_RETRY_ACTION,
 } from "../../../src/domain/workflow-runtime/default-policy.js";
 
 const phase4Policies = new Map([
@@ -420,18 +423,35 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       });
       assert.equal(projection.surfaceType, "single");
       assert.equal(projection.rowTypeLabel, "Single");
+      // A queued (pending) row offers bump + cancel + delete; retry is gated
+      // off (only terminal rows retry). Each descriptor's `enabled` is the
+      // status-driven flag the unified footer reads.
+      const targets = [{ workflowId, id: label, runId: projection.runId, status: "pending" }];
       assert.deepEqual(projection.actions, [
-        {
-          ...DEFAULT_ROW_CANCEL_ACTION,
-          targets: [{
-            workflowId,
-            id: label,
-            runId: projection.runId,
-            status: "pending",
-          }],
-        },
+        { ...DEFAULT_ROW_BUMP_ACTION, enabled: true, targets },
+        { ...DEFAULT_ROW_RETRY_ACTION, enabled: false, targets },
+        { ...DEFAULT_ROW_CANCEL_ACTION, enabled: true, targets },
+        { ...DEFAULT_ROW_DELETE_ACTION, enabled: true, targets },
       ]);
     }
+  });
+
+  it("gates row actions by status — running cancels, terminal retries+deletes", () => {
+    const base = {
+      workflow: "work-study",
+      id: "Doe, Jane",
+      data: { __queueTitle: "Doe, Jane", __queueTitleKind: "single" },
+    } as const;
+    const enabledKinds = (status: "running" | "done" | "failed") => {
+      const projection = buildWorkflowRunProjection(
+        entry({ ...base, runId: `ws-${status}`, status }),
+        { runtimePolicies: phase5Policies },
+      );
+      return projection.actions.filter((a) => a.enabled).map((a) => a.kind).sort();
+    };
+    assert.deepEqual(enabledKinds("running"), ["cancel"]);
+    assert.deepEqual(enabledKinds("done"), ["delete", "retry"]);
+    assert.deepEqual(enabledKinds("failed"), ["delete", "retry"]);
   });
 
   it("projects a direct person-lookup row as a normal utility surface", () => {

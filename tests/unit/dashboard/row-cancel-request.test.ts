@@ -1,7 +1,7 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
-import { buildQueueCancelRequest } from "../../../src/dashboard/components/queue-panel/QueueItemControls.js";
+import { buildRowCancelRequest } from "../../../src/dashboard/lib/row-cancel-request.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
 function prepEntry(): TrackerEntry {
@@ -20,10 +20,10 @@ function prepEntry(): TrackerEntry {
   };
 }
 
-describe("buildQueueCancelRequest", () => {
+describe("buildRowCancelRequest", () => {
   it("carries policy-declared cancel scope for ordinary queued rows", () => {
     assert.deepEqual(
-      buildQueueCancelRequest({
+      buildRowCancelRequest({
         workflow: "oath-upload",
         id: "oath-parent",
         runId: "parent-run",
@@ -32,7 +32,7 @@ describe("buildQueueCancelRequest", () => {
           scope: "tree",
           source: "queue-panel",
           label: "Cancel workflow tree",
-          targets: [{ workflowId: "oath-upload", id: "oath-parent", runId: "parent-run" }],
+          targets: [{ workflowId: "oath-upload", id: "oath-parent", runId: "parent-run", status: "pending" }],
           enabled: true,
         }],
       }),
@@ -48,9 +48,36 @@ describe("buildQueueCancelRequest", () => {
     );
   });
 
+  it("forces the running handler with status:running for running rows", () => {
+    assert.deepEqual(
+      buildRowCancelRequest({
+        workflow: "onboarding",
+        id: "10012345",
+        runId: "onboarding-run-1",
+        actions: [{
+          kind: "cancel",
+          scope: "row",
+          source: "queue-panel",
+          label: "Cancel row",
+          targets: [{ workflowId: "onboarding", id: "10012345", runId: "onboarding-run-1", status: "running" }],
+          enabled: true,
+        }],
+      }),
+      {
+        path: "/api/cancel-queued",
+        body: {
+          workflow: "onboarding",
+          id: "10012345",
+          runId: "onboarding-run-1",
+          status: "running",
+        },
+      },
+    );
+  });
+
   it("routes OCR prep proxy rows through central cancel with the OCR session context", () => {
     assert.deepEqual(
-      buildQueueCancelRequest({
+      buildRowCancelRequest({
         workflow: "oath-upload",
         id: "oath-parent",
         runId: "parent-run",
@@ -75,7 +102,7 @@ describe("buildQueueCancelRequest", () => {
 
   it("keeps ordinary queued rows on cancel-queued", () => {
     assert.deepEqual(
-      buildQueueCancelRequest({ workflow: "onboarding", id: "a@b.edu", runId: "a@b.edu#1" }),
+      buildRowCancelRequest({ workflow: "onboarding", id: "a@b.edu", runId: "a@b.edu#1" }),
       {
         path: "/api/cancel-queued",
         body: {
