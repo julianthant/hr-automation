@@ -492,6 +492,7 @@ export const INSTANCE_LABELS: Record<string, string> = {
   "work-study": "Work Study",
   "emergency-contact": "Emergency Contact",
   "sharepoint-download": "SharePoint Download",
+  "crm-doc-download": "CRM Doc Download",
   "oath-signature": "Oath Signature",
   "oath-upload": "Oath Upload",
   ocr: "OCR",
