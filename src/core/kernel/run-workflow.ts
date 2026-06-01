@@ -89,6 +89,12 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
      * trackerStub branch passes a no-op.
      */
     emitSkipped: (step: string) => void = () => {},
+    /**
+     * Session-drawer instance name (from `withTrackedWorkflow`'s sessionCtx).
+     * Surfaced as `ctx.workflowInstance` so handlers that emit their own
+     * progress (OCR) can drive the session timeline. Undefined in trackerStub.
+     */
+    instance?: string,
   ): Promise<void> => {
     const runId = forcedRunId ?? opts.preAssignedRunId ?? randomUUID()
     const stepper = new Stepper({
@@ -203,6 +209,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
           trackerDir: opts.trackerDir,
           emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
           signal: controller.signal,
+          instance,
         })
         completed = true
       } finally {
@@ -291,7 +298,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
             emit: (ev) => emitScreenshotEvent(ev, { dir: trackerDir }),
             currentStep: () => stepper.getCurrentStep(),
           }))
-        }, trackerRunId, emitSkipped)
+        }, trackerRunId, emitSkipped, sessionCtx.instance)
       },
       {
         ...buildTrackerOpts(wf),

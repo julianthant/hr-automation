@@ -9,6 +9,7 @@ Declarative workflow runtime. Cross-workflow execution behavior, cancellation, t
 - `ctx.signal` is the per-run AbortSignal. Pass it to non-Playwright awaits that support cancellation.
 - `ctx.step(name, fn)` emits step status, captures screenshots on failure, and maps aborts to the standard cancelled terminal row.
 - `ctx.updateData(patch)` writes operator-facing fields into tracker data.
+- `ctx.workflowInstance` is the session-drawer instance name owning the run; `ctx.reportPhase(step)` pushes a phase into the terminal-drawer timeline (session `item_start`+`step_change`) **without** a queue row — for handlers that emit their own rows and bypass `ctx.step` (today only OCR). Every other handler drives the timeline for free via `ctx.step`/`ctx.markStep`.
 - `ctx.parallel({...})` runs named tasks with `Promise.allSettled`.
 - `ctx.delegateTo` / `ctx.delegateToAll` compose workflows. The kernel owns `parentRunId`, pending-row pre-emits, input persistence, and child watching.
 

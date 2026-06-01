@@ -87,6 +87,15 @@ export interface OcrOrchestratorOpts {
    */
   signal?: AbortSignal;
 
+  /**
+   * Phase callback. Invoked with the row's `step` on every non-terminal
+   * (`running`) emission so the kernel can mirror OCR's progress into the
+   * session-drawer timeline (`ctx.reportPhase`). OCR owns its own queue-row
+   * emission and bypasses `ctx.step`, so without this its session row would
+   * never advance through the timeline. Optional — HTTP callers omit it.
+   */
+  onPhase?: (step: string) => void;
+
   // ─── Test escape hatches ──────────────────────────────
   _emitOverride?: (entry: TrackerEntry) => void;
   _ocrPipelineOverride?: (opts: {
@@ -152,9 +161,17 @@ export async function runOcrOrchestrator(
   const date = opts.date ?? dateLocal();
   const id = input.sessionId;
   const runId = opts.runId;
-  const emit =
+  const baseEmit =
     opts._emitOverride ??
     ((entry: TrackerEntry) => emitTrackerRow(entry as TrackerRowEmission, trackerDir));
+  // Mirror each non-terminal phase into the session-drawer timeline. The queue
+  // row is still owned by `baseEmit`; `onPhase` only drives the WorkflowBox.
+  const emit = (entry: TrackerEntry): void => {
+    baseEmit(entry);
+    if (opts.onPhase && entry.status === "running" && entry.step) {
+      opts.onPhase(entry.step);
+    }
+  };
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
   const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
   const trackerBaseDir = trackerDir ?? ".tracker";

@@ -261,6 +261,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       preHandler: args.preHandler,
       skipCancelledScreenshot: true,
       signal: controller.signal,
+      instance: args.preAssignedInstance,
       onPreHandlerError: (err) => {
         if (emitters.markCancelledStepOnCancelRequested && isCancelRequestedWithAbort?.()) {
           emitters.setStep('cancelled')

@@ -106,6 +106,65 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("orchestrator drives the session timeline via onPhase for each running phase", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const phases: string[] = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-phase",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-phase",
+      trackerDir: dir,
+      // onPhase is the kernel bridge (ctx.reportPhase) that mirrors OCR's
+      // progress into the session-drawer timeline. It must fire for every
+      // non-terminal phase even though OCR owns its own queue-row emission.
+      onPhase: (step) => phases.push(step),
+      _emitOverride: () => { /* swallow queue rows; we only assert phases */ },
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [
+        { eid: "10000001", name: "Liam Kustenbauder" },
+      ],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-oath-run-phase-r0",
+          runId: "verify-1",
+          status: "done" as const,
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+        },
+      ],
+    },
+  );
+
+  assert.ok(phases.includes("loading-roster"), `phases: ${phases.join(", ")}`);
+  assert.ok(phases.includes("ocr"), `phases: ${phases.join(", ")}`);
+  assert.ok(phases.includes("matching"), `phases: ${phases.join(", ")}`);
+  assert.ok(phases.includes("awaiting-approval"), `phases: ${phases.join(", ")}`);
+  // Bridge only fires on non-terminal (running) rows, never a bare terminal.
+  assert.ok(phases.every((p) => p.length > 0), `phases: ${phases.join(", ")}`);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   // Pre-populate v1 history in JSONL
