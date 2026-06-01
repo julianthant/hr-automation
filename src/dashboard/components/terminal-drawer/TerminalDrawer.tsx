@@ -134,7 +134,9 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
             <div
               className={cn(
                 "min-w-0 flex-1 flex gap-2.5 px-3.5 py-3",
-                "overflow-x-auto overflow-y-hidden items-start",
+                // items-stretch so every session card grows to the tallest in
+                // the row — short cards (e.g. OCR) match the others' height.
+                "overflow-x-auto overflow-y-hidden items-stretch",
                 "[scrollbar-width:thin]",
               )}
             >

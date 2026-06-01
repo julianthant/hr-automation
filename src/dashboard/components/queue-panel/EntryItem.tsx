@@ -19,15 +19,12 @@ import {
   resolveEntryName,
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
-import { RetryButton } from "@/components/shared/RetryButton";
-import { DeleteButton } from "@/components/shared/DeleteButton";
+import { QueueRowCard } from "./QueueRowCard";
 import { resolveQueueRowStatus } from "../../../domain/queue-row-status.js";
 // Side-effect import: registers each workflow's status extensions into the
 // queue-row-status registry for the client bundle (defineWorkflow doesn't run
 // here). Keep this even though no symbol is used directly.
 import "../../../domain/queue-row-status-index.js";
-import { QueueItemControls } from "./QueueItemControls";
-import { CancelRunningButton } from "./CancelRunningButton";
 import type {
   WorkflowActionDescriptor,
   WorkflowRunProjection,
@@ -201,7 +198,6 @@ function EntryItemImpl({
     ? formatEntryTime(entry.firstLogTs || entry.timestamp)
     : "";
 
-  const subject = typeof entry.data?.__subject === "string" ? entry.data.__subject : undefined;
   // Run-mode preset chip — present only when the row was started with a
   // non-default preset via the InputRunPanel gear menu. Read from the kernel-
   // stamped `data.__preset` (set at runOneItem startup).
@@ -216,168 +212,102 @@ function EntryItemImpl({
   const personLookupStatusTag = resolveQueueRowStatus(entry, { isDone }).secondaryTag;
 
   return (
-    <div className="px-3 pt-2 first:pt-3">
-      <div
-        onClick={() => onSelect(entry.id)}
-        role="button"
-        tabIndex={0}
-        aria-pressed={selected}
-        aria-label={
-          personLookupStatusTag
-            ? `${name || entry.id} — ${personLookupStatusTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
-            : `${name || entry.id} — ${(statusLabel ?? cfg.label).toLowerCase()}`
-        }
-        data-queue-entry-id={entry.id}
-        onKeyDown={(e) => {
+    <QueueRowCard
+      selected={selected}
+      rootProps={{
+        onClick: () => onSelect(entry.id),
+        role: "button",
+        tabIndex: 0,
+        "aria-pressed": selected,
+        "aria-label": personLookupStatusTag
+          ? `${name || entry.id} — ${personLookupStatusTag.title.toLowerCase()}, ${cfg.label.toLowerCase()}`
+          : `${name || entry.id} — ${(statusLabel ?? cfg.label).toLowerCase()}`,
+        "data-queue-entry-id": entry.id,
+        onKeyDown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onSelect(entry.id);
           }
-        }}
-        className={cn(
-          "group relative bg-card border border-border rounded-lg cursor-pointer outline-none overflow-hidden",
-          "transition-all duration-200",
-          "hover:border-primary/40 hover:shadow-lg hover:shadow-black/20",
-          "focus-visible:ring-2 focus-visible:ring-primary",
-          selected && "ring-2 ring-primary border-primary/50 shadow-lg shadow-black/20",
-          isDaemonRunning && "border-primary/30",
-        )}
-      >
-        {/* Header zone — name + status badge, optional live log inside */}
-        <div className="px-3.5 py-2.5">
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <StatusIcon
-                aria-hidden
-                className={cn("w-3.5 h-3.5 shrink-0", cfg.iconClass, cfg.iconColor)}
-              />
-              <span className="font-semibold text-[14px] text-foreground truncate">
-                {name || entry.id}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {presetId && (
-                <span
-                  title={`Run mode: ${presetId}`}
-                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans bg-primary/15 text-primary"
-                >
-                  {presetId}
-                </span>
-              )}
-              {personLookupStatusTag && (
-                <span
-                  title={personLookupStatusTag.title}
-                  className={cn(
-                    "text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans tabular-nums",
-                    personLookupStatusTag.className,
-                  )}
-                >
-                  {personLookupStatusTag.text}
-                </span>
-              )}
+        },
+        // Subtle running-state border tint, layered over the card chrome.
+        className: cn(isDaemonRunning && "border-primary/30"),
+      }}
+      footer={{
+        time,
+        runNumber,
+        secondaryId: footerSecondaryId,
+        suppressIdWhenEquals: name,
+        // needsReview is awaiting-approval (status "running" but not actively
+        // running) — show its frozen duration, not a live elapsed timer.
+        elapsed: isDaemonRunning && !isOcrDelegatedNeedsReview ? elapsed : null,
+        duration: isDone || isFailed || isOcrDelegatedNeedsReview ? duration : null,
+        rowAction: {
+          workflow: entry.workflow,
+          id: entry.id,
+          runId: entry.runId,
+          date,
+          actions: projectedActions,
+          onDelete,
+        },
+      }}
+    >
+      {/* Header zone — name + status badge, optional live log inside */}
+      <div className="px-3.5 py-2.5">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <StatusIcon
+              aria-hidden
+              className={cn("w-3.5 h-3.5 shrink-0", cfg.iconClass, cfg.iconColor)}
+            />
+            <span className="font-semibold text-[14px] text-foreground truncate">
+              {name || entry.id}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {presetId && (
               <span
+                title={`Run mode: ${presetId}`}
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans bg-primary/15 text-primary"
+              >
+                {presetId}
+              </span>
+            )}
+            {personLookupStatusTag && (
+              <span
+                title={personLookupStatusTag.title}
                 className={cn(
-                  "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide",
-                  cfg.badge,
+                  "text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans tabular-nums",
+                  personLookupStatusTag.className,
                 )}
               >
-                {statusLabel ?? cfg.label}
+                {personLookupStatusTag.text}
               </span>
-            </div>
-          </div>
-
-          {showLiveRow && (
-            <div className="mt-1.5 ml-5 text-[11px] font-mono min-w-0">
-              {isFailed && entry.error ? (
-                <span className="flex items-center gap-1.5 text-destructive truncate min-w-0">
-                  <X className="w-3 h-3 shrink-0" aria-hidden />
-                  <span className="truncate">{entry.error}</span>
-                </span>
-              ) : (
-                <span className="text-primary/85 truncate block">{entry.lastLogMessage}</span>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-border/60" />
-
-        {/* Footer zone — meta + inline ops, slightly tinted */}
-        <div className="px-3.5 py-1.5 bg-secondary/20 flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
-          <span className="tabular-nums shrink-0">{time}</span>
-          <span className="bg-secondary/80 px-1.5 py-px rounded font-medium shrink-0 tabular-nums">
-            #{runNumber}
-          </span>
-          {footerSecondaryId && footerSecondaryId !== name && (
-            <span
-              className="truncate text-foreground/80 flex-shrink min-w-0 tabular-nums"
-              title={footerSecondaryId}
-            >
-              {footerSecondaryId}
-            </span>
-          )}
-          <span className="flex-1" />
-          {isDaemonRunning && elapsed && (
-            <span className="text-primary tabular-nums shrink-0">{elapsed}</span>
-          )}
-          {(isDone || isFailed || isOcrDelegatedNeedsReview) && duration && (
-            <span className="tabular-nums shrink-0">{duration}</span>
-          )}
-          {(isFailed || isCancelled || isOcrDelegatedNeedsReview) && (
-            <div className="flex items-center gap-1 shrink-0">
-              <RetryButton
-                workflow={entry.workflow}
-                id={entry.id}
-                runId={entry.runId}
-                date={date}
-                actions={projectedActions}
-              />
-              {onDelete && date && (
-                <DeleteButton
-                  workflow={entry.workflow}
-                  id={entry.id}
-                  date={date}
-                  actions={projectedActions}
-                  onDeleted={onDelete}
-                />
-              )}
-            </div>
-          )}
-          {isDone && onDelete && date && (
-            <DeleteButton
-              workflow={entry.workflow}
-              id={entry.id}
-              date={date}
-              actions={projectedActions}
-              onDeleted={onDelete}
-              className="shrink-0"
-            />
-          )}
-          {isDaemonRunning && entry.runId && (
-              <CancelRunningButton
-                workflow={entry.workflow}
-                id={entry.id}
-                runId={entry.runId}
-                subject={subject}
-                entry={entry}
-                actions={projectedActions}
-                className="shrink-0 ml-1"
-              />
             )}
-          {isPending && (
-            <QueueItemControls
-              workflow={entry.workflow}
-              id={entry.id}
-              runId={entry.runId}
-              subject={subject}
-              entry={entry}
-              actions={projectedActions}
-              className="shrink-0 ml-1"
-            />
-          )}
+            <span
+              className={cn(
+                "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide",
+                cfg.badge,
+              )}
+            >
+              {statusLabel ?? cfg.label}
+            </span>
+          </div>
         </div>
+
+        {showLiveRow && (
+          <div className="mt-1.5 ml-5 text-[11px] font-mono min-w-0">
+            {isFailed && entry.error ? (
+              <span className="flex items-center gap-1.5 text-destructive truncate min-w-0">
+                <X className="w-3 h-3 shrink-0" aria-hidden />
+                <span className="truncate">{entry.error}</span>
+              </span>
+            ) : (
+              <span className="text-primary/85 truncate block">{entry.lastLogMessage}</span>
+            )}
+          </div>
+        )}
       </div>
-    </div>
+    </QueueRowCard>
   );
 }
 

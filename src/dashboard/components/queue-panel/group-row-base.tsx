@@ -5,21 +5,15 @@ import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { formatEntryTime, getRunNumber } from "@/components/shared/entry-display";
+import { QueueRowCard } from "./QueueRowCard";
 import {
   aggregateBatchCounts,
   pickPreviewChildren,
   computeBatchElapsed,
   resolveBatchAccent,
-  type BatchAccent,
 } from "@/components/ocr/delegation-row-helpers";
 
 const PREVIEW_KIDS = 3;
-
-const ACCENT_BORDER: Record<BatchAccent, string> = {
-  warning: "border-l-warning",
-  success: "border-l-success",
-  destructive: "border-l-destructive",
-};
 
 const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boolean }> = {
   running: { Icon: Loader2, color: "text-primary", spin: true },
@@ -76,6 +70,16 @@ export function GroupRowBase({
     ? footerRunOrdinal
     : getRunNumber(members[0] ?? ({ id: parentRunId, workflow: "", timestamp: "", status: "pending" } as TrackerEntry));
   const segs = computeProgressSegments(counts);
+  // A person batch anchor carries no title — drop the empty header row and
+  // move the count badge onto the status-counts line (right side, above the
+  // bar). Titled cards (file batches, prep previews) keep the header row.
+  const hasTitle = title.trim().length > 0;
+  const countBadgeClass = cn(
+    "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide shrink-0",
+    countTone === "warning"
+      ? "bg-warning/12 text-warning border border-warning/40"
+      : "bg-secondary/80 text-secondary-foreground border border-border",
+  );
   const interactive = drillInEnabled;
   const drillInProps = interactive
     ? {
@@ -94,139 +98,110 @@ export function GroupRowBase({
     : {};
 
   return (
-    <div className="px-3 pt-2 first:pt-3">
+    <QueueRowCard
+      accent={accent}
+      selected={isFocused}
+      interactive={interactive}
+      rootProps={{ "data-queue-group-kind": variant }}
+      footer={{
+        time: rowTime,
+        runNumber,
+        secondaryId: footerSecondaryId,
+        elapsed: elapsedLabel && !elapsed?.frozen ? elapsedLabel : null,
+        duration: elapsedLabel && elapsed?.frozen ? elapsedLabel : null,
+        metaProps: interactive
+          ? {
+              ...drillInProps,
+              className:
+                "cursor-pointer focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset rounded-sm",
+            }
+          : drillInProps,
+        actions: footerActions,
+      }}
+    >
+      {/* Body — header + status + member preview. Dividers lead each zone;
+          the divider before the footer is owned by RowFooter. */}
       <div
-        data-queue-group-kind={variant}
+        {...drillInProps}
         className={cn(
-          "group bg-card border border-border border-l-[3px] rounded-lg outline-none overflow-hidden",
-          "transition-all duration-200",
+          "outline-none",
           interactive &&
-            "hover:border-primary/40 hover:shadow-lg hover:shadow-black/20",
-          !interactive && "cursor-default",
-          ACCENT_BORDER[accent],
-          isFocused && "ring-2 ring-primary",
+            "cursor-pointer focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
         )}
       >
-        <div
-          {...drillInProps}
-          className={cn(
-            "outline-none",
-            interactive &&
-              "cursor-pointer focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
-          )}
-        >
+        {hasTitle && (
           <div className="px-3.5 py-2.5 flex items-center justify-between gap-2 min-w-0">
             <span className="font-semibold text-[14px] text-foreground truncate min-w-0 flex-1">
               {title}
             </span>
-            <span
-              className={cn(
-                "text-[10px] font-medium px-2 py-0.5 rounded-md font-sans tracking-wide shrink-0",
-                countTone === "warning"
-                  ? "bg-warning/12 text-warning border border-warning/40"
-                  : "bg-secondary/80 text-secondary-foreground border border-border",
-              )}
-            >
+            <span className={countBadgeClass}>
               {counts.done} / {counts.total}
             </span>
           </div>
+        )}
 
-          <div className="border-t border-border/60" />
+        {hasTitle && <div className="border-t border-border/60" />}
 
-          <div className="px-3.5 pt-2 pb-2.5 bg-secondary/20">
-            <div className="flex items-center gap-3 font-mono text-[10.5px] mb-1.5">
-              <span className="text-success">● {counts.done} done</span>
-              <span className="text-primary">● {counts.running} running</span>
-              <span className="text-warning">● {counts.queued} queued</span>
-              {counts.failed > 0 && (
-                <span className="text-destructive">● {counts.failed} failed</span>
-              )}
-            </div>
-            <div className="flex gap-[2px]">
-              {segs.map((s, i) => (
-                <div
-                  key={i}
-                  className={cn("h-[5px] rounded-[2px]", s.cls)}
-                  style={{ flex: s.flex }}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="border-t border-border/60" />
-
-          {previewKids.length > 0 && (
-            <>
-              <div className="px-3.5 py-2 bg-card flex flex-col gap-1.5 font-mono text-[10.5px]">
-                {previewKids.map((kid) => {
-                  const cfg = STATUS_ICON[kid.status] ?? STATUS_ICON.pending;
-                  const Icon = cfg.Icon;
-                  return (
-                    <div key={kid.id} className="flex items-center gap-2 min-w-0">
-                      <Icon
-                        className={cn(
-                          "w-3 h-3 shrink-0",
-                          cfg.color,
-                          cfg.spin && "animate-spin motion-reduce:animate-none",
-                        )}
-                        aria-hidden
-                      />
-                      <span className="text-foreground/90 truncate flex-1 min-w-0">
-                        {kid.name}
-                      </span>
-                      {kid.emplId && (
-                        <span className="text-muted-foreground text-[9.5px] shrink-0 tabular-nums">
-                          {kid.emplId}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="border-t border-border/60" />
-            </>
-          )}
-        </div>
-
-        <div className="px-3.5 py-1.5 bg-secondary/20 flex items-center gap-2 text-[11px] font-mono text-muted-foreground min-w-0">
-          <div
-            {...drillInProps}
-            className={cn(
-              "flex items-center gap-2 min-w-0 flex-1 outline-none",
-              interactive &&
-                "cursor-pointer focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset rounded-sm",
+        <div className={cn("px-3.5 pb-2.5 bg-secondary/20", hasTitle ? "pt-2" : "pt-3")}>
+          {/* Status counts stay on one line. When the count badge shares this
+              row (no-title anchor), spans are nowrap + shrink-0 and the gap is
+              tightened so 4 counts + badge don't wrap. */}
+          <div className="flex flex-nowrap items-center gap-x-2.5 font-mono text-[10.5px] mb-1.5">
+            <span className="text-success shrink-0 whitespace-nowrap">● {counts.done} done</span>
+            <span className="text-primary shrink-0 whitespace-nowrap">● {counts.running} running</span>
+            <span className="text-warning shrink-0 whitespace-nowrap">● {counts.queued} queued</span>
+            {counts.failed > 0 && (
+              <span className="text-destructive shrink-0 whitespace-nowrap">● {counts.failed} failed</span>
             )}
-          >
-            <span className="tabular-nums shrink-0">{rowTime}</span>
-            <span className="bg-secondary/80 px-1.5 py-px rounded font-medium shrink-0 tabular-nums">
-              #{runNumber}
-            </span>
-            {footerSecondaryId && (
-              <span
-                className="truncate text-foreground/80 flex-shrink min-w-0 tabular-nums"
-                title={footerSecondaryId}
-              >
-                {footerSecondaryId}
-              </span>
-            )}
-            <span className="flex-1" />
-            {elapsedLabel && (
-              <span
-                className={cn(
-                  "tabular-nums shrink-0",
-                  elapsed?.frozen ? "" : "text-primary",
-                )}
-              >
-                {elapsedLabel}
+            {!hasTitle && (
+              <span className={cn(countBadgeClass, "ml-auto")}>
+                {counts.done} / {counts.total}
               </span>
             )}
           </div>
-          {footerActions ? (
-            <div className="flex items-center gap-1 shrink-0">{footerActions}</div>
-          ) : null}
+          <div className="flex gap-[2px]">
+            {segs.map((s, i) => (
+              <div
+                key={i}
+                className={cn("h-[5px] rounded-[2px]", s.cls)}
+                style={{ flex: s.flex }}
+              />
+            ))}
+          </div>
         </div>
+
+        {previewKids.length > 0 && <div className="border-t border-border/60" />}
+
+        {previewKids.length > 0 && (
+          <div className="px-3.5 py-2 bg-card flex flex-col gap-1.5 font-mono text-[10.5px]">
+            {previewKids.map((kid) => {
+              const cfg = STATUS_ICON[kid.status] ?? STATUS_ICON.pending;
+              const Icon = cfg.Icon;
+              return (
+                <div key={kid.id} className="flex items-center gap-2 min-w-0">
+                  <Icon
+                    className={cn(
+                      "w-3 h-3 shrink-0",
+                      cfg.color,
+                      cfg.spin && "animate-spin motion-reduce:animate-none",
+                    )}
+                    aria-hidden
+                  />
+                  <span className="text-foreground/90 truncate flex-1 min-w-0">
+                    {kid.name}
+                  </span>
+                  {kid.emplId && (
+                    <span className="text-muted-foreground text-[9.5px] shrink-0 tabular-nums">
+                      {kid.emplId}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </div>
+    </QueueRowCard>
   );
 }
 
