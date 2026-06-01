@@ -31,7 +31,6 @@ describe("oath-signature scenario: pdf branch happy path", () => {
     t.onTestFinished(() => rt.cleanup());
 
     const input = {
-      kind: "pdf" as const,
       pdfPath: "/tmp/oath-test.pdf",
       pdfOriginalName: "oath-test.pdf",
       sessionId: "scenario-pdf-001",

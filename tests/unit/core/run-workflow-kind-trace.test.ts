@@ -36,7 +36,7 @@ const fakeLaunch = async ({ system: _system }: { system: SystemConfig }) => ({
 const wf = defineWorkflow({
   name: 'test-kind-trace',
   code: 'kt',
-  queueRowKind: 'file',
+  inputSubject: 'pdf',
   systems: [{ id: 'sys', login: async () => {} }],
   steps: ['go'] as const,
   schema: z.object({ doc: z.string() }),

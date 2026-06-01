@@ -82,7 +82,6 @@ export async function oathUploadHandler(
       const result = await delegateTo(
         oathSignatureWorkflow,
         {
-          kind: "pdf",
           pdfPath: input.pdfPath,
           pdfOriginalName: input.pdfOriginalName,
           ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),

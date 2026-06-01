@@ -55,7 +55,7 @@ export const onboardingWorkflow = defineWorkflow({
   name: "onboarding",
   label: "Onboarding",
   archetype: "batch",
-  queueRowKind: "person",
+  inputSubject: "email",
   code: "on",
   category: "Onboarding",
   iconName: "Users",

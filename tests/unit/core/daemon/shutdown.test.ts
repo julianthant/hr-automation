@@ -23,7 +23,7 @@ function makeWf() {
   return defineWorkflow({
     name: 'shutdown-trace',
     code: 'st',
-    queueRowKind: 'person',
+    inputSubject: 'name',
     schema: z.object({ id: z.string() }),
     steps: ['a'],
     systems: [],

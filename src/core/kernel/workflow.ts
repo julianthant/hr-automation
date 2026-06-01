@@ -9,6 +9,7 @@ import type {
 } from './types.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
+import { queueRowKindFromInputSubject } from '../../domain/queue-row-kind.js'
 import { register, autoLabel, normalizeDetailField } from './registry.js'
 import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
 import { registerWorkflowStatusExtensions } from '../../domain/queue-row-status.js'
@@ -96,10 +97,13 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     typeof archetype === 'function'
       ? (config.batch ? 'batch' : 'single')
       : archetype
-  // Subject-semantics kind (defaults to person — the majority shape; the
-  // architecture guard enforces an explicit declaration on every real
-  // workflow). Code is the trace-id/daemon provenance prefix.
-  const queueRowKind: QueueRowKindOrResolver<TData> = config.queueRowKind ?? 'person'
+  // Presentation kind is DERIVED from the declared input subject (defaults to
+  // `name` → person — the majority shape; the architecture guard enforces an
+  // explicit `inputSubject` on every real workflow). Code is the
+  // trace-id/daemon provenance prefix.
+  const queueRowKind: QueueRowKindOrResolver<TData> = queueRowKindFromInputSubject(
+    config.inputSubject ?? 'name',
+  )
   const code = (config.code ?? config.name.slice(0, 2)).toLowerCase()
   const presetsMetadata = config.presets
     ? validateAndNormalizePresets(config.name, config.steps, config.presets)

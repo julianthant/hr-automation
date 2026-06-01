@@ -329,7 +329,7 @@ export const personLookupWorkflow = defineWorkflow({
   name: "person-lookup",
   label: "Person Lookup",
   archetype: "single",
-  queueRowKind: "person",
+  inputSubject: (input) => ("emplId" in input ? "eid" : "name"),
   statusExtensions: personLookupStatusExtensions,
   code: "pl",
   category: "Utils",

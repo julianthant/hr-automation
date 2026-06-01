@@ -24,19 +24,16 @@ describe("oath-signature scenario: multi-EID batch", () => {
     const parentRunId = "scenario-input-batch-1";
     const inputs = [
       {
-        kind: "signer" as const,
         emplId: "10000001",
         name: "Alice Smith",
         __runtimeOptions: { rowShape: "batch-member" as const },
       },
       {
-        kind: "signer" as const,
         emplId: "10000002",
         name: "Bob Jones",
         __runtimeOptions: { rowShape: "batch-member" as const },
       },
       {
-        kind: "signer" as const,
         emplId: "10000003",
         name: "Carol Lee",
         __runtimeOptions: { rowShape: "batch-member" as const },

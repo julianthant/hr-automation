@@ -51,7 +51,6 @@ describe("oath-signature scenario: cancel during transaction", () => {
     t.onTestFinished(() => rt.cleanup());
 
     const { runId, result } = rt.enqueue({
-      kind: "signer",
       emplId: "10873698",
       name: "Jane Doe",
     });

@@ -28,7 +28,7 @@ export const workStudyWorkflow = defineWorkflow({
   name: "work-study",
   label: "Work Study",
   archetype: "single",
-  queueRowKind: "person",
+  inputSubject: "eid",
   code: "ws",
   category: "Work Study",
   iconName: "Briefcase",

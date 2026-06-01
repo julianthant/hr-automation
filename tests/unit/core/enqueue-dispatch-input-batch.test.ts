@@ -118,8 +118,8 @@ test("enqueueFromHttp pre-emits oath-signature multi-EID input runs as batch mem
   const result = await enqueueFromHttp(
     "oath-signature",
     [
-      { kind: "signer", emplId: "10000001" },
-      { kind: "signer", emplId: "10000002" },
+      { emplId: "10000001" },
+      { emplId: "10000002" },
     ],
     { trackerDir },
   );

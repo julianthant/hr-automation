@@ -28,7 +28,7 @@ export const oathUploadWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Upload",
   archetype: "single",
-  queueRowKind: "file",
+  inputSubject: "pdf",
   code: "ou",
   category: "Onboarding",
   iconName: "UploadCloud",

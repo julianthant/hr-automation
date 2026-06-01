@@ -47,7 +47,6 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
     t.onTestFinished(() => rt.cleanup());
 
     const { runId, result } = rt.enqueue({
-      kind: "signer",
       emplId: "10873698",
       name: "Jane Doe",
     });

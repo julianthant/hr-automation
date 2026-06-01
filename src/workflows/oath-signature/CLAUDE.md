@@ -4,12 +4,17 @@ Adds an **Oath Signature Date** row to UCPath Person Profile. Public starts are 
 
 ## Input Shape
 
-Schema is `z.discriminatedUnion("kind", ...)`.
+Schema is `z.union([SignerSchema, PdfSchema])`, told apart by **field presence**
+via the `isOathPdfInput` guard (`"pdfPath" in input`) — no `kind` discriminator,
+same pattern as person-lookup. The two shapes have disjoint required fields so
+presence is unambiguous.
 
-- `{ kind: "signer", emplId, name?, date?, dryRun? }` — one EID, one UCPath transaction.
-- `{ kind: "pdf", pdfPath, pdfOriginalName, sessionId, rosterMode?, rosterPath?, dryRun? }` — delegates to OCR, waits for approval, then fans out signer children via `ctx.delegateToAll`.
+- `{ emplId, name?, date?, dryRun? }` — signer variant: one EID, one UCPath transaction.
+- `{ pdfPath, pdfOriginalName, sessionId, rosterMode?, rosterPath?, dryRun? }` — pdf variant: delegates to OCR, waits for approval, then fans out signer (EID) children via `ctx.delegateToAll`. Children carry `emplId`, so the presence guard routes them to the signer branch.
 
-`archetype` resolves to `single` for signer inputs and `batch` for PDF inputs. Delegated PDF runs keep `batch` plus `parentRunId`; signer children from the PDF branch are stamped `batch-member` under the PDF parent, even when OCR approval leaves only one selected signer.
+`archetype` resolves to `single` for signer inputs and `batch` for PDF inputs;
+`inputSubject` resolves to `eid` (→ person row) for signer inputs and `pdf`
+(→ file row) for PDF inputs. Delegated PDF runs keep `batch` plus `parentRunId`; signer children from the PDF branch are stamped `batch-member` under the PDF parent, even when OCR approval leaves only one selected signer.
 
 ## UCPath Rules
 

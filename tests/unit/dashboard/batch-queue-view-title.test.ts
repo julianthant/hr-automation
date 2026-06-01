@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { resolveDaemonBatchQueueTitle } from "../../../src/dashboard/components/queue-panel/batch-queue-view.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
-test("resolveDaemonBatchQueueTitle returns titleOverride when non-empty", () => {
+test("resolveDaemonBatchQueueTitle ignores a non-PDF titleOverride (random/person name → no title)", () => {
   const member: TrackerEntry = {
     workflow: "eid-lookup",
     id: "x",
@@ -12,9 +12,17 @@ test("resolveDaemonBatchQueueTitle returns titleOverride when non-empty", () => 
     status: "done",
     data: { __name: "irrelevant", batchDisplayOrdinal: "" },
   } as TrackerEntry;
+  // A batch is titled ONLY by a PDF filename. A non-PDF override is dropped.
   assert.equal(
     resolveDaemonBatchQueueTitle("EID Lookup", [member], "1234", "Oath Signature · #1234"),
-    "Oath Signature · #1234",
+    "",
+  );
+});
+
+test("resolveDaemonBatchQueueTitle honors a titleOverride only when it is a PDF filename", () => {
+  assert.equal(
+    resolveDaemonBatchQueueTitle("Oath Upload", [], "1234", "Inherited_Batch.pdf"),
+    "Inherited_Batch.pdf",
   );
 });
 

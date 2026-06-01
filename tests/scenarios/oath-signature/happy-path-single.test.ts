@@ -16,7 +16,7 @@ describe("oath-signature scenario: happy path (single EID)", () => {
     const rt = await createScenarioRuntime({ workflow: oathSignatureWorkflow });
     t.onTestFinished(() => rt.cleanup());
 
-    const input = { kind: "signer" as const, emplId: "10873698", name: "Jane Doe" };
+    const input = { emplId: "10873698", name: "Jane Doe" };
     const { runId, result } = rt.enqueue(input, {
       itemId: input.emplId,
       beats: oathSignatureBeats(input),

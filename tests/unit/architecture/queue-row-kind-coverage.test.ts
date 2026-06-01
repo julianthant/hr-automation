@@ -1,10 +1,11 @@
 /**
  * Every workflow.ts with a defineWorkflow call must declare an explicit
- * `queueRowKind:` (person | file | catalog, or a resolver) and a `code:`
- * (2-char provenance prefix for trace ids + daemon instance names). The
- * kernel defaults a missing kind to "person" and a missing code to the first
- * two letters of the name, but explicit declarations keep the subject-
- * semantics axis visible and the codes collision-free.
+ * `inputSubject:` (name | eid | email | kualiId | pdf | selector, or a
+ * resolver) and a `code:` (2-char provenance prefix for trace ids + daemon
+ * instance names). The presentation `queueRowKind` is derived from the input
+ * subject; the kernel defaults a missing subject to "name" and a missing code
+ * to the first two letters of the name, but explicit declarations keep the
+ * input-subject axis visible and the codes collision-free.
  */
 import { test } from "vitest";
 import assert from "node:assert/strict";
@@ -31,13 +32,13 @@ for (const dir of workflowDirs()) {
   }
   if (!src.includes("defineWorkflow(")) continue;
 
-  test(`${dir}/workflow.ts declares queueRowKind`, () => {
-    const hasLiteral = /queueRowKind:\s*["'](person|file|catalog)["']/.test(src);
-    const hasResolver = /queueRowKind:\s*(\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>/.test(src);
+  test(`${dir}/workflow.ts declares inputSubject`, () => {
+    const hasLiteral = /inputSubject:\s*["'](name|eid|email|kualiId|pdf|selector)["']/.test(src);
+    const hasResolver = /inputSubject:\s*(\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>/.test(src);
     assert.ok(
       hasLiteral || hasResolver,
-      `src/workflows/${dir}/workflow.ts calls defineWorkflow but does not declare 'queueRowKind:'. ` +
-        `Add 'queueRowKind: "person"|"file"|"catalog"' (or a resolver: '(input) => ...').`,
+      `src/workflows/${dir}/workflow.ts calls defineWorkflow but does not declare 'inputSubject:'. ` +
+        `Add 'inputSubject: "name"|"eid"|"email"|"kualiId"|"pdf"|"selector"' (or a resolver: '(input) => ...').`,
     );
   });
 
