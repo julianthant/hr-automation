@@ -16,7 +16,7 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/screenshots/<filename>` | GET | PNG bytes, path-traversal guarded via `resolveScreenshotPath` | `ScreenshotsPanel` / `ScreenshotCard` `<img>` |
 | `/api/search?q=Q[&days=N]` | GET | `SearchResultRow[]` — cross-workflow tracker entry hits | `SearchBar` / `SearchResults` |
 | `/api/preflight` | GET | `{checks: [{name, passed, detail}], cleanedFiles?: number}` | `usePreflight` → sonner toast |
-| `/api/rosters` | GET | `RosterListing[]` — xlsx files in `.tracker/rosters/` + `src/data/`, newest first | `RunModal` (emergency-contact prep) |
+| `/api/rosters` | GET | `RosterListing[]` — xlsx files in `.tracker/rosters/` + `.tracker/sharepoint/`, newest first | `RunModal` (emergency-contact prep) |
 | `/api/ocr/prepare` | POST (multipart) | `{ok, sessionId, pdfPath}` — fires `runWorkflow(ocrWorkflow)` in the dashboard process | `RunModal` (OCR prep upload) |
 | `/api/ocr/approve-batch` | POST | Body: `{sessionId, records[]}`. Expands to N kernel queue items via `enqueueFromHttp` for the downstream form-type daemon. Marks the OCR parent row `done` step `approved`. | `OcrReviewPane` Approve button |
 | `/api/ocr/discard` | POST | Body: `{sessionId, reason?}`. Emits `failed` step `discarded`; best-effort unlinks the PDF. | `OcrReviewPane` Discard button |
@@ -24,7 +24,7 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/ocr/retry-page` | POST | Body: `{sessionId, pageNumber}`. Retries one OCR page in isolation. | `FailedPageCard` Retry button |
 | `/api/ocr/force-research` | POST | Body: `{sessionId, records[]}`. Re-dispatches eid-lookup for a subset of records flagged for forced research. | `OcrReviewPane` Force Research action |
 | `/api/sharepoint-download/list` | GET | `SharePointDownloadListItem[]` — one row per registered spreadsheet (`{id, label, description?, envVar, configured}`) | `QueuePanel` Download dropdown — populates menu on mount |
-| `/api/sharepoint-download/run` | POST | Body: `{ id }`. Response: `{ok, id, label, path, filename}` or `{ok:false, error}` — launches headed SharePoint download via `buildSharePointRosterDownloadHandler` (in `src/workflows/sharepoint-download/`), saves to `src/data/` | `QueuePanel` Download dropdown — fired when a menu item is picked |
+| `/api/sharepoint-download/run` | POST | Body: `{ id }`. Response: `{ok, id, label, path, filename}` or `{ok:false, error}` — launches headed SharePoint download via `buildSharePointRosterDownloadHandler` (in `src/workflows/sharepoint-download/`), saves to `.tracker/sharepoint/` | `QueuePanel` Download dropdown — fired when a menu item is picked |
 | `/api/retry` | POST | Body: `{workflow, id, runId?, date?, parentRunId?}`. Re-enqueues using the entry's persisted `input` field. | `RetryButton` (EntryItem failed rows + LogPanel header) via `useWorkflowActionDispatcher` |
 | `/api/retry-bulk` | POST | Body: `{workflow, ids?[], items?:[{workflowId?, id, runId?, date?}], date?, parentRunId?, source?, scope?}`. Batch footer sends `source:"batch-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `BulkRetryBar`, `BatchFooterActions` via `useWorkflowActionDispatcher` |
 | `/api/cancel-active-bulk` | POST | Body: `{workflow, items:[{id, status, runId?}]}` — `status` must be `pending` or `running`; bulk cancel queued + cooperative cancel running. | `StopAllButton` |

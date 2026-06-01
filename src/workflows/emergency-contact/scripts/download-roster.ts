@@ -8,8 +8,8 @@
  * For workflow integration, import downloadSharePointFile from
  * src/workflows/sharepoint-download (this is the canonical location).
  */
-import path from "node:path";
 import { downloadSharePointFile } from "../../sharepoint-download/index.js";
+import { ROSTERS_DIR } from "../config.js";
 import { validateEnv } from "../../../utils/env.js";
 import { log } from "../../../utils/log.js";
 
@@ -23,7 +23,7 @@ validateEnv();
 
 downloadSharePointFile({
   url,
-  outDir: path.join(".tracker", "rosters"),
+  outDir: ROSTERS_DIR,
 })
   .then((savedPath) => {
     log.success(`Done: ${savedPath}`);

@@ -4,19 +4,23 @@
 import { homedir } from "os";
 import { join } from "path";
 
+import { screenshotsDir } from "./tracker/paths.js";
 import { EnvValidationError } from "./utils/env.js";
 
 const HOME = homedir();
+const TRACKER_DIR = ".tracker";
 
 // ─── Paths (user-agnostic via homedir()) ─────────────────────
+// `.tracker/` subdir layout is owned by `src/tracker/paths.ts` — derive
+// subdir paths from its helpers, never re-spell them as literals here.
 
 export const PATHS = {
   reportsDir: join(HOME, "Downloads", "reports"),
   downloadsDir: join(HOME, "Downloads"),
   ukgSessionBase: join(HOME, "ukg_session"),
   ukgSessionSep: join(HOME, "ukg_session_sep"),
-  screenshotDir: "src/data/screenshots",
-  trackerDir: ".tracker",
+  screenshotDir: screenshotsDir(TRACKER_DIR),
+  trackerDir: TRACKER_DIR,
 } as const;
 
 // ─── Timeouts (ms) ──────────────────────────────────────────

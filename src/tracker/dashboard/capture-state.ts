@@ -5,6 +5,7 @@ import {
   createSessionStore,
   type CaptureSessionStore,
 } from "../../services/capture/index.js";
+import { resolveRosterDirs } from "../../services/matching/roster-loader.js";
 import type { CaptureSession } from "../../services/capture/sessions.js";
 import { log } from "../../utils/log.js";
 import { buildOcrPrepareHandler } from "./ocr/index.js";
@@ -76,10 +77,7 @@ export function makeCaptureFinalize(trackerDir: string) {
       return;
     }
 
-    const rosterDirs = [
-      resolve(process.cwd(), ".tracker/rosters"),
-      resolve(process.cwd(), "src/data"),
-    ];
+    const rosterDirs = resolveRosterDirs();
     const rosterDir = rosterDirs.find((dir) => existsSync(dir)) ?? rosterDirs[0];
     let rosterPath: string | undefined;
     try {

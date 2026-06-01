@@ -50,19 +50,9 @@ docs/*
 # Excel tracking files
 *.xlsx
 
-# Downloaded rosters + captured screenshots (local-only, PII-adjacent).
-# Directory shells are tracked via .gitkeep so runtime writers find the targets.
-src/data/*
-!src/data/.gitkeep
-!src/data/screenshots/
-src/data/screenshots/*
-!src/data/screenshots/.gitkeep
-!src/data/sharepoint/
-src/data/sharepoint/*
-!src/data/sharepoint/.gitkeep
-
-# Legacy screenshot location — kept for cleanup on older working trees.
-.screenshots/
+# Downloaded rosters + captured screenshots now live under .tracker/
+# (.tracker/sharepoint, .tracker/rosters, .tracker/screenshots) — covered by
+# the .tracker/ rule above. Runtime writers mkdir their targets on demand.
 
 # Generated artifacts. Directory shells/docs may be tracked; generated outputs
 # are re-created by scripts/tests.

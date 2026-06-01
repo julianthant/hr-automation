@@ -75,7 +75,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `GET /api/selector-warnings?days=N` — aggregated selector-fallback warns across N days (default 7)
 - `GET /api/failures` — `FailureRow[]` for failed entries on a given date across all workflows (`buildFailuresHandler`). Same latest-run-per-`(workflow,id)` dedup pattern; takes optional `?date=YYYY-MM-DD` (default today).
 - `GET /api/preflight` — startup checks + cleanedFiles count
-- `GET /api/rosters` — list xlsx rosters in `.tracker/rosters/` + `src/data/`, newest first (consumer: `RunModal`)
+- `GET /api/rosters` — list xlsx rosters in `.tracker/rosters/` + `.tracker/sharepoint/`, newest first (consumer: `RunModal`)
 - `POST /api/ocr/prepare` — multipart/form-data; fire-and-forgets `runWorkflow(ocrWorkflow)` and returns `{ok, sessionId, pdfPath}`. Body cap: 50MB.
 - `POST /api/ocr/approve-batch` — JSON `{sessionId, records[]}`; expands to N kernel queue items via `enqueueFromHttp` for the downstream form-type daemon.
 - `POST /api/ocr/discard` — JSON `{sessionId, reason?}`; emits `failed` step `discarded`.

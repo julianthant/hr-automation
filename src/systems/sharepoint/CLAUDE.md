@@ -1,6 +1,6 @@
 # SharePoint / Excel Online Module
 
-Headed browser automation for downloading files from UCSD's SharePoint / OneDrive (Microsoft 365) — specifically the Excel Online viewer at `ucsdcloud-my.sharepoint.com/.../doc2.aspx`. Primary consumers: the dashboard **SharePoint download dropdown** in the queue header (`GET /api/sharepoint-download/list` → `POST /api/sharepoint-download/run` with `{ id }` from the backend `SHAREPOINT_DOWNLOADS` registry) and the workflow-agnostic control in **Run modal** (`SharePointDownloadButton`), both pulling configured roster xlsx files into `src/data/` via `src/workflows/sharepoint-download/`.
+Headed browser automation for downloading files from UCSD's SharePoint / OneDrive (Microsoft 365) — specifically the Excel Online viewer at `ucsdcloud-my.sharepoint.com/.../doc2.aspx`. Primary consumers: the dashboard **SharePoint download dropdown** in the queue header (`GET /api/sharepoint-download/list` → `POST /api/sharepoint-download/run` with `{ id }` from the backend `SHAREPOINT_DOWNLOADS` registry) and the workflow-agnostic control in **Run modal** (`SharePointDownloadButton`), both pulling configured roster xlsx files into `.tracker/sharepoint/` via `src/workflows/sharepoint-download/`.
 
 ## Auth flow (verified 2026-04-22)
 
@@ -53,7 +53,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 - `iframe[name="WacFrame_Excel_0"]` — the trailing `_0` is a suffix for the Nth Excel viewer on the page. For single-doc views it's always `0`; if you ever embed multiple viewers the suffix increments.
 - `excelOnline.coEditingBanner` can be used as a readiness probe but only fires when someone else has the workbook open. Don't depend on it for general page-ready detection; prefer `page.waitForLoadState("networkidle")` plus a small fixed wait.
 - The File button's accessible name is `"File"` (exact). There's also a `Files` ribbon tab in some Office hosts — not in Excel Online, but keep `exact: true` defensively.
-- Download triggers via a `page.on("download", ...)` event; the file streams into the Playwright CLI workspace's `.playwright-cli/` folder during CLI probing, but the real `downloadSharePointFile` helper uses `download.saveAs()` to land the bytes in `src/data/`.
+- Download triggers via a `page.on("download", ...)` event; the file streams into the Playwright CLI workspace's `.playwright-cli/` folder during CLI probing, but the real `downloadSharePointFile` helper uses `download.saveAs()` to land the bytes in `.tracker/sharepoint/`.
 - The dashboard download endpoint (`POST /api/sharepoint-download/run`, handled by `buildSharePointRosterDownloadHandler` in `src/workflows/sharepoint-download/handler.ts`) holds a module-level in-flight lock — concurrent runs get HTTP 409. Don't invoke the helper twice in parallel.
 
 ## Lessons Learned

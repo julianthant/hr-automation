@@ -1,9 +1,8 @@
 import { readdirSync, statSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import ExcelJS from "exceljs";
+import { rostersDir, sharepointDir } from "../../tracker/paths.js";
 import type { RosterRow } from "./match.js";
-
-export const ROSTER_DIRS = [".tracker/rosters", "src/data"] as const;
 
 export interface RosterFileRef {
   path: string;
@@ -13,11 +12,12 @@ export interface RosterFileRef {
 }
 
 export function resolveRosterDirs(trackerDir = ".tracker"): string[] {
-  return ROSTER_DIRS.map((dir) =>
-    dir === ".tracker/rosters"
-      ? resolve(process.cwd(), trackerDir, "rosters")
-      : resolve(process.cwd(), dir),
-  );
+  // Both roster sources live under the tracker dir: emergency-contact
+  // pre-flight writes to `rosters/`; SharePoint downloads land in `sharepoint/`.
+  return [
+    resolve(process.cwd(), rostersDir(trackerDir)),
+    resolve(process.cwd(), sharepointDir(trackerDir)),
+  ];
 }
 
 /** Newest .xlsx in `dir` by mtime, or null if dir is empty / missing / has no .xlsx. */

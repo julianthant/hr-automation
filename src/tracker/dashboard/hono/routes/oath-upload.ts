@@ -9,6 +9,7 @@ import {
   buildOathUploadStartHandler,
   saveUploadedPdf,
 } from "../../oath-upload/http.js";
+import { resolveRosterDirs } from "../../../../services/matching/roster-loader.js";
 import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
@@ -82,10 +83,7 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
     const dryRun = multipart.parsed.fields.dryRun === "true" || multipart.parsed.fields.dryRun === "1";
     let rosterPath: string | undefined;
     if (mode === "full" && rosterMode === "existing") {
-      const rosterDirs = [
-        resolve(process.cwd(), ".tracker/rosters"),
-        resolve(process.cwd(), "src/data"),
-      ];
+      const rosterDirs = resolveRosterDirs();
       const rosterDir = rosterDirs.find((dir) => existsSync(dir)) ?? rosterDirs[0];
       try {
         const files = readdirSync(rosterDir).filter((fileName) => fileName.endsWith(".xlsx"));

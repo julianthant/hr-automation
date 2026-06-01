@@ -31,6 +31,7 @@ import {
 } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
+import { sharepointDir } from "../../tracker/paths.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
@@ -170,7 +171,7 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
     // download — File → Create a Copy (hover) → Download a Copy, capture
     // the Download event, saveAs into outDir.
     await ctx.step("download", async () => {
-      const outDir = input.outDir ?? "src/data";
+      const outDir = input.outDir ?? sharepointDir(".tracker");
       const { path: saved, filename } = await captureExcelDownload(page, outDir, {
         filenameBase: input.filenameBase,
       });
