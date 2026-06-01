@@ -23,6 +23,9 @@ export interface RunWorkflowHandlerOpts<TData, TSteps extends readonly string[]>
   /** Per-run AbortSignal — surfaced as `ctx.signal` and auto-injected
    *  into Playwright calls via the Page proxy. */
   signal: AbortSignal
+  /** Session-drawer instance name owning this run; surfaced as
+   *  `ctx.workflowInstance` and used by `ctx.reportPhase`. */
+  instance?: string
 }
 
 export async function runWorkflowHandler<TData, TSteps extends readonly string[]>(
@@ -39,6 +42,7 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
     emitScreenshotEvent: opts.emitScreenshotEvent,
     trackerDir: opts.trackerDir,
     signal: opts.signal,
+    instance: opts.instance,
   })
   opts.stepper.setScreenshotFn(ctx.screenshot)
 

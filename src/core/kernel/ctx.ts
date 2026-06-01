@@ -9,6 +9,7 @@ import { makeScreenshotFn } from './screenshot.js'
 import type { ScreenshotEvent } from './screenshot.js'
 import { wrapPageWithSignal } from './page-proxy.js'
 import { buildDelegateApi } from '../delegate.js'
+import { emitItemStart, emitStepChange } from '../../tracker/session-events.js'
 
 export interface MakeCtxOpts {
   session: Session
@@ -28,6 +29,12 @@ export interface MakeCtxOpts {
    * call that accepts a `signal` option auto-injects this one.
    */
   signal: AbortSignal
+  /**
+   * Session-drawer instance name owning this run (e.g. "OCR 1"). Surfaced on
+   * `ctx.workflowInstance` and used by `ctx.reportPhase` to drive the session
+   * timeline. Absent in trackerStub/test runs.
+   */
+  instance?: string
 }
 
 /**
@@ -74,9 +81,28 @@ export async function tryScreenshot(
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, code, itemId, emitScreenshotEvent, trackerDir, signal } = opts
+  const { session, stepper, isBatch, runId, workflow, code, itemId, emitScreenshotEvent, trackerDir, signal, instance } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
+
+  // Session-timeline bridge for handlers that own their own queue-row emission
+  // and so never call ctx.step (today: OCR). Emits session item_start (once)
+  // + step_change so the terminal-drawer WorkflowBox advances. No queue row is
+  // written here — that stays the handler's responsibility. No-op without an
+  // instance (trackerStub/test runs).
+  let phaseItemStarted = false
+  let lastReportedPhase: string | null = null
+  const reportPhase = (step: string): void => {
+    if (!instance) return
+    if (!phaseItemStarted) {
+      emitItemStart(instance, itemId, trackerDir)
+      phaseItemStarted = true
+    }
+    if (step !== lastReportedPhase) {
+      emitStepChange(instance, step, trackerDir, workflow)
+      lastReportedPhase = step
+    }
+  }
 
   const screenshot = makeScreenshotFn({
     session,
@@ -120,6 +146,8 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     signal,
     screenshot,
     trackerDir,
+    workflowInstance: instance,
+    reportPhase,
     delegateTo: delegateApi.delegateTo,
     delegateToAll: delegateApi.delegateToAll,
   }

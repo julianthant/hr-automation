@@ -93,6 +93,11 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
     runId: ctx.runId,
     trackerDir: ctx.trackerDir,
     signal: ctx.signal,
+    // OCR owns its own queue-row emission and bypasses ctx.step, so drive the
+    // session-drawer timeline explicitly: each orchestrator phase mirrors into
+    // ctx.reportPhase → session step_change, so the OCR WorkflowBox advances
+    // through loading-roster → … → awaiting-approval like every other workflow.
+    onPhase: (step) => ctx.reportPhase(step),
   });
   if (result.status !== "awaiting-approval") {
     // "discarded" — orchestrator already stopped emitting; the

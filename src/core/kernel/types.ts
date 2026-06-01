@@ -448,6 +448,23 @@ export interface Ctx<TSteps extends readonly string[], TData> {
    */
   trackerDir?: string
   /**
+   * The session-drawer instance name owning this run (e.g. "OCR 1",
+   * "Oath Signature 1"). Allocated by the kernel; surfaced so a handler that
+   * emits its own progress (OCR) can drive the session timeline via
+   * `reportPhase`. Undefined in trackerStub/test runs.
+   */
+  workflowInstance?: string
+  /**
+   * Push a phase into the **session-drawer timeline** (the terminal-drawer
+   * `WorkflowBox`) without emitting a queue row. The first call also marks the
+   * run's session item in-flight. Repeated calls with the same phase are
+   * coalesced. For handlers that own their own queue-row emission and so
+   * bypass `ctx.step` (today: OCR) — every other handler drives the timeline
+   * for free through `ctx.step`/`ctx.markStep`. No-op when `workflowInstance`
+   * is absent.
+   */
+  reportPhase(step: string): void
+  /**
    * Delegate to a single child workflow. The kernel stamps `parentRunId`
    * from `ctx.runId`, pre-emits the child's pending row through
    * `emitTrackerRow` with archetype stamped (Contract 1), persists the
