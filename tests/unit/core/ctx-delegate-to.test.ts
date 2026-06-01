@@ -461,7 +461,7 @@ test("ctx.delegateTo stamps the child trace id with the parent's code (provenanc
   const childTrace = (childPending!.data as { __traceId?: string }).__traceId;
   assert.ok(childTrace, "child pending row must carry a trace id");
   // Parent code "tr", NOT the child's own "zz".
-  assert.match(childTrace!, /^tr-\d{12}-[a-z0-9]{4}$/);
+  assert.match(childTrace!, /^tr-\d{6}-[a-z0-9]{4}$/);
 
   const parentPending = readWorkflowLines(trackerDir, "trace-parent-wf")
     .find((l) => l.status === "pending");
@@ -469,7 +469,7 @@ test("ctx.delegateTo stamps the child trace id with the parent's code (provenanc
   // point is it uses its OWN code, not an inherited one.
   if (parentPending) {
     const parentTrace = (parentPending.data as { __traceId?: string }).__traceId;
-    if (parentTrace) assert.match(parentTrace, /^tr-\d{12}-[a-z0-9]{4}$/);
+    if (parentTrace) assert.match(parentTrace, /^tr-\d{6}-[a-z0-9]{4}$/);
   }
 });
 
@@ -515,5 +515,5 @@ test("delegateToImpl threads an explicit rootCode into the child trace id", asyn
   const trace = (pending!.data as { __traceId?: string }).__traceId;
   assert.ok(trace, "child pending row must carry a trace id");
   // Originating code "os", NOT the child's own "zz".
-  assert.match(trace!, /^os-\d{12}-root$/);
+  assert.match(trace!, /^os-\d{6}-root$/);
 });

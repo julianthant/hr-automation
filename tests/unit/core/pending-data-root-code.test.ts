@@ -10,7 +10,7 @@ import { defineWorkflow } from "../../../src/core/index.js";
  * root row carries its own workflow `code`. Pins the consumption point at
  * `pending-data.ts` (`code: opts.rootCode ?? wf.code`).
  *
- * Format reminder: `<code>-<mmddyyHHMMSS>-<runId4>` (see queue-trace-id.ts).
+ * Format reminder: `<code>-<HHMMSS>-<runId4>` (see queue-trace-id.ts).
  */
 
 const childWorkflow = defineWorkflow({
@@ -39,7 +39,7 @@ test("buildPendingTrackerData stamps a delegated child's trace id with the root 
   });
 
   // Root (oath-signature) code prefix, NOT the child's own "pl".
-  assert.match(data.__traceId, /^os-\d{12}-abcd$/);
+  assert.match(data.__traceId, /^os-\d{6}-abcd$/);
 });
 
 test("buildPendingTrackerData falls back to the workflow's own code for a root row", () => {
@@ -53,7 +53,7 @@ test("buildPendingTrackerData falls back to the workflow's own code for a root r
     at: FIXED_AT,
   });
 
-  assert.match(data.__traceId, /^pl-\d{12}-abcd$/);
+  assert.match(data.__traceId, /^pl-\d{6}-abcd$/);
 });
 
 test("buildPendingTrackerData omits the trace id entirely when no runId is supplied", () => {
@@ -74,7 +74,7 @@ test("buildPendingTrackerData reuses a pre-frozen traceId verbatim instead of re
   // pending row (stamped seconds earlier at HTTP enqueue). It must reuse that
   // id, not mint a fresh one off `runId`+`at` — otherwise the same run shows
   // two different ids and the dashboard's latest-row-wins collapse flickers.
-  const frozen = "os-053026143012-abcd";
+  const frozen = "os-143012-abcd";
   const data = buildPendingTrackerData({
     workflow: childWorkflow,
     input: { emplId: "10000050" },

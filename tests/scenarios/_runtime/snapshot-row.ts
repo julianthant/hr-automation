@@ -58,12 +58,12 @@ function readTrackerEntries(dir: string, workflow: string): TrackerEntry[] {
 }
 
 /**
- * Trace ids (`<code>-<mmddyyHHMMSS>-<runId4>`) embed a wall-clock timestamp +
- * a slice of the random run UUID, so they're non-deterministic. Redact them to
- * a stable placeholder so snapshots lock in the *shape* without churning every
- * run. Applies to `data.__traceId` and any title/subtitle/id that renders one.
+ * Trace ids (`<code>-<HHMMSS>-<runId4>`) embed a wall-clock time + a slice of
+ * the random run UUID, so they're non-deterministic. Redact them to a stable
+ * placeholder so snapshots lock in the *shape* without churning every run.
+ * Applies to `data.__traceId` and any title/subtitle/id that renders one.
  */
-const TRACE_ID_RE = /\b[a-z0-9]{2,}-\d{12}-[a-z0-9]{4}\b/g;
+const TRACE_ID_RE = /\b[a-z0-9]{2,}-\d{6}-[a-z0-9]{4}\b/g;
 function scrubTraceId(value: string | undefined): string | undefined {
   return value === undefined ? undefined : value.replace(TRACE_ID_RE, "<traceId>");
 }

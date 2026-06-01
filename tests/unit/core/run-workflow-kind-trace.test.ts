@@ -64,7 +64,7 @@ test('runWorkflow seeds queueRowKind + __traceId onto every row (not just pendin
   assert.ok(live.length > 0, 'should have at least one running/done row')
   for (const row of live) {
     assert.equal(row.data?.queueRowKind, 'file', `live row (${row.status}) must carry queueRowKind`)
-    assert.match(row.data?.__traceId ?? '', /^kt-\d{12}-aaaa$/, `live row (${row.status}) must carry a kt-prefixed trace id`)
+    assert.match(row.data?.__traceId ?? '', /^kt-\d{6}-aaaa$/, `live row (${row.status}) must carry a kt-prefixed trace id`)
   }
 })
 

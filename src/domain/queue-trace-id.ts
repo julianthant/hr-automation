@@ -1,13 +1,16 @@
 /**
  * Human-readable, unique, log-greppable **trace id** for a queue row.
  *
- * Format: `<code>-<mmddyyHHMMSS>-<runId4>`   e.g. `ou-053026143012-a3f1`
+ * Format: `<code>-<HHMMSS>-<runId4>`   e.g. `ou-143012-a3f1`
  *
  *   - `code`    — the 2-char workflow code of the ROOT run. Provenance: a
  *                 delegated row shows the workflow that spawned its tree
  *                 (where it came from), not the child workflow.
- *   - timestamp — local `mmddyyHHMMSS` of the run's start. Human-readable
- *                 "when"; deliberately NOT relied on for uniqueness.
+ *   - time      — local `HHMMSS` (time-of-day) of the run's start. The date is
+ *                 intentionally omitted — tracker files are already
+ *                 date-partitioned (`{workflow}-{YYYY-MM-DD}.jsonl`), so the
+ *                 day is redundant. Human-readable "when"; NOT relied on for
+ *                 uniqueness.
  *   - runId4    — first 4 alphanumerics of the canonical run UUID. This is
  *                 what makes the id (a) collision-proof across same-second
  *                 batch fan-out, and (b) tied back to the real `runId` the
@@ -22,13 +25,10 @@
  */
 export function formatTraceTimestamp(at: Date): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
-  const mm = pad(at.getMonth() + 1);
-  const dd = pad(at.getDate());
-  const yy = pad(at.getFullYear() % 100);
   const HH = pad(at.getHours());
   const MM = pad(at.getMinutes());
   const SS = pad(at.getSeconds());
-  return `${mm}${dd}${yy}${HH}${MM}${SS}`;
+  return `${HH}${MM}${SS}`;
 }
 
 /** First 4 alphanumerics of the canonical run id (UUID), lowercased. */
