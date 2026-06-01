@@ -67,6 +67,7 @@ Kernel workflows get tracking for free through `defineWorkflow` + the kernel run
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Merge stale tracker lessons into current rules instead of appending another dated variant.
+- **2026-06-01: Every workflow needs an `INSTANCE_LABELS` entry (`session-events.ts`).** It maps workflow `name` ↔ session-drawer label both ways (`generateInstanceName` / `workflowNameFromInstance`). A workflow missing from it still launches a session row, but resolves to `workflow: null` — it shows up *unlabeled* in the terminal drawer ("shows up but not hooked in"). `crm-doc-download` was missing. The `tests/unit/architecture/instance-labels-coverage.test.ts` guard now fails loudly if any registered workflow lacks an entry (and checks the label round-trips) — add the new workflow's label there when scaffolding.
 - **Projection writes fail loud and recover async.** JSONL writes first, then SQLite projection applies; repeated projection failures should schedule guarded rebuilds rather than block workflow hot paths.
 - **DB handles are file-sensitive.** A live dashboard may outlast `.tracker/state.db` deletion/recreation; resolve DB handles at request/tick time.
 - **JSONL readers validate at the boundary.** Use focused validators and preserve each caller's public no-match value.
