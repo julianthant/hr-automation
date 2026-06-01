@@ -7,13 +7,13 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
 
 /**
  * Fallback title for daemon / dashboard batch cards when no projection title is
- * supplied (the projection's `batchGroupTitle` is the primary path). Session-
- * local ordinals (`Person Lookup 1`, `<label> · #1234`) are retired:
+ * supplied (the projection's `batchGroupTitle` is the primary path).
  *
- *   - `titleOverride` (e.g. an inherited delegated-batch label) wins outright.
- *   - File/roster batches surface their document identity (`pdfOriginalName`).
- *   - Person batches have NO synthetic title — the `{done}/{total}` count badge
- *     and the member-name preview already identify the bag of people.
+ * A batch is titled **only by a PDF filename**. Person / arbitrary batches have
+ * NO title — the `{done}/{total}` count badge + the member-name preview already
+ * identify the bag of people. A `titleOverride` is honored only when it is
+ * itself a PDF filename (an inherited delegated *file*-batch label); a random /
+ * person name is never used as a title.
  */
 export function resolveDaemonBatchQueueTitle(
   _workflowLabel: string,
@@ -21,9 +21,9 @@ export function resolveDaemonBatchQueueTitle(
   _batchParentRunId: string,
   titleOverride?: string,
 ): string {
-  if (titleOverride && titleOverride.length > 0) return titleOverride;
   const pdfName = members.map((m) => m.data?.pdfOriginalName).find((v) => v != null && v !== "");
   if (pdfName) return pdfName;
+  if (titleOverride && /\.pdf$/i.test(titleOverride)) return titleOverride;
   return "";
 }
 

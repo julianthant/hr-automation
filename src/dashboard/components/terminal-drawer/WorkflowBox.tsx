@@ -485,7 +485,9 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     <div
       className={cn(
         "shrink-0 w-[290px] rounded-xl border bg-card/60 transition-[border-color,box-shadow,opacity]",
-        "flex flex-col cursor-pointer",
+        // h-full + parent items-stretch makes every card fill the tallest
+        // card's height instead of hugging its own content.
+        "h-full flex flex-col cursor-pointer",
         active ? "" : "opacity-55",
         borderClass,
       )}
