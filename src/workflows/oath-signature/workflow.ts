@@ -75,9 +75,11 @@ const oathSignatureSteps = ["ocr", "fan-out", "ucpath-auth", "transaction"] as c
  *
  * `betweenItems: ["reset"]` keeps the browser but resets it to
  * `about:blank` between items so a stuck Person Profile page from item N
- * doesn't leak into item N+1's navigation. Only the signer branch
- * touches the browser; PDF runs never call `ctx.page("ucpath")` and so
- * never trigger Duo auth.
+ * doesn't leak into item N+1's navigation. Only the signer branch touches
+ * the browser AND authenticates UCPath (the system `login` is a no-op;
+ * Duo is deferred to the signer branch's `ucpath-auth` step). A PDF run
+ * never calls `ctx.page("ucpath")` and never triggers Duo — and a delegated
+ * PDF run's signer children Duo only after OCR approval.
  */
 export const oathSignatureWorkflow = defineWorkflow({
   name: WORKFLOW,
@@ -90,10 +92,16 @@ export const oathSignatureWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page, instance, context) => {
-        const ok = await loginToUCPath(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("UCPath authentication failed");
-      },
+      // No-op at session launch. UCPath auth is deferred to the signer
+      // branch's `ucpath-auth` step (see `runSignerBranch`) so:
+      //   - a PDF run never triggers Duo (it skips that branch entirely), and
+      //   - a delegated PDF run's signer children only Duo AFTER OCR approval,
+      //     when they actually reach UCPath.
+      // The kernel authenticates every declared system eagerly at launch
+      // (daemon startup or in-process `Session.launch`), so a real `login`
+      // here would fire Duo before any OCR/approval work — exactly what the
+      // upload flow must avoid. Mirrors oath-upload's ServiceNow deferral.
+      login: async () => {},
     },
   ],
   authSteps: false,
@@ -196,8 +204,18 @@ async function runSignerBranch(
   // so the dashboard StepPipeline collapses the missing dots cleanly.
   ctx.skipStep("ocr");
   ctx.skipStep("fan-out");
-  ctx.markStep("ucpath-auth");
+
+  // UCPath auth is deferred from session launch to here (the system's `login`
+  // is a no-op). A signer run authenticates only when it actually needs
+  // UCPath — for delegated fan-out children, that's AFTER OCR approval, not at
+  // the start of the PDF run. `loginToUCPath` is idempotent
+  // ("already_logged_in" → true), so on a daemon only the first signer item
+  // shows Duo and the rest reuse the warm session.
   const page = await ctx.page("ucpath");
+  await ctx.step("ucpath-auth", async () => {
+    const ok = await loginToUCPath(page, undefined, ctx.signal);
+    if (!ok) throw new Error("UCPath authentication failed");
+  });
 
   await ctx.step("transaction", async () => {
     // The live-page probe inside buildOathSignaturePlan still skips the
