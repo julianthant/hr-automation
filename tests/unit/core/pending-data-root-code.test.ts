@@ -16,7 +16,7 @@ import { defineWorkflow } from "../../../src/core/index.js";
 const childWorkflow = defineWorkflow({
   name: "trace-child-test",
   code: "pl",
-  queueRowKind: "person",
+  inputSubject: "eid",
   systems: [],
   steps: ["done"] as const,
   schema: z.object({ emplId: z.string() }),

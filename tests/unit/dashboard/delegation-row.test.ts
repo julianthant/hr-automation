@@ -111,7 +111,7 @@ test("single-signer approved batch card shows duration and child row retry/delet
   assert.match(html, /aria-label="Delete this (entry|run) permanently"/);
 });
 
-test("running single-signer child keeps duration without premature retry/delete icons", () => {
+test("running single-signer child shows uniform retry/delete footer ops", () => {
   const html = renderDelegationRow(
     {
       workflow: "ocr",
@@ -140,7 +140,10 @@ test("running single-signer child keeps duration without premature retry/delete 
     "OCR",
   );
 
+  // Footers are uniform: every single-signer/preview card shows retry + delete
+  // regardless of status. Per-status gating is the kernel's job (action
+  // descriptors), not the row component's.
   assert.match(html, /\d+m \d+s|\d+s/);
-  assert.doesNotMatch(html, /aria-label="Retry this run"/);
-  assert.doesNotMatch(html, /aria-label="Delete this (entry|run) permanently"/);
+  assert.match(html, /aria-label="Retry this run"/);
+  assert.match(html, /aria-label="Delete this (entry|run) permanently"/);
 });

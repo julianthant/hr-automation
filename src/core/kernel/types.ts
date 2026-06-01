@@ -3,7 +3,7 @@ import type { ZodType } from 'zod'
 import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
-import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
+import type { QueueRowKindOrResolver, InputSubjectOrResolver } from '../../domain/queue-row-kind.js'
 import type { WorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 
@@ -146,13 +146,17 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   /** Declarative row shape. Defaults to "batch" if `batch` is set, else "single". */
   archetype?: WorkflowArchetypeOrResolver<TData>
   /**
-   * Subject-semantics kind for queue title/subtitle resolution — `person`,
-   * `file`, or `catalog`. Either a literal or a resolver `(input) => kind`
-   * for input-variant workflows (e.g. oath-signature: `pdf` → file, `signer`
-   * → person). Orthogonal to `archetype` (shape) and `parentRunId` (scope).
-   * See `domain/queue-row-kind.ts`.
+   * What this workflow receives as input — `name | eid | email | kualiId |
+   * pdf | selector`. Either a literal or a resolver `(input) => subject` for
+   * input-variant workflows (e.g. oath-signature: `pdf` → pdf, `eid` → eid).
+   * The presentation `queueRowKind` (person/file/catalog) is *derived* from
+   * this; workflows do not declare `queueRowKind` directly. Orthogonal to
+   * `archetype` (shape) and `parentRunId` (scope). See `domain/queue-row-kind.ts`.
+   * Optional in the type (defaults to `name` → person); the
+   * `queue-row-kind-coverage` architecture guard enforces an explicit
+   * declaration on every real workflow.
    */
-  queueRowKind?: QueueRowKindOrResolver<TData>
+  inputSubject?: InputSubjectOrResolver<TData>
   /**
    * Optional per-workflow queue-row **status** rules — the status axis,
    * orthogonal to `queueRowKind` (title/subtitle). Lets a workflow promote a

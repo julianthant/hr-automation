@@ -26,7 +26,6 @@ describe("oath-signature scenario: pdf branch — cancel during ocr approval", (
     t.onTestFinished(() => rt.cleanup());
 
     const input = {
-      kind: "pdf" as const,
       pdfPath: "/tmp/oath-cancel.pdf",
       pdfOriginalName: "oath-cancel.pdf",
       sessionId: "scenario-pdf-cancel",

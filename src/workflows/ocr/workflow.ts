@@ -53,7 +53,7 @@ export const ocrWorkflow = defineWorkflow({
   name: "ocr",
   label: "OCR",
   archetype: "preview",
-  queueRowKind: "file",
+  inputSubject: "pdf",
   statusExtensions: ocrStatusExtensions,
   code: "oc",
   category: "Utils",

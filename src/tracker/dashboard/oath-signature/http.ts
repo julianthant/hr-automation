@@ -58,7 +58,6 @@ export async function enqueueOathSignaturePdf(
   }
   const sessionId = args.sessionId ?? randomUUID();
   const input: OathPdfInput = {
-    kind: "pdf",
     pdfPath: args.pdfPath,
     pdfOriginalName: args.pdfOriginalName,
     sessionId,

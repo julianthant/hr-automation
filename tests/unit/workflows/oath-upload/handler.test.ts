@@ -90,7 +90,6 @@ test("oathUploadHandler: walks delegate-signatures → open-hr-form → fill-for
 
     assert.equal(delegateWorkflow, "oath-signature");
     assert.deepEqual(delegateInput, {
-      kind: "pdf",
       pdfPath: "/tmp/test.pdf",
       pdfOriginalName: "test.pdf",
       pdfFileId: "file-1",
@@ -164,7 +163,6 @@ test("oathUploadHandler: dryRun propagates to delegated PDF run and skips Servic
     });
 
     assert.deepEqual(delegateInput, {
-      kind: "pdf",
       pdfPath: "/tmp/dry.pdf",
       pdfOriginalName: "dry.pdf",
       sessionId: "session-dry",

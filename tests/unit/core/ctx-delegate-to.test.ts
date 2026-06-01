@@ -420,7 +420,7 @@ test("ctx.delegateTo stamps the child trace id with the parent's code (provenanc
   const child = defineWorkflow({
     name: "trace-child-wf",
     code: "zz",
-    queueRowKind: "person",
+    inputSubject: "name",
     archetype: "single",
     systems: [],
     authSteps: false,
@@ -436,7 +436,7 @@ test("ctx.delegateTo stamps the child trace id with the parent's code (provenanc
   const parent = defineWorkflow({
     name: "trace-parent-wf",
     code: "tr",
-    queueRowKind: "person",
+    inputSubject: "name",
     archetype: "single",
     systems: [],
     authSteps: false,
@@ -484,7 +484,7 @@ test("delegateToImpl threads an explicit rootCode into the child trace id", asyn
   const child = defineWorkflow({
     name: "rootcode-child-wf",
     code: "zz",
-    queueRowKind: "person",
+    inputSubject: "name",
     archetype: "single",
     systems: [],
     authSteps: false,

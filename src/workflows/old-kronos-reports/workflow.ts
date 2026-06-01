@@ -165,7 +165,7 @@ export const kronosReportsWorkflow = defineWorkflow({
   name: "kronos-reports",
   label: "Kronos Reports",
   archetype: "batch",
-  queueRowKind: "person",
+  inputSubject: "eid",
   code: "kr",
   category: "Timekeeping",
   iconName: "FileText",

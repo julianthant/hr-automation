@@ -181,7 +181,6 @@ test("buildOathSignerInputFromApprovedRecord: matched selected record → signer
     dateSigned: "05/01/2026",
   });
   assert.deepEqual(input, {
-    kind: "signer",
     emplId: "10000910",
     name: "Person 905",
     date: "05/01/2026",

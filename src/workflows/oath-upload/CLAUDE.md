@@ -13,7 +13,8 @@ oath-signature tab.
 Given an `OathUploadInput` (`pdfPath`, `pdfOriginalName`, `sessionId`, `pdfHash`):
 
 1. `delegate-signatures` — call
-   `ctx.delegateTo(oathSignatureWorkflow, { kind: "pdf", ... }, { itemId: input.sessionId })`.
+   `ctx.delegateTo(oathSignatureWorkflow, { pdfPath, pdfOriginalName, sessionId, ... }, { itemId: input.sessionId })`
+   (the PDF variant, identified by `pdfPath` presence — no `kind` tag).
    The delegated oath-signature PDF run owns OCR, operator approval, and
    signer fan-out. The pinned `itemId` keeps restart/retry identity stable via
    the kernel's `tasks.original_input_json` contract.
@@ -75,7 +76,8 @@ a retry after a submitted ticket does not file a duplicate HR inquiry.
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section and `src/workflows/oath-signature/CLAUDE.md` before adding oath-upload delegation lessons. Keep the local model aligned with `docs/engineering/workflow-vocabulary.md`.
-- **2026-05-27: Oath Upload delegates to oath-signature, not OCR/signature internals.** Full-mode uploads delegate one `{ kind: "pdf" }` child to oath-signature and wait for that delegated batch-stage row to finish. Oath-signature owns its normal PDF branch after that: OCR preview, EID lookup/verification, approval, and signer fan-out. The parented PDF row keeps `archetype: "batch"` plus `parentRunId`; delegated scope is not a separate row archetype.
+- **2026-06-01: oath-signature input has no `kind` discriminator.** The delegated child is the PDF variant identified by `pdfPath` presence (`isOathPdfInput`), not `{ kind: "pdf" }`. `inputSubject` (`pdf`/`eid`) drives the derived `queueRowKind`.
+- **2026-05-27: Oath Upload delegates to oath-signature, not OCR/signature internals.** Full-mode uploads delegate one PDF-variant child to oath-signature and wait for that delegated batch-stage row to finish. Oath-signature owns its normal PDF branch after that: OCR preview, EID lookup/verification, approval, and signer fan-out. The parented PDF row keeps `archetype: "batch"` plus `parentRunId`; delegated scope is not a separate row archetype.
 - **2026-05-26: Oath Upload collapsed onto kernel delegation.** Plan A Commit 4 removed the local OCR prepare call, `waitForOcrApproval`, and `watchChildRuns` polling from the handler. Full-mode uploads now run one `delegate-signatures` step that delegates `{ kind: "pdf", ... }` to oath-signature with `itemId: input.sessionId`; oath-signature owns OCR approval and signer fan-out. Oath-upload only resumes to file ServiceNow after the delegated run is terminal.
 - **2026-05-24: Oath Upload is a single row.** The row stays flat in the oath-upload tab. Delegated signature work appears in oath-signature's tab; do not nest children under the oath-upload row.
 - **OCR-delegating workflows need the roster picker.** Any Run modal for a workflow that depends on OCR roster matching must expose the same roster controls as the OCR modal. Never hardcode `rosterMode` at the dispatch site; thread `rosterMode` and `rosterPath` into the delegated PDF input.

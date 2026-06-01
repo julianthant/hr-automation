@@ -24,7 +24,6 @@ describe("oath-signature scenario: pdf branch — single signer", () => {
 
     // 1) PDF-branch row
     const pdfInput = {
-      kind: "pdf" as const,
       pdfPath: "/tmp/oath-single.pdf",
       pdfOriginalName: "oath-single.pdf",
       sessionId: "scenario-pdf-single",
@@ -38,7 +37,6 @@ describe("oath-signature scenario: pdf branch — single signer", () => {
     // 2) The one signer that came out of OCR approval. PDF approval is a
     //    batch path even when only one signer is selected.
     const signerInput = {
-      kind: "signer" as const,
       emplId: "10000050",
       name: "Solo Signer",
       __runtimeOptions: { rowShape: "batch-member" as const },

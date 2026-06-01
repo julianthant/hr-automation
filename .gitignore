@@ -46,6 +46,7 @@ docs/*
 
 # Tracker data (local runtime)
 .tracker/
+.screenshots/
 
 # Excel tracking files
 *.xlsx

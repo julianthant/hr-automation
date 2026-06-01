@@ -117,7 +117,7 @@ export const separationsWorkflow = defineWorkflow({
   name: "separations",
   label: "Separations",
   archetype: "single",
-  queueRowKind: "person",
+  inputSubject: "kualiId",
   code: "se",
   category: "Separations",
   iconName: "UserMinus",

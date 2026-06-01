@@ -17,8 +17,10 @@ import { ocrWorkflow } from "../ocr/index.js";
 import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
 import {
   OathSignatureInputSchema,
+  isOathPdfInput,
   type OathSignatureInput,
   type OathSignerInput,
+  type OathPdfInput,
 } from "./schema.js";
 
 /**
@@ -57,17 +59,19 @@ const oathSignatureSteps = ["ocr", "fan-out", "ucpath-auth", "transaction"] as c
 /**
  * Kernel definition for the Oath Signature workflow.
  *
- * Two input variants share this workflow definition:
+ * Two input variants share this workflow definition, told apart by field
+ * presence (`isOathPdfInput`):
  *
- *  - `kind: "signer"` (today's per-EID flow): one person, one row, one
+ *  - signer (`emplId`, today's per-EID flow): one person, one row, one
  *    PeopleSoft transaction. Each EID is independent — daemon mode
  *    enqueues 1:1 and the daemon processes them sequentially on one
  *    browser (or fans out via `--parallel`).
- *  - `kind: "pdf"` (paper-roster flow): one input is one PDF; the
+ *  - pdf (`pdfPath`, paper-roster flow): one input is one PDF; the
  *    handler delegates to the OCR workflow (which awaits operator
  *    approval) and then `delegateToAll`s back into oath-signature with
- *    N `kind: "signer"` inputs. The discriminator gates the recursion —
- *    fan-out children never re-enter the PDF branch.
+ *    N signer (EID) inputs. The fan-out children carry `emplId`, so the
+ *    presence guard routes them to the signer branch — they never
+ *    re-enter the PDF branch.
  *
  * `betweenItems: ["reset"]` keeps the browser but resets it to
  * `about:blank` between items so a stuck Person Profile page from item N
@@ -78,8 +82,8 @@ const oathSignatureSteps = ["ocr", "fan-out", "ucpath-auth", "transaction"] as c
 export const oathSignatureWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Oath Signature",
-  archetype: (input: OathSignatureInput) => (input.kind === "pdf" ? "batch" : "single"),
-  queueRowKind: (input: OathSignatureInput) => (input.kind === "pdf" ? "file" : "person"),
+  archetype: (input: OathSignatureInput) => (isOathPdfInput(input) ? "batch" : "single"),
+  inputSubject: (input: OathSignatureInput) => (isOathPdfInput(input) ? "pdf" : "eid"),
   code: "os",
   category: "Onboarding",
   iconName: "ClipboardSignature",
@@ -113,7 +117,7 @@ export const oathSignatureWorkflow = defineWorkflow({
   // because `buildInitialTrackerData`'s seed drops fields not produced by
   // `initialData` / `operatorSubject`.
   initialData: (input) => {
-    if (input.kind === "pdf") {
+    if (isOathPdfInput(input)) {
       return {
         pdfOriginalName: input.pdfOriginalName,
         sessionId: input.sessionId,
@@ -133,9 +137,8 @@ export const oathSignatureWorkflow = defineWorkflow({
   getName: (d) => {
     if (d && typeof d === "object") {
       const r = d as Record<string, unknown>;
-      if (r.kind === "pdf" || typeof r.pdfOriginalName === "string") {
-        return typeof r.pdfOriginalName === "string" ? r.pdfOriginalName : "";
-      }
+      // PDF (roster) seed → title by the PDF filename; signer seed → person name.
+      if (typeof r.pdfOriginalName === "string") return r.pdfOriginalName;
       if (typeof r.name === "string") return r.name;
     }
     return "";
@@ -143,15 +146,14 @@ export const oathSignatureWorkflow = defineWorkflow({
   getId: (d) => {
     if (d && typeof d === "object") {
       const r = d as Record<string, unknown>;
-      if (r.kind === "pdf" || typeof r.sessionId === "string") {
-        return typeof r.sessionId === "string" ? r.sessionId : "";
-      }
+      // PDF (roster) seed → id by sessionId; signer seed → emplId.
+      if (typeof r.sessionId === "string") return r.sessionId;
       if (typeof r.emplId === "string") return r.emplId;
     }
     return "";
   },
   operatorSubject: (input) => {
-    if (input.kind === "pdf") {
+    if (isOathPdfInput(input)) {
       return buildOperatorSubject({
         kind: "pdf",
         value: input.pdfOriginalName ?? input.sessionId,
@@ -165,7 +167,7 @@ export const oathSignatureWorkflow = defineWorkflow({
     });
   },
   handler: async (ctx, input) => {
-    if (input.kind === "pdf") {
+    if (isOathPdfInput(input)) {
       await runPdfBranch(ctx, input);
       return;
     }
@@ -254,7 +256,7 @@ async function runSignerBranch(
  */
 async function runPdfBranch(
   ctx: Parameters<typeof oathSignatureWorkflow.config.handler>[0],
-  input: Extract<OathSignatureInput, { kind: "pdf" }>,
+  input: OathPdfInput,
 ): Promise<void> {
   ctx.updateData({
     __name: input.pdfOriginalName,
@@ -376,7 +378,6 @@ export function buildOathSignerInputFromApprovedRecord(
   const dateSigned = typeof r.dateSigned === "string" ? r.dateSigned : null;
   const normalizedDate = normalizeOathDate(dateSigned);
   return {
-    kind: "signer",
     emplId,
     ...(displayName ? { name: displayName } : {}),
     ...(normalizedDate ? { date: normalizedDate } : {}),
@@ -433,18 +434,15 @@ function readApprovedSignerInputs(args: ReadApprovedArgs): OathSignerInput[] {
 
 /**
  * Internal in-process adapter. Single EID only — multi-EID in-process batches
- * aren't supported here (daemon mode covers that case). Accepts the legacy
- * shape (no `kind` field) for internal callers — the schema discriminator
- * requires `kind`, so we inject `"signer"` if it's missing.
+ * aren't supported here (daemon mode covers that case). A bare signer input
+ * (`{ emplId, ... }`) is already a valid `OathSignatureInput` now that the
+ * union discriminates by field presence — no `kind` injection needed.
  */
 export async function runOathSignature(
-  input: OathSignatureInput | Omit<OathSignerInput, "kind">,
+  input: OathSignatureInput,
 ): Promise<void> {
-  const normalized: OathSignatureInput = "kind" in input
-    ? input as OathSignatureInput
-    : { kind: "signer", ...(input as Omit<OathSignerInput, "kind">) };
   try {
-    await runWorkflow(oathSignatureWorkflow, normalized);
+    await runWorkflow(oathSignatureWorkflow, input);
     log.success("Oath signature workflow completed");
   } catch (err) {
     log.error(`Oath signature failed: ${errorMessage(err)}`);
@@ -455,7 +453,7 @@ export async function runOathSignature(
 function buildOathSignaturePendingData(item: OathSignatureInput): Record<string, string> {
   const parentSubject = item.parentSubject;
   const queueFields = parentSubject ? rootQueueTitleData(parentSubject) : {};
-  if (item.kind === "pdf") {
+  if (isOathPdfInput(item)) {
     return {
       sessionId: item.sessionId,
       pdfOriginalName: item.pdfOriginalName,
@@ -480,28 +478,20 @@ function buildOathSignaturePendingData(item: OathSignatureInput): Record<string,
 /**
  * Internal daemon-mode adapter.
  *
- * Accepts the legacy bare `{ emplId, ... }` shape for back-compat with
- * existing internal CLI callers and tests; injects `kind: "signer"` so
- * the schema discriminator is satisfied. Callers that already pass
- * `kind: "signer"` or `kind: "pdf"` go through unchanged.
+ * Both input variants are plain `OathSignatureInput` values now that the union
+ * discriminates by field presence — a signer item is `{ emplId, ... }`, a PDF
+ * item is `{ pdfPath, ... }`, no `kind` tag.
  *
  * One input batch can carry N items — they enqueue 1:1 to the shared
  * daemon queue, and whichever alive daemon finishes its current item
  * first claims the next.
  */
-export type OathSignatureCliInput =
-  | OathSignatureInput
-  | Omit<OathSignerInput, "kind">;
-
-function ensureKind(input: OathSignatureCliInput): OathSignatureInput {
-  if ("kind" in input) return input as OathSignatureInput;
-  return { kind: "signer", ...(input as Omit<OathSignerInput, "kind">) };
-}
+export type OathSignatureCliInput = OathSignatureInput;
 
 export const runOathSignatureCli = buildCliAdapter<[OathSignatureCliInput[]], OathSignatureInput>({
   workflow: oathSignatureWorkflow,
   emptyMessage: "runOathSignatureCli: no inputs provided",
-  buildInputs: (inputs) => inputs.map(ensureKind),
-  deriveItemId: (input) => (input.kind === "pdf" ? input.sessionId : input.emplId),
+  buildInputs: (inputs) => inputs,
+  deriveItemId: (input) => (isOathPdfInput(input) ? input.sessionId : input.emplId),
   buildPendingData: (input) => buildOathSignaturePendingData(input),
 });

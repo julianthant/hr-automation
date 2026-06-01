@@ -14,10 +14,12 @@
  *   catalog — one named registry entry (roster/report). Title: spec label.
  *             Subtitle: trace id.
  *
- * Declared on `defineWorkflow` as `queueRowKind` — either a literal kind or a
- * resolver `(input) => QueueRowKind` for workflows whose kind depends on the
- * input variant (e.g. oath-signature: `pdf` → file, `signer` → person),
- * mirroring the `archetype` resolver pattern in `row-archetype.ts`.
+ * NOT declared directly on `defineWorkflow` — it is *derived* from the
+ * workflow's `inputSubject` (see `InputSubject` / `queueRowKindFromInputSubject`
+ * below) inside the kernel normalizer, then stamped onto every row. Workflows
+ * declare their input subject (`name`/`eid`/`email`/`kualiId`/`pdf`/`selector`),
+ * a literal or a resolver for input-variant workflows (e.g. oath-signature:
+ * `pdf` → file, `eid` → person).
  */
 export type QueueRowKind = "person" | "file" | "catalog";
 
@@ -48,6 +50,73 @@ export function resolveQueueRowKindFromValue<TInput>(
     );
   }
   return result;
+}
+
+/**
+ * Input **subject** — what a workflow receives as input, declared on every
+ * `defineWorkflow` as `inputSubject`. This is the single source axis the
+ * presentation `queueRowKind` is *derived* from (see `subjectToQueueRowKind`);
+ * workflows no longer declare `queueRowKind` directly.
+ *
+ *   name     — a person identified by name (separations' employee,
+ *              emergency-contact records, person-lookup name search).
+ *   eid      — a person identified by employee id (work-study, old-kronos,
+ *              oath-signature signer, person-lookup EID search).
+ *   email    — a person identified by email (onboarding, crm-doc-download).
+ *   kualiId  — a person identified by a Kuali document id (separations input).
+ *   pdf      — an uploaded document (ocr, oath-upload, oath-signature pdf).
+ *   selector — a catalog/registry selection with no person/file identifier
+ *              (sharepoint-download — you pick which spec to download).
+ *
+ * Many subjects funnel onto the three presentation kinds: every
+ * person-identifying subject → `person`, `pdf` → `file`, `selector` →
+ * `catalog`. The funnel keeps the presentation taxonomy small while letting
+ * each workflow name its input precisely.
+ */
+export type InputSubject = "name" | "eid" | "email" | "kualiId" | "pdf" | "selector";
+
+const SUBJECT_TO_KIND: Record<InputSubject, QueueRowKind> = {
+  name: "person",
+  eid: "person",
+  email: "person",
+  kualiId: "person",
+  pdf: "file",
+  selector: "catalog",
+};
+
+export function isInputSubject(v: unknown): v is InputSubject {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(SUBJECT_TO_KIND, v);
+}
+
+/** Map an input subject to its presentation queue-row kind. Fails loud on a bad value. */
+export function subjectToQueueRowKind(subject: InputSubject): QueueRowKind {
+  if (!isInputSubject(subject)) {
+    throw new Error(
+      `subjectToQueueRowKind: ${JSON.stringify(subject)} is not a valid InputSubject ` +
+        `(expected one of: ${Object.keys(SUBJECT_TO_KIND).join(", ")}).`,
+    );
+  }
+  return SUBJECT_TO_KIND[subject];
+}
+
+export type InputSubjectResolver<TInput> = (input: TInput) => InputSubject;
+export type InputSubjectOrResolver<TInput> = InputSubject | InputSubjectResolver<TInput>;
+
+/**
+ * Convert a workflow's declared `inputSubject` (literal or resolver) into the
+ * derived `QueueRowKindOrResolver` the stamping pipeline consumes. A resolver
+ * subject becomes a resolver kind; a literal subject is mapped eagerly. Bad
+ * values fail loud via `subjectToQueueRowKind` — same policy as
+ * `resolveQueueRowKindFromValue`.
+ */
+export function queueRowKindFromInputSubject<TInput>(
+  subject: InputSubjectOrResolver<TInput>,
+): QueueRowKindOrResolver<TInput> {
+  if (typeof subject === "function") {
+    const resolver = subject as InputSubjectResolver<TInput>;
+    return (input: TInput) => subjectToQueueRowKind(resolver(input));
+  }
+  return subjectToQueueRowKind(subject);
 }
 
 interface KindEntry {
