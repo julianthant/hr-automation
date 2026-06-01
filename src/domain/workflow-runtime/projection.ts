@@ -94,11 +94,13 @@ function withTargets(
  * cluster is exactly what this returns:
  *
  *   running          → cancel (×)
- *   pending (queued) → bump (▲) + cancel (×) + delete (🗑 = cancel+delete)
+ *   pending (queued) → bump (▲) + cancel (×)
  *   terminal         → retry (↻) + delete (🗑)
  *
- * A cancelled row is `status: "failed"` (with `step: "cancelled"`), so it
- * falls into the terminal branch — retry + delete, as intended.
+ * A queued row has no delete: cancelling it (×) moves it to a terminal state,
+ * which is where delete (🗑) then becomes available. A cancelled row is
+ * `status: "failed"` (with `step: "cancelled"`), so it falls into the terminal
+ * branch — retry + delete, as intended.
  */
 export function rowActionEnabledForStatus(
   kind: WorkflowActionKind,
@@ -112,7 +114,7 @@ export function rowActionEnabledForStatus(
     case "bump":
       return status === "pending";
     case "delete":
-      return status === "pending" || terminal;
+      return terminal;
     case "retry":
       return terminal;
     default:

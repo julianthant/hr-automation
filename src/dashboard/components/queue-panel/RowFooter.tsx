@@ -36,7 +36,7 @@ export interface RowFooterRowAction {
  * Flat-row buttons follow one schema, status-gated by the kernel projection
  * (`rowActionEnabledForStatus`). Each button self-hides on its descriptor's
  * `enabled` flag, so the visible cluster is purely status-driven:
- *   running → ×  ·  queued → ▲ × 🗑  ·  done/failed → ↻ 🗑
+ *   running → ×  ·  queued → ▲ ×  ·  done/failed → ↻ 🗑
  */
 export interface RowFooterProps {
   time: string;
