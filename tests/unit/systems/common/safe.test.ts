@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Locator } from "playwright";
 import { clickIfPresent, safeClick, safeFill } from "../../../../src/systems/common/safe.js";
 import { withLogContext } from "../../../../src/utils/log.js";
+import { logsDir } from "../../../../src/tracker/jsonl.js";
 
 /**
  * These tests use lightweight duck-typed fakes for Playwright's Locator
@@ -65,10 +66,10 @@ async function runWithLogCapture<T>(
     console.log = origLog;
     console.error = origErr;
   }
-  if (existsSync(dir)) {
-    for (const file of readdirSync(dir)) {
+  if (existsSync(logsDir(dir))) {
+    for (const file of readdirSync(logsDir(dir))) {
       if (!file.endsWith(".jsonl")) continue;
-      const contents = readFileSync(join(dir, file), "utf-8");
+      const contents = readFileSync(join(logsDir(dir), file), "utf-8");
       for (const line of contents.split("\n").filter(Boolean)) {
         const parsed = JSON.parse(line) as { level: string; message: string };
         result.entries.push({ level: parsed.level, message: parsed.message });

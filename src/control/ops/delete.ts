@@ -7,12 +7,18 @@
  * discard path.
  */
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
-import { basename, join, resolve, sep } from "path";
+import { basename, resolve, sep } from "path";
 import { PATHS } from "../../config.js";
 import { readSessionEvents } from "../../tracker/session-events.js";
 import { openStateDb } from "../../tracker/state/db.js";
 import { transaction } from "../../infra/sqlite/index.js";
 import { rewriteJsonlFile } from "../../tracker/jsonl-rewrite.js";
+import {
+  logFilePath,
+  rowFilePath,
+  rowsDir,
+  parseWorkflowDateFilename,
+} from "../../tracker/paths.js";
 
 export interface DeleteEntryRequest {
   workflow: string;
@@ -57,11 +63,11 @@ function applyDeleteTargets(
   const byFile = groupDeleteTargetsByFile(targets);
   for (const [fileKey, fileTargets] of byFile) {
     const [targetWorkflow, targetDate] = fileKey.split("\0") as [string, string];
-    rewriteJsonlFile(join(dir, `${targetWorkflow}-${targetDate}.jsonl`), (row) => {
+    rewriteJsonlFile(rowFilePath(targetWorkflow, targetDate, dir), (row) => {
       return !matchesAnyDeleteTarget(asString(row.id), asString(row.runId), fileTargets);
     });
 
-    rewriteJsonlFile(join(dir, `${targetWorkflow}-${targetDate}-logs.jsonl`), (row) => {
+    rewriteJsonlFile(logFilePath(targetWorkflow, targetDate, dir), (row) => {
       return !matchesAnyDeleteTarget(asString(row.itemId), asString(row.runId), fileTargets);
     });
   }
@@ -242,7 +248,7 @@ function collectRootRunIds(db: ReturnType<typeof openStateDb>, dir: string, req:
     ORDER BY run_ordinal ASC
   `).all(req) as Array<{ run_id: string }>;
   const runIds = new Set(rows.map((row) => row.run_id));
-  const path = join(dir, `${req.workflow}-${req.date}.jsonl`);
+  const path = rowFilePath(req.workflow, req.date, dir);
   if (existsSync(path)) {
     for (const line of readFileSync(path, "utf-8").split("\n").filter(Boolean)) {
       try {
@@ -258,17 +264,18 @@ function collectRootRunIds(db: ReturnType<typeof openStateDb>, dir: string, req:
 
 function readJsonlChildrenForParent(dir: string, parentRunId: string): DeleteTarget[] {
   const targets: DeleteTarget[] = [];
+  const rows = rowsDir(dir);
   let names: string[];
   try {
-    names = readdirSync(dir);
+    names = readdirSync(rows);
   } catch {
     return targets;
   }
   for (const name of names) {
-    const match = /^(.+)-(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(name);
-    if (!match || name.endsWith("-logs.jsonl")) continue;
-    const [, workflow, date] = match;
-    const path = join(dir, name);
+    const parsed = parseWorkflowDateFilename(name);
+    if (!parsed) continue;
+    const { workflow, date } = parsed;
+    const path = rowFilePath(workflow, date, dir);
     for (const line of readFileSync(path, "utf-8").split("\n").filter(Boolean)) {
       try {
         const row = JSON.parse(line) as { id?: string; runId?: string; parentRunId?: string };

@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { emitTrackerRow, dateLocal, type TrackerRowEmission } from "../../jsonl.js";
@@ -9,6 +8,8 @@ import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
+import { rowFilePath } from "../../paths.js";
+import { DEFAULT_DIR } from "../../jsonl.js";
 import type { OcrLookupKind } from "../../../services/ocr/eid-lookup-results.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../../services/ocr/eid-lookup-results.js";
 
@@ -53,7 +54,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
     let backgroundStarted = false;
     try {
       const date = opts.date ?? dateLocal();
-      const file = join(trackerDir ?? ".tracker", `ocr-${date}.jsonl`);
+      const file = rowFilePath(WORKFLOW, date, trackerDir ?? DEFAULT_DIR);
       if (!existsSync(file)) return { status: 404, body: { ok: false, error: "OCR row not found" } };
       const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
       let row: TrackerEntry | null = null;

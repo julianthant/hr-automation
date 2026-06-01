@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, appendFileSync, existsSync } from "fs";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type Server } from "http";
@@ -11,6 +11,7 @@ import { closeStateDbForTests, openStateDb, stateDbPath } from "../../../src/tra
 import { emitSessionEvent, readSessionEvents } from "../../../src/tracker/session-events.js";
 import { querySessionEventsForRun } from "../../../src/tracker/state/queries.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, rowsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 
 /**
  * Build a hub URL for a single subscription.
@@ -163,7 +164,8 @@ describe("/events/run-events SSE", () => {
   it("skips malformed JSONL lines without crashing", async () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "I", runId: "A" }, tmp);
     const sessionDay = dateLocal();
-    appendFileSync(join(tmp, `sessions-${sessionDay}.jsonl`), "{not-valid-json\n");
+    mkdirSync(sessionsDir(tmp), { recursive: true });
+    appendFileSync(sessionFilePath(sessionDay, tmp), "{not-valid-json\n");
     emitSessionEvent({ type: "auth_complete", workflowInstance: "I", runId: "A", system: "crm", browserId: "b1" }, tmp);
 
     const messages = await collectSSE(
@@ -229,7 +231,8 @@ describe("/events SSE JSONL fallback", () => {
     const tmp = mkdtempSync(join(tmpdir(), "events-jsonl-fallback-"));
     const date = "2026-04-19";
     try {
-      appendFileSync(join(tmp, `onboarding-${date}.jsonl`), JSON.stringify({
+      mkdirSync(rowsDir(tmp), { recursive: true });
+      appendFileSync(rowFilePath("onboarding", date, tmp), JSON.stringify({
         workflow: "onboarding",
         timestamp: "2026-04-19T10:00:00Z",
         id: "alice@example.com",

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runForceResearch } from "../../../../src/workflows/ocr/force-research.js";
-import { dateLocal } from "../../../../src/tracker/jsonl.js";
+import { dateLocal, rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 import type { ChildOutcome } from "../../../../src/tracker/delegation/watch-child-runs.js";
 
 function makeDir(): string {
@@ -27,12 +27,13 @@ function writeOcrRow(dir: string, sessionId: string, runId: string, records: unk
       records: JSON.stringify(records),
     },
   };
-  writeFileSync(join(dir, `ocr-${date}.jsonl`), JSON.stringify(entry) + "\n");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  writeFileSync(rowFilePath("ocr", date, dir), JSON.stringify(entry) + "\n");
 }
 
 function readLastTrackerEntry(dir: string): Record<string, unknown> {
   const date = dateLocal();
-  const file = join(dir, `ocr-${date}.jsonl`);
+  const file = rowFilePath("ocr", date, dir);
   const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
   return JSON.parse(lines[lines.length - 1]!);
 }

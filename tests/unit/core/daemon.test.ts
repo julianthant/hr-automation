@@ -15,6 +15,7 @@ import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
+import { rowFilePath } from '../../../src/tracker/paths.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 
 // Fake Session that has no browsers — works fine because our test workflow
@@ -256,7 +257,7 @@ test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row arch
     await runPromise
 
     const date = dateLocal()
-    const jsonlPath = join(dir, `dint-stop-queued-display-${date}.jsonl`)
+    const jsonlPath = rowFilePath('dint-stop-queued-display', date, dir)
     const rows = readFileSync(jsonlPath, 'utf-8')
       .split('\n')
       .filter(Boolean)
@@ -547,7 +548,7 @@ test('runWorkflowDaemon: in-flight shutdown-cancel rows preserve title and row a
     assert.equal(task.state, 'cancelled')
 
     const date = dateLocal()
-    const jsonlPath = join(dir, `dint-stop-running-display-${date}.jsonl`)
+    const jsonlPath = rowFilePath('dint-stop-running-display', date, dir)
     const rows = readFileSync(jsonlPath, 'utf-8')
       .split('\n')
       .filter(Boolean)
@@ -876,7 +877,7 @@ test('runWorkflowDaemon: forwards QueueItem.parentRunId into runOneItem so track
 
     // Verify tracker JSONL rows for this item carry parentRunId.
     const date = dateLocal()
-    const jsonlPath = join(dir, `dint-parent-${date}.jsonl`)
+    const jsonlPath = rowFilePath('dint-parent', date, dir)
     const raw = readFileSync(jsonlPath, 'utf-8')
     const rows = raw
       .split('\n')

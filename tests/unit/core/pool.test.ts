@@ -8,6 +8,7 @@ import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { runWorkflowPool } from '../../../src/core/kernel/pool.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 import { readSessionEvents } from '../../../src/tracker/session-events.js'
+import { rowFilePath, rowsDir } from '../../../src/tracker/paths.js'
 
 const fakeLaunch = () => Promise.resolve({
   page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
@@ -25,7 +26,7 @@ function fakeSlot() {
 
 function readTrackerEntries(dir: string, workflow: string): Array<Record<string, unknown>> {
   const today = dateLocal()
-  const path = join(dir, `${workflow}-${today}.jsonl`)
+  const path = rowFilePath(workflow, today, dir)
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')
     .split('\n')
@@ -175,11 +176,11 @@ test('runWorkflowPool: initialData merges into each item pending entry', async (
 
   await runWorkflowPool(wf, [{ n: 1 }, { n: 2 }], { launchFn: fakeLaunch, trackerDir: dir })
 
-  const entryFiles = readdirSync(dir).filter((f) =>
-    f.startsWith('test-pool-init-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl')
+  const entryFiles = readdirSync(rowsDir(dir)).filter((f) =>
+    f.startsWith('test-pool-init-') && f.endsWith('.jsonl')
   )
   assert.ok(entryFiles.length > 0, 'tracker jsonl file exists')
-  const lines = readFileSync(join(dir, entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const lines = readFileSync(join(rowsDir(dir), entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   const pendings = lines.filter((l: any) => l.status === 'pending')
   assert.equal(pendings.length, 2, `expected 2 pending entries, got ${pendings.length}`)
   const labels = pendings.map((p: any) => p.data.label).sort()

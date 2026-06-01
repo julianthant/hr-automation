@@ -9,7 +9,15 @@ import { parseSubsQuery } from "../../../../src/tracker/dashboard/hono/topics.js
 import { createDashboardServer } from "../../../../src/tracker/dashboard.js";
 import { closeStateDbForTests } from "../../../../src/tracker/state/db.js";
 import { emitSessionEvent } from "../../../../src/tracker/session-events.js";
-import { dateLocal } from "../../../../src/tracker/jsonl.js";
+import {
+  dateLocal,
+  rowFilePath,
+  logFilePath,
+  sessionFilePath,
+  rowsDir,
+  logsDir,
+  sessionsDir,
+} from "../../../../src/tracker/jsonl.js";
 
 // ── parseSubsQuery validation tests ──────────────────────────────────────────
 
@@ -181,7 +189,8 @@ describe("/events/hub integration", () => {
 
   test("hub emits envelope with sub id and data for telegram subscription", async () => {
     // Write a telegram_sent session event so the first tick has data
-    const sessionsDated = join(dir, `sessions-${new Date().toISOString().slice(0, 10)}.jsonl`);
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    const sessionsDated = sessionFilePath(new Date().toISOString().slice(0, 10), dir);
     appendFileSync(
       sessionsDated,
       JSON.stringify({
@@ -218,7 +227,8 @@ describe("/events/hub integration", () => {
 
   test("hub emits telegram envelope when events live in a dated sessions file", async () => {
     const iso = new Date().toISOString();
-    const sessionsFile = join(dir, `sessions-${dateLocal(new Date(iso))}.jsonl`);
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    const sessionsFile = sessionFilePath(dateLocal(new Date(iso)), dir);
     appendFileSync(
       sessionsFile,
       JSON.stringify({
@@ -382,10 +392,12 @@ describe("/events/hub logs + runEvents topics", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "hub-logs-test-"));
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(rowsDir(dir), { recursive: true });
+    mkdirSync(logsDir(dir), { recursive: true });
+    mkdirSync(sessionsDir(dir), { recursive: true });
 
     // Write a couple of log entries so the logs topic has data to return.
-    const logsFile = join(dir, `${testWorkflow}-${today}-logs.jsonl`);
+    const logsFile = logFilePath(testWorkflow, today, dir);
     appendFileSync(
       logsFile,
       JSON.stringify({
@@ -410,7 +422,7 @@ describe("/events/hub logs + runEvents topics", () => {
     );
 
     // Write a tracker entry + session event for runEvents topic.
-    const trackerFile = join(dir, `${testWorkflow}-${today}.jsonl`);
+    const trackerFile = rowFilePath(testWorkflow, today, dir);
     appendFileSync(
       trackerFile,
       JSON.stringify({
@@ -423,7 +435,7 @@ describe("/events/hub logs + runEvents topics", () => {
         data: { instance: "Onboarding 1" },
       }) + "\n",
     );
-    const sessionsDatedFile = join(dir, `sessions-${today}.jsonl`);
+    const sessionsDatedFile = sessionFilePath(today, dir);
     appendFileSync(
       sessionsDatedFile,
       JSON.stringify({
@@ -517,7 +529,7 @@ describe("/events/hub logs + runEvents topics", () => {
     // Prepend a pending row (no data.instance) BEFORE the running row that
     // beforeEach already wrote. Append-order matters — pending must come
     // first in the file so `Array.find` would have returned it.
-    const trackerFile = join(dir, `${testWorkflow}-${today}.jsonl`);
+    const trackerFile = rowFilePath(testWorkflow, today, dir);
     const existingContents = readFileSync(trackerFile, "utf-8");
     const pendingRow =
       JSON.stringify({
@@ -573,7 +585,7 @@ describe("/events/hub logs + runEvents topics", () => {
 
   test("two logs subscriptions on the same hub with different params get correctly demuxed", async () => {
     // Write a second item's log entry
-    const logsFile = join(dir, `${testWorkflow}-${today}-logs.jsonl`);
+    const logsFile = logFilePath(testWorkflow, today, dir);
     const secondItemId = "test-item-2";
     const secondRunId = `${secondItemId}#1`;
     appendFileSync(

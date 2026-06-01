@@ -15,9 +15,10 @@
 
 import { afterEach, beforeEach, test, describe } from "vitest";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { rowFilePath, logFilePath, rowsDir, logsDir } from "../../../src/tracker/paths.js";
 
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
@@ -55,15 +56,17 @@ function appendTrackerEntry(workflow: string, entry: Partial<TrackerEntry>): voi
     data: {},
     ...entry,
   };
-  appendFileSync(join(dir, `${workflow}-${TEST_DATE}.jsonl`), `${JSON.stringify(full)}\n`);
+  mkdirSync(rowsDir(dir), { recursive: true });
+  appendFileSync(rowFilePath(workflow, TEST_DATE, dir), `${JSON.stringify(full)}\n`);
 }
 
 function appendLog(
   workflow: string,
   entry: Record<string, unknown>,
 ): void {
+  mkdirSync(logsDir(dir), { recursive: true });
   appendFileSync(
-    join(dir, `${workflow}-${TEST_DATE}-logs.jsonl`),
+    logFilePath(workflow, TEST_DATE, dir),
     `${JSON.stringify(entry)}\n`,
   );
 }

@@ -2,6 +2,24 @@
 
 JSONL + SQLite projection for workflow observability. Workflow handlers should use `ctx.step`, `ctx.markStep`, and `ctx.updateData`; they should not call tracker primitives directly.
 
+## Directory layout (`.tracker/`)
+
+`src/tracker/paths.ts` is the **single source of truth** for every path under the tracker dir. Never build a `join(trackerDir, ...)` path inline — add a helper there instead.
+
+```
+.tracker/
+├── state.db (+ -wal, -shm)        SQLite live truth (root; see state/db.ts)
+├── rows/      <workflow>-<date>.jsonl   tracker / queue rows
+├── logs/      <workflow>-<date>.jsonl   operator log lines (NOTE: no "-logs" suffix)
+├── sessions/  <date>.jsonl              session events (NOTE: no "sessions-" prefix)
+├── runtime/   rotation-state-*.json     runtime state (OCR key rotation, …)
+├── daemons/   <workflow>-<ISO>.log + *.queue.jsonl + *.lock.json
+├── debug/     row-lifecycle-<date>.{json,jsonl}
+├── pdf-cache/ , uploads/               artifacts
+```
+
+Row **kind is the directory**, not a filename suffix: a `rows/` file and a `logs/` file share the identical `<workflow>-<date>.jsonl` name. Classify by `trackerKindForPath(path)` (parent-dir segment), never by `.endsWith("-logs.jsonl")` or a `sessions-` prefix. Helpers: `rowFilePath` / `logFilePath` / `sessionFilePath` / `runtimeFilePath`, the `*Dir` accessors, and `parseWorkflowDateFilename` / `parseSessionFilename`. All are re-exported from the `jsonl.ts` barrel.
+
 ## Row Emission
 
 - New persisted rows go through `emitTrackerRow` in `jsonl-io.ts`.
@@ -54,3 +72,4 @@ Kernel workflows get tracking for free through `defineWorkflow` + the kernel run
 - **OCR discard is a cancel variant.** Keep it routed through central cancel/control paths with OCR context.
 - **Row lifecycle debug is observational only.** It replays JSONL and must not mutate classification inputs or become streamed state.
 - **Caches are bounded and resettable.** Register test-visible caches in `__resetAllDashboardCachesForTests()`.
+- **2026-06-01: `.tracker/` is split into typed subdirs; `paths.ts` owns all path construction.** Rows → `rows/`, logs → `logs/` (dropped the `-logs` suffix), sessions → `sessions/` (dropped the `sessions-` prefix), OCR rotation state → `runtime/`. `state.db` + `daemons/`/`debug/`/`pdf-cache/`/`uploads/` are unchanged. Kind is now conveyed by **directory** (`trackerKindForPath`), so the old suffix/prefix classification special-cases collapsed. `clean:tracker` now also prunes `daemons/*.log` (was unbounded — a fresh timestamped file per daemon launch) via `cleanOldDaemonLogs`. **Gotcha:** raw `appendFileSync`/`writeFileSync` in tests must `mkdirSync(rowsDir(dir)|logsDir(dir)|sessionsDir(dir), {recursive:true})` first — those fns don't create parent dirs (the production `appendJsonlWithSource` does). **Inventory gotcha:** the original touchpoint sweep missed a reader in `src/workflows/` — `oath-upload/duplicate-check.ts` scanned the flat dir; when restructuring tracker paths, grep `src/workflows/` and `src/domain/` too, not just `src/tracker/` + `src/control/`.

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   getSessionsFilePathForDate,
 } from "../../../src/tracker/session-events.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 
 describe("sessions-* date rotation", () => {
   let dir: string;
@@ -23,12 +24,13 @@ describe("sessions-* date rotation", () => {
   it("writes new events to a date-suffixed file", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Test 1" }, dir);
     const today = dateLocal();
-    assert.ok(existsSync(join(dir, `sessions-${today}.jsonl`)));
+    assert.ok(existsSync(sessionFilePath(today, dir)));
   });
 
   it("reads from every dated snapshot file under the tracker dir", () => {
+    mkdirSync(sessionsDir(dir), { recursive: true });
     writeFileSync(
-      join(dir, "sessions-2026-01-01.jsonl"),
+      sessionFilePath("2026-01-01", dir),
       JSON.stringify({
         type: "workflow_start",
         timestamp: "2026-01-01T00:00:00.000Z",
@@ -38,7 +40,7 @@ describe("sessions-* date rotation", () => {
     );
     // Seed another old dated file.
     writeFileSync(
-      join(dir, "sessions-2026-04-01.jsonl"),
+      sessionFilePath("2026-04-01", dir),
       JSON.stringify({
         type: "workflow_start",
         timestamp: "2026-04-01T00:00:00.000Z",
@@ -57,12 +59,12 @@ describe("sessions-* date rotation", () => {
   it("getSessionsFilePathForDate returns the dated path", () => {
     assert.equal(
       getSessionsFilePathForDate("2026-05-07", dir),
-      join(dir, "sessions-2026-05-07.jsonl"),
+      sessionFilePath("2026-05-07", dir),
     );
   });
 
   it("getSessionsFilePath returns today's dated path", () => {
     const today = dateLocal();
-    assert.equal(getSessionsFilePath(dir), join(dir, `sessions-${today}.jsonl`));
+    assert.equal(getSessionsFilePath(dir), sessionFilePath(today, dir));
   });
 });

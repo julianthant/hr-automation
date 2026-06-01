@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "vitest";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -8,6 +8,7 @@ import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.
 import { getActiveHonoCaptureSseSubscriberCountForTests } from "../../../src/tracker/dashboard/hono/sse.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, rowsDir, logFilePath, logsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 
 let dir: string;
 
@@ -32,7 +33,8 @@ function app() {
 function appendSessionEvent(event: Record<string, unknown>): void {
   const tsStr = typeof event.timestamp === "string" ? event.timestamp : new Date().toISOString();
   const day = dateLocal(new Date(tsStr));
-  appendFileSync(join(dir, `sessions-${day}.jsonl`), `${JSON.stringify(event)}\n`);
+  mkdirSync(sessionsDir(dir), { recursive: true });
+  appendFileSync(sessionFilePath(day, dir), `${JSON.stringify(event)}\n`);
 }
 
 function appendTrackerEntry(workflow: string, date: string, entry: Partial<TrackerEntry>): void {
@@ -45,11 +47,13 @@ function appendTrackerEntry(workflow: string, date: string, entry: Partial<Track
     data: {},
     ...entry,
   };
-  appendFileSync(join(dir, `${workflow}-${date}.jsonl`), `${JSON.stringify(full)}\n`);
+  mkdirSync(rowsDir(dir), { recursive: true });
+  appendFileSync(rowFilePath(workflow, date, dir), `${JSON.stringify(full)}\n`);
 }
 
 function appendLog(workflow: string, date: string, log: Record<string, unknown>): void {
-  appendFileSync(join(dir, `${workflow}-${date}-logs.jsonl`), `${JSON.stringify(log)}\n`);
+  mkdirSync(logsDir(dir), { recursive: true });
+  appendFileSync(logFilePath(workflow, date, dir), `${JSON.stringify(log)}\n`);
 }
 
 async function readSseMessages(
@@ -185,7 +189,7 @@ test("Hono /events/logs replays snapshot when source length shrinks", async () =
   );
   setTimeout(() => {
     writeFileSync(
-      join(dir, "onboarding-2026-04-19-logs.jsonl"),
+      logFilePath("onboarding", "2026-04-19", dir),
       `${JSON.stringify({
         workflow: "onboarding",
         itemId: "alice@example.com",

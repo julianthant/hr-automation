@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import { enqueueFromHttp } from "../../../src/core/daemon/enqueue-dispatch.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { rowFilePath } from "../../../src/tracker/paths.js";
 
 vi.mock("../../../src/core/daemon/client.js", () => ({
   ensureDaemonsAndEnqueue: vi.fn().mockResolvedValue({ enqueued: [], daemons: [] }),
@@ -21,7 +22,7 @@ function tempTrackerDir(): string {
 }
 
 function readRows(trackerDir: string, workflow: string): TrackerEntry[] {
-  const path = join(trackerDir, `${workflow}-${dateLocal()}.jsonl`);
+  const path = rowFilePath(workflow, dateLocal(), trackerDir);
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8")
     .trim()

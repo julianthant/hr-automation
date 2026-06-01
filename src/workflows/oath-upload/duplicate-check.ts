@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { promises as fsp } from "node:fs";
 import { createHash } from "node:crypto";
 import { openControlDb } from "../../core/control-db.js";
-import { readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
+import { readEntriesForDate, rowsDir, type TrackerEntry } from "../../tracker/jsonl.js";
 
 export interface PriorRunSummary {
   sessionId: string;
@@ -92,10 +92,11 @@ export function findPriorRunsForHash(opts: FindPriorRunsOpts): PriorRunSummary[]
     // SQLite unavailable or schema mismatch — fall through to JSONL.
   }
 
-  // JSONL fallback.
-  if (!existsSync(dir)) return [];
+  // JSONL fallback. Tracker rows live in the `rows/` subdirectory.
+  const rows = rowsDir(dir);
+  if (!existsSync(rows)) return [];
 
-  const files = readdirSync(dir)
+  const files = readdirSync(rows)
     .filter((f) => f.startsWith("oath-upload-") && f.endsWith(".jsonl"))
     .sort()
     .reverse();

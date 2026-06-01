@@ -2,6 +2,7 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { rowFilePath } from "../../../src/tracker/paths.js";
 import { tmpdir } from "node:os";
 import { trackEvent, dateLocal } from "../../../src/tracker/jsonl.js";
 import {
@@ -66,7 +67,7 @@ test("buildOathUploadCancelHandler: writes step=cancel-requested sentinel on the
     const r = await h({ sessionId: "session-x" });
     assert.equal(r.status, 200);
 
-    const file = join(dir, `oath-upload-${dateLocal()}.jsonl`);
+    const file = rowFilePath("oath-upload", dateLocal(), dir);
     const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     const sentinel = lines.find((l) => l.step === "cancel-requested");
     assert.ok(sentinel, "expected a cancel-requested entry");
@@ -161,7 +162,7 @@ test("sweepStuckOathUploadRows: marks pending/running rows as failed step=swept"
 
     sweepStuckOathUploadRows(dir);
 
-    const file = join(dir, `oath-upload-${dateLocal()}.jsonl`);
+    const file = rowFilePath("oath-upload", dateLocal(), dir);
     const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     const sweptForPend = lines.find((l) => l.id === "s-pend" && l.step === "swept");
     const sweptForRun = lines.find((l) => l.id === "s-run" && l.step === "swept");

@@ -13,7 +13,7 @@ import {
   workflowNameFromInstance,
 } from "../../../src/tracker/session-events.js";
 import { filterEventsForRun, filterLiveSessionState, rebuildSessionState } from "../../../src/tracker/dashboard.js";
-import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { dateLocal, sessionsDir, sessionFilePath } from "../../../src/tracker/jsonl.js";
 
 function tempDir(): string {
   const d = join(tmpdir(), `sessions-test-${randomUUID()}`);
@@ -293,7 +293,7 @@ describe("rebuildSessionState — workflows", () => {
       pid: 999999,
     };
     // Write directly to bypass the auto-pid injection
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(sessionsDir(dir), { recursive: true });
     writeFileSync(path, JSON.stringify(event) + "\n");
 
     const state = rebuildSessionState(dir);
@@ -362,6 +362,7 @@ describe("rebuildSessionState — workflows", () => {
       type: "workflow_end", timestamp: stale, pid: 999999,
       workflowInstance: "Stale Crash", finalStatus: "failed",
     };
+    mkdirSync(sessionsDir(dir), { recursive: true });
     writeFileSync(path, JSON.stringify(start) + "\n" + JSON.stringify(end) + "\n");
 
     const state = rebuildSessionState(dir);
@@ -590,10 +591,11 @@ describe("rebuildSessionState — screenshot scenario", () => {
 const TMP = () => mkdtempSync(join(tmpdir(), "hrauto-gin-"));
 
 function writeSessionsRaw(dir: string, lines: object[]): void {
+  mkdirSync(sessionsDir(dir), { recursive: true });
   for (const l of lines) {
     const rec = l as { timestamp?: string };
     const tsStr = typeof rec.timestamp === "string" ? rec.timestamp : new Date().toISOString();
-    const path = join(dir, `sessions-${dateLocal(new Date(tsStr))}.jsonl`);
+    const path = sessionFilePath(dateLocal(new Date(tsStr)), dir);
     appendFileSync(path, `${JSON.stringify(l)}\n`);
   }
 }

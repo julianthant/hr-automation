@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 import type { WatchChildRunsOpts } from "../../../../src/tracker/delegation/watch-child-runs.js";
 import { openStateDb } from "../../../../src/tracker/state/db.js";
 import { registerLocalFile } from "../../../../src/tracker/files/files.js";
@@ -108,7 +109,8 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
 test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   // Pre-populate v1 history in JSONL
-  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
   writeFileSync(ocrFile, JSON.stringify({
     workflow: "ocr", id: "session-1", runId: "run-prev",
     status: "done", step: "approved",
@@ -404,9 +406,9 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
     },
   );
 
-  const eidFileName = readdirSync(dir).find((file) => /^person-lookup-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
+  const eidFileName = readdirSync(rowsDir(dir)).find((file) => /^person-lookup-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file));
   assert.ok(eidFileName, "expected a person-lookup tracker file");
-  const eidFile = join(dir, eidFileName);
+  const eidFile = join(rowsDir(dir), eidFileName);
   assert.equal(existsSync(eidFile), true, "delegated person-lookup pending row should be written immediately");
   const entries = readFileSync(eidFile, "utf-8").trim().split("\n").map((line) => JSON.parse(line));
   const pending = entries.find((entry: any) => entry.status === "pending" && entry.id === "ocr-oath-run-preemit-eid-r0");

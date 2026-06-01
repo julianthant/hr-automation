@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { dateLocal, rowFilePath, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 import { resolveRowArchetype } from "../../../src/domain/row-archetype.js";
 import { buildTrackerQueueSurfaces } from "../../../src/tracker/queue-surfaces.js";
 import { buildWorkflowRunProjection } from "../../../src/domain/workflow-runtime/projection.js";
@@ -48,7 +48,7 @@ export interface RowSnapshot {
 }
 
 function readTrackerEntries(dir: string, workflow: string): TrackerEntry[] {
-  const path = join(dir, `${workflow}-${dateLocal()}.jsonl`);
+  const path = rowFilePath(workflow, dateLocal(), dir);
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8")
     .trim()

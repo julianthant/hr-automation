@@ -7,6 +7,7 @@ import { withLogContext, setLogRunId } from "../../../src/utils/log.js";
 import { emitStepChange, readSessionEvents, type SessionEvent } from "../../../src/tracker/session-events.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
+import { logFilePath, logsDir } from "../../../src/tracker/paths.js";
 
 const today = () => dateLocal();
 
@@ -16,8 +17,8 @@ describe("emitStepChange dedupe against recent step log", () => {
   afterEach(() => { if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true }); });
 
   function appendStepLog(workflow: string, runId: string, step: string, ts: string): void {
-    const path = join(tmp, `${workflow}-${today()}-logs.jsonl`);
-    if (!existsSync(tmp)) mkdirSync(tmp, { recursive: true });
+    mkdirSync(logsDir(tmp), { recursive: true });
+    const path = logFilePath(workflow, today(), tmp);
     appendFileSync(path, JSON.stringify({
       workflow, itemId: "alice@example.com", runId, level: "step",
       message: `step started: ${step}`, ts,
@@ -102,7 +103,8 @@ test("emitStepChange wildcard escape: % in step name does not over-match unrelat
     // emitStepChange discovers workflows by scanning *-{date}-logs.jsonl
     // filenames; create an empty file so the dedupe loop iterates with
     // wf="onboarding" and recentStepLogExists is actually called.
-    appendFileSync(join(dir, `onboarding-${date}-logs.jsonl`), "");
+    mkdirSync(logsDir(dir), { recursive: true });
+    appendFileSync(logFilePath("onboarding", date, dir), "");
 
     await withLogContext("onboarding", "alice@example.com", async () => {
       setLogRunId("alice@example.com#1");

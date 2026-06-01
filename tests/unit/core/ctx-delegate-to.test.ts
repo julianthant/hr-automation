@@ -21,6 +21,7 @@ import {
   delegateToImpl,
 } from "../../../src/core/delegate.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { rowFilePath } from "../../../src/tracker/paths.js";
 
 interface TrackerLine {
   workflow: string;
@@ -34,7 +35,7 @@ interface TrackerLine {
 }
 
 function readWorkflowLines(trackerDir: string, workflow: string): TrackerLine[] {
-  const file = join(trackerDir, `${workflow}-${dateLocal()}.jsonl`);
+  const file = rowFilePath(workflow, dateLocal(), trackerDir);
   if (!existsSync(file)) return [];
   return readFileSync(file, "utf8")
     .split("\n")

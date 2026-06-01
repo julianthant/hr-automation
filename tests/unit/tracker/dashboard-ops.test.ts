@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, rowsDir, logFilePath, logsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
@@ -52,6 +53,9 @@ import {
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "dash-ops-"));
+  mkdirSync(rowsDir(tmp), { recursive: true });
+  mkdirSync(logsDir(tmp), { recursive: true });
+  mkdirSync(sessionsDir(tmp), { recursive: true });
 });
 afterEach(() => {
   closeStateDbForTests(tmp);
@@ -366,7 +370,7 @@ describe("buildSaveDataHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const entries = readFileSync(join(tmp, "separations-2026-05-15.jsonl"), "utf8")
+    const entries = readFileSync(rowFilePath("separations", "2026-05-15", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -397,13 +401,13 @@ describe("buildSaveDataHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const priorDateEntries = readFileSync(join(tmp, "separations-2026-05-11.jsonl"), "utf8")
+    const priorDateEntries = readFileSync(rowFilePath("separations", "2026-05-11", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(priorDateEntries.at(-1).data.transactionNumber, "new");
 
-    const todayFile = readdirSync(tmp).find((file) => {
+    const todayFile = readdirSync(rowsDir(tmp)).find((file) => {
       return /^separations-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file) && file !== "separations-2026-05-11.jsonl";
     });
     assert.equal(todayFile, undefined);
@@ -479,9 +483,9 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const ocrLines = readFileSync(join(tmp, "ocr-2026-05-09.jsonl"), "utf8").trim();
+    const ocrLines = readFileSync(rowFilePath("ocr", "2026-05-09", tmp), "utf8").trim();
     assert.equal(ocrLines, "");
-    const eidLines = readFileSync(join(tmp, "eid-lookup-2026-05-09.jsonl"), "utf8")
+    const eidLines = readFileSync(rowFilePath("eid-lookup", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .filter(Boolean)
@@ -510,7 +514,7 @@ describe("buildDeleteEntryHandler", () => {
     writeFileSync(deletedShot, "png");
     writeFileSync(keptShot, "png");
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "other", runId: "run-2", status: "done" }),
@@ -536,7 +540,7 @@ describe("buildDeleteEntryHandler", () => {
     writeFileSync(run1Shot, "png");
     writeFileSync(run2Shot, "png");
     writeFileSync(
-      join(tmp, "sessions-2026-05-09.jsonl"),
+      sessionFilePath("2026-05-09", tmp),
       [
         JSON.stringify({
           type: "screenshot",
@@ -565,7 +569,7 @@ describe("buildDeleteEntryHandler", () => {
       ].join("\n") + "\n",
     );
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "done" }),
@@ -586,14 +590,14 @@ describe("buildDeleteEntryHandler", () => {
 
   it("deletes a scoped tracker run via explicit legacy-shaped runId", () => {
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "3930", runId: "3930#1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "other", runId: "run-2", status: "done" }),
       ].join("\n") + "\n",
     );
     writeFileSync(
-      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      logFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "3930#1", message: "legacy" }),
         JSON.stringify({ workflow: "separations", itemId: "other", runId: "run-2", message: "other" }),
@@ -608,11 +612,11 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+    const trackerLines = readFileSync(rowFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    const logLines = readFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "utf8")
+    const logLines = readFileSync(logFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -622,7 +626,7 @@ describe("buildDeleteEntryHandler", () => {
 
   it("deletes all runs for an item when runId is omitted", () => {
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "done" }),
@@ -630,7 +634,7 @@ describe("buildDeleteEntryHandler", () => {
       ].join("\n") + "\n",
     );
     writeFileSync(
-      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      logFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-1", message: "first" }),
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-2", message: "second" }),
@@ -645,11 +649,11 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+    const trackerLines = readFileSync(rowFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    const logLines = readFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "utf8")
+    const logLines = readFileSync(logFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -659,14 +663,14 @@ describe("buildDeleteEntryHandler", () => {
 
   it("deletes only the requested run and promotes the previous run in SQLite", () => {
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "done" }),
       ].join("\n") + "\n",
     );
     writeFileSync(
-      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      logFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-1", message: "first" }),
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-2", message: "second" }),
@@ -767,11 +771,11 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+    const trackerLines = readFileSync(rowFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    const logLines = readFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "utf8")
+    const logLines = readFileSync(logFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -788,7 +792,7 @@ describe("buildDeleteEntryHandler", () => {
 
   it("compacts SQLite run ordinals after deleting a middle run", () => {
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-1", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "3930", runId: "run-2", status: "failed" }),
@@ -796,7 +800,7 @@ describe("buildDeleteEntryHandler", () => {
       ].join("\n") + "\n",
     );
     writeFileSync(
-      join(tmp, "separations-2026-05-09-logs.jsonl"),
+      logFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-1", message: "first" }),
         JSON.stringify({ workflow: "separations", itemId: "3930", runId: "run-2", message: "second" }),
@@ -848,14 +852,14 @@ describe("buildDeleteEntryHandler", () => {
 describe("buildDeleteBulkHandler", () => {
   it("deletes multiple items for the same workflow and date", () => {
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "a", status: "done" }),
         JSON.stringify({ workflow: "separations", id: "b", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "c", status: "pending" }),
       ].join("\n") + "\n",
     );
-    writeFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "\n");
+    writeFileSync(logFilePath("separations", "2026-05-09", tmp), "\n");
 
     const result = buildDeleteBulkHandler(tmp)({
       workflow: "separations",
@@ -865,7 +869,7 @@ describe("buildDeleteBulkHandler", () => {
 
     assert.equal(result.errors.length, 0);
     assert.equal(result.count, 2);
-    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+    const trackerLines = readFileSync(rowFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -874,14 +878,14 @@ describe("buildDeleteBulkHandler", () => {
 
   it("can delete only scoped runs for repeated item ids", () => {
     writeFileSync(
-      join(tmp, "separations-2026-05-09.jsonl"),
+      rowFilePath("separations", "2026-05-09", tmp),
       [
         JSON.stringify({ workflow: "separations", id: "a", runId: "run-old", status: "done" }),
         JSON.stringify({ workflow: "separations", id: "a", runId: "run-batch", status: "failed" }),
         JSON.stringify({ workflow: "separations", id: "b", runId: "run-batch-b", status: "failed" }),
       ].join("\n") + "\n",
     );
-    writeFileSync(join(tmp, "separations-2026-05-09-logs.jsonl"), "\n");
+    writeFileSync(logFilePath("separations", "2026-05-09", tmp), "\n");
 
     const result = buildDeleteBulkHandler(tmp)({
       workflow: "separations",
@@ -894,7 +898,7 @@ describe("buildDeleteBulkHandler", () => {
 
     assert.equal(result.errors.length, 0);
     assert.equal(result.count, 2);
-    const trackerLines = readFileSync(join(tmp, "separations-2026-05-09.jsonl"), "utf8")
+    const trackerLines = readFileSync(rowFilePath("separations", "2026-05-09", tmp), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));

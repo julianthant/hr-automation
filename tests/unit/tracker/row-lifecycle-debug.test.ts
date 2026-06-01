@@ -1,8 +1,9 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 
 import {
   buildRowLifecycles,
@@ -157,8 +158,9 @@ describe("runRowLifecycleDebugSweep", () => {
       entry({ id: "ws-1", status: "running", step: "updating", timestamp: ts(1) }),
       entry({ id: "ws-1", status: "done", step: "updating", timestamp: ts(2) }),
     ];
+    mkdirSync(rowsDir(dir), { recursive: true });
     writeFileSync(
-      join(dir, `work-study-${date}.jsonl`),
+      rowFilePath("work-study", date, dir),
       lines.map((l) => JSON.stringify(l)).join("\n") + "\n",
     );
 

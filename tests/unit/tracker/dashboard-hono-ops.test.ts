@@ -11,6 +11,7 @@ import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { dateLocal, trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import {
   resetDaemonSpawnStubs,
   stubDaemonSpawn,
@@ -159,7 +160,7 @@ test("Hono /api/cancel-queued routes OCR discard context through workflow action
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { ok: true });
 
-  const parentFile = join(dir, `oath-upload-${dateLocal()}.jsonl`);
+  const parentFile = rowFilePath("oath-upload", dateLocal(), dir);
   assert.ok(existsSync(parentFile));
   const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
   const parent = JSON.parse(parentLines[parentLines.length - 1]);

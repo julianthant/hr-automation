@@ -1,6 +1,14 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
+import {
+  logFilePath,
+  logsDir,
+  parseSessionFilename,
+  parseWorkflowDateFilename,
+  sessionFilePath,
+  sessionsDir,
+} from "./paths.js";
 import { makeTailState, tailIncremental } from "./tail-incremental.js";
 import { getLogRunId } from "../utils/log-context.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
@@ -68,14 +76,9 @@ export interface SessionEvent {
 
 // ── File paths ─────────────────────────────────────────
 //
-// Sessions rotate into dated files (`sessions-YYYY-MM-DD.jsonl`) the same
-// way tracker entries do. Reads aggregate every dated file in the tracker
-// directory.
-
-const SESSIONS_PREFIX = "sessions-";
-const SESSIONS_SUFFIX = ".jsonl";
-const LEGACY_SESSIONS_FILE = "sessions.jsonl";
-const SESSIONS_DATE_RE = /^sessions-\d{4}-\d{2}-\d{2}\.jsonl$/;
+// Sessions rotate into dated files under the `sessions/` subdirectory
+// (`<dir>/sessions/YYYY-MM-DD.jsonl`). Reads aggregate every dated file in
+// that directory. Path construction lives in `paths.ts`.
 
 // ── readSessionEvents cache ────────────────────────────────
 // Session files are append-only. Cache parsed events per file by
@@ -105,7 +108,7 @@ export function getSessionsFilePathForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): string {
-  return join(dir, `${SESSIONS_PREFIX}${date}${SESSIONS_SUFFIX}`);
+  return sessionFilePath(date, dir);
 }
 
 // ── Read / Write ───────────────────────────────────────
@@ -136,19 +139,17 @@ export function emitSessionEvent(
 
 export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
   const out: SessionEvent[] = [];
+  const sessions = sessionsDir(dir);
   let files: string[];
   try {
-    files = readdirSync(dir).filter(
-      (f) => f === LEGACY_SESSIONS_FILE || SESSIONS_DATE_RE.test(f),
-    );
+    files = readdirSync(sessions).filter((f) => parseSessionFilename(f) !== null);
   } catch {
     return out; // dir doesn't exist
   }
-  // Sort by date for deterministic ordering. Legacy file sorts first
-  // (no date in its name; treat as oldest).
+  // Sort by date (filename is `YYYY-MM-DD.jsonl`) for deterministic ordering.
   files.sort();
   for (const f of files) {
-    const filePath = join(dir, f);
+    const filePath = join(sessions, f);
     let stat: { mtimeMs: number; size: number };
     try {
       stat = statSync(filePath);
@@ -275,7 +276,7 @@ function recentStepLogExists(
   // JSONL fallback — bounded byte tail read of today's logs file. ~2 KB
   // covers the last ~10–20 lines, which is far more than the 50ms window
   // can produce. Avoids the multi-MB readFileSync the previous impl did.
-  const path = join(dir, `${workflow}-${dateLocal()}-logs.jsonl`);
+  const path = logFilePath(workflow, dateLocal(), dir);
   let size: number;
   try { size = statSync(path).size; } catch { return false; }
   const tailBytes = Math.min(size, STEP_LOG_TAIL_BYTES);
@@ -312,18 +313,20 @@ export function emitStepChange(instance: string, step: string, dir?: string, wor
     if (workflow && recentStepLogExists(workflow, runId, step, resolvedDir)) {
       return;
     }
-    // Scan all today's *-logs.jsonl files in resolvedDir (since we don't have
+    // Scan all of today's log files in the `logs/` subdir (since we don't have
     // the workflow name here, only the instance label). Constant-cost: each
     // scan reads the tail of one or two small JSONL files.
     if (!workflow) {
+      const today = dateLocal();
+      const logs = logsDir(resolvedDir);
       let workflowFiles: string[] = [];
-      const dateSuffix = `-${dateLocal()}-logs.jsonl`;
       try {
-        workflowFiles = readdirSync(resolvedDir).filter((f) => f.endsWith(dateSuffix));
+        workflowFiles = existsSync(logs) ? readdirSync(logs) : [];
       } catch { /* dir might not exist yet */ }
       for (const f of workflowFiles) {
-        const wf = f.slice(0, f.length - dateSuffix.length);
-        if (recentStepLogExists(wf, runId, step, resolvedDir)) {
+        const parsed = parseWorkflowDateFilename(f);
+        if (!parsed || parsed.date !== today) continue;
+        if (recentStepLogExists(parsed.workflow, runId, step, resolvedDir)) {
           return; // dedupe
         }
       }

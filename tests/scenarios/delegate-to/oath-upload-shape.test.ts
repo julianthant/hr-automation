@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { defineWorkflow, runWorkflow } from "../../../src/core/index.js";
-import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { dateLocal, rowFilePath } from "../../../src/tracker/jsonl.js";
 
 interface TrackerLine {
   workflow: string;
@@ -26,7 +26,7 @@ interface TrackerLine {
 }
 
 function readWorkflowLines(trackerDir: string, workflow: string): TrackerLine[] {
-  const file = join(trackerDir, `${workflow}-${dateLocal()}.jsonl`);
+  const file = rowFilePath(workflow, dateLocal(), trackerDir);
   if (!existsSync(file)) return [];
   return readFileSync(file, "utf8")
     .split("\n")

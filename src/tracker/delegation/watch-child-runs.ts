@@ -13,9 +13,9 @@ import {
   statSync,
   watch as fsWatch,
 } from "node:fs";
-import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { TrackerEntry } from "../jsonl.js";
+import { rowFilePath } from "../paths.js";
 import { makeTailState, tailIncremental, type TailState } from "../tail-incremental.js";
 import { createOperatorDiscardError } from "../ocr-prepare-abort.js";
 import { openControlDb } from "../../core/control-db.js";
@@ -95,7 +95,7 @@ function readAbortRequestedCached(
 ): boolean {
   if (!opts.abortIfRowState) return false;
   const sentinel = opts.abortIfRowState;
-  const abortFile = join(dir, `${sentinel.workflow}-${date}.jsonl`);
+  const abortFile = rowFilePath(sentinel.workflow, date, dir);
   if (!existsSync(abortFile)) {
     cache.current = null;
     return false;
@@ -381,7 +381,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
   const date = opts.date ?? dateLocal();
   const sqliteOutcomes = await maybeWatchSqliteChildRuns(opts, dir);
   if (sqliteOutcomes) return sqliteOutcomes;
-  const file = join(dir, `${opts.workflow}-${date}.jsonl`);
+  const file = rowFilePath(opts.workflow, date, dir);
   const expected = new Set(opts.expectedItemIds);
   const totalExpected = expected.size;
   const isTerminal =

@@ -1,6 +1,6 @@
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   readParentRunId,
   readDryRun,
 } from "../../../../src/tracker/dashboard/ocr/shared.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
 
 function yesterdayLocal(): string {
   const d = new Date();
@@ -36,7 +37,8 @@ describe("ocr shared readers — cross-day JSONL walk", () => {
   test("readFormType finds session written to yesterday's JSONL", () => {
     const dir = mkdtempSync(join(tmpdir(), "ocr-shared-"));
     try {
-      appendFileSync(join(dir, `ocr-${yesterdayLocal()}.jsonl`), makeOcrRow("sess-1") + "\n");
+      mkdirSync(rowsDir(dir), { recursive: true });
+      appendFileSync(rowFilePath("ocr", yesterdayLocal(), dir), makeOcrRow("sess-1") + "\n");
       assert.equal(readFormType("sess-1", dir), "oath");
     } finally {
       rmSync(dir, { recursive: true });
@@ -46,7 +48,8 @@ describe("ocr shared readers — cross-day JSONL walk", () => {
   test("readParentRunId finds session written to yesterday's JSONL", () => {
     const dir = mkdtempSync(join(tmpdir(), "ocr-shared-"));
     try {
-      appendFileSync(join(dir, `ocr-${yesterdayLocal()}.jsonl`), makeOcrRow("sess-2") + "\n");
+      mkdirSync(rowsDir(dir), { recursive: true });
+      appendFileSync(rowFilePath("ocr", yesterdayLocal(), dir), makeOcrRow("sess-2") + "\n");
       assert.equal(readParentRunId("sess-2", dir), "parent-run-abc");
     } finally {
       rmSync(dir, { recursive: true });
@@ -56,8 +59,9 @@ describe("ocr shared readers — cross-day JSONL walk", () => {
   test("readDryRun finds session written to yesterday's JSONL", () => {
     const dir = mkdtempSync(join(tmpdir(), "ocr-shared-"));
     try {
+      mkdirSync(rowsDir(dir), { recursive: true });
       appendFileSync(
-        join(dir, `ocr-${yesterdayLocal()}.jsonl`),
+        rowFilePath("ocr", yesterdayLocal(), dir),
         makeOcrRow("sess-4", { data: { dryRun: "true" } }) + "\n",
       );
       assert.equal(readDryRun("sess-4", dir), true);
@@ -78,7 +82,8 @@ describe("ocr shared readers — cross-day JSONL walk", () => {
   test("readDryRun returns false when dryRun is 'false'", () => {
     const dir = mkdtempSync(join(tmpdir(), "ocr-shared-"));
     try {
-      appendFileSync(join(dir, `ocr-${yesterdayLocal()}.jsonl`), makeOcrRow("sess-5") + "\n");
+      mkdirSync(rowsDir(dir), { recursive: true });
+      appendFileSync(rowFilePath("ocr", yesterdayLocal(), dir), makeOcrRow("sess-5") + "\n");
       assert.equal(readDryRun("sess-5", dir), false);
     } finally {
       rmSync(dir, { recursive: true });

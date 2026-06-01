@@ -1,5 +1,4 @@
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
 
@@ -8,6 +7,14 @@ import { log } from "../../utils/log.js";
 import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
 import { applyTrackerEntry, applyLogEntry, applySessionEvent } from "./apply.js";
 import type { ProjectionSourceKind, ProjectionSourceRef } from "./types.js";
+import {
+  logFilePath,
+  logsDir,
+  rowFilePath,
+  rowsDir,
+  sessionFilePath,
+  parseWorkflowDateFilename,
+} from "../paths.js";
 
 export interface RebuildProjectionOpts {
   dir: string;
@@ -150,16 +157,16 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
     // the approach is safe even if the offset is slightly stale. No DELETE needed.
     const existingOffsets = loadExistingOffsets(db);
 
-    const filenames = existsSync(dir) ? readdirSync(dir) : [];
-    for (const filename of filenames) {
-      if (!filename.endsWith(`-${date}.jsonl`)) continue;
-      if (filename.endsWith(`-${date}-logs.jsonl`)) continue;
-      // `sessions-${date}.jsonl` (post-rotation) matches the tracker suffix
-      // but holds session events, not TrackerEntry rows. Routed via the
-      // dedicated session loop below; never as a "sessions" workflow.
-      if (filename === `sessions-${date}.jsonl`) continue;
-      const workflow = filename.slice(0, -`-${date}.jsonl`.length);
-      const path = join(dir, filename);
+    // Tracker rows live in `<dir>/rows/<workflow>-<date>.jsonl`. The directory
+    // holds only row files for one day, so a single date-suffix match selects
+    // exactly this rebuild's workflows.
+    const rowsRoot = rowsDir(dir);
+    const rowFilenames = existsSync(rowsRoot) ? readdirSync(rowsRoot) : [];
+    for (const filename of rowFilenames) {
+      const parsedName = parseWorkflowDateFilename(filename);
+      if (!parsedName || parsedName.date !== date) continue;
+      const workflow = parsedName.workflow;
+      const path = rowFilePath(workflow, date, dir);
       const startAt = existingOffsets.get(path) ?? 0;
       const parsed = parseJsonlFrom<TrackerEntry>(path, startAt);
       for (const row of parsed) {
@@ -174,10 +181,14 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       recordSource(db, { path, sourceKind: "tracker", workflow, trackerDate: date, lineCount: parsed.length });
     }
 
-    for (const filename of filenames) {
-      if (!filename.endsWith(`-${date}-logs.jsonl`)) continue;
-      const workflow = filename.slice(0, -`-${date}-logs.jsonl`.length);
-      const path = join(dir, filename);
+    // Operator log lines live in `<dir>/logs/<workflow>-<date>.jsonl`.
+    const logsRoot = logsDir(dir);
+    const logFilenames = existsSync(logsRoot) ? readdirSync(logsRoot) : [];
+    for (const filename of logFilenames) {
+      const parsedName = parseWorkflowDateFilename(filename);
+      if (!parsedName || parsedName.date !== date) continue;
+      const workflow = parsedName.workflow;
+      const path = logFilePath(workflow, date, dir);
       const startAt = existingOffsets.get(path) ?? 0;
       const parsed = parseJsonlFrom<LogEntry>(path, startAt);
       for (const row of parsed) {
@@ -190,9 +201,9 @@ export function rebuildProjectionForDate(db: Database, opts: RebuildProjectionOp
       recordSource(db, { path, sourceKind: "log", workflow, trackerDate: date, lineCount: parsed.length });
     }
 
-    // Session events come from `sessions-YYYY-MM-DD.jsonl` only. Incremental:
+    // Session events come from `<dir>/sessions/<date>.jsonl` only. Incremental:
     // byte_offset on the dated file is safe (single calendar day per file).
-    const datedSessionPath = join(dir, `sessions-${date}.jsonl`);
+    const datedSessionPath = sessionFilePath(date, dir);
     const sessionsStartAt = existingOffsets.get(datedSessionPath) ?? 0;
     const sessions = parseJsonlFrom<SessionEvent | ScreenshotSessionEvent>(datedSessionPath, sessionsStartAt);
     let sessionLineCount = 0;

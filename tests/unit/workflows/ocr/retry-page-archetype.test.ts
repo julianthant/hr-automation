@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runOcrRetryPage, RetryPageError } from "../../../../src/workflows/ocr/retry-page.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 
 function setup(): { dir: string } {
   const dir = join(tmpdir(), `ocr-retry-gate-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -17,7 +18,8 @@ function writeRow(
 ): void {
   const sessionId = overrides.sessionId ?? "session-gate-1";
   const runId = overrides.runId ?? "run-gate-1";
-  const file = join(dir, "ocr-2026-05-16.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const file = rowFilePath("ocr", "2026-05-16", dir);
   writeFileSync(
     file,
     JSON.stringify({

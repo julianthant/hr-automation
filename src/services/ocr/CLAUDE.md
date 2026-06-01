@@ -13,7 +13,7 @@ Schema-bound OCR primitive used by OCR-backed workflows. Prep workflows default 
 
 ## Key Rotation
 
-`KeyRotation` persists provider key state at `.ocr-cache/rotation-state-{provider}.json`.
+`KeyRotation` persists provider key state at `<cacheDir>/rotation-state-{provider}.json`. The dashboard passes `runtimeDir(trackerDir)` and the default `cacheDir` is `.tracker/runtime`, so in normal operation the file lives at `.tracker/runtime/rotation-state-{provider}.json` (moved out of the `.tracker/` root in the 2026-06-01 tracker-dir restructure).
 
 - 429/rate-limit text → throttled briefly.
 - quota/exhaustion text → quota-exhausted until next UTC day.

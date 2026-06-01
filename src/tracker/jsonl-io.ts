@@ -1,5 +1,4 @@
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { join } from "path";
 import { createInterface } from "node:readline";
 
 import { log } from "../utils/log.js";
@@ -9,6 +8,7 @@ import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applyLogEntryLive, applySessionEventLive, applyTrackerEntryLive } from "./state/runtime.js";
 import { getSessionsFilePathForDate, type ScreenshotSessionEvent } from "./session-events.js";
 import { findLatestEntryForPredicate } from "./find-latest-entry.js";
+import { logFilePath, rowFilePath, rowsDir, parseWorkflowDateFilename } from "./paths.js";
 
 export const DEFAULT_DIR = ".tracker";
 
@@ -36,11 +36,11 @@ export interface LogEntry extends Omit<Partial<StructuredLogEvent>, "level" | "m
 }
 
 export function getLogsJsonlPathForDate(workflow: string, dir: string, date: string): string {
-  return join(dir, `${workflow}-${date}-logs.jsonl`);
+  return logFilePath(workflow, date, dir);
 }
 
 function getLogsJsonlPath(workflow: string, dir: string): string {
-  return getLogsJsonlPathForDate(workflow, dir, dateLocal());
+  return logFilePath(workflow, dateLocal(), dir);
 }
 
 export function appendLogEntry(entry: LogEntry, dir: string = DEFAULT_DIR): void {
@@ -306,7 +306,7 @@ export function isTrackerEntry(value: unknown): value is TrackerEntry {
 }
 
 function getTrackerJsonlPath(workflow: string, dir: string): string {
-  return join(dir, `${workflow}-${dateLocal()}.jsonl`);
+  return rowFilePath(workflow, dateLocal(), dir);
 }
 
 /**
@@ -337,7 +337,7 @@ export function writeTrackerEntryRawForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): void {
-  const logPath = join(dir, `${entry.workflow}-${date}.jsonl`);
+  const logPath = rowFilePath(entry.workflow, date, dir);
   const source = appendJsonlWithSource(logPath, entry, {
     sourceKind: "tracker",
     workflow: entry.workflow,
@@ -438,16 +438,9 @@ export function byTimestampAsc<T extends { timestamp: string }>(a: T, b: T): num
 }
 
 export function parseTrackerFilename(name: string): { workflow: string; date: string } | null {
-  if (name.endsWith("-logs.jsonl")) return null;
-  // `sessions-YYYY-MM-DD.jsonl` matches the generic shape below but holds
-  // SessionEvent rows, not TrackerEntry rows. Without this guard,
-  // listWorkflows() yields "sessions" as a workflow and every dashboard tick
-  // re-validates each session-event line against isTrackerEntry, spamming
-  // `[jsonl] skipping invalid line N in .tracker/sessions-*.jsonl` to stderr.
-  const m = name.match(/^(.+)-(\d{4}-\d{2}-\d{2})\.jsonl$/);
-  if (!m) return null;
-  if (m[1] === "sessions") return null;
-  return { workflow: m[1], date: m[2] };
+  // Rows live in their own `rows/` subdirectory now, so no `-logs.jsonl` /
+  // `sessions-*` exclusions are needed — that directory holds only row files.
+  return parseWorkflowDateFilename(name);
 }
 
 export function readEntries(workflow: string, dir: string = DEFAULT_DIR): TrackerEntry[] {
@@ -455,17 +448,17 @@ export function readEntries(workflow: string, dir: string = DEFAULT_DIR): Tracke
 }
 
 /**
- * List all workflows that have tracker data. Scans `dir` for files matching
- * `<workflow>-YYYY-MM-DD.jsonl` and returns the workflow names.
+ * List all workflows that have tracker data. Scans the `rows/` subdirectory for
+ * files matching `<workflow>-YYYY-MM-DD.jsonl` and returns the workflow names.
  *
- * The positive regex match (instead of "ends in .jsonl, isn't logs") rejects
- * meta files like `idempotency.jsonl`, `step-cache/...`
- * that share the directory but aren't workflow tracker files.
+ * The positive regex match (rather than "ends in .jsonl") rejects stray meta
+ * files that might share the directory but aren't workflow row files.
  */
 export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
-  if (!existsSync(dir)) return [];
+  const rows = rowsDir(dir);
+  if (!existsSync(rows)) return [];
   const out = new Set<string>();
-  for (const f of readdirSync(dir)) {
+  for (const f of readdirSync(rows)) {
     const parsed = parseTrackerFilename(f);
     if (parsed) out.add(parsed.workflow);
   }
@@ -474,8 +467,9 @@ export function listWorkflows(dir: string = DEFAULT_DIR): string[] {
 
 /** List all dates that have tracker data for a given workflow. */
 export function listDatesForWorkflow(workflow: string, dir: string = DEFAULT_DIR): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  const rows = rowsDir(dir);
+  if (!existsSync(rows)) return [];
+  return readdirSync(rows)
     .map(parseTrackerFilename)
     .filter((parsed): parsed is { workflow: string; date: string } => parsed?.workflow === workflow)
     .map((parsed) => parsed.date)
@@ -489,7 +483,7 @@ export function readEntriesForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): TrackerEntry[] {
-  return readJsonlCached<TrackerEntry>(join(dir, `${workflow}-${date}.jsonl`), { validate: isTrackerEntry });
+  return readJsonlCached<TrackerEntry>(rowFilePath(workflow, date, dir), { validate: isTrackerEntry });
 }
 
 /**

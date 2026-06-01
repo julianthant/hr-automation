@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { buildScreenshotsHandler } from '../../../src/tracker/dashboard.js'
 import { openStateDb, closeStateDbForTests, stateDbPath } from '../../../src/tracker/state/db.js'
 import { trackEvent, emitScreenshotEvent, dateLocal } from '../../../src/tracker/jsonl.js'
+import { sessionFilePath, sessionsDir } from '../../../src/tracker/paths.js'
 
 test('returns grouped entries only for screenshot session events (ignores orphan disk PNGs)', async () => {
   const trackerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scr-dash-'))
@@ -22,8 +23,8 @@ test('returns grouped entries only for screenshot session events (ignores orphan
   await fs.writeFile(path.join(shotsDir, 'separations-3907-kuali-extraction-old-kronos-1776709123932.png'), 'x')
 
   const sessionDay = dateLocal(new Date(ts))
-  const sessionsJsonl = path.join(trackerDir, `sessions-${sessionDay}.jsonl`)
-  await fs.writeFile(sessionsJsonl, JSON.stringify({
+  await fs.mkdir(sessionsDir(trackerDir), { recursive: true })
+  await fs.writeFile(sessionFilePath(sessionDay, trackerDir), JSON.stringify({
     type: 'screenshot', runId: 'r1', ts, kind: 'form', label: 'kuali-saved', step: 'kuali-finalization',
     timestamp: new Date(ts).toISOString(),
     files: [

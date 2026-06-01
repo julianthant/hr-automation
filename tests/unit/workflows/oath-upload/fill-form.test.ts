@@ -8,6 +8,7 @@ import {
   parseTicketNumberFromUrl,
 } from "../../../../src/workflows/oath-upload/fill-form.js";
 import { withLogContext } from "../../../../src/utils/log.js";
+import { logsDir } from "../../../../src/tracker/jsonl.js";
 
 test("parseTicketNumberFromUrl: parses HRC0XXXXXX number= param", () => {
   assert.equal(
@@ -134,9 +135,9 @@ test("fillHrInquiryForm: ServiceNow fields emit selector-health warnings through
       /Subject fill failed/,
     );
 
-    const logLines = readdirSync(dir)
+    const logLines = readdirSync(logsDir(dir))
       .filter((file) => file.endsWith(".jsonl"))
-      .flatMap((file) => readFileSync(join(dir, file), "utf-8").trim().split("\n").filter(Boolean))
+      .flatMap((file) => readFileSync(join(logsDir(dir), file), "utf-8").trim().split("\n").filter(Boolean))
       .map((line) => JSON.parse(line) as { level: string; message: string });
     assert.ok(
       logLines.some((line) =>

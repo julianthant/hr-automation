@@ -7,6 +7,7 @@ import {
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 
 test("lowestAvailableBatchOrdinal fills gaps", () => {
   assert.equal(lowestAvailableBatchOrdinal(new Set([1, 3])), 2);
@@ -16,11 +17,11 @@ test("lowestAvailableBatchOrdinal fills gaps", () => {
 
 test("collectUsedBatchDisplayOrdinals reads parent-linked ordinals", () => {
   const dir = join(tmpdir(), `batch-ord-${Date.now()}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     const wf = "active-check";
     const d = "2026-05-11";
-    const file = join(dir, `${wf}-${d}.jsonl`);
+    const file = rowFilePath(wf, d, dir);
     writeFileSync(
       file,
       [

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, rmSync, mkdtempSync, writeFileSync, utimesSync } from "fs";
+import { appendFileSync, existsSync, rmSync, mkdtempSync, writeFileSync, utimesSync, mkdirSync } from "fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +18,9 @@ import {
   trackerDateForTimestamp,
   __resetParseCacheForTests,
   __getParseCacheSizeForTests,
+  rowFilePath,
+  rowsDir,
+  logFilePath,
   type TrackerEntry,
 } from "../../../src/tracker/jsonl.js";
 import { log, withLogContext } from "../../../src/utils/log.js";
@@ -96,7 +99,7 @@ describe("JSONL tracker", () => {
   it("skips malformed and wrong-shape tracker lines when reading entries", () => {
     const date = dateLocal();
     trackEvent({ workflow: "ac", timestamp: `${date}T10:00:00.000Z`, id: "id-1", runId: "run-1", status: "pending", data: {} }, TEST_DIR);
-    const file = join(TEST_DIR, `ac-${date}.jsonl`);
+    const file = rowFilePath("ac", date, TEST_DIR);
     appendFileSync(file, "{\"not\":\"a tracker entry\"}\n");
     appendFileSync(file, "{not json}\n");
     trackEvent({ workflow: "ac", timestamp: `${date}T10:00:01.000Z`, id: "id-2", runId: "run-2", status: "done", data: {} }, TEST_DIR);
@@ -271,7 +274,7 @@ describe("appendLogEntry PII pass-through (redaction disabled)", () => {
       TEST_DIR,
     );
 
-    assert.equal(existsSync(join(TEST_DIR, `delayed-${entryDate}-logs.jsonl`)), true);
+    assert.equal(existsSync(logFilePath("delayed", entryDate, TEST_DIR)), true);
     assert.equal(readLogEntriesForDate("delayed", "item-1", entryDate, TEST_DIR).length, 1);
     assert.equal(readLogEntries("delayed", "item-1", TEST_DIR).length, entryDate === dateLocal() ? 1 : 0);
   });
@@ -336,8 +339,9 @@ describe("parseCache LRU", () => {
 
   function seedWorkflowFile(dir: string, wf: string): void {
     const today = dateLocal();
+    mkdirSync(rowsDir(dir), { recursive: true });
     writeFileSync(
-      join(dir, `${wf}-${today}.jsonl`),
+      rowFilePath(wf, today, dir),
       '{"workflow":"' + wf + '","id":"x","runId":"r","timestamp":"' + today + 'T00:00:00Z","status":"done","data":{}}\n',
     );
   }
@@ -433,14 +437,14 @@ describe("parseCache LRU", () => {
       // takes it.
       const wf0today = dateLocal();
       writeFileSync(
-        join(dir, `wf0-${wf0today}.jsonl`),
+        rowFilePath("wf0", wf0today, dir),
         '{"workflow":"wf0","id":"x","runId":"r","timestamp":"' + wf0today + 'T00:00:00Z","status":"done","data":{"v":2}}\n' +
           '{"workflow":"wf0","id":"y","runId":"r2","timestamp":"' + wf0today + 'T00:00:01Z","status":"done","data":{}}\n',
       );
       // Force a small mtime delta so the cache key invalidates even on
       // filesystems with low mtime resolution.
       const future = new Date(Date.now() + 5_000);
-      utimesSync(join(dir, `wf0-${wf0today}.jsonl`), future, future);
+      utimesSync(rowFilePath("wf0", wf0today, dir), future, future);
       readEntries("wf0", dir); // re-parse, MUST bump to MRU
 
       // Add wf64 → should evict the now-oldest, which is wf1 (wf0 was bumped).
