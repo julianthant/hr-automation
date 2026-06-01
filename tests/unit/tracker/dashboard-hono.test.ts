@@ -13,6 +13,7 @@ import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.
 import { __resetPreflightThrottleForTests } from "../../../src/tracker/dashboard/hono/routes/base.js";
 import { registerLocalFile } from "../../../src/tracker/files/files.js";
 import { trackEventForDate, trackEvent, emitScreenshotEvent } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { clear, register } from "../../../src/core/kernel/registry.js";
 import { defineWorkflow } from "../../../src/core/kernel/workflow.js";
 
@@ -65,7 +66,7 @@ test("Hono projection routes reopen state.db when the file was replaced after se
         sourceKind: "tracker",
         workflow: "oath-signature",
         trackerDate: date,
-        path: join(dir, `oath-signature-${date}.jsonl`),
+        path: rowFilePath("oath-signature", date, dir),
         line: 1,
         offset: 0,
       },
@@ -190,7 +191,8 @@ test("Hono /api/runs falls back to JSONL when projection is not ready", async ()
   const date = "2026-05-04";
   try {
     const db = openStateDb(dir);
-    writeFileSync(join(dir, `onboarding-${date}.jsonl`), [
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("onboarding", date, dir), [
       JSON.stringify({
         workflow: "onboarding",
         timestamp: "2026-05-04T12:00:00.000Z",
@@ -231,7 +233,8 @@ test("Hono /api/search returns JSONL search results", async () => {
   const date = "2026-05-04";
   try {
     const db = openStateDb(dir);
-    writeFileSync(join(dir, `onboarding-${date}.jsonl`), JSON.stringify({
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("onboarding", date, dir), JSON.stringify({
       workflow: "onboarding",
       timestamp: "2026-05-04T12:00:00.000Z",
       id: "jane@ucsd.edu",

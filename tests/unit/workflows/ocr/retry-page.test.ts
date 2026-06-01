@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runOcrRetryPage } from "../../../../src/workflows/ocr/retry-page.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 
 function ensurePdfCachePagePng(dir: string, pdfFileId: string, pageNum: number): void {
   const cacheDir = join(dir, "pdf-cache", pdfFileId);
@@ -20,7 +21,8 @@ function setup(): { dir: string } {
 
 test("runOcrRetryPage replaces records for the retried page and clears it from failedPages", async () => {
   const { dir } = setup();
-  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
   writeFileSync(ocrFile, JSON.stringify({
     workflow: "ocr",
     id: "session-r1",
@@ -95,7 +97,8 @@ test("runOcrRetryPage replaces records for the retried page and clears it from f
 
 test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry still fails", async () => {
   const { dir } = setup();
-  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
   writeFileSync(ocrFile, JSON.stringify({
     workflow: "ocr",
     id: "session-r2",
@@ -154,7 +157,8 @@ test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry 
 
 test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
   const { dir } = setup();
-  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
   writeFileSync(ocrFile, JSON.stringify({
     workflow: "ocr",
     id: "session-rp",
@@ -209,7 +213,8 @@ test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
 
 test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh (matches main orchestrator)", async () => {
   const { dir } = setup();
-  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
   writeFileSync(ocrFile, JSON.stringify({
     workflow: "ocr",
     id: "session-nh",
@@ -285,7 +290,8 @@ test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh
 
 test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)", async () => {
   const { dir } = setup();
-  const ocrFile = join(dir, "ocr-2026-05-01.jsonl");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
   writeFileSync(ocrFile, JSON.stringify({
     workflow: "ocr",
     id: "session-clamp",

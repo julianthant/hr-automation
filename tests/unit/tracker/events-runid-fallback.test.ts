@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "vitest";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, appendFileSync, existsSync } from "fs";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { rowFilePath, rowsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 import type { Server } from "http";
 import {
   createDashboardServer,
@@ -15,11 +16,13 @@ import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 function appendEvent(dir: string, event: Record<string, unknown> & { timestamp?: string }): void {
   const tsStr = typeof event.timestamp === "string" ? event.timestamp : new Date().toISOString();
   const day = dateLocal(new Date(tsStr));
-  appendFileSync(join(dir, `sessions-${day}.jsonl`), JSON.stringify(event) + "\n");
+  mkdirSync(sessionsDir(dir), { recursive: true });
+  appendFileSync(sessionFilePath(day, dir), JSON.stringify(event) + "\n");
 }
 
 function appendTrackerEntry(dir: string, workflow: string, date: string, entry: TrackerEntry): void {
-  appendFileSync(join(dir, `${workflow}-${date}.jsonl`), JSON.stringify(entry) + "\n");
+  mkdirSync(rowsDir(dir), { recursive: true });
+  appendFileSync(rowFilePath(workflow, date, dir), JSON.stringify(entry) + "\n");
 }
 
 async function collectSSE(

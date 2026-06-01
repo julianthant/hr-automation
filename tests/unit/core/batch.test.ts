@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { defineWorkflow, runWorkflowBatch } from '../../../src/core/kernel/workflow.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 import { readSessionEvents } from '../../../src/tracker/session-events.js'
+import { rowFilePath } from '../../../src/tracker/paths.js'
 
 function fakeSlot() {
   return {
@@ -18,7 +19,7 @@ function fakeSlot() {
 
 function readTrackerEntries(dir: string, workflow: string): Array<Record<string, unknown>> {
   const today = dateLocal()
-  const path = join(dir, `${workflow}-${today}.jsonl`)
+  const path = rowFilePath(workflow, today, dir)
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf-8')
     .split('\n')

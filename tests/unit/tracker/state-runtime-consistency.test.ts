@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -12,6 +12,7 @@ import {
   __resetProjectionFailureStateForTests,
 } from "../../../src/tracker/state/runtime.js";
 import { trackEvent } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, logFilePath, rowsDir, logsDir } from "../../../src/tracker/paths.js";
 import type { TrackerEntry, LogEntry } from "../../../src/tracker/jsonl.js";
 import type { ProjectionSourceRef } from "../../../src/tracker/state/types.js";
 import { openDatabase } from "../../../src/infra/sqlite/index.js";
@@ -36,7 +37,7 @@ function trackerSource(dir: string, date: string): ProjectionSourceRef {
     sourceKind: "tracker",
     workflow: "onboarding",
     trackerDate: date,
-    path: join(dir, `onboarding-${date}.jsonl`),
+    path: rowFilePath("onboarding", date, dir),
     offset: 0,
   };
 }
@@ -73,7 +74,8 @@ test("applyTrackerEntryLive triggers a deferred rebuild after consecutive failur
     // failed live apply leaves behind. (`rebuildProjectionForDate` is an
     // incremental, dedup-guarded replay: it recovers never-applied lines, but
     // would correctly no-op on a row that was applied and then deleted.)
-    const jsonlPath = join(dir, `onboarding-${date}.jsonl`);
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const jsonlPath = rowFilePath("onboarding", date, dir);
     appendFileSync(jsonlPath, `${JSON.stringify(trackerEntry(date))}\n`);
 
     // Sanity: the projection has no row for this item yet.
@@ -196,8 +198,8 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
       trackEntry,
       logEntry,
       {
-        trackerPath: join(dir, `onboarding-${date}.jsonl`),
-        logPath: join(dir, `onboarding-${date}-logs.jsonl`),
+        trackerPath: rowFilePath("onboarding", date, dir),
+        logPath: logFilePath("onboarding", date, dir),
         trackerDate: date,
       },
       dir,
@@ -259,8 +261,8 @@ test("applySigintTerminalToProjection is a silent no-op when the projection is n
         trackEntry,
         logEntry,
         {
-          trackerPath: join(dir, `onboarding-${date}.jsonl`),
-          logPath: join(dir, `onboarding-${date}-logs.jsonl`),
+          trackerPath: rowFilePath("onboarding", date, dir),
+          logPath: logFilePath("onboarding", date, dir),
           trackerDate: date,
         },
         dir,

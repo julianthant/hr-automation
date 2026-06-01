@@ -33,6 +33,7 @@ import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { rowFilePath } from "../../../src/tracker/paths.js";
 
 // ---------------------------------------------------------------------------
 // Reset module registry so that vi.mock intercepts are applied BEFORE delegate.ts
@@ -73,7 +74,7 @@ interface TrackerLine {
 }
 
 function readWorkflowLines(trackerDir: string, workflow: string, dateStr: string): TrackerLine[] {
-  const file = join(trackerDir, `${workflow}-${dateStr}.jsonl`);
+  const file = rowFilePath(workflow, dateStr, trackerDir);
   if (!existsSync(file)) return [];
   return readFileSync(file, "utf8")
     .split("\n")

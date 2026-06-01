@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { withTrackedWorkflow, dateLocal } from '../../../src/tracker/jsonl.js'
 import { readSessionEvents } from '../../../src/tracker/session-events.js'
+import { rowFilePath } from '../../../src/tracker/paths.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-preassigned-instance-'))
 
@@ -27,7 +28,7 @@ test('withTrackedWorkflow: preAssignedInstance skips workflow_start/end and stam
   assert.equal(ends.length, 0, 'no workflow_end emitted under preAssignedInstance')
 
   const today = dateLocal()
-  const entries = readFileSync(join(dir, `test-wf-${today}.jsonl`), 'utf8')
+  const entries = readFileSync(rowFilePath('test-wf', today, dir), 'utf8')
     .trim().split('\n').filter(Boolean)
     .map((l) => JSON.parse(l))
   const done = entries.find((e: any) => e.status === 'done')

@@ -1,5 +1,4 @@
 import { appendFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
 import { execSync } from "child_process";
 import { randomUUID } from "node:crypto";
 
@@ -22,6 +21,7 @@ import {
   emitStepChange,
 } from "./session-events.js";
 import { findLatestEntryForPredicate } from "./find-latest-entry.js";
+import { rowFilePath } from "./paths.js";
 import {
   DEFAULT_DIR,
   emitTrackerRow,
@@ -284,7 +284,7 @@ export async function withTrackedWorkflow<T>(
       error,
       ...(lastStep ? { step: lastStep } : {}),
     };
-    const trackerPath = join(dir, `${workflow}-${date}.jsonl`);
+    const trackerPath = rowFilePath(workflow, date, dir);
     const logPath = getLogsJsonlPathForDate(workflow, dir, date);
     appendFileSync(logPath, JSON.stringify(logEntry) + "\n");
     appendFileSync(trackerPath, JSON.stringify(trackEntry) + "\n");

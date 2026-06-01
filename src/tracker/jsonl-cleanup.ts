@@ -1,30 +1,25 @@
-import { existsSync, readdirSync, unlinkSync } from "fs";
+import { existsSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join } from "path";
 
 import { PATHS } from "../config.js";
 import { DEFAULT_DIR, dateLocal } from "./jsonl-io.js";
+import {
+  logsDir,
+  rowsDir,
+  sessionsDir,
+  parseSessionFilename,
+  parseWorkflowDateFilename,
+} from "./paths.js";
+import { daemonsDir } from "../core/daemon/registry.js";
 
-/**
- * Delete JSONL files older than maxAgeDays. Returns count of deleted files.
- *
- * Default 30 days — workflow history below that floor is considered "recent
- * enough to keep" for operator retro investigation. Callers that want a
- * shorter window must pass it explicitly.
- */
-export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFAULT_DIR): number {
-  if (!existsSync(dir)) return 0;
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - maxAgeDays);
-  const cutoffStr = dateLocal(cutoff);
-
+/** Delete every dated `<workflow>-<date>.jsonl` in `subdir` older than `cutoffStr`. */
+function pruneWorkflowDateDir(subdir: string, cutoffStr: string): number {
+  if (!existsSync(subdir)) return 0;
   let deleted = 0;
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(".jsonl")) continue;
-    // Skip sessions-YYYY-MM-DD.jsonl — those are handled by cleanOldSessionFiles.
-    if (f.startsWith("sessions-")) continue;
-    const match = f.match(/(\d{4}-\d{2}-\d{2})/);
-    if (match && match[1] < cutoffStr) {
-      unlinkSync(join(dir, f));
+  for (const f of readdirSync(subdir)) {
+    const parsed = parseWorkflowDateFilename(f);
+    if (parsed && parsed.date < cutoffStr) {
+      unlinkSync(join(subdir, f));
       deleted++;
     }
   }
@@ -32,26 +27,74 @@ export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFA
 }
 
 /**
- * Delete `sessions-YYYY-MM-DD.jsonl` files older than `maxAgeDays`.
+ * Delete tracker row + log JSONL files older than maxAgeDays. Returns count of
+ * deleted files (rows and logs combined).
+ *
+ * Default 30 days — workflow history below that floor is considered "recent
+ * enough to keep" for operator retro investigation. Callers that want a
+ * shorter window must pass it explicitly.
+ */
+export function cleanOldTrackerFiles(maxAgeDays: number = 30, dir: string = DEFAULT_DIR): number {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - maxAgeDays);
+  const cutoffStr = dateLocal(cutoff);
+  return (
+    pruneWorkflowDateDir(rowsDir(dir), cutoffStr) +
+    pruneWorkflowDateDir(logsDir(dir), cutoffStr)
+  );
+}
+
+/**
+ * Delete dated session files (`<dir>/sessions/<date>.jsonl`) older than
+ * `maxAgeDays`.
  */
 export function cleanOldSessionFiles(maxAgeDays: number, dir: string = DEFAULT_DIR): number {
-  if (!existsSync(dir)) return 0;
+  const sessions = sessionsDir(dir);
+  if (!existsSync(sessions)) return 0;
   const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   let deleted = 0;
   let entries: string[];
   try {
-    entries = readdirSync(dir);
+    entries = readdirSync(sessions);
   } catch {
     return 0;
   }
   for (const f of entries) {
-    const full = join(dir, f);
-    const m = f.match(/^sessions-(\d{4}-\d{2}-\d{2})\.jsonl$/);
-    if (!m) continue;
-    const dateStr = m[1];
+    const dateStr = parseSessionFilename(f);
+    if (!dateStr) continue;
     const dateMs = Date.parse(`${dateStr}T00:00:00Z`);
     if (!Number.isFinite(dateMs) || dateMs >= cutoffMs) continue;
     try {
+      unlinkSync(join(sessions, f));
+      deleted += 1;
+    } catch { /* missing or unreadable — skip */ }
+  }
+  return deleted;
+}
+
+/**
+ * Delete daemon process logs (`<dir>/daemons/<workflow>-<ISO>.log`) older than
+ * `maxAgeDays`. The spawner writes a fresh timestamped file on every daemon
+ * launch, so without pruning these accumulate one-per-restart indefinitely.
+ * The date is taken from each file's mtime (the ISO stamp in the name uses
+ * `:`-free formatting that's awkward to parse, and mtime is the true age).
+ */
+export function cleanOldDaemonLogs(maxAgeDays: number, dir: string = DEFAULT_DIR): number {
+  const daemons = daemonsDir(dir);
+  if (!existsSync(daemons)) return 0;
+  const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let deleted = 0;
+  let entries: string[];
+  try {
+    entries = readdirSync(daemons);
+  } catch {
+    return 0;
+  }
+  for (const f of entries) {
+    if (!f.endsWith(".log")) continue;
+    const full = join(daemons, f);
+    try {
+      if (statSync(full).mtimeMs >= cutoffMs) continue;
       unlinkSync(full);
       deleted += 1;
     } catch { /* missing or unreadable — skip */ }

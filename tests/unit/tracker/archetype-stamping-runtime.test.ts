@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { withTrackedWorkflow } from "../../../src/tracker/jsonl.js";
+import { rowsDir } from "../../../src/tracker/paths.js";
 
 describe("withTrackedWorkflow stamps data.archetype on tracker rows", () => {
   it("stamps single archetype by default", async () => {
@@ -15,9 +16,9 @@ describe("withTrackedWorkflow stamps data.archetype on tracker rows", () => {
         async () => {},
         { dir, archetype: "single" },
       );
-      const jsonlFile = readdirSync(dir).find((f) => f.startsWith("test-single-") && f.endsWith(".jsonl"));
+      const jsonlFile = readdirSync(rowsDir(dir)).find((f) => f.startsWith("test-single-") && f.endsWith(".jsonl"));
       assert.ok(jsonlFile, "should have written a JSONL file");
-      const lines = readFileSync(path.join(dir, jsonlFile), "utf-8")
+      const lines = readFileSync(path.join(rowsDir(dir), jsonlFile), "utf-8")
         .trim().split("\n").map((l) => JSON.parse(l));
       assert.ok(lines.length >= 2, "should emit at least pending + done");
       for (const line of lines) {

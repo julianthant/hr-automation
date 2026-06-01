@@ -3,6 +3,7 @@ import assert from "node:assert";
 import { mkdirSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { watchChildRuns } from "../../../src/tracker/delegation/watch-child-runs.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
@@ -11,7 +12,7 @@ import { log } from "../../../src/utils/log.js";
 
 function setupTrackerDir(): string {
   const dir = join(tmpdir(), `wcr-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   return dir;
 }
 
@@ -22,7 +23,7 @@ function writeEntry(file: string, entry: object): void {
 test("resolves when all expected itemIds reach terminal status", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   writeFileSync(file, "");
 
   // Pre-write one terminal entry
@@ -165,7 +166,7 @@ test("SQLite child failure with block_parent rejects for operator intervention",
 test("times out cleanly when items don't terminate", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   writeFileSync(file, "");
 
   await assert.rejects(
@@ -184,7 +185,7 @@ test("times out cleanly when items don't terminate", async () => {
 test("ignores non-matching itemIds in the JSONL", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   writeFileSync(file, "");
   writeEntry(file, {
     workflow: "eid-lookup", id: "other-item", runId: "x",
@@ -210,7 +211,7 @@ test("ignores non-matching itemIds in the JSONL", async () => {
 test("custom isTerminal predicate (waiting for step=approved)", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `ocr-${date}.jsonl`);
+  const file = rowFilePath("ocr", date, dir);
   writeFileSync(file, "");
 
   // status=done step=awaiting-approval should NOT be terminal under custom predicate
@@ -246,7 +247,7 @@ test("custom isTerminal predicate (waiting for step=approved)", async () => {
 test("calls onProgress as items terminate", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   writeFileSync(file, "");
 
   const progressCalls: Array<{ itemId: string; remaining: number }> = [];
@@ -277,7 +278,7 @@ test("calls onProgress as items terminate", async () => {
 test("survives when target file doesn't exist initially", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   // file does NOT exist yet
 
   const promise = watchChildRuns({
@@ -304,7 +305,7 @@ test("survives when target file doesn't exist initially", async () => {
 test("backs off fs.watch creation failures while polling continues", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   writeFileSync(file, "");
   const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
 
@@ -335,7 +336,7 @@ test("backs off fs.watch creation failures while polling continues", async () =>
 test("abortIfRowState: rejects when parent row reaches the sentinel step", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const parentFile = join(dir, `oath-upload-${date}.jsonl`);
+  const parentFile = rowFilePath("oath-upload", date, dir);
 
   // Pre-write a non-sentinel running entry so the file exists.
   writeEntry(parentFile, {
@@ -376,7 +377,7 @@ test("abortIfRowState: rejects when parent row reaches the sentinel step", async
 test("abortIfRowState: rejects immediately when sentinel is pre-written before watch starts", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const parentFile = join(dir, `oath-upload-${date}.jsonl`);
+  const parentFile = rowFilePath("oath-upload", date, dir);
 
   // Pre-write the cancel sentinel BEFORE calling watchChildRuns.
   writeEntry(parentFile, {
@@ -408,7 +409,7 @@ test("abortIfRowState: rejects immediately when sentinel is pre-written before w
 test("shouldAbort: rejects when predicate flips during JSONL polling", async () => {
   const dir = setupTrackerDir();
   const date = "2026-05-01";
-  const file = join(dir, `eid-lookup-${date}.jsonl`);
+  const file = rowFilePath("eid-lookup", date, dir);
   writeFileSync(file, "");
   let flag = false;
   const promise = watchChildRuns({

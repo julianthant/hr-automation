@@ -1,10 +1,10 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { findPriorTicketForSession } from "../../../../src/workflows/oath-upload/handler.js";
-import { dateLocal } from "../../../../src/tracker/jsonl.js";
+import { dateLocal, rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 
 describe("oath-upload retry/restart idempotency — findPriorTicketForSession", () => {
   it("returns null when no prior ticketNumber exists", () => {
@@ -30,7 +30,8 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
       step: "submit",
       data: { ticketNumber: "HRC0123456" },
     });
-    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", date, dir), line + "\n");
 
     const result = findPriorTicketForSession("session-abc", undefined, dir);
     assert.equal(result, "HRC0123456");
@@ -51,7 +52,8 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
       step: "submit",
       data: { ticketNumber: "HRC0987654" },
     });
-    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), priorRun + "\n");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", date, dir), priorRun + "\n");
 
     // The retry passes the same sessionId but the handler now has a new ctx.runId.
     // findPriorTicketForSession must still find the ticket.
@@ -71,7 +73,8 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
       step: "submit",
       data: { ticketNumber: "DRY RUN - not submitted" },
     });
-    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", date, dir), line + "\n");
 
     const result = findPriorTicketForSession("session-dry", undefined, dir);
     assert.equal(result, null);
@@ -89,7 +92,8 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
       step: "fill-form",
       data: { ticketNumber: "" },
     });
-    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", date, dir), line + "\n");
 
     const result = findPriorTicketForSession("session-running", undefined, dir);
     assert.equal(result, null);
@@ -109,7 +113,8 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
       step: "submit",
       data: { ticketNumber: "HRC0111111", pdfHash: "hash-aaa" },
     });
-    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", date, dir), line + "\n");
 
     // Same sessionId but different hash → no match.
     const result = findPriorTicketForSession("session-xyz", "hash-bbb", dir);
@@ -128,7 +133,8 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
       step: "submit",
       data: { ticketNumber: "HRC0222222", pdfHash: "hash-match" },
     });
-    writeFileSync(join(dir, `oath-upload-${date}.jsonl`), line + "\n");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", date, dir), line + "\n");
 
     const result = findPriorTicketForSession("session-hashed", "hash-match", dir);
     assert.equal(result, "HRC0222222");

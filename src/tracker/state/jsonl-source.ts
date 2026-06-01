@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { ProjectionSourceKind, ProjectionSourceRef } from "./types.js";
+import { trackerKindForPath } from "../paths.js";
 
 const knownDirs = new Set<string>();
 
@@ -39,7 +40,7 @@ export function appendJsonlWithSource(
 }
 
 export function sourceKindForFile(path: string): ProjectionSourceKind {
-  if (/sessions-\d{4}-\d{2}-\d{2}\.jsonl$/.test(path)) return "session";
-  if (path.endsWith("-logs.jsonl")) return "log";
-  return "tracker";
+  // Kind is conveyed by the parent directory (`rows/` | `logs/` | `sessions/`),
+  // not a filename suffix. See `paths.ts`.
+  return trackerKindForPath(path);
 }

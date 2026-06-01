@@ -10,6 +10,7 @@ import {
 import { join } from "node:path";
 import { buildSelectorWarningsHandler } from "../../../src/tracker/dashboard.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { logsDir, logFilePath } from "../../../src/tracker/paths.js";
 
 const TEST_DIR = ".tracker-selector-warnings-test";
 
@@ -29,7 +30,7 @@ function writeLog(
     ts: string;
   }>,
 ): void {
-  const path = join(TEST_DIR, filename);
+  const path = join(logsDir(TEST_DIR), filename);
   writeFileSync(path, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
 }
 
@@ -37,13 +38,13 @@ function appendLog(
   filename: string,
   entry: { workflow: string; itemId: string; level: string; message: string; ts: string },
 ): void {
-  appendFileSync(join(TEST_DIR, filename), JSON.stringify(entry) + "\n");
+  appendFileSync(join(logsDir(TEST_DIR), filename), JSON.stringify(entry) + "\n");
 }
 
 describe("buildSelectorWarningsHandler", () => {
   beforeEach(() => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
-    mkdirSync(TEST_DIR, { recursive: true });
+    mkdirSync(logsDir(TEST_DIR), { recursive: true });
   });
 
   afterEach(() => {
@@ -58,7 +59,7 @@ describe("buildSelectorWarningsHandler", () => {
 
   it("groups and counts `selector fallback triggered: <label>` warns", () => {
     const today = isoDate(0);
-    writeLog(`onboarding-${today}-logs.jsonl`, [
+    writeLog(`onboarding-${today}.jsonl`, [
       // Legacy (pre-timing) format — kept as a fixture to prove the regex is
       // backward-compatible with older JSONL files on disk.
       {
@@ -104,7 +105,7 @@ describe("buildSelectorWarningsHandler", () => {
 
   it("filters out non-warn levels and non-matching messages", () => {
     const today = isoDate(0);
-    writeLog(`onboarding-${today}-logs.jsonl`, [
+    writeLog(`onboarding-${today}.jsonl`, [
       {
         workflow: "onboarding",
         itemId: "a",
@@ -136,7 +137,7 @@ describe("buildSelectorWarningsHandler", () => {
 
   it("tracks workflows set across multiple source files", () => {
     const today = isoDate(0);
-    writeLog(`onboarding-${today}-logs.jsonl`, [
+    writeLog(`onboarding-${today}.jsonl`, [
       {
         workflow: "onboarding",
         itemId: "a",
@@ -145,7 +146,7 @@ describe("buildSelectorWarningsHandler", () => {
         ts: new Date().toISOString(),
       },
     ]);
-    writeLog(`separations-${today}-logs.jsonl`, [
+    writeLog(`separations-${today}.jsonl`, [
       {
         workflow: "separations",
         itemId: "doc-1",
@@ -165,7 +166,7 @@ describe("buildSelectorWarningsHandler", () => {
   it("honors the `days` argument — older files are excluded", () => {
     const today = isoDate(0);
     const tenDaysAgo = isoDate(10);
-    writeLog(`onboarding-${today}-logs.jsonl`, [
+    writeLog(`onboarding-${today}.jsonl`, [
       {
         workflow: "onboarding",
         itemId: "a",
@@ -174,7 +175,7 @@ describe("buildSelectorWarningsHandler", () => {
         ts: new Date().toISOString(),
       },
     ]);
-    writeLog(`onboarding-${tenDaysAgo}-logs.jsonl`, [
+    writeLog(`onboarding-${tenDaysAgo}.jsonl`, [
       {
         workflow: "onboarding",
         itemId: "b",
@@ -195,7 +196,7 @@ describe("buildSelectorWarningsHandler", () => {
     const t1 = "2026-04-18T10:00:00.000Z";
     const t2 = "2026-04-18T11:00:00.000Z";
     const t3 = "2026-04-18T12:00:00.000Z";
-    writeLog(`onboarding-${today}-logs.jsonl`, [
+    writeLog(`onboarding-${today}.jsonl`, [
       {
         workflow: "onboarding",
         itemId: "a",
@@ -204,14 +205,14 @@ describe("buildSelectorWarningsHandler", () => {
         ts: t2,
       },
     ]);
-    appendLog(`onboarding-${today}-logs.jsonl`, {
+    appendLog(`onboarding-${today}.jsonl`, {
       workflow: "onboarding",
       itemId: "b",
       level: "warn",
       message: "selector fallback triggered: envelope",
       ts: t1,
     });
-    appendLog(`onboarding-${today}-logs.jsonl`, {
+    appendLog(`onboarding-${today}.jsonl`, {
       workflow: "onboarding",
       itemId: "c",
       level: "warn",
@@ -229,7 +230,7 @@ describe("buildSelectorWarningsHandler", () => {
 
   it("tolerates malformed JSON lines (skips them)", () => {
     const today = isoDate(0);
-    const path = join(TEST_DIR, `onboarding-${today}-logs.jsonl`);
+    const path = logFilePath("onboarding", today, TEST_DIR);
     writeFileSync(
       path,
       [

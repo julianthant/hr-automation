@@ -89,7 +89,7 @@ Duo MFA is manual — the automation pauses and polls until you approve on your 
 
 `npm run dashboard` starts SSE backend (`:3838`) + Vite frontend (`:5173`). Workflow starts are centralized here: upload runs use `RunModal` / `RUN_MODAL_REGISTRY`, and typed input runs use `InputRunPanel` / `INPUT_RUN_REGISTRY`.
 
-Workflows emit JSONL to `.tracker/{workflow}-{YYYY-MM-DD}.jsonl`; SSE server streams to React SPA. All UI metadata (label, steps, detailFields) comes from the server-side kernel registry.
+Workflows emit JSONL to `.tracker/rows/{workflow}-{YYYY-MM-DD}.jsonl` (logs to `.tracker/logs/`, sessions to `.tracker/sessions/`); SSE server streams to React SPA. `.tracker/` is split into typed subdirs — `src/tracker/paths.ts` owns all path construction (see `src/tracker/CLAUDE.md`). All UI metadata (label, steps, detailFields) comes from the server-side kernel registry.
 
 **Row lifecycle debug logs:** `.tracker/debug/row-lifecycle-{YYYY-MM-DD}.{jsonl,json}` — regenerated every 60s; full per-row status/surface/cause history. Useful when diagnosing surface mis-classification or stuck retries. See `src/tracker/CLAUDE.md`.
 

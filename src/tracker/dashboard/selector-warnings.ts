@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { dateLocal } from "../jsonl.js";
+import { logsDir, parseWorkflowDateFilename } from "../paths.js";
 import type { Database } from "../../infra/sqlite/index.js";
 
 /**
@@ -91,19 +92,19 @@ export function buildSelectorWarningsHandler(
       return sortSelectorWarningRows(aggregated);
     }
 
-    if (!existsSync(dir)) return [];
+    const logs = logsDir(dir);
+    if (!existsSync(logs)) return [];
 
-    for (const f of readdirSync(dir)) {
-      if (!f.endsWith("-logs.jsonl")) continue;
-      // Match the date and workflow out of the filename: `<wf>-<YYYY-MM-DD>-logs.jsonl`
-      const m = f.match(/^(.+)-(\d{4}-\d{2}-\d{2})-logs\.jsonl$/);
-      if (!m) continue;
-      const date = m[2];
+    for (const f of readdirSync(logs)) {
+      // `logs/` holds only `<wf>-<YYYY-MM-DD>.jsonl` files; parse the date out.
+      const parsed = parseWorkflowDateFilename(f);
+      if (!parsed) continue;
+      const date = parsed.date;
       if (!dates.includes(date)) continue;
 
       let raw: string;
       try {
-        raw = readFileSync(join(dir, f), "utf-8");
+        raw = readFileSync(join(logs, f), "utf-8");
       } catch {
         continue;
       }

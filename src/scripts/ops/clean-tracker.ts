@@ -13,11 +13,13 @@ import { parseArgs as parseNodeArgs } from "node:util";
 import {
   cleanOldTrackerFiles,
   cleanOldSessionFiles,
+  cleanOldDaemonLogs,
   cleanOldScreenshots,
   dateLocal,
   DEFAULT_DIR,
   readJsonlStream,
 } from "../../tracker/jsonl.js";
+import { rowsDir, parseWorkflowDateFilename } from "../../tracker/paths.js";
 import { pruneStateDb } from "../../tracker/state/cleanup.js";
 import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
@@ -79,14 +81,14 @@ export async function sweepOrphanUploadDirs(dir: string): Promise<number> {
  */
 async function readPrepRunIds(dir: string): Promise<Set<string>> {
   const runIds = new Set<string>();
-  if (!existsSync(dir)) return runIds;
+  const rows = rowsDir(dir);
+  if (!existsSync(rows)) return runIds;
   let files: string[];
   try {
-    files = readdirSync(dir).filter(
+    files = readdirSync(rows).filter(
       (f) =>
         (f.startsWith("emergency-contact-") || f.startsWith("oath-signature-")) &&
-        f.endsWith(".jsonl") &&
-        !f.endsWith("-logs.jsonl"),
+        parseWorkflowDateFilename(f) !== null,
     );
   } catch {
     return runIds;
@@ -96,7 +98,7 @@ async function readPrepRunIds(dir: string): Promise<Set<string>> {
       for await (const entry of readJsonlStream<{
         runId?: string;
         data?: { mode?: string };
-      }>(join(dir, file))) {
+      }>(join(rows, file))) {
         if (entry.data?.mode === "prepare" && entry.runId) {
           runIds.add(entry.runId);
         }
@@ -195,6 +197,14 @@ export async function cleanTrackerMain(argv: string[] = process.argv.slice(2)): 
     if (sessionsDeleted > 0) {
       log.success(
         `Deleted ${sessionsDeleted} stale sessions file${sessionsDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}`,
+      );
+    }
+    // Daemon process logs (`daemons/<workflow>-<ISO>.log`) accumulate one file
+    // per daemon launch and are not date-rotated — prune them by mtime here.
+    const daemonLogsDeleted = cleanOldDaemonLogs(days, dir);
+    if (daemonLogsDeleted > 0) {
+      log.success(
+        `Deleted ${daemonLogsDeleted} stale daemon log${daemonLogsDeleted === 1 ? "" : "s"} (older than ${days} day${days === 1 ? "" : "s"}) from ${dir}/daemons`,
       );
     }
     // Prune SQLite projection rows in lockstep with JSONL pruning. Use the

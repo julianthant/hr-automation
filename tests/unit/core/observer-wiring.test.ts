@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 import { readSessionEvents } from '../../../src/tracker/session-events.js'
+import { rowsDir } from '../../../src/tracker/paths.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-observer-'))
 
@@ -64,8 +65,8 @@ test('runWorkflow: observer bridges Session.launch hooks to sessionCtx + setStep
   assert.match(loginInstances[0]!, /test[-\s]obs/i, `got: ${loginInstances[0]}`)
 
   // 3. Entry's tracker jsonl has a `running` entry with step 'ucpath-auth' (from onAuthStart → setStep).
-  const entryFiles = readdirSync(dir).filter((f) => f.startsWith('test-obs-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl'))
-  const lines = readFileSync(join(dir, entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const entryFiles = readdirSync(rowsDir(dir)).filter((f) => f.startsWith('test-obs-') && f.endsWith('.jsonl'))
+  const lines = readFileSync(join(rowsDir(dir), entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   const runningSteps = lines.filter((l: any) => l.status === 'running').map((l: any) => l.step)
   // auth:ucpath is auto-prepended by the registry and emitted via makeAuthObserver on onAuthStart.
   assert.ok(runningSteps.includes('auth:ucpath'), `running entries missing auth:ucpath: ${runningSteps.join(',')}`)
@@ -86,8 +87,8 @@ test('runWorkflow: observer guards setStep against undeclared step names', async
 
   await runWorkflow(wf, {}, { launchFn: fakeLaunch, trackerDir: dir })
 
-  const entryFiles = readdirSync(dir).filter((f) => f.startsWith('test-undecl-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl'))
-  const lines = readFileSync(join(dir, entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const entryFiles = readdirSync(rowsDir(dir)).filter((f) => f.startsWith('test-undecl-') && f.endsWith('.jsonl'))
+  const lines = readFileSync(join(rowsDir(dir), entryFiles[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   const runningSteps = lines.filter((l: any) => l.status === 'running').map((l: any) => l.step)
   assert.ok(!runningSteps.includes('mystery-auth'), 'must not emit unregistered step name')
   // Session events still emit regardless of step-name matching.

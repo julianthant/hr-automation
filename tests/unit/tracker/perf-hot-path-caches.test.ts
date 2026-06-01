@@ -212,12 +212,14 @@ import {
   __resetSessionEventsCacheForTests,
   getSessionsFilePathForDate,
 } from "../../../src/tracker/session-events.js";
+import { sessionsDir } from "../../../src/tracker/paths.js";
 
 describe("sessionEventsCache — bounded LRU", () => {
   let dir: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "sess-cache-"));
+    mkdirSync(sessionsDir(dir), { recursive: true });
     __resetSessionEventsCacheForTests();
   });
 

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 
 import { defineWorkflow, runOneItem } from "../../src/core/kernel/workflow.js";
 import { Session } from "../../src/core/kernel/session.js";
-import { dateLocal } from "../../src/tracker/jsonl.js";
+import { dateLocal, rowFilePath } from "../../src/tracker/jsonl.js";
 import { oathUploadHandler, oathUploadSteps } from "../../src/workflows/oath-upload/handler.js";
 import { OathUploadInputSchema } from "../../src/workflows/oath-upload/schema.js";
 
@@ -125,7 +125,7 @@ test(
 
     // Read the emitted JSONL and assert the final row shape.
     const today = dateLocal();
-    const jsonlPath = join(dir, `oath-upload-smoke-test-${today}.jsonl`);
+    const jsonlPath = rowFilePath("oath-upload-smoke-test", today, dir);
     const rows = readFileSync(jsonlPath, "utf-8")
       .trim()
       .split("\n")

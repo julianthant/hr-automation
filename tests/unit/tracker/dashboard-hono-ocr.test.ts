@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, test } from "vitest";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { _resetSessionLockForTests } from "../../../src/tracker/dashboard/ocr/index.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 
@@ -54,7 +55,8 @@ test("Hono /api/ocr/approve-batch forwards validation errors", async () => {
 test("Hono /api/ocr/approve-batch forwards body without preview fields", async () => {
   const sessionId = "session-preview-route";
   const runId = "run-preview-route";
-  writeFileSync(join(dir, `ocr-${todayLocal()}.jsonl`), JSON.stringify({
+  mkdirSync(rowsDir(dir), { recursive: true });
+  writeFileSync(rowFilePath("ocr", todayLocal(), dir), JSON.stringify({
     workflow: "ocr",
     id: sessionId,
     runId,

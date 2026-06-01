@@ -1,8 +1,9 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { dateLocal, readLatestTrackerEntriesByRunKey, trackEvent } from "../../../src/tracker/jsonl.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
 import { findLatestEntryForPredicate } from "../../../src/tracker/find-latest-entry.js";
@@ -46,7 +47,7 @@ test("findLatestEntryForPredicate skips invalid JSONL tracker rows", () => {
   const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
   try {
     const date = dateLocal();
-    const file = join(dir, `ocr-${date}.jsonl`);
+    const file = rowFilePath("ocr", date, dir);
     trackEvent({
       workflow: "ocr",
       timestamp: `${date}T10:00:00.000Z`,
@@ -77,8 +78,9 @@ test("findLatestEntryForPredicate accepts legacy ts tracker rows", () => {
   try {
     const date = dateLocal();
     const timestamp = `${date}T10:00:00.000Z`;
+    mkdirSync(rowsDir(dir), { recursive: true });
     appendFileSync(
-      join(dir, `ocr-${date}.jsonl`),
+      rowFilePath("ocr", date, dir),
       `${JSON.stringify({
         workflow: "ocr",
         ts: timestamp,
@@ -111,8 +113,9 @@ test("readLatestTrackerEntriesByRunKey uses tolerant newest-first JSONL scan", (
     yesterday.setDate(now.getDate() - 1);
     const todayDate = dateLocal(now);
     const yesterdayDate = dateLocal(yesterday);
+    mkdirSync(rowsDir(dir), { recursive: true });
     appendFileSync(
-      join(dir, `ocr-${yesterdayDate}.jsonl`),
+      rowFilePath("ocr", yesterdayDate, dir),
       `${JSON.stringify({
         workflow: "ocr",
         timestamp: `${yesterdayDate}T09:00:00.000Z`,
@@ -123,7 +126,7 @@ test("readLatestTrackerEntriesByRunKey uses tolerant newest-first JSONL scan", (
       })}\n`,
     );
     appendFileSync(
-      join(dir, `ocr-${todayDate}.jsonl`),
+      rowFilePath("ocr", todayDate, dir),
       [
         "{not json}",
         JSON.stringify({

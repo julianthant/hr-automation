@@ -16,6 +16,10 @@ import {
   cleanOldScreenshots,
   dateLocal,
   trackEvent,
+  rowsDir,
+  logsDir,
+  sessionsDir,
+  sessionFilePath,
 } from "../../../../src/tracker/jsonl.js";
 import {
   DEFAULT_SCREENSHOTS_DIR,
@@ -31,7 +35,8 @@ import { PATHS } from "../../../../src/config.js";
 const TEST_DIR = ".tracker-clean-test";
 
 function writeFixture(filename: string, ageDays: number): string {
-  const fullPath = join(TEST_DIR, filename);
+  const fullPath = join(rowsDir(TEST_DIR), filename);
+  mkdirSync(rowsDir(TEST_DIR), { recursive: true });
   writeFileSync(fullPath, '{"test":true}\n');
   // Set mtime + atime to ageDays in the past. `cleanOldTrackerFiles` uses the
   // date embedded in the filename (YYYY-MM-DD), not mtime — but we still set
@@ -66,7 +71,7 @@ describe("cleanOldTrackerFiles (clean-tracker script)", () => {
     const deleted = cleanOldTrackerFiles(7, TEST_DIR);
 
     assert.equal(deleted, 1, "should delete 1 file (the 30-day-old one)");
-    const remaining = readdirSync(TEST_DIR).sort();
+    const remaining = readdirSync(rowsDir(TEST_DIR)).sort();
     assert.equal(remaining.length, 2);
     assert.ok(
       remaining.some((f) => f.includes(isoDate(1))),
@@ -92,7 +97,7 @@ describe("cleanOldTrackerFiles (clean-tracker script)", () => {
     writeFixture(`test-${isoDate(30)}.jsonl`, 30);
     const deleted = cleanOldTrackerFiles(7, TEST_DIR);
     assert.equal(deleted, 1);
-    const remaining = readdirSync(TEST_DIR);
+    const remaining = readdirSync(rowsDir(TEST_DIR));
     assert.ok(remaining.some((f) => f.endsWith(".txt")));
   });
 
@@ -103,7 +108,7 @@ describe("cleanOldTrackerFiles (clean-tracker script)", () => {
     // With --days 1, both files should be deleted.
     const deleted = cleanOldTrackerFiles(1, TEST_DIR);
     assert.equal(deleted, 2);
-    assert.equal(readdirSync(TEST_DIR).length, 0);
+    assert.equal(readdirSync(rowsDir(TEST_DIR)).length, 0);
   });
 });
 
@@ -214,11 +219,12 @@ describe("cleanTrackerMain sessionsDeleted field", () => {
   it("deletes old sessions-YYYY-MM-DD.jsonl files and returns count", async () => {
     // Write an old dated sessions file (40 days ago).
     const oldDate = isoDate(40);
-    const oldFile = join(dir, `sessions-${oldDate}.jsonl`);
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    const oldFile = sessionFilePath(oldDate, dir);
     writeFileSync(oldFile, '{"type":"workflow_start","workflowInstance":"old"}\n');
     // Write a recent dated sessions file (1 day ago).
     const recentDate = isoDate(1);
-    const recentFile = join(dir, `sessions-${recentDate}.jsonl`);
+    const recentFile = sessionFilePath(recentDate, dir);
     writeFileSync(recentFile, '{"type":"workflow_start","workflowInstance":"recent"}\n');
 
     const result = await cleanTrackerMain(["--days", "30", "--dir", dir, "--no-screenshots"]);

@@ -7,12 +7,13 @@ import { z } from 'zod'
 import { defineWorkflow, runOneItem } from '../../../src/core/kernel/workflow.js'
 import { Session } from '../../../src/core/kernel/session.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
+import { rowFilePath } from '../../../src/tracker/paths.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-runone-'))
 
 function readTracker(dir: string, workflow: string): any[] {
   const today = dateLocal()
-  const p = join(dir, `${workflow}-${today}.jsonl`)
+  const p = rowFilePath(workflow, today, dir)
   return readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
 }
 

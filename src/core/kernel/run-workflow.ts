@@ -7,6 +7,9 @@ import { makeScreenshotFn } from './screenshot.js'
 import { withLogContext } from '../../utils/log.js'
 import { runRegistry, type RunHandle } from '../run-registry.js'
 import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
+import { resolveQueueRowKindFromValue } from '../../domain/queue-row-kind.js'
+import { buildTraceId } from '../../domain/queue-trace-id.js'
+import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { runWorkflowHandler } from './handler-runner.js'
 import {
   splitPrefilled,
@@ -236,6 +239,34 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // handler on top would just duplicate cleanup, so don't install one.
   await withLogContext(wf.config.name, String(itemId), async () => {
     const seedData = buildInitialTrackerData(wf, handlerInput)
+    // Subject-semantics kind + frozen trace id must ride EVERY row, not just
+    // the pre-emit pending one — the dashboard collapses a run to its latest
+    // row. Mirrors `run-one-item.ts` (the daemon-worker path); this is the
+    // in-process `runWorkflow` path used by non-daemon `delegateTo` children
+    // (OCR preview, sharepoint-download) and `delegateToAll`. Kind is
+    // runId-independent so it's always seeded; the trace id needs the run id,
+    // which is only known here when the caller pre-assigned one (delegation
+    // always does). For a bare direct `runWorkflow` (no preAssignedRunId)
+    // withTrackedWorkflow mints the id itself and owns the pending emit, so we
+    // leave the trace id to that path rather than guess an id we don't have.
+    seedData.queueRowKind = resolveQueueRowKindFromValue(
+      wf.queueRowKind,
+      handlerInput,
+      wf.config.name,
+    )
+    if (opts.preAssignedRunId) {
+      seedData.__traceId =
+        findFrozenTraceId({
+          workflow: wf.config.name,
+          runId: opts.preAssignedRunId,
+          ...(opts.trackerDir ? { trackerDir: opts.trackerDir } : {}),
+        }) ??
+        buildTraceId({
+          code: runtimeOptions?.rootCode ?? wf.code,
+          runId: opts.preAssignedRunId,
+          at: new Date(),
+        })
+    }
     const rowArchetype = deriveRowArchetype(
       resolveArchetype(wf.config, handlerInput),
       opts.parentRunId,

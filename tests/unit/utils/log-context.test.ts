@@ -1,7 +1,8 @@
 import { describe, it, beforeEach } from "vitest";
 import assert from "node:assert/strict";
-import { existsSync, rmSync, readFileSync, readdirSync } from "fs";
+import { existsSync, mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
 import { withLogContext, log } from "../../../src/utils/log.js";
+import { logsDir } from "../../../src/tracker/jsonl.js";
 
 const TEST_DIR = "generated/.tracker-log-test";
 
@@ -16,11 +17,11 @@ describe("withLogContext", () => {
       log.success("it worked");
     }, TEST_DIR);
 
-    const files = readdirSync(TEST_DIR);
+    const files = readdirSync(logsDir(TEST_DIR));
     assert.equal(files.length, 1);
-    assert.ok(files[0].endsWith("-logs.jsonl"));
+    assert.ok(files[0].endsWith(".jsonl"));
 
-    const lines = readFileSync(`${TEST_DIR}/${files[0]}`, "utf-8").split("\n").filter(Boolean);
+    const lines = readFileSync(`${logsDir(TEST_DIR)}/${files[0]}`, "utf-8").split("\n").filter(Boolean);
     assert.equal(lines.length, 2);
 
     const entry1 = JSON.parse(lines[0]);
@@ -47,7 +48,7 @@ describe("withLogContext", () => {
       log.step("from B");
     }, TEST_DIR);
 
-    const files = readdirSync(TEST_DIR).sort();
+    const files = readdirSync(logsDir(TEST_DIR)).sort();
     assert.equal(files.length, 2);
   });
 });

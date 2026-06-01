@@ -24,6 +24,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSy
 import { tmpdir } from "os";
 import { join } from "path";
 import { readLogEntries } from "../../../src/tracker/jsonl.js";
+import { rowsDir } from "../../../src/tracker/paths.js";
 import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
@@ -253,14 +254,14 @@ describe("Test D: cancel queued person-lookup writes tracker row + JSONL log lin
     assert.equal(result.ok, true);
 
     // Verify tracker row: person-lookup-<date>.jsonl must contain a failed+step=cancelled row
-    const trackerFile = readdirSync(tmp).find((file) =>
+    const trackerFile = readdirSync(rowsDir(tmp)).find((file) =>
       /^person-lookup-\d{4}-\d{2}-\d{2}\.jsonl$/.test(file),
     );
     assert.ok(
       trackerFile,
-      `Expected a person-lookup tracker file but found: [${readdirSync(tmp).join(", ")}]`,
+      `Expected a person-lookup tracker file but found: [${readdirSync(rowsDir(tmp)).join(", ")}]`,
     );
-    const trackerContent = readFileSync(join(tmp, trackerFile), "utf8");
+    const trackerContent = readFileSync(join(rowsDir(tmp), trackerFile), "utf8");
     const trackerEntries = trackerContent
       .trim()
       .split("\n")

@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
 import { buildInitialTrackerData } from '../../../src/core/kernel/workflow.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
+import { rowsDir } from '../../../src/tracker/paths.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-initdata-'))
 
@@ -41,9 +42,9 @@ test('runWorkflow: initialData result merges into pending entry data', async () 
 
   await runWorkflow(wf, { names: ['Zaw', 'Thant'] }, { launchFn: fakeLaunch, trackerDir: dir })
 
-  const files = readdirSync(dir).filter((f) => f.startsWith('test-initdata-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl'))
+  const files = readdirSync(rowsDir(dir)).filter((f) => f.startsWith('test-initdata-') && f.endsWith('.jsonl'))
   assert.ok(files.length > 0, 'tracker jsonl file should exist')
-  const lines = readFileSync(join(dir, files[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const lines = readFileSync(join(rowsDir(dir), files[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   const pending = lines.find((l: any) => l.status === 'pending')
   assert.ok(pending, 'pending entry should exist')
   assert.equal(pending.data.summary, 'Zaw|Thant')
@@ -67,8 +68,8 @@ test('runWorkflow: without initialData, pending data.__name is empty', async () 
 
   await runWorkflow(wf, { names: ['x'] }, { launchFn: fakeLaunch, trackerDir: dir })
 
-  const files = readdirSync(dir).filter((f) => f.startsWith('test-noinit-') && f.endsWith('.jsonl') && !f.endsWith('-logs.jsonl'))
-  const lines = readFileSync(join(dir, files[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const files = readdirSync(rowsDir(dir)).filter((f) => f.startsWith('test-noinit-') && f.endsWith('.jsonl'))
+  const lines = readFileSync(join(rowsDir(dir), files[0]), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   const pending = lines.find((l: any) => l.status === 'pending')
   assert.ok(pending)
   assert.equal(pending.data.__name, '')

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Database } from "../infra/sqlite/index.js";
 import { log } from "../utils/log.js";
 import { dateLocal, isTrackerEntry, isTrackerEntryStatus, type TrackerEntry } from "./jsonl-io.js";
+import { rowFilePath } from "./paths.js";
 
 export interface FindLatestEntryForPredicateOpts {
   workflow: string;
@@ -170,7 +170,7 @@ export function findLatestEntryForPredicate(
   for (let i = 0; i < lookbackDays; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
-    const file = join(dir, `${opts.workflow}-${dateLocal(d)}.jsonl`);
+    const file = rowFilePath(opts.workflow, dateLocal(d), dir);
     if (!existsSync(file)) continue;
     const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
     for (let j = lines.length - 1; j >= 0; j--) {

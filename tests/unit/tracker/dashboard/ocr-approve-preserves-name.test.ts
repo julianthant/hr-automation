@@ -1,9 +1,10 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, appendFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOcrApproveHandler } from "../../../../src/tracker/dashboard/ocr/approve.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
 
 function todayLocal(): string {
   const d = new Date();
@@ -36,8 +37,9 @@ test("approve-batch threads OCR parentSubject into kernel inputs", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-name-"));
   try {
     // Seed: OCR session row with parentRunId and explicit parentSubject.
+    mkdirSync(rowsDir(dir), { recursive: true });
     appendFileSync(
-      join(dir, `ocr-${todayLocal()}.jsonl`),
+      rowFilePath("ocr", todayLocal(), dir),
       JSON.stringify({
         workflow: "ocr",
         timestamp: new Date().toISOString(),
@@ -74,7 +76,7 @@ test("approve-batch threads OCR parentSubject into kernel inputs", async () => {
     await new Promise((r) => setTimeout(r, 250));
 
     // OCR approved row keeps the explicit parentSubject for later re-reads.
-    const ocrRows = readJsonl(join(dir, `ocr-${todayLocal()}.jsonl`));
+    const ocrRows = readJsonl(rowFilePath("ocr", todayLocal(), dir));
     const approved = ocrRows.find(
       (r) => (r as { step?: string }).step === "approved",
     ) as { data: Record<string, string> } | undefined;
@@ -95,8 +97,9 @@ test("approve-batch omits parentSubject when no parent row found", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-no-parent-"));
   try {
     // Seed only the OCR session row, with NO parentRunId.
+    mkdirSync(rowsDir(dir), { recursive: true });
     appendFileSync(
-      join(dir, `ocr-${todayLocal()}.jsonl`),
+      rowFilePath("ocr", todayLocal(), dir),
       JSON.stringify({
         workflow: "ocr",
         timestamp: new Date().toISOString(),

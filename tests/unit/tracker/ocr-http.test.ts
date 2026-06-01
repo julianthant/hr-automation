@@ -15,12 +15,13 @@ import {
 } from "../../../src/tracker/dashboard/ocr/index.js";
 import { buildOcrDiscardHandler } from "../../../src/control/ocr/discard.js";
 import { trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 
 function setup(): string {
   const dir = join(tmpdir(), `ocr-http-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   return dir;
 }
 
@@ -149,7 +150,7 @@ test("POST /api/ocr/discard-prepare emits failed step=discarded", async () => {
   const handler = buildOcrDiscardHandler({ trackerDir: dir });
   const resp = await handler({ sessionId: "s1", runId: "r1", reason: "user clicked" });
   assert.equal(resp.status, 200);
-  const file = join(dir, `ocr-${todayLocal()}.jsonl`);
+  const file = rowFilePath("ocr", todayLocal(), dir);
   assert.ok(existsSync(file));
   const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
   const last = JSON.parse(lines[lines.length - 1]);
@@ -185,7 +186,7 @@ test("POST /api/ocr/discard-prepare reports missing OCR history without deleting
   assert.match(resp.body.error ?? "", /cannot discard OCR prep/i);
   assert.match(resp.body.error ?? "", /prior tracker row/i);
 
-  const eidFile = join(dir, `eid-lookup-${date}.jsonl`);
+  const eidFile = rowFilePath("eid-lookup", date, dir);
   const remaining = readFileSync(eidFile, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
   assert.deepEqual(remaining.map((row) => row.id), ["child-that-must-remain"]);
   rmSync(dir, { recursive: true, force: true });
@@ -228,7 +229,7 @@ test("POST /api/ocr/discard-prepare deletes delegated EID lookup child rows", as
   });
 
   assert.equal(resp.status, 200);
-  const eidFile = join(dir, `eid-lookup-${date}.jsonl`);
+  const eidFile = rowFilePath("eid-lookup", date, dir);
   const eidLines = existsSync(eidFile)
     ? readFileSync(eidFile, "utf-8").split("\n").filter(Boolean)
     : [];
@@ -273,7 +274,7 @@ test("POST /api/ocr/discard-prepare deletes children for that OCR run only", asy
   });
 
   assert.equal(resp.status, 200);
-  const eidFile = join(dir, `eid-lookup-${date}.jsonl`);
+  const eidFile = rowFilePath("eid-lookup", date, dir);
   const remaining = existsSync(eidFile)
     ? readFileSync(eidFile, "utf-8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
     : [];
@@ -312,7 +313,7 @@ test("POST /api/ocr/discard-prepare mirrors explicit parent row with OCR and par
   });
   assert.equal(resp.status, 200);
 
-  const parentFile = join(dir, `oath-signature-${todayLocal()}.jsonl`);
+  const parentFile = rowFilePath("oath-signature", todayLocal(), dir);
   assert.ok(existsSync(parentFile));
   const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
   const lastParent = JSON.parse(parentLines[parentLines.length - 1]);
@@ -364,7 +365,7 @@ test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row 
   });
   assert.equal(resp.status, 200);
 
-  const parentFile = join(dir, `oath-signature-${date}.jsonl`);
+  const parentFile = rowFilePath("oath-signature", date, dir);
   const parentLines = readFileSync(parentFile, "utf-8").split("\n").filter(Boolean);
   const lastParent = JSON.parse(parentLines[parentLines.length - 1]);
   assert.equal(lastParent.status, "failed");
@@ -384,7 +385,7 @@ test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row 
 
 test("sweepStuckOcrRows marks running rows failed", () => {
   const dir = setup();
-  const file = join(dir, `ocr-${todayLocal()}.jsonl`);
+  const file = rowFilePath("ocr", todayLocal(), dir);
   appendFileSync(file,
     JSON.stringify({
       workflow: "ocr", id: "stuck-session", runId: "r1",
@@ -402,7 +403,7 @@ test("sweepStuckOcrRows marks running rows failed", () => {
 
 test("buildOcrRetryPageHandler rejects concurrent retries on the same row", async () => {
   const dir = join(tmpdir(), `ocr-http-mutex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
     _resetSessionLockForTests();
@@ -432,7 +433,7 @@ test("buildOcrRetryPageHandler rejects concurrent retries on the same row", asyn
 
 test("buildOcrRetryPageHandler maps RetryPageError codes to HTTP statuses", async () => {
   const dir = join(tmpdir(), `ocr-http-err-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     const { buildOcrRetryPageHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
     const { RetryPageError } = await import("../../../src/workflows/ocr/retry-page.js");
@@ -454,9 +455,9 @@ test("buildOcrRetryPageHandler maps RetryPageError codes to HTTP statuses", asyn
 
 test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", async () => {
   const dir = join(tmpdir(), `ocr-http-whole-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "s3",
@@ -516,9 +517,9 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
 
 test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-out", async () => {
   const dir = join(tmpdir(), `ocr-http-reocr-fanout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "s-fanout",
@@ -610,9 +611,9 @@ function emergencyContactPreviewRecord(
 
 test("buildOcrApproveHandler does not fan out oath approvals from the approve route", async () => {
   const dir = join(tmpdir(), `ocr-approve-oath-no-fanout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "session-oath-no-fanout",
@@ -675,10 +676,10 @@ test("buildOcrApproveHandler does not fan out oath approvals from the approve ro
 
 test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOverride and stamps post-approve entry", async () => {
   const dir = join(tmpdir(), `ocr-approve-parent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     // Pre-write an OCR awaiting-approval tracker entry with parentRunId
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "session-approve-1",
@@ -750,11 +751,11 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
 
 test("buildOcrApproveHandler provides downstream pre-emit hook before daemon auth", async () => {
   const dir = join(tmpdir(), `ocr-approve-preemit-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     const today = dateLocalForTest();
-    const ocrFile = join(dir, `ocr-${today}.jsonl`);
-    const ecFile = join(dir, `emergency-contact-${today}.jsonl`);
+    const ocrFile = rowFilePath("ocr", today, dir);
+    const ecFile = rowFilePath("emergency-contact", today, dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "session-preemit-approve",
@@ -803,9 +804,9 @@ test("buildOcrApproveHandler provides downstream pre-emit hook before daemon aut
 
 test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs", async () => {
   const dir = join(tmpdir(), `ocr-approve-dry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "session-approve-dry",
@@ -846,7 +847,7 @@ test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs
 
 test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-out task ids", async () => {
   const dir = join(tmpdir(), `ocr-approve-deps-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
     const [parent] = taskStore.enqueueTasks({
@@ -855,7 +856,7 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
       deriveItemId: () => "ocr-prep-session-approve-deps",
       runIds: ["oath-upload-run-deps"],
     });
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "session-approve-deps",
@@ -911,10 +912,10 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
 
 test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy called with undefined 4th arg, entry has no parentRunId but still has fannedOutItemIds", async () => {
   const dir = join(tmpdir(), `ocr-approve-noparent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
     // Pre-write an OCR awaiting-approval entry WITHOUT parentRunId
-    const ocrFile = join(dir, `ocr-${dateLocalForTest()}.jsonl`);
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
       id: "session-approve-2",
@@ -971,9 +972,9 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
 
 test("buildOcrApproveHandler approves without preview readiness props", async () => {
   const dir = join(tmpdir(), `ocr-approve-skip-preview-props-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(rowsDir(dir), { recursive: true });
   try {
-    writeFileSync(join(dir, `ocr-${dateLocalForTest()}.jsonl`), JSON.stringify({
+    writeFileSync(rowFilePath("ocr", dateLocalForTest(), dir), JSON.stringify({
       workflow: "ocr",
       id: "session-preview-props-removed",
       runId: "run-preview-props-removed",

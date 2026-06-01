@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -8,6 +8,7 @@ import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db
 import { rebuildProjectionForDate } from "../../../src/tracker/state/rebuild.js";
 import { applyTrackerEntry } from "../../../src/tracker/state/apply.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
+import { rowFilePath, logFilePath, sessionFilePath, rowsDir, logsDir, sessionsDir } from "../../../src/tracker/paths.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "state-rebuild-"));
@@ -17,7 +18,9 @@ test("rebuildProjectionForDate replays tracker and log JSONL into SQLite", () =>
   const dir = tmpTracker();
   const date = "2026-05-04";
   try {
-    appendFileSync(join(dir, `onboarding-${date}.jsonl`), JSON.stringify({
+    mkdirSync(rowsDir(dir), { recursive: true });
+    mkdirSync(logsDir(dir), { recursive: true });
+    appendFileSync(rowFilePath("onboarding", date, dir), JSON.stringify({
       workflow: "onboarding",
       timestamp: "2026-05-04T20:00:00.000Z",
       id: "jane",
@@ -26,7 +29,7 @@ test("rebuildProjectionForDate replays tracker and log JSONL into SQLite", () =>
       step: "extraction",
       data: { name: "Jane" },
     }) + "\n");
-    appendFileSync(join(dir, `onboarding-${date}-logs.jsonl`), JSON.stringify({
+    appendFileSync(logFilePath("onboarding", date, dir), JSON.stringify({
       workflow: "onboarding",
       itemId: "jane",
       runId: "run-1",
@@ -88,8 +91,9 @@ test("rebuildProjectionForDate is idempotent and skips malformed lines", () => {
   const dir = tmpTracker();
   const date = "2026-05-04";
   try {
-    appendFileSync(join(dir, `work-study-${date}.jsonl`), "{bad json}\n");
-    appendFileSync(join(dir, `work-study-${date}.jsonl`), JSON.stringify({
+    mkdirSync(rowsDir(dir), { recursive: true });
+    appendFileSync(rowFilePath("work-study", date, dir), "{bad json}\n");
+    appendFileSync(rowFilePath("work-study", date, dir), JSON.stringify({
       workflow: "work-study",
       timestamp: "2026-05-04T20:00:00.000Z",
       id: "10000001",
@@ -109,14 +113,15 @@ test("rebuildProjectionForDate is idempotent and skips malformed lines", () => {
 });
 
 test("rebuildProjectionForDate skips sessions-${date}.jsonl in the tracker loop", () => {
-  // Regression: sessions-${date}.jsonl matches the `-${date}.jsonl` suffix
-  // and was being parsed as a tracker file with workflow="sessions".
-  // Session events have no `workflow` field, so `applyTrackerEntry` failed
-  // bind on parameter 4 (@workflow), aborting the projection rebuild.
+  // Regression: sessions-${date}.jsonl used to match the `-${date}.jsonl` suffix
+  // when sitting in the tracker root, but now session files live in the sessions/
+  // subdir — separate from rows/. This test confirms the session file still flows
+  // through the session loop and does NOT appear as a tracker row.
   const dir = tmpTracker();
   const date = "2026-05-04";
   try {
-    appendFileSync(join(dir, `sessions-${date}.jsonl`), JSON.stringify({
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    appendFileSync(sessionFilePath(date, dir), JSON.stringify({
       type: "workflow_start",
       timestamp: "2026-05-04T20:00:00.000Z",
       pid: 1,
@@ -140,7 +145,8 @@ test("rebuildProjectionForDate applies only new bytes on second call (incrementa
   const dir = tmpTracker();
   const date = "2026-05-04";
   try {
-    const trackerPath = join(dir, `onboarding-${date}.jsonl`);
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const trackerPath = rowFilePath("onboarding", date, dir);
 
     // First write: one entry
     appendFileSync(trackerPath, JSON.stringify({
@@ -179,14 +185,15 @@ test("rebuildProjectionForDate applies only new bytes on second call (incrementa
 test("rebuildProjectionForDate only clears session events for the rebuilt date", () => {
   const dir = tmpTracker();
   try {
-    appendFileSync(join(dir, "sessions-2026-05-03.jsonl"), JSON.stringify({
+    mkdirSync(sessionsDir(dir), { recursive: true });
+    appendFileSync(sessionFilePath("2026-05-03", dir), JSON.stringify({
       type: "workflow_start",
       timestamp: "2026-05-03T20:00:00.000Z",
       pid: 1,
       workflowInstance: "Yesterday 1",
       runId: "run-yesterday",
     }) + "\n");
-    appendFileSync(join(dir, "sessions-2026-05-04.jsonl"), JSON.stringify({
+    appendFileSync(sessionFilePath("2026-05-04", dir), JSON.stringify({
       type: "workflow_start",
       timestamp: "2026-05-04T20:00:00.000Z",
       pid: 1,
@@ -227,7 +234,8 @@ test("rebuild handles JSONL truncation by re-reading from offset 0", () => {
   const dir = tmpTracker();
   const date = "2026-05-08";
   try {
-    const path = join(dir, `separations-${date}.jsonl`);
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const path = rowFilePath("separations", date, dir);
 
     // Write 2 long entries — large enough that a 2-entry replacement file
     // (with shorter lines) will be smaller than this file's total size.

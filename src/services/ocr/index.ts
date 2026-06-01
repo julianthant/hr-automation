@@ -24,7 +24,7 @@ export { OcrAllKeysExhaustedError, OcrValidationError, OcrProviderError };
 //
 // `_cacheDir` is retained because `KeyRotation` persists per-key
 // throttle/quota state into it across runs.
-const DEFAULT_CACHE_DIR = ".tracker";
+const DEFAULT_CACHE_DIR = ".tracker/runtime";
 
 let _cacheDir: string | undefined;
 let _provider: OcrProvider | undefined;

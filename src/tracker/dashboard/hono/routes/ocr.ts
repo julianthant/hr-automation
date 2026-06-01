@@ -19,6 +19,7 @@ import { readMultipartRequest } from "../multipart.js";
 import { jsonResponse, readJsonRequest } from "../responses.js";
 import { log } from "../../../../utils/log.js";
 import { getOcrKeyStatuses } from "../../../../services/ocr/key-status.js";
+import { runtimeDir } from "../../../paths.js";
 
 export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
   const handlers = {
@@ -104,7 +105,7 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
     return jsonResponse(result.body, result.status);
   });
 
-  app.get("/api/ocr/key-status", () => jsonResponse(getOcrKeyStatuses(deps.dir)));
+  app.get("/api/ocr/key-status", () => jsonResponse(getOcrKeyStatuses(runtimeDir(deps.dir))));
 }
 
 async function handlePrepare(
