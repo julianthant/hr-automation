@@ -17,6 +17,7 @@
  * browsers.
  */
 import { resolve } from "node:path";
+import { sharepointDir } from "../../tracker/paths.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { runWorkflow } from "../../core/index.js";
@@ -47,7 +48,7 @@ export interface RosterDownloadResponse {
 }
 
 export interface RosterDownloadHandlerOptions {
-  /** Default root directory for downloads, overridable per-spec via `spec.outDir`. Default: `<cwd>/src/data`. */
+  /** Default root directory for downloads, overridable per-spec via `spec.outDir`. Default: `<cwd>/.tracker/sharepoint`. */
   outDir?: string;
   /**
    * Injected for tests — fires the kernel workflow. Defaults to the real
@@ -194,7 +195,7 @@ function resolveOutDir(
 export function buildSharePointRosterDownloadHandler(
   options: RosterDownloadHandlerOptions = {},
 ): (input: { id?: string; parentRunId?: string }) => Promise<RosterDownloadResponse> {
-  const defaultOutDir = options.outDir ?? resolve(process.cwd(), "src/data/sharepoint");
+  const defaultOutDir = options.outDir ?? resolve(process.cwd(), sharepointDir(".tracker"));
   const runWorkflowImpl = options.runWorkflowFn ?? runWorkflow;
   const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
 

@@ -44,7 +44,7 @@ export interface SharePointDownloadSpec {
   envVar: string;
   /**
    * Optional per-spec download directory, relative to `process.cwd()`.
-   * Defaults to `src/data/` (see `buildSharePointRosterDownloadHandler`).
+   * Defaults to `.tracker/sharepoint/` (see `buildSharePointRosterDownloadHandler`).
    * Override when a spreadsheet needs to land somewhere the rest of the
    * codebase already looks (e.g. a workflow-specific fixture dir).
    */

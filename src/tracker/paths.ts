@@ -17,6 +17,9 @@ import { join } from "node:path";
  *   <dir>/debug/     …                   row-lifecycle debug dumps (row-lifecycle-debug.ts)
  *   <dir>/pdf-cache/ …                   rasterized PDF pages (files/pdf-cache.ts)
  *   <dir>/uploads/   …                   uploaded source files (dashboard)
+ *   <dir>/screenshots/ …                 operator audit screenshots (PATHS.screenshotDir)
+ *   <dir>/sharepoint/  *.xlsx            SharePoint roster downloads (sharepoint-download)
+ *   <dir>/rosters/     *.xlsx            emergency-contact pre-flight roster downloads
  * ```
  *
  * Row "kind" is conveyed by DIRECTORY, not by a filename suffix: a `rows/` file
@@ -29,6 +32,9 @@ export const ROWS_SUBDIR = "rows";
 export const LOGS_SUBDIR = "logs";
 export const SESSIONS_SUBDIR = "sessions";
 export const RUNTIME_SUBDIR = "runtime";
+export const SCREENSHOTS_SUBDIR = "screenshots";
+export const SHAREPOINT_SUBDIR = "sharepoint";
+export const ROSTERS_SUBDIR = "rosters";
 
 export function rowsDir(dir: string): string {
   return join(dir, ROWS_SUBDIR);
@@ -44,6 +50,21 @@ export function sessionsDir(dir: string): string {
 
 export function runtimeDir(dir: string): string {
   return join(dir, RUNTIME_SUBDIR);
+}
+
+/** `<dir>/screenshots` — operator audit screenshots (surfaced as `PATHS.screenshotDir`). */
+export function screenshotsDir(dir: string): string {
+  return join(dir, SCREENSHOTS_SUBDIR);
+}
+
+/** `<dir>/sharepoint` — SharePoint roster `.xlsx` downloads. */
+export function sharepointDir(dir: string): string {
+  return join(dir, SHAREPOINT_SUBDIR);
+}
+
+/** `<dir>/rosters` — emergency-contact pre-flight roster `.xlsx` downloads. */
+export function rostersDir(dir: string): string {
+  return join(dir, ROSTERS_SUBDIR);
 }
 
 /** `<dir>/rows/<workflow>-<date>.jsonl` — tracker/queue rows for one workflow+day. */

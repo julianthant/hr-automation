@@ -10,7 +10,7 @@ import { z } from "zod";
  * is the human-readable spreadsheet name, mirrored into `detailFields` so
  * the queue row shows "Onboarding Roster" instead of the opaque id.
  * `outDir` is optional per-spec override; when absent, the handler defaults
- * to `<cwd>/src/data/sharepoint`.
+ * to `<cwd>/.tracker/sharepoint`.
  */
 export const SharePointDownloadInputSchema = z.object({
   id: z.string().min(1, "id must not be empty"),
