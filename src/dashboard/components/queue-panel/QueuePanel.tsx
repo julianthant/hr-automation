@@ -444,6 +444,26 @@ export function QueuePanel({
     const { surface, projection } = row;
     switch (surface.kind) {
       case "preview":
+        // A preview with no delegated members (the OCR review row awaiting
+        // approval) is a flat row, not a member-summary card. Render it as a
+        // normal EntryItem — same as the UI gallery's `preview` variant — so it
+        // gets the kind title/subtitle (PDF name · trace id) and the unified
+        // status-gated footer instead of a degenerate 0/0 batch chrome.
+        // DelegationRow stays for previews that have fanned out to members.
+        if (surface.members.length === 0) {
+          return (
+            <EntryItem
+              key={`preview-${surface.parentRunId}`}
+              entry={surface.parent}
+              projection={row.parentProjection}
+              displayNames={displayNames}
+              selected={selectedId === surface.parent.id}
+              onSelect={onSelect}
+              date={date}
+              onDelete={onDelete}
+            />
+          );
+        }
         return (
           <DelegationRow
             key={`preview-${surface.parentRunId}`}
