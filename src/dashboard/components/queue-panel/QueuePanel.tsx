@@ -468,6 +468,7 @@ export function QueuePanel({
             titleOverride={surface.titleOverride}
             projection={projection}
             memberEntries={surface.members}
+            anchorEntry={surface.parent}
             isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
             onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
             batchDrillInEnabled={!batchQueueParentRunId}

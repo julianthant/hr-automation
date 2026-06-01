@@ -17,6 +17,13 @@ export interface DaemonBatchRowProps {
   titleOverride?: string;
   projection?: WorkflowRunProjection;
   memberEntries: TrackerEntry[];
+  /**
+   * The batch anchor (parent) row. Used as the footer fallback when the batch
+   * has no members yet (a `batch` anchor before it fans out — e.g. the
+   * oath-signature PDF row during OCR approval), so the uniform footer keeps
+   * its time / elapsed / retry+delete instead of collapsing to a bare `#run`.
+   */
+  anchorEntry?: TrackerEntry;
   isBatchQueueFocused: boolean;
   onEnterBatchQueue: (batchParentRunId: string) => void;
   /**
@@ -40,15 +47,23 @@ export function DaemonBatchRow({
   titleOverride,
   projection,
   memberEntries,
+  anchorEntry,
   isBatchQueueFocused,
   onEnterBatchQueue,
   batchDrillInEnabled = true,
   onDeletedIds,
 }: DaemonBatchRowProps) {
+  // Footer source: members once they exist, else the batch anchor (so a
+  // 0-member pre-fan-out batch still shows time / elapsed / retry+delete).
+  // `members` stays as-is for the count badge + progress bar (0/0).
+  const footerEntries = useMemo(
+    () => (memberEntries.length > 0 ? memberEntries : anchorEntry ? [anchorEntry] : memberEntries),
+    [memberEntries, anchorEntry],
+  );
   const firstTimestamp = useMemo(
     () =>
-      [...memberEntries].sort((a, b) => a.timestamp.localeCompare(b.timestamp))[0]?.timestamp,
-    [memberEntries],
+      [...footerEntries].sort((a, b) => a.timestamp.localeCompare(b.timestamp))[0]?.timestamp,
+    [footerEntries],
   );
   const title = useMemo(
     () => resolveDaemonBatchQueueTitle(workflowLabel, memberEntries, batchParentRunId, titleOverride),
@@ -60,7 +75,7 @@ export function DaemonBatchRow({
       workflow={workflow}
       date={date}
       batchParentRunId={batchParentRunId}
-      memberEntries={memberEntries}
+      memberEntries={footerEntries}
       projection={projection}
       onDeletedIds={onDeletedIds}
     />
@@ -75,6 +90,7 @@ export function DaemonBatchRow({
       countTone="neutral"
       footerSecondaryId={projection?.subtitle}
       firstTimestamp={firstTimestamp}
+      elapsedEntries={footerEntries}
       isFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
       onEnter={onEnterBatchQueue}
