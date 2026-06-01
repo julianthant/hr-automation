@@ -247,6 +247,8 @@ function EntryItemImpl({
           runId: entry.runId,
           date,
           actions: projectedActions,
+          entry,
+          subject: name || entry.id,
           onDelete,
         },
       }}

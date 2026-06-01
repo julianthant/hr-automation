@@ -18,6 +18,7 @@ import {
 } from "./registry.js";
 import type {
   WorkflowActionDescriptor,
+  WorkflowActionKind,
   WorkflowActionPolicy,
   WorkflowActionTargetDescriptor,
   WorkflowRunProjection,
@@ -82,6 +83,57 @@ function withTargets(
 ): WorkflowActionDescriptor[] {
   return actions.map((action) => ({
     ...action,
+    targets: targets.map((target) => ({ ...target })),
+  }));
+}
+
+/**
+ * Which row-scoped actions a single row offers, by status. This is the one
+ * source of truth for the unified footer's button matrix — the dashboard
+ * footer renders a button per kind and self-hides on `enabled`, so the visible
+ * cluster is exactly what this returns:
+ *
+ *   running          → cancel (×)
+ *   pending (queued) → bump (▲) + cancel (×) + delete (🗑 = cancel+delete)
+ *   terminal         → retry (↻) + delete (🗑)
+ *
+ * A cancelled row is `status: "failed"` (with `step: "cancelled"`), so it
+ * falls into the terminal branch — retry + delete, as intended.
+ */
+export function rowActionEnabledForStatus(
+  kind: WorkflowActionKind,
+  status: string | undefined,
+): boolean {
+  const terminal =
+    status === "done" || status === "failed" || status === "skipped" || status === "cancelled";
+  switch (kind) {
+    case "cancel":
+      return status === "running" || status === "pending";
+    case "bump":
+      return status === "pending";
+    case "delete":
+      return status === "pending" || terminal;
+    case "retry":
+      return terminal;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Build row-scoped action descriptors with `enabled` gated by the row's status.
+ * Row actions target exactly one entry, so the gate reads `targets[0].status`.
+ * Group/bulk descriptors keep `withTargets` (their footer selects targets by
+ * kind/status itself).
+ */
+function withRowTargets(
+  actions: readonly WorkflowActionPolicy[],
+  targets: readonly WorkflowActionTargetDescriptor[],
+): WorkflowActionDescriptor[] {
+  const status = targets[0]?.status;
+  return actions.map((action) => ({
+    ...action,
+    enabled: action.enabled && rowActionEnabledForStatus(action.kind, status),
     targets: targets.map((target) => ({ ...target })),
   }));
 }
@@ -223,7 +275,7 @@ export function buildWorkflowRunProjection(
     step: entry.step,
     surfaceType,
     rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType),
-    actions: overrides.actions ?? withTargets(policy.rowActions, targets),
+    actions: overrides.actions ?? withRowTargets(policy.rowActions, targets),
     batchMembers: overrides.batchMembers ?? [],
   };
 }
@@ -300,7 +352,7 @@ export function buildProjectionFromQueueSurface(
   const groupActions = withTargets(policy.groupActions, actionTargets(targetEntries));
   const actions = surface.kind === "preview"
     ? [
-        ...withTargets(policy.rowActions, actionTargets(rowTargetEntries)),
+        ...withRowTargets(policy.rowActions, actionTargets(rowTargetEntries)),
         ...groupActions,
       ]
     : groupActions;

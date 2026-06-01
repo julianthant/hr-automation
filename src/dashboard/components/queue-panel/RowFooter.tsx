@@ -1,16 +1,23 @@
 import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { BumpButton } from "@/components/shared/BumpButton";
 import { RetryButton } from "@/components/shared/RetryButton";
+import { RowCancelButton } from "@/components/shared/RowCancelButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
+import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
 
-/** Standard single-row retry + delete target. */
+/** Standard single-row action target. Footer buttons self-hide per descriptor. */
 export interface RowFooterRowAction {
   workflow: string;
   id: string;
   runId?: string;
   date?: string;
   actions?: WorkflowActionDescriptor[];
+  /** The row's tracker entry — lets cancel detect OCR-prep + read row status. */
+  entry?: TrackerEntry;
+  /** Display subject for action toasts (falls back to id). */
+  subject?: string;
   onDelete?: (id: string) => void;
 }
 
@@ -20,11 +27,16 @@ export interface RowFooterRowAction {
  *
  *   time · #run · id · ⟨spacer⟩ · elapsed|duration · retry · delete
  *
- * Retry + delete live HERE. A flat row passes `rowAction` (standard
- * single-target buttons); a batch card passes a custom `actions` cluster
- * (bulk) which overrides `rowAction`. Either way the slot + layout are
- * identical. Timing is one muted value — `elapsed` (running) else `duration`
- * (terminal); status is conveyed by the badge, never the timer color.
+ * The action cluster lives HERE. A flat row passes `rowAction`; a batch card
+ * passes a custom `actions` cluster (bulk) which overrides `rowAction`. Either
+ * way the slot + layout are identical. Timing is one muted value — `elapsed`
+ * (running) else `duration` (terminal); status is conveyed by the badge, never
+ * the timer color.
+ *
+ * Flat-row buttons follow one schema, status-gated by the kernel projection
+ * (`rowActionEnabledForStatus`). Each button self-hides on its descriptor's
+ * `enabled` flag, so the visible cluster is purely status-driven:
+ *   running → ×  ·  queued → ▲ × 🗑  ·  done/failed → ↻ 🗑
  */
 export interface RowFooterProps {
   time: string;
@@ -59,18 +71,35 @@ export function RowFooter({
   actions,
 }: RowFooterProps) {
   const showId = secondaryId && secondaryId !== suppressIdWhenEquals;
-  // Uniform retry + delete. Per-status visibility is delegated to the kernel:
-  // RetryButton / DeleteButton self-hide only when their action descriptor is
-  // disabled, never on a client-side status branch.
+  // One status-gated schema: bump · retry · cancel · delete, ordered. Every
+  // button self-hides when its kernel descriptor is disabled, so the visible
+  // set is decided entirely by the projection's per-status `enabled` flags —
+  // never a client-side `isRunning/isPending/isDone` branch.
   const actionCluster =
     actions ??
     (rowAction ? (
       <>
+        <BumpButton
+          workflow={rowAction.workflow}
+          id={rowAction.id}
+          runId={rowAction.runId}
+          subject={rowAction.subject}
+          actions={rowAction.actions}
+        />
         <RetryButton
           workflow={rowAction.workflow}
           id={rowAction.id}
           runId={rowAction.runId}
           date={rowAction.date}
+          actions={rowAction.actions}
+        />
+        <RowCancelButton
+          workflow={rowAction.workflow}
+          id={rowAction.id}
+          runId={rowAction.runId}
+          date={rowAction.date}
+          subject={rowAction.subject}
+          entry={rowAction.entry}
           actions={rowAction.actions}
         />
         {rowAction.onDelete && rowAction.date && (
