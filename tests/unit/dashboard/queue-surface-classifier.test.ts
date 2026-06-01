@@ -2,6 +2,7 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
 import {
+  buildQueueProjectionRows,
   buildQueueProjections,
   buildQueueSurfaces,
 } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
@@ -55,6 +56,44 @@ describe("buildQueueSurfaces", () => {
       ["run-a", "run-b"],
       ["run-a", "run-b"],
     ]);
+  });
+
+  it("gives a memberless OCR preview a flat parentProjection (renders as a single row, not a 0/0 batch)", () => {
+    const ocr = row({
+      workflow: "ocr",
+      id: "ocr-session-1",
+      runId: "ocr-run-1",
+      status: "running",
+      step: "awaiting-approval",
+      data: {
+        archetype: "preview",
+        queueRowKind: "file",
+        mode: "prepare",
+        pdfOriginalName: "Xerox Scan_04282026111307.pdf",
+        __traceId: "oc-095600-5603",
+      },
+    });
+    const rows = buildQueueProjectionRows({
+      entries: [ocr],
+      delegationSourceEntries: [],
+      workflow: "ocr",
+      workflowLabel: "OCR",
+      runtimePolicies,
+    });
+    const group = rows.groupRows[0];
+    assert.ok(group, "expected a preview group row");
+    assert.equal(group.surface.kind, "preview");
+    assert.equal(group.surface.members.length, 0);
+    // The flat parentProjection drives the EntryItem render: PDF-name title,
+    // trace-id subtitle (never "OCR"), and a running row's only enabled action
+    // is cancel.
+    assert.ok(group.parentProjection, "expected a flat parentProjection");
+    assert.equal(group.parentProjection!.title, "Xerox Scan_04282026111307.pdf");
+    assert.equal(group.parentProjection!.subtitle, "oc-095600-5603");
+    assert.deepEqual(
+      group.parentProjection!.actions.filter((a) => a.enabled).map((a) => a.kind).sort(),
+      ["cancel"],
+    );
   });
 
   it("groups multiple OCR person-lookup children as a delegated batch", () => {

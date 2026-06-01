@@ -95,6 +95,15 @@ export interface QueueSurfaces {
 export interface QueueGroupProjectionRow {
   surface: QueueGroupSurface;
   projection: WorkflowRunProjection;
+  /**
+   * Flat single-row projection of a preview surface's parent. A preview with
+   * no delegated members (the OCR review row awaiting approval) renders as a
+   * flat {@link EntryItem} — not the member-summary `DelegationRow` — so it
+   * needs the parent's own status-gated row actions + kind title/subtitle,
+   * exactly like a `single` row. Absent for batch surfaces and for previews
+   * that have fanned out to members.
+   */
+  parentProjection?: WorkflowRunProjection;
 }
 
 export interface QueueEntryProjectionRow {
@@ -147,6 +156,9 @@ export function buildQueueProjectionRows(input: BuildQueueSurfacesInput): QueueP
       surface as unknown as TrackerQueueGroupSurface,
       context,
     ),
+    ...(surface.kind === "preview"
+      ? { parentProjection: buildWorkflowRunProjection(toJsonlEntry(surface.parent), context) }
+      : {}),
   }));
   const flatEntries = surfaces.flatEntries.map((entry) => ({
     entry,
