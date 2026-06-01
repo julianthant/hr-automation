@@ -423,15 +423,16 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       });
       assert.equal(projection.surfaceType, "single");
       assert.equal(projection.rowTypeLabel, "Single");
-      // A queued (pending) row offers bump + cancel + delete; retry is gated
-      // off (only terminal rows retry). Each descriptor's `enabled` is the
-      // status-driven flag the unified footer reads.
+      // A queued (pending) row offers bump + cancel only. Retry and delete are
+      // gated off — delete becomes available once the row is cancelled (→
+      // terminal). Each descriptor's `enabled` is the status-driven flag the
+      // unified footer reads.
       const targets = [{ workflowId, id: label, runId: projection.runId, status: "pending" }];
       assert.deepEqual(projection.actions, [
         { ...DEFAULT_ROW_BUMP_ACTION, enabled: true, targets },
         { ...DEFAULT_ROW_RETRY_ACTION, enabled: false, targets },
         { ...DEFAULT_ROW_CANCEL_ACTION, enabled: true, targets },
-        { ...DEFAULT_ROW_DELETE_ACTION, enabled: true, targets },
+        { ...DEFAULT_ROW_DELETE_ACTION, enabled: false, targets },
       ]);
     }
   });
@@ -442,7 +443,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       id: "Doe, Jane",
       data: { __queueTitle: "Doe, Jane", __queueTitleKind: "single" },
     } as const;
-    const enabledKinds = (status: "running" | "done" | "failed") => {
+    const enabledKinds = (status: "pending" | "running" | "done" | "failed") => {
       const projection = buildWorkflowRunProjection(
         entry({ ...base, runId: `ws-${status}`, status }),
         { runtimePolicies: phase5Policies },
@@ -450,6 +451,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       return projection.actions.filter((a) => a.enabled).map((a) => a.kind).sort();
     };
     assert.deepEqual(enabledKinds("running"), ["cancel"]);
+    assert.deepEqual(enabledKinds("pending"), ["bump", "cancel"]);
     assert.deepEqual(enabledKinds("done"), ["delete", "retry"]);
     assert.deepEqual(enabledKinds("failed"), ["delete", "retry"]);
   });

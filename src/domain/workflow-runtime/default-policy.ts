@@ -28,7 +28,7 @@ export function workflowAction(
  * cluster is purely status-driven:
  *
  *   running → ×            (cancel)
- *   queued  → ▲ × 🗑       (bump, cancel, delete=cancel+delete)
+ *   queued  → ▲ ×          (bump, cancel — delete only after cancel → terminal)
  *   done    → ↻ 🗑         (retry, delete)
  *   failed  → ↻ 🗑         (retry, delete)
  */
