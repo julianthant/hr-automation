@@ -4,7 +4,7 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 
 ## New Workflow Rules
 
-- `defineWorkflow` owns `name`, `label`, `archetype`, `queueRowKind`, `code`, `runtimePolicy`, `systems`, `steps`, `schema`, `tiling`, `detailFields`, display-name/id helpers, operator subject, and handler.
+- `defineWorkflow` owns `name`, `label`, `archetype`, `inputSubject`, `code`, `category`, `runtimePolicy`, `systems`, `steps`, `schema`, `tiling`, `detailFields`, display-name/id helpers, operator subject, and handler. `queueRowKind` is derived from `inputSubject`, not declared directly.
 - The kernel owns browser launch, Duo-aware auth, tracker emissions, screenshots on step failure, SIGINT cleanup, batch/pool wrapping, and dashboard registry data.
 - Do not add Commander subcommands or package scripts for operator starts. Public starts are dashboard input/upload runs.
 - Do not create workflow-local `tracker.ts`; kernel JSONL emissions + dashboard are the observability surface. The only grandfathered workflow tracker is `old-kronos-reports/tracker.ts`.
@@ -23,6 +23,7 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 - Input runs: add the workflow to `DASHBOARD_INPUT_RUN_WORKFLOWS`, configure `src/dashboard/lib/input-run-registry.ts`, and ensure `src/core/workflow-loaders.ts` resolves it for `/api/enqueue`.
 - Upload runs: add the workflow to `DASHBOARD_UPLOAD_RUN_WORKFLOWS` and configure `src/dashboard/lib/run-modal-registry.ts`.
 - Add a `:stop` script only for workflows with long-lived daemons.
+- Workflow rail badges are backend-authoritative `wfCounts`. The active queue panel's top-level row count must not override the active workflow's rail count; resolved OCR prep rows that still render in the queue remain countable.
 
 ## Archetypes
 
@@ -57,7 +58,7 @@ Rule objects live client-bundle-safe in domain/tracker (`domain/person-lookup-st
 
 Workflow-local functions describe orchestration steps. Reusable behavior belongs in `src/domain/`, `src/core/`, `src/services/ocr/forms/`, or the relevant `src/systems/` module. If another workflow could use it, promote it.
 
-Internal helper workflow modules may live under `src/workflows/<name>/` without being operator-startable. They must stay out of `WORKFLOW_LOADERS` and dashboard run-surface lists. `src/workflows/person-lookup/` is the operator-facing merged workflow (formerly EID Lookup + Active Check); it is registered in `WORKFLOW_LOADERS` and dashboard input runs, and also exports the `lookupPersonInUcpath` primitive for internal callers (OCR orchestrator, force-research, retry-page).
+Internal helper workflow modules may live under `src/workflows/<name>/` without being operator-startable. Pure in-process helpers stay out of `WORKFLOW_LOADERS`; delegated-only daemon workflows belong in `WORKFLOW_LOADERS` so parents can enqueue them, but stay out of dashboard run-surface lists. `src/workflows/person-lookup/` is the operator-facing merged workflow (formerly EID Lookup + Active Check); it is registered in `WORKFLOW_LOADERS` and dashboard input runs, and also exports the `lookupPersonInUcpath` primitive for internal callers (OCR orchestrator, force-research, retry-page). `src/workflows/i9-lookup/` is delegated-only, registered in `WORKFLOW_LOADERS`, category `Utils`, and not in input/upload run surfaces.
 
 ## Opt-Ins
 
@@ -68,6 +69,7 @@ The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operato
 ## Lessons Learned
 
 - **2026-05-30: Queue row status is a fourth (optional) axis via `statusExtensions`.** Per-workflow status rules (person-lookup A/IA + `notFound`, ocr `needsReview`) moved out of the generic `EntryItem` dashboard component into `WorkflowConfig.statusExtensions`, resolved by `resolveQueueRowStatus` (`src/domain/queue-row-status.ts`). Rule objects are client-bundle-safe (domain/tracker only — no `src/workflows/*` reaches the dashboard bundle) and registered for the client via `domain/queue-row-status-index.ts`. Optional axis: omitting it = default base-status behavior. No coverage guard (it's optional, unlike `queueRowKind`).
+- **2026-06-02: Workflow rail badge counts are backend-authoritative.** `wfCounts` are computed by backend queue/sidebar row counting and passed through `buildWorkflowRailEntryCounts`; the active queue panel no longer overrides the active workflow badge with its scoped top-level count. Resolved OCR prep rows that still render in queue surfaces stay included in counts, and retired workflow ids are filtered before the rail sees them.
 - **2026-06-01: `inputSubject` is the declared subject axis; `queueRowKind` is derived from it.** Workflows declare `inputSubject` (`name|eid|email|kualiId|pdf|selector`) on `defineWorkflow` — a literal, or a resolver for input-variant workflows. The presentation `queueRowKind` (`person|file|catalog`, still stamped as `data.queueRowKind`) is derived via `subjectToQueueRowKind` in the kernel normalizer (`src/core/kernel/workflow.ts`), so the stamping sites and the dashboard are unchanged. `queueRowKind` is **no longer a `defineWorkflow` field** — the `queue-row-kind-coverage` guard now asserts `inputSubject`. Many subjects funnel onto three kinds (every person-identifying subject → person); this keeps the presentation taxonomy small while naming each workflow's input precisely. person-lookup is the remaining multi-shape workflow; it discriminates by **field presence** (`z.union` + a type guard), not a `kind` literal. (oath-signature was multi-shape too; its PDF variant was removed 2026-06-02 — it's now EID-only, and the paper-roster flow is owned by OCR's approve fan-out.)
 - **2026-05-30: Queue row kind is a third axis, orthogonal to shape and scope.** Kind drives title/subtitle only (via `src/domain/queue-row-presentation.ts`) — never footer/layout/status. Pending→resolved phase is derived at projection time from data presence, not stamped. Trace id (`data.__traceId`) replaced session-local ordinals in titles; `code` is its 2-char prefix. (Superseded declaration mechanism: kind is now derived from `inputSubject` — see the 2026-06-01 entry above.)
 - **2026-05-28: Person Lookup is the merged operator-facing workflow (formerly EID Lookup + Active Check).** `src/workflows/person-lookup/` is registered in `WORKFLOW_LOADERS` and dashboard input runs. It also exports the `lookupPersonInUcpath` primitive for internal callers. Do not add separate `eid-lookup` or `active-check` entries back to any registry.
