@@ -2,9 +2,10 @@ import { test } from "vitest";
 import assert from "node:assert";
 import { FORM_SPECS, getFormSpec, listFormTypes } from "../../../../src/workflows/ocr/form-registry.js";
 
-test("FORM_SPECS includes oath + emergency-contact", () => {
+test("FORM_SPECS includes oath + emergency-contact + verify", () => {
   assert.ok(FORM_SPECS.oath);
   assert.ok(FORM_SPECS["emergency-contact"]);
+  assert.ok(FORM_SPECS.verify);
 });
 
 test("getFormSpec resolves known formType", () => {
@@ -19,9 +20,13 @@ test("getFormSpec returns null for unknown", () => {
 
 test("listFormTypes returns metadata for the run modal", () => {
   const list = listFormTypes();
-  assert.equal(list.length, 2);
+  assert.equal(list.length, 3);
   const oath = list.find((f) => f.formType === "oath");
   assert.ok(oath);
   assert.equal(oath.label, "Oath signature");
   assert.equal(oath.rosterMode, "required");
+  const verify = list.find((f) => f.formType === "verify");
+  assert.ok(verify);
+  assert.equal(verify.rosterMode, "optional");
+  assert.equal(verify.hasApproveFanOut, false);
 });

@@ -15,12 +15,20 @@ describe("shared OCR forms", () => {
     assert.equal(parsed.state, "verified");
   });
 
-  it("lists oath and emergency contact specs from the shared registry", () => {
+  it("lists oath, emergency contact, and verify specs from the shared registry", () => {
     assert.deepEqual(
       listFormTypes().map((f) => f.formType).sort(),
-      ["emergency-contact", "oath"],
+      ["emergency-contact", "oath", "verify"],
     );
     assert.equal(getFormSpec("oath")?.formType, "oath");
     assert.equal(getFormSpec("emergency-contact")?.formType, "emergency-contact");
+    assert.equal(getFormSpec("verify")?.formType, "verify");
+  });
+
+  it("verify is read-only — optional roster, no approve fan-out", () => {
+    const verify = listFormTypes().find((f) => f.formType === "verify");
+    assert.ok(verify);
+    assert.equal(verify.rosterMode, "optional");
+    assert.equal(verify.hasApproveFanOut, false);
   });
 });
