@@ -1,9 +1,11 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
+import type { Page } from "playwright";
 import {
   DUO_POLL_INTERVAL_MS,
   DUO_PRE_CHECK_MS,
   DUO_PRE_CHECK_INTERVAL_MS,
+  attemptDuoSmsPasscode,
   buildDuoResentDetail,
   buildDuoWaitingDetail,
   extractDuoVerificationCode,
@@ -11,6 +13,7 @@ import {
   readDuoVerificationCodeWhenVisible,
   type DuoPollOptions,
 } from "../../../../src/infra/auth/duo-poll.js";
+import type { ImessagePasscodeReader } from "../../../../src/infra/auth/imessage-passcode.js";
 
 describe("DuoPollOptions interface", () => {
   it("accepts string successUrlMatch", () => {
@@ -245,5 +248,213 @@ describe("Duo verification code helpers", () => {
       ]),
       /stop requested during Duo|aborted/i,
     );
+  });
+});
+
+// ─── iMessage SMS-passcode path ───────────────────────────────────────────────
+
+function fakeReader(opts: {
+  enabled?: boolean;
+  code?: string;
+}): ImessagePasscodeReader {
+  return {
+    isEnabled: () => opts.enabled ?? true,
+    readFreshPasscode: () => opts.code,
+  };
+}
+
+/**
+ * Builds a fake Playwright page for the Duo Universal Prompt. Each selector
+ * call is tagged by intent (otherOptions / smsFactor / tryAgain / trust / input
+ * / verify / body); `.or()` merges tag lists; `.count()` reflects whether the
+ * tag is "present" per `cfg`; `.click()`/`.fill()` record interactions. `url()`
+ * flips to `successUrl` once the verify button is clicked.
+ */
+function makeDuoPromptPage(cfg: {
+  otherOptions?: boolean;
+  smsFactor?: boolean;
+  successUrl?: string;
+  pendingUrl?: string;
+}) {
+  const clicks: string[] = [];
+  const fills: { tag: string; value: string }[] = [];
+  const flags = { verified: false, innerTextCalled: false };
+
+  const present = (tag: string): boolean => {
+    if (tag === "otherOptions") return cfg.otherOptions ?? false;
+    if (tag === "smsFactor") return cfg.smsFactor ?? false;
+    if (tag === "tryAgain" || tag === "trust") return false;
+    return true; // input + verify + body always resolvable
+  };
+
+  const tagFor = (name?: RegExp | string, sel?: string): string => {
+    const n = name instanceof RegExp ? name.source : typeof name === "string" ? name : "";
+    if (/other options/i.test(n)) return "otherOptions";
+    if (/text message passcode/i.test(n)) return "smsFactor";
+    if (/try again/i.test(n) || sel?.includes("Try Again")) return "tryAgain";
+    if (/Yes, this is my device/i.test(n)) return "trust";
+    if (/passcode/i.test(n) || sel?.includes("one-time-code") || sel?.includes('name="passcode"'))
+      return "input";
+    if (/verify|log/i.test(n) || sel?.includes('type="submit"')) return "verify";
+    if (sel === "body") return "body";
+    return "unknown";
+  };
+
+  const makeLoc = (tags: string[]) => {
+    const loc = {
+      __tags: tags,
+      or: (other: { __tags: string[] }) => makeLoc([...tags, ...other.__tags]),
+      first() {
+        return loc;
+      },
+      count: async () => tags.filter(present).length,
+      click: async () => {
+        const tag = tags.find(present) ?? tags[0];
+        clicks.push(tag);
+        if (tag === "verify") flags.verified = true;
+      },
+      fill: async (value: string) => {
+        fills.push({ tag: tags.find(present) ?? tags[0], value });
+      },
+      innerText: async () => {
+        flags.innerTextCalled = true;
+        return "";
+      },
+    };
+    return loc;
+  };
+
+  const page = {
+    url: () => (flags.verified ? cfg.successUrl ?? "" : cfg.pendingUrl ?? ""),
+    getByRole: (_role: string, o?: { name?: RegExp | string }) => makeLoc([tagFor(o?.name)]),
+    getByText: (t: RegExp | string) => makeLoc([tagFor(t)]),
+    locator: (sel: string) => makeLoc([tagFor(undefined, sel)]),
+  } as unknown as Page;
+
+  return { page, clicks, fills, flags };
+}
+
+describe("attemptDuoSmsPasscode", () => {
+  it("returns false and never touches the page when the reader is disabled", async () => {
+    let touched = false;
+    const page = new Proxy(
+      {},
+      {
+        get() {
+          touched = true;
+          throw new Error("page must not be touched when SMS path is disabled");
+        },
+      },
+    ) as unknown as Page;
+    const result = await attemptDuoSmsPasscode(page, fakeReader({ enabled: false }));
+    assert.equal(result, false);
+    assert.equal(touched, false);
+  });
+
+  it("clicks the SMS factor, fills the code, and verifies when a code arrives", async () => {
+    const { page, clicks, fills } = makeDuoPromptPage({ otherOptions: false, smsFactor: true });
+    const result = await attemptDuoSmsPasscode(page, fakeReader({ enabled: true, code: "1234567" }), {
+      waitMs: 1_000,
+      intervalMs: 10,
+    });
+    assert.equal(result, true);
+    assert.deepEqual(clicks, ["smsFactor", "verify"]);
+    assert.deepEqual(fills, [{ tag: "input", value: "1234567" }]);
+  });
+
+  it("clicks 'Other options' first when it is present", async () => {
+    const { page, clicks } = makeDuoPromptPage({ otherOptions: true, smsFactor: true });
+    await attemptDuoSmsPasscode(page, fakeReader({ enabled: true, code: "7654321" }), {
+      waitMs: 1_000,
+      intervalMs: 10,
+    });
+    assert.deepEqual(clicks, ["otherOptions", "smsFactor", "verify"]);
+  });
+
+  it("returns false (no submit) when the 'Text message passcode' option is absent", async () => {
+    const { page, clicks, fills } = makeDuoPromptPage({ otherOptions: false, smsFactor: false });
+    const result = await attemptDuoSmsPasscode(page, fakeReader({ enabled: true, code: "1234567" }), {
+      waitMs: 1_000,
+      intervalMs: 10,
+    });
+    assert.equal(result, false);
+    assert.deepEqual(clicks, []);
+    assert.deepEqual(fills, []);
+  });
+
+  it("requests the passcode but returns false when no fresh code arrives in time", async () => {
+    const { page, clicks, fills } = makeDuoPromptPage({ otherOptions: false, smsFactor: true });
+    const result = await attemptDuoSmsPasscode(page, fakeReader({ enabled: true, code: undefined }), {
+      waitMs: 0,
+      intervalMs: 0,
+    });
+    assert.equal(result, false);
+    assert.deepEqual(clicks, ["smsFactor"]);
+    assert.deepEqual(fills, []);
+  });
+
+  it("propagates an abort raised during the chat.db wait", async () => {
+    const { page } = makeDuoPromptPage({ otherOptions: false, smsFactor: true });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error("stop requested during Duo")), 25);
+    await assert.rejects(
+      () =>
+        attemptDuoSmsPasscode(page, fakeReader({ enabled: true, code: undefined }), {
+          waitMs: 60_000,
+          intervalMs: 5_000,
+          abortSignal: controller.signal,
+        }),
+      /stop requested during Duo|aborted/i,
+    );
+  });
+});
+
+describe("pollDuoApproval — SMS passcode integration", () => {
+  it("auto-submits the SMS code and skips the manual (voice/Telegram) announce", async () => {
+    const { page, clicks, fills, flags } = makeDuoPromptPage({
+      otherOptions: false,
+      smsFactor: true,
+      successUrl: "https://app.example/home",
+      pendingUrl: "https://duo.example/prompt",
+    });
+
+    const ok = await pollDuoApproval(page, {
+      successUrlMatch: "app.example",
+      timeoutSeconds: 30,
+      preCheckMs: 0,
+      initialCodeWaitMs: 0,
+      pollIntervalMs: 10,
+      smsReader: fakeReader({ enabled: true, code: "1234567" }),
+      smsWaitMs: 1_000,
+      smsPollIntervalMs: 10,
+    });
+
+    assert.equal(ok, true);
+    assert.ok(clicks.includes("smsFactor"), "should request the SMS passcode");
+    assert.ok(clicks.includes("verify"), "should submit the passcode");
+    assert.deepEqual(fills, [{ tag: "input", value: "1234567" }]);
+    assert.equal(
+      flags.innerTextCalled,
+      false,
+      "manual-announce code read must be skipped after a successful SMS submit",
+    );
+  });
+
+  it("falls through to the normal loop when the SMS reader is disabled", async () => {
+    const { page, clicks } = makeDuoPromptPage({
+      smsFactor: true,
+      successUrl: "https://app.example/home",
+      pendingUrl: "https://app.example/home", // already at success → loop returns immediately
+    });
+    const ok = await pollDuoApproval(page, {
+      successUrlMatch: "app.example",
+      timeoutSeconds: 30,
+      preCheckMs: 0,
+      initialCodeWaitMs: 0,
+      pollIntervalMs: 10,
+      smsReader: fakeReader({ enabled: false }),
+    });
+    assert.equal(ok, true);
+    assert.deepEqual(clicks, [], "disabled reader must not interact with the Duo prompt");
   });
 });
