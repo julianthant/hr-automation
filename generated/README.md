@@ -4,7 +4,7 @@ This directory holds outputs produced by scripts, analysis tools, and tests. The
 
 ## Layout
 
-- `schemas/` — JSON Schema exports from workflow Zod schemas. Regenerate with `npm run schemas:export`.
+- `schemas/` — JSON Schema exports from workflow Zod schemas. Regenerate with `npm run schemas:export`; generated `*.schema.json` files are gitignored.
 - `pathfinder/` — architecture/pathfinder reports and analysis scratch output.
 - `.tracker-test/` and `.tracker-log-test/` — tracker JSONL files produced by unit tests.
 - `.e2e-screenshots/` — screenshots captured during E2E/manual browser verification.

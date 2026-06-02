@@ -18,6 +18,12 @@ Unit tests for pure/near-pure logic. Playwright automation, login flows, and liv
 
 Static convention guards live in `tests/unit/architecture/`. Add guards when a rule is mechanical: import boundaries, default exports, signal-listener misuse, console logging outside allowed surfaces, workflow ownership leaks, and **src filename patterns** (kebab-case outside `src/dashboard/`; PascalCase components / `use*` hooks / kebab modules inside the dashboard — see `docs/engineering/codebase-conventions.md`).
 
+## Regression clusters
+
+- Dashboard queue/rail counts: backend `wfCounts` regressions belong in `tests/unit/tracker/state-queries.test.ts` and pure count helpers under `tests/unit/tracker/` or `tests/unit/dashboard/`. Pin that counts are backend-authoritative, independent of the selected workflow, and use the same queue-surface model as the rendered rail badges. OCR prep rows that still render in the queue must remain counted until the queue no longer renders them.
+- Person lookup dates: tests under `tests/unit/workflows/person-lookup/` should keep UCPath Last Hire/startDate separate from assignment EFFDT/effectiveDate. Dashboard detail fields should show `startDate`; retain `effdt` only as backend context.
+- Workflow categories/start surfaces: when a workflow moves category or start-surface eligibility, pin both the workflow config and the loader/surface arrays. Example: delegated utilities such as `i9-lookup` are `category: "Utils"` but are not dashboard input/upload starts.
+
 ## Lessons Learned
 
 - **2026-05-27: Architecture guards should avoid shell-only tool assumptions.** The origin-workflow lineage guard now scans with Node filesystem APIs instead of spawning `rg`, because Codex sessions can expose ripgrep through a shell path that is not executable from Vitest's `spawnSync`.
