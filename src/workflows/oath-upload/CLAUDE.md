@@ -1,35 +1,44 @@
 # Oath Upload Workflow
 
-Operator uploads a paper-oath PDF. The workflow delegates the PDF to
-**oath-signature**, waits for that delegated batch to complete, then files an
-HR General Inquiry ticket on `support.ucsd.edu` with the original PDF attached.
+Files an HR General Inquiry ticket on `support.ucsd.edu` with the oath PDF
+attached — AFTER every per-signer `oath-signature` row has finished and
+succeeded.
+
+**Fed by the OCR hub, not by uploading directly.** The operator's "full" oath
+upload starts an **OCR prep** (`/api/ocr/prepare`, `lockedFormType: "oath"`).
+On approve, OCR fans out one `oath-signature` signer row per approved record
+AND one `oath-upload` ticket row (carrying the signer itemIds). The ticket row
+waits on those signer rows, then files. This wait is **cross-daemon**
+(oath-upload daemon waits on oath-signature daemon rows), so nothing blocks on
+its own daemon's children — the fix for the prior single-worker deadlock.
 
 **Kernel-based + daemon-mode**, `archetype: "single"`. The Oath Upload row is a
-single row in the oath-upload tab. Its delegated signature work lives in the
-oath-signature tab.
+single row, grouped under the OCR run (`parentRunId`); the signer rows live in
+the oath-signature tab.
 
 ## What this workflow does
 
-Given an `OathUploadInput` (`pdfPath`, `pdfOriginalName`, `sessionId`, `pdfHash`):
+Given an `OathUploadInput` (`pdfFileId` or `pdfPath`, `pdfOriginalName`,
+`sessionId`, `signerItemIds`):
 
-1. `delegate-signatures` — call
-   `ctx.delegateTo(oathSignatureWorkflow, { pdfPath, pdfOriginalName, sessionId, ... }, { itemId: input.sessionId })`
-   (the PDF variant, identified by `pdfPath` presence — no `kind` tag).
-   The delegated oath-signature PDF run owns OCR, operator approval, and
-   signer fan-out. The pinned `itemId` keeps restart/retry identity stable via
-   the kernel's `tasks.original_input_json` contract.
+1. `wait-signatures` — `watchChildRuns({ workflow: "oath-signature", expectedItemIds: signerItemIds })`.
+   Requires EVERY signer outcome `status === "done"`; if any is missing /
+   `failed` / `cancelled`, THROW with a clear message and do NOT file the
+   ticket ("verify everything is good before we upload"). Skipped when there
+   are no `signerItemIds` (e.g. `upload-only`). The PDF path + hash are resolved
+   from the file store via `pdfFileId` when not passed inline.
 2. `servicenow-auth` — lazily launch the ServiceNow browser and authenticate.
-   Authentication stays after the long delegated wait so the daemon does not
-   hold an authenticated session open across hours/days.
+   Deferred past the wait so the daemon does not hold a SAML session open
+   across hours/days.
 3. `open-hr-form` — navigate to the HR Inquiry form on `support.ucsd.edu`.
 4. `fill-form` — subject `"HDH New Hire Oaths"`, description `"Please see
    attached oaths for employees hired under HDH."`, specifically
-   `"Signing Ceremony (Oath)"`, category `"Payroll"`. Attach the original PDF.
+   `"Signing Ceremony (Oath)"`, category `"Payroll"`. Attach the PDF.
 5. `submit` — capture the new ticket number from the redirect URL
    (`?id=ticket&number=HRC0XXXXXX`). Store on `data.ticketNumber`.
 
-`upload-only` mode skips `delegate-signatures` and files the ServiceNow ticket
-directly.
+`upload-only` mode skips `wait-signatures` and files the ServiceNow ticket
+directly (posts straight to `/api/oath-upload/start`, no OCR/signers).
 
 ## Selector Intelligence
 
@@ -57,16 +66,16 @@ handler stamps that ticket and skips the ServiceNow submit steps.
 ## Soft-cancel
 
 Oath-upload cancellation uses the standard workflow-control path. The long
-wait is now inside kernel delegation to oath-signature rather than a local OCR
-or child-run polling helper.
+wait is `watchChildRuns` over the signer itemIds (cross-daemon), not a
+delegation.
 
 ## Retry safety
 
 **Idempotent across retry.** Contract 2 makes retry a uniform kernel behavior:
 a retry assigns a new runId and replays the handler from step 0 with the
-pristine original input. The delegated oath-signature PDF run is pinned to
-`itemId: input.sessionId`, and the kernel stores pristine child input in
-`tasks.original_input_json`.
+pristine original input (`signerItemIds` included). `wait-signatures` re-watches
+the same signer rows; if they already finished, the watch returns their
+terminal outcomes immediately.
 
 The ServiceNow-side duplicate probe
 `findPriorTicketForSession(input.sessionId, input.pdfHash, trackerDir)` remains
@@ -75,10 +84,8 @@ a retry after a submitted ticket does not file a duplicate HR inquiry.
 
 ## Lessons Learned
 
-- **Lesson maintenance rule:** Search this section and `src/workflows/oath-signature/CLAUDE.md` before adding oath-upload delegation lessons. Keep the local model aligned with `docs/engineering/workflow-vocabulary.md`.
-- **2026-06-01: oath-signature input has no `kind` discriminator.** The delegated child is the PDF variant identified by `pdfPath` presence (`isOathPdfInput`), not `{ kind: "pdf" }`. `inputSubject` (`pdf`/`eid`) drives the derived `queueRowKind`.
-- **2026-05-27: Oath Upload delegates to oath-signature, not OCR/signature internals.** Full-mode uploads delegate one PDF-variant child to oath-signature and wait for that delegated batch-stage row to finish. Oath-signature owns its normal PDF branch after that: OCR preview, EID lookup/verification, approval, and signer fan-out. The parented PDF row keeps `archetype: "batch"` plus `parentRunId`; delegated scope is not a separate row archetype.
-- **2026-05-26: Oath Upload collapsed onto kernel delegation.** Plan A Commit 4 removed the local OCR prepare call, `waitForOcrApproval`, and `watchChildRuns` polling from the handler. Full-mode uploads now run one `delegate-signatures` step that delegates `{ kind: "pdf", ... }` to oath-signature with `itemId: input.sessionId`; oath-signature owns OCR approval and signer fan-out. Oath-upload only resumes to file ServiceNow after the delegated run is terminal.
-- **2026-05-24: Oath Upload is a single row.** The row stays flat in the oath-upload tab. Delegated signature work appears in oath-signature's tab; do not nest children under the oath-upload row.
-- **OCR-delegating workflows need the roster picker.** Any Run modal for a workflow that depends on OCR roster matching must expose the same roster controls as the OCR modal. Never hardcode `rosterMode` at the dispatch site; thread `rosterMode` and `rosterPath` into the delegated PDF input.
+- **Lesson maintenance rule:** Search this section and `src/workflows/oath-signature/CLAUDE.md` before adding oath-upload lessons. Keep the local model aligned with `docs/engineering/workflow-vocabulary.md`.
+- **2026-06-02: OCR hub fan-out — oath-upload WAITS on signer rows, it no longer delegates.** The old handler ran `delegate-signatures` → `ctx.delegateTo(oathSignatureWorkflow, { pdfPath, ... })`, whose PDF handler ran OCR then `delegateToAll(self)` — deadlocking the single-worker oath-signature daemon (it held its only worker awaiting children queued on itself). New design: OCR is the hub. Its approve route fans out signer rows (one per record) AND one oath-upload ticket row (`approveDocumentTo`), each on its OWN daemon. oath-upload's `wait-signatures` step `watchChildRuns({ workflow: "oath-signature", expectedItemIds: input.signerItemIds })` and THROWS without filing if any signer is missing/failed/cancelled. Cross-daemon wait → no deadlock. `watchChildRuns` (itemId-based, SQLite+JSONL, cross-process) is the same primitive the OCR orchestrator uses; the handler calls it directly via the `_watchChildRunsOverride` test seam. Schema: `pdfPath`/`pdfHash` now optional (fan-out rows arrive with only `pdfFileId`; the handler resolves path+hash from the file store), `signerItemIds` added. Removed the `delegate-signatures` step + the `oathSignatureWorkflow` import entirely.
+- **2026-06-02: The oath PDF entry is the OCR prep, not a direct oath-upload run.** The oath-upload run modal's "full" mode posts to `/api/ocr/prepare` (`lockedFormType: "oath"`); oath-upload rows are born only from the OCR approve fan-out. `upload-only` mode still posts to `/api/oath-upload/start` (files a ticket without OCR/signers). The roster picker is still required for full mode because the OCR prep needs a roster to match names → EIDs.
+- **2026-05-24: Oath Upload is a single row, grouped under the OCR run.** The ticket row carries `parentRunId` (the OCR run) so it nests under the OCR card alongside the signer batch; signer rows live in the oath-signature tab.
 - **Use `data.uploadMode`, not `data.mode`.** Dashboard read sites should dispatch on `resolveRowArchetype` / stamped `data.archetype`, not legacy task-role fields.

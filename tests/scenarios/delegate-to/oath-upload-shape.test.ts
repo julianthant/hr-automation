@@ -1,9 +1,18 @@
 /**
- * Contract 3 scenario test — oath-upload-style end-to-end shape.
+ * Contract 3 scenario test — OCR-hub fan-out shape.
  *
- * Parent (synthetic, modeled on oath-upload's handler shape): delegates one
- * PDF run to a synthetic oath-signature-like child. That child owns OCR
- * approval and signer fan-out.
+ * Models the new oath shape with synthetic workflows: an OCR-like parent fans
+ * out to N signer-like children (batch members) PLUS one upload-like child
+ * (single), all parented to the OCR run. This exercises the generic kernel
+ * delegation contract (parentRunId stamping, archetype derivation, pristine
+ * input persistence) for a parent that delegates to two different children —
+ * the shape the real OCR approve route produces.
+ *
+ * (The real approve fan-out runs through `/api/ocr/approve-batch` +
+ * `ensureDaemonsAndEnqueue`, which the scenario harness doesn't model; the
+ * end-to-end approve→signers→upload-wait behavior is covered by the unit tests
+ * in tests/unit/tracker/dashboard/ocr-approve* and
+ * tests/unit/workflows/oath-upload/handler.test.ts.)
  */
 import { describe, test, expect } from "vitest";
 import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
@@ -34,26 +43,10 @@ function readWorkflowLines(trackerDir: string, workflow: string): TrackerLine[] 
     .map((line) => JSON.parse(line) as TrackerLine);
 }
 
-describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", () => {
-  test("parent → delegated PDF batch → OCR preview + signer batch children", async (t) => {
+describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(upload)", () => {
+  test("OCR-like parent → N signer batch members + one upload child, all parented", async (t) => {
     const trackerDir = mkdtempSync(join(tmpdir(), "delegate-shape-"));
     t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
-
-    const ocrLikeChild = defineWorkflow({
-      name: "scen-ocr-like",
-      archetype: "preview",
-      systems: [],
-      authSteps: false,
-      steps: ["prep"] as const,
-      schema: z.object({ sessionId: z.string() }),
-      detailFields: [{ key: "sessionId", label: "Session" }],
-      getName: (d) => d.sessionId ?? "",
-      getId: (d) => d.sessionId ?? "",
-      handler: async (ctx, input) => {
-        ctx.updateData({ sessionId: input.sessionId });
-        await ctx.step("prep", async () => {});
-      },
-    });
 
     const sigLikeChild = defineWorkflow({
       name: "scen-sig-like",
@@ -71,102 +64,85 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
       },
     });
 
-    const oathSignaturePdfLike = defineWorkflow({
-      name: "scen-oath-signature-pdf-like",
-      archetype: "batch",
+    const uploadLikeChild = defineWorkflow({
+      name: "scen-upload-like",
+      archetype: "single",
       systems: [],
       authSteps: false,
-      steps: ["ocr", "delegate-signatures"] as const,
+      steps: ["file-ticket"] as const,
+      schema: z.object({ sessionId: z.string() }),
+      detailFields: [{ key: "sessionId", label: "Session" }],
+      getName: (d) => d.sessionId ?? "",
+      getId: (d) => d.sessionId ?? "",
+      handler: async (ctx, input) => {
+        ctx.updateData({ sessionId: input.sessionId });
+        await ctx.step("file-ticket", async () => {});
+      },
+    });
+
+    // Synthetic OCR-like parent: on "approve" it fans out signer children
+    // (batch) AND one upload child (single), all parented to its own run —
+    // exactly the dual fan-out the real OCR approve route performs.
+    const ocrHubLike = defineWorkflow({
+      name: "scen-ocr-hub-like",
+      archetype: "preview",
+      systems: [],
+      authSteps: false,
+      steps: ["approve"] as const,
       schema: z.object({ sessionId: z.string(), eids: z.array(z.string()) }),
       detailFields: [{ key: "sessionId", label: "Session" }],
       getName: (d) => d.sessionId ?? "",
       getId: (d) => d.sessionId ?? "",
       handler: async (ctx, input) => {
         ctx.updateData({ sessionId: input.sessionId });
-        await ctx.step("ocr", async () => {
-          const result = await ctx.delegateTo(
-            ocrLikeChild,
-            { sessionId: input.sessionId },
-            { renderAs: "preview", itemId: input.sessionId },
-          );
-          if (result.status !== "done") throw new Error("OCR delegation did not complete");
-        });
-        await ctx.step("delegate-signatures", async () => {
+        await ctx.step("approve", async () => {
           await ctx.delegateToAll(
             sigLikeChild,
             input.eids.map((emplId) => ({ emplId })),
             { renderAs: "batch" },
           );
-        });
-      },
-    });
-
-    const parent = defineWorkflow({
-      name: "scen-oath-upload-like",
-      archetype: "single",
-      systems: [],
-      authSteps: false,
-      steps: ["delegate-signatures"] as const,
-      schema: z.object({ sessionId: z.string(), eids: z.array(z.string()) }),
-      detailFields: [{ key: "sessionId", label: "Session" }],
-      getName: (d) => d.sessionId ?? "",
-      getId: (d) => d.sessionId ?? "",
-      handler: async (ctx, input) => {
-        ctx.updateData({ sessionId: input.sessionId });
-        await ctx.step("delegate-signatures", async () => {
-          const result = await ctx.delegateTo(
-            oathSignaturePdfLike,
-            { sessionId: input.sessionId, eids: input.eids },
+          await ctx.delegateTo(
+            uploadLikeChild,
+            { sessionId: input.sessionId },
             { itemId: input.sessionId },
           );
-          if (result.status !== "done") throw new Error("Signature delegation did not complete");
         });
       },
     });
 
-    await runWorkflow(parent, { sessionId: "sess-abc", eids: ["E1", "E2", "E3"] }, { trackerDir });
+    await runWorkflow(ocrHubLike, { sessionId: "sess-abc", eids: ["E1", "E2", "E3"] }, { trackerDir });
 
-    const parentLines = readWorkflowLines(trackerDir, "scen-oath-upload-like");
-    const parentPending = parentLines.find((l) => l.status === "pending");
-    const parentDone = parentLines.find((l) => l.status === "done");
-    expect((parentPending?.data as { archetype?: string }).archetype).toBe("single");
-    expect(parentDone).toBeDefined();
-    expect(parentDone?.parentRunId).toBeUndefined();
+    const hubLines = readWorkflowLines(trackerDir, "scen-ocr-hub-like");
+    const hubPending = hubLines.find((l) => l.status === "pending");
+    const hubDone = hubLines.find((l) => l.status === "done");
+    expect((hubPending?.data as { archetype?: string }).archetype).toBe("preview");
+    expect(hubDone).toBeDefined();
+    expect(hubDone?.parentRunId).toBeUndefined();
 
-    const parentRunId = parentPending?.runId;
-    expect(parentRunId).toBeDefined();
+    const hubRunId = hubPending?.runId;
+    expect(hubRunId).toBeDefined();
 
-    const pdfLines = readWorkflowLines(trackerDir, "scen-oath-signature-pdf-like");
-    const pdfPending = pdfLines.find((l) => l.status === "pending");
-    expect(pdfPending).toBeDefined();
-    expect(pdfPending?.parentRunId).toBe(parentRunId);
-    expect((pdfPending?.data as { archetype?: string }).archetype).toBe("batch");
-    expect(pdfPending?.input).toEqual({ sessionId: "sess-abc", eids: ["E1", "E2", "E3"] });
-    expect(pdfPending?.id).toBe("sess-abc");
-
-    const pdfRunId = pdfPending?.runId;
-    expect(pdfRunId).toBeDefined();
-
-    const ocrLines = readWorkflowLines(trackerDir, "scen-ocr-like");
-    const ocrPending = ocrLines.find((l) => l.status === "pending");
-    expect(ocrPending).toBeDefined();
-    expect(ocrPending?.parentRunId).toBe(pdfRunId);
-    expect((ocrPending?.data as { archetype?: string }).archetype).toBe("preview");
-    expect(ocrPending?.input).toEqual({ sessionId: "sess-abc" });
-    expect(ocrPending?.id).toBe("sess-abc");
-
+    // Signer children: batch members parented to the OCR run.
     const sigLines = readWorkflowLines(trackerDir, "scen-sig-like");
     const sigPendings = sigLines.filter((l) => l.status === "pending");
     expect(sigPendings.length).toBe(3);
     for (const p of sigPendings) {
-      expect(p.parentRunId).toBe(pdfRunId);
+      expect(p.parentRunId).toBe(hubRunId);
       expect((p.data as { archetype?: string }).archetype).toBe("batch-member");
       expect(p.input).toMatchObject({ emplId: expect.any(String) });
     }
     const sigEids = sigPendings.map((p) => (p.input as { emplId: string }).emplId).sort();
     expect(sigEids).toEqual(["E1", "E2", "E3"]);
+    expect(sigLines.filter((l) => l.status === "done").length).toBe(3);
 
-    const sigDones = sigLines.filter((l) => l.status === "done");
-    expect(sigDones.length).toBe(3);
+    // Upload child: a single row parented to the OCR run.
+    const uploadLines = readWorkflowLines(trackerDir, "scen-upload-like");
+    const uploadPending = uploadLines.find((l) => l.status === "pending");
+    expect(uploadPending).toBeDefined();
+    expect(uploadPending?.parentRunId).toBe(hubRunId);
+    expect((uploadPending?.data as { archetype?: string }).archetype).toBe("single");
+    expect(uploadPending?.input).toEqual({ sessionId: "sess-abc" });
+    expect(uploadPending?.id).toBe("sess-abc");
+    expect(uploadLines.find((l) => l.status === "done")).toBeDefined();
   });
 });

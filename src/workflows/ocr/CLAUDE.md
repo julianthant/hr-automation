@@ -3,10 +3,26 @@
 The "prep phase" of any form-based workflow. Operator uploads a PDF → OCR
 runs the per-form Zod-bound LLM extraction → roster match → eid-lookup +
 verification → preview row in the OCR tab → operator approves/discards/
-reuploads → on approve, writes the terminal OCR row. Form specs with
-`approveTo` (currently emergency-contact) also fan out downstream daemon rows
-from the approve route; form specs without `approveTo` (currently oath) let
-the owning workflow consume the approved row and fan out itself.
+reuploads → on approve, writes the terminal OCR row and fans out downstream
+daemon rows.
+
+**Approve fan-out is form-spec driven, with TWO independent targets:**
+- `approveTo` (**per-record**) — one downstream row per approved record.
+  emergency-contact → an EC daemon row; oath → an oath-signature EID signer row.
+  An optional `approveTo.canFanOut(record)` skips a selected-but-incomplete
+  record (oath: no resolved EID) so the per-record itemIds stay in sync with
+  what is actually enqueued.
+- `approveDocumentTo` (**once-per-document**) — exactly one downstream row per
+  approved PDF, handed `perRecordItemIds` (the itemIds the per-record fan-out
+  produced) so it can wait on exactly those rows. oath → one oath-upload ticket
+  row that waits for all the signer rows before filing.
+
+A spec may declare either, both, or neither. With neither, the approve route
+just writes the terminal OCR row and the owning workflow consumes it. The two
+oath targets run on DIFFERENT daemons, so neither waits on its own daemon's
+children (the OCR-hub fan-out that fixes the oath single-worker deadlock).
+Fanned-out children parent under the OCR run itself when OCR ran standalone
+(`childParentRunId = parentRunId ?? ocrRunId`).
 
 **Kernel-registered, NOT daemon-mode.** No browsers, no Duo. Runs in the
 dashboard's Node process via fire-and-forget `runWorkflow` from
@@ -23,7 +39,7 @@ archetype.
 |------------------------------------|-------------------|--------------------------------|
 | OCR prep parent (awaiting-approval) | `preview` | OCR review card |
 | `person-lookup` children | `single` + `parentRunId` | Single if one OCR person; batch surface if multiple |
-| Approved downstream children (`approveTo` forms only) | natural child shape + `parentRunId` | Nested under parent card |
+| Approved downstream children (`approveTo` / `approveDocumentTo` forms) | natural child shape + `parentRunId` (the OCR run when standalone) | Nested under the OCR card |
 
 ## EID lookup dependency mode
 
@@ -42,9 +58,11 @@ finishes.
 
 ## Adding a new form type
 
-1. Create `src/workflows/<consumer>/ocr-form.ts` exporting an
-   `OcrFormSpec` object. Mirror oath/EC for prompt + match. Add `approveTo`
-   only if the OCR approve route should enqueue downstream daemon rows.
+1. Create the `OcrFormSpec` object (oath/EC live in `src/services/ocr/forms/`).
+   Mirror oath/EC for prompt + match. Add `approveTo` to enqueue one downstream
+   daemon row per approved record; add `approveDocumentTo` to additionally
+   enqueue one row per PDF (e.g. a ticket/upload row that waits on the
+   per-record rows).
 2. Add a record renderer component in `src/dashboard/components/ocr/`
    (e.g. `MyFormRecordView.tsx`).
 3. Add the spec to `FORM_SPECS` in `form-registry.ts`.
@@ -58,7 +76,7 @@ finishes.
 - **2026-06-02: A delegated OCR run must re-stamp `parentRunId` on EVERY self-emitted row.** The orchestrator emits its own rich running/awaiting-approval snapshots (bypassing kernel row emission) and the dashboard collapses a run to its LATEST row. `parentRunId` is delegated scope; the kernel stamps it on the rows IT emits (pending/terminal) but delegation never puts it in the child *input* (it's a kernel option, not an input field). So the orchestrator's snapshots dropped it → the dashboard saw the latest row as standalone → `OcrReviewPane` hid the Approve button (`isDelegation = prepActive && entry.parentRunId`). Fix: `ctx.parentRunId` is now exposed (threaded `run-workflow`/`run-one-item` → `handler-runner` → `makeCtx`) and `ocrKernelHandler` forwards it as `input.parentRunId` into the orchestrator, which already re-stamps it in `writeTracker`. Same bug class as the mode/archetype/`__id`/`__traceId` re-stamp rules — `parentRunId` just wasn't in the re-stamp set. Pinned by `orchestrator.test.ts` ("delegated orchestrator re-stamps parentRunId on EVERY self-emitted row").
 - **2026-06-01: A failed OCR prep row must stay a *preview* row (keep its Preview tab).** OCR has TWO emission channels for the same `(id, runId)`: the orchestrator's direct `emitTrackerRow` (rich — `mode:"prepare"`, `records`, `pageImagesDir`, page metadata) and the kernel's auto-emitted terminal row built from accumulated `ctx` data. On the **success/awaiting-approval** path the orchestrator's row stays latest (the handler suspends in `subscribeToApproval`), so the live Preview tab works. On **failure** the orchestrator rethrows → the kernel emits its own terminal `failed` row LAST, and it's sparse (no `mode`, no `records`). The dashboard collapses a run to its *latest* row (`dedupeLatestByIdWithCarriedEmplId`, latest-wins-wholesale), so the sparse kernel row clobbered the rich one — `App.tsx`'s Preview gate (`workflow==="ocr" && data.mode==="prepare"`) then failed → no Preview tab on the failed card (and the title regressed from the PDF filename to the form label). Fix mirrors the approve-path `ctx.updateData` pattern: the orchestrator surfaces its last rich snapshot via a new `onReviewData(data)` opt (called in `emitSnapshot`) and also re-stamps it onto its own `failed` row; `ocrKernelHandler` captures it and, in a `catch` around `runOcrOrchestrator`, calls `ctx.updateData({ ...reviewData, mode:"prepare" })` before rethrowing (stripping kernel-owned `parentRunId`). `ctx.updateData` on the real-run path only merges into accumulated `data` (no extra emit), so the kernel's single terminal `failed` row carries the prep identity + records. Same bug class as core's "Sparse terminal rows overwrite rich pending rows in dashboard dedupe." Pinned by `orchestrator.test.ts` ("terminal failed row keeps the rich preview payload").
 - **2026-06-01: OCR drives the session-drawer timeline via `ctx.reportPhase`.** OCR owns its own queue-row emission (`runOcrOrchestrator` → `emitTrackerRow`) and so bypasses `ctx.step`. That meant its session row appeared (from `workflow_start`) but never emitted `step_change`/`item_start`, so the terminal-drawer `WorkflowBox` timeline stayed static while every browser workflow advanced. Fix: the orchestrator takes an `onPhase(step)` callback, invoked at its single `emit` chokepoint for every `running` row (so all phases — `loading-roster`→…→`awaiting-approval` — fire, including snapshots via `writeTracker`/`emitSnapshot`); `ocrKernelHandler` wires `onPhase: (step) => ctx.reportPhase(step)`. `ctx.reportPhase` (new kernel capability) emits session `item_start` (once) + `step_change` for the run's `ctx.workflowInstance` **without** a queue row, coalescing repeats. The instance is threaded kernel-side: `run-workflow`/`run-one-item` → `runWorkflowHandler({ instance })` → `makeCtx`. Direct child emits (person-lookup fan-out at orchestrator.ts ~737) correctly bypass `onPhase` (they're child rows, not OCR parent phases). Pinned by `tests/unit/workflows/ocr/orchestrator.test.ts` ("drives the session timeline via onPhase").
-- **2026-05-26: `approveTo` is optional and controls approve-route fan-out.** Emergency-contact still declares `approveTo`, so `/api/ocr/approve-batch` enqueues downstream daemon rows and writes dependency rows. Oath omits `approveTo`; approve only emits `done step=approved` for OCR and wakes the `oath-signature` PDF handler, which reads the approved records and runs `ctx.delegateToAll` itself. Do not gate this behavior by form-type string in the approve handler — the presence of `spec.approveTo` is the contract.
+- **2026-06-02: Approve fan-out has TWO form-spec targets — `approveTo` (per-record) + `approveDocumentTo` (once-per-document).** `/api/ocr/approve-batch` enqueues one row per approved record via `approveTo` (EC daemon row / oath-signature signer row) AND, if present, exactly one row per PDF via `approveDocumentTo` (oath-upload ticket row). The doc target's `deriveInput(doc)` receives `{ records, sessionId, runId, perRecordItemIds, pdfOriginalName, pdfFileId, pdfHash?, pdfPath?, dryRun }` — `perRecordItemIds` are the itemIds the per-record fan-out ACTUALLY enqueued (filtered by `approveTo.canFanOut`), so the doc target waits on exactly those rows. Oath declares both; the two targets land on DIFFERENT daemons (oath-signature + oath-upload), so neither waits on its own daemon's children — fixing the prior `delegateToAll(self)` single-worker deadlock. Specs with neither target keep the "owner consumes" behavior. Do not gate by form-type string — `spec.approveTo` / `spec.approveDocumentTo` presence is the contract. `GET /api/ocr/forms` exposes `hasApproveFanOut` so the review pane shows Approve on a standalone OCR run (no parentRunId) when the form fans out. Children parent under the OCR run itself when standalone (`childParentRunId = parentRunId ?? ocrRunId`). Pinned by `ocr-approve-oath-fanout.test.ts` + `ocr-http.test.ts`.
 - **2026-05-27: person-lookup fan-out stamps single + parentRunId.** The orchestrator, force-research, and retry-page routes still use `delegateToAllImpl({ child: personLookupWorkflow, renderAs: "flat", fireAndForget: true, deriveItemId, ... })`. For `renderAs: "flat"`, the kernel stamps lookup rows `single`; `parentRunId` ties them to the OCR session. `renderAs: "batch"` is the separate opt-in for batch-member fan-out. OCR still waits through SQLite task dependencies or `watchChildRuns`.
 - **2026-05-24: `force-research.ts` + `retry-page.ts` also route through `delegateToAllImpl` (Finding #23).** They previously called `ensureDaemonsAndEnqueue` directly from HTTP entrypoints (no parent `ctx`), and remain on `delegate-to-all-impl-callers.test.ts`'s allow-list alongside the orchestrator because they need stable per-record item IDs and their own `watchChildRuns` wait.
 - **2026-05-27: OCR is a preview archetype.** `ocrWorkflow.metadata.runtimePolicy` declares preview labels and file-scope cancel behavior. Person Lookup utility rows keep their natural `single` row archetype plus OCR `parentRunId`; one child renders as a single delegated row, multiple siblings group as a batch surface in the utility workflow tab.
