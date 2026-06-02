@@ -91,10 +91,11 @@ export const runOathUploadCli = buildCliAdapter<[OathUploadInput[]], OathUploadI
   buildInputs: (inputs) => inputs,
   deriveItemId: (input) => input.sessionId,
   buildPendingData: (input) => ({
-    pdfPath: input.pdfPath,
+    ...(input.pdfPath ? { pdfPath: input.pdfPath } : {}),
     pdfOriginalName: input.pdfOriginalName,
     sessionId: input.sessionId,
-    pdfHash: input.pdfHash,
+    ...(input.pdfHash ? { pdfHash: input.pdfHash } : {}),
+    ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
     ...(input.dryRun ? { dryRun: "true" } : {}),
   }),
 });
