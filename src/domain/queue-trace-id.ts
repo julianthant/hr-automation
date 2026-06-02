@@ -10,14 +10,17 @@
  *                 `ou`, branding the whole oath-upload operation by its
  *                 destination rather than OCR's own `oc`).
  *
- * Root trace-id propagation: the FULL root id (not just its code) now flows
- * transitively to every descendant of an operation via `rootTraceId` on the
- * child input's `__runtimeOptions` channel (threaded by `delegate.ts` /
- * `makeCtx`'s `forwardRootTraceId`). So every row of one operation DISPLAYS the
- * identical id (e.g. all rows of an oath upload show the OCR root's `ou-…` id)
- * while each row keeps its own runId/itemId for logs, SQLite, and the footer
- * `#run`. The frozen-once invariant still holds — a same-run re-emit reuses the
- * already-frozen value before any propagation/compute runs.
+ * Root trace-id propagation (trace/span model): the root PREFIX
+ * (`<code>-<HHMMSS>`) — NOT the full root id — flows transitively to every
+ * descendant of an operation via `rootTracePrefix` on the child input's
+ * `__runtimeOptions` channel (threaded by `delegate.ts` / `makeCtx`'s
+ * `forwardRootTracePrefix`). Each descendant COMPOSES that shared prefix with
+ * its OWN `runId4` tail (`buildTraceId({ …, rootPrefix })`), so every row of one
+ * operation reads `ou-090553-<theirOwnRunId4>` — visibly ONE operation (shared
+ * `<code>-<HHMMSS>` prefix) yet each row individually greppable by its own
+ * runId/itemId (logs, SQLite, footer `#run` keep the row's own id). The
+ * frozen-once invariant still holds — a same-run re-emit reuses the row's
+ * already-composed value before any propagation/compose runs.
  *   - time      — local `HHMMSS` (time-of-day) of the run's start. The date is
  *                 intentionally omitted — tracker files are already
  *                 date-partitioned (`{workflow}-{YYYY-MM-DD}.jsonl`), so the
@@ -49,7 +52,31 @@ export function runIdFragment(runId: string): string {
   return cleaned.slice(0, 4) || "0000";
 }
 
-export function buildTraceId(opts: { code: string; runId: string; at: Date }): string {
+/**
+ * The shared operation PREFIX of a trace id: everything before the final
+ * `-<runId4>` tail. `ou-090553-1a57` → `ou-090553`. This is what propagates to
+ * descendants (the trace/span model) — each descendant appends its own tail.
+ * Returns the input unchanged when there is no `-` to split on.
+ */
+export function tracePrefix(traceId: string): string {
+  const i = traceId.lastIndexOf("-");
+  return i > 0 ? traceId.slice(0, i) : traceId;
+}
+
+/**
+ * Build a row's trace id.
+ *
+ *  - Without `rootPrefix`: a physical root composes its own
+ *    `<code>-<HHMMSS>-<runId4>` from the clock + its runId.
+ *  - With `rootPrefix` (root trace-id propagation): a descendant composes the
+ *    INHERITED operation prefix with its OWN `runId4` tail — `<rootPrefix>-<runId4>`
+ *    — so the whole operation shares the prefix while each row stays greppable
+ *    by its own runId. `code`/`at` are ignored in this branch.
+ */
+export function buildTraceId(opts: { code: string; runId: string; at: Date; rootPrefix?: string }): string {
+  if (opts.rootPrefix) {
+    return `${opts.rootPrefix}-${runIdFragment(opts.runId)}`;
+  }
   const code = opts.code.trim().toLowerCase() || "wf";
   return `${code}-${formatTraceTimestamp(opts.at)}-${runIdFragment(opts.runId)}`;
 }
