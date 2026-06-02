@@ -41,6 +41,7 @@ import type { OcrInput } from "./schema.js";
 import { runOcrPipeline } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
+import { buildTraceId } from "../../domain/queue-trace-id.js";
 import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
 import {
@@ -174,6 +175,14 @@ export async function runOcrOrchestrator(
   const date = opts.date ?? dateLocal();
   const id = input.sessionId;
   const runId = opts.runId;
+  // OCR prep is emitted directly (not via the kernel pre-emit), so the trace id
+  // + queue-row kind the kernel would normally stamp are stamped here instead.
+  // Without them the row has no `data.__traceId`/`data.queueRowKind`, so
+  // `resolveQueueRowPresentation` returns undefined and the footer subtitle
+  // falls back to the literal workflow name ("OCR"). Built once from the
+  // run-start clock + runId so it's frozen-identical across every re-emit.
+  // code "oc" = the ocr `defineWorkflow` code; OCR is the root of the prep tree.
+  const traceId = buildTraceId({ code: "oc", runId, at: new Date() });
   const baseEmit =
     opts._emitOverride ??
     ((entry: TrackerEntry) => emitTrackerRow(entry as TrackerRowEmission, trackerDir));
@@ -257,6 +266,10 @@ export async function runOcrOrchestrator(
     flat.__id = input.sessionId ?? "";
     flat.__name = cachedParentSubject ?? "OCR";
     flat.archetype = "preview";
+    // OCR inputSubject is "pdf" → queue-row kind "file": title resolves to the
+    // PDF filename, subtitle to the trace id (not the literal "OCR").
+    flat.queueRowKind = "file";
+    flat.__traceId = traceId;
     if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,

@@ -98,6 +98,19 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
     (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
   );
   assert.ok(approval);
+  // Regression (2026-06-02): OCR prep rows must carry the trace id + queue-row
+  // kind the kernel would otherwise stamp, so the footer subtitle resolves to
+  // the trace id (kind "file") instead of falling back to the literal "OCR".
+  for (const entry of writtenEntries as Array<{ data?: Record<string, string> }>) {
+    assert.equal(entry.data?.queueRowKind, "file", "every OCR row stamps queueRowKind=file");
+    assert.match(
+      entry.data?.__traceId ?? "",
+      /^oc-\d{6}-[a-z0-9]{4}$/,
+      `every OCR row stamps a frozen oc-… trace id (got "${entry.data?.__traceId}")`,
+    );
+  }
+  const traceIds = new Set((writtenEntries as Array<{ data?: Record<string, string> }>).map((e) => e.data?.__traceId));
+  assert.equal(traceIds.size, 1, "the trace id is frozen-identical across every emitted row");
   const summary = JSON.parse(approval!.data!.pageStatusSummary ?? "{}");
   assert.deepEqual(summary, { total: 0, succeeded: 0, failed: 0 });
   const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]");
