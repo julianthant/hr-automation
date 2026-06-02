@@ -199,6 +199,111 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.subtitle, undefined);
   });
 
+  it("uses the TRACE ID (not the EID) as a one-member person batch group subtitle", () => {
+    // oath-signature / person-lookup fan-out: a lone delegated person member
+    // renders as a one-member batch (alwaysBatchDelegatedMembers). The member
+    // carries an EID — shown on the member-preview's title-line right — so the
+    // group card's footer subtitle must fall THROUGH the EID to the trace id,
+    // never repeat the EID and never go blank (the prior `batchParent`-gated
+    // `undefined`).
+    const member = entry({
+      workflow: "oath-signature",
+      id: "ocr-oath-f85c86b9-r0",
+      runId: "ad013f70-7c7e",
+      parentRunId: "f85c86b9-2d85",
+      status: "running",
+      data: {
+        archetype: "single",
+        queueRowKind: "person",
+        emplId: "10874100",
+        name: "Barahona Martell, Carlos, D",
+        __name: "Barahona Martell, Carlos, D",
+        __subjectKind: "eid",
+        __traceId: "os-090551-ad01",
+      },
+    });
+    const surfaces = buildTrackerQueueSurfaces({
+      entries: [member],
+      delegationSourceEntries: [member],
+      runtimePolicies: phase5Policies,
+    });
+
+    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+      runtimePolicies: phase5Policies,
+    });
+
+    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.subtitle, "os-090551-ad01");
+    assert.notEqual(projection.subtitle, "10874100");
+  });
+
+  it("uses the TRACE ID as an OCR file preview subtitle, never the workflow label", () => {
+    // A stamped OCR prep row (file kind + trace id) renders its footer subtitle
+    // as the trace id — NOT the `data.__name = "OCR"` fallback that leaks the
+    // literal workflow label.
+    const ocr = entry({
+      workflow: "ocr",
+      id: "ocr-session-trace",
+      runId: "ocr-run-trace",
+      status: "running",
+      step: "awaiting-approval",
+      data: {
+        archetype: "preview",
+        mode: "prepare",
+        formType: "oath",
+        queueRowKind: "file",
+        pdfOriginalName: "test.pdf",
+        __name: "OCR",
+        __traceId: "oc-090214-1234",
+      },
+    });
+    const surfaces = buildTrackerQueueSurfaces({
+      entries: [ocr],
+      delegationSourceEntries: [ocr],
+      runtimePolicies: phase4Policies,
+    });
+
+    const groupProjection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+      runtimePolicies: phase4Policies,
+    });
+    assert.equal(groupProjection.subtitle, "oc-090214-1234");
+    assert.notEqual(groupProjection.subtitle, "OCR");
+
+    // The flat EntryItem path (preview with no members) resolves the same id.
+    const flatProjection = buildWorkflowRunProjection(ocr, {
+      runtimePolicies: phase4Policies,
+    });
+    assert.equal(flatProjection.subtitle, "oc-090214-1234");
+    assert.notEqual(flatProjection.subtitle, "OCR");
+  });
+
+  it("keeps the EID as the subtitle for a flat single person row (unchanged)", () => {
+    // Flat single → the footer is the only place the EID shows, so it stays the
+    // EID. preferTraceIdSubtitle is NOT applied to flat rows.
+    const single = entry({
+      workflow: "person-lookup",
+      id: "lookup-flat",
+      runId: "lookup-flat-run",
+      status: "done",
+      data: {
+        archetype: "single",
+        queueRowKind: "person",
+        emplId: "20991234",
+        name: "Valencia, Adolfo",
+        __name: "Valencia, Adolfo",
+        __subjectKind: "person",
+        __traceId: "pl-100142-1bff",
+      },
+    });
+
+    const projection = buildWorkflowRunProjection(single, {
+      runtimePolicies: phase5Policies,
+    });
+    assert.equal(projection.surfaceType, "single");
+    assert.equal(projection.subtitle, "20991234");
+    assert.notEqual(projection.subtitle, "pl-100142-1bff");
+  });
+
   it("projects a single OCR prep file as single delegation preview from policy", () => {
     const ocr = entry({
       workflow: "ocr",

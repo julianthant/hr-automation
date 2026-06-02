@@ -43,6 +43,12 @@ interface ProjectionOverrides {
   rowTypeLabel?: string;
   actions?: WorkflowActionDescriptor[];
   batchMembers?: WorkflowRunProjection[];
+  /**
+   * Resolve the person-kind subtitle to the trace id instead of the EID — used
+   * for batch/preview group anchors (the member-name preview already shows the
+   * EID, so the footer should not repeat it). No effect on flat single rows.
+   */
+  preferTraceIdSubtitle?: boolean;
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string {
@@ -264,7 +270,9 @@ export function buildWorkflowRunProjection(
   const targets = actionTargets([entry]);
   // Kind-based title/subtitle (person/file/catalog) takes precedence over the
   // legacy fallbacks but yields to explicit overrides + context resolvers.
-  const presentation = resolveQueueRowPresentation(entry);
+  const presentation = resolveQueueRowPresentation(entry, {
+    preferTraceIdSubtitle: overrides.preferTraceIdSubtitle,
+  });
   return {
     runId,
     workflowId: entry.workflow,
@@ -358,8 +366,18 @@ export function buildProjectionFromQueueSurface(
         ...groupActions,
       ]
     : groupActions;
+  // The group card's footer subtitle is the anchor's — resolved with
+  // `preferTraceIdSubtitle` so a person batch/preview anchor shows the TRACE ID
+  // (the member-name preview already carries the EID on its title-line right),
+  // never a repeated EID or a blank slot. `anchor` falls back to `members[0]`
+  // when no parent row exists (an `alwaysBatchDelegatedMembers` one-member
+  // batch: oath-signature / person-lookup fan-out), so the slot is filled even
+  // when `surface.parent` is undefined.
   const anchorProjection = anchor
-    ? buildWorkflowRunProjection(anchor, context, { surfaceType })
+    ? buildWorkflowRunProjection(anchor, context, {
+        surfaceType,
+        preferTraceIdSubtitle: true,
+      })
     : undefined;
   const batchParent = surface.kind === "batch" ? surface.parent : undefined;
 
@@ -368,7 +386,7 @@ export function buildProjectionFromQueueSurface(
     workflowId: fallbackWorkflow,
     itemId: surface.kind === "preview" ? surface.parent.id : batchParent?.id ?? surface.parentRunId,
     title: batchGroupTitle(surface, context, policy),
-    subtitle: surface.kind === "preview" || batchParent ? anchorProjection?.subtitle : undefined,
+    subtitle: anchorProjection?.subtitle,
     status,
     step: surface.kind === "preview" ? surface.parent.step : batchParent?.step,
     surfaceType,

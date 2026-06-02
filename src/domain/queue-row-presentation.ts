@@ -27,6 +27,21 @@ interface PresentationEntry {
   data?: Record<string, string> | null;
 }
 
+export interface QueueRowPresentationOptions {
+  /**
+   * When the EID/name is already shown elsewhere on the card (the title-line
+   * right of a batch-member preview, or a group anchor whose members carry the
+   * person identity), the footer subtitle should NOT repeat the EID — it falls
+   * through to the trace id instead. Set this for **batch / preview group
+   * anchors and batch-member rows**; leave it off for a **flat single** row,
+   * whose footer is the only place the EID appears.
+   *
+   * Only affects the `person` kind. `file` / `catalog` already yield the trace
+   * id, so the flag is a no-op there.
+   */
+  preferTraceIdSubtitle?: boolean;
+}
+
 function firstNonBlank(...values: Array<string | undefined>): string {
   for (const value of values) {
     const trimmed = value?.trim();
@@ -55,7 +70,10 @@ function resolvePersonName(data: Record<string, string>): string {
   return "";
 }
 
-export function resolveQueueRowPresentation(entry: PresentationEntry): QueueRowPresentation | undefined {
+export function resolveQueueRowPresentation(
+  entry: PresentationEntry,
+  options: QueueRowPresentationOptions = {},
+): QueueRowPresentation | undefined {
   const kind = resolveQueueRowKind(entry);
   if (!kind) return undefined;
   const data = entry.data ?? {};
@@ -63,9 +81,15 @@ export function resolveQueueRowPresentation(entry: PresentationEntry): QueueRowP
 
   if (kind === "person") {
     const name = resolvePersonName(data);
+    // Flat single → EID in the footer (the only place it shows). Batch/preview
+    // anchors + batch-member rows already show the EID on the title line, so
+    // the footer subtitle falls through to the trace id instead of repeating it.
+    const subtitle = options.preferTraceIdSubtitle
+      ? traceId || resolveEid(data) || undefined
+      : resolveEid(data) || traceId;
     return {
       title: name || firstNonBlank(data.searchName, data.__subject, data.__name) || entry.id,
-      subtitle: resolveEid(data) || traceId,
+      subtitle,
     };
   }
 
