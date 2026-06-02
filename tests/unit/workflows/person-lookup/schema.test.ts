@@ -101,6 +101,49 @@ describe("PersonLookupItemSchema", () => {
     assert.equal(n.keepNonHdh, true);
     assert.equal(e.keepNonHdh, true);
   });
+
+  it("includeCrmDates is optional — omitting it still parses both shapes", () => {
+    const n = PersonLookupNameInputSchema.parse({ name: "Coleman, Renee" });
+    const e = PersonLookupEidInputSchema.parse({ emplId: "10706431" });
+    assert.equal(n.includeCrmDates, undefined);
+    assert.equal(e.includeCrmDates, undefined);
+  });
+
+  it("includeCrmDates: true is accepted on name input", () => {
+    const n = PersonLookupNameInputSchema.parse({
+      name: "Coleman, Renee",
+      includeCrmDates: true,
+    });
+    assert.equal(n.includeCrmDates, true);
+  });
+
+  it("includeCrmDates: true is accepted on EID input", () => {
+    const e = PersonLookupEidInputSchema.parse({
+      emplId: "10706431",
+      includeCrmDates: true,
+    });
+    assert.equal(e.includeCrmDates, true);
+  });
+
+  it("includeCrmDates: false is accepted on both shapes", () => {
+    const n = PersonLookupNameInputSchema.parse({
+      name: "Coleman, Renee",
+      includeCrmDates: false,
+    });
+    const e = PersonLookupEidInputSchema.parse({
+      emplId: "10706431",
+      includeCrmDates: false,
+    });
+    assert.equal(n.includeCrmDates, false);
+    assert.equal(e.includeCrmDates, false);
+  });
+
+  it("includeCrmDates carries through the union schema", () => {
+    const n = PersonLookupItemSchema.parse({ name: "Smith, Bob", includeCrmDates: true });
+    const e = PersonLookupItemSchema.parse({ emplId: "10812990", includeCrmDates: true });
+    assert.equal(n.includeCrmDates, true);
+    assert.equal(e.includeCrmDates, true);
+  });
 });
 
 describe("derivePersonLookupItemId", () => {
