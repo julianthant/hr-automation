@@ -65,6 +65,12 @@ export function buildOcrApproveHandler(
 
     const approveTo = spec.approveTo;
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
+    // Fanned-out children nest under the run that owns approval: the delegating
+    // parent run when OCR was delegated (oath-upload legacy / EC delegation),
+    // else the OCR run itself (standalone OCR-hub upload). This keeps the
+    // oath-signature signer rows and the oath-upload ticket row grouped under
+    // the OCR card instead of appearing as orphaned top-level rows.
+    const childParentRunId = parentRunId ?? input.runId;
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
     const parentSubject = parentRunId && approveTo
@@ -79,15 +85,21 @@ export function buildOcrApproveHandler(
       };
     }
 
+    const approveDocumentTo = spec.approveDocumentTo;
+
     const fannedOut: Array<{ workflow: string; itemId: string }> = [];
     const enqueueInputs: unknown[] = [];
     const itemIds: string[] = [];
     if (approveTo) {
       // Only fan out records the operator selected in the preview pane.
       // Unsigned rows / unverified rows / unknown-doc rows are kept in the
-      // tracker payload for context but should never become daemon work.
+      // tracker payload for context but should never become daemon work. A
+      // spec-level `canFanOut` guard additionally skips selected-but-incomplete
+      // records (oath: a signed row whose EID never resolved) so the
+      // per-record itemIds stay in sync with what is actually enqueued.
       input.records.forEach((rec, index) => {
         if (!isSelectedRecord(rec)) return;
+        if (approveTo.canFanOut && !approveTo.canFanOut(rec as never)) return;
         const baseFanInput = approveTo.deriveInput(rec as never);
         const fanInput =
           baseFanInput && typeof baseFanInput === "object"
@@ -101,6 +113,22 @@ export function buildOcrApproveHandler(
         enqueueInputs.push(fanInput);
         itemIds.push(itemId);
         fannedOut.push({ workflow: approveTo.workflow, itemId });
+      });
+    }
+
+    // Reflect the once-per-document fan-out target in the HTTP response too —
+    // its itemId is deterministic from the OCR run id, so it's known
+    // synchronously even though the actual enqueue happens in the background
+    // (after the per-record fan-out, so it can pass `perRecordItemIds`).
+    if (approveDocumentTo) {
+      fannedOut.push({
+        workflow: approveDocumentTo.workflow,
+        itemId: approveDocumentTo.deriveItemId({
+          records: [],
+          sessionId: input.sessionId,
+          runId: input.runId,
+          perRecordItemIds: [],
+        } as never),
       });
     }
 
@@ -147,7 +175,7 @@ export function buildOcrApproveHandler(
               enqueueInputs,
               (_inp, idx) => itemIds[idx],
               {
-                ...(parentRunId ? { parentRunId } : {}),
+                ...(childParentRunId ? { parentRunId: childParentRunId } : {}),
                 onPreEmitPending: emitFallbackChildPending,
               },
             );
@@ -171,7 +199,7 @@ export function buildOcrApproveHandler(
               {
                 trackerDir,
                 deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
-                ...(parentRunId ? { parentRunId } : {}),
+                ...(childParentRunId ? { parentRunId: childParentRunId } : {}),
                 onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
                   const childInput =
                     item && typeof item === "object" && !Array.isArray(item)
@@ -185,11 +213,11 @@ export function buildOcrApproveHandler(
                       runId: childRunId,
                       status: "pending",
                       data: {
-                        ...buildHttpPendingData(childWf, item, passedParentRunId ?? parentRunId),
+                        ...buildHttpPendingData(childWf, item, passedParentRunId ?? childParentRunId),
                         ...rootQueueTitleData(readParentSubjectFromInput(item)),
                         archetype: deriveRowArchetype(
                           resolveArchetype(childWf.config, item),
-                          passedParentRunId ?? parentRunId,
+                          passedParentRunId ?? childParentRunId,
                         ),
                       },
                       ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
@@ -209,6 +237,48 @@ export function buildOcrApproveHandler(
             : approveTo
               ? itemIds
               : [];
+
+        // ─── Once-per-document fan-out (approveDocumentTo) ───────────────
+        // After the per-record fan-out, enqueue exactly ONE downstream row
+        // (oath-upload's ServiceNow ticket). It is handed `perRecordItemIds`
+        // = the itemIds actually enqueued above, so it can wait on exactly
+        // those rows before filing. Runs on a DIFFERENT daemon than the
+        // per-record target, so neither waits on its own daemon's children.
+        let docDispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> } = undefined;
+        let docFanItemId: string | undefined;
+        if (approveDocumentTo) {
+          const doc = {
+            records: input.records.filter(isSelectedRecord) as never[],
+            sessionId: input.sessionId,
+            runId: input.runId,
+            perRecordItemIds: enqueuedIds,
+            ...(typeof latestReviewData.pdfOriginalName === "string"
+              ? { pdfOriginalName: latestReviewData.pdfOriginalName }
+              : {}),
+            ...(typeof latestReviewData.pdfFileId === "string"
+              ? { pdfFileId: latestReviewData.pdfFileId }
+              : {}),
+            ...(typeof latestReviewData.pdfHash === "string"
+              ? { pdfHash: latestReviewData.pdfHash }
+              : {}),
+            ...(typeof latestReviewData.pdfPath === "string"
+              ? { pdfPath: latestReviewData.pdfPath }
+              : {}),
+            ...(dryRun ? { dryRun: true } : {}),
+          };
+          const docInput = approveDocumentTo.deriveInput(doc as never);
+          docFanItemId = approveDocumentTo.deriveItemId(doc as never);
+          docDispatchResult = await enqueueDocFanOut({
+            workflow: approveDocumentTo.workflow,
+            input: docInput,
+            itemId: docFanItemId,
+            childParentRunId,
+            trackerDir,
+            ensureDaemonsAndEnqueueOverride: opts.ensureDaemonsAndEnqueueOverride,
+            ocrRunId: input.runId,
+          });
+          void docFanItemId; // already reflected in the synchronous `fannedOut` response
+        }
 
         // Under the new approval contract this row IS the OCR row's
         // terminal `done`: the orchestrator now emits `running
@@ -248,12 +318,20 @@ export function buildOcrApproveHandler(
           { workflow: WORKFLOW, sessionId: input.sessionId },
           { records: input.records, fannedOutItemIds: enqueuedIds },
         );
-        if (approveTo && parentRunId && dispatchResult?.enqueued) {
+        if (approveTo && childParentRunId && dispatchResult?.enqueued) {
           createApprovalDependencyRows({
             trackerDir,
-            parentRunId,
+            parentRunId: childParentRunId,
             childWorkflow: approveTo.workflow,
             children: dispatchResult.enqueued,
+          });
+        }
+        if (approveDocumentTo && childParentRunId && docDispatchResult?.enqueued) {
+          createApprovalDependencyRows({
+            trackerDir,
+            parentRunId: childParentRunId,
+            childWorkflow: approveDocumentTo.workflow,
+            children: docDispatchResult.enqueued,
           });
         }
       } catch (err) {
@@ -280,6 +358,101 @@ export function buildOcrApproveHandler(
 
     return { status: 200, body: { ok: true, fannedOut } };
   };
+}
+
+/**
+ * Enqueue exactly one once-per-document fan-out row (oath-upload's ticket).
+ * Mirrors the per-record dispatch path but for a single input: pre-emits a
+ * pending row parented to the OCR run and enqueues the daemon task.
+ */
+async function enqueueDocFanOut(args: {
+  workflow: string;
+  input: unknown;
+  itemId: string;
+  childParentRunId?: string;
+  trackerDir?: string;
+  ensureDaemonsAndEnqueueOverride?: ApproveHandlerOpts["ensureDaemonsAndEnqueueOverride"];
+  ocrRunId: string;
+}): Promise<void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> }> {
+  const { workflow, input, itemId, childParentRunId, trackerDir } = args;
+  if (args.ensureDaemonsAndEnqueueOverride) {
+    return args.ensureDaemonsAndEnqueueOverride(
+      workflow,
+      [input],
+      () => itemId,
+      {
+        ...(childParentRunId ? { parentRunId: childParentRunId } : {}),
+        onPreEmitPending: (item, childRunId, passedParentRunId, emittedItemId) => {
+          const childInput =
+            item && typeof item === "object" && !Array.isArray(item)
+              ? (item as Record<string, unknown>)
+              : undefined;
+          emitTrackerRow(
+            {
+              workflow,
+              timestamp: new Date().toISOString(),
+              id: emittedItemId,
+              runId: childRunId,
+              status: "pending",
+              data: {
+                ...buildFallbackPendingData(item),
+                ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                archetype: "single",
+              },
+              ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
+              ...(childInput ? { input: childInput } : {}),
+            },
+            trackerDir,
+          );
+        },
+      },
+    );
+  }
+  const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
+  const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
+  const childWf = await loadWorkflow(workflow);
+  if (!childWf) {
+    log.error(
+      `[ocr-http] approve-batch: unknown approveDocumentTo workflow "${workflow}" — doc row not enqueued`,
+    );
+    return undefined;
+  }
+  return ensureDaemonsAndEnqueue(
+    childWf,
+    [input] as never,
+    {},
+    {
+      trackerDir,
+      deriveItemId: () => itemId,
+      ...(childParentRunId ? { parentRunId: childParentRunId } : {}),
+      onPreEmitPending: (item, childRunId, passedParentRunId, emittedItemId) => {
+        const childInput =
+          item && typeof item === "object" && !Array.isArray(item)
+            ? (item as Record<string, unknown>)
+            : undefined;
+        emitTrackerRow(
+          {
+            workflow: childWf.config.name,
+            timestamp: new Date().toISOString(),
+            id: emittedItemId,
+            runId: childRunId,
+            status: "pending",
+            data: {
+              ...buildHttpPendingData(childWf, item, passedParentRunId ?? childParentRunId),
+              ...rootQueueTitleData(readParentSubjectFromInput(item)),
+              archetype: deriveRowArchetype(
+                resolveArchetype(childWf.config, item),
+                passedParentRunId ?? childParentRunId,
+              ),
+            },
+            ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
+            ...(childInput ? { input: childInput } : {}),
+          },
+          trackerDir,
+        );
+      },
+    },
+  );
 }
 
 function readLatestEntryDataWithLookback(

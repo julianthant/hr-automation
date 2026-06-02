@@ -9,8 +9,16 @@ import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../matching/index.js";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
-import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
-import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
+import {
+  normalizePersonNameForCompare,
+  displayPersonName,
+} from "../../../domain/identity/person-name.js";
+import type {
+  OcrFormSpec,
+  LookupKind,
+} from "../../../workflows/ocr/types.js";
+import type { OathSignerInput } from "../../../workflows/oath-signature/schema.js";
+import type { OathUploadInput } from "../../../workflows/oath-upload/schema.js";
 import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
@@ -107,7 +115,9 @@ const OCR_NAME_CONFIDENCE_DISAMBIG_SKIP = 0.85;
 
 export const oathOcrFormSpec: OcrFormSpec<
   OathRosterOcrRecord,
-  OathPreviewRecord
+  OathPreviewRecord,
+  OathSignerInput,
+  OathUploadInput
 > = {
   formType: "oath",
   label: "Oath signature",
@@ -387,9 +397,104 @@ export const oathOcrFormSpec: OcrFormSpec<
     return record.forceResearch === true;
   },
 
+  // ─── Approve fan-out: per-record → oath-signature signer rows ─────────
+  // Each approved record (a signed row with a valid 5+-digit EID) becomes one
+  // EID signer row on the oath-signature daemon (UCPath transaction + Duo).
+  // Records without a valid signer input are skipped (no enqueue) — the approve
+  // route keeps the per-record itemIds in sync with what was actually enqueued.
+  approveTo: {
+    workflow: "oath-signature",
+    deriveInput(record): OathSignerInput {
+      const built = buildOathSignerInputFromApprovedRecord(record);
+      if (!built) {
+        // Should never happen — the approve route only calls deriveInput for
+        // records that pass `hasOathSignerInput`. Fail loud.
+        throw new Error(
+          "oath.approveTo.deriveInput: record has no valid signer input (selected + 5+-digit EID required)",
+        );
+      }
+      return built;
+    },
+    deriveItemId(_record, parentRunId, index): string {
+      return `ocr-oath-${parentRunId}-r${index}`;
+    },
+    canFanOut(record): boolean {
+      return hasOathSignerInput(record);
+    },
+  },
+
+  // ─── Approve fan-out: once-per-document → oath-upload ticket row ──────
+  // One ServiceNow HR-ticket row per approved PDF, running on the oath-upload
+  // daemon. It waits for every signer row above (`signerItemIds`) to finish and
+  // succeed BEFORE filing the ticket. This wait is cross-daemon (oath-upload
+  // waits on oath-signature rows), so nothing waits on its own daemon's
+  // children — fixing the prior single-worker deadlock.
+  approveDocumentTo: {
+    workflow: "oath-upload",
+    deriveInput(doc): OathUploadInput {
+      // pdfPath/pdfHash are resolved by oath-upload's handler from `pdfFileId`
+      // (the OCR review data carries the file id, not always the on-disk path).
+      return {
+        pdfFileId: doc.pdfFileId,
+        pdfOriginalName: doc.pdfOriginalName ?? doc.sessionId,
+        sessionId: doc.sessionId,
+        ...(doc.pdfPath ? { pdfPath: doc.pdfPath } : {}),
+        ...(doc.pdfHash ? { pdfHash: doc.pdfHash } : {}),
+        signerItemIds: doc.perRecordItemIds,
+        mode: "full",
+        rosterMode: "download",
+        ...(doc.dryRun ? { dryRun: true } : {}),
+      } as OathUploadInput;
+    },
+    deriveItemId(doc): string {
+      return `ocr-oath-upload-${doc.runId}`;
+    },
+  },
+
   recordRendererId: "OathRecordView",
   rosterMode: "required",
 };
+
+/**
+ * Whether an approved OCR record can be turned into a valid oath-signature
+ * signer input (selected + a 5+-digit employee id). The approve route uses
+ * this to keep the per-record fan-out itemIds in sync with what is actually
+ * enqueued, so oath-upload waits on exactly the rows that were created.
+ */
+export function hasOathSignerInput(rec: unknown): boolean {
+  return buildOathSignerInputFromApprovedRecord(rec) !== null;
+}
+
+/**
+ * Read an approved OCR record's printed name / employeeId / dateSigned and
+ * build the `oath-signature` signer input. Returns null when the record is
+ * not selected or has no valid 5+-digit employee id. Normalizes the name via
+ * `displayPersonName` and the date via `normalizeOathDate`.
+ *
+ * Moved here from `oath-signature/workflow.ts` (the old PDF branch's
+ * `readApprovedSignerInputs`) — it's now only used by the OCR approve fan-out.
+ */
+export function buildOathSignerInputFromApprovedRecord(
+  rec: unknown,
+  opts: { parentSubject?: string; dryRun?: boolean } = {},
+): OathSignerInput | null {
+  if (!rec || typeof rec !== "object") return null;
+  const r = rec as Record<string, unknown>;
+  if (r.selected !== true) return null;
+  const emplId = typeof r.employeeId === "string" ? r.employeeId : "";
+  if (!/^\d{5,}$/.test(emplId)) return null;
+  const printedName = typeof r.printedName === "string" ? r.printedName : "";
+  const displayName = displayPersonName(printedName);
+  const dateSigned = typeof r.dateSigned === "string" ? r.dateSigned : null;
+  const normalizedDate = normalizeOathDate(dateSigned);
+  return {
+    emplId,
+    ...(displayName ? { name: displayName } : {}),
+    ...(normalizedDate ? { date: normalizedDate } : {}),
+    ...(opts.dryRun ? { dryRun: true } : {}),
+    ...(opts.parentSubject ? { parentSubject: opts.parentSubject } : {}),
+  };
+}
 
 /**
  * Coerce an LLM-extracted handwritten date into the MM/DD/YYYY shape that
