@@ -60,6 +60,14 @@ export const PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   memberRow: {
     titleSource: "person",
   },
+  // Delegated lookups (OCR EID-resolution fan-out) always render as a batch,
+  // even when one record resolves — a lone delegated lookup stays a one-member
+  // batch, not a standalone single. Direct one-person input runs are unaffected
+  // (root rows, not delegated members), so they stay `single`.
+  delegation: {
+    ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation,
+    alwaysBatchDelegatedMembers: true,
+  },
 };
 
 /**

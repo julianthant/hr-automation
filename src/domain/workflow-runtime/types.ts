@@ -78,6 +78,25 @@ export interface WorkflowDelegationPolicy {
    * OCR + signature + ServiceNow stages).
    */
   rootRowPersistsThroughChildren?: boolean;
+  /**
+   * Group this workflow's delegated rows into a batch surface **even when only
+   * one member exists**. By default the queue classifier renders a lone
+   * delegated child as a flat single row; with this set, a 1-member set still
+   * renders as a batch anchor + member. Used by oath-signature and
+   * person-lookup, whose fan-outs are conceptually always a group of people
+   * (a roster/PDF), so a single result should still read as a one-member batch
+   * rather than collapsing to a standalone single row.
+   */
+  alwaysBatchDelegatedMembers?: boolean;
+  /**
+   * Force a **direct (non-delegated) input run** to batch even with a single
+   * item, so this workflow never produces a standalone single row from a manual
+   * input run. Oath Signature sets this (with `alwaysBatchDelegatedMembers`) so
+   * it is "always batch, whether delegated or not". person-lookup does NOT set
+   * it — its one-person input runs stay `single`. The OCR fan-out path is
+   * unaffected either way (those rows already carry a `parentRunId`).
+   */
+  alwaysBatchInputRun?: boolean;
 }
 
 /**

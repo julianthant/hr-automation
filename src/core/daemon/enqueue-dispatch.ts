@@ -198,7 +198,15 @@ export async function enqueueFromHttp(
   const resolvedTrackerDir = trackerDir ?? DEFAULT_DIR;
   let effectiveParentRunId = parentRunId;
   let batchDisplayOrdinal: number | undefined;
-  const isDirectInputRunBatch = inputs.length > 1 && !effectiveParentRunId;
+  // A multi-item input run is always a batch. Some workflows (oath-signature)
+  // opt to batch a SINGLE-item input run too via
+  // `delegation.alwaysBatchInputRun`, so they never produce a standalone single
+  // row. Only applies to direct input runs (no parentRunId) — delegated
+  // fan-out rows already carry one.
+  const forcesInputRunBatch =
+    wf.config.runtimePolicy?.delegation?.alwaysBatchInputRun === true;
+  const isDirectInputRunBatch =
+    (inputs.length > 1 || forcesInputRunBatch) && !effectiveParentRunId;
   if (isDirectInputRunBatch) {
     effectiveParentRunId = randomUUID();
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);

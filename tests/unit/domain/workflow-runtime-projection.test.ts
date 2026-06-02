@@ -132,7 +132,7 @@ describe("workflow runtime projection adapters", () => {
     );
   });
 
-  it("keeps OCR utility person-lookup children as delegation members", () => {
+  it("renders a lone OCR utility person-lookup child as a one-member batch (alwaysBatchDelegatedMembers)", () => {
     const child = entry({
       workflow: "person-lookup",
       id: "lookup-1",
@@ -148,12 +148,15 @@ describe("workflow runtime projection adapters", () => {
     const surfaces = buildTrackerQueueSurfaces({
       entries: [],
       delegationSourceEntries: [child],
+      runtimePolicies: phase5Policies,
     });
 
-    const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {});
-
-    assert.equal(projection.surfaceType, "single");
-    assert.equal(projection.rowTypeLabel, "Single");
+    // person-lookup opts into alwaysBatchDelegatedMembers, so a single delegated
+    // lookup is a one-member batch surface, not a flat single.
+    assert.equal(surfaces.flatEntries.length, 0);
+    assert.equal(surfaces.groupRows.length, 1);
+    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
+    assert.equal(projection.surfaceType, "batch");
   });
 
   it("does not expose a raw parent run id as the batch group subtitle", () => {
@@ -422,7 +425,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     assert.equal(projection.title, "Jane Doe");
   });
 
-  it("projects OCR person-lookup utility children as flat delegation members", () => {
+  it("projects a lone OCR person-lookup utility child as a one-member batch", () => {
     const child = entry({
       workflow: "person-lookup",
       id: "ocr-active-1",
@@ -440,13 +443,15 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       delegationSourceEntries: [child],
       runtimePolicies: phase5Policies,
     });
-    assert.equal(surfaces.groupRows.length, 0);
-    assert.deepEqual(surfaces.flatEntries.map((row) => row.id), ["ocr-active-1"]);
-    const projection = buildWorkflowRunProjection(surfaces.flatEntries[0]!, {
+    // alwaysBatchDelegatedMembers keeps even one delegated lookup as a batch.
+    assert.equal(surfaces.flatEntries.length, 0);
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((row) => row.id), ["ocr-active-1"]);
+    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "single");
-    assert.equal(projection.title, "Jane Doe");
+    assert.equal(projection.surfaceType, "batch");
   });
 
   it("projects separations daemon batch groups without a raw parent run id subtitle", () => {

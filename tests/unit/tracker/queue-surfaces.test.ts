@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { buildTrackerQueueSurfaces } from "../../../src/tracker/queue-surfaces.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
 import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
+import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-signature/workflow.js";
+import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../../src/domain/workflow-runtime/default-policy.js";
 
 const phase4Policies = new Map([["ocr", OCR_WORKFLOW_RUNTIME_POLICY]]);
 
@@ -145,6 +147,48 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.equal(result.groupRows[0]?.approvalState, "approved");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["10000001"]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
+  });
+
+  it("renders a lone delegated member as a one-member batch when its workflow opts into alwaysBatchDelegatedMembers", () => {
+    // Regression (2026-06-02): in the signer's OWN tab the OCR preview anchor is
+    // absent, so the lone fanned-out signer fell into the anchorless
+    // delegated-member path and rendered as a flat single. oath-signature opts
+    // into alwaysBatchDelegatedMembers, so it must stay a one-member batch.
+    const signer = entry({
+      workflow: "oath-signature",
+      id: "10874100",
+      runId: "signer-run-1",
+      parentRunId: "ocr-run-x",
+      status: "done",
+      data: { archetype: "single" },
+    });
+    const result = buildTrackerQueueSurfaces({
+      entries: [signer],
+      delegationSourceEntries: [signer],
+      runtimePolicies: new Map([["oath-signature", OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY]]),
+    });
+    assert.equal(result.groupRows.length, 1, "one batch surface");
+    assert.equal(result.groupRows[0]?.kind, "batch");
+    assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["10874100"]);
+    assert.deepEqual(result.flatEntries.map((e) => e.id), [], "no flat single");
+  });
+
+  it("renders a lone delegated member flat when its workflow does NOT opt into alwaysBatchDelegatedMembers", () => {
+    const child = entry({
+      workflow: "work-study",
+      id: "ws-1",
+      runId: "ws-run-1",
+      parentRunId: "some-parent",
+      status: "done",
+      data: { archetype: "single" },
+    });
+    const result = buildTrackerQueueSurfaces({
+      entries: [child],
+      delegationSourceEntries: [child],
+      runtimePolicies: new Map([["work-study", DEFAULT_WORKFLOW_RUNTIME_POLICY]]),
+    });
+    assert.equal(result.groupRows.length, 0, "no batch surface");
+    assert.deepEqual(result.flatEntries.map((e) => e.id), ["ws-1"], "renders flat");
   });
 
   it("excludes discarded preview rows from all surfaces", () => {
