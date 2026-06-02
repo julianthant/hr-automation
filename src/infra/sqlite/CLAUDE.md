@@ -62,12 +62,6 @@ on — not a domain concept and not workflow-specific.
 - **Bigints**: default off (`setReadBigInts(false)` is the default). Matches
   better-sqlite3. If a future caller stores 64-bit integers, opt in
   per-statement.
-- **External read-only DBs**: `infra/auth/imessage-passcode.ts` opens the macOS
-  Messages `chat.db` read-only (`{ readonly: true, fileMustExist: true,
-  applyDefaultPragmas: false }`). Apple stores `message.date` as Apple-epoch
-  **nanoseconds**, which exceed `Number.MAX_SAFE_INTEGER` for current dates —
-  bind such thresholds as **BigInt** and compare in SQL; never read the column
-  back into a JS number. node:sqlite accepts a `bigint` bound param fine.
 
 ## Lessons Learned
 
