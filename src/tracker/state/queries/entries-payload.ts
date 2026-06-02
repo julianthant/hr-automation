@@ -3,8 +3,7 @@ import { computeFailureCounts } from "../../dashboard/failures.js";
 import { computeStepDurations, pickEarlier, pickLater } from "../../dashboard/run-timelines.js";
 import type { ProjectionEntriesPayload } from "../types.js";
 import type { TrackerEntry } from "../../jsonl-io.js";
-import { groupMergedTrackerEntries } from "../../queue-row-count.js";
-import { countTopLevelQueueSurfaceRows } from "../../queue-surfaces.js";
+import { countSidebarRowsFromTrackerHistory } from "../../queue-row-count.js";
 import { log } from "../../../utils/log.js";
 import { isTrackerStatus, parseJsonObject, parseTypedDataJson, readStmts } from "./statements.js";
 import {
@@ -218,11 +217,7 @@ export function queryEntriesPayload(
       ),
       ...(row.error ? { error: row.error } : {}),
     }));
-    const primaries = groupMergedTrackerEntries(asTracker).map((g) => g.primary);
-    wfCounts[wf] = countTopLevelQueueSurfaceRows({
-      entries: primaries,
-      delegationSourceEntries: asTracker,
-    });
+    wfCounts[wf] = countSidebarRowsFromTrackerHistory(asTracker);
   }
 
   const failureCounts: Record<string, number> = {};

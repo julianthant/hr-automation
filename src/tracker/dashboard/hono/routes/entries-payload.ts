@@ -29,7 +29,6 @@ import {
   type RunTimeline,
   type StepDurationEntry,
 } from "../../run-timelines.js";
-import { isResolvedPrepEntry } from "../../prep-rows.js";
 import { computeFailureCounts } from "../../failures.js";
 import { SCREENSHOTS_DIR } from "../../screenshots.js";
 import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
@@ -72,7 +71,7 @@ const getCrossWorkflowCounts = ttlMemoize(
     const failureCounts: Record<string, number> = {};
     for (const wf of workflows) {
       const all = readEntriesForDate(wf, targetDate, dir);
-      wfCounts[wf] = countSidebarRowsFromTrackerHistory(all, isResolvedPrepEntry);
+      wfCounts[wf] = countSidebarRowsFromTrackerHistory(all);
       const failures = computeFailureCounts(all);
       if (failures > 0) failureCounts[wf] = failures;
     }

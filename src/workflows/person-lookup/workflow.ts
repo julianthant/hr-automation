@@ -34,7 +34,13 @@ import {
   parsePersonOrgNameInput as parseNameInput,
   type EidResult,
 } from "../../systems/ucpath/person-org-summary.js";
-import { searchCrmByName, datesWithinDays } from "./crm-search.js";
+import {
+  searchCrmByName,
+  searchCrmByEidOrName,
+  pickCrmStartDate,
+  datesWithinDays,
+  type CrmRecord,
+} from "./crm-search.js";
 import {
   PersonLookupItemSchema,
   derivePersonLookupItemId,
@@ -116,18 +122,19 @@ async function searchingStep<TSteps extends readonly string[]>(
       hrStatus: result.hrStatus,
       jobTitle: result.jobCodeDescription ?? "",
     });
-    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
+    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
+      systems: ["ucpath"],
+    });
     return lookup.results as EidResult[];
   }
 
-  // Name-search path
+  // Name-search path. The searching-state grid is only worth a screenshot when
+  // nothing resolves (a not-found audit) — on success we capture the resolved
+  // detail page instead, so the operator never sees the mid-search form.
   let lookup: Awaited<ReturnType<typeof lookupPersonInUcpath>>;
   try {
     lookup = await lookupPersonInUcpath(page, { kind: "by-name", name: input.name }, {
       keepNonHdh: input.keepNonHdh,
-      onAfterSearchAttempt: async () => {
-        await ctx.captureAndStampScreenshot("person-org-summary-search-results", "personOrgSearchScreenshot");
-      },
     });
   } catch (err) {
     log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
@@ -137,6 +144,11 @@ async function searchingStep<TSteps extends readonly string[]>(
   if (lookup.results.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
     ctx.updateData({ emplId: "Not found" });
+    await ctx.captureAndStampScreenshot(
+      "person-org-summary-search-results",
+      "personOrgSearchScreenshot",
+      { systems: ["ucpath"] },
+    );
     return [];
   }
   const first = lookup.selection.selected ?? lookup.results[0]!;
@@ -149,54 +161,130 @@ async function searchingStep<TSteps extends readonly string[]>(
     hrStatus: first.hrStatus,
     jobTitle: first.jobCodeDescription ?? "",
   });
-  await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
+  await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
+    systems: ["ucpath"],
+  });
   return lookup.results as EidResult[];
 }
 
+/** Split a UCPath-resolved "First [Middle] Last" name into CRM search parts. */
+export function splitResolvedName(fullName: string): { lastName: string; firstName: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { lastName: "", firstName: "" };
+  if (parts.length === 1) return { lastName: parts[0]!, firstName: "" };
+  return { lastName: parts[parts.length - 1]!, firstName: parts[0]! };
+}
+
 /**
- * Cross-verify one name against CRM. Emits `crmMatch` as one of:
+ * Resolve the CRM cross-verification match for a name search against the
+ * UCPath SDCMP candidates. Pure — drives `crmMatch` / `crmMatchedEmplId`:
+ *  - "direct" — a CRM record's UCPath EID equals an SDCMP candidate's EID
+ *  - "date"   — a CRM firstDayOfService is within ±7d of an SDCMP date
+ *  - "none"   — CRM returned records but nothing matched
+ */
+export function matchCrmEid(
+  sdcmp: EidResult[],
+  crmRecords: CrmRecord[],
+): { crmMatch: "direct" | "date" | "none"; crmMatchedEmplId?: string } {
+  for (const crec of crmRecords) {
+    if (!crec.ucpathEmployeeId) continue;
+    const match = sdcmp.find((r) => r.emplId === crec.ucpathEmployeeId);
+    if (match) return { crmMatch: "direct", crmMatchedEmplId: match.emplId };
+  }
+  for (const crec of crmRecords) {
+    const crmDate = crec.firstDayOfService;
+    if (!crmDate) continue;
+    for (const ucRec of sdcmp) {
+      const ucDate = ucRec.startDate || ucRec.effectiveDate;
+      if (!ucDate) continue;
+      if (datesWithinDays(crmDate, ucDate, 7)) {
+        return { crmMatch: "date", crmMatchedEmplId: ucRec.emplId };
+      }
+    }
+  }
+  return { crmMatch: "none" };
+}
+
+/**
+ * Stamp the operator-facing Start Date from CRM (First Day of Service) and, if
+ * any CRM record was found, capture the CRM record page (not the search grid).
+ * Start Date is CRM-only: it stays blank when CRM has no record or no date.
+ */
+async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
+  ctx: Ctx<TSteps, PersonLookupItem>,
+  crmRecords: CrmRecord[],
+  resolvedEid?: string,
+): Promise<void> {
+  const startDate = pickCrmStartDate(crmRecords, resolvedEid);
+  ctx.updateData({ startDate });
+  if (crmRecords.length === 0) {
+    log.step("CRM start date: no CRM record — Start Date left blank");
+    return;
+  }
+  log.step(`CRM start date: "${startDate || "(none)"}" (EID ${resolvedEid || "?"})`);
+  await ctx.captureAndStampScreenshot("crm-record", "crmRecordScreenshot", {
+    systems: ["crm"],
+  });
+}
+
+/**
+ * Cross-verify against CRM and source the operator-facing Start Date (CRM First
+ * Day of Service). Emits `crmMatch` for name inputs as one of:
  *  - "direct"   — UCPath EID matched a CRM record's UCPath EID
  *  - "date"     — UCPath effective date matched a CRM firstDayOfService (±7d)
  *  - "crm-only" — CRM had an EID but UCPath returned no SDCMP results
  *  - "none"     — CRM returned records but none matched
  *  - ""         — CRM returned no records for this name
+ *
+ * EID inputs skip name disambiguation (the EID already identifies the person)
+ * and only fetch the CRM record — searching CRM by EID first, then by the
+ * UCPath-resolved name — to stamp the Start Date.
  */
 async function crossVerificationStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
   input: PersonLookupItem,
   sdcmp: EidResult[],
 ): Promise<void> {
-  // CRM cross-verification is name-based; EID-input items skip this step
-  // entirely (the handler gates on isEidInput before scheduling it).
-  if (isEidInput(input)) return;
-
   const crmPage = await ctx.page("crm");
+
+  // EID inputs: search CRM by EID or name purely to source the Start Date.
+  if (isEidInput(input)) {
+    const { lastName, firstName } = splitResolvedName(String(ctx.data.searchName ?? ""));
+    let crmRecords: CrmRecord[] = [];
+    try {
+      crmRecords = await searchCrmByEidOrName(crmPage, {
+        emplId: input.emplId,
+        lastName,
+        firstName,
+      });
+    } catch (err) {
+      log.error(`CRM start date: search failed for EID ${input.emplId} — ${errorMessage(err)}`);
+    }
+    await stampCrmStartDateAndScreenshot(ctx, crmRecords, input.emplId);
+    return;
+  }
 
   let parsed: ReturnType<typeof parseNameInput>;
   try {
     parsed = parseNameInput(input.name);
   } catch (err) {
     log.error(`CRM cross-verify: invalid name "${input.name}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "" });
+    ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
 
-  let crmRecords: Awaited<ReturnType<typeof searchCrmByName>>;
+  let crmRecords: CrmRecord[];
   try {
-    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first, {
-      onAfterSearch: async () => {
-        await ctx.captureAndStampScreenshot("crm-search-results", "crmSearchScreenshot");
-      },
-    });
+    crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {
     log.error(`CRM cross-verify: search failed for "${input.name}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "" });
+    ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
 
   if (crmRecords.length === 0) {
     log.step(`CRM: no records for "${input.name}"`);
-    ctx.updateData({ crmMatch: "" });
+    ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
 
@@ -211,39 +299,27 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
         department: withEid.department ?? "",
         crmMatch: "crm-only",
       });
+      await stampCrmStartDateAndScreenshot(ctx, crmRecords, withEid.ucpathEmployeeId);
       return;
     }
     // CRM returned records but none had an EID — can't verify anything
     ctx.updateData({ crmMatch: "none" });
+    await stampCrmStartDateAndScreenshot(ctx, crmRecords);
     return;
   }
 
-  for (const crec of crmRecords) {
-    if (crec.ucpathEmployeeId) {
-      const match = sdcmp.find((r) => r.emplId === crec.ucpathEmployeeId);
-      if (match) {
-        log.success(`Direct EID match: ${match.emplId} — ${match.department}`);
-        ctx.updateData({ crmMatch: "direct", crmMatchedEmplId: match.emplId });
-        return;
-      }
-    }
+  const { crmMatch, crmMatchedEmplId } = matchCrmEid(sdcmp, crmRecords);
+  if (crmMatch === "direct") {
+    log.success(`Direct EID match: ${crmMatchedEmplId}`);
+  } else if (crmMatch === "date") {
+    log.success(`Date match → EID ${crmMatchedEmplId}`);
   }
-
-  for (const crec of crmRecords) {
-    const crmDate = crec.firstDayOfService;
-    if (!crmDate) continue;
-    for (const ucRec of sdcmp) {
-      const ucDate = ucRec.startDate || ucRec.effectiveDate;
-      if (!ucDate) continue;
-      if (datesWithinDays(crmDate, ucDate, 7)) {
-        log.success(`Date match: CRM "${crmDate}" ≈ UCPath "${ucDate}" → EID ${ucRec.emplId}`);
-        ctx.updateData({ crmMatch: "date", crmMatchedEmplId: ucRec.emplId });
-        return;
-      }
-    }
-  }
-
-  ctx.updateData({ crmMatch: "none" });
+  ctx.updateData({ crmMatch, ...(crmMatchedEmplId ? { crmMatchedEmplId } : {}) });
+  await stampCrmStartDateAndScreenshot(
+    ctx,
+    crmRecords,
+    crmMatchedEmplId ?? String(ctx.data.emplId ?? ""),
+  );
 }
 
 function stampActiveCheckFields<TSteps extends readonly string[]>(
@@ -255,7 +331,11 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
     hrStatus: outcome.hrStatus,
     department: outcome.department,
     ...(outcome.emplId ? { emplId: outcome.emplId } : {}),
-    startDate: outcome.startDate,
+    // Start Date is sourced from CRM (First Day of Service) in
+    // cross-verification — do NOT write it here, or active-status (which runs
+    // after cross-verification) would clobber the CRM value with UCPath's Last
+    // Hire. Keep the UCPath date as backend-only context for audit.
+    ucpathStartDate: outcome.startDate,
     effdt: outcome.effdt,
     terminationDate: outcome.terminationDate,
     expectedJobEndDate: outcome.expectedJobEndDate,
@@ -312,7 +392,9 @@ async function activeStatusStep<TSteps extends readonly string[]>(
     }
     const lookup = await lookupPersonInUcpath(page, { kind: "by-eid", emplId: eid });
     const results = lookup.results;
-    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot");
+    await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
+      systems: ["ucpath"],
+    });
     const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results);
     stampActiveCheckFields(ctx, outcome);
     return;
@@ -445,8 +527,13 @@ export const personLookupWorkflow = defineWorkflow({
       ctx.updateData({ searchName: displayPersonLookupInput(input) });
     }
     const sdcmp = await ctx.step("searching", async () => searchingStep(ctx, input));
+    // Cross-verification now runs for EID inputs too: even though the EID
+    // already identifies the person, the step sources the operator-facing
+    // Start Date from CRM (searching CRM by EID, then name).
+    await ctx.step("cross-verification", async () => {
+      await crossVerificationStep(ctx, input, sdcmp);
+    });
     if (isEidInput(input)) {
-      ctx.skipStep("cross-verification");
       await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
       if (input.includeCrmDates !== true) {
         ctx.skipStep("crm-dates");
@@ -455,9 +542,6 @@ export const personLookupWorkflow = defineWorkflow({
       }
       return;
     }
-    await ctx.step("cross-verification", async () => {
-      await crossVerificationStep(ctx, input, sdcmp);
-    });
     await ctx.step("active-status", async () => activeStatusStep(ctx, input, sdcmp));
     if (input.includeCrmDates !== true) {
       ctx.skipStep("crm-dates");

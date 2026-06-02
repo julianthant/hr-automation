@@ -195,6 +195,80 @@ export async function searchCrmByName(
 }
 
 /**
+ * Search CRM by Empl ID via the global `?q=` search, then extract each result
+ * row and keep only records whose UCPath Employee ID matches `emplId`.
+ *
+ * CRM's onboarding search is global, so an EID query surfaces the person's
+ * onboarding record directly — more precise than a name search when the EID is
+ * known. Returns an empty array when the EID query yields nothing (callers fall
+ * back to a name search).
+ */
+async function searchCrmByEid(
+  page: Page,
+  emplId: string,
+  options: {
+    onAfterSearch?: (query: string, rows: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>) => Promise<void>;
+  } = {},
+): Promise<CrmRecord[]> {
+  const rows = await searchCrm(page, emplId);
+  await options.onAfterSearch?.(emplId, rows);
+
+  const records: CrmRecord[] = [];
+  for (const row of rows) {
+    if (!row.recordUrl) continue;
+    const record = await extractCrmRecord(page, row.recordUrl);
+    if (record && record.ucpathEmployeeId.trim() === emplId) records.push(record);
+  }
+  if (records.length > 0) {
+    log.step(`CRM: ${records.length} record(s) matched EID ${emplId}`);
+    return records;
+  }
+  log.step(`CRM: no record matched EID ${emplId}`);
+  return [];
+}
+
+/**
+ * Resolve CRM records for a person by EID **or** name.
+ *
+ * When `emplId` is provided, search CRM by the EID first (precise) and fall
+ * back to the name search only when the EID query returns no matching record.
+ * EID-less inputs go straight to the name search. Used by Person Lookup to
+ * source the operator-facing Start Date (CRM First Day of Service) for both
+ * name-input and EID-input lookups.
+ */
+export async function searchCrmByEidOrName(
+  page: Page,
+  params: { emplId?: string; lastName: string; firstName: string },
+  options: {
+    onAfterSearch?: (query: string, rows: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>) => Promise<void>;
+  } = {},
+): Promise<CrmRecord[]> {
+  const emplId = params.emplId?.trim();
+  if (emplId) {
+    const byEid = await searchCrmByEid(page, emplId, options);
+    if (byEid.length > 0) return byEid;
+    log.step(`CRM: falling back to name search for "${params.lastName}, ${params.firstName}"`);
+  }
+  return searchCrmByName(page, params.lastName, params.firstName, options);
+}
+
+/**
+ * Pick the CRM First Day of Service to use as the operator-facing Start Date.
+ *
+ * Prefers the record whose UCPath Employee ID matches the resolved EID; falls
+ * back to the first record. Returns "" when there are no records or the chosen
+ * record has no First Day of Service (Start Date is CRM-only — no UCPath
+ * fallback).
+ */
+export function pickCrmStartDate(records: CrmRecord[], emplId?: string): string {
+  if (records.length === 0) return "";
+  const eid = emplId?.trim();
+  const matched = eid ? records.find((r) => r.ucpathEmployeeId.trim() === eid) : undefined;
+  const chosen = matched ?? records[0]!;
+  return chosen.firstDayOfService?.trim() ?? "";
+}
+
+/**
  * Check if two dates are within N days of each other.
  * Parses MM/DD/YYYY or "Month D, YYYY" formats.
  */

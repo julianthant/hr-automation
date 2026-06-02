@@ -175,11 +175,11 @@ test("queryEntriesPayload wfCounts carries emplId from earlier person-lookup eve
   }
 });
 
-test("queryEntriesPayload wfCounts excludes approved OCR prep rows (new approval contract)", () => {
-  // New approval contract (2026-05-25): OCR `done` is the terminal
-  // "operator approved" state, so approved prep rows are resolved-prep and
-  // drop out of the sidebar wfCounts — only awaiting-approval (running) or
-  // unresolved rows count.
+test("queryEntriesPayload wfCounts includes approved OCR prep rows that still render in the queue", () => {
+  // The rail count must match the queue's ALL count for the same workflow.
+  // Approved OCR prep rows are terminal, but they still render as done rows in
+  // the selected OCR queue until deleted, so backend wfCounts must include
+  // them instead of relying on an active-workflow-only frontend override.
   const dir = tmpTracker();
   try {
     openStateDb(dir);
@@ -201,10 +201,64 @@ test("queryEntriesPayload wfCounts excludes approved OCR prep rows (new approval
     const db = openStateDb(dir);
     const payload = queryEntriesPayload(db, { workflow: "ocr", date: day });
     assert.equal(
-      payload.wfCounts.ocr ?? 0,
-      0,
-      "approved OCR prep is resolved-prep and excluded from sidebar wfCounts",
+      payload.wfCounts.ocr,
+      3,
+      "approved OCR prep rows still count as rendered OCR queue surfaces",
     );
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryEntriesPayload wfCounts do not depend on the selected workflow", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const day = "2026-06-02";
+    trackEvent(
+      {
+        workflow: "ocr",
+        timestamp: `${day}T12:00:00.000Z`,
+        id: "ocr-approved-prep",
+        runId: "ocr-approved-run",
+        status: "done",
+        step: "approved",
+        data: { mode: "prepare", pdfOriginalName: "approved.pdf", archetype: "preview" },
+      },
+      dir,
+    );
+    trackEvent(
+      {
+        workflow: "person-lookup",
+        timestamp: `${day}T12:01:00.000Z`,
+        id: "10874100",
+        runId: "lookup-run",
+        status: "done",
+        data: { emplId: "10874100" },
+      },
+      dir,
+    );
+    trackEvent(
+      {
+        workflow: "crm-doc-download",
+        timestamp: `${day}T12:02:00.000Z`,
+        id: "crm-doc-1",
+        runId: "crm-doc-run",
+        status: "done",
+        data: {},
+      },
+      dir,
+    );
+
+    const db = openStateDb(dir);
+    const ocrSelected = queryEntriesPayload(db, { workflow: "ocr", date: day });
+    const crmSelected = queryEntriesPayload(db, { workflow: "crm-doc-download", date: day });
+
+    assert.deepEqual(ocrSelected.wfCounts, crmSelected.wfCounts);
+    assert.equal(ocrSelected.wfCounts.ocr, 1);
+    assert.equal(ocrSelected.wfCounts["person-lookup"], 1);
+    assert.equal(ocrSelected.wfCounts["crm-doc-download"], 1);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
