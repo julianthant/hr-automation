@@ -52,13 +52,15 @@ const authLabel: Record<AuthState, string> = {
 
 /**
  * Operator-facing daemon label. The instance identity stays numbered
- * ("Oath Upload 1") for stable start/end pairing, but a lone daemon shows just
- * "Oath Upload" — the gratuitous " 1" is dropped. A second concurrent daemon
- * keeps its "Oath Upload 2" so the rail still disambiguates. The full numbered
- * identity stays in the hover `title`.
+ * ("Oath Upload 1", "Oath Upload 2") internally for stable start/end pairing,
+ * but the card title shows just the bare workflow name — the trailing session
+ * ordinal is always dropped, for every workflow and every instance. Cards are
+ * disambiguated by their subtitle (the running run's trace id) + the live
+ * elapsed timer, not by a title number. The full numbered identity stays in
+ * the hover `title`.
  */
 function displayInstance(instance: string): string {
-  return instance.replace(/\s1$/, "");
+  return instance.replace(/\s\d+$/, "");
 }
 
 function AuthIcon({ state, className }: { state: AuthState; className?: string }) {
@@ -380,6 +382,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     active,
     pidAlive,
     currentItemId,
+    currentTraceId,
     itemInFlight,
     currentStep,
     finalStatus,
@@ -408,6 +411,10 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     : 0;
 
   const queued = workflowName ? queueDepth[workflowName] ?? 0 : 0;
+
+  // Machine-scoped daemon log lines. Always present (the section renders even
+  // at 0 entries), so default to an empty array rather than gating on length.
+  const daemonLogs = recentDaemonLogs ?? [];
 
   if (workflow.crashedOnLaunch) {
     return (
@@ -512,11 +519,14 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                 {displayInstance(instance)}
               </span>
             </div>
+            {/* Subtitle: the running run's trace id (same id its queue row
+                shows). Kept after the item completes; falls back to the phase
+                subline for a daemon that's authenticating/idle with no run. */}
             <div
               className="mt-0.5 text-[10.5px] font-mono text-muted-foreground truncate leading-tight"
-              title={subline}
+              title={currentTraceId ?? subline}
             >
-              {subline}
+              {currentTraceId ?? subline}
             </div>
           </div>
 
@@ -552,62 +562,65 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
           </div>
         </div>
 
-        {/* 2×2 grid of system tiles (existing visual contract preserved). */}
-        {browsers.length > 0 && (
-          <div className="grid grid-cols-2 gap-1">
-            {browsers.map((b) => (
-              <div
-                key={b.browserId}
-                className={cn(
-                  "rounded-md border px-1.5 py-1 min-w-0 transition-colors",
-                  authBg[b.authState],
-                )}
-                title={
-                  b.system === "ucpath" && b.authState === "authed" && ucpathIdle?.lastTouchAt
-                    ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
-                    : `${b.system} · ${authLabel[b.authState]}`
-                }
-              >
-                <div className="flex items-center gap-1 min-w-0 justify-between">
-                  <div className="flex items-center gap-1 min-w-0">
-                    <AuthIcon
-                      state={b.authState}
-                      className={cn("w-3 h-3 shrink-0", authColor[b.authState])}
-                    />
-                    <span className="text-[11px] font-mono text-foreground truncate leading-none">
-                      {b.system}
-                    </span>
-                  </div>
-                  {b.system === "ucpath" &&
-                    b.authState === "authed" &&
-                    !itemInFlight &&
-                    ucpathIdle?.lastTouchAt != null &&
-                    ucpathIdle.lastTouchAt.length > 0 && (
-                      <UcpathIdleCountdownRing
-                        lastTouchAt={ucpathIdle.lastTouchAt}
-                        refreshing={!!ucpathIdle.refreshing}
-                        cycling={active && !itemInFlight}
-                      />
-                    )}
-                </div>
+        {/* System lane: keep its height even before a workflow has browser
+            sessions so the micro pipeline lines up across all cards. */}
+        <div className="min-h-[43px]">
+          {browsers.length > 0 && (
+            <div className="grid grid-cols-2 gap-1">
+              {browsers.map((b) => (
                 <div
+                  key={b.browserId}
                   className={cn(
-                    "mt-0.5 text-[9.5px] uppercase tracking-wider font-semibold leading-none",
-                    authColor[b.authState],
+                    "rounded-md border px-1.5 py-1 min-w-0 transition-colors",
+                    authBg[b.authState],
                   )}
+                  title={
+                    b.system === "ucpath" && b.authState === "authed" && ucpathIdle?.lastTouchAt
+                      ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
+                      : `${b.system} · ${authLabel[b.authState]}`
+                  }
                 >
-                  {authLabel[b.authState]}
+                  <div className="flex items-center gap-1 min-w-0 justify-between">
+                    <div className="flex items-center gap-1 min-w-0">
+                      <AuthIcon
+                        state={b.authState}
+                        className={cn("w-3 h-3 shrink-0", authColor[b.authState])}
+                      />
+                      <span className="text-[11px] font-mono text-foreground truncate leading-none">
+                        {b.system}
+                      </span>
+                    </div>
+                    {b.system === "ucpath" &&
+                      b.authState === "authed" &&
+                      !itemInFlight &&
+                      ucpathIdle?.lastTouchAt != null &&
+                      ucpathIdle.lastTouchAt.length > 0 && (
+                        <UcpathIdleCountdownRing
+                          lastTouchAt={ucpathIdle.lastTouchAt}
+                          refreshing={!!ucpathIdle.refreshing}
+                          cycling={active && !itemInFlight}
+                        />
+                      )}
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-0.5 text-[9.5px] uppercase tracking-wider font-semibold leading-none",
+                      authColor[b.authState],
+                    )}
+                  >
+                    {authLabel[b.authState]}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Micro step pipeline — small dots showing lifecycle position
             for the instance's current step. Only renders when we have
             both a registered step list and at least 2 steps. */}
         {steps.length >= 2 && (
-          <div className="flex items-center gap-0 pt-1" aria-hidden>
+          <div className="flex items-center gap-0 pt-1" data-session-step-pipeline aria-hidden>
             {steps.map((s, i) => {
               const done = currentIdx > i;
               const running = currentIdx === i;
@@ -639,9 +652,13 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
         )}
 
         {/* Collapsible daemon log lines — machine-scoped session-log entries
-            surfaced here in the terminal drawer, never in per-run Events tabs. */}
-        {recentDaemonLogs && recentDaemonLogs.length > 0 && (
-          <div className="border-t border-border/40 pt-1.5">
+            surfaced here in the terminal drawer, never in per-run Events tabs.
+            This is a STANDARD element on every session card (the crashed-on-
+            launch card returns early above and is the only one that omits it).
+            It renders even at 0 entries — a fresh daemon whose first log line
+            hasn't arrived yet still shows "Daemon log (0)" rather than a gap,
+            so the section never appears/disappears as lines stream in. */}
+        <div className="border-t border-border/40 pt-1.5">
             <button
               type="button"
               className="flex items-center gap-1 w-full text-left text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
@@ -656,11 +673,16 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                   logsOpen && "rotate-90",
                 )}
               />
-              <span>Daemon log ({recentDaemonLogs.length})</span>
+              <span>Daemon log ({daemonLogs.length})</span>
             </button>
-            {logsOpen && (
+            {logsOpen && daemonLogs.length === 0 && (
+              <div className="mt-1 font-mono text-[9.5px] leading-[1.35] text-muted-foreground/50 pl-[14px]">
+                No daemon log entries yet
+              </div>
+            )}
+            {logsOpen && daemonLogs.length > 0 && (
               <div className="mt-1 max-h-[120px] overflow-y-auto flex flex-col gap-[2px]">
-                {[...recentDaemonLogs].reverse().map((l, i) => {
+                {[...daemonLogs].reverse().map((l, i) => {
                   const d = new Date(l.ts);
                   const hh = String(d.getHours()).padStart(2, "0");
                   const mm = String(d.getMinutes()).padStart(2, "0");
@@ -690,7 +712,6 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
               </div>
             )}
           </div>
-        )}
 
         {/* Footer: queued chip + spacer + current-step descriptor. */}
         <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground min-h-[16px]">

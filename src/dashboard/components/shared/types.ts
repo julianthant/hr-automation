@@ -275,6 +275,13 @@ export interface WorkflowInstanceState {
   pidAlive: boolean;
   crashedOnLaunch?: boolean;
   currentItemId: string | null;
+  /**
+   * Frozen `data.__traceId` of the current (or most-recent) in-flight run — the
+   * same id its queue row shows. Drives the session-card subtitle. Set on
+   * `item_start`, kept after `item_complete` (like `currentItemId`). `null` for
+   * a daemon that hasn't run an item yet.
+   */
+  currentTraceId: string | null;
   /** True between item_start and item_complete — i.e. a real item is currently being processed. */
   itemInFlight: boolean;
   currentStep: string | null;

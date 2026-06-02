@@ -26,6 +26,7 @@ import {
   emitUcpathIdleSignal,
 } from '../../tracker/session-events.js'
 import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
+import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
 import { createWorkerStore } from './worker-store.js'
@@ -473,7 +474,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               emitWorkerHeartbeat()
               state.lastActivity = Date.now()
               const itemAuthTimings = itemAuthTimingResolver.resolveForNextItem()
-              emitItemStart(instance, item.id, trackerDir, runId)
+              // Carry the run's frozen trace id onto the session card so its
+              // subtitle shows the same id as the run's queue row. The pending
+              // row (with `data.__traceId`) was pre-emitted at enqueue time, so
+              // it's already on disk by the time we claim and start the item.
+              const itemTraceId = findFrozenTraceId({
+                workflow: wf.config.name,
+                runId,
+                ...(trackerDir ? { trackerDir } : {}),
+              })
+              emitItemStart(instance, item.id, trackerDir, runId, itemTraceId)
               try {
                 const r = await runOneItem({
                   wf,

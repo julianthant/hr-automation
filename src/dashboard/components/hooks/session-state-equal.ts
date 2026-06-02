@@ -39,6 +39,7 @@ export function workflowEqual(a: WorkflowInstanceState, b: WorkflowInstanceState
     a.pidAlive === b.pidAlive &&
     a.crashedOnLaunch === b.crashedOnLaunch &&
     a.currentItemId === b.currentItemId &&
+    a.currentTraceId === b.currentTraceId &&
     a.itemInFlight === b.itemInFlight &&
     a.currentStep === b.currentStep &&
     a.finalStatus === b.finalStatus &&

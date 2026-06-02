@@ -103,6 +103,7 @@ describe("rebuildSessionState — workflows", () => {
         active: false,
         pidAlive: true,
         currentItemId: null,
+        currentTraceId: null,
         itemInFlight: false,
         currentStep: null,
         finalStatus: "done",

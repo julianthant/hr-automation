@@ -32,6 +32,7 @@ function makeWorkflow(sessions: SessionInfo[]): WorkflowInstanceState {
     active: true,
     pidAlive: true,
     currentItemId: null,
+    currentTraceId: null,
     itemInFlight: false,
     currentStep: null,
     finalStatus: null,
