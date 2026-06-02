@@ -62,7 +62,6 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "GET", path: "/api/oath-upload/check-duplicate" },
   { method: "POST", path: "/api/oath-upload/cancel" },
   { method: "POST", path: "/api/oath-upload/start" },
-  { method: "POST", path: "/api/oath-signature/start" },
   { method: "POST", path: "/api/capture/start" },
   { method: "GET", path: "/capture/:token" },
   { method: "GET", path: "/api/capture/manifest/:token" },

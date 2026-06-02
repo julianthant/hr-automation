@@ -73,7 +73,7 @@ export interface RunModalConfig {
   /**
    * If set, the workflow's run modal locks the OCR `formType` to this value
    * — picker is hidden, the field is force-injected on submit. Used so
-   * `emergency-contact` and `oath-signature` can each surface a dedicated
+   * `emergency-contact` and `oath-upload` can each surface a dedicated
    * Run button that delegates to the shared `/api/ocr/prepare` endpoint
    * without making the operator pick the form type a second time.
    */
@@ -95,25 +95,6 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       description: file.name,
     }),
   },
-  "oath-signature": {
-    title: () => "Run Oath Signature",
-    srDescription: () =>
-      "Upload a PDF for oath preparation. Each PDF becomes one oath-signature run that delegates to OCR (you'll approve the extracted rows in the OCR queue) and then fans out one signer per approved record.",
-    // Plan A Commit 3: PDF uploads enqueue a `{ kind: "pdf" }`
-    // oath-signature daemon item directly. The handler delegates to OCR
-    // (which suspends until operator approval) and then fans out signer
-    // children via ctx.delegateToAll. Reupload still goes through the
-    // OCR HTTP route — Commit 4/5 collapse the reupload path.
-    submitUrl: ({ reuploadFor }) =>
-      reuploadFor ? "/api/ocr/reupload" : "/api/oath-signature/start",
-    sections: { roster: true, dryRun: true },
-    lockedFormType: "oath",
-    allowMultipleFiles: true,
-    buildSuccessToast: (_resp, file) => ({
-      title: "Oath signature queued",
-      description: file.name,
-    }),
-  },
   ocr: {
     title: ({ lockedFormType }) =>
       lockedFormType === "oath" ? "Run Oath Signature" : "OCR — Prepare",
@@ -124,8 +105,8 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
     // Dedicated OCR runs have no Approve flow (just inspecting OCR output),
-    // so dry-run is meaningless here. Delegations from oath-signature /
-    // emergency-contact / oath-upload keep their own dry-run toggles.
+    // so dry-run is meaningless here. Delegations from emergency-contact /
+    // oath keep their own dry-run toggles.
     sections: { roster: true, formType: true },
     allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
@@ -137,12 +118,21 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     title: () => "Upload Oath PDF",
     srDescription: ({ oathUploadMode }) =>
       oathUploadMode === "upload-only"
-        ? "Upload a paper oath PDF for ServiceNow filing only — OCR and signature delegation are skipped. The workflow files an HR ticket with the PDF attached and nothing else."
-        : "Upload a paper oath PDF. Full process dispatches OCR + per-signer signatures into the Oath Signature tab (where the operator approves OCR and the per-signer batch runs); after every signer completes, oath-upload files the HR ticket. Pick roster source, duplicate check, and dry run.",
-    submitUrl: () => "/api/oath-upload/start",
-    // Roster picker is required for Full process because oath-upload's dispatch
-    // step starts an OCR + signature batch in the oath-signature tab, which
-    // needs a roster to match the OCR'd names → EIDs before fanning out.
+        ? "Upload a paper oath PDF for ServiceNow filing only — OCR and signatures are skipped. The workflow files an HR ticket with the PDF attached and nothing else."
+        : "Upload a paper oath PDF. Full process starts OCR prep (approve the extracted rows in the OCR queue); on approve, OCR fans out one signer per approved record into the Oath Signature tab AND one ServiceNow ticket row that waits for every signer to finish before filing. Pick roster source, duplicate check, and dry run.",
+    // Full process is the OCR-hub entry: it starts an OCR prep locked to the
+    // oath form. OCR owns approval and the dual fan-out (oath-signature signers
+    // + oath-upload ticket). upload-only stays a direct oath-upload run that
+    // files the ticket without OCR/signers.
+    submitUrl: ({ reuploadFor, oathUploadMode }) =>
+      reuploadFor
+        ? "/api/ocr/reupload"
+        : oathUploadMode === "upload-only"
+          ? "/api/oath-upload/start"
+          : "/api/ocr/prepare",
+    lockedFormType: "oath",
+    // Roster picker is required for Full process because the OCR prep needs a
+    // roster to match the OCR'd names → EIDs before fanning out.
     sections: { roster: true, duplicateCheck: true, dryRun: true, oathUploadMode: true },
     allowMultipleFiles: true,
     buildSuccessToast: (resp, file) => ({

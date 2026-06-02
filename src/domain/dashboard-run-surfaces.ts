@@ -9,7 +9,6 @@ export const DASHBOARD_INPUT_RUN_WORKFLOWS = [
 
 export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [
   "emergency-contact",
-  "oath-signature",
   "ocr",
   "oath-upload",
 ] as const;
