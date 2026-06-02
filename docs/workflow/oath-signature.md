@@ -2,68 +2,40 @@
 
 ## What It Does
 
-Oath Signature gets oath-signature PDFs through OCR, lets the operator approve the signer records, then runs a UCPath oath transaction for each approved employee.
-
-It has two launch shapes:
-
-- PDF upload or delegated Oath Upload signature stage: the PDF run is a batch row.
-- Direct signer input: the signer input is a single row.
+Oath Signature adds an Oath Signature Date row to UCPath Person Profile for one employee EID. It is EID-only: one input item, one UCPath transaction, one signer row. The PDF/OCR branch was removed; OCR now owns paper-roster prep and fans out signer rows here after approval.
 
 ## Delegation Model
 
-The delegated oath-signature PDF row is the main batch-shaped row.
-
-| Field | Value |
-|---|---|
-| Workflow | `oath-signature` |
-| Row archetype | `batch` |
-| Scope | Delegated when it has `parentRunId = oath-upload runId` |
-| Title | PDF filename from `pdfOriginalName` |
-| Subtitle | `Oath · <last4 oath-signature PDF run id>` |
-| Batch members | Per-signer `oath-signature` child rows created after OCR approval |
-
-Each signer row under that PDF run is a batch member in the PDF batch surface.
-
-| Field | Value |
-|---|---|
-| Workflow | `oath-signature` |
-| Row archetype | `batch-member` |
-| Rendered role | Batch member / delegation member inside the PDF batch surface |
-| Title | Person name from the approved OCR record normalized into `name` |
-| Subtitle | Usually EID or `__id` |
-| Work | UCPath oath transaction for that one employee |
-
-Oath Signature should not use a second "single signer under PDF" row type for approved OCR signer work. Approved signer work belongs under the PDF batch as batch members, even when the PDF has only one signer.
-
-## Flow
+Oath Signature does not delegate to another workflow. It can be started from the dashboard input-run surface or by OCR approval fan-out.
 
 ```mermaid
 flowchart TD
-  A["Oath Signature request<br/>{ source: empty input run, upload run, or Oath Upload delegation }"]
-  A --> B["OCR preview<br/>{ workflow: ocr,<br/>row archetype: preview,<br/>title: PDF name }"]
-  B --> C["EID lookup / active check<br/>{ one person: single,<br/>multiple people: batch }"]
-  C --> D["OCR approval<br/>{ endpoint: /api/ocr/approve-batch }"]
-  D --> E["Oath Signature PDF row<br/>{ workflow: oath-signature,<br/>row archetype: batch }"]
-  E --> F["Signer members<br/>{ workflow: oath-signature,<br/>row archetype: batch-member }"]
+  A["Oath PDF upload<br/>{ Oath Upload full process }"] --> B["OCR preview<br/>{ formType: oath }"]
+  B --> C["Person Lookup<br/>{ delegated batch,<br/>even one lookup }"]
+  C --> D["OCR approval"]
+  D --> E["Oath Signature signer rows<br/>{ one EID row each }"]
+  D --> F["Oath Upload ticket row<br/>{ waits on signer itemIds }"]
 ```
 
-## Single Oath PDF Upload
+The two approval targets run on different daemons: Oath Signature performs the per-EID UCPath work, and Oath Upload waits for those signer item ids before filing the ServiceNow ticket. Do not reintroduce a PDF branch that delegates to `oath-signature` from inside `oath-signature`; that self-fan-out deadlocked the single-worker daemon.
 
-| Stage | Queue row | Title | Footer/subtitle | Batch view | Cancel effect |
+## Queue Behavior
+
+| Scenario | Queue row | Title | Footer/subtitle | Batch view | Actions |
 |---|---|---|---|---|---|
-| Oath Signature started | OCR preview row for one PDF file. | PDF name. | `Oath · <last4 run id>`. | OCR preview for that file. | Cancel/discard this file. Since it is the only file, the request is cancelled. |
-| OCR running | Same OCR preview row. Log panel should show `Single delegation · Preview`. | PDF name. | `Oath · <last4 run id>`. | OCR records appear for that file. | Cancel from queue or preview discards this OCR run and its children. |
-| EID lookup/active checks | One utility child is a single row; multiple utility children group as a batch surface. | Person/EID when known. | Normal child or group footer. | Utility rows appear in their own workflow tabs while OCR waits. | Cancel one utility lookup cancels that person/lookup only. |
-| OCR approval | OCR preview row becomes approved/done. | PDF name. | `Oath · <last4 run id>`. | Approved selected people become downstream members. | Discard before approval cancels the file. After approval, cancel final person rows individually. |
-| Final signature work | PDF batch row with signer member rows. | PDF batch title is the PDF name; signer title is the person name. | PDF subtitle is `Oath · <last4 PDF run id>`; signer subtitle is normal child footer. | Every approved person from the PDF gets a row in the PDF batch view. | Cancel one signer cancels only that signer and shows that member as Cancelled. |
+| Manual input run | One-member or multi-member batch surface, depending on input count. Single-EID input runs are forced to a one-member batch by runtime policy. | Person name when present, otherwise EID. | Normal daemon footer. | Signer rows. | Cancel/retry/delete one signer row; group retry/delete for grouped rows. |
+| OCR approval signer fan-out | Delegated signer row grouped as a batch surface even when there is one approved signer. | Person name from the approved OCR record, falling back to EID. | Normal delegated child footer. | Signer rows in the Oath Signature workflow context. | Cancel one signer only; Oath Upload will not file if a required signer row is missing, failed, or cancelled. |
 
-## Multiple Oath PDF Upload
+## Stages
 
-Multiple PDFs behave as multiple single-file OCR preview runs grouped for display. The shared batch id is a dashboard grouping id.
+| Stage | Work | Notes |
+|---|---|---|
+| `ucpath-auth` | Authenticate to UCPath when the item reaches the handler. | The workflow's system login is a no-op at session launch so Duo is deferred until the signer row actually runs. |
+| `transaction` | Add the Oath Signature Date row to UCPath Person Profile. | `loginToUCPath` is idempotent, so a warm daemon reuses the authenticated UCPath session across signer rows. |
 
-| Stage | Queue row | Title | Footer/subtitle | Batch view | Cancel effect |
-|---|---|---|---|---|---|
-| Oath Signature started | Batch delegation row over multiple single-file OCR preview rows. | `Oath · <last4 batch/run id>` when inherited; no PDF title at top because there are multiple files. | Empty/normal group footer; do not show raw parent run id beside `#run`. | Batch view contains preview rows, one per PDF. Each member title is PDF name and subtitle/default title is `Oath · <last4 file run id>`. | Current group actions are retry/delete, not a dedicated cancel-all. |
-| Per-file OCR | Each PDF row is an OCR preview row inside the group. | PDF name. | `Oath · <last4 file run id>`. | Open file row to see OCR preview/logs. | Canceling one file cancels only that file's OCR/signature chain. Other PDFs continue. |
-| Per-file EID lookup | One lookup is a single row; multiple lookups with the same OCR parent form a batch surface. | Person/EID when known. | Normal child footer. | Utility rows appear in their workflow tabs while OCR waits. | Cancel one lookup cancels one lookup/person only. |
-| Per-file final signature | PDF batch with signer member rows. | PDF title for batch; person title for members. | PDF Oath subtitle; normal child footer for signer members. | Every person from each PDF gets a row under that PDF's context. | Cancel one signer cancels only that signer and marks the member Cancelled. |
+## Important Rules
+
+- Input subject is `eid`; the workflow no longer accepts PDFs.
+- Runtime policy sets `alwaysBatchInputRun` and `alwaysBatchDelegatedMembers`, so even a single signer appears as a one-member batch surface.
+- OCR approval uses the oath form spec's `approveTo` to enqueue signer rows here and `approveDocumentTo` to enqueue the Oath Upload ticket row.
+- The paper-roster flow belongs to OCR/Oath Upload, not to Oath Signature.

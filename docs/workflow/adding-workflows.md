@@ -17,8 +17,8 @@
 
 - A group row is often just a display group. Do not assume group cancel exists because group retry/delete exists.
 - `/api/ocr/discard-prepare` is the file-scope cancel path for OCR preview; it is stronger than generic queued/running cancel.
-- OCR utility Person Lookup rows use normal count-based grouping: one child is a single row; multiple siblings become a batch surface.
-- Multi-PDF Oath Signature behaves as multiple single-file OCR preview runs grouped for display.
+- OCR utility Person Lookup rows set `delegation.alwaysBatchDelegatedMembers`, so even one delegated lookup is a one-member batch surface. Direct one-person input runs are still single rows.
+- Multi-PDF Oath Upload full-process runs behave as multiple single-file OCR preview runs grouped for display; Oath Signature itself is EID-only.
 - Daemon stop is operational control. It stops workers; it is not the same as a clean cancellation decision for every related row.
 - Some workflows exist in metadata but are not exposed through the dashboard upload-run or input-run registry.
 - Parent dependency behavior depends on policy. Oath Upload signature children use `block_parent` on failure and cascade-capable dependencies, but dashboard buttons still need the correct endpoint to apply tree-wide cancellation.

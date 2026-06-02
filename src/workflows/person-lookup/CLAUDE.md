@@ -2,7 +2,7 @@
 
 Resolves an employee by name or EID via UCPath Person Organizational Summary + CRM cross-verification, then derives active/HDH status. Merges the former **EID Lookup** and **Active Check** workflows into one operator-facing daemon workflow.
 
-**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → `active-status`. Output: resolved EID, active/HDH status, department, termination date.
+**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → `active-status`. Output: resolved EID, active/HDH status, department, start date, assignment EFFDT context, and termination date.
 
 Each dashboard input run enqueues N names/EIDs as N kernel items to an alive daemon (session reused — no re-Duo between items). A one-person input run is a `single` row. A multi-person input run is a batch surface: every person row is stamped `batch-member` under the shared input-run `parentRunId`.
 
@@ -17,6 +17,8 @@ Each dashboard input run enqueues N names/EIDs as N kernel items to an alive dae
 - `deriveActiveCheckOutcome` — derives the operator-facing `ActiveCheckOutcome` (activeStatus: `active` | `inactive` | `not-found` | `non-hdh` | `ambiguous`; `isActive`; `isHdhAccepted`; `terminationDate`; `candidateEids`).
 - `derivePersonLookupSelection` — selects the preferred result row for multi-instance EID sets (active row wins over inactive for the same EID).
 - `resolvePersonLookupForEidLookup` — narrows a multi-result name search by CRM-matched EID.
+
+`startDate` is the UCPath Last Hire / first-day-of-service date used for operator display and CRM date matching. `effdt` remains the assignment row effective date for backend context. Prefer `startDate` when comparing to CRM First Day of Service; fall back to EFFDT only when Last Hire is missing.
 
 ## Selector intelligence
 
@@ -61,7 +63,7 @@ EID inputs skip cross-verification entirely and go straight to `active-status`.
 - Assignment table scan: finds first row with 12+ cells where cell[3] matches business unit pattern and cell[6] is department description
 - "View All" button may need re-clicking after drill-in if results are paginated (rowIndex > 10)
 - CRM search uses different strategy: last name first, then first name
-- CRM date matching uses ±7 day tolerance for hire date comparison
+- CRM date matching uses ±7 day tolerance against UCPath `startDate` (Last Hire / first day of service), falling back to assignment EFFDT only when `startDate` is missing
 - Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages
 - Person Org may return multiple SDCMP rows for the same EID / employment history. `lookupPersonInUcpath` expands Employment Instances and selects the preferred assignment row (active first, HDH-active before non-HDH) before workflow status derivation.
 
@@ -76,6 +78,7 @@ The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyB
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases and canonicalizes separator; `prepareNames` + `dedupeNames` prevent itemId collisions.
 - **HDH acceptance is department-level, not BU-level.** SDCMP alone is too broad. Rejected SDCMP/non-HDH rows should log why they were ignored so CRM-only fallback can surface the better EID.
 - **Person Org active-row selection is shared.** Do not fork active/inactive parsing. Keep status derivation fed by `lookupPersonInUcpath` / `derivePersonLookupSelection` so hidden active Employment Instances are handled consistently.
+- **2026-06-02: Start Date is Last Hire, not assignment EFFDT.** Person Org extraction carries both dates: `startDate` from UCPath Last Hire / first-day-of-service and `effdt` from the selected assignment row's EFFDT. CRM cross-verification should compare CRM First Day of Service to `startDate` first. Dashboard detail fields show `Start Date`; keep EFFDT as backend context instead of relabeling it for operators.
 - **Runtime policy uses default row actions + memberRow person title + always-batch-when-delegated.** `PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY` spreads `DEFAULT_WORKFLOW_RUNTIME_POLICY`, sets `memberRow.titleSource: "person"`, and sets `delegation.alwaysBatchDelegatedMembers: true`. Direct one-person input runs are `single`; direct multi-person input runs are grouped `batch-member` rows under the input-run `parentRunId`.
 - **2026-06-02: Delegated lookups always render as a batch, even one.** OCR's EID-resolution fan-out used to render a lone delegated lookup as a flat single row (the queue classifier collapses a 1-member delegated set to a flat single). `delegation.alwaysBatchDelegatedMembers: true` on the person-lookup policy keeps even one delegated lookup as a one-member batch surface in the Person Lookup tab. Only delegated rows are affected — direct one-person input runs (root rows, no `parentRunId`) stay `single`. The flag rides the serialized `runtimePolicy` to the client classifier; `queue-surfaces.ts` reads it via `getWorkflowRuntimePolicy(...).delegation?.alwaysBatchDelegatedMembers`.
 - **2026-05-28: Batch means multiple people, not one daemon/session.** Keep `personLookupWorkflow.archetype` as `single` because each schema item is one person. The `/api/enqueue` boundary marks multi-value input runs with `__runtimeOptions.rowShape = "batch-member"` and a shared `parentRunId`, which is what makes a 5-ID Person Lookup request a batch surface.

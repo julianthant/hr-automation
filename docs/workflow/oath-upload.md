@@ -2,35 +2,37 @@
 
 ## What It Does
 
-Oath Upload handles the ServiceNow oath-upload submission flow. In full mode, it first delegates signature work, waits for all approved signer rows to finish, then continues the ServiceNow upload. In upload-only mode, it skips signature delegation and goes straight to the ServiceNow upload path.
+Oath Upload handles the ServiceNow oath-upload submission flow. In full mode, OCR approval fans out one Oath Upload ticket row plus one Oath Signature signer row per approved employee. The Oath Upload row waits for all signer item ids to finish before it files the ServiceNow ticket. In upload-only mode, it skips the signature wait and goes straight to the ServiceNow upload path.
 
-The root Oath Upload row stays a single row through the workflow.
+The Oath Upload ticket row stays a single row through the workflow. In full mode that row is created by OCR approval; in upload-only mode it is created directly by `/api/oath-upload/start`.
 
 ## Delegation Model
 
-Oath Upload delegates signature work instead of turning itself into a batch. The delegated signature stage creates an Oath Signature PDF batch row scoped under the Oath Upload run.
+Oath Upload no longer delegates signature work. OCR is the prep/approval hub. On approval, OCR enqueues signer rows to Oath Signature and a separate ticket row to Oath Upload; Oath Upload only waits on the signer rows.
 
 ```mermaid
 flowchart TD
-  A["oath-upload root<br/>{ row: single }"]
-  A --> B["delegate OCR / oath-signature PDF<br/>{ child workflow: oath-signature,<br/>row: batch }"]
-  B --> C["OCR preview<br/>{ child workflow: ocr,<br/>row: preview }"]
-  C --> D["Person Lookup<br/>{ one OCR person: single,<br/>multiple OCR people: batch }"]
-  D --> E["OCR approval"]
-  E --> F["Signer members<br/>{ workflow: oath-signature,<br/>row: batch-member }"]
-  F --> G["All signer members done"]
-  G --> H["Oath Upload resumes ServiceNow submit"]
+  A["Oath Upload full-process request<br/>{ endpoint: /api/ocr/prepare }"]
+  A --> B["OCR preview<br/>{ workflow: ocr,<br/>row: preview }"]
+  B --> C["Person Lookup<br/>{ delegated batch,<br/>even one lookup }"]
+  C --> D["OCR approval"]
+  D --> E["Signer rows<br/>{ workflow: oath-signature,<br/>one EID row each }"]
+  D --> F["Oath Upload ticket row<br/>{ workflow: oath-upload,<br/>waits on signer itemIds }"]
+  E --> G["All signer rows done"]
+  G --> F
+  F --> H["ServiceNow submit"]
 ```
 
-After OCR approval, signer rows start showing up in the delegated Oath Signature PDF batch as batch members. Oath Upload waits until those signer members are terminal. Once all required signer rows are done, Oath Upload continues.
+After OCR approval, signer rows appear in Oath Signature and the ticket row appears in Oath Upload. The Oath Upload handler watches the exact signer item ids supplied by OCR approval and throws without filing if any signer row is missing, failed, or cancelled.
 
 ## Stages
 
 | Stage | Queue row | Title | Footer/subtitle | Batch view | Cancel effect |
 |---|---|---|---|---|---|
-| Root starts | Existing Oath Upload root row (`single`). | Oath Upload/request title from upload data. | Normal root footer. | Delegated signature work appears in the Oath Signature tab. | Cancel root row cancels root task. Tree-wide child cancellation depends on a tree-aware endpoint. |
-| Delegate signature PDF | Same root row continues; delegated Oath Signature PDF batch appears. | PDF filename for delegated Oath Signature batch. | `Oath · <last4 oath-signature PDF run id>`. | The PDF batch owns OCR and signer context. | Cancel PDF/OCR child affects that delegated signature chain. |
-| OCR preview | OCR child appears as preview, not batch. | PDF filename. | Oath subtitle for the OCR run. | OCR approval view controls selected signer records. | Discard OCR blocks/cancels that preview path and mirrors discarded to parent when parent is known. |
-| Person lookup | One OCR person creates a single Person Lookup row; multiple OCR people create a batch surface. | Person/EID. | Normal child footer. | Lookup rows appear in the Person Lookup tab while OCR waits. | Cancel one lookup cancels that lookup/person only. |
-| Signer members | Oath Signature child rows are enqueued after OCR approval. | Person name. | Usually EID or `__id`. | Signer rows are batch members of the delegated PDF batch. | Cancel one signature child cancels that person only; failed child blocks parent because dependency policy is `block_parent`. |
-| Submit ServiceNow | Root row resumes after all signer members finish. | Root title. | Normal root footer. | Signature children remain visible as member history. | Stop daemon stops processing, not a clean tree cancel. |
+| Full process starts | OCR preview row. | PDF filename. | Oath subtitle for the OCR run. | OCR preview owns roster matching and approval. | Cancel/discard acts on the OCR prep file/run and its children. |
+| Upload-only starts | Oath Upload ticket row (`single`). | Oath Upload/request title from upload data. | Normal root footer. | No signer rows. | Cancel root row cancels root task. |
+| OCR preview | OCR appears as preview, not batch. | PDF filename. | Oath subtitle for the OCR run. | OCR approval view controls selected signer records. | Discard OCR blocks/cancels that preview path and mirrors discarded to parent when parent is known. |
+| Person lookup | Delegated Person Lookup batch surface, even when there is only one lookup. | Person/EID. | Normal child footer. | Lookup rows appear in the Person Lookup tab while OCR waits. | Cancel one lookup cancels that lookup/person only. |
+| Signer rows | Oath Signature rows are enqueued after OCR approval. | Person name. | Usually EID or `__id`. | Signer rows group according to Oath Signature runtime policy. | Cancel one signature child cancels that person only; Oath Upload will not file while a required signer is failed/cancelled/missing. |
+| Wait signatures | Oath Upload ticket row waits cross-daemon on the signer item ids from OCR approval. | Root/PDF title. | Normal root footer. | Signer rows remain in the Oath Signature workflow context. | Failed/missing/cancelled signer rows cause Oath Upload to fail before ServiceNow filing. |
+| Submit ServiceNow | Ticket row resumes after all signer rows succeed. | Root/PDF title. | Normal root footer. | Signature children remain visible as related history through the OCR operation. | Stop daemon stops processing, not a clean tree cancel. |
