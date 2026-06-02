@@ -453,6 +453,12 @@ export const oathOcrFormSpec: OcrFormSpec<
 
   recordRendererId: "OathRecordView",
   rosterMode: "required",
+
+  // Brand the whole oath operation `ou` (the oath-upload destination) for the
+  // OCR root run + every fan-out descendant via root trace-id propagation. The
+  // operator uploads "to Oath Upload", so the trace id reads `ou-...` even
+  // though OCR is the physical root. DISPLAY-only — execution graph unchanged.
+  traceCode: "ou",
 };
 
 /**

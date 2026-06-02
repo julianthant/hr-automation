@@ -141,6 +141,16 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
 
   /** Whether to require a roster on disk before starting OCR. */
   rosterMode: "required" | "optional";
+
+  /**
+   * Optional 2-char trace-id code branding the OCR root run (and, via root
+   * trace-id propagation, every descendant of the operation). OCR's physical
+   * root is the OCR prep run, but the operator's mental model brands the whole
+   * operation by its destination (oath upload → `"ou"`). When omitted the OCR
+   * root keeps its own `"oc"` code (standalone OCR + emergency-contact). Set on
+   * the oath form spec only. DISPLAY-only — does not change the execution graph.
+   */
+  traceCode?: string;
 }
 
 /** Convenience union — used by callers that don't care about generics. */
