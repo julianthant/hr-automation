@@ -53,6 +53,7 @@ import {
   type QueueSortMode,
 } from "./components/queue-panel/queue-sort";
 import { AppErrorBoundary } from "./components/shared/AppErrorBoundary";
+import { UiGallery } from "./components/dev/UiGallery";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -703,6 +704,16 @@ export function App() {
 }
 
 export function DashboardApp() {
+  // TEMPORARY dev route — ?view=ui-gallery catalogs the dashboard's reusable
+  // surfaces (queue rows, session cards, controls) with the real components.
+  // Remove this gate + src/dashboard/components/dev/UiGallery.tsx when done.
+  if (new URLSearchParams(window.location.search).get("view") === "ui-gallery") {
+    return (
+      <AppErrorBoundary>
+        <UiGallery />
+      </AppErrorBoundary>
+    );
+  }
   return (
     <AppErrorBoundary>
       <WorkflowsProvider>

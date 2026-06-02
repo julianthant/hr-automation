@@ -68,6 +68,10 @@ export interface SessionEvent {
   data?: Record<string, string>;
   /** Workflow item runId, written when emitted inside a withLogContext + setLogRunId scope. */
   runId?: string;
+  /** Frozen `data.__traceId` of the item's run, carried on `item_start` so the
+   * session-drawer card can show the running run's trace id — identical to the
+   * subtitle of that run's queue row. */
+  traceId?: string;
   /** OS pid of the Chromium process for `browser_launch` events. Lets the
    * dashboard's force-stop path SIGKILL orphaned browsers when the Node
    * parent dies. Only populated for `type === "browser_launch"`. */
@@ -420,12 +424,19 @@ export function emitDaemonLog(
   );
 }
 
-export function emitItemStart(instance: string, itemId: string, dir?: string, runId?: string): void {
+export function emitItemStart(
+  instance: string,
+  itemId: string,
+  dir?: string,
+  runId?: string,
+  traceId?: string,
+): void {
   emitSessionEvent({
     type: "item_start",
     workflowInstance: instance,
     currentItemId: itemId,
     ...(runId ? { runId } : {}),
+    ...(traceId ? { traceId } : {}),
   }, dir);
 }
 

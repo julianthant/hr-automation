@@ -171,6 +171,14 @@ export interface WorkflowInstanceState {
    */
   crashedOnLaunch?: boolean;
   currentItemId: string | null;
+  /**
+   * Frozen `data.__traceId` of the current (or most-recent) in-flight item's
+   * run — the same id its queue row shows. Set on `item_start` and, like
+   * `currentItemId`, intentionally NOT cleared on `item_complete` so the card
+   * keeps showing the last run's trace id between items. `null` for a daemon
+   * that hasn't processed an item yet.
+   */
+  currentTraceId: string | null;
   /** True between item_start and item_complete - i.e. a real item is currently being processed. */
   itemInFlight: boolean;
   currentStep: string | null;
@@ -224,6 +232,7 @@ export function rebuildSessionState(dir?: string): SessionState {
         active: true,
         pidAlive: true,
         currentItemId: null,
+        currentTraceId: null,
         itemInFlight: false,
         currentStep: null,
         finalStatus: null,
@@ -299,6 +308,7 @@ export function rebuildSessionState(dir?: string): SessionState {
       const wf = wfMap.get(inst);
       if (wf) {
         wf.currentItemId = e.currentItemId!;
+        if (e.traceId) wf.currentTraceId = e.traceId;
         wf.itemInFlight = true;
       }
     }
