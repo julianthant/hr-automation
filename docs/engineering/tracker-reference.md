@@ -10,7 +10,7 @@ Full reference for `src/tracker/`. For invariants, critical gotchas, and lessons
 - `jsonl-cleanup.ts` — `cleanOldTrackerFiles`, `cleanOldSessionFiles`, `cleanOldScreenshots`
 - `dashboard/server.ts` — creates the HTTP server (port 3838): JSONL-only startup prune (unless `noClean`), projection rebuild, periodic sweeps. Serves `/api/*`, multiplexed `GET /events/hub`, and static prod assets when configured — routing lives under `dashboard/hono/`
 - `dashboard.ts` — barrel re-export of `startDashboard` / `createDashboardServer` / `stopDashboard` plus session-state helpers (`filterEventsForRun`, `rebuildSessionState`, …) for tests and imports
-- `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to rotated `sessions-*.jsonl` (and legacy `sessions.jsonl`). `rebuildSessionState` in `src/tracker/dashboard/session-state.ts` reduces them into a live `SessionState` (re-exported from `dashboard.ts` for tests)
+- `session-events.ts` — `emitWorkflowStart` / `emitWorkflowEnd` / `emitSessionCreate` / `emitBrowserLaunch` / `emitAuthStart` / `emitAuthComplete` / `emitItemStart` / etc. Append `SessionEvent` lines to `.tracker/sessions/{YYYY-MM-DD}.jsonl`. `rebuildSessionState` in `src/tracker/dashboard/session-state.ts` reduces them into a live `SessionState` (re-exported from `dashboard.ts` for tests)
 - `sessions/duo-queue.ts` — `requestDuoApproval(page, options)` — wraps `pollDuoApproval` with queue semantics (emit `duo_waiting` browser overlay, register in the global Duo queue, swap to `duo_active` when this request becomes head-of-line). Used by every login flow in `src/infra/auth/login.ts`
 - `sessions/auth-observer.ts` — builds a `SessionObserver` that turns kernel auth lifecycle callbacks into tracker step events and failure screenshots.
 - `files/files.ts` — SQLite-backed file registry helpers (`registerLocalFile`, `getRegisteredFile`) for PDFs, screenshots, page images, and related dashboard downloads.
@@ -69,7 +69,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `GET /api/entries?workflow=X` — return all tracker entries (JSON)
 - `GET /api/logs?workflow=X&id=Y[&runId=Z]` — return log entries (JSON)
 - `GET /api/runs?workflow=X&id=Y[&date=D]` — past runs for an itemId
-- `GET /api/screenshots?workflow=X&itemId=Y` — list `.screenshots/<workflow>-<itemId>-...png` for a failed entry
+- `GET /api/screenshots?workflow=X&itemId=Y` — list `.tracker/screenshots/<workflow>-<itemId>-...png` for a failed entry
 - `GET /screenshots/<filename>` — stream a PNG with path-traversal guard (`resolveScreenshotPath`)
 - `GET /api/search?q=Q[&days=N]` — cross-workflow tracker entry search (`buildSearchHandler`)
 - `GET /api/selector-warnings?days=N` — aggregated selector-fallback warns across N days (default 7)
@@ -81,21 +81,23 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `POST /api/ocr/discard` — JSON `{sessionId, reason?}`; emits `failed` step `discarded`.
 - `POST /api/ocr/reocr-whole-pdf` — JSON `{sessionId}`; re-runs OCR for every page.
 - `POST /api/ocr/retry-page` — JSON `{sessionId, pageNumber}`; retries one OCR page.
-- `POST /api/ocr/force-research` — JSON `{sessionId, records[]}`; re-dispatches eid-lookup for a subset of records flagged for forced research.
+- `POST /api/ocr/force-research` — JSON `{sessionId, records[]}`; re-dispatches Person Lookup for a subset of records flagged for forced research.
 
 Implementation: `src/tracker/dashboard/hono/routes/ocr.ts`.
 - **`GET /events/hub?subs=<urlencoded JSON array>`** — single multiplexed SSE connection. Each element is `{ id, topic, params }`; every `data:` line is a `HubEnvelope` `{ sub, data, event? }` for the matching subscription id (`src/tracker/dashboard/hono/routes/hub.ts`). **Legacy per-topic URLs** (`/events`, `/events/logs`, …) were removed (2026-05-08); no `registerEventRoutes` shim remains.
-- **Topic registry** — `src/tracker/dashboard/hono/topics.ts` (`topicRegistry`, `parseSubsQuery`). **Emitters** register in `topics-emitters.ts`. Registered topics include: `entries` (payload includes enriched rows + `wfCounts` + `failureCounts` from `computeFailureCounts` — drives `FailureBell` without an extra HTTP fetch for counts), `logs`, `sessions`, `runEvents`, `captureSessions`, `telegram`.
+- **Topic registry** — `src/tracker/dashboard/hono/topics.ts` (`topicRegistry`, `parseSubsQuery`). **Emitters** register in `topics-emitters.ts`. Registered topics include: `entries` (payload includes enriched rows + backend-authoritative `wfCounts` + `failureCounts` from `computeFailureCounts`; rail badges consume `wfCounts` directly, and `failureCounts` drives `FailureBell` without an extra HTTP fetch for counts), `logs`, `sessions`, `runEvents`, `captureSessions`, `telegram`.
+- **Rail / sidebar counts** — `wfCounts` are the contract for WorkflowRail badges. Both SQLite and JSONL fallback paths should convert rows to `TrackerEntry[]` and call `countSidebarRowsFromTrackerHistory(asTracker)` so counting dedupes latest rows, carries resolved EIDs, merges rows by employee, and collapses top-level queue surfaces/delegated batches. Do not prefilter latest rows with `resolved_prep = 0`; the shared helper/exclusion callback owns count exclusions. Resolved OCR prep rows that still render in the queue must stay counted.
 - **Run events filtering** — events lacking `runId` (batch-scope `Session.launch`) are attributed via `workflowInstance` + per-run time window inside `filterEventsForRun` (`src/tracker/dashboard/session-state.ts`), **re-exported** from `src/tracker/dashboard.ts` for unit tests and hub code.
 
 In dev, the React dashboard is served by Vite (port 5173) and proxies API calls to 3838. In prod, `dashboard --prod` serves `dist/dashboard/index.html` from the Hono dashboard server.
 
 ## JSONL File Format
 
-Two file types per workflow per day in `.tracker/`:
+Two file types per workflow per day under typed `.tracker/` subdirectories:
 
-- **Entries**: `.tracker/{workflow}-{YYYY-MM-DD}.jsonl` — one JSON line per `trackEvent()` call
-- **Logs**: `.tracker/{workflow}-{YYYY-MM-DD}-logs.jsonl` — one JSON line per `log.step/success/error/waiting` call (via `withLogContext`)
+- **Entries**: `.tracker/rows/{workflow}-{YYYY-MM-DD}.jsonl` — one JSON line per tracker row emit
+- **Logs**: `.tracker/logs/{workflow}-{YYYY-MM-DD}.jsonl` — one JSON line per `log.step/success/error/waiting` call (via `withLogContext`)
+- **Sessions**: `.tracker/sessions/{YYYY-MM-DD}.jsonl` — session, daemon, browser, auth, and run-event lines
 
 Debug-only side files live in the `.tracker/debug/` **subdirectory** (kept out of `.tracker/` top-level so they are not picked up as workflows):
 
@@ -108,7 +110,7 @@ Appends a single row to an `.xlsx` file. Creates the file and/or worksheet if mi
 ## Cleaning Old Tracker Files
 
 - `cleanOldTrackerFiles(maxAgeDays, dir)` — deletes JSONL files whose filename date (YYYY-MM-DD) is older than `maxAgeDays`. Returns count deleted.
-- `cleanOldScreenshots(maxAgeDays, dir)` — still available for **manual**/`npm run clean:tracker` use — deletes PNGs in `.screenshots/` whose filename-embedded ms timestamp is older than `maxAgeDays`. Not invoked on dashboard startup or `GET /api/preflight` (the dashboard uses `sweepStaleRunScreenshots` instead — see below).
+- `cleanOldScreenshots(maxAgeDays, dir)` — still available for **manual**/`npm run clean:tracker` use — deletes PNGs in `.tracker/screenshots/` whose filename-embedded ms timestamp is older than `maxAgeDays`. Not invoked by `GET /api/preflight` (the dashboard uses `sweepStaleRunScreenshots` on startup and interval instead — see below).
 - `sweepStaleRunScreenshots(dir, screenshotsDir, maxAgeDays = 30)` (`src/tracker/state/screenshot-sweep.ts`) — **lifecycle-tied** screenshot cleanup. Two passes: (1) joins `runs` (where `terminal_at` is older than `maxAgeDays`) with `files` (`kind='screenshot'`) and deletes both the PNGs and the rows in one transaction, zeroing `runs.screenshot_count`; (2) file-age backstop that deletes orphan PNGs older than `maxAgeDays` (parsed from the ms-embedded filename, mtime fallback) whose path is not registered in `files`. Per-file delete failures are logged via `log.warn` and the sweep continues. No-op when the projection isn't ready. `runs.terminal_at` is stamped by `applyTrackerEntry` the first time a run reaches a terminal status (`done` / `failed` / `skipped`).
 - `npm run clean:tracker` — CLI wrapper in `src/scripts/ops/clean-tracker.ts`. By default cleans tracker JSONL + screenshots. Accepts `--days N` (default 7), `--dir PATH`, `--screenshots-dir PATH`, `--no-screenshots`, `--screenshots-only`.
 - **Dashboard cadence:** `createDashboardServer` runs three startup operations: a one-time `cleanOldTrackerFiles` prune at **30 days** (JSONL only), a single `sweepStaleRunScreenshots` pass, then a low-frequency `setInterval` (**6 hours**, `.unref()`) that re-runs the screenshot sweep so long-lived dashboards keep up. `GET /api/preflight` re-runs the JSONL prune at most once per **60s** (throttled in `hono/routes/base.ts`); it does NOT re-trigger the screenshot sweep. Pass `{ noClean: true }` or `--no-clean` to skip startup operations.

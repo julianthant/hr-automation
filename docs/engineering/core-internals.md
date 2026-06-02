@@ -30,8 +30,7 @@ Full file-by-file reference for `src/core/`. Orientation, design invariants, and
 - `daemon.ts` — `runWorkflowDaemon(wf, opts)`: long-running daemon main loop. HTTP surface: `GET /whoami`, `POST /wake`, `POST /stop`. Delegates shutdown/cleanup, worker-command handling, and auth-timing rotation to sibling modules.
 - `shutdown.ts` — `runDaemonShutdownCleanup`, `buildShutdownTrackerData`, `createAbortLaunchAndKillSession`. Terminalizes queued + in-flight items, preserves display metadata on cancellation rows.
 - `worker-commands.ts` — `createHandleWorkerCommand`, `createPollWorkerCommands`, `startWorkerTickInterval`. Routes `cancel_task` / `drain_worker` / `stop_worker` / `kill_browser` / `health_check`; defaults unknown command types to `failCommand` so orphan recovery isn't blocked.
-- `in-process-control.ts` — in-process control-DB hooks for HTTP / dashboard-initiated enqueues to live daemons.
-- `in-process-runs.ts` — module-level registry of fire-and-forget `runWorkflow` calls inside the dashboard process; `/api/cancel-running` falls back here when no daemon claim exists (e.g. sharepoint-download). Hard-kills Chromium via `session.killChromeHard()` for Duo-stuck launches.
+- `in-process-control.ts` — in-process control-DB hooks and SQLite metadata for HTTP / dashboard-initiated runs that still route cancellation through the shared `runRegistry`.
 - `auth-timing.ts` — daemon-only auth timing rotation: `snapshotStartupAuthTimings`, `buildClaimAnchoredAuthTimings`, `createDaemonItemAuthTimingResolver`. Startup session launch + observer wiring stays inline in `daemon.ts`.
 - `http.ts` — daemon HTTP server (express-like minimal server for control surface).
 - `worker-store.ts` — daemon/dashboard worker rows, heartbeat, `worker_commands`, `browser_processes`.

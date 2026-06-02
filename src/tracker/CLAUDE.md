@@ -47,6 +47,8 @@ Rows should prefer structured operator subjects over raw ids: `data.__subject`, 
 
 Failure-pattern scans run from the dashboard server on a short interval, prefer SQLite projection data when ready, and fall back to JSONL scans only when necessary. Notification errors must not stall dashboard streaming.
 
+Workflow rail badge counts (`wfCounts`) are a backend contract, not a React override. Build them from tracker history with `countSidebarRowsFromTrackerHistory(asTracker)` so latest rows, carried EIDs, employee merges, and top-level queue-surface/delegation collapse stay consistent across SQLite and JSONL fallback. Do not prefilter latest rows with `resolved_prep = 0`; the exclusion callback defaults to no-op and owns any count exclusions. Resolved OCR prep rows that still render in the queue must remain in `wfCounts`.
+
 Full reference: `docs/engineering/tracker-reference.md`.
 
 ## Gotchas
