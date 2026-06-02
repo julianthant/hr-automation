@@ -28,7 +28,7 @@ Resolves **who signed Section 2 of an employee's I-9 form** — the "authorized 
 | `archetype` | `"single"` — one person, one row |
 | `inputSubject` | `"name"` → `queueRowKind: "person"` |
 | `code` | `"i9"` |
-| `category` | `"Onboarding"` |
+| `category` | `"Utils"` |
 | `systems` | `[{ id: "i9", login: loginToI9 }]` — kernel auto-prepends `auth:i9` step |
 | `steps` | `["lookup"]` |
 
