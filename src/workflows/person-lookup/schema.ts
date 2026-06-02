@@ -31,6 +31,13 @@ export const PersonLookupNameInputSchema = z.object({
   name: z.string().min(1),
   keepNonHdh: z.boolean().optional(),
   parentSubject: z.string().optional(),
+  /**
+   * When true, person-lookup runs an extra CRM-date step that stamps
+   * `employmentDate` (CRM First Day of Service) and `oathDate` (CRM Date
+   * Signed) onto output data. Used by the OCR `verify` flow; omitted for
+   * normal lookups so they stay fast.
+   */
+  includeCrmDates: z.boolean().optional(),
 });
 
 export const PersonLookupEidInputSchema = z.object({
@@ -40,6 +47,13 @@ export const PersonLookupEidInputSchema = z.object({
   name: z.string().min(1).optional(),
   keepNonHdh: z.boolean().optional(),
   parentSubject: z.string().optional(),
+  /**
+   * When true, person-lookup runs an extra CRM-date step that stamps
+   * `employmentDate` (CRM First Day of Service) and `oathDate` (CRM Date
+   * Signed) onto output data. Used by the OCR `verify` flow; omitted for
+   * normal lookups so they stay fast.
+   */
+  includeCrmDates: z.boolean().optional(),
 });
 
 export const PersonLookupItemSchema = z.union([

@@ -2,7 +2,7 @@
 
 Resolves an employee by name or EID via UCPath Person Organizational Summary + CRM cross-verification, then derives active/HDH status. Merges the former **EID Lookup** and **Active Check** workflows into one operator-facing daemon workflow.
 
-**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → `active-status`. Output: resolved EID, active/HDH status, department, termination date.
+**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → `active-status` → `crm-dates` (skipped unless `input.includeCrmDates === true`). Output: resolved EID, active/HDH status, department, termination date.
 
 Each dashboard input run enqueues N names/EIDs as N kernel items to an alive daemon (session reused — no re-Duo between items). A one-person input run is a `single` row. A multi-person input run is a batch surface: every person row is stamped `batch-member` under the shared input-run `parentRunId`.
 
@@ -65,6 +65,23 @@ EID inputs skip cross-verification entirely and go straight to `active-status`.
 - Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages
 - Person Org may return multiple SDCMP rows for the same EID / employment history. `lookupPersonInUcpath` expands Employment Instances and selects the preferred assignment row (active first, HDH-active before non-HDH) before workflow status derivation.
 
+## CRM-date enrichment (`includeCrmDates`)
+
+Set `includeCrmDates: true` in the input to run an extra `crm-dates` step after `active-status`. The step searches CRM by the resolved `searchName`, then stamps two fields onto the tracker row's output data:
+
+- `employmentDate` — CRM "First Day of Service (Effective Date)" field
+- `oathDate` — CRM "Date Signed" field (the oath taken-and-subscribed date)
+
+Selection: prefers the CRM record whose `ucpathEmployeeId` matches the resolved EID; falls back to the first record when no EID match is found.
+
+**Best-effort:** parse failures, CRM search errors, and empty result sets all log and return gracefully without failing the overall lookup. Never throws.
+
+**Off by default.** Omitting `includeCrmDates` (or setting it to `false`) causes the step to be skipped via `ctx.skipStep("crm-dates")` so the step list stays consistent across all runs. Normal dashboard input runs are unaffected.
+
+**Not in `detailFields`:** `employmentDate` and `oathDate` are output-data fields for a delegating parent to read. Adding them to `detailFields` would trigger a runtime warning for every run where the flag is off.
+
+Currently used by: the OCR `verify` flow.
+
 ## Dead code note
 
 The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyBatch` (in `src/tracker/tasks/store.ts`) are vestigial dead code — OCR only ever delegates to person-lookup via `ocr-eid-lookup`. These are intentionally retained for historical reasons; do not remove or rename them.
@@ -80,3 +97,4 @@ The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyB
 - **2026-06-02: Delegated lookups always render as a batch, even one.** OCR's EID-resolution fan-out used to render a lone delegated lookup as a flat single row (the queue classifier collapses a 1-member delegated set to a flat single). `delegation.alwaysBatchDelegatedMembers: true` on the person-lookup policy keeps even one delegated lookup as a one-member batch surface in the Person Lookup tab. Only delegated rows are affected — direct one-person input runs (root rows, no `parentRunId`) stay `single`. The flag rides the serialized `runtimePolicy` to the client classifier; `queue-surfaces.ts` reads it via `getWorkflowRuntimePolicy(...).delegation?.alwaysBatchDelegatedMembers`.
 - **2026-05-28: Batch means multiple people, not one daemon/session.** Keep `personLookupWorkflow.archetype` as `single` because each schema item is one person. The `/api/enqueue` boundary marks multi-value input runs with `__runtimeOptions.rowShape = "batch-member"` and a shared `parentRunId`, which is what makes a 5-ID Person Lookup request a batch surface.
 - **Dashboard input run is the public start path.** `npm run person-lookup:stop` stops the daemon pool. Typed name/EID starts go through `InputRunPanel` and `/api/enqueue`. There is no `npm run person-lookup` launch script.
+- **2026-06-02: `oathDate` = CRM "Date Signed"; `includeCrmDates` is purely additive and gated.** The CRM date enrichment step (`crm-dates`) stamps `employmentDate` (First Day of Service) and `oathDate` (Date Signed — the oath taken-&-subscribed date) only when `input.includeCrmDates === true`. The step is always declared in the `steps` tuple and skipped via `ctx.skipStep("crm-dates")` when the flag is off, so the step list is consistent across all runs. Neither field is in `detailFields` — they are output-data fields for delegating parents (OCR verify flow) to read. Normal dashboard input runs are unaffected.
