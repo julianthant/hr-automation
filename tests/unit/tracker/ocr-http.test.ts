@@ -609,39 +609,44 @@ function emergencyContactPreviewRecord(
 
 // ─── buildOcrApproveHandler: parentRunId forwarding + fannedOutItemIds ────────
 
-test("buildOcrApproveHandler does not fan out oath approvals from the approve route", async () => {
-  const dir = join(tmpdir(), `ocr-approve-oath-no-fanout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+test("buildOcrApproveHandler fans out oath approvals to oath-signature + oath-upload", async () => {
+  // OCR-hub fan-out (2026-06-02): oath approve now enqueues per-record
+  // oath-signature signer rows AND one oath-upload ticket row. (Old behavior:
+  // approve omitted fan-out and woke the oath-signature PDF handler — retired.)
+  const dir = join(tmpdir(), `ocr-approve-oath-fanout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(rowsDir(dir), { recursive: true });
   try {
     const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
     writeFileSync(ocrFile, JSON.stringify({
       workflow: "ocr",
-      id: "session-oath-no-fanout",
-      runId: "run-oath-no-fanout",
+      id: "session-oath-fanout",
+      runId: "run-oath-fanout",
       status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
-      parentRunId: "oath-signature-pdf-run",
       data: {
         formType: "oath",
         pdfPath: "/tmp/oath.pdf",
         pdfOriginalName: "oath.pdf",
-        sessionId: "session-oath-no-fanout",
+        pdfFileId: "file-oath",
+        sessionId: "session-oath-fanout",
         records: JSON.stringify([]),
       },
     }) + "\n", "utf-8");
 
-    let enqueueCalled = false;
+    const enqueuedWorkflows: string[] = [];
     const handler = buildOcrApproveHandler({
       trackerDir: dir,
-      ensureDaemonsAndEnqueueOverride: async () => {
-        enqueueCalled = true;
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId) => {
+        enqueuedWorkflows.push(workflow);
+        const ids = inputs.map((inp, i) => deriveItemId(inp, i));
+        return { enqueued: ids.map((id) => ({ id })) };
       },
     });
 
     const resp = await handler({
-      sessionId: "session-oath-no-fanout",
-      runId: "run-oath-no-fanout",
+      sessionId: "session-oath-fanout",
+      runId: "run-oath-fanout",
       records: [
         {
           employeeId: "10000001",
@@ -658,17 +663,24 @@ test("buildOcrApproveHandler does not fan out oath approvals from the approve ro
     });
 
     assert.equal(resp.status, 200);
-    assert.deepEqual(resp.body, { ok: true, fannedOut: [] });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(enqueueCalled, false, "approve route must not enqueue oath-signature rows for oath OCR");
+    const body = resp.body as { ok: true; fannedOut: Array<{ workflow: string }> };
+    const workflows = body.fannedOut.map((f) => f.workflow);
+    assert.ok(workflows.includes("oath-signature"));
+    assert.ok(workflows.includes("oath-upload"));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.ok(enqueuedWorkflows.includes("oath-signature"));
+    assert.ok(enqueuedWorkflows.includes("oath-upload"));
 
     const lines = readFileSync(ocrFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     const approvedEntry = lines.find((e: { step?: string }) => e.step === "approved");
     assert.ok(approvedEntry, "post-approve entry should exist");
     assert.equal(approvedEntry.data?.formType, "oath");
     assert.equal(approvedEntry.data?.recordCount, "1");
-    assert.equal(approvedEntry.data?.fannedOutCount, "0");
-    assert.deepEqual(JSON.parse(approvedEntry.data.fannedOutItemIds as string), []);
+    // fannedOutItemIds names the per-record (signer) rows.
+    assert.equal(approvedEntry.data?.fannedOutCount, "1");
+    assert.deepEqual(JSON.parse(approvedEntry.data.fannedOutItemIds as string), [
+      "ocr-oath-run-oath-fanout-r0",
+    ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -910,7 +922,7 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
   }
 });
 
-test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy called with undefined 4th arg, entry has no parentRunId but still has fannedOutItemIds", async () => {
+test("buildOcrApproveHandler: standalone OCR run (no parentRunId) nests children under the OCR run, entry has no parentRunId but still has fannedOutItemIds", async () => {
   const dir = join(tmpdir(), `ocr-approve-noparent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(rowsDir(dir), { recursive: true });
   try {
@@ -952,9 +964,13 @@ test("buildOcrApproveHandler back-compat: no parentRunId on OCR row → spy call
 
     assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
 
-    // 4th arg still carries the pre-auth child row emitter when no parentRunId exists.
+    // 4th arg carries the pre-auth child row emitter. With no delegating
+    // parent, the fan-out children nest under the OCR run itself
+    // (childParentRunId = parentRunId ?? ocrRunId), so the 4th arg's
+    // parentRunId is the OCR run id — keeping signer/ticket rows grouped under
+    // the OCR card instead of orphaning as top-level rows.
     assert.ok(capturedSpyArgs, "spy should have been called");
-    assert.equal((capturedSpyArgs![3] as any).parentRunId, undefined);
+    assert.equal((capturedSpyArgs![3] as any).parentRunId, "run-approve-2");
     assert.equal(typeof (capturedSpyArgs![3] as any).onPreEmitPending, "function");
 
     // Read back the post-approve JSONL entry

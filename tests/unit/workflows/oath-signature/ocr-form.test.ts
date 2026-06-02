@@ -1,7 +1,10 @@
 import { test } from "vitest";
 import assert from "node:assert";
-import { oathOcrFormSpec, normalizeOathDate } from "../../../../src/services/ocr/forms/oath.js";
-import { buildOathSignerInputFromApprovedRecord } from "../../../../src/workflows/oath-signature/workflow.js";
+import {
+  oathOcrFormSpec,
+  normalizeOathDate,
+  buildOathSignerInputFromApprovedRecord,
+} from "../../../../src/services/ocr/forms/oath.js";
 import type { RosterRow } from "../../../../src/workflows/ocr/types.js";
 
 const roster: RosterRow[] = [
@@ -169,8 +172,21 @@ test("applyCarryForward inherits resolved EID + verification + selection", async
   assert.deepEqual(merged.verification?.state, "verified");
 });
 
-test("oath OCR form spec leaves approve fan-out to oath-signature PDF handler", () => {
-  assert.equal(oathOcrFormSpec.approveTo, undefined);
+test("oath OCR form spec fans out to BOTH oath-signature (per-record) and oath-upload (per-document)", () => {
+  // OCR-hub fan-out: approveTo enqueues one signer row per approved record;
+  // approveDocumentTo enqueues exactly one oath-upload ticket row per PDF.
+  assert.equal(oathOcrFormSpec.approveTo?.workflow, "oath-signature");
+  assert.equal(typeof oathOcrFormSpec.approveTo?.canFanOut, "function");
+  assert.equal(oathOcrFormSpec.approveDocumentTo?.workflow, "oath-upload");
+  // canFanOut gates selected-but-EID-less records out of the per-record fan-out.
+  assert.equal(
+    oathOcrFormSpec.approveTo!.canFanOut!({ selected: true, employeeId: "10000001" } as never),
+    true,
+  );
+  assert.equal(
+    oathOcrFormSpec.approveTo!.canFanOut!({ selected: true, employeeId: "" } as never),
+    false,
+  );
 });
 
 test("buildOathSignerInputFromApprovedRecord: matched selected record → signer input", () => {

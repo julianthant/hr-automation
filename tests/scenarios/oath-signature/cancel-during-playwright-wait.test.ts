@@ -28,8 +28,6 @@ describe("oath-signature scenario: cancel during a Playwright-style wait", () =>
     const SIM_WAIT_MS = 30_000;
     const beats: ScenarioBeat[] = [
       { kind: "updateData", data: { emplId: "10873698", name: "Jane Doe" } },
-      { kind: "skipStep", name: "ocr" },
-      { kind: "skipStep", name: "delegate-signatures" },
       { kind: "markStep", name: "ucpath-auth" },
       // Long-wait beat (simulates page.waitForSelector with a 30s timeout
       // that observes the per-run AbortSignal). Cancel must interrupt this.

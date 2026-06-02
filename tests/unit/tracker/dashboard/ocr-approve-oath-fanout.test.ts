@@ -1,0 +1,168 @@
+import { test } from "vitest";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildOcrApproveHandler } from "../../../../src/tracker/dashboard/ocr/approve.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
+
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function oathRecord(opts: {
+  employeeId: string;
+  printedName?: string;
+  selected?: boolean;
+  employeeSigned?: boolean;
+  dateSigned?: string;
+}): Record<string, unknown> {
+  return {
+    formKind: "oath",
+    sourcePage: 1,
+    rowIndex: 0,
+    printedName: opts.printedName ?? "DOE, JANE",
+    employeeId: opts.employeeId,
+    employeeSigned: opts.employeeSigned ?? true,
+    dateSigned: opts.dateSigned ?? "4/23/26",
+    documentType: "expected",
+    originallyMissing: [],
+    notes: [],
+    matchState: "matched",
+    selected: opts.selected ?? true,
+    warnings: [],
+  };
+}
+
+function seedOathOcrRow(dir: string, sessionId: string, runId: string): void {
+  mkdirSync(rowsDir(dir), { recursive: true });
+  appendFileSync(
+    rowFilePath("ocr", todayLocal(), dir),
+    JSON.stringify({
+      workflow: "ocr",
+      timestamp: new Date().toISOString(),
+      id: sessionId,
+      runId,
+      status: "done",
+      step: "awaiting-approval",
+      data: {
+        formType: "oath",
+        sessionId,
+        pdfOriginalName: "roster.pdf",
+        pdfFileId: "file-abc",
+      },
+    }) + "\n",
+  );
+}
+
+test("oath approve fans out BOTH targets: oath-signature signers + one oath-upload ticket", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-"));
+  try {
+    seedOathOcrRow(dir, "sess-oath", "ocr-run-oath");
+
+    const calls: Array<{ workflow: string; inputs: unknown[]; itemIds: string[] }> = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId) => {
+        const itemIds = inputs.map((inp, i) => deriveItemId(inp, i));
+        calls.push({ workflow, inputs, itemIds });
+        return { enqueued: itemIds.map((id) => ({ id })) };
+      },
+    });
+
+    const res = await handler({
+      sessionId: "sess-oath",
+      runId: "ocr-run-oath",
+      records: [
+        oathRecord({ employeeId: "10000001", printedName: "DOE, JANE" }),
+        oathRecord({ employeeId: "10000002", printedName: "ROE, RICHARD" }),
+      ],
+    });
+    assert.equal(res.status, 200);
+
+    // Response reflects both targets synchronously.
+    const body = res.body as { ok: true; fannedOut: Array<{ workflow: string; itemId: string }> };
+    const workflows = body.fannedOut.map((f) => f.workflow);
+    assert.ok(workflows.includes("oath-signature"));
+    assert.ok(workflows.includes("oath-upload"));
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    const sigCall = calls.find((c) => c.workflow === "oath-signature");
+    const uploadCall = calls.find((c) => c.workflow === "oath-upload");
+    assert.ok(sigCall, "oath-signature should be enqueued");
+    assert.ok(uploadCall, "oath-upload should be enqueued");
+
+    // Per-record: two signer inputs with the right EIDs + itemIds.
+    assert.equal(sigCall!.inputs.length, 2);
+    const sigInputs = sigCall!.inputs as Array<{ emplId: string }>;
+    assert.deepEqual(sigInputs.map((i) => i.emplId).sort(), ["10000001", "10000002"]);
+    assert.deepEqual(sigCall!.itemIds, [
+      "ocr-oath-ocr-run-oath-r0",
+      "ocr-oath-ocr-run-oath-r1",
+    ]);
+
+    // Once-per-document: exactly one oath-upload input carrying the signer
+    // itemIds it must wait on + the pdfFileId for path resolution.
+    assert.equal(uploadCall!.inputs.length, 1);
+    const docInput = uploadCall!.inputs[0] as {
+      signerItemIds: string[];
+      pdfFileId?: string;
+      pdfOriginalName?: string;
+      sessionId: string;
+      mode: string;
+    };
+    assert.deepEqual(docInput.signerItemIds.sort(), [
+      "ocr-oath-ocr-run-oath-r0",
+      "ocr-oath-ocr-run-oath-r1",
+    ]);
+    assert.equal(docInput.pdfFileId, "file-abc");
+    assert.equal(docInput.pdfOriginalName, "roster.pdf");
+    assert.equal(docInput.sessionId, "sess-oath");
+    assert.equal(docInput.mode, "full");
+    assert.deepEqual(uploadCall!.itemIds, ["ocr-oath-upload-ocr-run-oath"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oath approve: selected-but-EID-less records are NOT enqueued and NOT waited on", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-skip-"));
+  try {
+    seedOathOcrRow(dir, "sess-skip", "ocr-run-skip");
+
+    const calls: Array<{ workflow: string; inputs: unknown[]; itemIds: string[] }> = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId) => {
+        const itemIds = inputs.map((inp, i) => deriveItemId(inp, i));
+        calls.push({ workflow, inputs, itemIds });
+        return { enqueued: itemIds.map((id) => ({ id })) };
+      },
+    });
+
+    const res = await handler({
+      sessionId: "sess-skip",
+      runId: "ocr-run-skip",
+      records: [
+        oathRecord({ employeeId: "10000001" }),
+        // selected but no valid EID → must be skipped (canFanOut === false)
+        oathRecord({ employeeId: "", printedName: "NO EID PERSON" }),
+      ],
+    });
+    assert.equal(res.status, 200);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const sigCall = calls.find((c) => c.workflow === "oath-signature");
+    const uploadCall = calls.find((c) => c.workflow === "oath-upload");
+    assert.ok(sigCall);
+    assert.equal(sigCall!.inputs.length, 1, "only the EID-bearing record fans out");
+
+    // oath-upload waits on exactly the one enqueued signer row.
+    const docInput = uploadCall!.inputs[0] as { signerItemIds: string[] };
+    assert.deepEqual(docInput.signerItemIds, ["ocr-oath-ocr-run-skip-r0"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

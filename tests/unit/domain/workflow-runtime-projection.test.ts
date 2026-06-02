@@ -225,79 +225,10 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.rowTypeLabel, "Preview");
   });
 
-  it("projects Oath Signature prep rows with PDF titles and file-run subtitles", () => {
-    const prep = entry({
-      workflow: "oath-signature",
-      id: "ocr-prep-s1",
-      runId: "oath-file-run-9876",
-      status: "running",
-      step: "ocr",
-      data: {
-        archetype: "batch",
-        mode: "prepare",
-        pdfOriginalName: "packet-a.pdf",
-        __queueTitle: "Oath · 1111",
-        __queueTitleKind: "batch",
-        parentSubject: "Oath · 1111",
-      },
-    });
-    const projection = buildWorkflowRunProjection(prep, {
-      runtimePolicies: phase4Policies,
-    });
-
-    assert.equal(projection.title, "packet-a.pdf");
-    assert.equal(projection.subtitle, "Oath · 9876");
-  });
-
-  it("projects multiple Oath PDF rows as independent batch anchors", () => {
-    const first = entry({
-      workflow: "oath-signature",
-      id: "ocr-prep-a",
-      runId: "oath-file-run-1111",
-      parentRunId: "oath-batch-run-9999",
-      status: "running",
-      step: "ocr",
-      data: {
-        archetype: "batch",
-        mode: "prepare",
-        pdfOriginalName: "packet-a.pdf",
-        parentSubject: "Oath · 9999",
-        __queueTitle: "Oath · 9999",
-        __queueTitleKind: "batch",
-      },
-    });
-    const second = entry({
-      workflow: "oath-signature",
-      id: "ocr-prep-b",
-      runId: "oath-file-run-2222",
-      parentRunId: "oath-batch-run-9999",
-      status: "running",
-      step: "ocr",
-      data: {
-        archetype: "batch",
-        mode: "prepare",
-        pdfOriginalName: "packet-b.pdf",
-        parentSubject: "Oath · 9999",
-        __queueTitle: "Oath · 9999",
-        __queueTitleKind: "batch",
-      },
-    });
-    const surfaces = buildTrackerQueueSurfaces({
-      entries: [first, second],
-      delegationSourceEntries: [first, second],
-      runtimePolicies: phase4Policies,
-    });
-
-    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
-      runtimePolicies: phase4Policies,
-    });
-
-    assert.equal(surfaces.groupRows.length, 2);
-    assert.equal(projection.surfaceType, "batch");
-    assert.equal(projection.title, "packet-a.pdf");
-    assert.equal(projection.subtitle, "Oath · 1111");
-    assert.deepEqual(projection.batchMembers, []);
-  });
+  // (Removed 2026-06-02: oath-signature no longer emits `mode: "prepare"` PDF
+  // prep rows — it's EID-only and OCR owns prep/approval. The PDF prep-row
+  // projection behavior is still covered by the emergency-contact + OCR
+  // prep-row tests above, which keep their `prepRow` policy.)
 
   it("groups multiple OCR utility rows by parent run", () => {
     const ocr = entry({

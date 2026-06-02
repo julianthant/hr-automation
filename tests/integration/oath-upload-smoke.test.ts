@@ -19,12 +19,12 @@ import { OathUploadInputSchema } from "../../src/workflows/oath-upload/schema.js
  *  - Real Stepper / ctx.step / ctx.updateData / ctx.skipStep flow
  *  - Real `withTrackedWorkflow` JSONL emit
  *  - Real archetype stamping (`single`)
- *  - Real handler orchestration body (delegate-signatures →
+ *  - Real handler orchestration body (wait-signatures →
  *    servicenow-auth → open-hr-form → fill-form → submit)
  *
  * What it does NOT exercise (stubbed by escape hatches):
  *  - Playwright / real ServiceNow browser interaction
- *  - Live oath-signature / OCR / Gemini delegation
+ *  - Live oath-signature row watching / file-store PDF resolution
  *  - Daemon enqueue paths
  */
 test(
@@ -64,13 +64,17 @@ test(
       handler: async (ctx, input) => {
         await oathUploadHandler(ctx, input, {
           trackerDir: dir,
-          _delegateToOverride: async (child) => ({
-            workflow: child.config.name,
-            runId: "smoke-signatures-run",
-            itemId: "smoke-session-1",
-            status: "done" as const,
-            data: { fannedOutCount: "0" },
+          _resolvePdfOverride: (inp) => ({
+            pdfPath: inp.pdfPath ?? "/tmp/smoke-test.pdf",
+            pdfHash: inp.pdfHash ?? "a".repeat(64),
           }),
+          _watchChildRunsOverride: async (opts) =>
+            opts.expectedItemIds.map((itemId) => ({
+              workflow: "oath-signature",
+              itemId,
+              runId: `${itemId}-run`,
+              status: "done" as const,
+            })),
           _loginOverride: async () => true,
           _gotoOverride: async () => {},
           _verifyOverride: async () => {},
@@ -114,6 +118,7 @@ test(
         pdfHash: "a".repeat(64),
         mode: "full" as const,
         rosterMode: "download" as const,
+        signerItemIds: ["smoke-r0", "smoke-r1"],
       },
       itemId,
       runId,

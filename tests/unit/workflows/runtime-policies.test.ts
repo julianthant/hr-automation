@@ -41,10 +41,11 @@ describe("workflow runtime policies", () => {
     assert.equal(policy?.preview?.alwaysAvailable, true);
   });
 
-  it("registers Oath Signature file prep and person member rules", () => {
+  it("registers Oath Signature person member rules (EID-only — no PDF prep row)", () => {
     const policy = oathSignatureWorkflow.metadata.runtimePolicy;
-    assert.equal(policy?.prepRow?.titleSource, "pdf-original-name");
-    assert.equal(policy?.prepRow?.subtitleTemplate, "Oath · <last4 run id>");
+    // PDF variant removed 2026-06-02 — no prepRow. Signer rows fanned out from
+    // OCR keep the person member title.
+    assert.equal(policy?.prepRow, undefined);
     assert.equal(policy?.memberRow?.titleSource, "person");
     assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "row");
   });

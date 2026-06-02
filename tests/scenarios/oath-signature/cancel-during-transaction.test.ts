@@ -35,11 +35,9 @@ describe("oath-signature scenario: cancel during transaction", () => {
       // at the top before any step boundary, which seeds emplId/name onto
       // every subsequent `running` row.
       { kind: "updateData", data: { emplId: "10873698", name: "Jane Doe" } },
-      // PDF-branch-only steps are skipped on a signer run; ucpath-auth is a
-      // synthetic `markStep` marker (auth handled by Session.launch in
-      // production). The real transaction step is held until cancel.
-      { kind: "skipStep", name: "ocr" },
-      { kind: "skipStep", name: "delegate-signatures" },
+      // ucpath-auth is a synthetic `markStep` marker (auth handled by
+      // Session.launch in production). The real transaction step is held
+      // until cancel.
       { kind: "markStep", name: "ucpath-auth" },
       { kind: "step", name: "transaction", hold: true },
     ];
