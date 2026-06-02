@@ -10,6 +10,7 @@ import type { ScreenshotEvent } from './screenshot.js'
 import { wrapPageWithSignal } from './page-proxy.js'
 import { buildDelegateApi } from '../delegate.js'
 import { emitItemStart, emitStepChange } from '../../tracker/session-events.js'
+import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 
 export interface MakeCtxOpts {
   session: Session
@@ -19,6 +20,14 @@ export interface MakeCtxOpts {
   workflow: string
   /** Parent workflow's 2-char code — forwarded to delegated children as the trace-id provenance prefix. */
   code?: string
+  /**
+   * Inherited ROOT trace id for trace-id propagation. When present this run was
+   * itself a delegated child carrying the originating run's full trace id;
+   * `buildDelegateApi` forwards it (transitively) to this run's own children so
+   * a whole delegation tree shows ONE id. Absent on a physical root run, which
+   * computes its own frozen id (resolved via `findFrozenTraceId`).
+   */
+  rootTraceId?: string
   itemId: string
   /**
    * Delegated scope — the parent run's id when this run was spawned via
@@ -89,7 +98,7 @@ export async function tryScreenshot(
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, code, itemId, parentRunId, emitScreenshotEvent, trackerDir, signal, instance } = opts
+  const { session, stepper, isBatch, runId, workflow, code, rootTraceId, itemId, parentRunId, emitScreenshotEvent, trackerDir, signal, instance } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
 
@@ -121,7 +130,24 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     currentStep: () => stepper.getCurrentStep(),
   })
 
-  const delegateApi = buildDelegateApi({ runId, trackerDir, signal, ...(code ? { code } : {}) })
+  // Trace-id propagation: forward the INHERITED root id (not a recompute) so a
+  // whole delegation tree shows ONE id. A physical root run has no
+  // `rootTraceId`, so we read back its own frozen id from its first pending row
+  // (`findFrozenTraceId`) and forward THAT — children then inherit the root's
+  // id. A non-root parent already carries `rootTraceId`; we pass it straight
+  // through so grandchildren still show the ORIGINAL root (the parentSubject
+  // pattern, which `rootCode` deliberately does NOT do).
+  const forwardRootTraceId =
+    rootTraceId ??
+    findFrozenTraceId({ workflow, runId, ...(trackerDir ? { trackerDir } : {}) }) ??
+    undefined
+  const delegateApi = buildDelegateApi({
+    runId,
+    trackerDir,
+    signal,
+    ...(code ? { code } : {}),
+    ...(forwardRootTraceId ? { rootTraceId: forwardRootTraceId } : {}),
+  })
 
   // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's
   // signal-injecting Proxy (see `page-proxy.ts`). The wrapper merges

@@ -15,6 +15,14 @@ export interface RunWorkflowHandlerOpts<TData, TSteps extends readonly string[]>
   runId: string
   /** Parent run id when this run is a delegation; surfaced as `ctx.parentRunId`. */
   parentRunId?: string
+  /**
+   * Inherited ROOT trace id (`<code>-<HHMMSS>-<runId4>`) for trace-id
+   * propagation — when this run was spawned by a delegation carrying a
+   * `rootTraceId`, it's forwarded into `makeCtx` so this run's own delegations
+   * pass the SAME root id down to grandchildren (transitivity). Absent for a
+   * physical root run, which computes its own frozen id.
+   */
+  rootTraceId?: string
   itemId: string
   trackerDir?: string
   emitScreenshotEvent: (event: ScreenshotEvent) => void
@@ -39,6 +47,7 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
     isBatch: opts.isBatch,
     runId: opts.runId,
     ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
+    ...(opts.rootTraceId ? { rootTraceId: opts.rootTraceId } : {}),
     workflow: opts.wf.config.name,
     code: opts.wf.code,
     itemId: opts.itemId,

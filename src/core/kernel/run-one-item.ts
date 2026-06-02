@@ -254,6 +254,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       isBatch: true,
       runId,
       ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
+      ...(runtimeOptions?.rootTraceId ? { rootTraceId: runtimeOptions.rootTraceId } : {}),
       itemId,
       handlerInput,
       prefilled,
@@ -324,8 +325,13 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     handlerInput,
     wf.config.name,
   )
+  // Resolution order (frozen-once invariant): a same-run re-emit reuses the
+  // already-frozen id; otherwise an inherited ROOT trace id (`rootTraceId`,
+  // carried transitively on `__runtimeOptions` for trace-id propagation) wins
+  // verbatim; otherwise compute a fresh id off this run's code + runId.
   const frozenTraceId =
     findFrozenTraceId({ workflow: wf.config.name, runId, ...(trackerDir ? { trackerDir } : {}) }) ??
+    runtimeOptions?.rootTraceId ??
     buildTraceId({ code: runtimeOptions?.rootCode ?? wf.code, runId, at: new Date() })
   stringifiedSeed.__traceId = frozenTraceId
   // Stamp the run-mode preset id on the seed so it's visible from the very
