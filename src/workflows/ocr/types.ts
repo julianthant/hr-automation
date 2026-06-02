@@ -23,7 +23,37 @@ export interface RosterRow {
 
 export type LookupKind = "name" | "verify" | "verify-only" | null;
 
-export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown> {
+/**
+ * The per-document context handed to `approveDocumentTo.deriveInput`. Built by
+ * the approve route after the per-record (`approveTo`) fan-out so the
+ * once-per-document target can wait on exactly the rows that were enqueued.
+ */
+export interface OcrApproveDocument<TPreview> {
+  /** The selected/approved preview records (the records the operator approved). */
+  records: TPreview[];
+  /** OCR session id (stable across the run). */
+  sessionId: string;
+  /** OCR run id (the `id`/`runId` of the approved OCR row). */
+  runId: string;
+  /**
+   * The itemIds the per-record `approveTo` fan-out actually enqueued — kept in
+   * sync with the rows the per-record target produced, so the doc target can
+   * wait on exactly those rows.
+   */
+  perRecordItemIds: string[];
+  /** Original uploaded PDF filename (display). */
+  pdfOriginalName?: string;
+  /** Registered file id for the uploaded PDF (resolve path/hash from the file store). */
+  pdfFileId?: string;
+  /** SHA-256 hex of the uploaded PDF, when known. */
+  pdfHash?: string;
+  /** Absolute path to the uploaded PDF on disk, when known. */
+  pdfPath?: string;
+  /** Whether the operator enabled dry-run for this prep. */
+  dryRun?: boolean;
+}
+
+export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unknown> {
   /** Stable id matching the form-type picker value. e.g. "oath", "emergency-contact". */
   formType: string;
 
@@ -79,6 +109,31 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown> {
     workflow: string;                                              // "oath-signature", "emergency-contact"
     deriveInput: (record: TPreview) => TFanOut;
     deriveItemId: (record: TPreview, parentRunId: string, index: number) => string;
+    /**
+     * Optional guard: when present, only selected records for which this
+     * returns true are fanned out (and counted toward `perRecordItemIds`).
+     * Lets a spec keep a selected-but-incomplete record visible in the
+     * preview payload without enqueueing a daemon row for it (oath: a signed
+     * row whose EID never resolved). Default (absent) → every selected record
+     * fans out, matching emergency-contact's behavior.
+     */
+    canFanOut?: (record: TPreview) => boolean;
+  };
+
+  /**
+   * Optional SECOND, **once-per-document** approve fan-out target. Enqueues
+   * exactly one downstream row per approved PDF (not per record). Used by oath
+   * to start a single `oath-upload` ServiceNow-ticket row that waits for all
+   * the per-record `oath-signature` signer rows to finish before filing.
+   *
+   * Distinct from `approveTo` (per-record) — a spec may declare either, both,
+   * or neither. Both targets run on DIFFERENT daemons so neither waits on its
+   * own daemon's children (the "OCR hub fan-out" that fixes the oath deadlock).
+   */
+  approveDocumentTo?: {
+    workflow: string;
+    deriveInput: (doc: OcrApproveDocument<TPreview>) => TDocFanOut;
+    deriveItemId: (doc: OcrApproveDocument<TPreview>) => string;
   };
 
   /** React component reference for per-record preview rendering. Looked up frontend-side. */
@@ -89,4 +144,4 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown> {
 }
 
 /** Convenience union — used by callers that don't care about generics. */
-export type AnyOcrFormSpec = OcrFormSpec<unknown, unknown, unknown>;
+export type AnyOcrFormSpec = OcrFormSpec<unknown, unknown, unknown, unknown>;

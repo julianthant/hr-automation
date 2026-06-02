@@ -23,6 +23,14 @@ export interface FormTypeListing {
   label: string;
   description: string;
   rosterMode: "required" | "optional";
+  /**
+   * Whether approving this form fans out downstream daemon rows from the
+   * approve route (`approveTo` per-record and/or `approveDocumentTo`
+   * once-per-document). The OCR review pane shows the Approve button when this
+   * is true (even on a standalone OCR run with no `parentRunId`) — a form that
+   * fans out on approve always needs the Approve action available.
+   */
+  hasApproveFanOut: boolean;
 }
 
 export function listFormTypes(): FormTypeListing[] {
@@ -31,5 +39,6 @@ export function listFormTypes(): FormTypeListing[] {
     label: spec.label,
     description: spec.description,
     rosterMode: spec.rosterMode,
+    hasApproveFanOut: Boolean(spec.approveTo || spec.approveDocumentTo),
   }));
 }
