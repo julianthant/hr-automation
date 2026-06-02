@@ -89,16 +89,34 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
   // the kernel emits the terminal `done` row only after this handler
   // returns. Discards reject via `OcrDiscardedError` → kernel `failed`;
   // operator cancel via `ctx.signal` → kernel `cancelled`.
-  const result = await runOcrOrchestrator(input, {
-    runId: ctx.runId,
-    trackerDir: ctx.trackerDir,
-    signal: ctx.signal,
-    // OCR owns its own queue-row emission and bypasses ctx.step, so drive the
-    // session-drawer timeline explicitly: each orchestrator phase mirrors into
-    // ctx.reportPhase → session step_change, so the OCR WorkflowBox advances
-    // through loading-roster → … → awaiting-approval like every other workflow.
-    onPhase: (step) => ctx.reportPhase(step),
-  });
+  // Capture the orchestrator's latest rich preview payload. The orchestrator
+  // emits its own (rich) queue rows directly, but on FAILURE the kernel
+  // auto-emits a terminal `failed` row from accumulated `ctx` data — which is
+  // sparse (no `mode: "prepare"`, no records) and, under the dashboard's
+  // latest-wins dedupe, clobbers the orchestrator's rich `failed` row,
+  // stripping the Preview tab off the failed prep row. Seeding the captured
+  // payload into `ctx` before rethrow keeps that terminal row a recognizable
+  // preview row (mirrors the approve-path `ctx.updateData` below).
+  let lastReviewData: Record<string, unknown> | undefined;
+  let result: Awaited<ReturnType<typeof runOcrOrchestrator>>;
+  try {
+    result = await runOcrOrchestrator(input, {
+      runId: ctx.runId,
+      trackerDir: ctx.trackerDir,
+      signal: ctx.signal,
+      // OCR owns its own queue-row emission and bypasses ctx.step, so drive the
+      // session-drawer timeline explicitly: each orchestrator phase mirrors into
+      // ctx.reportPhase → session step_change, so the OCR WorkflowBox advances
+      // through loading-roster → … → awaiting-approval like every other workflow.
+      onPhase: (step) => ctx.reportPhase(step),
+      onReviewData: (data) => { lastReviewData = data; },
+    });
+  } catch (err) {
+    // `parentRunId` is kernel-owned (top-level); keep it out of `data`.
+    const { parentRunId: _parentRunId, ...reviewData } = lastReviewData ?? {};
+    ctx.updateData({ ...reviewData, mode: "prepare" } as Partial<OcrInput & Record<string, unknown>>);
+    throw err;
+  }
   if (result.status !== "awaiting-approval") {
     // "discarded" — orchestrator already stopped emitting; the
     // discard route owns the terminal row. Don't await — return.

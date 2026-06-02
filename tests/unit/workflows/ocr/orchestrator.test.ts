@@ -106,6 +106,58 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("orchestrator's terminal failed row keeps the rich preview payload (mode/preview + records)", async () => {
+  // Regression: a failed OCR prep run must stay a recognizable *preview* row so
+  // the dashboard keeps showing its Preview tab. The orchestrator surfaces its
+  // last rich snapshot via `onReviewData` (so the kernel handler can re-stamp
+  // it onto the kernel's terminal failed row) AND carries that payload onto its
+  // own `failed` row. Force a failure after the first preview snapshot emits.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: any[] = [];
+  const reviewPayloads: Array<Record<string, unknown>> = [];
+
+  await assert.rejects(
+    runOcrOrchestrator(
+      {
+        pdfPath,
+        pdfOriginalName: "fake.pdf",
+        pdfFileId,
+        formType: "oath",
+        sessionId: "session-fail",
+        rosterPath,
+        rosterMode: "existing",
+      },
+      {
+        runId: "run-fail",
+        trackerDir: dir,
+        _emitOverride: (entry: any) => writtenEntries.push(entry),
+        onReviewData: (data) => reviewPayloads.push(data),
+        // Throw after the placeholder "ocr" snapshot has already emitted, so a
+        // rich review payload is captured before the orchestrator unwinds.
+        _ocrPipelineOverride: async () => { throw new Error("boom ocr"); },
+        _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+        _enqueueEidLookupOverride: async () => { /* no-op */ },
+        _watchChildRunsOverride: async () => [],
+      },
+    ),
+    /boom ocr/,
+  );
+
+  // onReviewData fired at least once with the preview records.
+  assert.ok(reviewPayloads.length >= 1, "onReviewData should surface the preview payload");
+  assert.ok(Array.isArray(reviewPayloads[0]!.records), "review payload carries records");
+
+  const failed = writtenEntries.find((e) => e.status === "failed");
+  assert.ok(failed, "a terminal failed row should be emitted");
+  assert.equal(failed.data.mode, "prepare", "failed row keeps the prep mode");
+  assert.equal(failed.data.archetype, "preview", "failed row keeps the preview archetype");
+  const failedRecords = JSON.parse(failed.data.records ?? "[]");
+  assert.ok(Array.isArray(failedRecords) && failedRecords.length >= 1, "failed row carries the extracted records");
+  assert.match(failed.error, /boom ocr/);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("orchestrator drives the session timeline via onPhase for each running phase", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const phases: string[] = [];

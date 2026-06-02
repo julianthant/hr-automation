@@ -96,6 +96,19 @@ export interface OcrOrchestratorOpts {
    */
   onPhase?: (step: string) => void;
 
+  /**
+   * Review-data callback. Invoked at each `emitSnapshot` with the row's rich
+   * preview payload (records + page metadata, sans kernel-owned stamps). Lets
+   * the kernel handler capture the last-known extracted records so that on
+   * FAILURE its terminal `failed` row — auto-emitted from accumulated `ctx`
+   * data, which bypasses the orchestrator's direct emissions — still carries
+   * the OCR prep identity (`mode: "prepare"`) + records. Otherwise the sparse
+   * kernel row clobbers the orchestrator's rich `failed` row in the dashboard's
+   * latest-wins dedupe, stripping the Preview tab off a failed prep row.
+   * Optional — HTTP callers omit it.
+   */
+  onReviewData?: (data: Record<string, unknown>) => void;
+
   // ─── Test escape hatches ──────────────────────────────
   _emitOverride?: (entry: TrackerEntry) => void;
   _ocrPipelineOverride?: (opts: {
@@ -207,6 +220,11 @@ export async function runOcrOrchestrator(
       : undefined;
 
   let lastAnnouncedPhase: string | undefined;
+  // Latest rich preview payload (records + page metadata) emitted via
+  // `emitSnapshot`. Hoisted above the try so the failure path can re-stamp it
+  // onto the terminal `failed` row (and surface it to the kernel handler via
+  // `onReviewData`) — see the `onReviewData` opt doc.
+  let lastReviewData: Record<string, unknown> | undefined;
   const writeTracker = (
     status: TrackerEntry["status"],
     data: Record<string, unknown>,
@@ -381,7 +399,7 @@ export async function runOcrOrchestrator(
         lastSnapshotKey = key;
       }
       const verifiedCount = countVerified(records);
-      writeTracker(status, {
+      const snapshotData: Record<string, unknown> = {
         formType: input.formType,
         pdfOriginalName: input.pdfOriginalName,
         sessionId: input.sessionId,
@@ -391,7 +409,12 @@ export async function runOcrOrchestrator(
         verifiedCount,
         records,
         ...extras,
-      }, step);
+      };
+      // Remember the latest rich payload so a later failure can re-stamp it,
+      // and surface it to the kernel handler for its terminal-row seed.
+      lastReviewData = snapshotData;
+      opts.onReviewData?.(snapshotData);
+      writeTracker(status, snapshotData, step);
     };
 
     // Seed the Preview tab with one blank record per page so the operator
@@ -880,7 +903,15 @@ export async function runOcrOrchestrator(
       return { status: "discarded" };
     }
     try {
-      writeTracker("failed", { formType: input.formType, sessionId: input.sessionId }, undefined, errorMessage(err));
+      // Carry the last rich preview payload onto the failed row so it stays a
+      // recognizable preview row (records + page metadata survive for the
+      // Preview tab even on failure). `writeTracker` re-stamps mode/archetype.
+      writeTracker(
+        "failed",
+        { ...(lastReviewData ?? {}), formType: input.formType, sessionId: input.sessionId },
+        undefined,
+        errorMessage(err),
+      );
     } catch (innerE) {
       if (isOperatorDiscardAbortError(innerE)) {
         // Discard fired while recording failure — both unwind to finally below.
