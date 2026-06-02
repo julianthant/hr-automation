@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 import {
   parseOathPrepareRowData,
   parsePrepareRowData,
+  parseVerifyPrepareRowData,
   type OathPreviewRecord,
   type PreviewRecord,
+  type VerifyPreviewRecord,
 } from "../components/ocr/types";
 
-export type AnyOcrPreviewRecord = PreviewRecord | OathPreviewRecord;
+export type AnyOcrPreviewRecord = PreviewRecord | OathPreviewRecord | VerifyPreviewRecord;
 
 export interface ParsedOcrPrepareRow {
   records: ReadonlyArray<AnyOcrPreviewRecord>;
@@ -26,7 +28,7 @@ export interface ParsedOcrPrepareRow {
  */
 export interface OcrDownstreamConfig {
   /** Which OCR form variant this config produces records for. Drives addBlankRow's variant branch. */
-  formKind: "oath" | "emergency-contact";
+  formKind: "oath" | "emergency-contact" | "verify";
   /** Parser for the prep row's serialized records / PDF metadata. */
   parseRow: (data: Record<string, string> | undefined) => ParsedOcrPrepareRow | null;
   /** POST endpoint that fans out N kernel queue items on Approve. */
@@ -98,6 +100,11 @@ export function resolveOcrConfigForEntry(entry: {
     return hasOcrDownstream(entry.workflow) ? getOcrDownstream(entry.workflow) : null;
   }
   const formType = entry.data?.formType;
+  if (formType === "verify") {
+    if (!hasOcrDownstream("verify")) return null;
+    // verify is read-only — no force-research overlay.
+    return getOcrDownstream("verify");
+  }
   if (formType !== "oath" && formType !== "emergency-contact") {
     console.warn(`resolveOcrConfigForEntry: unknown formType "${String(formType)}" — returning null`);
     return null;
@@ -152,7 +159,10 @@ registerOcrDownstream("ocr", {
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: true,
-  recordName: (r) => (r.formKind === "emergency-contact" ? r.employee?.name : "") || "(no name)",
+  recordName: (r) =>
+    (r.formKind === "emergency-contact"
+      ? (r as PreviewRecord).employee?.name
+      : "") || "(no name)",
   renderEditor: noopRenderer,
 });
 
@@ -165,7 +175,10 @@ registerOcrDownstream("emergency-contact", {
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: false,
-  recordName: (r) => (r.formKind === "emergency-contact" ? r.employee?.name : "") || "(no name)",
+  recordName: (r) =>
+    (r.formKind === "emergency-contact"
+      ? (r as PreviewRecord).employee?.name
+      : "") || "(no name)",
   renderEditor: noopRenderer,
 });
 
@@ -179,5 +192,18 @@ registerOcrDownstream("oath-signature", {
   hasSignature: true,
   supportsForceResearch: false,
   recordName: (r) => (r.formKind === "oath" ? r.printedName : "") || "(no name)",
+  renderEditor: noopRenderer,
+});
+
+registerOcrDownstream("verify", {
+  formKind: "verify",
+  parseRow: parseVerifyPrepareRowData,
+  approveUrl: OCR_APPROVE_URL,
+  discardUrl: OCR_DISCARD_URL,
+  editsKey: ({ runId }) => `verify-prep-edits:${runId}`,
+  cursorKey: ({ runId }) => `verify-prep-cursor:${runId}`,
+  hasSignature: false,
+  supportsForceResearch: false,
+  recordName: (r) => ("checks" in r ? (r as VerifyPreviewRecord).name || "(no name)" : "(no name)"),
   renderEditor: noopRenderer,
 });

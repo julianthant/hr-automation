@@ -28,6 +28,8 @@ import {
 import { EmptyPagePlaceholder } from "./EmptyPagePlaceholder";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
+import { VerifyRecordView } from "./VerifyRecordView";
+import type { VerifyPreviewRecord } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
 import { useFormTypes, formTypeHasApproveFanOut } from "@/components/hooks/useFormTypes";
@@ -252,6 +254,11 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch,
     />
   );
 });
+setOcrDownstreamRenderer("verify", ({ record }) =>
+  "checks" in record ? (
+    <VerifyRecordView record={record as VerifyPreviewRecord} />
+  ) : null,
+);
 
 /**
  * Legacy stacked layout (toolbar + body). Prefer {@link OcrReviewPrepProvider} +
@@ -520,6 +527,7 @@ function useOcrReviewPrepApi(
 
   function addBlankRow(page: number): void {
     if (!cfg) return;
+    if (cfg.formKind === "verify") return;
     const onPageCount = recordRows.filter(
       (e) => e.record.sourcePage === page,
     ).length;
