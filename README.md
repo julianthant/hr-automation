@@ -1,6 +1,6 @@
 # HR Automation
 
-UCPath HR automation for UCSD. Playwright-driven workflows for onboarding, separations, EID lookups, work-study updates, oath signatures, oath uploads, emergency contacts, and UKG report downloads.
+UCPath HR automation for UCSD. Playwright-driven workflows for onboarding, separations, person lookups, work-study updates, oath signatures, oath uploads, emergency contacts, and UKG report downloads.
 
 ## Setup
 
@@ -23,67 +23,18 @@ Duo MFA is manual — the automation pauses and polls until you approve on your 
 
 ## Commands
 
-Most commands use **daemon mode**: the first invocation spawns a persistent process (Duo once), subsequent invocations enqueue without re-authenticating. Use `:stop` to drain and shut down, `-n` to force-spawn an additional daemon, `-p N` to ensure N daemons are alive.
+Workflow starts are dashboard-only: typed runs use the top input bar and file/PDF runs use the upload modal. Daemon workers still back most workflows; use `:stop` scripts to drain and shut down a workflow's daemon pool.
 
-### Onboarding
+### Daemon Stops
 ```bash
-npm run onboarding <email> [<email> ...]     # Enqueue; auto-spawns a daemon (CRM + UCPath + I9 Duo once)
 npm run onboarding:stop                      # Soft-stop all onboarding daemons
-```
-
-### Separations
-```bash
-npm run separation <docId> [docId ...]       # Enqueue; auto-spawns a daemon
 npm run separation:stop                      # Soft-stop all separation daemons
-```
-
-### Work Study
-```bash
-npm run work-study <emplId> <date>           # Enqueue UCPath PayPath update
 npm run work-study:stop
-```
-
-### EID Lookup
-```bash
-npm run eid-lookup "Last, First Middle"      # Enqueue; auto-spawns a daemon
-npm run eid-lookup:stop
-```
-
-### Active Check
-```bash
-npm run active-check "Last, First Middle"    # Check UCPath active status by name
-npm run active-check 10873698                # Check by 8-digit EID
-npm run active-check:stop
-```
-
-### Oath Signature
-```bash
-npm run oath-signature <emplId> [emplId ...] # Enqueue UCPath oath signature
+npm run person-lookup:stop                   # Person Lookup replaces legacy eid-lookup + active-check starts
 npm run oath-signature:stop
-```
-
-### Oath Upload
-```bash
-npm run oath-upload <pdfPath> [pdfPath ...]  # OCR → fan out signatures → HR ticket
 npm run oath-upload:stop
-```
-
-### Emergency Contact
-```bash
-npm run emergency-contact <batchYaml>        # Load YAML → preflight → enqueue each record
 npm run emergency-contact:stop
-# Flags: --roster-url "<sp-url>" | --roster-path <xlsx> | --ignore-roster-mismatch | -p N | -n
-```
-
-### CRM Doc Download
-```bash
-npm run crm-doc-download                     # Download iDocs PDFs from CRM (delegation target)
 npm run crm-doc-download:stop
-```
-
-### Kronos Reports
-```bash
-npm run kronos                               # Download Time Detail PDFs (4 parallel workers)
 ```
 
 ### Dashboard
@@ -99,7 +50,7 @@ Open **http://localhost:5173** to monitor live workflow progress.
 ### Export / Utilities
 ```bash
 tsx --env-file=.env src/cli.ts export <workflow>   # Dump JSONL tracker to xlsx
-npm run clean:tracker                              # Default 30d: prune stale .tracker JSONL and .screenshots PNGs (`--days`, `--dir`, `--no-screenshots`, `--screenshots-only` — see `src/scripts/ops/clean-tracker.ts`)
+npm run clean:tracker                              # Default 7d: prune stale .tracker JSONL and .tracker/screenshots PNGs (`--days`, `--dir`, `--no-screenshots`, `--screenshots-only` — see `src/scripts/ops/clean-tracker.ts`)
 npm run test-login                                 # Smoke test UCPath + CRM auth
 npm run setup                                      # First-use environment validation wizard
 npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
@@ -123,7 +74,7 @@ See `CLAUDE.md` for the full architecture reference, kernel API, daemon mode des
 src/
   core/          # Workflow kernel (kernel/, daemon/, task-store/)
   systems/       # Playwright drivers: crm, ucpath, i9, kuali, old-kronos, new-kronos, servicenow, sharepoint
-  workflows/     # Composed workflows: onboarding, separations, eid-lookup, active-check, work-study,
+  workflows/     # Composed workflows: onboarding, separations, person-lookup, work-study,
                  #   oath-signature, oath-upload, emergency-contact, ocr, old-kronos-reports,
                  #   sharepoint-download, crm-doc-download
   infra/         # Auth flows + browser launch
