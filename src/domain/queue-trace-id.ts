@@ -5,7 +5,19 @@
  *
  *   - `code`    — the 2-char workflow code of the ROOT run. Provenance: a
  *                 delegated row shows the workflow that spawned its tree
- *                 (where it came from), not the child workflow.
+ *                 (where it came from), not the child workflow. The OCR form
+ *                 spec may override this per-operation via `traceCode` (oath →
+ *                 `ou`, branding the whole oath-upload operation by its
+ *                 destination rather than OCR's own `oc`).
+ *
+ * Root trace-id propagation: the FULL root id (not just its code) now flows
+ * transitively to every descendant of an operation via `rootTraceId` on the
+ * child input's `__runtimeOptions` channel (threaded by `delegate.ts` /
+ * `makeCtx`'s `forwardRootTraceId`). So every row of one operation DISPLAYS the
+ * identical id (e.g. all rows of an oath upload show the OCR root's `ou-…` id)
+ * while each row keeps its own runId/itemId for logs, SQLite, and the footer
+ * `#run`. The frozen-once invariant still holds — a same-run re-emit reuses the
+ * already-frozen value before any propagation/compute runs.
  *   - time      — local `HHMMSS` (time-of-day) of the run's start. The date is
  *                 intentionally omitted — tracker files are already
  *                 date-partitioned (`{workflow}-{YYYY-MM-DD}.jsonl`), so the
