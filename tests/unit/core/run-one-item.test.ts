@@ -202,6 +202,117 @@ test('runOneItem: without authTimings, no synthetic auth entries are emitted', a
   assert.equal(authEntries.length, 0, 'no synthetic auth entries without authTimings')
 })
 
+test('runOneItem: __runtimeOptions.rootTraceId survives splitPrefilled and rides every row (daemon-worker path)', async () => {
+  // The daemon worker re-emits pending+running for a delegated child whose
+  // `__runtimeOptions.rootTraceId` was stamped at enqueue (root trace-id
+  // propagation). With no prior frozen pending row, the inherited root id must
+  // win over the per-run compute and ride pending + all live rows.
+  const dir = TMP()
+  const wf = defineWorkflow({
+    name: 'root-trace-worker-test',
+    code: 'kt',
+    inputSubject: 'eid',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['searching'] as const,
+    schema: z.object({ emplId: z.string() }),
+    authSteps: false,
+    operatorSubject: (input) => ({ kind: 'eid', label: input.emplId }),
+    handler: async (ctx) => {
+      ctx.markStep('searching')
+    },
+  })
+
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+
+  const ROOT_ID = 'ou-090553-1a57'
+  await runOneItem({
+    wf,
+    session,
+    item: { emplId: '10000050', __runtimeOptions: { rootTraceId: ROOT_ID } },
+    itemId: 'item-root-trace',
+    runId: 'run-root-trace',
+    trackerDir: dir,
+    callerPreEmits: false,
+    parentRunId: 'ocr-root-run',
+  })
+
+  const entries = readTracker(dir, 'root-trace-worker-test')
+  const traced = entries.filter((e: any) => e.data?.__traceId)
+  assert.ok(traced.length >= 2, 'pending + at least one live row carry a trace id')
+  for (const e of traced) {
+    assert.equal(e.data.__traceId, ROOT_ID, `${e.status} row displays the inherited root id`)
+  }
+})
+
+test('runOneItem: a 2nd emit reuses the frozen trace id (findFrozenTraceId wins over rootTraceId)', async () => {
+  // Frozen-once invariant: once a pending row carries a trace id, a re-emit must
+  // reuse it (findFrozenTraceId is the FIRST fallback). Here the frozen id is
+  // the same as the inherited rootTraceId, but the assertion pins that
+  // findFrozenTraceId — not the runtime option — is consulted first.
+  const dir = TMP()
+  const wf = defineWorkflow({
+    name: 'root-trace-frozen-test',
+    code: 'kt',
+    inputSubject: 'eid',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['searching'] as const,
+    schema: z.object({ emplId: z.string() }),
+    authSteps: false,
+    operatorSubject: (input) => ({ kind: 'eid', label: input.emplId }),
+    handler: async (ctx) => {
+      ctx.markStep('searching')
+    },
+  })
+
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+
+  const ROOT_ID = 'ou-090553-1a57'
+  const runId = 'run-frozen-trace'
+
+  // First emit (caller pre-emits the pending row carrying the frozen root id).
+  const { emitTrackerRow } = await import('../../../src/tracker/jsonl.js')
+  emitTrackerRow(
+    {
+      workflow: 'root-trace-frozen-test',
+      timestamp: new Date().toISOString(),
+      id: 'item-frozen',
+      runId,
+      parentRunId: 'ocr-root-run',
+      status: 'pending',
+      data: { archetype: 'single', queueRowKind: 'person', __traceId: ROOT_ID },
+    },
+    dir,
+  )
+
+  // Second pass: a fresh rootTraceId is supplied, but findFrozenTraceId must
+  // win — the row already carries ROOT_ID, so we reuse it (no drift).
+  await runOneItem({
+    wf,
+    session,
+    item: { emplId: '10000050', __runtimeOptions: { rootTraceId: 'ou-999999-zzzz' } },
+    itemId: 'item-frozen',
+    runId,
+    trackerDir: dir,
+    callerPreEmits: false,
+    parentRunId: 'ocr-root-run',
+  })
+
+  const entries = readTracker(dir, 'root-trace-frozen-test')
+  const live = entries.filter((e: any) => (e.status === 'running' || e.status === 'done') && e.data?.__traceId)
+  assert.ok(live.length > 0, 'should have at least one live row with a trace id')
+  for (const e of live) {
+    assert.equal(e.data.__traceId, ROOT_ID, `${e.status} row reuses the frozen id, NOT the new rootTraceId`)
+  }
+})
+
 test('runOneItem: cancel sticks after controller.abort() even when underlying probe clears (daemon resets cancelTarget)', async () => {
   // Regression: the daemon flips state.cancelTarget back to null after the
   // first cancel signal lands; subsequent probes returned false even though

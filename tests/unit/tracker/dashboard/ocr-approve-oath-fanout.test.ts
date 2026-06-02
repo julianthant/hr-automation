@@ -35,7 +35,7 @@ function oathRecord(opts: {
   };
 }
 
-function seedOathOcrRow(dir: string, sessionId: string, runId: string): void {
+function seedOathOcrRow(dir: string, sessionId: string, runId: string, traceId?: string): void {
   mkdirSync(rowsDir(dir), { recursive: true });
   appendFileSync(
     rowFilePath("ocr", todayLocal(), dir),
@@ -51,9 +51,18 @@ function seedOathOcrRow(dir: string, sessionId: string, runId: string): void {
         sessionId,
         pdfOriginalName: "roster.pdf",
         pdfFileId: "file-abc",
+        ...(traceId ? { __traceId: traceId } : {}),
       },
     }) + "\n",
   );
+}
+
+function readRootTraceId(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const ro = (input as Record<string, unknown>).__runtimeOptions;
+  if (!ro || typeof ro !== "object") return undefined;
+  const id = (ro as Record<string, unknown>).rootTraceId;
+  return typeof id === "string" ? id : undefined;
 }
 
 test("oath approve fans out BOTH targets: oath-signature signers + one oath-upload ticket", async () => {
@@ -162,6 +171,55 @@ test("oath approve: selected-but-EID-less records are NOT enqueued and NOT waite
     // oath-upload waits on exactly the one enqueued signer row.
     const docInput = uploadCall!.inputs[0] as { signerItemIds: string[] };
     assert.deepEqual(docInput.signerItemIds, ["ocr-oath-ocr-run-skip-r0"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oath approve stamps the OCR root's frozen trace id as rootTraceId on BOTH fan-out targets", async () => {
+  // Root trace-id propagation (DISPLAY-only): the OCR root row carries the
+  // operation's `ou-…` id (branded via the oath form spec's traceCode). The
+  // approve fan-out runs OUTSIDE any kernel ctx, so it reads that id back off
+  // the OCR row (findFrozenTraceId) and stamps it as `rootTraceId` on every
+  // enqueued child's `__runtimeOptions` — the daemon worker then DISPLAYS the
+  // OCR root's id on the signer rows + the oath-upload ticket.
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-roottrace-"));
+  try {
+    const ROOT_ID = "ou-090553-1a57";
+    seedOathOcrRow(dir, "sess-rt", "ocr-run-rt", ROOT_ID);
+
+    const calls: Array<{ workflow: string; inputs: unknown[] }> = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId) => {
+        const itemIds = inputs.map((inp, i) => deriveItemId(inp, i));
+        calls.push({ workflow, inputs });
+        return { enqueued: itemIds.map((id) => ({ id })) };
+      },
+    });
+
+    const res = await handler({
+      sessionId: "sess-rt",
+      runId: "ocr-run-rt",
+      records: [
+        oathRecord({ employeeId: "10000001", printedName: "DOE, JANE" }),
+        oathRecord({ employeeId: "10000002", printedName: "ROE, RICHARD" }),
+      ],
+    });
+    assert.equal(res.status, 200);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const sigCall = calls.find((c) => c.workflow === "oath-signature");
+    const uploadCall = calls.find((c) => c.workflow === "oath-upload");
+    assert.ok(sigCall, "oath-signature enqueued");
+    assert.ok(uploadCall, "oath-upload enqueued");
+
+    // Every per-record signer input carries the OCR root's id.
+    for (const inp of sigCall!.inputs) {
+      assert.equal(readRootTraceId(inp), ROOT_ID, "signer input stamps the OCR root id");
+    }
+    // The once-per-document oath-upload ticket input carries it too.
+    assert.equal(readRootTraceId(uploadCall!.inputs[0]), ROOT_ID, "oath-upload input stamps the OCR root id");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

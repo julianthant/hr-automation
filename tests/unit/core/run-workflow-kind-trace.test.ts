@@ -103,3 +103,35 @@ test('runWorkflow reuses the trace id frozen on the run\'s pending row (delegati
     assert.equal(row.data?.queueRowKind, 'file')
   }
 })
+
+test('runWorkflow stamps an inherited rootTraceId onto every live row when no pending row is frozen', async () => {
+  // Root trace-id propagation: a delegated child carries `rootTraceId` on its
+  // `__runtimeOptions` (e.g. an OCR fan-out into oath-signature). With NO prior
+  // frozen pending row, the inherited root id must win over the per-run compute
+  // — every live row displays the ORIGINATING run's id, not a `kt-...` recompute.
+  const dir = TMP()
+  const runId = 'eeeeffff-1111-2222-3333-444455556666'
+  const ROOT_ID = 'ou-090553-1a57'
+
+  await runWorkflow(
+    wf,
+    {
+      doc: 'scan.pdf',
+      __runtimeOptions: { rootTraceId: ROOT_ID },
+    } as unknown as { doc: string },
+    {
+      launchFn: fakeLaunch,
+      trackerDir: dir,
+      itemId: 'item-root-trace',
+      preAssignedRunId: runId,
+      parentRunId: 'ocr-root-run',
+    },
+  )
+
+  const rows = readRows(dir)
+  const live = rows.filter((r) => r.status === 'running' || r.status === 'done')
+  assert.ok(live.length > 0, 'should have at least one running/done row')
+  for (const row of live) {
+    assert.equal(row.data?.__traceId, ROOT_ID, `live row (${row.status}) must display the inherited root id`)
+  }
+})

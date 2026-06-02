@@ -42,6 +42,28 @@ async function setup(): Promise<{
   return { dir, uploadsDir, rosterPath, pdfPath, pdfFileId };
 }
 
+test("OCR trace-id branding: oath form spec sets traceCode 'ou'; emergency-contact has none (keeps 'oc')", async () => {
+  // Root trace-id propagation brands the WHOLE oath operation by its
+  // destination (oath-upload → "ou"). The oath OCR root run computes its trace
+  // id off `spec.traceCode ?? "oc"`, so the oath form yields `ou-…` while
+  // standalone/EC forms (no traceCode) keep `oc-…`. Pins the form-spec contract
+  // that drives the orchestrator's branding at orchestrator.ts:185.
+  const { getFormSpec } = await import("../../../../src/services/ocr/forms/registry.js");
+  const { buildTraceId } = await import("../../../../src/domain/queue-trace-id.js");
+  const at = new Date("2026-06-02T09:05:53.000Z");
+  const runId = "1a57-aaaa-bbbb";
+
+  const oathSpec = getFormSpec("oath");
+  assert.ok(oathSpec, "oath form spec must resolve");
+  assert.strictEqual(oathSpec!.traceCode, "ou", "oath spec brands the operation 'ou'");
+  assert.match(buildTraceId({ code: oathSpec!.traceCode ?? "oc", runId, at }), /^ou-\d{6}-1a57$/);
+
+  const ecSpec = getFormSpec("emergency-contact");
+  assert.ok(ecSpec, "emergency-contact form spec must resolve");
+  assert.strictEqual(ecSpec!.traceCode, undefined, "EC spec has no traceCode → keeps default");
+  assert.match(buildTraceId({ code: ecSpec!.traceCode ?? "oc", runId, at }), /^oc-\d{6}-1a57$/);
+});
+
 test("orchestrator emits pending → loading-roster → ocr → matching → done(awaiting-approval)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
@@ -101,12 +123,16 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
   // Regression (2026-06-02): OCR prep rows must carry the trace id + queue-row
   // kind the kernel would otherwise stamp, so the footer subtitle resolves to
   // the trace id (kind "file") instead of falling back to the literal "OCR".
+  // Trace-id branding (root trace-id propagation): the OATH form spec sets
+  // `traceCode: "ou"`, so an oath-form OCR root brands the whole operation
+  // `ou-…` (not the default `oc-…`). Standalone/EC forms keep `oc-…` — see the
+  // emergency-contact branding test below.
   for (const entry of writtenEntries as Array<{ data?: Record<string, string> }>) {
     assert.equal(entry.data?.queueRowKind, "file", "every OCR row stamps queueRowKind=file");
     assert.match(
       entry.data?.__traceId ?? "",
-      /^oc-\d{6}-[a-z0-9]{4}$/,
-      `every OCR row stamps a frozen oc-… trace id (got "${entry.data?.__traceId}")`,
+      /^ou-\d{6}-[a-z0-9]{4}$/,
+      `every oath-form OCR row stamps a frozen ou-… trace id (got "${entry.data?.__traceId}")`,
     );
   }
   const traceIds = new Set((writtenEntries as Array<{ data?: Record<string, string> }>).map((e) => e.data?.__traceId));

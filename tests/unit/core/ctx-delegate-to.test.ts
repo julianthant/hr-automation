@@ -517,3 +517,117 @@ test("delegateToImpl threads an explicit rootCode into the child trace id", asyn
   // Originating code "os", NOT the child's own "zz".
   assert.match(trace!, /^os-\d{6}-root$/);
 });
+
+// ─── Root trace-id propagation ──────────────────────────────────────────────
+// A delegated child must DISPLAY the originating run's FULL trace id (not just
+// its code, and not a per-child recompute). `delegateToImpl` stamps the
+// inherited `rootTraceId` verbatim as the child's `data.__traceId`.
+test("delegateToImpl stamps the child trace id with the inherited rootTraceId verbatim", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-roottrace-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  const child = makeChildWorkflow({ name: "roottrace-child-wf" });
+  const ROOT_ID = "tr-101010-aaaa";
+  await delegateToImpl({
+    parentRunId: "roottrace-parent-run",
+    trackerDir,
+    child,
+    input: { payload: "x" },
+    itemId: "roottrace-item",
+    runId: "roottrace-run-bbbb",
+    fireAndForget: false,
+    // rootCode would prefix "os" if it won; rootTraceId must beat it.
+    rootCode: "os",
+    rootTraceId: ROOT_ID,
+  });
+
+  const pending = readWorkflowLines(trackerDir, "roottrace-child-wf")
+    .find((l) => l.status === "pending");
+  assert.ok(pending, "child pending row must be emitted");
+  const trace = (pending!.data as { __traceId?: string }).__traceId;
+  // The child displays the ROOT's full id, NOT a recompute off its own runId.
+  assert.equal(trace, ROOT_ID);
+});
+
+// Transitivity: a root → child → grandchild chain (three DISTINCT codes) must
+// have the grandchild still display the ROOT's id. We simulate the originating
+// run (e.g. OCR) by delegating the child with an explicit `rootTraceId` (the
+// root's frozen id), exactly as OCR's orchestrator passes its `ou-...` id. The
+// child must (a) display that id and (b) forward it to its OWN grandchild —
+// proving each non-root parent passes through what it inherited, so the
+// grandchild shows the ORIGINAL root, not the immediate parent's id.
+test("delegated trace id propagates transitively to a grandchild (root → child → grandchild)", async (t) => {
+  const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-transitive-"));
+  t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
+
+  const grandchild = defineWorkflow({
+    name: "transitive-grandchild-wf",
+    code: "gc",
+    inputSubject: "name",
+    archetype: "single",
+    systems: [],
+    authSteps: false,
+    steps: ["work"] as const,
+    schema: z.object({ payload: z.string() }),
+    getName: (d) => d.payload ?? "",
+    getId: (d) => d.payload ?? "",
+    handler: async (ctx, input) => {
+      ctx.updateData({ payload: input.payload });
+      await ctx.step("work", async () => {});
+    },
+  });
+  const child = defineWorkflow({
+    name: "transitive-child-wf",
+    code: "ch",
+    inputSubject: "name",
+    archetype: "single",
+    systems: [],
+    authSteps: false,
+    steps: ["delegate"] as const,
+    schema: z.object({ payload: z.string() }),
+    getName: (d) => d.payload ?? "",
+    getId: (d) => d.payload ?? "",
+    handler: async (ctx, input) => {
+      ctx.updateData({ payload: input.payload });
+      await ctx.step("delegate", async () => {
+        const c = ctx as unknown as { delegateTo: (...args: unknown[]) => Promise<unknown> };
+        // The child delegates WITHOUT re-passing a rootTraceId — it must
+        // forward the one it inherited (via makeCtx's forwardRootTraceId).
+        await c.delegateTo(grandchild, { payload: "gc-payload" });
+      });
+    },
+  });
+
+  // ROOT's frozen id, code "rt" — distinct from the child's "ch" and the
+  // grandchild's "gc" so a recompute at any level would be detectable.
+  const ROOT_ID = "rt-090553-1a57";
+  await delegateToImpl({
+    parentRunId: "transitive-root-run",
+    trackerDir,
+    child,
+    input: { payload: "ch-payload" },
+    itemId: "transitive-child-item",
+    runId: "transitive-child-run",
+    fireAndForget: false,
+    rootCode: "rt",
+    rootTraceId: ROOT_ID,
+  });
+
+  // The immediate child shows the ROOT's id, not "ch-..." or a recompute.
+  const childRows = readWorkflowLines(trackerDir, "transitive-child-wf");
+  const childPending = childRows.find((l) => l.status === "pending");
+  assert.ok(childPending, "child pending row must be emitted");
+  assert.equal((childPending!.data as { __traceId?: string }).__traceId, ROOT_ID);
+  // And it rides every child row, not just pending.
+  for (const row of childRows) {
+    if ((row.data as { __traceId?: string })?.__traceId) {
+      assert.equal((row.data as { __traceId?: string }).__traceId, ROOT_ID, `child ${row.status} row carries root id`);
+    }
+  }
+
+  // The grandchild ALSO shows the ROOT's id, not "gc-..." or the child's id.
+  const gcPending = readWorkflowLines(trackerDir, "transitive-grandchild-wf")
+    .find((l) => l.status === "pending");
+  assert.ok(gcPending, "grandchild pending row must be emitted");
+  assert.equal((gcPending!.data as { __traceId?: string }).__traceId, ROOT_ID);
+});
