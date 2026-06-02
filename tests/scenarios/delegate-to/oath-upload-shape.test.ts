@@ -23,6 +23,7 @@ import { z } from "zod";
 import { defineWorkflow, runWorkflow } from "../../../src/core/index.js";
 import { delegateToImpl } from "../../../src/core/delegate.js";
 import { dateLocal, rowFilePath } from "../../../src/tracker/jsonl.js";
+import { runIdFragment, tracePrefix } from "../../../src/domain/queue-trace-id.js";
 
 interface TrackerLine {
   workflow: string;
@@ -111,14 +112,15 @@ describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(
       },
     });
 
-    // Model the OCR-hub parent as part of a larger operation whose ROOT trace id
-    // is already known (`ou-090553-1a57` — the oath operation's branded id). In
-    // production OCR computes this id at its root and passes it down (orchestrator
-    // for person-lookup, approve.ts for signers/upload). Here we drive the hub via
-    // `delegateToImpl` with an explicit `rootTraceId` so the parent's `makeCtx`
-    // carries it and forwards it to EVERY fan-out child — proving the whole tree
-    // (signers + upload) shares the one root id while keeping its own runId/itemId.
-    const ROOT_ID = "ou-090553-1a57";
+    // Model the OCR-hub parent as part of a larger operation whose ROOT trace
+    // PREFIX is already known (`ou-090553` — the oath operation's branded
+    // prefix). In production OCR computes its id at the root and passes the
+    // PREFIX down (orchestrator for person-lookup, approve.ts for
+    // signers/upload). Here we drive the hub via `delegateToImpl` with an
+    // explicit `rootTracePrefix` so the parent's `makeCtx` carries it and
+    // forwards it to EVERY fan-out child — proving the whole tree (hub +
+    // signers + upload) SHARES the prefix while each composes its OWN tail.
+    const ROOT_PREFIX = "ou-090553";
     await delegateToImpl({
       parentRunId: "operation-root-run",
       trackerDir,
@@ -127,7 +129,7 @@ describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(
       itemId: "sess-abc",
       runId: "ocr-hub-run-1a57",
       fireAndForget: false,
-      rootTraceId: ROOT_ID,
+      rootTracePrefix: ROOT_PREFIX,
     });
 
     const hubLines = readWorkflowLines(trackerDir, "scen-ocr-hub-like");
@@ -140,8 +142,10 @@ describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(
 
     const hubRunId = "ocr-hub-run-1a57";
     expect(hubLines.every((l) => l.runId === hubRunId)).toBe(true);
-    // The hub displays the operation's ROOT id (inherited verbatim).
-    expect((hubPending?.data as { __traceId?: string }).__traceId).toBe("ou-090553-1a57");
+    // The hub composes its OWN span id off the shared prefix + its own runId4.
+    const hubTrace = (hubPending?.data as { __traceId?: string }).__traceId;
+    expect(hubTrace).toBe(`${ROOT_PREFIX}-${runIdFragment(hubRunId)}`);
+    expect(tracePrefix(hubTrace!)).toBe(ROOT_PREFIX);
 
     // Signer children: batch members parented to the OCR run.
     const sigLines = readWorkflowLines(trackerDir, "scen-sig-like");
@@ -166,29 +170,50 @@ describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(
     expect(uploadPending?.id).toBe("sess-abc");
     expect(uploadLines.find((l) => l.status === "done")).toBeDefined();
 
-    // ── Root trace-id propagation (unmasked) ────────────────────────────────
-    // Every fan-out child (signers + upload) must DISPLAY the SAME root trace id
-    // as the OCR-like parent — one operation, one id — while keeping its own
-    // runId/itemId. The literal root id is `ou-090553-1a57` (the oath operation's
-    // branded id), threaded transitively from the operation root through the hub.
-    const ROOT_TRACE = "ou-090553-1a57";
-    expect((hubPending?.data as { __traceId?: string }).__traceId).toBe(ROOT_TRACE);
+    // ── Root trace-id propagation (trace/span model) ────────────────────────
+    // Every fan-out child (signers + upload) SHARES the operation prefix
+    // `ou-090553` with the OCR-like parent — one visible operation — while each
+    // composes its OWN runId4 tail (individually greppable). The prefix is
+    // threaded transitively from the operation root through the hub.
+    expect(tracePrefix(hubTrace!)).toBe(ROOT_PREFIX);
 
-    // Every signer (oath-signature-like) child row shows the EXACT root id.
+    // Each signer row composes `<prefix>-<ownRunId4>`: shares the prefix, tail
+    // matches its OWN runId, and is distinct from the parent's full id.
     for (const l of sigLines) {
       const id = (l.data as { __traceId?: string })?.__traceId;
-      if (id) expect(id).toBe(ROOT_TRACE);
+      if (id) {
+        expect(tracePrefix(id)).toBe(ROOT_PREFIX);
+        expect(id).toBe(`${ROOT_PREFIX}-${runIdFragment(l.runId!)}`);
+        expect(id).not.toBe(hubTrace);
+      }
     }
-    // The upload (oath-upload-like) child rows show the EXACT root id too.
+    // The upload child rows do the same.
     for (const l of uploadLines) {
       const id = (l.data as { __traceId?: string })?.__traceId;
-      if (id) expect(id).toBe(ROOT_TRACE);
+      if (id) {
+        expect(tracePrefix(id)).toBe(ROOT_PREFIX);
+        expect(id).toBe(`${ROOT_PREFIX}-${runIdFragment(l.runId!)}`);
+        expect(id).not.toBe(hubTrace);
+      }
     }
-    // The signer pending rows definitely carry it (not just "if present").
+    // The signer pending rows definitely carry the composed id (not just "if present").
     for (const p of sigPendings) {
-      expect((p.data as { __traceId?: string }).__traceId).toBe(ROOT_TRACE);
+      const id = (p.data as { __traceId?: string }).__traceId;
+      expect(tracePrefix(id!)).toBe(ROOT_PREFIX);
+      expect(id).toBe(`${ROOT_PREFIX}-${runIdFragment(p.runId!)}`);
     }
-    expect((uploadPending?.data as { __traceId?: string }).__traceId).toBe(ROOT_TRACE);
+    const uploadTrace = (uploadPending?.data as { __traceId?: string }).__traceId;
+    expect(tracePrefix(uploadTrace!)).toBe(ROOT_PREFIX);
+    expect(uploadTrace).toBe(`${ROOT_PREFIX}-${runIdFragment(uploadPending!.runId!)}`);
+
+    // Distinct tails: every fan-out child's full id differs from the others and
+    // from the parent — shared prefix, individually greppable.
+    const allChildIds = [
+      ...sigPendings.map((p) => (p.data as { __traceId?: string }).__traceId!),
+      uploadTrace!,
+    ];
+    expect(new Set(allChildIds).size).toBe(allChildIds.length);
+    expect(allChildIds.every((id) => id !== hubTrace)).toBe(true);
 
     // And each child still keeps its OWN runId (distinct from the parent's).
     expect(sigPendings.every((p) => p.runId && p.runId !== hubRunId)).toBe(true);

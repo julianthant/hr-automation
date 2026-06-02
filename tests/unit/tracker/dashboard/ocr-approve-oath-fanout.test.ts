@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOcrApproveHandler } from "../../../../src/tracker/dashboard/ocr/approve.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
+import { tracePrefix } from "../../../../src/domain/queue-trace-id.js";
 
 function todayLocal(): string {
   const d = new Date();
@@ -57,12 +58,12 @@ function seedOathOcrRow(dir: string, sessionId: string, runId: string, traceId?:
   );
 }
 
-function readRootTraceId(input: unknown): string | undefined {
+function readRootTracePrefix(input: unknown): string | undefined {
   if (!input || typeof input !== "object") return undefined;
   const ro = (input as Record<string, unknown>).__runtimeOptions;
   if (!ro || typeof ro !== "object") return undefined;
-  const id = (ro as Record<string, unknown>).rootTraceId;
-  return typeof id === "string" ? id : undefined;
+  const prefix = (ro as Record<string, unknown>).rootTracePrefix;
+  return typeof prefix === "string" ? prefix : undefined;
 }
 
 test("oath approve fans out BOTH targets: oath-signature signers + one oath-upload ticket", async () => {
@@ -176,16 +177,17 @@ test("oath approve: selected-but-EID-less records are NOT enqueued and NOT waite
   }
 });
 
-test("oath approve stamps the OCR root's frozen trace id as rootTraceId on BOTH fan-out targets", async () => {
-  // Root trace-id propagation (DISPLAY-only): the OCR root row carries the
-  // operation's `ou-…` id (branded via the oath form spec's traceCode). The
-  // approve fan-out runs OUTSIDE any kernel ctx, so it reads that id back off
-  // the OCR row (findFrozenTraceId) and stamps it as `rootTraceId` on every
-  // enqueued child's `__runtimeOptions` — the daemon worker then DISPLAYS the
-  // OCR root's id on the signer rows + the oath-upload ticket.
+test("oath approve stamps the OCR root's trace PREFIX as rootTracePrefix on BOTH fan-out targets", async () => {
+  // Root trace-id propagation (DISPLAY-only, trace/span model): the OCR root row
+  // carries the operation's `ou-…` id (branded via the oath form spec's
+  // traceCode). The approve fan-out runs OUTSIDE any kernel ctx, so it reads
+  // that id back off the OCR row (findFrozenTraceId) and stamps its PREFIX as
+  // `rootTracePrefix` on every enqueued child's `__runtimeOptions` — the daemon
+  // worker then COMPOSES `<prefix>-<ownRunId4>` on the signer rows + ticket.
   const dir = mkdtempSync(join(tmpdir(), "approve-oath-roottrace-"));
   try {
     const ROOT_ID = "ou-090553-1a57";
+    const ROOT_PREFIX = tracePrefix(ROOT_ID); // "ou-090553"
     seedOathOcrRow(dir, "sess-rt", "ocr-run-rt", ROOT_ID);
 
     const calls: Array<{ workflow: string; inputs: unknown[] }> = [];
@@ -214,12 +216,12 @@ test("oath approve stamps the OCR root's frozen trace id as rootTraceId on BOTH 
     assert.ok(sigCall, "oath-signature enqueued");
     assert.ok(uploadCall, "oath-upload enqueued");
 
-    // Every per-record signer input carries the OCR root's id.
+    // Every per-record signer input carries the OCR root's PREFIX.
     for (const inp of sigCall!.inputs) {
-      assert.equal(readRootTraceId(inp), ROOT_ID, "signer input stamps the OCR root id");
+      assert.equal(readRootTracePrefix(inp), ROOT_PREFIX, "signer input stamps the OCR root prefix");
     }
     // The once-per-document oath-upload ticket input carries it too.
-    assert.equal(readRootTraceId(uploadCall!.inputs[0]), ROOT_ID, "oath-upload input stamps the OCR root id");
+    assert.equal(readRootTracePrefix(uploadCall!.inputs[0]), ROOT_PREFIX, "oath-upload input stamps the OCR root prefix");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

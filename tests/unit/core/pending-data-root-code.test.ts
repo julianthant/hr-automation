@@ -89,23 +89,45 @@ test("buildPendingTrackerData reuses a pre-frozen traceId verbatim instead of re
   assert.equal(data.__traceId, frozen);
 });
 
-test("buildPendingTrackerData stamps an inherited ROOT trace id verbatim, ignoring rootCode + runId compute", () => {
-  // Root trace-id propagation: a delegated child of an oath operation inherits
-  // the OCR root's full `ou-...` id. The `traceId` opt (fed `rootTraceId` by
-  // delegate.ts) must win over BOTH the child's runId/at compute AND any
-  // rootCode — every descendant shows the one root id, not a per-child recompute.
-  const rootId = "ou-090553-1a57";
+test("buildPendingTrackerData COMPOSES <rootTracePrefix>-<ownRunId4> for a delegated child (trace/span model)", () => {
+  // Root trace-id propagation (trace/span model): a delegated child of an oath
+  // operation inherits the OCR root's PREFIX `ou-090553`. The `rootTracePrefix`
+  // opt (fed by delegate.ts) must drive a COMPOSE — the child shares the
+  // operation prefix but keeps its OWN runId4 tail, winning over the child's
+  // code/at compute and any rootCode.
   const data = buildPendingTrackerData({
     workflow: childWorkflow,
     input: { emplId: "10000050" },
     parentRunId: "ocr-root-run",
     useInitialTrackerSeed: true,
     nameIdStamp: "always-on-seed",
-    runId: "zzzz-9999-0000", // would compute `pl-...-zzzz` if the compute ran
+    runId: "9d10-9999-0000", // its OWN tail = 9d10
     rootCode: "os", // would prefix `os-...` if rootCode won
     at: FIXED_AT,
-    traceId: rootId,
+    rootTracePrefix: "ou-090553",
   });
 
-  assert.equal(data.__traceId, rootId);
+  // Shares the operation prefix, keeps its own greppable tail.
+  assert.equal(data.__traceId, "ou-090553-9d10");
+});
+
+test("buildPendingTrackerData: a verbatim traceId (re-emit) wins over rootTracePrefix compose", () => {
+  // Frozen-once: a daemon worker re-emit passes the already-frozen full id via
+  // `traceId` — it must win outright, even if a `rootTracePrefix` is also in
+  // scope (the row's id was already composed once at its first emit).
+  const frozen = "ou-090553-9d10";
+  const data = buildPendingTrackerData({
+    workflow: childWorkflow,
+    input: { emplId: "10000050" },
+    parentRunId: "ocr-root-run",
+    useInitialTrackerSeed: true,
+    nameIdStamp: "always-on-seed",
+    runId: "ffff-1234-5678", // would compose a DIFFERENT tail if the compose ran
+    rootCode: "os",
+    at: FIXED_AT,
+    rootTracePrefix: "ou-090553",
+    traceId: frozen,
+  });
+
+  assert.equal(data.__traceId, frozen);
 });

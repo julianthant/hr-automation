@@ -9,6 +9,7 @@ import { clear } from '../../../../src/core/kernel/registry.js'
 import { buildShutdownTrackerData } from '../../../../src/core/daemon/shutdown.js'
 import { buildHttpPendingData } from '../../../../src/core/daemon/enqueue-dispatch.js'
 import { emitTrackerRow } from '../../../../src/tracker/jsonl.js'
+import { runIdFragment, tracePrefix } from '../../../../src/domain/queue-trace-id.js'
 
 // buildShutdownTrackerData rebuilds the cancelled/shutdown row's `data` from
 // `input`. That re-derives name/EID/archetype/queueRowKind, but it CANNOT
@@ -63,17 +64,19 @@ test('buildShutdownTrackerData carries the frozen __traceId forward from the pen
   )
 })
 
-test('a cancelled child inherits the ROOT trace id (root trace-id propagation, not a recompute)', (t) => {
+test('a cancelled child keeps its composed span trace id (root trace-id propagation, not a recompute)', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'shutdown-roottrace-'))
   t.onTestFinished(() => rmSync(dir, { recursive: true, force: true }))
   const wf = makeWf()
   const runId = 'ccccdddd-1111-2222-3333-444455556666'
   const input = { id: 'E54321' }
 
-  // A delegated child whose pending row was stamped with the OCR ROOT's id
-  // (`ou-...`) via root trace-id propagation — distinct from this workflow's
-  // own "st" code, so a recompute would be detectable.
-  const ROOT_ID = 'ou-090553-1a57'
+  // A delegated child whose pending row was stamped with a COMPOSED span id —
+  // the OCR root's prefix `ou-090553` + this child's OWN runId4 tail (`cccc`)
+  // via root trace-id propagation. `preserveFrozenTraceId` must copy that exact
+  // composed id forward (NOT regenerate an `st-`-prefixed one off this
+  // workflow's own code), so the prefix stays detectable.
+  const SPAN_ID = `ou-090553-${runIdFragment(runId)}`
   emitTrackerRow(
     {
       workflow: wf.config.name,
@@ -82,7 +85,7 @@ test('a cancelled child inherits the ROOT trace id (root trace-id propagation, n
       runId,
       parentRunId: 'ocr-root-run',
       status: 'pending',
-      data: { archetype: 'single', queueRowKind: 'person', __traceId: ROOT_ID },
+      data: { archetype: 'single', queueRowKind: 'person', __traceId: SPAN_ID },
     },
     dir,
   )
@@ -90,9 +93,10 @@ test('a cancelled child inherits the ROOT trace id (root trace-id propagation, n
   const cancelledData = buildShutdownTrackerData(wf, input, 'ocr-root-run', { runId, trackerDir: dir })
   assert.equal(
     cancelledData.__traceId,
-    ROOT_ID,
-    'cancelled child must keep the ROOT id, not regenerate an st-prefixed one',
+    SPAN_ID,
+    'cancelled child must keep its composed span id (shared prefix + own tail), not regenerate an st-prefixed one',
   )
+  assert.equal(tracePrefix(cancelledData.__traceId as string), 'ou-090553')
 })
 
 test('buildShutdownTrackerData omits __traceId (no throw) when no prior row exists', (t) => {
