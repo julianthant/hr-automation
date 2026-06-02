@@ -1,6 +1,6 @@
 # HR Automation
 
-UCPath HR automation for UCSD: Playwright-driven onboarding, separations, EID lookups, work-study updates, UKG report downloads, oath workflows, OCR review, and emergency contact fills.
+UCPath HR automation for UCSD: Playwright-driven onboarding, separations, Person Lookup, work-study updates, UKG report downloads, oath workflows, OCR review, and emergency contact fills.
 
 ## Before You Start
 
@@ -90,6 +90,8 @@ Duo MFA is manual — the automation pauses and polls until you approve on your 
 `npm run dashboard` starts SSE backend (`:3838`) + Vite frontend (`:5173`). Workflow starts are centralized here: upload runs use `RunModal` / `RUN_MODAL_REGISTRY`, and typed input runs use `InputRunPanel` / `INPUT_RUN_REGISTRY`.
 
 Workflows emit JSONL to `.tracker/rows/{workflow}-{YYYY-MM-DD}.jsonl` (logs to `.tracker/logs/`, sessions to `.tracker/sessions/`); SSE server streams to React SPA. `.tracker/` is split into typed subdirs — `src/tracker/paths.ts` owns all path construction (see `src/tracker/CLAUDE.md`). All UI metadata (label, steps, detailFields) comes from the server-side kernel registry.
+
+Workflow rail badges are backend-authoritative: React consumes SSE `wfCounts` as-is via `buildWorkflowRailEntryCounts`; do not override the active workflow count from QueuePanel state. Backend `wfCounts` must use the same top-level queue-surface model as the rail, including delegated batch collapse and OCR prep rows that still render in the queue.
 
 **Row lifecycle debug logs:** `.tracker/debug/row-lifecycle-{YYYY-MM-DD}.{jsonl,json}` — regenerated every 60s; full per-row status/surface/cause history. Useful when diagnosing surface mis-classification or stuck retries. See `src/tracker/CLAUDE.md`.
 

@@ -22,7 +22,7 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/ocr/discard` | POST | Body: `{sessionId, reason?}`. Emits `failed` step `discarded`; best-effort unlinks the PDF. | `OcrReviewPane` Discard button |
 | `/api/ocr/reocr-whole-pdf` | POST | Body: `{sessionId}`. Re-runs OCR for every page (clears prior failed pages). | `OcrReviewPane` Re-OCR whole PDF dialog |
 | `/api/ocr/retry-page` | POST | Body: `{sessionId, pageNumber}`. Retries one OCR page in isolation. | `FailedPageCard` Retry button |
-| `/api/ocr/force-research` | POST | Body: `{sessionId, records[]}`. Re-dispatches eid-lookup for a subset of records flagged for forced research. | `OcrReviewPane` Force Research action |
+| `/api/ocr/force-research` | POST | Body: `{sessionId, records[]}`. Re-dispatches Person Lookup for a subset of records flagged for forced research. | `OcrReviewPane` Force Research action |
 | `/api/sharepoint-download/list` | GET | `SharePointDownloadListItem[]` — one row per registered spreadsheet (`{id, label, description?, envVar, configured}`) | `QueuePanel` Download dropdown — populates menu on mount |
 | `/api/sharepoint-download/run` | POST | Body: `{ id }`. Response: `{ok, id, label, path, filename}` or `{ok:false, error}` — launches headed SharePoint download via `buildSharePointRosterDownloadHandler` (in `src/workflows/sharepoint-download/`), saves to `.tracker/sharepoint/` | `QueuePanel` Download dropdown — fired when a menu item is picked |
 | `/api/retry` | POST | Body: `{workflow, id, runId?, date?, parentRunId?}`. Re-enqueues using the entry's persisted `input` field. | `RetryButton` (EntryItem failed rows + LogPanel header) via `useWorkflowActionDispatcher` |
@@ -30,13 +30,12 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/cancel-active-bulk` | POST | Body: `{workflow, items:[{id, status, runId?}]}` — `status` must be `pending` or `running`; bulk cancel queued + cooperative cancel running. | `StopAllButton` |
 | `/api/delete-bulk` | POST | Body: `{workflow, date, ids?[], items?:[{workflowId?, id, runId?, date?}], source?, scope?}` — delete many tracker rows + scoped screenshots. Batch footer sends `source:"batch-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `DeleteAllButton`, `BatchFooterActions` via `useWorkflowActionDispatcher` |
 | `/api/run-with-data` | POST | Body: `{workflow, id, data}`. Re-enqueues with `prefilledData` channel; kernel merges into ctx.data + workflow's extraction gate skips. | `EditDataTab` |
-| `/api/cancel-queued` | POST | Body: `{workflow, id, runId?, scope?, ocrSessionId?, parentRunId?, parentWorkflow?, parentItemId?, formType?, reason?}`. Normal queued rows cancel the SQLite task/attempt, write completed `worker_commands.cancel_task`, emit JSONL audit + tracker `failed` with `step:"cancelled"`, and return 409 if claimed. OCR prep rows set `ocrSessionId` and route through central action dispatch to OCR discard instead. | `QueueItemControls` via `useWorkflowActionDispatcher` |
-| `/api/cancel-running` | POST | Body: `{workflow, id, runId}`. Queues `worker_commands.cancel_task` for the owning worker; cooperative cancel happens at the next kernel step boundary. | `CancelRunningButton` |
-| `/api/task/force-stop` | POST | Body: `{workflow, id, runId?, scope?, ocrSessionId?, parentRunId?, parentWorkflow?, parentItemId?, formType?, reason?}`. Normal running rows write `force_stop_task` plus scoped `kill_browser` commands for browser rows attached to that task. OCR prep rows set `ocrSessionId` and route through central action dispatch to OCR discard instead. | `CancelRunningButton` via `useWorkflowActionDispatcher` |
-| `/api/browser/kill` | POST | Body: `{browserProcessId}` or `{pid}`. Kills only the recorded browser process row and records a `kill_browser` command. | _no React consumer today_ — prefer `/api/task/force-stop` from queue controls |
+| `/api/cancel-queued` | POST | Body: `{workflow, id, runId?, scope?, ocrSessionId?, parentRunId?, parentWorkflow?, parentItemId?, formType?, reason?}`. Normal queued rows cancel the SQLite task/attempt, write completed `worker_commands.cancel_task`, emit JSONL audit + tracker `failed` with `step:"cancelled"`, and return 409 if claimed. OCR prep rows set `ocrSessionId` and route through central action dispatch to OCR discard instead. | `RowCancelButton` via `useWorkflowActionDispatcher` |
+| `/api/cancel-running` | POST | Body: `{workflow, id, runId}`. Queues `worker_commands.cancel_task` for the owning worker; cooperative cancel happens at the next kernel step boundary. | `RowCancelButton` via `useWorkflowActionDispatcher` |
+| `/api/browser/kill` | POST | Body: `{browserProcessId}` or `{pid}`. Kills only the recorded browser process row and records a `kill_browser` command. | _no React consumer today_ — prefer row cancel or daemon stop controls |
 | `/api/worker/drain` | POST | Body: `{workerId}`. Queues `drain_worker`; worker stops after the current item without failing queued work. | _no React consumer today_ |
 | `/api/worker/stop` | POST | Body: `{workerId}`. Queues `stop_worker`; worker shuts down and hard-kills its active browser only on this explicit stop path. | _no React consumer today_ |
-| `/api/queue/bump` | POST | Body: `{workflow, id, runId?}`. Bumps a queued SQLite task priority so it is claimed next; legacy JSONL rewrite only applies when no task row exists. 409 if claimed. | `QueueItemControls` |
+| `/api/queue/bump` | POST | Body: `{workflow, id, runId?}`. Bumps a queued SQLite task priority so it is claimed next; legacy JSONL rewrite only applies when no task row exists. 409 if claimed. | `BumpButton` via `useWorkflowActionDispatcher` |
 | `/api/queue-depth` | GET | `{workflow: depth}` map (count of queued SQLite tasks per workflow, legacy JSONL fallback when no task rows exist). | `useQueueDepth` → `TopBar` queue-depth pill |
 | `/api/daemons` | GET | `DaemonInfo[]` — SQLite workers plus lockfile fallback, heartbeat age, current item/run, and scoped browser processes. | `useDaemons` → `WorkflowBox` / `StopPill` context |
 | `/api/daemons/spawn` | POST | Body: `{workflow, count?}`. Fire-and-forget spawn. | _no React consumer today_ |
@@ -75,14 +74,15 @@ interface LogEntry {
 ## JSONL Files (`.tracker/`)
 
 ```
-.tracker/{workflow}-{YYYY-MM-DD}.jsonl       ← TrackerEntry lines
-.tracker/{workflow}-{YYYY-MM-DD}-logs.jsonl  ← LogEntry lines
+.tracker/rows/{workflow}-{YYYY-MM-DD}.jsonl  ← TrackerEntry lines
+.tracker/logs/{workflow}-{YYYY-MM-DD}.jsonl  ← LogEntry lines
+.tracker/sessions/{YYYY-MM-DD}.jsonl         ← SessionEvent lines
 ```
 
 - Append-only. One line per event.
 - Multiple entries per ID (status changes emit new lines).
 - Frontend dedupes by ID (keeps latest entry per ID).
-- **Tracker JSONL** older than **30 days** (by filename date) is pruned on dashboard startup and throttled on each `GET /api/preflight` (same threshold). **Screenshots are not pruned** on that cadence — use **`npm run clean:tracker`** (default **7** days, optional `--screenshots-only`) or a future lifecycle hook.
+- **Tracker JSONL** older than **30 days** (by filename date) is pruned on dashboard startup and throttled on each `GET /api/preflight` (same threshold). Screenshot cleanup is lifecycle-tied through `sweepStaleRunScreenshots` on dashboard startup and interval; `npm run clean:tracker` remains the manual cleanup path (default **7** days, optional `--screenshots-only`).
 
 ## How Frontend Processes Data
 
@@ -125,8 +125,7 @@ Current consumption:
 |----------|-----------|-----------|-------------|-------|---------------|
 | `onboarding` | `single` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
 | `separations` | `delegating` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, EID, Doc ID |
-| `eid-lookup` | `utility` | search name | `data.name` | ucpath-auth → searching (→ crm-auth → cross-verification) | (no declared detailFields — see workflow CLAUDE.md) |
-| `active-check` | `single` | name or EID | `data.name` | ucpath-auth → check | Name, EID, Status |
+| `person-lookup` | `single` | name or EID | `data.searchName` | auth:ucpath → auth:crm → searching → cross-verification → active-status | Search, EID, Dept, HR Status, Start Date, End Date |
 | `old-kronos-reports` | `single` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
 | `work-study` | `single` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
 | `emergency-contact` | `batch` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
@@ -135,12 +134,15 @@ Current consumption:
 | `ocr` | `delegating-batch` | session ID | (PDF filename) | upload → ocr → matching → disambiguating → awaiting-approval → approved/discarded | PDF, Form type, Pages, Records |
 | `crm-doc-download` | `delegating` | email or doc ID | `data.name` | crm-auth → download | Employee, Email, Doc URL |
 | `sharepoint-download` | `single` | URL or label | (file label) | login → download | Label, Output path |
+| `i9-lookup` | `single` | person name | `data.signerName` | auth:i9 → lookup | Signed By, I-9 Status |
+
+`person-lookup` and delegated-only `i9-lookup` are registered under the dashboard category `Utils`. For Person Lookup date fields, display `data.startDate` as **Start Date** (UCPath Last Hire / first day of service); keep assignment `effectiveDate` / EFFDT as backend matching context, not the operator-facing start date.
 
 ## Hook → Component Mapping
 
 | Hook | Component | What it does |
 |------|-----------|-------------|
-| `useEntries(workflow, date)` | `App.tsx` → `QueuePanel` | `sseHub.subscribe("entries", { workflow, date? })` — multiplexed `/events/hub`; dedupes, sorts newest-first; receives `wfCounts` / `failureCounts` |
+| `useEntries(workflow, date)` | `App.tsx` → `QueuePanel` | `sseHub.subscribe("entries", { workflow, date? })` — multiplexed `/events/hub`; dedupes, sorts newest-first; receives backend-authoritative `wfCounts` / `failureCounts` |
 | `useLogs(...)` | `LogPanel` → `LogStream` | `useSseHistoryStream("logs", …)` — hub topic `logs`, full history on first tick + deltas; collapses consecutive duplicates |
 | `useRunEvents(...)` | `LogPanel` → `LogStream` (Events tab) | `useSseHistoryStream("runEvents", …)` — same delta semantics as logs |
 | `useSessions()` | `TerminalDrawer` | `sseHub.subscribe("sessions", {})` — live `SessionState` for workflow cards |

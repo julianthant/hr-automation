@@ -30,8 +30,8 @@ exactly two, split by *what they describe*:
 
 | Keeper name | What it records | In the code today |
 |---|---|---|
-| **run log** | The steps of **one run** — what the automation did for one subject, line by line. | `logs`, `LogEntry`, `*-logs.jsonl`, `logs` table |
-| **session log** | The **machinery** — browser open/close, login, screenshots, the daemon starting and stopping. Not tied to one subject. | `session events`, `SessionEvent`, `sessions-*.jsonl`, `session_events` table |
+| **run log** | The steps of **one run** — what the automation did for one subject, line by line. | `logs`, `LogEntry`, `.tracker/logs/{workflow}-{date}.jsonl`, `logs` table |
+| **session log** | The **machinery** — browser open/close, login, screenshots, the daemon starting and stopping. Not tied to one subject. | `session events`, `SessionEvent`, `.tracker/sessions/{date}.jsonl`, `session_events` table |
 
 Both are written the same way and stored the same way (below). They differ only
 in scope: **run log = one run**, **session log = the machine**.
