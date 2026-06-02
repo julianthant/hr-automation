@@ -206,7 +206,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
           isBatch: false,
           runId,
           ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
-          ...(runtimeOptions?.rootTraceId ? { rootTraceId: runtimeOptions.rootTraceId } : {}),
+          ...(runtimeOptions?.rootTracePrefix ? { rootTracePrefix: runtimeOptions.rootTracePrefix } : {}),
           itemId: String(itemId),
           trackerDir: opts.trackerDir,
           emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),
@@ -265,20 +265,22 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     )
     if (opts.preAssignedRunId) {
       // Resolution order (frozen-once invariant): a same-run re-emit reuses the
-      // already-frozen id; otherwise an inherited ROOT trace id (`rootTraceId`,
-      // carried transitively on `__runtimeOptions` for trace-id propagation)
-      // wins verbatim; otherwise compute a fresh id off this run's code+runId.
+      // already-frozen id; otherwise COMPOSE this row's id — when an inherited
+      // ROOT trace PREFIX (`rootTracePrefix`, carried transitively on
+      // `__runtimeOptions` for trace/span propagation) is present, build
+      // `<prefix>-<ownRunId4>`; otherwise compute a fresh
+      // `<code>-<HHMMSS>-<runId4>` off this run's code.
       seedData.__traceId =
         findFrozenTraceId({
           workflow: wf.config.name,
           runId: opts.preAssignedRunId,
           ...(opts.trackerDir ? { trackerDir: opts.trackerDir } : {}),
         }) ??
-        runtimeOptions?.rootTraceId ??
         buildTraceId({
           code: runtimeOptions?.rootCode ?? wf.code,
           runId: opts.preAssignedRunId,
           at: new Date(),
+          ...(runtimeOptions?.rootTracePrefix ? { rootPrefix: runtimeOptions.rootTracePrefix } : {}),
         })
     }
     const rowArchetype = deriveRowArchetype(
