@@ -308,6 +308,118 @@ export const RELATIONSHIP_OPTIONS: string[] = [
   "Other",
 ];
 
+// ─── Verify types (mixed oath + emergency-contact completeness report) ──
+
+export interface VerifyCheck {
+  /** "name" | "eid" | "employmentDate" | "oathDate" | "officialSigner" | "activeStatus" */
+  key: string;
+  label: string;
+  /** Present on the scanned form. */
+  onPaper: boolean;
+  paperValue: string | null;
+  /** Looked-up value (CRM / UCPath / i9). */
+  foundValue: string | null;
+  source: "paper" | "crm" | "ucpath" | "i9" | null;
+  /** present=on paper; found=blank but looked up; missing=blank+not found. */
+  status: "present" | "found" | "missing";
+}
+
+export interface VerifyPreviewRecord {
+  formKind: "oath" | "emergency-contact" | "unknown";
+  sourcePage: number;
+  printedName?: string | null;
+  /** Resolved EID. */
+  employeeId: string;
+  /** Resolved name (falls back to printedName). */
+  name: string;
+  paperEmploymentDate?: string | null;
+  paperDateSigned?: string | null;
+  employeeSigned?: boolean | null;
+  officerSigned?: boolean | null;
+  paperOfficialName?: string | null;
+  activeStatus?: string;
+  /** CRM First Day of Service. */
+  employmentDate?: string;
+  /** CRM Date Signed. */
+  oathDate?: string;
+  /** I-9 Section 2 signer. */
+  officialSigner?: string;
+  matchState: MatchState;
+  selected: boolean;
+  warnings: string[];
+  originallyMissing?: string[];
+  documentType?: "expected" | "unknown";
+  checks: VerifyCheck[];
+}
+
+export interface VerifyPrepareRowData {
+  mode: "prepare";
+  pdfPath: string;
+  pdfOriginalName: string;
+  pdfFileId?: string;
+  rosterMode: "download" | "existing";
+  rosterPath: string;
+  pageImagesDir?: string;
+  records: VerifyPreviewRecord[];
+  ocrProvider?: string;
+  ocrAttempts?: number;
+  ocrCached?: boolean;
+  failedPages?: FailedPage[];
+  emptyPages?: number[];
+  pageStatusSummary?: PageStatusSummary;
+}
+
+export function parseVerifyPrepareRowData(
+  rawData: Record<string, string> | undefined,
+): VerifyPrepareRowData | null {
+  if (!rawData) return null;
+  if (rawData.mode !== "prepare") return null;
+  let records: VerifyPreviewRecord[] = [];
+  try {
+    const parsed = JSON.parse(rawData.records ?? "[]");
+    if (Array.isArray(parsed)) records = parsed as VerifyPreviewRecord[];
+  } catch {
+    return null;
+  }
+  let failedPages: FailedPage[] | undefined;
+  try {
+    if (typeof rawData.failedPages === "string") {
+      const parsed = JSON.parse(rawData.failedPages);
+      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
+    }
+  } catch { /* tolerate */ }
+  let pageStatusSummary: PageStatusSummary | undefined;
+  try {
+    if (typeof rawData.pageStatusSummary === "string") {
+      const parsed = JSON.parse(rawData.pageStatusSummary);
+      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
+    }
+  } catch { /* tolerate */ }
+  let emptyPages: number[] | undefined;
+  try {
+    if (typeof rawData.emptyPages === "string") {
+      const parsed = JSON.parse(rawData.emptyPages);
+      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
+    }
+  } catch { /* tolerate — pre-feature row */ }
+  return {
+    mode: "prepare",
+    pdfPath: rawData.pdfPath ?? "",
+    pdfOriginalName: rawData.pdfOriginalName ?? "",
+    pdfFileId: rawData.pdfFileId || undefined,
+    rosterMode: rawData.rosterMode === "download" ? "download" : "existing",
+    rosterPath: rawData.rosterPath ?? "",
+    pageImagesDir: rawData.pageImagesDir || undefined,
+    records,
+    ocrProvider: rawData.ocrProvider,
+    ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
+    ocrCached: rawData.ocrCached === "true",
+    failedPages,
+    emptyPages,
+    pageStatusSummary,
+  };
+}
+
 // ─── Oath-signature types (was oath-preview-types.ts) ──────────────
 
 export type OathMatchState =
