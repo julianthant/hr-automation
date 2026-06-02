@@ -151,6 +151,41 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
    * the oath form spec only. DISPLAY-only — does not change the execution graph.
    */
   traceCode?: string;
+
+  /**
+   * Optional post-match enrichment hook. Called ONCE by the orchestrator after
+   * the match / disambiguation / lookup phases and before the awaiting-approval
+   * snapshot. Lets a form do bespoke cross-system enrichment that the generic
+   * roster/eid-lookup pipeline does not cover — e.g. the `verify` form delegates
+   * each person to `person-lookup` (CRM employment + oath dates, active status)
+   * and oath records with a blank authorized-official signature to `i9-lookup`,
+   * then patches the found values onto each record so the preview shows a
+   * completeness report. Returns the enriched records (same length + order).
+   *
+   * Forms that need no extra enrichment omit this — the orchestrator skips the
+   * phase entirely. Implementations delegate via the kernel's `delegateToAllImpl`
+   * + `watchChildRuns` (mirror `force-research.ts`), using `runId` as the child
+   * `parentRunId` and `rootTracePrefix` for trace propagation. The hook is
+   * awaited, so the OCR row stays `running` until enrichment completes — verify
+   * blocks here on purpose (the report needs the looked-up data before review).
+   */
+  enrichRecords?(input: {
+    records: TPreview[];
+    /** The OCR run id — use as the `parentRunId` for any delegated children. */
+    runId: string;
+    /** OCR session id (stable business key, e.g. for child `taskGroupId`). */
+    sessionId: string;
+    /** Tracker dir override (undefined → default `.tracker`). */
+    trackerDir: string | undefined;
+    /** Local date partition for child-run watching. */
+    date: string;
+    /** Parent subject to re-stamp on child pending rows, when known. */
+    parentSubject: string | undefined;
+    /** Root trace PREFIX (`<code>-<HHMMSS>`) for child trace propagation. */
+    rootTracePrefix: string;
+    /** Emit a progress snapshot mid-enrichment (re-renders the Preview tab). */
+    emitProgress: (records: TPreview[]) => void;
+  }): Promise<TPreview[]>;
 }
 
 /** Convenience union — used by callers that don't care about generics. */
