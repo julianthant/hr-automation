@@ -50,7 +50,10 @@ export function DelegationRow({
       members={delegatedEntries}
       countTone="warning"
       footerRunOrdinal={parent.runOrdinal}
-      footerSecondaryId={projection?.subtitle ?? (parent.data?.__name || parent.id)}
+      // Subtitle is the kind-resolved trace id (file kind → trace id). Never
+      // fall back to `data.__name` — for OCR that leaks the literal workflow
+      // label "OCR" into the slot. A stale, pre-trace-id row simply shows no id.
+      footerSecondaryId={projection?.subtitle}
       firstTimestamp={parent.timestamp}
       elapsedEntries={[parent, ...delegatedEntries]}
       isFocused={isBatchQueueFocused}
