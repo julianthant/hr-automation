@@ -30,6 +30,13 @@ Whole-PDF path is Gemini-only. Per-page path uses configured keys for Gemini, Mi
 
 Use `__setCacheDirForTests` and `__setProviderForTests` to isolate cache paths and stub providers. Reset both after each test.
 
+## Form Specs
+
+`forms/` holds one `OcrFormSpec` per form type, all registered in `forms/registry.ts` `FORM_SPECS` (oath, emergency-contact, verify). Specs own the prompt, record schemas, `matchRecord`, `needsLookup`, carry-forward, and the optional approve targets / `enrichRecords` hook.
+
+- **`oath` / `emergency-contact`** — write paths: `rosterMode:"required"`, declare `approveTo` (and oath also `approveDocumentTo`), fan out downstream daemon rows on approve.
+- **`verify`** — read-only completeness report for a MIXED oath+EC PDF: `rosterMode:"optional"`, `needsLookup → null`, NO approve targets. All enrichment lives in its `enrichRecords` hook (delegates to person-lookup for EID/active/CRM dates and i9-lookup for the I-9 signer; mirrors `src/workflows/ocr/force-research.ts`). Pure helpers `buildVerifyChecks` / `applyPersonLookupToVerifyRecord` / `applyI9ToVerifyRecord` are unit-tested; the live fan-out is not. Full contract + the orchestrator hooks it relies on: `src/workflows/ocr/CLAUDE.md` (verify lesson).
+
 ## Lessons Learned
 
 - **2026-05-19: Oath approve payloads normalize OCR names before daemon enqueue.** Queue rows should show display-case names, while raw OCR records remain in prep payloads for review.
