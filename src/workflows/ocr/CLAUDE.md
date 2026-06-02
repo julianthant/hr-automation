@@ -1,7 +1,7 @@
 # OCR Workflow — `src/workflows/ocr/`
 
 The "prep phase" of any form-based workflow. Operator uploads a PDF → OCR
-runs the per-form Zod-bound LLM extraction → roster match → eid-lookup +
+runs the per-form Zod-bound LLM extraction → roster match → person-lookup +
 verification → preview row in the OCR tab → operator approves/discards/
 reuploads → on approve, writes the terminal OCR row and fans out downstream
 daemon rows.
@@ -41,9 +41,9 @@ archetype.
 | `person-lookup` children | `single` + `parentRunId` plus runtime-policy delegated grouping | Batch surface even for one delegated OCR person |
 | Approved downstream children (`approveTo` / `approveDocumentTo` forms) | natural child shape + `parentRunId` (the OCR run when standalone) | Nested under the OCR card |
 
-## EID lookup dependency mode
+## Person Lookup dependency mode
 
-The first OCR `eid-lookup` fan-out uses SQLite task dependencies. The OCR
+The first OCR `person-lookup` fan-out uses SQLite task dependencies. The OCR
 handler still returns at `awaiting-approval`; the scheduler patches records as
 child lookup runs finish. If dependency setup fails before queue append, OCR
 falls back to the old `watchChildRuns` path. Force-research and whole-PDF
@@ -52,9 +52,10 @@ re-OCR still use `watchChildRuns` during Phase 2.
 Retrying a failed dependency child must keep the original child task id. The
 dashboard retry path uses the failed run id to create a new task attempt, then
 reopens the corresponding `ocr-eid-lookup` / `ocr-active-check` dependency to
-`pending`. That keeps the OCR preview blocked from approval while the retry is
-queued/running and lets the scheduler patch `data.records` when the retry
-finishes.
+`pending`. Those are legacy dependency-kind names, not workflow names; the
+retried child workflow is still `person-lookup`. Keeping the task id stable
+keeps the OCR preview blocked from approval while the retry is queued/running
+and lets the scheduler patch `data.records` when the retry finishes.
 
 ## Adding a new form type
 
@@ -86,7 +87,7 @@ finishes.
 - **Phase logs and parent context are deliberate.** `runOcrOrchestrator` emits plain `Phase: <step>` markers, and delegated OCR rows inherit parent context via explicit `parentSubject` while person lookup rows keep their own person/EID title.
 - **Matching flow:** OCR records may carry confidence; high-confidence signed names can skip LLM roster disambiguation, no-candidate lookup suggestions collapse to the longest complete variant, and form specs patch records via `applyDisambiguation` where needed.
 - **Operator discard must clean abort state.** Always clear `clearOcrPrepareAbort(id, runId)` in `finally`; tracker failure writes inside the abort path need their own inner try/catch so they cannot strand the abort flag.
-- **Force research consumes child outcomes.** Apply every `eid-lookup` outcome through `patchOcrRecordFromEidLookupOutcome` before emitting the final awaiting-approval row; use explicit `null` when clearing fields so JSON preserves the keys.
+- **Force research consumes child outcomes.** Apply every `person-lookup` outcome through `patchOcrRecordFromEidLookupOutcome` before emitting the final awaiting-approval row; use explicit `null` when clearing fields so JSON preserves the keys. The helper name is historical.
 - **Latest-row probes use tracker helpers.** Use `findLatestEntryForPredicate` for newest-first OCR row lookup; avoid workflow-local full-file JSONL loops.
 - **Retrying failed lookup dependencies reopens the dependency.** Bulk retry must send `{id, runId}` so the SQLite retry path can reset the matching OCR dependency to `pending`; the approval pane stays disabled until the scheduler patches the retried result back into `data.records`.
 - **Manual-fill and empty-page UX:** The `disambiguating` phase, `data.emptyPages`, empty-page cards, per-page add-row controls, and `employeeId` approval gate are part of the current review model; keep renderer changes aligned with `OcrFormSpec.applyDisambiguation`.
