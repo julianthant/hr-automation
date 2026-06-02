@@ -31,6 +31,16 @@ export const OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   memberRow: {
     titleSource: "person",
   },
+  // Oath Signature is always a batch, whether delegated or not — never a
+  // standalone single row. Signers fan out from an OCR roster/PDF (conceptually
+  // a group of people), so even a single fanned-out signer is a one-member
+  // batch (`alwaysBatchDelegatedMembers`), and a single manual EID input run is
+  // a one-member batch too (`alwaysBatchInputRun`).
+  delegation: {
+    ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation,
+    alwaysBatchDelegatedMembers: true,
+    alwaysBatchInputRun: true,
+  },
 };
 
 const WORKFLOW = "oath-signature";

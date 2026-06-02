@@ -63,6 +63,22 @@ function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
   return entry.runId ?? entry.id;
 }
 
+/**
+ * True when the entry's workflow opts into batching its delegated rows even at
+ * a count of one (`delegation.alwaysBatchDelegatedMembers`). Keeps a single
+ * fanned-out signer / person-lookup result rendering as a one-member batch
+ * instead of collapsing to a standalone single row.
+ */
+function forcesBatchWhenDelegated(
+  entry: TrackerEntry,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): boolean {
+  return (
+    getWorkflowRuntimePolicy(entry.workflow, runtimePolicies).delegation
+      ?.alwaysBatchDelegatedMembers === true
+  );
+}
+
 function rootPersistingParentRunIds(
   entries: TrackerEntry[],
   runtimePolicies?: WorkflowRuntimePolicyLookup,
@@ -197,7 +213,10 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
 
   for (const [parentRunId, members] of membersByParentRunId) {
     if (anchoredParentRunIds.has(parentRunId)) continue;
-    if (members.length === 1) {
+    // A lone delegated child normally renders as a flat single row — unless its
+    // workflow opts into `alwaysBatchDelegatedMembers` (oath-signature,
+    // person-lookup), where even one member stays a one-member batch surface.
+    if (members.length === 1 && !forcesBatchWhenDelegated(members[0]!, input.runtimePolicies)) {
       singleChildEntries.push(members[0]!);
       continue;
     }

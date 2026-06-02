@@ -13,10 +13,15 @@ variant was removed 2026-06-02):
 
 - `{ emplId, name?, date?, dryRun?, parentSubject? }` — one EID, one UCPath transaction.
 
-`archetype` is always `single`; `inputSubject` is always `eid` (→ person row).
-When a signer row is fanned out from an OCR approval it carries `parentRunId`
-(delegated scope) and groups under the OCR run; scope never changes the `single`
-shape. `OathSignerInput` is an alias of `OathSignatureInput`.
+`archetype` is always `single` (one EID, one transaction); `inputSubject` is
+always `eid` (→ person row). **But oath-signature always renders as a batch,
+never a standalone single row** — its runtime policy sets both
+`delegation.alwaysBatchDelegatedMembers` (a lone OCR-fan-out signer is a
+one-member batch) and `delegation.alwaysBatchInputRun` (a single manual EID
+input run is a one-member batch too; `enqueue-dispatch.ts` forces a batch
+`parentRunId` even for one item). The per-row `archetype` stays `single`; the
+*surface* is always a batch. `OathSignerInput` is an alias of
+`OathSignatureInput`.
 
 ## UCPath Rules
 

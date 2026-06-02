@@ -173,7 +173,7 @@ describe("buildQueueSurfaces", () => {
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
-  it("surfaces a single OCR-fan-out person-lookup child as a flat delegation member", () => {
+  it("surfaces a single OCR-fan-out person-lookup child as a one-member batch (alwaysBatchDelegatedMembers)", () => {
     const eid = row({
       workflow: "person-lookup",
       id: "ocr-oath-run-1-r0",
@@ -188,15 +188,20 @@ describe("buildQueueSurfaces", () => {
     });
 
     const surfaces = buildQueueSurfaces({
-      entries: [],
+      entries: [eid],
       delegationSourceEntries: [eid],
-      workflow: "oath-signature",
-      workflowLabel: "Oath Signature",
+      workflow: "person-lookup",
+      workflowLabel: "Person Lookup",
       runtimePolicies,
     });
 
-    assert.equal(surfaces.groupRows.length, 0);
-    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
+    // person-lookup opts into alwaysBatchDelegatedMembers, so a lone delegated
+    // lookup stays a one-member batch surface rather than collapsing to a flat
+    // single row.
+    assert.equal(surfaces.groupRows.length, 1);
+    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
+    assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
   it("builds phase-5 projections with default group actions for separations batches", () => {

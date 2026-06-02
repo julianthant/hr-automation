@@ -73,3 +73,8 @@ Thumbs.db
 
 # claude-mem session artifacts (regenerated each session for Codex context injection)
 AGENTS.md
+
+# Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.
+/test.pdf
+/detect.pdf
+/*.pdf
