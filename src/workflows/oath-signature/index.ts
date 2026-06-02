@@ -1,5 +1,5 @@
 export { OathSignatureInputSchema } from "./schema.js";
-export type { OathSignatureInput } from "./schema.js";
+export type { OathSignatureInput, OathSignerInput } from "./schema.js";
 export { buildOathSignaturePlan } from "./enter.js";
 export type { OathSignatureContext } from "./enter.js";
 export {
@@ -14,6 +14,8 @@ export {
   OathOcrOutputSchema,
   OathPreviewRecordSchema,
   normalizeOathDate,
+  buildOathSignerInputFromApprovedRecord,
+  hasOathSignerInput,
 } from "../../services/ocr/forms/oath.js";
 export type {
   OathRosterOcrRecord,
