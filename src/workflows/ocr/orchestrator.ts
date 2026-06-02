@@ -181,8 +181,13 @@ export async function runOcrOrchestrator(
   // `resolveQueueRowPresentation` returns undefined and the footer subtitle
   // falls back to the literal workflow name ("OCR"). Built once from the
   // run-start clock + runId so it's frozen-identical across every re-emit.
-  // code "oc" = the ocr `defineWorkflow` code; OCR is the root of the prep tree.
-  const traceId = buildTraceId({ code: "oc", runId, at: new Date() });
+  // The trace-id code is the form spec's `traceCode` when set (oath → "ou",
+  // branding the whole operation by its destination), else "oc" (the ocr
+  // `defineWorkflow` code) for standalone OCR + emergency-contact. OCR is the
+  // physical root of the prep tree; root trace-id propagation then carries this
+  // exact id to every fan-out descendant (person-lookups, signer rows,
+  // oath-upload ticket) so they all DISPLAY the same `ou-...` id.
+  const traceId = buildTraceId({ code: spec.traceCode ?? "oc", runId, at: new Date() });
   const baseEmit =
     opts._emitOverride ??
     ((entry: TrackerEntry) => emitTrackerRow(entry as TrackerRowEmission, trackerDir));
@@ -833,6 +838,11 @@ export async function runOcrOrchestrator(
             inputs,
             renderAs: "flat",
             fireAndForget: true,
+            // Root trace-id propagation: the OCR root computed `traceId` above
+            // (`ou-...` for oath, `oc-...` otherwise). Pass it directly so every
+            // person-lookup child DISPLAYS the OCR root's id while keeping its
+            // own runId/itemId.
+            rootTraceId: traceId,
             deriveItemId: deriveChildItemId,
             // The OCR pending row carries pdfFileId / sessionId / parent
             // subject context — re-emit those onto each child pending row
