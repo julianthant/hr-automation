@@ -46,6 +46,26 @@ describe("deriveActiveCheckOutcome", () => {
     assert.equal(outcome.expectedJobEndDate, "06/30/2026");
   });
 
+  it("carries first day of service as startDate without replacing EFFDT", () => {
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10706431" }, [
+      eidResult({
+        effectiveDate: "04/01/2026",
+        startDate: "03/15/2026",
+      }),
+    ]);
+
+    assert.equal(outcome.effdt, "04/01/2026");
+    assert.equal(outcome.startDate, "03/15/2026");
+  });
+
+  it("falls back to EFFDT for startDate when first day of service is unavailable", () => {
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10706431" }, [
+      eidResult({ effectiveDate: "04/01/2026", startDate: "" }),
+    ]);
+
+    assert.equal(outcome.startDate, "04/01/2026");
+  });
+
   it("flags active non-HDH employees without hiding their active state", () => {
     const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10706431" }, [
       eidResult({ department: "QUALCOMM INSTITUTE" }),

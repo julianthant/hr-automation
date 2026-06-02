@@ -45,7 +45,7 @@ Dashboard input runs use daemon mode when the workflow is registered in `src/cor
 - `ctx.session.page(id)` gives the raw authenticated Page.
 - `ctx.isBatch` and `ctx.runId` are available for batch-only cleanup or external correlation.
 - `runWorkerPool` / shared-context pool modes are for in-handler fan-out sharing authenticated sessions, as in Person Lookup's one-Duo-many-tabs pattern.
-- Person Lookup / UCPath date naming: `startDate` is the Last Hire / first day of service shown to operators as "Start Date"; assignment `effectiveDate`/EFFDT is backend matching context. Do not repurpose EFFDT as the dashboard-facing start date.
+- Person Lookup / UCPath date naming: the operator-facing "Start Date" (`data.startDate`) is **CRM First Day of Service**, stamped in cross-verification — NOT a UCPath date. UCPath `EidResult.startDate` (Last Hire) and `effectiveDate`/EFFDT are backend matching context only (ride the row as `ucpathStartDate`/`effdt`). Do not repurpose either UCPath date as the dashboard-facing start date.
 
 Recurring escape hatches should become first-class kernel features.
 

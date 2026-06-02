@@ -23,6 +23,7 @@ import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { WorkflowsProvider, useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
+import { buildWorkflowRailEntryCounts } from "./lib/workflow-rail-counts";
 import {
   resolveEntryName,
   buildDisplayNameMap,
@@ -461,19 +462,15 @@ export function App() {
     [selectedId],
   );
 
-  // Rail badges: other workflows use SSE `wfCounts`; the **active** workflow
-  // uses the same merged + resolved-prep exclusion as the StatPills strip so
-  // the sidebar digit and "ALL" stay lockstep.
-  // Only override the active workflow's count once `entriesKey` confirms the
-  // loaded entries belong to the current workflow — prevents a stale count
-  // flash when switching workflows before the new SSE tick arrives.
-  const entriesMatchWorkflow = entriesKey.startsWith(`${workflow}|`);
   const entryCounts = useMemo(
-    () => ({
-      ...wfCounts,
-      ...(entriesMatchWorkflow ? { [workflow]: queuePanelTopLevelCount } : {}),
-    }),
-    [wfCounts, workflow, queuePanelTopLevelCount, entriesMatchWorkflow],
+    () =>
+      buildWorkflowRailEntryCounts({
+        wfCounts,
+        activeWorkflow: workflow,
+        activeEntriesKey: entriesKey,
+        activeQueuePanelTopLevelCount: queuePanelTopLevelCount,
+      }),
+    [wfCounts, workflow, entriesKey, queuePanelTopLevelCount],
   );
 
   const batchPreviewMembers = useMemo(

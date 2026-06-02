@@ -516,6 +516,7 @@ export class Session {
    */
   static async captureFullPage(page: Page, path: string): Promise<Buffer> {
     let restoreFn: (() => Promise<void>) | null = null
+    let restoreViewport: (() => Promise<void>) | null = null
     try {
       await page.evaluate(() => {
         interface Saved {
@@ -593,10 +594,76 @@ export class Session {
         waitForLoadState?: (state: 'networkidle', options: { timeout: number }) => Promise<void>
       }
       await maybeWaitForLoadState.waitForLoadState?.('networkidle', { timeout: 1_000 }).catch(() => {})
+      // `fullPage: true` expands the document HEIGHT but clamps WIDTH to the
+      // viewport, so wide content (PeopleSoft Person Org assignment grids,
+      // which often need ~1600-2400px) gets clipped on the right when the
+      // browser window is narrow. Widen the viewport to fit the widest content
+      // — measured at the top document AND inside child frames, since the
+      // PeopleSoft grid lives in a fluid-width iframe — then restore it after
+      // the shot. Best-effort + reversible, like the overflow mutation above.
+      restoreViewport = await Session.widenViewportForCapture(page)
       const buf = await page.screenshot({ path, fullPage: true })
       return buf
     } finally {
+      if (restoreViewport) await restoreViewport()
       if (restoreFn) await restoreFn()
+    }
+  }
+
+  /**
+   * Temporarily widen the page viewport so a `fullPage` screenshot captures
+   * horizontally-overflowing content (wide PeopleSoft grids) instead of
+   * clipping it. Returns a restore callback (no-op when no widening was needed
+   * or the page can't be resized). Best-effort — never throws.
+   */
+  private static async widenViewportForCapture(page: Page): Promise<(() => Promise<void>) | null> {
+    const maybeResize = page as unknown as {
+      setViewportSize?: (size: { width: number; height: number }) => Promise<void>
+      waitForTimeout?: (ms: number) => Promise<void>
+      frames?: () => Array<{ evaluate: (fn: () => number) => Promise<number> }>
+    }
+    if (typeof maybeResize.setViewportSize !== 'function') return null
+
+    try {
+      const metrics = await page.evaluate(() => ({
+        innerWidth: window.innerWidth || 0,
+        innerHeight: window.innerHeight || 0,
+        docWidth: Math.max(
+          document.documentElement?.scrollWidth ?? 0,
+          document.body?.scrollWidth ?? 0,
+        ),
+      })).catch(() => null)
+      if (!metrics || metrics.innerWidth <= 0 || metrics.innerHeight <= 0) return null
+
+      // The PeopleSoft assignment grid lives in a content iframe; the top
+      // document width often doesn't reflect it, so probe each frame too.
+      let widest = Math.max(metrics.docWidth, metrics.innerWidth)
+      try {
+        for (const fr of maybeResize.frames?.() ?? []) {
+          const w = await fr.evaluate(() => Math.max(
+            document.documentElement?.scrollWidth ?? 0,
+            document.body?.scrollWidth ?? 0,
+          )).catch(() => 0)
+          if (typeof w === 'number') widest = Math.max(widest, w)
+        }
+      } catch { /* best-effort — frame probing is optional */ }
+
+      // Only widen when content actually overflows; cap to avoid runaway sizes.
+      if (widest <= metrics.innerWidth + 2) return null
+      const target = Math.min(widest + 24, 6_000)
+
+      await maybeResize.setViewportSize({ width: target, height: metrics.innerHeight })
+      await maybeResize.waitForTimeout?.(200).catch(() => {})
+      return async () => {
+        try {
+          await maybeResize.setViewportSize!({
+            width: metrics.innerWidth,
+            height: metrics.innerHeight,
+          })
+        } catch { /* best-effort */ }
+      }
+    } catch {
+      return null
     }
   }
 

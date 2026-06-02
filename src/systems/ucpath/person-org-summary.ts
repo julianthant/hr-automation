@@ -112,6 +112,7 @@ export interface EidResult {
   department?: string;
   deptId?: string;
   positionNumber?: string;
+  startDate?: string;
   effectiveDate?: string;
   terminationDate?: string;
   expectedJobEndDate?: string;
@@ -429,7 +430,7 @@ async function extractSingleResultDetail(
   const assignment = await extractPreferredAssignmentFromBody(frame);
 
   const selectedTermDate = assignment && !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
-  const selectedStartDate = assignment?.effectiveDate || startDate;
+  const selectedStartDate = startDate || assignment?.effectiveDate || "";
   const endDate = selectedTermDate || "Active";
   const nameParts = fullName?.split(" ") ?? [];
   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
@@ -451,7 +452,8 @@ async function extractSingleResultDetail(
     department: assignment?.department,
     deptId: assignment?.deptId,
     positionNumber: assignment?.positionNumber,
-    effectiveDate: selectedStartDate,
+    startDate: selectedStartDate,
+    effectiveDate: assignment?.effectiveDate ?? "",
     terminationDate: selectedTermDate,
     expectedJobEndDate: assignment?.expectedJobEndDate,
     fte: assignment?.fte,
@@ -561,6 +563,7 @@ async function extractResults(page: Page, frame: FrameLocator): Promise<EidResul
 /** Details extracted from the drill-in detail page. */
 interface DrillInDetails {
   emplRecord: string;
+  effectiveDate: string;
   hrStatus: string;
   businessUnit: string;
   department: string;
@@ -616,7 +619,7 @@ async function drillInAndGetDetails(
 
   if (assignment) {
     const selectedTermDate = !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
-    const selectedStartDate = assignment.effectiveDate || startDate;
+    const selectedStartDate = startDate || assignment.effectiveDate;
     const endDate = selectedTermDate || "Active";
     log.step(`  Department: ${assignment.department} | Start: ${selectedStartDate} | End: ${endDate}`);
     return {
@@ -690,7 +693,8 @@ async function populateDepartments(
       result.department = details.department;
       result.deptId = details.deptId;
       result.positionNumber = details.positionNumber;
-      result.effectiveDate = details.startDate;
+      result.startDate = details.startDate;
+      result.effectiveDate = details.effectiveDate;
       result.terminationDate = details.terminationDate;
       result.expectedJobEndDate = details.expectedJobEndDate;
       result.fte = details.fte;

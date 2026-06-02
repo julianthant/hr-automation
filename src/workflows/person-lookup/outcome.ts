@@ -10,6 +10,7 @@ export interface PersonLookupResult {
   lastName?: string;
   department?: string;
   hrStatus?: string;
+  startDate?: string;
   effectiveDate?: string;
   terminationDate?: string;
   expectedJobEndDate?: string;
@@ -38,6 +39,7 @@ export interface ActiveCheckOutcome {
   name: string;
   department: string;
   hrStatus: string;
+  startDate: string;
   effdt: string;
   terminationDate: string;
   expectedJobEndDate: string;
@@ -140,6 +142,7 @@ export function deriveActiveCheckOutcome(
       name: "",
       department: "",
       hrStatus: "Not found",
+      startDate: "",
       effdt: "",
       terminationDate: "",
       expectedJobEndDate: "",
@@ -157,6 +160,7 @@ export function deriveActiveCheckOutcome(
       name: "",
       department: "",
       hrStatus: "Ambiguous",
+      startDate: "",
       effdt: "",
       terminationDate: "",
       expectedJobEndDate: "",
@@ -189,6 +193,7 @@ export function deriveActiveCheckOutcome(
     name: toLastFirstName(result.name, result.lastName),
     department: result.department ?? "",
     hrStatus,
+    startDate: normalizeDate(result.startDate || result.effectiveDate),
     effdt: normalizeDate(result.effectiveDate),
     terminationDate,
     expectedJobEndDate,

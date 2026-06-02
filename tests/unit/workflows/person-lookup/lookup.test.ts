@@ -6,6 +6,7 @@ import { WORKFLOW_LOADERS, listWorkflowNames } from "../../../../src/core/workfl
 import {
   deriveActiveCheckOutcome,
   derivePersonLookupSelection,
+  personLookupWorkflow,
   type PersonLookupResult,
 } from "../../../../src/workflows/person-lookup/index.js";
 
@@ -58,5 +59,24 @@ describe("person-lookup workflow helper", () => {
     assert.equal(outcome.activeStatus, "active");
     assert.equal(outcome.emplId, "10733938");
     assert.equal(outcome.department, "HOUSING/DINING/HOSPITALITY");
+  });
+
+  it("shows start date instead of EFFDT in the dashboard detail grid", () => {
+    const fields = (personLookupWorkflow.config.detailFields ?? []).map((field) =>
+      typeof field === "string" ? { key: field, label: field } : field,
+    );
+
+    assert.equal(fields.some((field) => field.key === "effdt" || field.label === "EFFDT"), false);
+    assert.deepEqual(
+      fields.map((field) => [field.key, field.label]),
+      [
+        ["searchName", "Search"],
+        ["emplId", "EID"],
+        ["department", "Dept"],
+        ["hrStatus", "HR Status"],
+        ["startDate", "Start Date"],
+        ["terminationDate", "End Date"],
+      ],
+    );
   });
 });

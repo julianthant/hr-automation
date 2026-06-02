@@ -185,7 +185,7 @@ export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEn
  */
 export function countSidebarRowsFromTrackerHistory(
   raw: TrackerEntry[],
-  isExcluded: (e: TrackerEntry) => boolean,
+  isExcluded: (e: TrackerEntry) => boolean = () => false,
 ): number {
   const deduped = dedupeLatestByIdWithCarriedEmplId(raw);
   const visible = deduped.filter((e) => !isExcluded(e));

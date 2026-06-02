@@ -174,7 +174,7 @@ export function readStmts(db: Database): CachedReadStatements {
        AND r.tracker_date = i.tracker_date
        AND r.item_id = i.item_id
        AND r.run_id = i.latest_run_id
-      WHERE i.tracker_date = @date AND i.resolved_prep = 0
+      WHERE i.tracker_date = @date
     `),
     selectAllLatestRowsForDate: db.prepare(`
       SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
@@ -225,4 +225,3 @@ export function readStmts(db: Database): CachedReadStatements {
   readStmtCache.set(db, s);
   return s;
 }
-

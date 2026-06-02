@@ -191,10 +191,25 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     delegateToAll: delegateApi.delegateToAll,
   }
   Object.assign(ctx, {
-    captureAndStampScreenshot: async (label: string, dataKey: string) => {
+    captureAndStampScreenshot: async (
+      label: string,
+      dataKey: string,
+      opts?: { systems?: string[] },
+    ) => {
       try {
-        const cap = await ctx.screenshot({ kind: 'form', label })
-        const filename = cap.files?.[0]?.path.split('/').pop()
+        const cap = await ctx.screenshot({
+          kind: 'form',
+          label,
+          ...(opts?.systems ? { systems: opts.systems } : {}),
+        })
+        // When a system filter was requested, stamp the file for that system
+        // (the first requested one) rather than a blind files[0] — otherwise a
+        // multi-system run could stamp the wrong page's screenshot.
+        const wanted = opts?.systems?.[0]
+        const file =
+          (wanted ? cap.files?.find((f) => f.system === wanted) : undefined) ??
+          cap.files?.[0]
+        const filename = file?.path.split('/').pop()
         if (filename) stepper.updateData({ [dataKey]: filename })
       } catch (err) {
         log.warn(`Screenshot capture failed for ${label}: ${errorMessage(err)}`)
