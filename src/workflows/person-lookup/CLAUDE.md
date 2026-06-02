@@ -2,7 +2,7 @@
 
 Resolves an employee by name or EID via UCPath Person Organizational Summary + CRM cross-verification, then derives active/HDH status. Merges the former **EID Lookup** and **Active Check** workflows into one operator-facing daemon workflow.
 
-**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` -> `cross-verification` (skipped for `{ emplId }` inputs) -> `active-status` -> `crm-dates` (skipped unless `input.includeCrmDates === true`). Output: resolved EID, active/HDH status, department, start date, assignment EFFDT context, termination date, and optional CRM dates.
+**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (skipped for `{ emplId }` inputs) → `active-status` → `crm-dates` (skipped unless `input.includeCrmDates === true`). Output: resolved EID, active/HDH status, department, start date, assignment EFFDT context, termination date, and optional CRM dates.
 
 Each dashboard input run enqueues N names/EIDs as N kernel items to an alive daemon (session reused — no re-Duo between items). A one-person input run is a `single` row. A multi-person input run is a batch surface: every person row is stamped `batch-member` under the shared input-run `parentRunId`.
 
@@ -63,7 +63,7 @@ EID inputs skip cross-verification entirely and go straight to `active-status`.
 - Assignment table scan: finds first row with 12+ cells where cell[3] matches business unit pattern and cell[6] is department description
 - "View All" button may need re-clicking after drill-in if results are paginated (rowIndex > 10)
 - CRM search uses different strategy: last name first, then first name
-- CRM date matching uses +/-7 day tolerance against UCPath `startDate` (Last Hire / first day of service), falling back to assignment EFFDT only when `startDate` is missing
+- CRM date matching uses ±7 day tolerance against UCPath `startDate` (Last Hire / first day of service), falling back to assignment EFFDT only when `startDate` is missing
 - Each worker gets its own UCPath tab AND its own CRM tab — concurrent CRM name searches on separate pages
 - Person Org may return multiple SDCMP rows for the same EID / employment history. `lookupPersonInUcpath` expands Employment Instances and selects the preferred assignment row (active first, HDH-active before non-HDH) before workflow status derivation.
 
