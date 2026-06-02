@@ -45,6 +45,8 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
     selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
     isVisible: () => Promise<boolean>;
     first: () => FakeLocator;
+    locator: (sel: string) => FakeLocator;
+    filter: (opts: unknown) => FakeLocator;
   };
   const fakeLocator = (label: string): FakeLocator => ({
     fill: (v) => { calls.push(`fill[${label}]=${v}`); return Promise.resolve(); },
@@ -57,6 +59,10 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
     },
     isVisible: () => Promise.resolve(true),
     first: () => fakeLocator(`${label}[0]`),
+    // Select2 v3 helpers chain off getByRole (xpath ancestor) and page.locator
+    // (`.filter({ hasText }).first()`); the fake mirrors that chaining.
+    locator: (sel) => fakeLocator(`${label}»${sel}`),
+    filter: () => fakeLocator(`${label}.filtered`),
   });
   const fakePage = {
     getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),

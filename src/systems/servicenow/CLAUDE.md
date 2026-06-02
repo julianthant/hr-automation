@@ -30,12 +30,16 @@ npm run selector:search "<intent>"
 
 ## Gotchas
 
-- **Specifically combobox is a ServiceNow typeahead.** It doesn't
-  support `selectOption`. Implementation: type the search term, wait
-  for the dropdown suggestion list, click the matching option.
-  `oath-upload`'s `fill-form.ts` encapsulates this pattern and wraps
-  registry-locator clicks/fills in `safeClick` / `safeFill` so selector
-  fallback failures surface in the dashboard's selector-health panel.
+- **"Specifically:" and "Category:" are Select2 v3 typeaheads**, not
+  plain comboboxes. The accessible combobox (`getByRole("combobox",
+  …)`) is an OFFSCREEN focusser; the visible `a.select2-choice`
+  intercepts clicks, so clicking the focusser times out. Drive them via
+  `specificallyChoice` / `categoryChoice` (open the drop) → `select2DropSearch`
+  (type) → `select2ResultOption` (pick). `Category` tries native
+  `selectOption` first, then this Select2 path. `oath-upload`'s
+  `fill-form.ts` encapsulates the pattern and wraps registry-locator
+  clicks/fills in `safeClick` / `safeFill` so fallback failures surface
+  in the dashboard's selector-health panel. See LESSONS.md (2026-06-02).
 - **Choose-a-file button drives a hidden file input.** Use
   `page.setInputFiles` on the adjacent `input[type="file"]` — clicking
   the visible button surfaces an OS file picker that Playwright would
