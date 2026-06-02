@@ -4,7 +4,7 @@
  * and emergency-contact/prepare.ts.
  *
  * Phases (each emits a tracker `running` event with `step` set):
- *   loading-roster → ocr → matching → disambiguating → eid-lookup → verification → awaiting-approval
+ *   loading-roster → ocr → matching → disambiguating → person-lookup → verification → awaiting-approval
  *
  * Returns when the row reaches `awaiting-approval`. The OCR row stays
  * `running step=awaiting-approval` (not `done`) — the row only becomes
@@ -692,8 +692,8 @@ export async function runOcrOrchestrator(
         log.step(`[ocr] lookup target rec ${t.index + 1}: kind=${t.kind} ${inputDesc}`);
       });
       // Snapshot WITH records so the Preview keeps showing the matched
-      // rows while eid-lookup fans out in the background.
-      emitSnapshot(records, "eid-lookup", "running", { failedPages, emptyPages, pageStatusSummary });
+      // rows while the person-lookup fan-out runs in the background.
+      emitSnapshot(records, "person-lookup", "running", { failedPages, emptyPages, pageStatusSummary });
 
       const lookupTargetsByRecord = countTargetsByRecord(lookupTargets);
       const eidLookupEnqueueItems = lookupTargets.map((t, ordinal) => {
@@ -705,7 +705,7 @@ export async function runOcrOrchestrator(
         process.env.OCR_SQLITE_DEPENDENCIES !== "0" && !opts._disableSqliteDependencies;
 
       await runFanOutPhase({
-        kind: "eid-lookup",
+        kind: "person-lookup",
         enqueueItems: eidLookupEnqueueItems,
         createDependencyBatch: async (children) => {
           const parent = { workflow: "ocr" as const, itemId: id, runId, formType: spec.formType };
@@ -946,7 +946,14 @@ interface FanOutItem {
 }
 
 interface FanOutOpts {
-  kind: "eid-lookup";
+  /**
+   * Phase label for tracker `step` + logs (the OCR pipeline stage). This is a
+   * DISPLAY value only — it is NOT the workflow whose child rows we watch.
+   * The watch key is hardcoded to `person-lookup` below; keeping them separate
+   * is deliberate (the 2026-05-28 eid-lookup→person-lookup rename conflated the
+   * two and stranded `watchChildRuns` on a dead `eid-lookup` key for 1h).
+   */
+  kind: "person-lookup";
   enqueueItems: FanOutItem[];
   createDependencyBatch: (children: FanOutChildSpec[]) => Promise<void>;
   buildChild: (itemId: string, runId: string, item: FanOutItem) => FanOutChildSpec;
@@ -1020,7 +1027,15 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
   const waitForChildRuns = async (): Promise<void> => {
     const progressed = new Set<string>();
     const outcomes = await watchChildren({
-      workflow: kind,
+      // The workflow whose child rows we watch is `person-lookup` — the actual
+      // workflow the eid-lookup fan-out delegates to (see realEnqueue →
+      // delegateToAllImpl({ child: personLookupWorkflow })). This MUST be the
+      // child workflow name, NOT the `kind` phase label. watchChildRuns keys on
+      // this name for both its SQLite (`listTasksForWorkflow`) and JSONL
+      // (`rowFilePath`) paths, so a stale name resolves NOTHING and the watcher
+      // hangs the full `timeoutMs` (1h). The 2026-05-28 eid-lookup→person-lookup
+      // rename fixed force-research.ts / retry-page.ts but missed this site.
+      workflow: "person-lookup",
       expectedItemIds: enqueueItems.map((e) => e.itemId),
       trackerDir,
       date,

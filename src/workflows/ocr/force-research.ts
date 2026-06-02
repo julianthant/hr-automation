@@ -81,7 +81,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       id: input.sessionId,
       runId: input.runId,
       status: "running",
-      step: "eid-lookup",
+      step: "person-lookup",
       data: { records: JSON.stringify(records), archetype: "preview" },
     },
     trackerDir,

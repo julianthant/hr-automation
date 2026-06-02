@@ -39,7 +39,7 @@ describe("oath-signature scenario: cancel during transaction", () => {
       // synthetic `markStep` marker (auth handled by Session.launch in
       // production). The real transaction step is held until cancel.
       { kind: "skipStep", name: "ocr" },
-      { kind: "skipStep", name: "fan-out" },
+      { kind: "skipStep", name: "delegate-signatures" },
       { kind: "markStep", name: "ucpath-auth" },
       { kind: "step", name: "transaction", hold: true },
     ];

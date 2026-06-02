@@ -20,6 +20,14 @@ export interface MakeCtxOpts {
   /** Parent workflow's 2-char code — forwarded to delegated children as the trace-id provenance prefix. */
   code?: string
   itemId: string
+  /**
+   * Delegated scope — the parent run's id when this run was spawned via
+   * `delegateTo`/`delegateToAll`. The kernel already stamps it on the rows it
+   * emits; it's surfaced on `ctx` so handlers that own their OWN tracker
+   * emission (today: OCR) can re-stamp it on every self-emitted row and stay a
+   * recognizable delegated row under the dashboard's latest-wins dedupe.
+   */
+  parentRunId?: string
   emitScreenshotEvent: (event: ScreenshotEvent) => void
   trackerDir?: string
   /**
@@ -81,7 +89,7 @@ export async function tryScreenshot(
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, code, itemId, emitScreenshotEvent, trackerDir, signal, instance } = opts
+  const { session, stepper, isBatch, runId, workflow, code, itemId, parentRunId, emitScreenshotEvent, trackerDir, signal, instance } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
 
@@ -143,6 +151,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     log,
     isBatch,
     runId,
+    parentRunId,
     signal,
     screenshot,
     trackerDir,

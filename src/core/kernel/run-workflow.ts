@@ -205,6 +205,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
           prefilled,
           isBatch: false,
           runId,
+          ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
           itemId: String(itemId),
           trackerDir: opts.trackerDir,
           emitScreenshotEvent: (ev) => emitScreenshotEvent(ev, { dir: opts.trackerDir }),

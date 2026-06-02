@@ -44,7 +44,7 @@ const ocrSteps = [
   "ocr",
   "matching",
   "disambiguating",
-  "eid-lookup",
+  "person-lookup",
   "verification",
   "awaiting-approval",
 ] as const;
@@ -100,7 +100,22 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
   let lastReviewData: Record<string, unknown> | undefined;
   let result: Awaited<ReturnType<typeof runOcrOrchestrator>>;
   try {
-    result = await runOcrOrchestrator(input, {
+    // `parentRunId` is delegated scope. The kernel stamps it on the rows IT
+    // emits (pending/terminal), but the orchestrator emits its own rich
+    // running/awaiting-approval snapshots and reads `input.parentRunId` to
+    // re-stamp them. Delegation never injects parentRunId into the child
+    // *input* (it's a kernel option, not an input field), so fall back to
+    // `ctx.parentRunId` — otherwise the orchestrator's latest-wins snapshot
+    // rows drop the scope, the dashboard treats a delegated OCR row as
+    // standalone, and the OcrReviewPane hides the Approve button (isDelegation
+    // = parentRunId present). Verified 2026-06-02.
+    const orchestratorInput = {
+      ...input,
+      ...(input.parentRunId ?? ctx.parentRunId
+        ? { parentRunId: input.parentRunId ?? ctx.parentRunId }
+        : {}),
+    };
+    result = await runOcrOrchestrator(orchestratorInput, {
       runId: ctx.runId,
       trackerDir: ctx.trackerDir,
       signal: ctx.signal,

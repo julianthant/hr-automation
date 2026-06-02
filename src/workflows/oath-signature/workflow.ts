@@ -47,14 +47,14 @@ export const OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
 
 const WORKFLOW = "oath-signature";
 // The kernel runs both input variants through the same step list:
-//   - signer branch: skips "ocr" + "fan-out"; runs "ucpath-auth" + "transaction"
-//   - pdf branch: runs "ocr" (delegates to ocrWorkflow) + "fan-out"
+//   - signer branch: skips "ocr" + "delegate-signatures"; runs "ucpath-auth" + "transaction"
+//   - pdf branch: runs "ocr" (delegates to ocrWorkflow) + "delegate-signatures"
 //     (delegateToAll to self with N signer inputs); skips "ucpath-auth"
 //     and "transaction"
 // `ctx.skipStep` keeps the pipeline shape consistent across both branches
 // so the dashboard StepPipeline always knows the full set of possible
 // steps even when a given run only exercises a subset.
-const oathSignatureSteps = ["ocr", "fan-out", "ucpath-auth", "transaction"] as const;
+const oathSignatureSteps = ["ocr", "delegate-signatures", "ucpath-auth", "transaction"] as const;
 
 /**
  * Kernel definition for the Oath Signature workflow.
@@ -185,7 +185,7 @@ export const oathSignatureWorkflow = defineWorkflow({
 
 /**
  * Per-EID handler — the original oath-signature flow. Skips the upstream
- * "ocr" + "fan-out" steps and runs the UCPath transaction.
+ * "ocr" + "delegate-signatures" steps and runs the UCPath transaction.
  */
 async function runSignerBranch(
   ctx: Parameters<typeof oathSignatureWorkflow.config.handler>[0],
@@ -203,7 +203,7 @@ async function runSignerBranch(
   // PDF-branch steps are not exercised on a signer run. Mark them skipped
   // so the dashboard StepPipeline collapses the missing dots cleanly.
   ctx.skipStep("ocr");
-  ctx.skipStep("fan-out");
+  ctx.skipStep("delegate-signatures");
 
   // UCPath auth is deferred from session launch to here (the system's `login`
   // is a no-op). A signer run authenticates only when it actually needs
@@ -325,8 +325,8 @@ async function runPdfBranch(
     }
   });
 
-  // ─── 2. Read approved records + fan out ──────────────────────
-  await ctx.step("fan-out", async () => {
+  // ─── 2. Read approved records + delegate signer batch ────────
+  await ctx.step("delegate-signatures", async () => {
     const signerInputs = readApprovedSignerInputs({
       sessionId: input.sessionId,
       trackerDir: ctx.trackerDir,

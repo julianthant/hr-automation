@@ -13,6 +13,8 @@ export interface RunWorkflowHandlerOpts<TData, TSteps extends readonly string[]>
   prefilled: Record<string, unknown> | null
   isBatch: boolean
   runId: string
+  /** Parent run id when this run is a delegation; surfaced as `ctx.parentRunId`. */
+  parentRunId?: string
   itemId: string
   trackerDir?: string
   emitScreenshotEvent: (event: ScreenshotEvent) => void
@@ -36,6 +38,7 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
     stepper: opts.stepper,
     isBatch: opts.isBatch,
     runId: opts.runId,
+    ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
     workflow: opts.wf.config.name,
     code: opts.wf.code,
     itemId: opts.itemId,
