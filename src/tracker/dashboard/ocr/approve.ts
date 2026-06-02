@@ -6,7 +6,7 @@ import { openControlDb } from "../../../core/control-db.js";
 import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { rootQueueTitleData } from "../../../domain/queue-title.js";
-import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
+import { findLatestEntryForPredicate, findFrozenTraceId } from "../../find-latest-entry.js";
 import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
 import { readFormType, readParentRunId, readDryRun } from "./shared.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
@@ -71,6 +71,18 @@ export function buildOcrApproveHandler(
     // oath-signature signer rows and the oath-upload ticket row grouped under
     // the OCR card instead of appearing as orphaned top-level rows.
     const childParentRunId = parentRunId ?? input.runId;
+    // Root trace-id propagation (DISPLAY-only): the OCR root row carries the
+    // operation's frozen trace id (`ou-...` after the oath form branded it via
+    // `traceCode`, else `oc-...`). This fan-out runs OUTSIDE any kernel ctx
+    // (HTTP path), so we read the root id back off the OCR row and stamp it as
+    // `rootTraceId` on every enqueued child's `__runtimeOptions` — the daemon
+    // worker's `run-one-item` re-emit then displays the OCR root's id on the
+    // signer rows + oath-upload ticket while each keeps its own runId/itemId.
+    const ocrRootTraceId = findFrozenTraceId({
+      workflow: WORKFLOW,
+      runId: input.runId,
+      ...(trackerDir !== undefined ? { trackerDir } : {}),
+    });
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
     const parentSubject = parentRunId && approveTo
@@ -103,11 +115,14 @@ export function buildOcrApproveHandler(
         const baseFanInput = approveTo.deriveInput(rec as never);
         const fanInput =
           baseFanInput && typeof baseFanInput === "object"
-            ? {
-                ...(baseFanInput as Record<string, unknown>),
-                ...(dryRun ? { dryRun: true } : {}),
-                ...(parentSubject ? { parentSubject } : {}),
-              }
+            ? withRootTraceIdRuntimeOption(
+                {
+                  ...(baseFanInput as Record<string, unknown>),
+                  ...(dryRun ? { dryRun: true } : {}),
+                  ...(parentSubject ? { parentSubject } : {}),
+                },
+                ocrRootTraceId,
+              )
             : baseFanInput;
         const itemId = approveTo.deriveItemId(rec as never, input.runId, index);
         enqueueInputs.push(fanInput);
@@ -266,7 +281,10 @@ export function buildOcrApproveHandler(
               : {}),
             ...(dryRun ? { dryRun: true } : {}),
           };
-          const docInput = approveDocumentTo.deriveInput(doc as never);
+          const docInput = withRootTraceIdRuntimeOption(
+            approveDocumentTo.deriveInput(doc as never),
+            ocrRootTraceId,
+          );
           docFanItemId = approveDocumentTo.deriveItemId(doc as never);
           docDispatchResult = await enqueueDocFanOut({
             workflow: approveDocumentTo.workflow,
@@ -479,6 +497,28 @@ function readLatestOcrReviewData(
   trackerDir?: string,
 ): Record<string, string> {
   return readLatestEntryDataWithLookback(WORKFLOW, sessionId, runId, trackerDir);
+}
+
+/**
+ * Merge the OCR root's trace id onto an enqueued child's `__runtimeOptions`
+ * channel (root trace-id propagation). The daemon worker reads
+ * `runtimeOptions.rootTraceId` in `run-one-item.ts` and stamps it verbatim as
+ * the child's `data.__traceId`, so every fan-out descendant DISPLAYS the OCR
+ * root's id while keeping its own runId/itemId. No-op when the id is absent
+ * (the OCR row had no trace id) or the input isn't a plain object.
+ */
+function withRootTraceIdRuntimeOption<TInput>(input: TInput, rootTraceId: string | undefined): TInput {
+  if (!rootTraceId || !input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const current = (input as Record<string, unknown>).__runtimeOptions;
+  return {
+    ...(input as Record<string, unknown>),
+    __runtimeOptions: {
+      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
+      rootTraceId,
+    },
+  } as TInput;
 }
 
 function buildFallbackPendingData(input: unknown): Record<string, string> {
