@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getLogRunId, getLogWorkflow, log } from "../../utils/log.js";
 import { cueDuo } from "./voice-cue.js";
+import { duoSmsReader, type ImessagePasscodeReader } from "./imessage-passcode.js";
 import {
   notifyAuthEvent,
   type AuthEventKind,
@@ -226,6 +227,128 @@ export interface DuoPollOptions {
    * to the workflow name when unset.
    */
   instance?: string;
+
+  /**
+   * Opt-in iMessage SMS-passcode reader (`HR_AUTOMATION_DUO_SMS=1`, macOS).
+   * Production omits this and uses the default `duoSmsReader` singleton; tests
+   * inject a fake reader to exercise the SMS path without a real chat.db.
+   */
+  smsReader?: ImessagePasscodeReader;
+
+  /**
+   * Override the bounded wait (ms) for a fresh SMS passcode before falling
+   * back to the push/Telegram flow. Default: `DUO_SMS_WAIT_MS` (45s). Tests
+   * pass small values.
+   */
+  smsWaitMs?: number;
+
+  /**
+   * Override the chat.db poll cadence (ms) during the SMS wait. Default:
+   * `DUO_SMS_POLL_INTERVAL_MS` (2s).
+   */
+  smsPollIntervalMs?: number;
+}
+
+/** Bounded wait (ms) for a Duo SMS passcode to land in Messages chat.db. */
+export const DUO_SMS_WAIT_MS = 45_000;
+
+/** Poll cadence (ms) for chat.db while waiting for the SMS passcode. */
+export const DUO_SMS_POLL_INTERVAL_MS = 2_000;
+
+/**
+ * Opt-in iMessage SMS-passcode path (`HR_AUTOMATION_DUO_SMS=1`, macOS only).
+ *
+ * In the Duo Universal Prompt: reveal "Other options", select "Text message
+ * passcode" (which makes Duo send the SMS), then poll macOS Messages (chat.db)
+ * for the freshly-arrived code and submit it via the passcode input + "Verify".
+ *
+ * Returns `true` once a code has been typed and submitted — the caller's poll
+ * loop then confirms success via the success URL. Returns `false` on any
+ * non-fatal miss (reader disabled, factor option absent, no fresh code within
+ * the bounded wait, or a selector failure) so the caller falls through to the
+ * voice-cue + Telegram + push flow. Only an abort propagates as a throw.
+ *
+ * The Universal Prompt selectors here are best-guess and must be confirmed
+ * against a live prompt — see the `TODO(verify-live)` markers.
+ */
+export async function attemptDuoSmsPasscode(
+  page: Page,
+  reader: ImessagePasscodeReader,
+  opts: {
+    now?: () => number;
+    waitMs?: number;
+    intervalMs?: number;
+    abortSignal?: AbortSignal;
+  } = {},
+): Promise<boolean> {
+  if (!reader.isEnabled()) return false;
+
+  const now = opts.now ?? Date.now;
+  const waitMs = opts.waitMs ?? DUO_SMS_WAIT_MS;
+  const intervalMs = opts.intervalMs ?? DUO_SMS_POLL_INTERVAL_MS;
+  const requestedAt = now();
+
+  try {
+    // Reveal the factor list when Duo shows a single default factor first.
+    // TODO(verify-live): confirm the "Other options" control shape.
+    const otherOptions = page
+      .getByRole("button", { name: /other options/i })
+      .or(page.getByRole("link", { name: /other options/i }))
+      .or(page.getByText(/other options/i));
+    if ((await otherOptions.count()) > 0) {
+      await otherOptions.first().click({ timeout: 5_000 });
+    }
+
+    // Select "Text message passcode" — this triggers Duo to send the SMS.
+    // TODO(verify-live): confirm the exact label / control.
+    const smsFactor = page
+      .getByRole("button", { name: /text message passcode/i })
+      .or(page.getByText(/text message passcode/i));
+    if ((await smsFactor.count()) === 0) {
+      log.step("Duo SMS: 'Text message passcode' option not found — falling back");
+      return false;
+    }
+    await smsFactor.first().click({ timeout: 5_000 });
+    log.step("Duo SMS: requested text-message passcode — reading from Messages...");
+
+    // Bounded poll of chat.db for a code newer than the request timestamp.
+    const deadline = requestedAt + Math.max(0, waitMs);
+    let code: string | undefined;
+    do {
+      opts.abortSignal?.throwIfAborted();
+      code = reader.readFreshPasscode({ sinceMs: requestedAt });
+      if (code) break;
+      if (now() >= deadline) break;
+      await waitForDuoPoll(intervalMs, opts.abortSignal);
+    } while (now() < deadline);
+
+    if (!code) {
+      log.step("Duo SMS: no fresh passcode within the wait window — falling back");
+      return false;
+    }
+
+    // Enter the code and submit.
+    // TODO(verify-live): confirm passcode input + verify-button selectors.
+    const input = page
+      .getByRole("textbox", { name: /passcode/i })
+      .or(page.locator('input[autocomplete="one-time-code"]'))
+      .or(page.locator('input[name="passcode"]'));
+    await input.first().fill(code, { timeout: 5_000 });
+
+    const verify = page
+      .getByRole("button", { name: /verify|log ?in|continue/i })
+      .or(page.locator('button[type="submit"]'));
+    await verify.first().click({ timeout: 5_000 });
+
+    log.step("Duo SMS: submitted passcode from iMessage");
+    return true;
+  } catch (err) {
+    // Propagate aborts so the caller's loop can stop; swallow all other
+    // failures (selector misses, fill/click errors) → fall through.
+    if (opts.abortSignal?.aborted) throw err;
+    log.step(`Duo SMS: passcode path failed (${(err as Error).message}) — falling back`);
+    return false;
+  }
 }
 
 /**
@@ -297,29 +420,52 @@ export async function pollDuoApproval(
     }
   }
 
-  // Pre-check elapsed without an auto-success → a real Duo push is
-  // pending. Announce now.
+  // Pre-check elapsed without an auto-success → a real Duo prompt is pending.
   //
-  // Best-effort voice cue — opt-in via HR_AUTOMATION_VOICE_CUES=1 + macOS.
-  // Fires once before the polling loop begins so the operator hears a cue if
-  // they're not looking at the terminal. Never blocks; never throws.
-  await cueDuo(systemLabel ?? "system").catch(() => {});
+  // Opt-in iMessage SMS-passcode path first (HR_AUTOMATION_DUO_SMS=1, macOS):
+  // select Duo's "Text message passcode" factor and auto-submit the code read
+  // from Messages. On success we skip the manual-prompt announce below — the
+  // main loop confirms the redirect. Any miss falls through to the cue +
+  // Telegram + push flow. Disabled/non-darwin readers are a transparent no-op.
+  const smsReader = options.smsReader ?? duoSmsReader;
+  let smsSubmitted = false;
+  if (smsReader.isEnabled()) {
+    smsSubmitted = await attemptDuoSmsPasscode(page, smsReader, {
+      abortSignal: options.abortSignal,
+      ...(options.smsWaitMs !== undefined ? { waitMs: options.smsWaitMs } : {}),
+      ...(options.smsPollIntervalMs !== undefined
+        ? { intervalMs: options.smsPollIntervalMs }
+        : {}),
+    });
+    if (smsSubmitted) {
+      log.step("Duo: submitted SMS passcode from iMessage — awaiting redirect");
+    }
+  }
 
-  // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
-  // TELEGRAM_CHAT_ID are set; otherwise no-op.
-  const initialDuoCode = await readDuoVerificationCodeWhenVisible(page, {
-    timeoutMs: initialCodeWaitMs,
-    intervalMs: initialCodeWaitIntervalMs,
-    abortSignal: options.abortSignal,
-  });
-  let lastDuoCode = initialDuoCode;
-  emitTelegram("duo-waiting", systemLabel ?? "system", buildDuoWaitingDetail(initialDuoCode), instance);
+  // Announce a manual prompt only when we did NOT auto-submit an SMS passcode.
+  let lastDuoCode: string | undefined;
+  if (!smsSubmitted) {
+    // Best-effort voice cue — opt-in via HR_AUTOMATION_VOICE_CUES=1 + macOS.
+    // Fires once before the polling loop begins so the operator hears a cue if
+    // they're not looking at the terminal. Never blocks; never throws.
+    await cueDuo(systemLabel ?? "system").catch(() => {});
 
-  log.waiting(
-    initialDuoCode
-      ? `Waiting for Duo approval (enter code ${initialDuoCode} in Duo Mobile)...`
-      : "Waiting for Duo approval (approve on your phone)...",
-  );
+    // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
+    // TELEGRAM_CHAT_ID are set; otherwise no-op.
+    const initialDuoCode = await readDuoVerificationCodeWhenVisible(page, {
+      timeoutMs: initialCodeWaitMs,
+      intervalMs: initialCodeWaitIntervalMs,
+      abortSignal: options.abortSignal,
+    });
+    lastDuoCode = initialDuoCode;
+    emitTelegram("duo-waiting", systemLabel ?? "system", buildDuoWaitingDetail(initialDuoCode), instance);
+
+    log.waiting(
+      initialDuoCode
+        ? `Waiting for Duo approval (enter code ${initialDuoCode} in Duo Mobile)...`
+        : "Waiting for Duo approval (approve on your phone)...",
+    );
+  }
 
   for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += pollIntervalSec) {
     options.abortSignal?.throwIfAborted();
