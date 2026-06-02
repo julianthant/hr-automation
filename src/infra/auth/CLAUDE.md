@@ -55,36 +55,6 @@ Submit button: always `button[name="_eventId_proceed"]` (avoids collision with "
 - Debug screenshots saved to `.auth/debug-*.png` (ACTCrm flow only)
 - "Enroll in Two-Step Login" nav link has `role="button"` containing "Login" — causes selector collisions if not using `button[name=...]`
 
-## Duo SMS passcode (iMessage, opt-in)
-
-`HR_AUTOMATION_DUO_SMS=1` (macOS only) makes Duo MFA hands-off: in the Universal
-Prompt, `attemptDuoSmsPasscode` (in `duo-poll.ts`) selects Duo's "Text message
-passcode" factor, reads the freshly-arrived code from the macOS Messages
-database, types it in, and submits — no phone interaction. It runs inside
-`pollDuoApproval` **before** the manual-prompt announce (same hook point as the
-voice cue), so all five logins benefit from one code path. On success the
-announce is skipped; on any miss it falls through to the push fallback.
-
-- **Reader:** `imessage-passcode.ts` — `createImessagePasscodeReader` (factory +
-  injected deps, mirrors `voice-cue.ts`): darwin + env gated, never throws,
-  opens `~/Library/Messages/chat.db` read-only **fresh per call** so
-  WAL-committed rows are visible. Production singleton `duoSmsReader`.
-- **Storage gotcha:** for forwarded SMS, `message.text` is NULL — the body is in
-  the `message.attributedBody` typedstream blob. `decodeAttributedBody`
-  latin1-decodes it and `extractSmsPasscode` greps `SMS passcodes: NNNNNNN`
-  (6–8 digits).
-- **Freshness:** matches sender shortcode `386767` and `m.date > :threshold`,
-  where the threshold is the SMS-request time (minus a 2 s grace) converted to
-  Apple-epoch **nanoseconds as a BigInt** — current-date nanos overflow
-  `Number.MAX_SAFE_INTEGER`, so the comparison must stay in SQL. Stops an old
-  code ever being reused.
-- **Requirements:** Text Message Forwarding to the Mac + Full Disk Access for
-  the launching app (Cursor/Terminal/iTerm). `npm run setup` (`checkDuoSmsAccess`)
-  probes chat.db readability and warns if FDA is missing.
-- **Selectors:** the Universal Prompt selectors in `attemptDuoSmsPasscode` are
-  best-guess and marked `TODO(verify-live)` — confirm against a real prompt and
-  stamp `// verified <date>`.
-
 ## Lessons Learned
 
 - **2026-04-10: Duo pollDuoApproval auto-retry on timeout** — Duo MFA can time out if the user doesn't approve in time (e.g. phone not nearby). `pollDuoApproval` now auto-retries on timeout by clicking the "Try Again" button in the Duo iframe. This avoids the entire workflow failing because of a single missed Duo prompt.
@@ -93,4 +63,3 @@ announce is skipped; on any miss it falls through to the push fallback.
 - **2026-05-15: SSO field selectors are inline in `fillSsoCredentials`.** The old selector getter was removed; keep the 3-level fallback chains directly beside the fill operations so the selector order and behavior stay obvious. If the selector set changes, test the login behavior or the fallback chain through `fillSsoCredentials`, not a detached getter.
 - **2026-05-27: Global auth chain — `authChain` field deleted.** The kernel had three modes (`sequential`, `interleaved`, `parallel-staggered`) selectable per workflow. As of 2026-05-27 the field is gone and `Session.launch` always uses one strategy: 1-system fast path, ≥2-system parallel-staggered with cap=1 + settle=2s + stagger=5s. Migration was mechanical (`authChain: "sequential"` lines removed from every workflow file) — there is no path back. If a workflow legitimately needs strict serialization in the future, restore the field on `WorkflowConfig` + the `sequential` branch in `Session.launch` rather than working around it in the handler.
 - **2026-05-27: Global auth queue cap reduced to one.** The default `LaunchOpts.maxConcurrentDuos` is now 1, so production multi-system auth keeps only one Duo prompt pending at a time. Tests may still pass `maxConcurrentDuos > 1` to exercise the semaphore path, but production callers should continue omitting the knob unless the operator intentionally wants concurrent phone prompts.
-- **2026-06-02: Duo SMS passcode via iMessage (opt-in, macOS).** `HR_AUTOMATION_DUO_SMS=1` auto-reads the Duo "Text message passcode" from `~/Library/Messages/chat.db` and submits it inside `pollDuoApproval` before the manual announce; misses fall through to the push fallback. Three gotchas drove the design: (1) `message.text` is NULL for forwarded SMS — the body lives in the `attributedBody` typedstream blob, recovered via a latin1 decode; (2) `message.date` is Apple-epoch **nanoseconds**, and current-date values exceed `Number.MAX_SAFE_INTEGER`, so the freshness threshold is bound as a **BigInt** and filtered in SQL (never round-tripped through a JS number); (3) WAL — a fresh read-only open per poll makes committed rows visible. Reuses `src/infra/sqlite` (`node:sqlite`, no new dep). Universal Prompt selectors are best-guess pending one live login (`TODO(verify-live)`). See the "Duo SMS passcode (iMessage, opt-in)" section above.
