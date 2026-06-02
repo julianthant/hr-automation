@@ -30,6 +30,7 @@ import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
+import { useFormTypes, formTypeHasApproveFanOut } from "@/components/hooks/useFormTypes";
 import {
   useTaskDependencies,
   type TaskDependencyChild,
@@ -278,13 +279,19 @@ function useOcrReviewPrepApi(
     if (!prepActive || !entry) return null;
     return resolveOcrConfigForEntry(entry);
   }, [prepActive, entry]);
-  // Dedicated OCR run = no parent row in a downstream workflow (operator
-  // ran the OCR workflow directly to inspect results). Delegations from
-  // oath-signature / emergency-contact / oath-upload set parentRunId on
-  // the OCR row; for those we keep the Approve flow that fans out child
-  // queue items. Standalone runs hide Approve since there's nothing to
-  // dispatch.
-  const isDelegation = Boolean(prepActive && entry?.parentRunId);
+  // Show Approve when the OCR row is a DELEGATION (a downstream workflow set
+  // `parentRunId` — the old oath-upload / EC delegation shape) OR the form
+  // type fans out downstream rows on approve (`approveTo` / `approveDocumentTo`).
+  // The OCR-hub flow runs OCR standalone (operator uploads straight to OCR, no
+  // parentRunId), so the fan-out forms (oath, emergency-contact) must still
+  // surface Approve. A truly dedicated OCR run (a form with no fan-out) keeps
+  // the button hidden — there's nothing to dispatch.
+  const formOptions = useFormTypes();
+  const hasApproveFanOut = useMemo(
+    () => formTypeHasApproveFanOut(entry?.data?.formType),
+    [entry?.data?.formType, formOptions],
+  );
+  const isDelegation = Boolean(prepActive && entry && (entry.parentRunId || hasApproveFanOut));
   const data = useMemo(
     () => (cfg && entry ? cfg.parseRow(entry.data) ?? null : null),
     [entry?.data, cfg, entry],

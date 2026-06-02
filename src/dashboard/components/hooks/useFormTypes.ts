@@ -5,6 +5,19 @@ export interface FormTypeOption {
   label: string;
   description: string;
   rosterMode: "required" | "optional";
+  /** Whether approving this form fans out downstream daemon rows. */
+  hasApproveFanOut?: boolean;
+}
+
+/**
+ * Synchronous lookup against the module-level form-types cache: does this
+ * form type fan out downstream rows on approve? Returns false when the cache
+ * isn't primed yet (the pane re-renders when it loads). Used by the OCR review
+ * pane to show the Approve button for fan-out forms on standalone runs.
+ */
+export function formTypeHasApproveFanOut(formType: string | undefined): boolean {
+  if (!formType || cache === null) return false;
+  return cache.some((f) => f.formType === formType && f.hasApproveFanOut === true);
 }
 
 /**
