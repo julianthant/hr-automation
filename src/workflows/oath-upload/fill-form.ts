@@ -24,43 +24,52 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
     label: "servicenow hr inquiry description",
   });
 
-  // Specifically — ServiceNow typeahead. Click to focus, type, wait for
-  // suggestion list, click matching option. If the option doesn't surface
-  // (different ServiceNow build, layout drift), keep the typed text as
-  // free-text (some configurations accept it).
-  const specInput = hrInquiry.specificallyInput(page);
-  await safeClick(specInput, { label: "servicenow hr inquiry specifically combobox" });
-  await safeFill(specInput, v.specifically, { label: "servicenow hr inquiry specifically" });
+  // Specifically — ServiceNow Select2 v3 typeahead. The accessible combobox is
+  // an OFFSCREEN focusser; the visible `a.select2-choice` intercepts clicks, so
+  // click the choice anchor to open the drop, type into the drop's search box,
+  // then click the matching result. If the result doesn't surface (different
+  // ServiceNow build / layout drift), press Enter to accept the highlighted
+  // match; otherwise keep the typed free-text (some configs accept it).
+  await safeClick(hrInquiry.specificallyChoice(page), {
+    label: "servicenow hr inquiry specifically combobox",
+  });
+  await safeFill(hrInquiry.select2DropSearch(page), v.specifically, {
+    label: "servicenow hr inquiry specifically",
+  });
   await page.waitForTimeout(800);
-  const specOption = page.getByRole("option", { name: v.specifically }).first();
   try {
-    await safeClick(specOption, {
+    await safeClick(hrInquiry.select2ResultOption(page, v.specifically), {
       timeout: 3_000,
       label: "servicenow hr inquiry specifically option",
     });
   } catch {
     log.warn(
-      `[oath-upload] Specifically dropdown didn't surface "${v.specifically}" — keeping free-text`,
+      `[oath-upload] Specifically dropdown didn't surface "${v.specifically}" — pressing Enter to accept the highlighted match`,
     );
+    await page.keyboard.press("Enter").catch(() => {});
   }
 
-  // Category — combobox. Try selectOption first (semantic <select>); fall
-  // back to typeahead pattern if it isn't a <select>.
+  // Category — Select2 v3 combobox. Try selectOption first (works if ServiceNow
+  // renders a native <select>); fall back to the same Select2 choice→search→
+  // option pattern as Specifically.
   const catInput = hrInquiry.categoryInput(page);
   try {
     await catInput.selectOption({ label: v.category }, { timeout: 3_000 });
   } catch {
-    await safeClick(catInput, { label: "servicenow hr inquiry category combobox" });
-    await safeFill(catInput, v.category, { label: "servicenow hr inquiry category" });
+    await safeClick(hrInquiry.categoryChoice(page), {
+      label: "servicenow hr inquiry category combobox",
+    });
+    await safeFill(hrInquiry.select2DropSearch(page), v.category, {
+      label: "servicenow hr inquiry category",
+    });
     await page.waitForTimeout(500);
-    const catOption = page.getByRole("option", { name: v.category }).first();
     try {
-      await safeClick(catOption, {
+      await safeClick(hrInquiry.select2ResultOption(page, v.category), {
         timeout: 3_000,
         label: "servicenow hr inquiry category option",
       });
     } catch {
-      /* fall through — accept whatever the combobox decided */
+      await page.keyboard.press("Enter").catch(() => {});
     }
   }
 
