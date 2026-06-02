@@ -4,6 +4,7 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { EntryItem } from "./EntryItem";
 import { cn } from "@/lib/utils";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
+import { tracePrefix } from "../../../domain/queue-trace-id.js";
 
 /**
  * Fallback title for daemon / dashboard batch cards when no projection title is
@@ -67,6 +68,12 @@ export function BatchQueueToolbar({
   const runId = batchAnchor.runId ?? batchAnchor.id;
   const time = formatBatchToolbarTime(batchAnchor.timestamp);
   const startedLabel = anchorKind === "prep" ? "Approved" : "Started";
+  // Operation id for the batch header — the shared trace PREFIX (`ou-090553`)
+  // of the batch's trace id, so the header reads as part of the same scheme as
+  // its members (which compose `<prefix>-<ownRunId4>`). Falls back to the legacy
+  // `batch#<run4>` when no trace id is stamped (legacy/unstamped rows).
+  const anchorTraceId = batchAnchor.data?.__traceId;
+  const operationId = anchorTraceId ? tracePrefix(anchorTraceId) : `batch#${runId.slice(-4)}`;
   return (
     <div className="h-[69.5px] flex flex-col justify-center px-3 min-[1440px]:px-4 border-b border-border bg-card/60 shrink-0 gap-1">
       <div className="flex items-center gap-2 min-w-0">
@@ -108,7 +115,7 @@ export function BatchQueueToolbar({
       </div>
       <div className="text-[10px] font-mono text-muted-foreground pl-1 flex items-center gap-1.5 flex-wrap">
         <span>
-          {startedLabel} {time} · batch#{runId.slice(-4)}
+          {startedLabel} {time} · {operationId}
         </span>
         {onOpenPrepReview ? (
           <>
