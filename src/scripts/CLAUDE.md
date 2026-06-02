@@ -12,7 +12,7 @@ Scripts are organized by purpose. Workflow-specific dev tools live in their work
 
 ### `codegen/`
 
-- **`export-schemas.ts`** — Walks every `src/workflows/*/schema.ts`, exports each Zod input schema to a JSON Schema file under `generated/schemas/`. Pure `exportSchemas(outDir)` exported for tests. Wired as `npm run schemas:export`.
+- **`export-schemas.ts`** — Exports workflow Zod input schemas to JSON Schema files under `generated/schemas/`. The script uses an explicit `SCHEMA_REGISTRY` mapping (workflow name -> exported schema), converts with Zod v4 `toJSONSchema({ unrepresentable: "any" })`, and writes one gitignored `*.schema.json` per entry. Pure `exportSchemas(outDir)` is exported for tests. Wired as `npm run schemas:export`.
 
 ### `ops/`
 
@@ -36,7 +36,7 @@ Scripts are organized by purpose. Workflow-specific dev tools live in their work
 
 - **Tests mirror source layout one-for-one** (per `tests/CLAUDE.md`). `src/scripts/selectors/catalog.ts` → `tests/unit/scripts/selectors/catalog.test.ts`.
 - **Pure logic exported for tests, I/O confined to `main()`.** Every script that has unit tests follows this split — see `selectors/search-lib.ts` (pure index/scoring) vs `selectors/search.ts` (CLI + file I/O).
-- **`isMainModule` guard** at the bottom uses a three-way check (`import.meta.url` match, `.ts` filename match, `.js` filename match) so the script behaves the same when run via tsx or compiled output, and is safe to import from tests without firing `main()`. Import from `src/scripts/main-module.ts`; do not add underscore-prefixed script helpers because the filename architecture guard rejects them.
+- **`isMainModule` guard** comes from `src/scripts/main-module.ts` and checks the invoked path plus `.ts`/compiled `.js` basename fallbacks so scripts behave the same under tsx and compiled output. Use that helper before firing `main()`; do not add underscore-prefixed script helpers because the filename architecture guard rejects them.
 
 ## Usage
 
