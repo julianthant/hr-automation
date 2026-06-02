@@ -39,6 +39,11 @@ export interface BuildPendingTrackerDataOpts<TInput> {
    * `runId`/`at` computation, so a re-emit (e.g. a daemon worker re-emitting
    * `pending` after the HTTP enqueue already stamped one) reuses the exact id
    * the first row showed instead of minting a fresh, time-drifted one.
+   *
+   * Also the channel for ROOT trace-id propagation: a delegated child is
+   * stamped with the originating run's full trace id (`rootTraceId`, threaded
+   * by `delegate.ts`) here, so every descendant of an operation displays the
+   * one root id while keeping its own runId/itemId.
    */
   traceId?: string;
 }
