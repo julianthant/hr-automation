@@ -31,6 +31,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { isMainModule } from "../main-module.js";
+import { openDatabase } from "../../infra/sqlite/index.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -302,6 +303,77 @@ export function checkJq(): CheckResult {
   };
 }
 
+/**
+ * Check the opt-in Duo SMS passcode path (`HR_AUTOMATION_DUO_SMS=1`). When
+ * enabled on macOS, the automation reads the Duo "Text message passcode" out of
+ * the Messages database (`~/Library/Messages/chat.db`), which requires Full
+ * Disk Access for the app launching the automation. Warn-only — this is an
+ * opt-in convenience, never required to run a workflow. `flagValue`/`platform`/
+ * `probe`/`homedir` are injectable for tests.
+ */
+export function checkDuoSmsAccess(
+  opts: {
+    flagValue?: string;
+    platform?: NodeJS.Platform;
+    probe?: () => boolean;
+    homedir?: string;
+  } = {},
+): CheckResult {
+  const name = "Duo SMS passcode (opt-in)";
+  const flag = opts.flagValue ?? process.env.HR_AUTOMATION_DUO_SMS;
+  if (flag !== "1") {
+    return {
+      name,
+      status: "ok",
+      message:
+        "disabled (set HR_AUTOMATION_DUO_SMS=1 on macOS to auto-read Duo SMS codes from Messages)",
+    };
+  }
+  const platform = opts.platform ?? process.platform;
+  if (platform !== "darwin") {
+    return {
+      name,
+      status: "warn",
+      message: `enabled but only works on macOS (platform=${platform}); the SMS path will be skipped`,
+      fix: "Unset HR_AUTOMATION_DUO_SMS on non-macOS hosts — Duo still works via push notification.",
+    };
+  }
+  const probe = opts.probe ?? (() => chatDbReadable(opts.homedir));
+  if (probe()) {
+    return {
+      name,
+      status: "ok",
+      message: "enabled — Messages chat.db is readable",
+    };
+  }
+  return {
+    name,
+    status: "warn",
+    message: "enabled but Messages chat.db is not readable (Full Disk Access likely missing)",
+    fix: "Grant Full Disk Access to the app launching the automation (System Settings → Privacy & Security → Full Disk Access), then relaunch it. Also enable Text Message Forwarding to this Mac on your iPhone.",
+  };
+}
+
+/** Best-effort read-only probe of the macOS Messages database. */
+function chatDbReadable(home: string = os.homedir()): boolean {
+  try {
+    const dbPath = path.join(home, "Library", "Messages", "chat.db");
+    const db = openDatabase(dbPath, {
+      readonly: true,
+      fileMustExist: true,
+      applyDefaultPragmas: false,
+    });
+    try {
+      db.prepare("SELECT 1").get();
+      return true;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 // ─── Telegram setup helpers ────────────────────────────────────────────────
 
 /** Token validation outcome — narrows on `.ok`. */
@@ -461,6 +533,7 @@ export function runAllChecks(cwd: string = process.cwd()): CheckResult[] {
     ),
     checkNotifyCapability(),
     checkJq(),
+    checkDuoSmsAccess(),
   ];
 }
 
