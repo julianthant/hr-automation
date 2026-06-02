@@ -1,6 +1,6 @@
 # UCPath Module
 
-PeopleSoft HR automation: Smart HR transactions, person search, job summary extraction, emergency contact forms, and the ActionPlan execution pattern. Used by onboarding, work-study, emergency-contact, eid-lookup, and separations workflows.
+PeopleSoft HR automation: Smart HR transactions, person search, job summary extraction, emergency contact forms, and the ActionPlan execution pattern. Used by onboarding, work-study, emergency-contact, person-lookup, and separations workflows.
 
 ## Before mapping a new selector
 
@@ -45,6 +45,7 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 - Error detection: `.PSERROR`, `#ALERTMSG`, `.ps_alert-error` selectors
 - Person search: discriminates new hires (dialog) vs rehires (results table) by UI presence
 - Person Org Summary: detail pages with multiple Employment Instances must click `View All` when present and select the preferred assignment row (active first, HDH-active before non-HDH, then highest empl record). Do not derive active/inactive from the first visible assignment row.
+- Person Org Summary dates: `EidResult.startDate` is the ORG Instance Last Hire date (`PER_INST_EMP_VW_LAST_HIRE_DT$0`, first day of service). `EidResult.effectiveDate` is the selected assignment-row EFFDT. Do not use assignment EFFDT as the person-lookup dashboard start date.
 - Modal dialogs dismissed via `frame.evaluate()` + `document.getElementById("#ICOK")` (Playwright can't click behind PeopleSoft overlay)
 - `parsePayRate("$17.75 per hour")` → `"17.75"`
 - Phone/email grid indices hardcoded: `$6` for phone type, `$7` for email type
@@ -67,7 +68,8 @@ Auto-correction via cross-source name matching is a correctness risk: names aren
 
 ## Lessons Learned
 
-- **2026-05-28: Person Org Summary multiple employment instances need active-row selection.** UCPath can open Person Org detail on an inactive instance while an active instance is hidden behind the Employment Instances `View All` link. `person-org-summary.ts` now expands the detail view when possible and selects the preferred assignment row before Active Check / EID Lookup derive status.
+- **2026-06-02: Person Org Summary Last Hire is the lookup start date.** Person Org detail exposes Last Hire in the ORG Instance section and assignment EFFDT in the Employment Instances grid. Keep `EidResult.startDate` on Last Hire for person-lookup display/active checks, and keep the assignment date in `EidResult.effectiveDate` for backend context.
+- **2026-05-28: Person Org Summary multiple employment instances need active-row selection.** UCPath can open Person Org detail on an inactive instance while an active instance is hidden behind the Employment Instances `View All` link. `person-org-summary.ts` now expands the detail view when possible and selects the preferred assignment row before Person Lookup and other callers derive status.
 - **2026-05-27: Smart HR Transactions sidebar selector must be exact.** UCPath renders both "Smart HR Transactions" and "SS Smart HR Transactions" under Smart HR Templates; loose `getByText("Smart HR Transactions")` matches both and fails strict mode before separations can create transactions. Keep `hrTasks.smartHRTransactionsLink` on an exact link role selector.
 - **2026-05-27: Transaction readback lives below the fold.** The submitted Smart HR readback page shows `Transaction ID: T...` and the approval strip below the comments/save area. `readLatestTransactionNumber` scrolls to that section before parsing, and separations captures `ucpath-transaction-submitted-missing-number` if UCPath accepted the submit but no T-number was parsed.
 - **2026-05-15: Person Org Summary name lookup moved to a registry selector.** `person-org-summary.ts` now reads `personOrgSummary.personNameValue` before falling back to generic leaf-text heuristics. Do not add personal names to skip lists; if the name readback fails, fix or extend the selector chain and record a selector lesson.
