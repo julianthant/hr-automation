@@ -507,6 +507,7 @@ export const INSTANCE_LABELS: Record<string, string> = {
   "oath-signature": "Oath Signature",
   "oath-upload": "Oath Upload",
   ocr: "OCR",
+  "i9-lookup": "I9 Lookup",
 };
 
 /**

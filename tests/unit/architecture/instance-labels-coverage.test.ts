@@ -27,6 +27,7 @@ import "../../../src/workflows/separations/index.js";
 import "../../../src/workflows/sharepoint-download/index.js";
 import "../../../src/workflows/work-study/index.js";
 import "../../../src/workflows/old-kronos-reports/index.js";
+import "../../../src/workflows/i9-lookup/index.js";
 
 import { getAll } from "../../../src/core/kernel/registry.js";
 import { INSTANCE_LABELS, workflowNameFromInstance } from "../../../src/tracker/session-events.js";

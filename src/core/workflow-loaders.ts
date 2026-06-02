@@ -46,6 +46,12 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/oath-upload/index.js");
     return mod.oathUploadWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // I9 Lookup resolves who signed Section 2 of an employee's I-9 form.
+  // Delegated-only subworkflow — no dashboard start surface.
+  "i9-lookup": async () => {
+    const mod = await import("../workflows/i9-lookup/index.js");
+    return mod.i9LookupWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 /**
