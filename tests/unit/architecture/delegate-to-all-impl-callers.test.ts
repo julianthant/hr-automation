@@ -26,6 +26,13 @@ const ALLOWED_CALLERS = new Set<string>([
   // patching can correlate child results back to OCR records).
   "src/workflows/ocr/force-research.ts",
   "src/workflows/ocr/retry-page.ts",
+  // The `verify` OCR form spec owns all of its cross-system enrichment in
+  // `OcrFormSpec.enrichRecords` (person-lookup for CRM dates + active status,
+  // i9-lookup for the Section-2 signer). The orchestrator awaits the hook, but
+  // the hook drives its own `watchChildRuns` wait — so it needs the same
+  // escape hatch as force-research: `fireAndForget: true` + `deriveItemId` for
+  // stable per-record item IDs that correlate child outcomes back to records.
+  "src/services/ocr/forms/verify.ts",
 ]);
 
 const IGNORED_FILES = new Set<string>([
