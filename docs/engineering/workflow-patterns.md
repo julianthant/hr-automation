@@ -23,7 +23,7 @@ Workflows where daemon mode is **not** appropriate (do NOT convert):
 - **Non-CLI workflows** like `sharepoint-download` (dashboard button, fire-and-forget `runWorkflow`) — daemon mode solves "avoid re-Duo on repeated CLI runs," which doesn't apply when the dashboard holds one long-lived session.
 - **Workflows invoked programmatically from other workflows** — daemon mode is client/daemon IPC; an in-process caller should keep using `runWorkflow` / `runWorkflowBatch` directly.
 
-Daemon-capable workflows (lazy-imported in `src/core/workflow-loaders.ts` for daemon spawn and dashboard `/api/enqueue` internals): `separations`, `work-study`, `eid-lookup`, `onboarding`, **`crm-doc-download`**, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`.
+Daemon-capable workflows (lazy-imported in `src/core/workflow-loaders.ts` for daemon spawn and dashboard `/api/enqueue` internals): `separations`, `work-study`, `person-lookup`, `onboarding`, **`crm-doc-download`**, `oath-signature`, `emergency-contact`, `oath-upload`, and delegated-only `i9-lookup`.
 
 **Not** in `WORKFLOW_LOADERS`: **`old-kronos-reports`**. Its old batch-file adapter was removed; it is not a valid dashboard run surface.
 

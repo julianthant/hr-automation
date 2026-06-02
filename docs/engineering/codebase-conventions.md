@@ -161,7 +161,7 @@ To enable for a specific deployment, launch daemons with:
 node --permission \
   --allow-fs-read=* \
   --allow-fs-write=/Users/$USER/Documents/hr-automation/.tracker \
-  --allow-fs-write=/Users/$USER/Documents/hr-automation/.screenshots \
+  --allow-fs-write=/Users/$USER/Documents/hr-automation/.tracker/screenshots \
   --allow-fs-write=/tmp \
   --allow-child-process \
   ./node_modules/.bin/tsx --env-file=.env src/cli-daemon.ts <workflow>
@@ -170,7 +170,7 @@ node --permission \
 Required flags:
 - `--allow-fs-read=*` — Playwright reads from many paths (Chromium binaries, user-data-dir, system fonts).
 - `--allow-fs-write=<tracker dir>` — JSONL emissions, SQLite state DB, screenshot uploads.
-- `--allow-fs-write=<screenshots dir>` — debug screenshots written by `Stepper.step` on failure.
+- `--allow-fs-write=<screenshots dir>` — debug screenshots written by `Stepper.step` on failure (`.tracker/screenshots` by default).
 - `--allow-fs-write=/tmp` — Playwright + Chromium temp files.
 - `--allow-child-process` — Playwright spawns Chromium.
 

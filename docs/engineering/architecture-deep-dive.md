@@ -20,7 +20,7 @@ A from-scratch walkthrough of how the codebase is wired. Assumes zero prior cont
 
 ## 1. The 10,000-foot view
 
-The repo is a **Playwright robot** that logs into UCSD's HR systems (UCPath, ACT CRM, I9 Complete, Kuali, Kronos) and does routine HR work: onboarding, separations, EID lookups, report downloads, etc.
+The repo is a **Playwright robot** that logs into UCSD's HR systems (UCPath, ACT CRM, I9 Complete, Kuali, Kronos) and does routine HR work: onboarding, separations, person lookups, report downloads, etc.
 
 The trick: each automation is **declarative**. You don't write "launch a browser, log in, run this, tear down." You write:
 
@@ -64,13 +64,13 @@ src/
 ├── workflows/     ← COMPOSED WORKFLOWS: each is defineWorkflow(...) + CLI adapter
 │   ├── onboarding/          ← CRM + UCPath + I9
 │   ├── separations/         ← Kuali + Old/New Kronos + UCPath
-│   ├── eid-lookup/          ← UCPath + optional CRM
+│   ├── person-lookup/       ← UCPath + CRM name/EID resolution
 │   ├── old-kronos-reports/  ← UKG Time Detail PDFs
 │   ├── work-study/          ← UCPath PayPath
 │   ├── emergency-contact/   ← UCPath
 │   ├── oath-signature/      ← UCPath
 │   ├── oath-upload/         ← ServiceNow + OCR + delegation
-│   ├── active-check/        ← UCPath
+│   ├── i9-lookup/           ← I9 signer lookup (delegated-only)
 │   ├── crm-doc-download/    ← CRM iDocs PDFs
 │   ├── sharepoint-download/ ← SharePoint roster files
 │   └── ocr/                 ← OCR engine (dashboard HTTP only)
@@ -100,7 +100,7 @@ flowchart TB
     subgraph "Layer 3: workflows/"
         W1[onboarding/workflow.ts]
         W2[separations/workflow.ts]
-        W3[eid-lookup/workflow.ts]
+        W3[person-lookup/workflow.ts]
     end
     subgraph "Layer 2: systems/"
         S1[ucpath/selectors.ts + navigate.ts]
@@ -141,7 +141,7 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   retry<R>(fn, opts?): Promise<R>           // linear-backoff retry
   updateData(patch): void                   // push fields into the dashboard row
   data: Partial<TData>                      // current merged data (prefilled + updateData patches)
-  screenshot(label: string): Promise<void>  // take a debug screenshot, saved to .screenshots/
+  screenshot(label: string): Promise<void>  // take a debug screenshot, saved to .tracker/screenshots/
   captureAndStampScreenshot(page, label): Promise<string | null>  // screenshot + stamp with label overlay
   session: SessionHandle                    // escape hatch to raw Session
   log: typeof log                           // colored console + JSONL
@@ -203,13 +203,13 @@ await ctx.step("extraction", async () => {
 });
 ```
 
-What happens on the way in: `emitStep(name)` — writes a `running` entry to `.tracker/{workflow}-{date}.jsonl` so the dashboard row updates to show this step.
+What happens on the way in: `emitStep(name)` — writes a `running` entry to `.tracker/rows/{workflow}-{date}.jsonl` so the dashboard row updates to show this step.
 
 What happens on success: nothing extra, your value is returned.
 
 What happens on **failure**:
 
-1. `screenshotFn(name)` fires — screenshots **every open page** to `.screenshots/{workflow}-{itemId}-{step}-{systemId}-{ts}.png`
+1. `screenshotFn(name)` fires — screenshots **every open page** to `.tracker/screenshots/{workflow}-{itemId}-{step}-{systemId}-{ts}.png`
 2. `emitFailed(name, classifiedError)` fires — writes a `failed` entry
 3. The error is **re-thrown** so your handler's control flow continues to work as expected
 
@@ -561,7 +561,7 @@ Operator submits another input run while the daemon is alive
 - Keepalive: every 15 min idle, each daemon runs `session.healthCheck(system)` per system to prevent SAML expiry.
 - Graceful drain: `:stop` scripts set a stop signal; daemons finish in-flight work and exit.
 
-Workflows registered for daemon mode (as of 2026-05-16): `separations`, `work-study`, `eid-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `active-check`, `crm-doc-download`.
+Workflows registered for daemon mode: `separations`, `work-study`, `person-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `crm-doc-download`, and delegated-only `i9-lookup`.
 
 Implementation: `src/core/daemon/` (daemon loop, queue, registry, HTTP keepalive) + `src/core/task-store/` (SQLite control plane).
 
@@ -681,10 +681,13 @@ Every kernel workflow emits two append-only JSONL streams:
 
 ```
 .tracker/
-├── onboarding-2026-04-18.jsonl          ← entries: pending/running/done/failed
-├── onboarding-2026-04-18-logs.jsonl     ← logs: step/success/warn/error/waiting
-├── separations-2026-04-18.jsonl
-├── sessions.jsonl                        ← session-level events (browser launch, duo queue)
+├── rows/
+│   ├── onboarding-2026-04-18.jsonl      ← entries: pending/running/done/failed
+│   └── separations-2026-04-18.jsonl
+├── logs/
+│   └── onboarding-2026-04-18.jsonl      ← logs: step/success/warn/error/waiting
+├── sessions/
+│   └── 2026-04-18.jsonl                 ← session-level events (browser launch, duo queue)
 ├── state.db                             ← SQLite control plane (tasks, worker heartbeats, worker_commands, browser_processes). Queue authority since 2026-05-04.
 └── daemons/
     └── <workflow>.queue.jsonl            ← append-only audit trail for daemon queue items (not authoritative — read state.db)
@@ -698,8 +701,8 @@ flowchart LR
     H -->|ctx.updateData| STP
     H -->|ctx.log.step| LOG[log emit]
     STP -->|emitStep/emitData/emitFailed| WTW[withTrackedWorkflow callbacks]
-    WTW -->|trackEvent| JSONL[workflow-DATE.jsonl]
-    LOG -->|AsyncLocalStorage ctx| LOGJSONL[workflow-DATE-logs.jsonl]
+    WTW -->|trackEvent| JSONL[rows/workflow-DATE.jsonl]
+    LOG -->|AsyncLocalStorage ctx| LOGJSONL[logs/workflow-DATE.jsonl]
 ```
 
 - `appendFileSync` is the write primitive. POSIX `write(2)` with `O_APPEND` is atomic per-line at the OS level — no mutex needed.
@@ -771,8 +774,8 @@ flowchart LR
 | `WorkflowRuntimePolicy` | `src/domain/workflow-runtime/types.ts` | Declares row/group/batch-view action descriptors + delegation/preview/member/prep rules |
 | Policy registry | `src/domain/workflow-runtime/registry.ts` | Populated at workflow load via `defineWorkflow({ runtimePolicy })` |
 | Projections | `src/domain/workflow-runtime/projection.ts` | Turns tracker rows + queue surfaces into `WorkflowRunProjection` (title, subtitle, `rowTypeLabel`, `actions`, `batchMembers`) |
-| Action engine | `src/tracker/dashboard/actions/perform-workflow-action.ts` | Single dispatcher for cancel / retry / delete / bump; HTTP routes are thin wrappers |
-| React consumers | `QueuePanel`, `EntryItem`, `BatchFooterActions`, `QueueItemControls` | Read projection `actions` for enablement + scope; POST to legacy-compatible `/api/*` paths |
+| Action engine | `src/control/actions/perform-workflow-action.ts` | Single dispatcher for cancel / retry / delete / bump; HTTP routes are thin wrappers |
+| React consumers | `QueuePanel`, `EntryItem`, `BatchFooterActions`, shared row action buttons | Read projection `actions` for enablement + scope; POST to legacy-compatible `/api/*` paths |
 
 **Scope discipline:** `row` / `group` / `visible-view` use caller-provided targets verbatim — queue-panel buttons cannot reach batch-view-only rows. Only explicit `tree` scope walks descendant runs. Batch footer retry/delete uses projection `targetRunIds` so bulk actions stay inside the opened batch.
 
