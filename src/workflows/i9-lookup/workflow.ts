@@ -52,7 +52,7 @@ export const i9LookupWorkflow = defineWorkflow({
   archetype: "single",
   inputSubject: "name",
   code: "i9",
-  category: "Onboarding",
+  category: "Utils",
   iconName: "ShieldCheck",
   systems: [
     {
