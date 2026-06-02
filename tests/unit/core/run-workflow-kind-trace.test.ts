@@ -8,6 +8,7 @@ import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
 import { emitTrackerRow } from '../../../src/tracker/jsonl.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 import { rowsDir } from '../../../src/tracker/paths.js'
+import { runIdFragment, tracePrefix } from '../../../src/domain/queue-trace-id.js'
 
 /**
  * The in-process `runWorkflow` real-run path (used by non-daemon `delegateTo`
@@ -104,20 +105,22 @@ test('runWorkflow reuses the trace id frozen on the run\'s pending row (delegati
   }
 })
 
-test('runWorkflow stamps an inherited rootTraceId onto every live row when no pending row is frozen', async () => {
-  // Root trace-id propagation: a delegated child carries `rootTraceId` on its
-  // `__runtimeOptions` (e.g. an OCR fan-out into oath-signature). With NO prior
-  // frozen pending row, the inherited root id must win over the per-run compute
-  // — every live row displays the ORIGINATING run's id, not a `kt-...` recompute.
+test('runWorkflow composes <rootTracePrefix>-<ownRunId4> onto every live row when no pending row is frozen', async () => {
+  // Root trace-id propagation (trace/span model): a delegated child carries
+  // `rootTracePrefix` on its `__runtimeOptions` (e.g. an OCR fan-out into
+  // oath-signature). With NO prior frozen pending row, the child COMPOSES
+  // `<prefix>-<ownRunId4>` — every live row shares the operation prefix while
+  // keeping its own tail, not a `kt-...` recompute.
   const dir = TMP()
   const runId = 'eeeeffff-1111-2222-3333-444455556666'
-  const ROOT_ID = 'ou-090553-1a57'
+  const ROOT_PREFIX = 'ou-090553'
+  const expected = `${ROOT_PREFIX}-${runIdFragment(runId)}`
 
   await runWorkflow(
     wf,
     {
       doc: 'scan.pdf',
-      __runtimeOptions: { rootTraceId: ROOT_ID },
+      __runtimeOptions: { rootTracePrefix: ROOT_PREFIX },
     } as unknown as { doc: string },
     {
       launchFn: fakeLaunch,
@@ -132,6 +135,7 @@ test('runWorkflow stamps an inherited rootTraceId onto every live row when no pe
   const live = rows.filter((r) => r.status === 'running' || r.status === 'done')
   assert.ok(live.length > 0, 'should have at least one running/done row')
   for (const row of live) {
-    assert.equal(row.data?.__traceId, ROOT_ID, `live row (${row.status}) must display the inherited root id`)
+    assert.equal(row.data?.__traceId, expected, `live row (${row.status}) composes <prefix>-<ownRunId4>`)
+    assert.equal(tracePrefix(row.data?.__traceId as string), ROOT_PREFIX, `live row (${row.status}) shares the root prefix`)
   }
 })

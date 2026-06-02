@@ -8,6 +8,7 @@ import { defineWorkflow, runOneItem } from '../../../src/core/kernel/workflow.js
 import { Session } from '../../../src/core/kernel/session.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 import { rowFilePath } from '../../../src/tracker/paths.js'
+import { runIdFragment, tracePrefix } from '../../../src/domain/queue-trace-id.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-runone-'))
 
@@ -202,11 +203,11 @@ test('runOneItem: without authTimings, no synthetic auth entries are emitted', a
   assert.equal(authEntries.length, 0, 'no synthetic auth entries without authTimings')
 })
 
-test('runOneItem: __runtimeOptions.rootTraceId survives splitPrefilled and rides every row (daemon-worker path)', async () => {
+test('runOneItem: __runtimeOptions.rootTracePrefix survives splitPrefilled and composes <prefix>-<ownRunId4> on every row (daemon-worker path)', async () => {
   // The daemon worker re-emits pending+running for a delegated child whose
-  // `__runtimeOptions.rootTraceId` was stamped at enqueue (root trace-id
-  // propagation). With no prior frozen pending row, the inherited root id must
-  // win over the per-run compute and ride pending + all live rows.
+  // `__runtimeOptions.rootTracePrefix` was stamped at enqueue (root trace-id
+  // propagation, trace/span model). With no prior frozen pending row, the child
+  // COMPOSES `<prefix>-<ownRunId4>` and that composed id rides every row.
   const dir = TMP()
   const wf = defineWorkflow({
     name: 'root-trace-worker-test',
@@ -228,13 +229,15 @@ test('runOneItem: __runtimeOptions.rootTraceId survives splitPrefilled and rides
     readyPromises: new Map([['ucpath', Promise.resolve()]]),
   })
 
-  const ROOT_ID = 'ou-090553-1a57'
+  const ROOT_PREFIX = 'ou-090553'
+  const runId = 'run-root-trace'
+  const expected = `${ROOT_PREFIX}-${runIdFragment(runId)}`
   await runOneItem({
     wf,
     session,
-    item: { emplId: '10000050', __runtimeOptions: { rootTraceId: ROOT_ID } },
+    item: { emplId: '10000050', __runtimeOptions: { rootTracePrefix: ROOT_PREFIX } },
     itemId: 'item-root-trace',
-    runId: 'run-root-trace',
+    runId,
     trackerDir: dir,
     callerPreEmits: false,
     parentRunId: 'ocr-root-run',
@@ -244,15 +247,18 @@ test('runOneItem: __runtimeOptions.rootTraceId survives splitPrefilled and rides
   const traced = entries.filter((e: any) => e.data?.__traceId)
   assert.ok(traced.length >= 2, 'pending + at least one live row carry a trace id')
   for (const e of traced) {
-    assert.equal(e.data.__traceId, ROOT_ID, `${e.status} row displays the inherited root id`)
+    // Shares the operation prefix, keeps its own greppable tail.
+    assert.equal(e.data.__traceId, expected, `${e.status} row composes <prefix>-<ownRunId4>`)
+    assert.equal(tracePrefix(e.data.__traceId), ROOT_PREFIX, `${e.status} row shares the root prefix`)
   }
 })
 
-test('runOneItem: a 2nd emit reuses the frozen trace id (findFrozenTraceId wins over rootTraceId)', async () => {
+test('runOneItem: a 2nd emit reuses the frozen trace id (findFrozenTraceId wins over rootTracePrefix compose)', async () => {
   // Frozen-once invariant: once a pending row carries a trace id, a re-emit must
-  // reuse it (findFrozenTraceId is the FIRST fallback). Here the frozen id is
-  // the same as the inherited rootTraceId, but the assertion pins that
-  // findFrozenTraceId — not the runtime option — is consulted first.
+  // reuse it (findFrozenTraceId is the FIRST fallback). Here the frozen id was
+  // already composed off the operation prefix, and the assertion pins that
+  // findFrozenTraceId — not a fresh compose off the runtime option — is
+  // consulted first.
   const dir = TMP()
   const wf = defineWorkflow({
     name: 'root-trace-frozen-test',
@@ -292,12 +298,13 @@ test('runOneItem: a 2nd emit reuses the frozen trace id (findFrozenTraceId wins 
     dir,
   )
 
-  // Second pass: a fresh rootTraceId is supplied, but findFrozenTraceId must
-  // win — the row already carries ROOT_ID, so we reuse it (no drift).
+  // Second pass: a DIFFERENT rootTracePrefix is supplied, but findFrozenTraceId
+  // must win — the row already carries ROOT_ID, so we reuse it (no drift, no
+  // recompose off the new prefix).
   await runOneItem({
     wf,
     session,
-    item: { emplId: '10000050', __runtimeOptions: { rootTraceId: 'ou-999999-zzzz' } },
+    item: { emplId: '10000050', __runtimeOptions: { rootTracePrefix: 'ou-999999' } },
     itemId: 'item-frozen',
     runId,
     trackerDir: dir,
@@ -309,7 +316,7 @@ test('runOneItem: a 2nd emit reuses the frozen trace id (findFrozenTraceId wins 
   const live = entries.filter((e: any) => (e.status === 'running' || e.status === 'done') && e.data?.__traceId)
   assert.ok(live.length > 0, 'should have at least one live row with a trace id')
   for (const e of live) {
-    assert.equal(e.data.__traceId, ROOT_ID, `${e.status} row reuses the frozen id, NOT the new rootTraceId`)
+    assert.equal(e.data.__traceId, ROOT_ID, `${e.status} row reuses the frozen id, NOT a recompose off the new prefix`)
   }
 })
 
