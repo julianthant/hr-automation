@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { defineWorkflow, runWorkflow } from "../../../src/core/index.js";
+import { delegateToImpl } from "../../../src/core/delegate.js";
 import { dateLocal, rowFilePath } from "../../../src/tracker/jsonl.js";
 
 interface TrackerLine {
@@ -110,17 +111,37 @@ describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(
       },
     });
 
-    await runWorkflow(ocrHubLike, { sessionId: "sess-abc", eids: ["E1", "E2", "E3"] }, { trackerDir });
+    // Model the OCR-hub parent as part of a larger operation whose ROOT trace id
+    // is already known (`ou-090553-1a57` — the oath operation's branded id). In
+    // production OCR computes this id at its root and passes it down (orchestrator
+    // for person-lookup, approve.ts for signers/upload). Here we drive the hub via
+    // `delegateToImpl` with an explicit `rootTraceId` so the parent's `makeCtx`
+    // carries it and forwards it to EVERY fan-out child — proving the whole tree
+    // (signers + upload) shares the one root id while keeping its own runId/itemId.
+    const ROOT_ID = "ou-090553-1a57";
+    await delegateToImpl({
+      parentRunId: "operation-root-run",
+      trackerDir,
+      child: ocrHubLike,
+      input: { sessionId: "sess-abc", eids: ["E1", "E2", "E3"] },
+      itemId: "sess-abc",
+      runId: "ocr-hub-run-1a57",
+      fireAndForget: false,
+      rootTraceId: ROOT_ID,
+    });
 
     const hubLines = readWorkflowLines(trackerDir, "scen-ocr-hub-like");
     const hubPending = hubLines.find((l) => l.status === "pending");
     const hubDone = hubLines.find((l) => l.status === "done");
     expect((hubPending?.data as { archetype?: string }).archetype).toBe("preview");
     expect(hubDone).toBeDefined();
-    expect(hubDone?.parentRunId).toBeUndefined();
+    // The hub is itself a delegated child of the operation root run.
+    expect(hubDone?.parentRunId).toBe("operation-root-run");
 
-    const hubRunId = hubPending?.runId;
-    expect(hubRunId).toBeDefined();
+    const hubRunId = "ocr-hub-run-1a57";
+    expect(hubLines.every((l) => l.runId === hubRunId)).toBe(true);
+    // The hub displays the operation's ROOT id (inherited verbatim).
+    expect((hubPending?.data as { __traceId?: string }).__traceId).toBe("ou-090553-1a57");
 
     // Signer children: batch members parented to the OCR run.
     const sigLines = readWorkflowLines(trackerDir, "scen-sig-like");
@@ -144,5 +165,33 @@ describe("ocr-hub fan-out shape via ctx.delegateToAll(signers) + ctx.delegateTo(
     expect(uploadPending?.input).toEqual({ sessionId: "sess-abc" });
     expect(uploadPending?.id).toBe("sess-abc");
     expect(uploadLines.find((l) => l.status === "done")).toBeDefined();
+
+    // ── Root trace-id propagation (unmasked) ────────────────────────────────
+    // Every fan-out child (signers + upload) must DISPLAY the SAME root trace id
+    // as the OCR-like parent — one operation, one id — while keeping its own
+    // runId/itemId. The literal root id is `ou-090553-1a57` (the oath operation's
+    // branded id), threaded transitively from the operation root through the hub.
+    const ROOT_TRACE = "ou-090553-1a57";
+    expect((hubPending?.data as { __traceId?: string }).__traceId).toBe(ROOT_TRACE);
+
+    // Every signer (oath-signature-like) child row shows the EXACT root id.
+    for (const l of sigLines) {
+      const id = (l.data as { __traceId?: string })?.__traceId;
+      if (id) expect(id).toBe(ROOT_TRACE);
+    }
+    // The upload (oath-upload-like) child rows show the EXACT root id too.
+    for (const l of uploadLines) {
+      const id = (l.data as { __traceId?: string })?.__traceId;
+      if (id) expect(id).toBe(ROOT_TRACE);
+    }
+    // The signer pending rows definitely carry it (not just "if present").
+    for (const p of sigPendings) {
+      expect((p.data as { __traceId?: string }).__traceId).toBe(ROOT_TRACE);
+    }
+    expect((uploadPending?.data as { __traceId?: string }).__traceId).toBe(ROOT_TRACE);
+
+    // And each child still keeps its OWN runId (distinct from the parent's).
+    expect(sigPendings.every((p) => p.runId && p.runId !== hubRunId)).toBe(true);
+    expect(uploadPending?.runId && uploadPending.runId !== hubRunId).toBe(true);
   });
 });

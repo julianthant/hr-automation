@@ -88,3 +88,24 @@ test("buildPendingTrackerData reuses a pre-frozen traceId verbatim instead of re
 
   assert.equal(data.__traceId, frozen);
 });
+
+test("buildPendingTrackerData stamps an inherited ROOT trace id verbatim, ignoring rootCode + runId compute", () => {
+  // Root trace-id propagation: a delegated child of an oath operation inherits
+  // the OCR root's full `ou-...` id. The `traceId` opt (fed `rootTraceId` by
+  // delegate.ts) must win over BOTH the child's runId/at compute AND any
+  // rootCode — every descendant shows the one root id, not a per-child recompute.
+  const rootId = "ou-090553-1a57";
+  const data = buildPendingTrackerData({
+    workflow: childWorkflow,
+    input: { emplId: "10000050" },
+    parentRunId: "ocr-root-run",
+    useInitialTrackerSeed: true,
+    nameIdStamp: "always-on-seed",
+    runId: "zzzz-9999-0000", // would compute `pl-...-zzzz` if the compute ran
+    rootCode: "os", // would prefix `os-...` if rootCode won
+    at: FIXED_AT,
+    traceId: rootId,
+  });
+
+  assert.equal(data.__traceId, rootId);
+});
