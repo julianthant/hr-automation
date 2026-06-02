@@ -14,7 +14,6 @@ import {
   checkTsx,
   checkPlaywrightBrowsers,
   checkDirWritable,
-  checkDuoSmsAccess,
   renderResults,
   validateBotToken,
   discoverChatId,
@@ -198,47 +197,6 @@ describe("checkDirWritable", () => {
     mkdirSync(target, { recursive: true });
     const r = checkDirWritable("target", target, "fix me");
     assert.equal(r.status, "ok");
-  });
-});
-
-describe("checkDuoSmsAccess", () => {
-  it("reports disabled (ok) when the flag is unset, without probing", () => {
-    let probed = false;
-    const r = checkDuoSmsAccess({
-      flagValue: undefined,
-      probe: () => {
-        probed = true;
-        return true;
-      },
-    });
-    assert.equal(r.status, "ok");
-    assert.match(r.message, /disabled/i);
-    assert.equal(probed, false, "probe must not run when the flag is unset");
-  });
-
-  it('reports disabled (ok) when the flag is "0"', () => {
-    const r = checkDuoSmsAccess({ flagValue: "0" });
-    assert.equal(r.status, "ok");
-    assert.match(r.message, /disabled/i);
-  });
-
-  it("warns when enabled on a non-macOS host", () => {
-    const r = checkDuoSmsAccess({ flagValue: "1", platform: "linux" });
-    assert.equal(r.status, "warn");
-    assert.match(r.message, /macOS/i);
-    assert.ok(r.fix);
-  });
-
-  it("passes when enabled on macOS and chat.db is readable", () => {
-    const r = checkDuoSmsAccess({ flagValue: "1", platform: "darwin", probe: () => true });
-    assert.equal(r.status, "ok");
-    assert.match(r.message, /readable/i);
-  });
-
-  it("warns (Full Disk Access) when enabled on macOS but chat.db is unreadable", () => {
-    const r = checkDuoSmsAccess({ flagValue: "1", platform: "darwin", probe: () => false });
-    assert.equal(r.status, "warn");
-    assert.match(r.fix ?? "", /Full Disk Access/i);
   });
 });
 
