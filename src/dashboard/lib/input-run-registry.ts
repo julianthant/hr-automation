@@ -18,7 +18,7 @@ type DashboardInputRunWorkflow = (typeof DASHBOARD_INPUT_RUN_WORKFLOWS)[number];
  * Input-format conventions:
  *   - Comma-separated single-field workflows (separations / onboarding /
  *     oath-signature) use the `parseCommaSeparated` helper.
- *   - Workflows whose input contains commas (eid-lookup's "Last, First")
+ *   - Workflows whose input contains commas (person-lookup's "Last, First")
  *     should pick a different separator (newline / semicolon) in their
  *     parser.
  *   - Workflows needing structured multi-field input (work-study:
@@ -95,7 +95,7 @@ export function parseCommaSeparated(
 
 /**
  * Semicolon-separated single-string-field parser. Use when the value
- * itself may contain commas — e.g. eid-lookup takes `"Last, First"` name
+ * itself may contain commas — e.g. person-lookup takes `"Last, First"` name
  * strings, so the top-level separator must be `;`. Trims whitespace
  * around the semicolons (so `"Smith, John ; Doe, Jane"` is fine) and
  * drops empties.

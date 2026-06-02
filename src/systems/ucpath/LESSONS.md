@@ -70,10 +70,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 ## 2026-05-07 — Person Org Summary detail-page Person ID id is `PERSON_NPC_VW_EMPLID`, not `PER_INST_EMP_VW_*`
 
 **Tried:** Detecting the single-result detail page in `extractSingleResultDetail` by counting `personOrgSummary.personIdValue`, whose registry definition was `#PER_INST_EMP_VW_OPRID$0` `.or` `#PER_INST_EMP_VW_EMPLID$0`.
-**Failed because:** Live UCPath renders the header Person ID as `<span id="PERSON_NPC_VW_EMPLID">10874572</span>` — no `$0` suffix and a different DOM-prefix entirely. Both fallback ids miss; `count()` returns 0; `extractSingleResultDetail` returns null; `searchByEid` warns "no detail page rendered" and the active-check workflow reports `not-found` for an Active employee. The `PER_INST_EMP_VW_LAST_HIRE_DT$0` and `PER_INST_EMP_VW_TERMINATION_DT$0` ids in the same selector group are correct (verified live), so the bug is isolated to the Person ID gate.
+**Failed because:** Live UCPath renders the header Person ID as `<span id="PERSON_NPC_VW_EMPLID">10874572</span>` — no `$0` suffix and a different DOM-prefix entirely. Both fallback ids miss; `count()` returns 0; `extractSingleResultDetail` returns null; `searchByEid` warns "no detail page rendered" and the lookup reports `not-found` for an Active employee. The `PER_INST_EMP_VW_LAST_HIRE_DT$0` and `PER_INST_EMP_VW_TERMINATION_DT$0` ids in the same selector group are correct (verified live), so the bug is isolated to the Person ID gate.
 **Fix:** Lead the `personIdValue` chain with `#PERSON_NPC_VW_EMPLID`, keep the legacy ids as fallbacks for cross-flow safety. Bumped `// verified` to 2026-05-07. Discovered by running playwright-cli against `PERSON_ORG_SUMM.GBL` for EID 10874572 (Leo Langley, SDCMP HDH, Active) during the 2026-05-05 E2E session.
 **Selector:** `personOrgSummary.personIdValue` in `selectors.ts`
-**Tags:** person-id, emplid, detail, person-org-summary, single-result, active-check, eid-lookup
+**Tags:** person-id, emplid, detail, person-org-summary, single-result, person-lookup
 
 ## 2026-04-23 — Workforce Job Summary multi-row grid blocks detail-page tabs
 
@@ -106,3 +106,13 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Failed because:** The `Transaction ID: T...` field and the approval strip (`Transaction: T..., ID: ...`) are below the comments/save area. A top-positioned screenshot hides the usable T-number, and a failed parse returned before any submitted-page evidence screenshot was captured.
 **Fix:** Scroll the Smart HR iframe to transaction readback markers before parsing and before workflow screenshots. Parse both lower-page shapes via `extractSmartHrTransactionNumber`, and capture `ucpath-transaction-submitted-missing-number` when UCPath accepted the submit but parsing still returns empty.
 **Tags:** transaction, readback, screenshot, scroll, smart-hr, separations
+
+## 2026-06-02 — Person Org Last Hire is start date, not assignment EFFDT
+
+**Tried:** Treating Person Org Summary assignment-table `EFFDT` as the person-lookup dashboard start date.
+
+**Failed because:** The assignment grid `EFFDT` is the selected employment-instance effective date, while the first day of service/start date is exposed separately as `PER_INST_EMP_VW_LAST_HIRE_DT$0` (`personOrgSummary.lastHireDate`). Showing EFFDT in the log panel makes the workflow look like it found the hire start date even when the two dates differ.
+
+**Fix:** Keep both values separate: populate `EidResult.startDate` from Last Hire/first day of service, keep `EidResult.effectiveDate` for assignment EFFDT, and have person-lookup stamp/display `startDate` while retaining `effdt` only as backend context.
+
+**Tags:** person-org-summary, last-hire, start-date, effdt, person-lookup, dashboard

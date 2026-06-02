@@ -12,8 +12,8 @@ import { oathUploadHandler, oathUploadSteps } from "./handler.js";
  * Oath Upload runtime policy.
  *
  * The Oath Upload row is a single, top-level row in the oath-upload tab.
- * Its `delegate-signatures` step delegates one PDF run to oath-signature,
- * then files the HR ticket after the delegated batch completes.
+ * OCR now fans out signer rows separately; oath-upload waits for those
+ * cross-daemon child rows, then files the HR ticket after every signer finishes.
  */
 export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
