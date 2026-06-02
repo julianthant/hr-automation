@@ -106,6 +106,72 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("delegated orchestrator re-stamps parentRunId on EVERY self-emitted row", async () => {
+  // Regression (verified 2026-06-02): the OCR orchestrator emits its own rich
+  // running/awaiting-approval snapshot rows, and the dashboard collapses a run
+  // to its LATEST row. If those snapshots drop `parentRunId`, the dashboard
+  // treats a delegated OCR run as standalone and `OcrReviewPane` hides the
+  // Approve button (`isDelegation = prepActive && entry.parentRunId`). The
+  // kernel only stamps parentRunId on the rows IT emits; delegation never puts
+  // it in the child input, so `ocrKernelHandler` forwards `ctx.parentRunId`
+  // into `input.parentRunId`. This pins that the orchestrator carries it onto
+  // every emission — pending through awaiting-approval.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string; parentRunId?: string }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-parent",
+      rosterPath,
+      rosterMode: "existing",
+      parentRunId: "oath-sig-run-99",
+    },
+    {
+      runId: "run-parent",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-parent-r0",
+        runId: "verify-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+      }],
+    },
+  );
+
+  assert.ok(writtenEntries.length >= 3, "expected multiple emitted rows");
+  for (const entry of writtenEntries) {
+    assert.equal(
+      entry.parentRunId,
+      "oath-sig-run-99",
+      `every emitted row must carry parentRunId (offender: ${entry.status}/${entry.step ?? ""})`,
+    );
+  }
+  const approval = writtenEntries.find(
+    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  );
+  assert.ok(approval, "awaiting-approval row should be emitted");
+  assert.equal(approval!.parentRunId, "oath-sig-run-99");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("orchestrator's terminal failed row keeps the rich preview payload (mode/preview + records)", async () => {
   // Regression: a failed OCR prep run must stay a recognizable *preview* row so
   // the dashboard keeps showing its Preview tab. The orchestrator surfaces its
@@ -534,6 +600,7 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
+  let watchedWorkflow: string | undefined;
 
   await runOcrOrchestrator(
     {
@@ -570,8 +637,9 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
         eidLookupItems = items;
       },
       _disableSqliteDependencies: true,
-      _watchChildRunsOverride: async ({ expectedItemIds }: WatchChildRunsOpts) =>
-        expectedItemIds.map((itemId) => ({
+      _watchChildRunsOverride: async (opts: WatchChildRunsOpts) => {
+        watchedWorkflow = opts.workflow;
+        return opts.expectedItemIds.map((itemId) => ({
           workflow: "person-lookup",
           itemId,
           runId: "eid-run-active-mock",
@@ -584,15 +652,21 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
             isActive: "true",
             isHdhAccepted: "true",
           },
-        })),
+        }));
+      },
     } as never,
   );
 
   assert.equal(eidLookupItems.length, 1);
   assert.equal(eidLookupItems[0].emplId, "10000001");
   assert.match(eidLookupItems[0].itemId, /^ocr-oath-run-active-r0$/);
+  // Regression guard for the 2026-05-28 eid-lookup→person-lookup rename that
+  // stranded watchChildRuns on a dead `eid-lookup` key (1h timeout). The
+  // orchestrator must watch the ACTUAL child workflow (`person-lookup`), not
+  // the phase label, or the lookup wait never resolves.
+  assert.equal(watchedWorkflow, "person-lookup");
   const steps = writtenEntries.map((e: any) => `${e.status}/${e.step ?? ""}`);
-  assert.ok(steps.some((s) => s.includes("eid-lookup")), `steps: ${steps.join(", ")}`);
+  assert.ok(steps.some((s) => s.includes("person-lookup")), `steps: ${steps.join(", ")}`);
   rmSync(dir, { recursive: true, force: true });
 });
 

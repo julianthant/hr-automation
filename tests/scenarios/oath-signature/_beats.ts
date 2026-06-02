@@ -29,7 +29,7 @@ export interface OathSignatureBeatsOpts {
  *
  *   1. `ctx.updateData({ emplId, name, date? })` — seeds operator-facing
  *      fields onto every subsequent row.
- *   2. `ctx.skipStep("ocr")` + `ctx.skipStep("fan-out")` — PDF-branch
+ *   2. `ctx.skipStep("ocr")` + `ctx.skipStep("delegate-signatures")` — PDF-branch
  *      steps don't apply on a signer run.
  *   3. `ctx.markStep("ucpath-auth")` — synthetic timeline marker (auth
  *      done by Session.launch in production).
@@ -51,7 +51,7 @@ export function oathSignatureBeats(
       },
     },
     { kind: "skipStep", name: "ocr" },
-    { kind: "skipStep", name: "fan-out" },
+    { kind: "skipStep", name: "delegate-signatures" },
     { kind: "markStep", name: "ucpath-auth" },
     {
       kind: "step",
@@ -65,16 +65,16 @@ export function oathSignatureBeats(
 export interface OathPdfBeatsOpts {
   /**
    * Step to hold inside until the runtime releases or cancels. `"ocr"`
-   * simulates "waiting for operator to approve OCR"; `"fan-out"` would
-   * simulate "fan-out in flight" (rarely useful since fan-out children
-   * run real workflows in the scenario harness).
+   * simulates "waiting for operator to approve OCR"; `"delegate-signatures"`
+   * would simulate "signer fan-out in flight" (rarely useful since the signer
+   * children run real workflows in the scenario harness).
    */
-  holdAt?: "ocr" | "fan-out";
+  holdAt?: "ocr" | "delegate-signatures";
   /**
    * Throw from inside the named step body — e.g. simulate "OCR child
-   * came back failed" or "fan-out child reported non-done status".
+   * came back failed" or "a signer child reported non-done status".
    */
-  throwAt?: { step: "ocr" | "fan-out"; error: Error };
+  throwAt?: { step: "ocr" | "delegate-signatures"; error: Error };
 }
 
 /**
@@ -88,9 +88,9 @@ export interface OathPdfBeatsOpts {
  *   1. `updateData` — seeds pdfOriginalName / sessionId on the row.
  *   2. `ctx.skipStep("ucpath-auth")` + `ctx.skipStep("transaction")`.
  *   3. `ctx.step("ocr", ...)` — operator-approval surrogate.
- *   4. `ctx.step("fan-out", ...)` — fan-out surrogate; tests that need
- *      to assert downstream signer rows must enqueue them through the
- *      runtime separately (the harness doesn't auto-spawn children).
+ *   4. `ctx.step("delegate-signatures", ...)` — signer fan-out surrogate;
+ *      tests that need to assert downstream signer rows must enqueue them
+ *      through the runtime separately (the harness doesn't auto-spawn children).
  */
 export function oathPdfBeats(
   input: OathPdfInput,
@@ -116,9 +116,9 @@ export function oathPdfBeats(
     },
     {
       kind: "step",
-      name: "fan-out",
-      hold: opts.holdAt === "fan-out",
-      throw: opts.throwAt?.step === "fan-out" ? opts.throwAt.error : undefined,
+      name: "delegate-signatures",
+      hold: opts.holdAt === "delegate-signatures",
+      throw: opts.throwAt?.step === "delegate-signatures" ? opts.throwAt.error : undefined,
     },
   ];
 }

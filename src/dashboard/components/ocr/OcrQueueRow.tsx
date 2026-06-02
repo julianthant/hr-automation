@@ -35,7 +35,7 @@ const STAGES = [
   { key: "loading-roster", label: "Roster" },
   { key: "ocr", label: "OCR" },
   { key: "matching", label: "Match" },
-  { key: "eid-lookup", label: "EID lookup" },
+  { key: "person-lookup", label: "Person lookup" },
   { key: "verify", label: "Verify" },
 ] as const;
 

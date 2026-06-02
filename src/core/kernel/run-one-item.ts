@@ -253,6 +253,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       stepper,
       isBatch: true,
       runId,
+      ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
       itemId,
       handlerInput,
       prefilled,

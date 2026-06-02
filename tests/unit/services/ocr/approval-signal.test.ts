@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   OcrApprovalCancelledError,
   _resetApprovalSignalRegistryForTests,
 } from "../../../../src/services/ocr/approval-signal.js";
+import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 
 function freshKey() {
   return { workflow: "ocr", sessionId: `s-${Math.random().toString(36).slice(2, 10)}` };
@@ -72,7 +73,11 @@ test("approval-signal: JSONL backstop picks up out-of-process approve write", as
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const dd = String(today.getDate()).padStart(2, "0");
-    const path = join(dir, `ocr-${yyyy}-${mm}-${dd}.jsonl`);
+    // Production writes OCR rows under `.tracker/rows/` — the backstop reads
+    // via `rowFilePath`, so the test must write to the same canonical location
+    // (a flat `dir/ocr-<date>.jsonl` would silently never be read).
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const path = rowFilePath("ocr", `${yyyy}-${mm}-${dd}`, dir);
     // Pre-write an approved row before subscribing — backstop's initial poll
     // should pick it up regardless of in-memory listeners.
     writeFileSync(path, JSON.stringify({
@@ -107,7 +112,8 @@ test("approval-signal: JSONL backstop picks up discarded row out-of-process", as
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const dd = String(today.getDate()).padStart(2, "0");
-    const path = join(dir, `ocr-${yyyy}-${mm}-${dd}.jsonl`);
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const path = rowFilePath("ocr", `${yyyy}-${mm}-${dd}`, dir);
     writeFileSync(path, JSON.stringify({
       workflow: "ocr",
       id: key.sessionId,
@@ -132,6 +138,47 @@ test("approval-signal: JSONL backstop picks up discarded row out-of-process", as
         return true;
       },
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("approval-signal: backstop reads rows/ — a stale flat-path row is NOT picked up", async () => {
+  // Regression (2026-06-02): the backstop previously read a flat
+  // `dir/ocr-<date>.jsonl`, which the tracker-dir restructure moved to
+  // `dir/rows/`. A daemon-hosted OCR handler then never saw the dashboard's
+  // approve and stalled at `step=ocr`. Pin that the backstop ignores the
+  // legacy flat location: a flat-path approve row must NOT resolve the wait,
+  // so an abort is the only way out.
+  _resetApprovalSignalRegistryForTests();
+  const dir = mkdtempSync(join(tmpdir(), "ocr-approval-"));
+  try {
+    const key = { workflow: "ocr", sessionId: "session-flat-ignored" };
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    // Write the approved row at the OLD flat location only.
+    writeFileSync(join(dir, `ocr-${yyyy}-${mm}-${dd}.jsonl`), JSON.stringify({
+      workflow: "ocr",
+      id: key.sessionId,
+      runId: `${key.sessionId}#1`,
+      timestamp: new Date().toISOString(),
+      status: "done",
+      step: "approved",
+      data: { records: JSON.stringify([{ x: 1 }]) },
+    }) + "\n");
+
+    const ctrl = new AbortController();
+    const promise = subscribeToApproval(key, {
+      signal: ctrl.signal,
+      trackerDir: dir,
+      initialPollMs: 5,
+      pollMs: 5,
+    });
+    // Give the backstop several poll cycles; it must NOT resolve from the flat row.
+    setTimeout(() => ctrl.abort(), 60);
+    await assert.rejects(promise, (err: unknown) => err instanceof OcrApprovalCancelledError);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

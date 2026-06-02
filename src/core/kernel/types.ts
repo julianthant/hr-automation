@@ -414,6 +414,15 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   isBatch: boolean
   runId: string
   /**
+   * Delegated scope: the parent run's id when this run was spawned via
+   * `delegateTo`/`delegateToAll`, else `undefined`. The kernel stamps it on the
+   * rows it emits; it's surfaced here so a handler that owns its own tracker
+   * emission (today only OCR) can re-stamp `parentRunId` on every self-emitted
+   * row — otherwise the dashboard's latest-wins dedupe sees the handler's
+   * unstamped rows and treats a delegated row as standalone.
+   */
+  parentRunId?: string
+  /**
    * Per-run `AbortSignal` sourced from the kernel's per-item `AbortController`.
    * Flips to `aborted` when an operator-issued cancel reaches the daemon /
    * scenario runtime for this run. The signal is auto-injected into every

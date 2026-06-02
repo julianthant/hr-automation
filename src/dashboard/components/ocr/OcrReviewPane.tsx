@@ -1223,7 +1223,7 @@ function deriveRecordWorkflowPhase(args: {
   const step = args.entryStep ?? "";
   if (
     args.entryStatus === "running" &&
-    (step === "matching" || step === "disambiguating" || step === "eid-lookup" || step === "verification") &&
+    (step === "matching" || step === "disambiguating" || step === "person-lookup" || step === "verification") &&
     (lookupState === "extracted" || lookupState === "lookup-pending" || lookupState === "lookup-running")
   ) {
     return "running";
@@ -1259,7 +1259,9 @@ function getMatchSourceDisplay(record: AnyPreviewRecord): { label: string; class
     return { label: "Match: LLM", className: "border-warning/40 bg-warning/10 text-warning" };
   }
   if (source === "eid-lookup") {
-    return { label: "Match: eid-lookup", className: "border-primary/40 bg-primary/10 text-primary" };
+    // Display label tracks the renamed "Person Lookup" step; the underlying
+    // `matchSource` VALUE stays "eid-lookup" (provenance, not a step).
+    return { label: "Match: person lookup", className: "border-primary/40 bg-primary/10 text-primary" };
   }
   if (source === "manual") {
     return { label: "Match: manual", className: "border-border bg-muted text-muted-foreground" };

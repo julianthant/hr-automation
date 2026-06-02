@@ -19,8 +19,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { dateLocal } from "../../tracker/jsonl.js";
+import { dateLocal, rowFilePath } from "../../tracker/jsonl.js";
 
 export interface ApprovalKey {
   workflow: string;
@@ -283,7 +282,14 @@ function readLatestOcrApprovalState(
   const dates = [today, addDays(today, -1)];
   let latest: { ts: string; row: ApprovalRow } | null = null;
   for (const date of dates) {
-    const path = join(trackerDir, `ocr-${date}.jsonl`);
+    // Rows live under `.tracker/rows/` since the 2026-06-01 tracker-dir
+    // restructure — use the canonical `rowFilePath` helper, NOT a flat
+    // `join(trackerDir, "ocr-<date>.jsonl")`. The stale flat path made this
+    // cross-process JSONL backstop always read a non-existent file, so a
+    // daemon-hosted OCR handler (oath-upload → oath-signature daemon →
+    // in-process OCR) never saw the dashboard's approve and stalled at
+    // `step=ocr` forever (the in-memory `emitApproved` can't cross processes).
+    const path = rowFilePath("ocr", date, trackerDir);
     if (!existsSync(path)) continue;
     let raw: string;
     try {

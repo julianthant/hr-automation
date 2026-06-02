@@ -18,7 +18,7 @@ test("ocrWorkflow declares expected steps", () => {
     "ocr",
     "matching",
     "disambiguating",
-    "eid-lookup",
+    "person-lookup",
     "verification",
     "awaiting-approval",
   ]);

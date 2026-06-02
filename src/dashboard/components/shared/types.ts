@@ -382,7 +382,7 @@ const STEP_ABBREVIATIONS: Record<string, string> = {
 
 export function formatStepName(step: string): string {
   if (step === "ocr") return "OCR";
-  if (step === "eid-lookup") return "EID Lookup";
+  if (step === "person-lookup") return "Person Lookup";
   return step
     .replace(/-/g, " ")
     .replace(/\b\w+/g, (w) => STEP_ABBREVIATIONS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1));

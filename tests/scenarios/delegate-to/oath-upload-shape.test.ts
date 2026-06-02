@@ -76,7 +76,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
       archetype: "batch",
       systems: [],
       authSteps: false,
-      steps: ["ocr", "fan-out"] as const,
+      steps: ["ocr", "delegate-signatures"] as const,
       schema: z.object({ sessionId: z.string(), eids: z.array(z.string()) }),
       detailFields: [{ key: "sessionId", label: "Session" }],
       getName: (d) => d.sessionId ?? "",
@@ -91,7 +91,7 @@ describe("oath-upload-shape scenario via ctx.delegateTo(oath-signature PDF)", ()
           );
           if (result.status !== "done") throw new Error("OCR delegation did not complete");
         });
-        await ctx.step("fan-out", async () => {
+        await ctx.step("delegate-signatures", async () => {
           await ctx.delegateToAll(
             sigLikeChild,
             input.eids.map((emplId) => ({ emplId })),
