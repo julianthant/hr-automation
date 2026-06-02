@@ -7,6 +7,7 @@ import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate, findFrozenTraceId } from "../../find-latest-entry.js";
+import { tracePrefix } from "../../../domain/queue-trace-id.js";
 import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
 import { readFormType, readParentRunId, readDryRun } from "./shared.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
@@ -71,18 +72,20 @@ export function buildOcrApproveHandler(
     // oath-signature signer rows and the oath-upload ticket row grouped under
     // the OCR card instead of appearing as orphaned top-level rows.
     const childParentRunId = parentRunId ?? input.runId;
-    // Root trace-id propagation (DISPLAY-only): the OCR root row carries the
-    // operation's frozen trace id (`ou-...` after the oath form branded it via
-    // `traceCode`, else `oc-...`). This fan-out runs OUTSIDE any kernel ctx
-    // (HTTP path), so we read the root id back off the OCR row and stamp it as
-    // `rootTraceId` on every enqueued child's `__runtimeOptions` — the daemon
-    // worker's `run-one-item` re-emit then displays the OCR root's id on the
-    // signer rows + oath-upload ticket while each keeps its own runId/itemId.
-    const ocrRootTraceId = findFrozenTraceId({
+    // Root trace-id propagation (DISPLAY-only, trace/span model): the OCR root
+    // row carries the operation's frozen trace id (`ou-...` after the oath form
+    // branded it via `traceCode`, else `oc-...`). This fan-out runs OUTSIDE any
+    // kernel ctx (HTTP path), so we read that id back off the OCR row and stamp
+    // its PREFIX (`<code>-<HHMMSS>`) as `rootTracePrefix` on every enqueued
+    // child's `__runtimeOptions` — the daemon worker's `run-one-item` re-emit
+    // then COMPOSES `<prefix>-<ownRunId4>` on each signer row + oath-upload
+    // ticket, so they share the operation prefix while staying greppable.
+    const ocrRootFrozenId = findFrozenTraceId({
       workflow: WORKFLOW,
       runId: input.runId,
       ...(trackerDir !== undefined ? { trackerDir } : {}),
     });
+    const ocrRootTracePrefix = ocrRootFrozenId ? tracePrefix(ocrRootFrozenId) : undefined;
     const dryRun = readDryRun(input.sessionId, trackerDir);
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
     const parentSubject = parentRunId && approveTo
@@ -115,13 +118,13 @@ export function buildOcrApproveHandler(
         const baseFanInput = approveTo.deriveInput(rec as never);
         const fanInput =
           baseFanInput && typeof baseFanInput === "object"
-            ? withRootTraceIdRuntimeOption(
+            ? withRootTracePrefixRuntimeOption(
                 {
                   ...(baseFanInput as Record<string, unknown>),
                   ...(dryRun ? { dryRun: true } : {}),
                   ...(parentSubject ? { parentSubject } : {}),
                 },
-                ocrRootTraceId,
+                ocrRootTracePrefix,
               )
             : baseFanInput;
         const itemId = approveTo.deriveItemId(rec as never, input.runId, index);
@@ -281,9 +284,9 @@ export function buildOcrApproveHandler(
               : {}),
             ...(dryRun ? { dryRun: true } : {}),
           };
-          const docInput = withRootTraceIdRuntimeOption(
+          const docInput = withRootTracePrefixRuntimeOption(
             approveDocumentTo.deriveInput(doc as never),
-            ocrRootTraceId,
+            ocrRootTracePrefix,
           );
           docFanItemId = approveDocumentTo.deriveItemId(doc as never);
           docDispatchResult = await enqueueDocFanOut({
@@ -500,15 +503,16 @@ function readLatestOcrReviewData(
 }
 
 /**
- * Merge the OCR root's trace id onto an enqueued child's `__runtimeOptions`
- * channel (root trace-id propagation). The daemon worker reads
- * `runtimeOptions.rootTraceId` in `run-one-item.ts` and stamps it verbatim as
- * the child's `data.__traceId`, so every fan-out descendant DISPLAYS the OCR
- * root's id while keeping its own runId/itemId. No-op when the id is absent
- * (the OCR row had no trace id) or the input isn't a plain object.
+ * Merge the OCR root's trace PREFIX onto an enqueued child's `__runtimeOptions`
+ * channel (root trace-id propagation, trace/span model). The daemon worker reads
+ * `runtimeOptions.rootTracePrefix` in `run-one-item.ts` and COMPOSES
+ * `<prefix>-<ownRunId4>` as the child's `data.__traceId`, so every fan-out
+ * descendant shares the OCR root's operation prefix while keeping its own
+ * greppable tail/runId/itemId. No-op when the prefix is absent (the OCR row had
+ * no trace id) or the input isn't a plain object.
  */
-function withRootTraceIdRuntimeOption<TInput>(input: TInput, rootTraceId: string | undefined): TInput {
-  if (!rootTraceId || !input || typeof input !== "object" || Array.isArray(input)) {
+function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix: string | undefined): TInput {
+  if (!rootTracePrefix || !input || typeof input !== "object" || Array.isArray(input)) {
     return input;
   }
   const current = (input as Record<string, unknown>).__runtimeOptions;
@@ -516,7 +520,7 @@ function withRootTraceIdRuntimeOption<TInput>(input: TInput, rootTraceId: string
     ...(input as Record<string, unknown>),
     __runtimeOptions: {
       ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
-      rootTraceId,
+      rootTracePrefix,
     },
   } as TInput;
 }

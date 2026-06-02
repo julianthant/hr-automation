@@ -41,7 +41,7 @@ import type { OcrInput } from "./schema.js";
 import { runOcrPipeline } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
-import { buildTraceId } from "../../domain/queue-trace-id.js";
+import { buildTraceId, tracePrefix } from "../../domain/queue-trace-id.js";
 import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
 import {
@@ -838,11 +838,11 @@ export async function runOcrOrchestrator(
             inputs,
             renderAs: "flat",
             fireAndForget: true,
-            // Root trace-id propagation: the OCR root computed `traceId` above
-            // (`ou-...` for oath, `oc-...` otherwise). Pass it directly so every
-            // person-lookup child DISPLAYS the OCR root's id while keeping its
-            // own runId/itemId.
-            rootTraceId: traceId,
+            // Root trace-id propagation (trace/span model): pass the OCR root's
+            // trace PREFIX (`ou-<HHMMSS>` for oath, `oc-<HHMMSS>` otherwise) so
+            // every person-lookup child COMPOSES `<prefix>-<ownRunId4>` —
+            // visibly one operation, each child individually greppable.
+            rootTracePrefix: tracePrefix(traceId),
             deriveItemId: deriveChildItemId,
             // The OCR pending row carries pdfFileId / sessionId / parent
             // subject context — re-emit those onto each child pending row
