@@ -358,10 +358,16 @@ export async function runOcrOrchestrator(
       log.success(`[ocr] roster downloaded: ${resolvedRosterPath}`);
     }
 
-    if (!resolvedRosterPath) {
+    // Forms that declare `rosterMode: "optional"` (e.g. `verify`, which does no
+    // roster matching — it resolves identities via person-lookup in
+    // `enrichRecords`) may run with no roster at all. Roster-`required` forms
+    // (oath / emergency-contact) still throw if no path resolved.
+    if (!resolvedRosterPath && spec.rosterMode !== "optional") {
       throw new Error("OCR: no roster path resolved");
     }
-    const roster = precomputeRoster((await loadRosterFn(resolvedRosterPath)) as MatchRosterRow[]) as OcrRosterRow[];
+    const roster = resolvedRosterPath
+      ? (precomputeRoster((await loadRosterFn(resolvedRosterPath)) as MatchRosterRow[]) as OcrRosterRow[])
+      : [];
 
     // 1b. Pre-render PDF pages so we know page count + can show the page
     // image in the Preview tab before OCR finishes.
@@ -528,7 +534,7 @@ export async function runOcrOrchestrator(
 
     // 3. Match
     log.step(`[ocr] matching ${(ocrResult.data as unknown[]).length} OCR record(s) against roster`);
-    log.step(`[ocr] roster has ${roster.length} row(s) loaded from ${resolvedRosterPath.split("/").pop()}`);
+    log.step(`[ocr] roster has ${roster.length} row(s)${resolvedRosterPath ? ` loaded from ${resolvedRosterPath.split("/").pop()}` : " (no roster — rosterMode optional)"}`);
     let records = await raceOcrPrepWithDiscard(
       id,
       runId,
@@ -880,6 +886,36 @@ export async function runOcrOrchestrator(
         sqliteDependenciesEnabled: eidLookupSqliteDepsEnabled,
         id,
         runId,
+      });
+    }
+
+    // 4b. Form-specific enrichment (generic hook; most forms omit it). The
+    // `verify` form uses this to delegate each person to person-lookup (CRM
+    // employment + oath dates, active status) and oath records with a blank
+    // authorized-official signature to i9-lookup, then patch the found values
+    // onto each record. Awaited on purpose — the completeness report needs the
+    // looked-up data before the operator reviews. Forms whose `needsLookup`
+    // drives the eid-lookup fan-out above (oath / emergency-contact) omit this.
+    if (spec.enrichRecords) {
+      log.step(`[ocr] enrichRecords: running form-specific enrichment for ${records.length} record(s)`);
+      emitSnapshot(records, "person-lookup", "running", { failedPages, emptyPages, pageStatusSummary });
+      const enriched = await raceOcrPrepWithDiscard(
+        id,
+        runId,
+        spec.enrichRecords({
+          records,
+          runId,
+          sessionId: input.sessionId,
+          trackerDir,
+          date,
+          parentSubject: cachedParentSubject,
+          rootTracePrefix: tracePrefix(traceId),
+          emitProgress: (recs: unknown[]) =>
+            emitSnapshot(recs, "person-lookup", "running", { failedPages, emptyPages, pageStatusSummary }),
+        }) as Promise<unknown[]>,
+      );
+      enriched.forEach((r, i) => {
+        records[i] = r;
       });
     }
 
