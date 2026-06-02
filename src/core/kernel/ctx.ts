@@ -11,6 +11,7 @@ import { wrapPageWithSignal } from './page-proxy.js'
 import { buildDelegateApi } from '../delegate.js'
 import { emitItemStart, emitStepChange } from '../../tracker/session-events.js'
 import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
+import { tracePrefix } from '../../domain/queue-trace-id.js'
 
 export interface MakeCtxOpts {
   session: Session
@@ -21,13 +22,14 @@ export interface MakeCtxOpts {
   /** Parent workflow's 2-char code — forwarded to delegated children as the trace-id provenance prefix. */
   code?: string
   /**
-   * Inherited ROOT trace id for trace-id propagation. When present this run was
-   * itself a delegated child carrying the originating run's full trace id;
-   * `buildDelegateApi` forwards it (transitively) to this run's own children so
-   * a whole delegation tree shows ONE id. Absent on a physical root run, which
-   * computes its own frozen id (resolved via `findFrozenTraceId`).
+   * Inherited ROOT trace PREFIX for trace-id propagation (trace/span model).
+   * When present this run was itself a delegated child carrying the originating
+   * run's `<code>-<HHMMSS>` prefix; `buildDelegateApi` forwards it (transitively)
+   * to this run's own children so a whole delegation tree SHARES one operation
+   * prefix (each row composes its own tail). Absent on a physical root run,
+   * which derives the prefix from its own frozen id (`tracePrefix(findFrozenTraceId)`).
    */
-  rootTraceId?: string
+  rootTracePrefix?: string
   itemId: string
   /**
    * Delegated scope — the parent run's id when this run was spawned via
@@ -98,7 +100,7 @@ export async function tryScreenshot(
 export function makeCtx<TSteps extends readonly string[], TData>(
   opts: MakeCtxOpts,
 ): Ctx<TSteps, TData> {
-  const { session, stepper, isBatch, runId, workflow, code, rootTraceId, itemId, parentRunId, emitScreenshotEvent, trackerDir, signal, instance } = opts
+  const { session, stepper, isBatch, runId, workflow, code, rootTracePrefix, itemId, parentRunId, emitScreenshotEvent, trackerDir, signal, instance } = opts
 
   session.setUcpathIdleGuard(() => stepper.isInsideStep())
 
@@ -130,23 +132,25 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     currentStep: () => stepper.getCurrentStep(),
   })
 
-  // Trace-id propagation: forward the INHERITED root id (not a recompute) so a
-  // whole delegation tree shows ONE id. A physical root run has no
-  // `rootTraceId`, so we read back its own frozen id from its first pending row
-  // (`findFrozenTraceId`) and forward THAT — children then inherit the root's
-  // id. A non-root parent already carries `rootTraceId`; we pass it straight
-  // through so grandchildren still show the ORIGINAL root (the parentSubject
-  // pattern, which `rootCode` deliberately does NOT do).
-  const forwardRootTraceId =
-    rootTraceId ??
-    findFrozenTraceId({ workflow, runId, ...(trackerDir ? { trackerDir } : {}) }) ??
-    undefined
+  // Trace-id propagation (trace/span model): forward the INHERITED root PREFIX
+  // (not a recompute) so a whole delegation tree SHARES one operation prefix and
+  // each child composes its own tail. A physical root run has no
+  // `rootTracePrefix`, so we read back its own frozen id from its first pending
+  // row (`findFrozenTraceId`) and forward `tracePrefix(that)` — children then
+  // compose `<rootPrefix>-<ownRunId4>`. A non-root parent already carries
+  // `rootTracePrefix`; we pass it straight through so grandchildren still share
+  // the ORIGINAL root prefix (the parentSubject pattern, which `rootCode`
+  // deliberately does NOT do).
+  const ownFrozen = findFrozenTraceId({ workflow, runId, ...(trackerDir ? { trackerDir } : {}) })
+  const forwardRootTracePrefix =
+    rootTracePrefix ??
+    (ownFrozen ? tracePrefix(ownFrozen) : undefined)
   const delegateApi = buildDelegateApi({
     runId,
     trackerDir,
     signal,
     ...(code ? { code } : {}),
-    ...(forwardRootTraceId ? { rootTraceId: forwardRootTraceId } : {}),
+    ...(forwardRootTracePrefix ? { rootTracePrefix: forwardRootTracePrefix } : {}),
   })
 
   // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's

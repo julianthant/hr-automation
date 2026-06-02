@@ -35,17 +35,21 @@ export interface BuildPendingTrackerDataOpts<TInput> {
   /** Timestamp for the trace id; defaults to `new Date()`. Tests pass a fixed Date. */
   at?: Date;
   /**
-   * Pre-frozen trace id to stamp verbatim. When set it wins over the
-   * `runId`/`at` computation, so a re-emit (e.g. a daemon worker re-emitting
-   * `pending` after the HTTP enqueue already stamped one) reuses the exact id
-   * the first row showed instead of minting a fresh, time-drifted one.
-   *
-   * Also the channel for ROOT trace-id propagation: a delegated child is
-   * stamped with the originating run's full trace id (`rootTraceId`, threaded
-   * by `delegate.ts`) here, so every descendant of an operation displays the
-   * one root id while keeping its own runId/itemId.
+   * Pre-frozen trace id to stamp VERBATIM. When set it wins over both the
+   * `rootPrefix` compose and the `runId`/`at` compute, so a re-emit (e.g. a
+   * daemon worker re-emitting `pending` after the HTTP enqueue already stamped
+   * one) reuses the exact id the first row showed instead of minting a fresh,
+   * time-drifted one.
    */
   traceId?: string;
+  /**
+   * Inherited ROOT trace PREFIX (`<code>-<HHMMSS>`) for ROOT trace-id
+   * propagation (trace/span model). When present (and no verbatim `traceId`),
+   * this row COMPOSES `<rootPrefix>-<ownRunId4>` for its `data.__traceId` — so a
+   * delegated child's FIRST pending emit shares the operation prefix while
+   * keeping its own greppable tail. Threaded by `delegate.ts`.
+   */
+  rootTracePrefix?: string;
 }
 
 function stringifyExtra(extra: Record<string, unknown>): Record<string, string> {
@@ -119,8 +123,13 @@ export function buildPendingTrackerData<TInput>(
   data.queueRowKind = resolveQueueRowKindFromValue(wf.queueRowKind, opts.input, wf.config.name);
 
   // Human-readable, unique, log-greppable trace id — frozen once at pre-emit.
-  // A re-emit passes the already-frozen `traceId` so every row for a run shows
-  // the identical id; the `runId`/`at` compute path is the first-emit case.
+  // Resolution order:
+  //   1. a verbatim `traceId` (a re-emit reuses the already-frozen id so every
+  //      row for a run shows the identical id) wins outright;
+  //   2. else, with an inherited ROOT `rootTracePrefix` in scope (trace/span
+  //      propagation), COMPOSE `<rootPrefix>-<ownRunId4>` so the child shares the
+  //      operation prefix but keeps its own greppable tail;
+  //   3. else compute a fresh `<code>-<HHMMSS>-<runId4>` off this run's code.
   if (opts.traceId) {
     data.__traceId = opts.traceId;
   } else if (opts.runId) {
@@ -128,6 +137,7 @@ export function buildPendingTrackerData<TInput>(
       code: opts.rootCode ?? wf.code,
       runId: opts.runId,
       at: opts.at ?? new Date(),
+      ...(opts.rootTracePrefix ? { rootPrefix: opts.rootTracePrefix } : {}),
     });
   }
 

@@ -44,7 +44,7 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTraceId?: string } | null
+  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTracePrefix?: string } | null
 }
 
 export function splitPrefilled(input: unknown): SplitInput {
@@ -66,8 +66,8 @@ export function splitPrefilled(input: unknown): SplitInput {
 
 function normalizeRuntimeOptions(
   raw: Record<string, unknown>,
-): { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTraceId?: string } | null {
-  const out: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTraceId?: string } = {}
+): { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTracePrefix?: string } | null {
+  const out: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTracePrefix?: string } = {}
   const skipSteps = raw.skipSteps
   if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
     if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
@@ -86,16 +86,16 @@ function normalizeRuntimeOptions(
   if (typeof raw.rootCode === 'string' && raw.rootCode.length > 0) {
     out.rootCode = raw.rootCode
   }
-  // Full root trace id (`<code>-<HHMMSS>-<runId4>`) for ROOT trace-id
-  // propagation — the entire originating run's trace id, not just its 2-char
-  // code. Rides the same `__runtimeOptions` channel as `rootCode` so it
-  // survives the SQLite task store to the daemon worker's `run-one-item`
-  // re-emit, where it's stamped verbatim as `data.__traceId` (via
-  // buildPendingTrackerData's `traceId` opt). Unlike `rootCode` (immediate
-  // parent's code), this is forwarded transitively so a grandchild shows the
-  // original root's id. See `buildDelegateApi`'s `forwardRootTraceId`.
-  if (typeof raw.rootTraceId === 'string' && raw.rootTraceId.length > 0) {
-    out.rootTraceId = raw.rootTraceId
+  // Root trace PREFIX (`<code>-<HHMMSS>`) for ROOT trace-id propagation
+  // (trace/span model) — the originating run's shared prefix, not its full id.
+  // Rides the same `__runtimeOptions` channel as `rootCode` so it survives the
+  // SQLite task store to the daemon worker's `run-one-item` re-emit, where the
+  // child COMPOSES `<prefix>-<ownRunId4>` for its `data.__traceId` (via
+  // buildTraceId's `rootPrefix` opt). Unlike `rootCode` (immediate parent's
+  // code), this is forwarded transitively so a grandchild shares the original
+  // root's prefix. See `buildDelegateApi`'s `forwardRootTracePrefix`.
+  if (typeof raw.rootTracePrefix === 'string' && raw.rootTracePrefix.length > 0) {
+    out.rootTracePrefix = raw.rootTracePrefix
   }
   return Object.keys(out).length > 0 ? out : null
 }
