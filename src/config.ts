@@ -8,7 +8,11 @@ import { screenshotsDir } from "./tracker/paths.js";
 import { EnvValidationError } from "./utils/env.js";
 
 const HOME = homedir();
-const TRACKER_DIR = ".tracker";
+// Tracker root. `HRAUTO_TRACKER_DIR` is set by the daemon spawner
+// (`src/core/daemon/registry.ts`) on the spawned subprocess's env so a daemon
+// running at an isolated tracker root has `PATHS.screenshotDir`/`PATHS.trackerDir`
+// follow that root. Unset (the normal case) → `.tracker`. Backward-compatible.
+const TRACKER_DIR = process.env.HRAUTO_TRACKER_DIR ?? ".tracker";
 
 // ─── Paths (user-agnostic via homedir()) ─────────────────────
 // `.tracker/` subdir layout is owned by `src/tracker/paths.ts` — derive

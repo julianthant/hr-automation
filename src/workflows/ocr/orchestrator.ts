@@ -73,7 +73,13 @@ interface OcrPipelineResult {
 export interface OcrOrchestratorOpts {
   /** runId for this execution. Required — caller (HTTP or kernel handler) supplies. */
   runId: string;
-  /** Tracker directory override. Default: process.env.TRACKER_DIR or .tracker. */
+  /**
+   * Tracker directory override. Supplied by the caller (HTTP or kernel
+   * handler); the orchestrator reads NO env directly. When unset, downstream
+   * tracker writes fall back to `.tracker`. (The daemon-spawner env is named
+   * `HRAUTO_TRACKER_DIR` and is consumed only by `config.ts` — this opt is the
+   * explicit thread-through for the OCR path.)
+   */
   trackerDir?: string;
   /** Date override (YYYY-MM-DD). Default: today. */
   date?: string;

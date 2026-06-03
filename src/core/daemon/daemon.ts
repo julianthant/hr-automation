@@ -26,6 +26,7 @@ import {
   emitUcpathIdleSignal,
 } from '../../tracker/session-events.js'
 import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
+import { screenshotsDir } from '../../tracker/paths.js'
 import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
@@ -325,6 +326,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           session = await launchFn(wf.config.systems, {
             observer,
             abortSignal: state.launchAbort.signal,
+            // When the daemon runs at an isolated tracker root, route the
+            // session's audit screenshots under it (instead of the real
+            // `.tracker/`). Unset → Session falls back to PATHS.screenshotDir.
+            ...(trackerDir ? { screenshotDir: screenshotsDir(trackerDir) } : {}),
             onReady: (readySession) => {
               state.activeSession = readySession
               registerBrowserProcesses()

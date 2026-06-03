@@ -82,6 +82,14 @@ export interface LaunchOpts {
    * both values must be positive.
    */
   ucpathIdleRefresh?: { thresholdMs: number; tickMs: number }
+  /**
+   * Output directory for `screenshotAll` / `captureAll` PNGs. Stored on the
+   * session state and honored over `PATHS.screenshotDir` (and inherited by
+   * `forWorker` children). The daemon threads `screenshotsDir(trackerDir)` here
+   * when running at an isolated tracker root so audit screenshots land under
+   * that root instead of the real `.tracker/`. Unset → `PATHS.screenshotDir`.
+   */
+  screenshotDir?: string
 }
 
 interface LaunchOneOpts {
@@ -145,7 +153,7 @@ export class Session {
     // any browser launches or auth begins. The maps are mutated in-place below.
     const browsers = new Map<string, SystemSlot>()
     const readyPromises = new Map<string, Promise<void>>()
-    const session = new Session({ systems, browsers, readyPromises })
+    const session = new Session({ systems, browsers, readyPromises, screenshotDir: opts.screenshotDir })
     session.ucpathIdleTouchCb = (): void => {
       opts.observer?.onUcpathIdleTouch?.()
     }
