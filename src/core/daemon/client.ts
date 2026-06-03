@@ -308,10 +308,33 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   const idFn = (input: TData, idx: number): string => {
-    if (opts.deriveItemId) return opts.deriveItemId(input)
-    if (wf.config.deriveItemId) return wf.config.deriveItemId(input)
-    const fallback = `${Date.now()}-${idx}-${randomUUID().slice(0, 8)}`
-    return deriveItemId(input, fallback)
+    // Derive the item id from the LOGICAL input only. `delegateTo*` wraps every
+    // input with the kernel's `__runtimeOptions` channel (rowShape / rootCode /
+    // rootTracePrefix) BEFORE this runs, so a caller's `deriveItemId` — often an
+    // identity-keyed map (OCR verify / i9 / force-research key by
+    // `JSON.stringify(input)`) — would see a shape it never built and miss the
+    // lookup, yielding an empty id. An empty id makes the row invisible (the
+    // tracker validator `isTrackerEntry` rejects it) AND collides in the
+    // id-keyed dedupe. Strip the kernel channels first, mirroring the HTTP
+    // enqueue path (`enqueue-dispatch.ts`), so derivation sees the same input
+    // the caller shaped.
+    const { cleaned } = splitPrefilled(input)
+    const cleanedInput = cleaned as TData
+    const derived = opts.deriveItemId
+      ? opts.deriveItemId(cleanedInput)
+      : wf.config.deriveItemId
+        ? wf.config.deriveItemId(cleanedInput)
+        : deriveItemId(cleanedInput, `${Date.now()}-${idx}-${randomUUID().slice(0, 8)}`)
+    if (!derived) {
+      // Fail loud: an empty item id silently strands the run as an invisible,
+      // collision-prone row. Surface it at the enqueue boundary instead.
+      throw new Error(
+        `ensureDaemonsAndEnqueue: deriveItemId produced an empty id for workflow '${wf.config.name}' (input #${idx}). ` +
+          `An empty item id yields rows the tracker validator rejects and the queue can't render — ` +
+          `check the workflow's or caller's deriveItemId.`,
+      )
+    }
+    return derived
   }
 
   // ---------------------------------------------------------------------

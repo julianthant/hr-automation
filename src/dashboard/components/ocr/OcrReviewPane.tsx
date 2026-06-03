@@ -1061,10 +1061,6 @@ function renderFormCard(args: {
       FROM PILE.
     </span>
   ) : undefined;
-  const addToPaperBanner =
-    (r.originallyMissing?.length ?? 0) > 0 ? (
-      <span>Add to paper: {r.originallyMissing!.join(", ")}</span>
-    ) : undefined;
   const signatureBanner = renderOathSignatureBanner(r, args.cfg.hasSignature);
 
   return (
@@ -1108,7 +1104,6 @@ function renderFormCard(args: {
         ) : undefined
       }
       removeFromPileBanner={removeFromPileBanner}
-      addToPaperBanner={addToPaperBanner}
       signatureBanner={signatureBanner}
       selected={r.selected}
       selectedDisabled={isUnknown}
