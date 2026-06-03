@@ -12,7 +12,7 @@ import { queryProjectionHealth } from "../../../src/tracker/state/queries.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { __resetPreflightThrottleForTests } from "../../../src/tracker/dashboard/hono/routes/base.js";
 import { registerLocalFile } from "../../../src/tracker/files/files.js";
-import { trackEventForDate, trackEvent, emitScreenshotEvent } from "../../../src/tracker/jsonl.js";
+import { trackEventForDate, trackEvent, emitScreenshotEvent, dateLocal } from "../../../src/tracker/jsonl.js";
 import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { clear, register } from "../../../src/core/kernel/registry.js";
 import { defineWorkflow } from "../../../src/core/kernel/workflow.js";
@@ -230,13 +230,17 @@ test("Hono /api/runs falls back to JSONL when projection is not ready", async ()
 
 test("Hono /api/search returns JSONL search results", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hono-search-"));
-  const date = "2026-05-04";
+  // Date-relative to today: /api/search filters to the last `days` calendar
+  // days (cutoff = today − (days−1)), so a hardcoded past date ages out of the
+  // window and the row vanishes. Use today's local date + timestamp so the row
+  // is always inside any positive `days` window.
+  const date = dateLocal();
   try {
     const db = openStateDb(dir);
     mkdirSync(rowsDir(dir), { recursive: true });
     writeFileSync(rowFilePath("onboarding", date, dir), JSON.stringify({
       workflow: "onboarding",
-      timestamp: "2026-05-04T12:00:00.000Z",
+      timestamp: new Date().toISOString(),
       id: "jane@ucsd.edu",
       runId: "jane@ucsd.edu#1",
       status: "done",
