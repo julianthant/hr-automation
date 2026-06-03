@@ -171,6 +171,28 @@ function isDaemonCapable(workflowName: string): boolean {
 }
 
 /**
+ * Emit the run-scope `delegation:children-spawned` event at the public
+ * `delegateTo`/`delegateToAll` fan-out chokepoint (called from inside the
+ * parent handler's run-scope log context, so it lands in the PARENT's
+ * logs/<workflow>-<date>.jsonl). The Tier-1 harness `waitForEvent(
+ * "delegation:children-spawned", { childWorkflow })` on it to know a fan-out
+ * happened and how many children it produced (`count`). Emitting at the
+ * public API (not `delegateToImpl`/`delegateToAllImpl`) avoids double-counting
+ * when `delegateToAll`'s in-process pool re-enters `delegateToImpl` per child.
+ * See docs/engineering/structured-log-events.md.
+ */
+function emitChildrenSpawned(childWorkflow: string, count: number): void {
+  log.step({
+    message: `Delegating ${count} ${childWorkflow} child run(s)`,
+    event: "delegation:children-spawned",
+    category: "delegation",
+    occasion: "started",
+    childWorkflow,
+    count,
+  })
+}
+
+/**
  * Emit the child's pending row through `emitTrackerRow` with the resolved
  * archetype stamped + the pristine input attached as `entry.input`. The
  * daemon path also writes a pending row inside `ensureDaemonsAndEnqueue`
@@ -692,8 +714,9 @@ export function buildDelegateApi(parent: {
     child: RegisteredWorkflow<TChildData, TChildSteps>,
     input: TChildData,
     opts: DelegateOpts = {},
-  ): Promise<ChildRunResult<TChildData>> =>
-    delegateToImpl({
+  ): Promise<ChildRunResult<TChildData>> => {
+    emitChildrenSpawned(child.config.name, 1)
+    return delegateToImpl({
       parentRunId: parent.runId,
       trackerDir: parent.trackerDir,
       child,
@@ -706,13 +729,15 @@ export function buildDelegateApi(parent: {
       ...(parent.rootTracePrefix ? { rootTracePrefix: parent.rootTracePrefix } : {}),
       ...(parent.signal ? { parentSignal: parent.signal } : {}),
     })
+  }
 
   const delegateToAll = <TChildData, TChildSteps extends readonly string[]>(
     child: RegisteredWorkflow<TChildData, TChildSteps>,
     inputs: readonly TChildData[],
     opts: DelegateAllOpts = {},
-  ): Promise<ChildRunResult<TChildData>[]> =>
-    delegateToAllImpl({
+  ): Promise<ChildRunResult<TChildData>[]> => {
+    if (inputs.length > 0) emitChildrenSpawned(child.config.name, inputs.length)
+    return delegateToAllImpl({
       parentRunId: parent.runId,
       trackerDir: parent.trackerDir,
       child,
@@ -724,6 +749,7 @@ export function buildDelegateApi(parent: {
       ...(parent.rootTracePrefix ? { rootTracePrefix: parent.rootTracePrefix } : {}),
       ...(parent.signal ? { parentSignal: parent.signal } : {}),
     })
+  }
 
   return { delegateTo, delegateToAll } as unknown as Pick<
     Ctx<readonly string[], unknown>,

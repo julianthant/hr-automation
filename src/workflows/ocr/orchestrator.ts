@@ -955,7 +955,18 @@ export async function runOcrOrchestrator(
     // (→ `done step=approved` via the approve route, or kernel-emitted
     // `done` after the handler's approval-signal resolves) or discards
     // (→ `failed step=discarded`). See `src/services/ocr/approval-signal.ts`.
-    log.success(`[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`);
+    // Annotated with the stable `ocr:awaiting-approval` event so the Tier-1
+    // harness can `waitForEvent("ocr:awaiting-approval", { runId })` to know the
+    // OCR prep parked at awaiting-approval (the operator-approval gate). Run-scope
+    // log → logs/ocr-<date>.jsonl; see docs/engineering/structured-log-events.md.
+    log.success({
+      message: `[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`,
+      event: "ocr:awaiting-approval",
+      category: "ocr",
+      occasion: "waiting",
+      step: "awaiting-approval",
+      count: records.length,
+    });
     emitSnapshot(records, "awaiting-approval", "running", {
       failedPages,
       emptyPages,
