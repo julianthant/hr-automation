@@ -55,13 +55,31 @@ export class Stepper {
 
   private throwCancelled(reason: string): never {
     this.currentStep = 'cancelled'
+    // Run-scope `cancel:requested` event: the operator cancel (an aborted
+    // per-run AbortSignal / cancel probe) has been observed by THIS run at a
+    // step boundary and is becoming a CancelledError. The daemon's own
+    // `cancel_task` command handler runs in daemon-scope (session log), so
+    // this Stepper site is the run-scope observation the harness tails.
+    // See docs/engineering/structured-log-events.md.
+    log.warn({
+      message: `Cancel requested at step '${reason}'`,
+      event: 'cancel:requested',
+      category: 'queue',
+      occasion: 'cancelled',
+      step: reason,
+    })
     this.opts.emitStep('cancelled')
     throw new CancelledError(reason)
   }
 
   private announce(name: string, emit: (name: string) => void = this.opts.emitStep): void {
     this.currentStep = name
-    log.step(`Phase: ${name}`)
+    // Annotate the per-step log line with the stable `step:start` event +
+    // the step name so the Tier-1 harness can `waitForEvent("step:start",
+    // { step })` to know a (child) run reached a given stage. Run-scope log
+    // (persisted to logs/<workflow>-<date>.jsonl); see
+    // docs/engineering/structured-log-events.md.
+    log.step({ message: `Phase: ${name}`, event: "step:start", step: name })
     emit(name)
   }
 
@@ -77,8 +95,16 @@ export class Stepper {
     }
     this.announce(name)
     this.stepDepth++
+    const startedAt = Date.now()
     try {
-      return await fn()
+      const result = await fn()
+      // Run-scope `step:done` event — the harness can `waitForEvent(
+      // "step:done", { step })` to know a step's body completed (vs
+      // `step:start`, which fires at the boundary before the body runs).
+      // Carries the wall-clock duration. See
+      // docs/engineering/structured-log-events.md.
+      log.step({ message: `Phase done: ${name}`, event: "step:done", step: name, durationMs: Date.now() - startedAt })
+      return result
     } catch (err) {
       // CancelledError thrown from inside `fn` (e.g. handler explicitly
       // checks ctx and throws): same suppression rule — no screenshot,

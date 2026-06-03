@@ -360,14 +360,28 @@ export async function withTrackedWorkflow<T>(
     }
 
     emit("done");
+    // Run-scope `run:terminal` event (outcome=completed). The Tier-1 harness
+    // `waitForEvent("run:terminal", { runId })` to await deterministic run
+    // completion. Run-scope log → logs/<workflow>-<date>.jsonl; see
+    // docs/engineering/structured-log-events.md.
+    log.success({
+      message: "Run complete",
+      event: "run:terminal",
+      occasion: "completed",
+      ...(lastStep ? { step: lastStep } : {}),
+    });
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "done", dir);
     return result;
   } catch (e) {
     const error = classifyError(e);
-    if (e instanceof Error && e.name === "CancelledError") {
-      log.warn(error);
+    const cancelled = e instanceof Error && e.name === "CancelledError";
+    // Annotate the existing terminal log line with `run:terminal` (outcome =
+    // cancelled|failed) so the harness can await ANY terminal outcome on one
+    // event name + branch on `occasion`.
+    if (cancelled) {
+      log.warn({ message: error, event: "run:terminal", occasion: "cancelled", ...(lastStep ? { step: lastStep } : {}) });
     } else {
-      log.error(error);
+      log.error({ message: error, event: "run:terminal", occasion: "failed", ...(lastStep ? { step: lastStep } : {}) });
     }
     emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
