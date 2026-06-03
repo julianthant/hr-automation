@@ -75,6 +75,4 @@ Thumbs.db
 AGENTS.md
 
 # Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.
-/test.pdf
-/detect.pdf
-/*.pdf
+tests/data/*.pdf

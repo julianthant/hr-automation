@@ -50,6 +50,7 @@ These should stay accurate relative to the code and are fair game for stale-doc 
 | `docs/engineering/tracker-reference.md` | Tracker module internals: file-by-file, JSONL format, cleanup, withTrackedWorkflow |
 | `docs/engineering/core-internals.md` | Kernel internals: kernel/, daemon/, task-store/ file-by-file |
 | `docs/engineering/workflow-patterns.md` | Daemon-mode conversion template, edit-data opt-in recipe |
+| `docs/engineering/hands-off-duo-webauthn.md` | Hands-off Duo via CDP WebAuthn: enrollment, two-phase factor selection, the six Duo flows, testing, and failure modes |
 | `docs/workflow/README.md` | Workflow delegation index: row units, global actions, cancellation rules, workflow inventory |
 | `docs/workflow/*.md` | Per-workflow behavior, delegation, row shape, and cancel/retry scope notes |
 | `CLAUDE.md` (repo root) | Commands, kernel primer, high-level map (≤15k) |

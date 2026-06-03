@@ -23,7 +23,6 @@ export interface PrepReviewFormCardProps {
   onDeleteRecord?: () => void;
   deleteDisabled?: boolean;
   removeFromPileBanner?: ReactNode;
-  addToPaperBanner?: ReactNode;
   verificationBanner?: ReactNode;
   signatureBanner?: ReactNode;
   selected: boolean;
@@ -64,12 +63,6 @@ export function PrepReviewFormCard(props: PrepReviewFormCardProps) {
         <div className="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
           <div>{props.removeFromPileBanner}</div>
-        </div>
-      )}
-      {props.addToPaperBanner && (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs text-warning">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <div>{props.addToPaperBanner}</div>
         </div>
       )}
       {props.verificationBanner && (

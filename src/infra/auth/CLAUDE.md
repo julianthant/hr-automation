@@ -52,6 +52,10 @@ fresh browser with a per-system pass/fail table. Prefix with
 
 ## Hands-off Duo via WebAuthn (opt-in)
 
+> **Full reference:** [`docs/engineering/hands-off-duo-webauthn.md`](../../../docs/engineering/hands-off-duo-webauthn.md)
+> — enrollment, the two-phase factor model, the six Duo flows, testing, and a
+> failure-modes table. Read it before debugging a hands-off Duo issue.
+
 `HR_AUTOMATION_DUO_WEBAUTHN=1` makes every login approve Duo automatically with
 no phone push, using credentials enrolled once as independent Duo security keys.
 **Chromium-only**, entirely opt-in, and always falls back to manual Duo on any

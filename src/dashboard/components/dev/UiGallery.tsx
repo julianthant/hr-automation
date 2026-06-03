@@ -29,8 +29,10 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
  * A catalog of the dashboard's reusable surfaces, rendered with the REAL
  * components fed synthetic data. Organized into tabs:
  *
- *   - Queue Rows   → row archetypes (single / batch / preview). Workflow-
- *                    agnostic; variations come from kind + status/derived tags.
+ *   - Queue Rows   → row archetypes (single / batch / approval+preview).
+ *                    Workflow-agnostic; variations come from kind + status/
+ *                    derived tags. Approval and preview rows share the `preview`
+ *                    archetype (approval gates fan-out; preview is read-only).
  *   - Session Cards → the terminal-drawer `WorkflowBox` daemon session card,
  *                     across its lifecycle states (in-flight, authing, duo,
  *                     idle, keepalive, complete, failed, crashed).
@@ -379,8 +381,15 @@ const emptyBatchAnchor = row({
   },
 });
 
-// --- PREVIEW: the OCR prep / approval row. ---
-const previewReady = row({
+// --- APPROVAL / PREVIEW: OCR review surfaces (archetype: preview). ---
+// Two named row types share the `preview` archetype. An APPROVAL ROW gates
+// downstream fan-out on operator approval (oath / emergency-contact — the form
+// declares approveTo / approveDocumentTo, so the review pane shows an Approve
+// button). A PREVIEW ROW is read-only — no approval gate (verify: the form
+// declares neither target, so there is no Approve button; the operator inspects
+// the completeness report then discards). Same queue-row shape for both; the
+// only difference is the Approve button in the review pane.
+const approvalReady = row({
   id: "pv-ready",
   workflow: "ocr",
   status: "done",
@@ -396,7 +405,7 @@ const previewReady = row({
   },
 });
 
-const previewNeedsReview = row({
+const approvalNeedsReview = row({
   id: "pv-needs-review",
   workflow: "ocr",
   status: "running",
@@ -410,6 +419,24 @@ const previewNeedsReview = row({
     queueRowKind: "file",
     pdfOriginalName: "Oath_Packet_Batch.pdf",
     __traceId: "oc-095000-7711",
+  },
+});
+
+// Read-only review surface — no approval gate (verify completeness report).
+const previewReadOnly = row({
+  id: "pv-verify",
+  workflow: "ocr",
+  status: "running",
+  step: "awaiting-approval",
+  firstLogTs: "2026-06-01T09:50:00.000Z",
+  lastLogTs: "2026-06-01T09:52:00.000Z",
+  runOrdinal: 1,
+  data: {
+    archetype: "preview",
+    queueRowKind: "file",
+    formType: "verify",
+    pdfOriginalName: "Mixed_Oath_EC_Packet.pdf",
+    __traceId: "vf-095000-9a2c",
   },
 });
 
@@ -489,16 +516,19 @@ function QueueRowsTab() {
         />
       </Variant>
 
-      {/* ---- PREVIEW ---- */}
+      {/* ---- APPROVAL / PREVIEW ---- */}
       <Section
-        title="preview"
-        sub="The OCR prep / approval flat row. 'Needs review' is a derived tag on it, not a separate row."
+        title="approval / preview"
+        sub="OCR review surfaces (archetype: preview). An approval row gates downstream fan-out on operator approval (oath / emergency-contact — Approve button in the review pane). A preview row is read-only — no approval gate (verify completeness report); operator inspects then discards. Same queue-row shape; the Approve button is the only difference. 'Needs review' is a derived tag, not a separate row."
       />
-      <Variant label="ready / done" axes="preview · kind=file · done">
-        <Flat entry={previewReady} />
+      <Variant label="approval row · ready / done" axes="preview · kind=file · done" note="approval already resolved (done)">
+        <Flat entry={approvalReady} />
       </Variant>
-      <Variant label="tag = needs review" axes="preview · derived=needsReview" note="delegated awaiting-approval (parentRunId set)">
-        <Flat entry={previewNeedsReview} />
+      <Variant label="approval row · needs review" axes="preview · derived=needsReview" note="delegated awaiting-approval (parentRunId set); review pane shows Approve">
+        <Flat entry={approvalNeedsReview} />
+      </Variant>
+      <Variant label="preview row · read-only (verify)" axes="preview · kind=file · awaiting-approval" note="no approveTo → no Approve button; operator inspects then discards">
+        <Flat entry={previewReadOnly} />
       </Variant>
     </div>
   );
