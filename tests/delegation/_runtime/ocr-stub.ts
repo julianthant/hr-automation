@@ -65,6 +65,32 @@ export interface StubEcOcrRecord {
   originallyMissing?: string[];
 }
 
+/**
+ * A synthetic VERIFY OCR record the stub pipeline returns. Mirrors the verify
+ * form spec's `VerifyOcrRecordSchema` raw shape — a MIXED oath + emergency-
+ * contact page record. Same PII-FREE rule (fake printed names; verify enriches
+ * via person-lookup/i9-lookup, not a roster, so EIDs are usually blank on
+ * paper). The verify `matchRecord` runs on these for real, then `enrichRecords`
+ * fans out to person-lookup (every record with a `name`) and i9-lookup (oath
+ * records with `officerSigned !== true`).
+ */
+export interface StubVerifyOcrRecord {
+  formKind: "oath" | "emergency-contact" | "unknown";
+  sourcePage: number;
+  printedName: string;
+  /** Usually null/absent on paper for verify (looked up via person-lookup). */
+  employeeId?: string | null;
+  /** oath: authorized-official signature present. `false` → i9-lookup fires. */
+  officerSigned?: boolean | null;
+  paperEmploymentDate?: string | null;
+  paperDateSigned?: string | null;
+  employeeSigned?: boolean | null;
+  paperOfficialName?: string | null;
+  documentType?: "expected" | "unknown";
+  originallyMissing?: string[];
+  notes?: string[];
+}
+
 /** Roster row the stub `_loadRosterOverride` returns (eid+name only). */
 export interface StubRosterRow {
   eid: string;
@@ -309,6 +335,30 @@ export function rawEcRecordFromStub(r: StubEcOcrRecord): Record<string, unknown>
     notes: r.notes ?? [],
     documentType: r.documentType ?? "expected",
     originallyMissing: r.originallyMissing ?? [],
+  };
+}
+
+/**
+ * Build a raw VERIFY OCR record (the orchestrator pipeline shape,
+ * `VerifyOcrRecordSchema`) from a `StubVerifyOcrRecord`. Passed verbatim
+ * through `_ocrPipelineOverride`; the verify `matchRecord` runs on it and
+ * `enrichRecords` fans out to person-lookup + i9-lookup. verify has NO approve
+ * fan-out — it is a read-only completeness report.
+ */
+export function rawVerifyRecordFromStub(r: StubVerifyOcrRecord): Record<string, unknown> {
+  return {
+    formKind: r.formKind,
+    sourcePage: r.sourcePage,
+    printedName: r.printedName,
+    employeeId: r.employeeId ?? null,
+    ...(r.officerSigned !== undefined ? { officerSigned: r.officerSigned } : {}),
+    ...(r.paperEmploymentDate !== undefined ? { paperEmploymentDate: r.paperEmploymentDate } : {}),
+    ...(r.paperDateSigned !== undefined ? { paperDateSigned: r.paperDateSigned } : {}),
+    ...(r.employeeSigned !== undefined ? { employeeSigned: r.employeeSigned } : {}),
+    ...(r.paperOfficialName !== undefined ? { paperOfficialName: r.paperOfficialName } : {}),
+    documentType: r.documentType ?? "expected",
+    originallyMissing: r.originallyMissing ?? [],
+    notes: r.notes ?? [],
   };
 }
 
