@@ -23,6 +23,7 @@ import { getAll } from "../../../src/core/kernel/registry.js";
 import "../../../src/workflows/person-lookup/workflow.js";
 import "../../../src/workflows/crm-doc-download/workflow.js";
 import "../../../src/workflows/emergency-contact/workflow.js";
+import "../../../src/workflows/i9-lookup/workflow.js";
 import "../../../src/workflows/oath-signature/workflow.js";
 import "../../../src/workflows/oath-upload/workflow.js";
 import "../../../src/workflows/ocr/workflow.js";
