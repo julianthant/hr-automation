@@ -51,8 +51,20 @@ const rt = await createDelegationRuntime({
 | `rt.children(parentRunId)` | Child runs (`parentRunId` on JSONL rows) across ALL row files — finds in-process delegated children whose workflow isn't a registered daemon. |
 | `rt.dashboard()` | `{ row, groupAnchor, timeline }` over `snapshot-row.ts` — the REAL projection. |
 | `rt.cleanup()` | `/stop` all daemons → await `runPromise`s → `closeStateDbForTests` → `rm` temp dir. Idempotent. Register with `t.onTestFinished`. |
-| `rt.stubOcr(records)` | **P2.9 SEAM** — throws today; P2.9 wires the real `runOcrOrchestrator` overrides (`_ocrPipelineOverride` / `_loadRosterOverride` / `_enqueueEidLookupOverride`) per `tests/integration/ocr/end-to-end.test.ts`. `opts.pdf` is the same seam's PDF input. |
+| `rt.stubOcr(records, roster?)` | Seed PII-FREE synthetic OCR records (+ optional roster) the stub `runOcrOrchestrator` returns. Requires the `ocr` runtime option. Call BEFORE `enqueueOcr`. (P2.9 — fleshed; was a throwing seam.) |
+| `rt.enqueueOcr({ fixturePath, originalName?, runId?, sessionId?, parentRunId? })` | Register a renderable PDF + enqueue an OCR run on the stub `"ocr"` daemon. Returns `{ sessionId, runId, usedFixture }`. Requires `ocr` opts. |
+| `rt.approveOcr({ sessionId, runId, records, childWorkflow })` | Drive the REAL `buildOcrApproveHandler` fan-out, redirecting the child enqueue onto `childWorkflow`'s gated daemon. Returns the enqueued `{ itemId, runId }[]`. Requires `ocr` opts. |
 | `rt.trackerDir` | The temp tracker root. |
+
+The `ocr` runtime option (`createDelegationRuntime({ workflows, ocr: { formType } })`)
+registers the thin test-only `"ocr"` workflow + daemon (`ocr-stub.ts`). The OCR
+fan-out test pattern is documented in `tests/delegation/CLAUDE.md`.
+
+`GatedWorkflowSpec` accepts optional `runtimePolicy` / `initialData` / `getId` /
+`getName` / `deriveItemId` / `operatorSubject` / `label` so a gated stub can
+mirror a real workflow's config faithfully (e.g. the oath-signature stub stamping
+`emplId` + the real `alwaysBatchDelegatedMembers` policy so the projection matches
+production).
 
 ### Gated stub workflows (`scenario-handler.ts`)
 

@@ -16,7 +16,10 @@ import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { buildCancelRunningHandler } from "../../../src/control/ops/cancel.js";
 import { logFilePath, rowFilePath, rowsDir, logsDir } from "../../../src/tracker/paths.js";
 import { dateLocal, parseWorkflowDateFilename } from "../../../src/tracker/jsonl.js";
+import { buildOcrApproveHandler } from "../../../src/tracker/dashboard/ocr/approve.js";
+import { _resetApprovalSignalRegistryForTests } from "../../../src/services/ocr/approval-signal.js";
 import type { RegisteredWorkflow } from "../../../src/core/kernel/types.js";
+import type { OcrInput } from "../../../src/workflows/ocr/schema.js";
 
 import {
   createGateCoordinator,
@@ -25,6 +28,14 @@ import {
   type GatedInput,
   type GatedWorkflowSpec,
 } from "./scenario-handler.js";
+import {
+  makeStubOcrWorkflow,
+  registerOcrPdf,
+  type StubOcrConfig,
+  type StubOcrRecord,
+  type StubOcrState,
+  type StubRosterRow,
+} from "./ocr-stub.js";
 import {
   snapshotRow,
   snapshotGroupAnchor,
@@ -123,8 +134,56 @@ export interface CreateDelegationRuntimeOpts {
   workflows: ReadonlyArray<DelegationWorkflow | GatedWorkflowSpec | WorkflowRegistration>;
   /** Reserved for OCR scenarios (P2.9) — a PDF the OCR seam will register. */
   pdf?: string;
+  /**
+   * Register a thin test-only `"ocr"` workflow + daemon driving the REAL
+   * `runOcrOrchestrator` with stubbed LLM/roster/eid-lookup (no browser, no LLM,
+   * no SQLite deps). When present, the runtime exposes `stubOcr` / `enqueueOcr`
+   * / `approveOcr` for the OCR → `approveTo` fan-out star test (P2.9). The
+   * daemon starts at construction (like every other workflow daemon), so the
+   * test sets records via `stubOcr` BEFORE `enqueueOcr`.
+   */
+  ocr?: StubOcrConfig;
   /** Daemon idle window. Keep small so daemons spin down promptly. */
   idleTimeoutMs?: number;
+}
+
+/** One OCR child run enqueued onto its gated daemon by `approveOcr`. */
+export interface ApprovedChild {
+  itemId: string;
+  runId: string;
+}
+
+export interface EnqueueOcrOpts {
+  /** Path to the fixture PDF to register (falls back to a synthetic one-pager). */
+  fixturePath: string;
+  /** Original filename the OCR file/title resolves to. Defaults to basename. */
+  originalName?: string;
+  /** Pre-assign the OCR run id (else a fresh UUID). */
+  runId?: string;
+  /** Pre-assign the OCR session id (the OCR row `id`). Else a fresh id. */
+  sessionId?: string;
+  /** Stamp `parentRunId` (delegated OCR — rare; standalone OCR omits it). */
+  parentRunId?: string;
+}
+
+export interface EnqueueOcrResult {
+  sessionId: string;
+  runId: string;
+  /** True when the real fixture rendered; false when the synthetic fallback was used. */
+  usedFixture: boolean;
+}
+
+export interface ApproveOcrOpts {
+  sessionId: string;
+  runId: string;
+  /** The approved records (selected + EID) the operator would submit. */
+  records: Array<Record<string, unknown>>;
+  /**
+   * The gated child daemon to fan out onto (the `approveTo.workflow`, e.g.
+   * `"oath-signature"`). The real approve route resolves the per-record itemIds
+   * + inputs via the form spec; the override enqueues each onto this daemon.
+   */
+  childWorkflow: string;
 }
 
 export interface DelegationRuntime {
@@ -165,12 +224,30 @@ export interface DelegationRuntime {
   cleanup(): Promise<void>;
 
   /**
-   * OCR LLM stub injector — SEAM for P2.9 (see CLAUDE.md). The generic harness
-   * does not wire the real OCR orchestrator; P2.9 fleshes this using the
-   * `_ocrPipelineOverride` / `_loadRosterOverride` pattern from
-   * `tests/integration/ocr/end-to-end.test.ts`.
+   * Seed the synthetic OCR records (+ optional roster) the stub
+   * `runOcrOrchestrator` pipeline returns. Call BEFORE `enqueueOcr`. Records are
+   * PII-FREE — fake names + fake 5+-digit (UCPath-shaped) EIDs. When `roster` is
+   * omitted, a roster row is derived per record (EID short-circuit → matched).
+   * Requires `ocr` in the runtime opts.
    */
-  stubOcr(records: ReadonlyArray<Record<string, unknown>>): void;
+  stubOcr(records: ReadonlyArray<StubOcrRecord>, roster?: ReadonlyArray<StubRosterRow>): void;
+
+  /**
+   * Register a renderable PDF in the temp tracker file store and enqueue an OCR
+   * run on the stub `"ocr"` daemon. Returns the assigned `sessionId` + `runId`
+   * (sync on `ocr:awaiting-approval` via `waitForEvent`). Requires `ocr` opts.
+   */
+  enqueueOcr(opts: EnqueueOcrOpts): Promise<EnqueueOcrResult>;
+
+  /**
+   * Drive the REAL approve fan-out (`buildOcrApproveHandler`) for an OCR run:
+   * the real `approveTo.deriveInput/deriveItemId/canFanOut`, trace-prefix
+   * propagation, `childParentRunId`, and terminal OCR row all run, with the
+   * child enqueue redirected onto `childWorkflow`'s gated daemon via
+   * `rt.enqueue(..., { renderAs: "batch" })`. Resolves with the enqueued child
+   * runs once the approve route's background dispatch completes.
+   */
+  approveOcr(opts: ApproveOcrOpts): Promise<ApprovedChild[]>;
 }
 
 /** Internal per-workflow daemon handle. */
@@ -242,6 +319,9 @@ export async function createDelegationRuntime(
   // don't leak into this runtime.
   clear();
   _resetRunRegistryForTests();
+  // OCR approval signaling is process-local — reset the registry so an OCR
+  // run from a prior runtime can't wake (or block) this one's subscriber.
+  _resetApprovalSignalRegistryForTests();
 
   const coordinator = createGateCoordinator();
 
@@ -258,6 +338,16 @@ export async function createDelegationRuntime(
         : makeGatedWorkflow(reg.workflow, coordinator);
     workflows.set(wf.config.name, wf);
     instanceCounts.set(wf.config.name, Math.max(1, reg.instances ?? 1));
+  }
+
+  // OCR stub: a thin test-only `"ocr"` daemon driving the REAL orchestrator with
+  // stubbed LLM/roster/eid-lookup. Its records are seeded post-construction via
+  // `stubOcr`, so the holder is shared with the workflow handler closure.
+  const ocrState: StubOcrState = { records: [], roster: [] };
+  if (opts.ocr) {
+    const ocrWf = makeStubOcrWorkflow(ocrState, opts.ocr) as unknown as DelegationWorkflow;
+    workflows.set(ocrWf.config.name, ocrWf);
+    instanceCounts.set(ocrWf.config.name, 1);
   }
 
   // Start `instances` daemon(s) per workflow against the SAME temp trackerDir
@@ -463,13 +553,147 @@ export async function createDelegationRuntime(
   const resolveLabel = (workflow: string): string =>
     workflows.get(workflow)?.config.label ?? workflow;
 
-  // ── stubOcr (seam for P2.9) ──────────────────────────────────────────────
-  const stubOcr: DelegationRuntime["stubOcr"] = () => {
-    throw new Error(
-      "stubOcr is a P2.9 seam — wire the real runOcrOrchestrator overrides " +
-        "(_ocrPipelineOverride / _loadRosterOverride / _enqueueEidLookupOverride) " +
-        "per tests/integration/ocr/end-to-end.test.ts when building the OCR fan-out test.",
-    );
+  // ── stubOcr / enqueueOcr / approveOcr (P2.9 seam) ────────────────────────
+  const requireOcr = (method: string): void => {
+    if (!opts.ocr) {
+      throw new Error(
+        `${method} requires the runtime to be created with the \`ocr\` option ` +
+          `(createDelegationRuntime({ workflows, ocr: { formType } })).`,
+      );
+    }
+  };
+
+  // Seed the synthetic records the stub orchestrator returns. When the test
+  // omits a roster, derive one row per record (EID→matched short-circuit) so the
+  // oath form spec's `matchRecord` reaches `matched` without a live person-lookup.
+  const stubOcr: DelegationRuntime["stubOcr"] = (records, roster) => {
+    requireOcr("stubOcr");
+    ocrState.records = records.map((r) => ({ ...r }));
+    ocrState.roster = roster
+      ? roster.map((r) => ({ ...r }))
+      : records.map((r) => ({ eid: r.employeeId, name: r.printedName }));
+  };
+
+  const enqueueOcr: DelegationRuntime["enqueueOcr"] = async (enqueueOcrOpts) => {
+    requireOcr("enqueueOcr");
+    const originalName =
+      enqueueOcrOpts.originalName ??
+      enqueueOcrOpts.fixturePath.split("/").pop() ??
+      "oaths.pdf";
+    const { pdfFileId, pdfPath, usedFixture } = await registerOcrPdf({
+      trackerDir,
+      fixturePath: enqueueOcrOpts.fixturePath,
+      originalName,
+    });
+    const sessionId = enqueueOcrOpts.sessionId ?? `ocr-sess-${randomUUID().slice(0, 8)}`;
+    const runId = (enqueueOcrOpts.runId ?? randomUUID()) as UUID;
+    const ocrInput: OcrInput = {
+      pdfPath,
+      pdfOriginalName: originalName,
+      pdfFileId,
+      formType: opts.ocr!.formType ?? "oath",
+      sessionId,
+      rosterPath: join(trackerDir, "uploads", "roster.xlsx"),
+      rosterMode: "existing",
+      ...(enqueueOcrOpts.parentRunId ? { parentRunId: enqueueOcrOpts.parentRunId } : {}),
+    };
+    // The orchestrator's `_loadRosterOverride` bypasses real parsing, but the
+    // path must resolve to a non-empty string so the "no roster path" guard
+    // doesn't trip — write an empty placeholder.
+    const uploadsDir = join(trackerDir, "uploads");
+    if (!existsSync(uploadsDir)) {
+      // registerOcrPdf already mkdirs uploads on the synthetic path; ensure it
+      // for the fixture path too.
+      try {
+        const { mkdirSync } = await import("node:fs");
+        mkdirSync(uploadsDir, { recursive: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+    try {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(ocrInput.rosterPath!, "");
+    } catch {
+      /* best-effort */
+    }
+    await enqueue("ocr", ocrInput as unknown as Partial<GatedInput> & { id?: string }, {
+      runId,
+      itemId: sessionId,
+      ...(enqueueOcrOpts.parentRunId ? { parentRunId: enqueueOcrOpts.parentRunId } : {}),
+    });
+    return { sessionId, runId, usedFixture };
+  };
+
+  const approveOcr: DelegationRuntime["approveOcr"] = async (approveOcrOpts) => {
+    requireOcr("approveOcr");
+    const enqueuedChildren: ApprovedChild[] = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir,
+      // The real approve route resolves per-record itemIds + inputs via the form
+      // spec; redirect the child enqueue onto the gated daemon so each becomes a
+      // controllable, individually-cancellable child run. Returning `enqueued`
+      // lets the route create dependency rows + the terminal OCR row.
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId, overrideOpts) => {
+        const enqueued: Array<{ id: string; runId?: string }> = [];
+        const isRegistered = workflows.has(workflow);
+        for (let i = 0; i < inputs.length; i++) {
+          const itemId = deriveItemId(inputs[i], i);
+          if (isRegistered) {
+            // Redirect onto the gated daemon → a controllable child run.
+            const { runId: childRunId } = await enqueue(
+              workflow,
+              inputs[i] as unknown as Partial<GatedInput> & { id?: string },
+              {
+                itemId,
+                ...(overrideOpts?.parentRunId ? { parentRunId: overrideOpts.parentRunId } : {}),
+                renderAs: "batch",
+              },
+            );
+            enqueued.push({ id: itemId, runId: childRunId });
+            if (workflow === approveOcrOpts.childWorkflow) {
+              enqueuedChildren.push({ itemId, runId: childRunId });
+            }
+          } else {
+            // A fan-out target with no daemon in this runtime (e.g. the
+            // once-per-document `oath-upload` ticket when only oath-signature is
+            // under test). Pre-emit its pending row through the route's hook so
+            // the projection still nests it, but don't try to claim it.
+            const childRunId = randomUUID();
+            overrideOpts?.onPreEmitPending?.(inputs[i], childRunId, overrideOpts.parentRunId, itemId);
+            enqueued.push({ id: itemId, runId: childRunId });
+          }
+        }
+        return { enqueued };
+      },
+    });
+    const res = await handler({
+      sessionId: approveOcrOpts.sessionId,
+      runId: approveOcrOpts.runId,
+      records: approveOcrOpts.records,
+    });
+    if (res.status !== 200) {
+      throw new Error(
+        `approveOcr: approve route returned ${res.status}: ${JSON.stringify(res.body)}`,
+      );
+    }
+    // The actual enqueue runs inside the approve route's BACKGROUND dispatch
+    // IIFE, so `res` returns before children are enqueued. The synchronous
+    // `fannedOut` response names the per-record targets; wait until the override
+    // has enqueued exactly that many onto `childWorkflow` (no sleeps — poll the
+    // captured handle).
+    const body = res.body as { ok: true; fannedOut: Array<{ workflow: string; itemId: string }> };
+    const expected = body.fannedOut.filter((f) => f.workflow === approveOcrOpts.childWorkflow).length;
+    const start = Date.now();
+    while (enqueuedChildren.length < expected) {
+      if (Date.now() - start > 10_000) {
+        throw new Error(
+          `approveOcr: only ${enqueuedChildren.length}/${expected} ${approveOcrOpts.childWorkflow} children enqueued within 10s`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return enqueuedChildren;
   };
 
   // ── cleanup ──────────────────────────────────────────────────────────────
@@ -509,6 +733,8 @@ export async function createDelegationRuntime(
     dashboard,
     cleanup,
     stubOcr,
+    enqueueOcr,
+    approveOcr,
   };
 }
 
