@@ -31,8 +31,8 @@ import {
 import {
   makeStubOcrWorkflow,
   registerOcrPdf,
+  deriveRosterFromRawRecords,
   type StubOcrConfig,
-  type StubOcrRecord,
   type StubOcrState,
   type StubRosterRow,
 } from "./ocr-stub.js";
@@ -224,13 +224,18 @@ export interface DelegationRuntime {
   cleanup(): Promise<void>;
 
   /**
-   * Seed the synthetic OCR records (+ optional roster) the stub
-   * `runOcrOrchestrator` pipeline returns. Call BEFORE `enqueueOcr`. Records are
-   * PII-FREE — fake names + fake 5+-digit (UCPath-shaped) EIDs. When `roster` is
-   * omitted, a roster row is derived per record (EID short-circuit → matched).
-   * Requires `ocr` in the runtime opts.
+   * Seed the FORM-APPROPRIATE raw OCR records (+ optional roster) the stub
+   * `runOcrOrchestrator` pipeline returns VERBATIM (oath-shaped for the oath
+   * form, EC-shaped for emergency-contact — build them via
+   * `rawOathRecordFromStub` / `rawEcRecordFromStub`). The real `spec.matchRecord`
+   * runs on them. Call BEFORE `enqueueOcr`. Records are PII-FREE — fake names +
+   * fake 5+-digit (UCPath-shaped) EIDs. When `roster` is omitted, a roster row is
+   * derived per record (EID short-circuit → matched). Requires `ocr` opts.
    */
-  stubOcr(records: ReadonlyArray<StubOcrRecord>, roster?: ReadonlyArray<StubRosterRow>): void;
+  stubOcr(
+    rawRecords: ReadonlyArray<Record<string, unknown>>,
+    roster?: ReadonlyArray<StubRosterRow>,
+  ): void;
 
   /**
    * Register a renderable PDF in the temp tracker file store and enqueue an OCR
@@ -343,7 +348,7 @@ export async function createDelegationRuntime(
   // OCR stub: a thin test-only `"ocr"` daemon driving the REAL orchestrator with
   // stubbed LLM/roster/eid-lookup. Its records are seeded post-construction via
   // `stubOcr`, so the holder is shared with the workflow handler closure.
-  const ocrState: StubOcrState = { records: [], roster: [] };
+  const ocrState: StubOcrState = { rawRecords: [], roster: [] };
   if (opts.ocr) {
     const ocrWf = makeStubOcrWorkflow(ocrState, opts.ocr) as unknown as DelegationWorkflow;
     workflows.set(ocrWf.config.name, ocrWf);
@@ -384,13 +389,28 @@ export async function createDelegationRuntime(
   // ── enqueue ──────────────────────────────────────────────────────────────
   const enqueue: DelegationRuntime["enqueue"] = async (workflow, input, enqueueOpts) => {
     const wf = resolveWf(workflow);
+    // Preserve any `__runtimeOptions` already on the input (the real approve
+    // route stamps `rootTracePrefix` there via `withRootTracePrefixRuntimeOption`
+    // so each fan-out child COMPOSES `<rootPrefix>-<ownRunId4>`). MERGE the
+    // batch-member rowShape onto it rather than clobbering — clobbering would
+    // strip the propagated trace prefix and the child would fall back to its
+    // own workflow code, breaking root trace-id propagation.
+    const existingRuntimeOptions =
+      input && typeof (input as Record<string, unknown>).__runtimeOptions === "object"
+        ? ((input as Record<string, unknown>).__runtimeOptions as Record<string, unknown>)
+        : undefined;
     const item: GatedInput = {
       id: enqueueOpts?.itemId ?? input?.id ?? `item-${randomUUID().slice(0, 8)}`,
       ...(input ?? {}),
       // Mirror `withBatchMemberRuntimeOptions` — the real approve fan-out stamps
       // this so the daemon's pre-emit derives a `batch-member` archetype.
-      ...(enqueueOpts?.renderAs === "batch"
-        ? { __runtimeOptions: { rowShape: "batch-member" } }
+      ...(enqueueOpts?.renderAs === "batch" || existingRuntimeOptions
+        ? {
+            __runtimeOptions: {
+              ...(existingRuntimeOptions ?? {}),
+              ...(enqueueOpts?.renderAs === "batch" ? { rowShape: "batch-member" } : {}),
+            },
+          }
         : {}),
     } as GatedInput;
     const runId = (enqueueOpts?.runId ?? randomUUID()) as UUID;
@@ -563,15 +583,16 @@ export async function createDelegationRuntime(
     }
   };
 
-  // Seed the synthetic records the stub orchestrator returns. When the test
-  // omits a roster, derive one row per record (EID→matched short-circuit) so the
-  // oath form spec's `matchRecord` reaches `matched` without a live person-lookup.
-  const stubOcr: DelegationRuntime["stubOcr"] = (records, roster) => {
+  // Seed the raw form-appropriate records the stub orchestrator returns. When
+  // the test omits a roster, derive one row per record (EID→matched short-
+  // circuit) so the form spec's `matchRecord` reaches `matched` without a live
+  // person-lookup — form-agnostic via the EID/name extractors in `ocr-stub.ts`.
+  const stubOcr: DelegationRuntime["stubOcr"] = (rawRecords, roster) => {
     requireOcr("stubOcr");
-    ocrState.records = records.map((r) => ({ ...r }));
+    ocrState.rawRecords = rawRecords.map((r) => ({ ...r }));
     ocrState.roster = roster
       ? roster.map((r) => ({ ...r }))
-      : records.map((r) => ({ eid: r.employeeId, name: r.printedName }));
+      : deriveRosterFromRawRecords(ocrState.rawRecords);
   };
 
   const enqueueOcr: DelegationRuntime["enqueueOcr"] = async (enqueueOcrOpts) => {

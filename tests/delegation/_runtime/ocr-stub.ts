@@ -17,10 +17,10 @@ import { writeOnePagePdf } from "../../_utils/one-page-pdf.js";
 import type { RegisteredWorkflow } from "../../../src/core/kernel/types.js";
 
 /**
- * A synthetic OCR record the stub pipeline returns. PII-FREE — tests pass fake
- * printed names + fake 5+-digit (UCPath-shaped 8-digit) EIDs; never extract real
- * EIDs/names from the fixture PDFs. The oath form spec's `matchRecord` runs on
- * these for real, so an EID present here that also appears in the stub roster
+ * A synthetic OATH OCR record the stub pipeline returns. PII-FREE — tests pass
+ * fake printed names + fake 5+-digit (UCPath-shaped 8-digit) EIDs; never extract
+ * real EIDs/names from the fixture PDFs. The oath form spec's `matchRecord` runs
+ * on these for real, so an EID present here that also appears in the stub roster
  * short-circuits to `matched` (form-eid) and passes the approve fan-out's
  * `canFanOut` (`selected` + `/^\d{5,}$/` EID).
  */
@@ -37,15 +37,48 @@ export interface StubOcrRecord {
   originallyMissing?: string[];
 }
 
+/**
+ * A synthetic EMERGENCY-CONTACT OCR record the stub pipeline returns. Mirrors
+ * the EC form spec's `PermissiveRecordSchema` raw shape (`employee.name` /
+ * `employee.employeeId` + a nested `emergencyContact`). Same PII-FREE rule.
+ * The EC form spec's `matchRecord` runs on these for real; a form-EID present
+ * (`employee.employeeId`) short-circuits to `matched` (form source).
+ */
+export interface StubEcOcrRecord {
+  sourcePage: number;
+  employee: {
+    name: string;
+    employeeId: string;
+  };
+  emergencyContact: {
+    name: string;
+    relationship: string;
+    primary?: boolean;
+    sameAddressAsEmployee: boolean;
+    address?: { street: string; city?: string; state?: string; zip?: string } | null;
+    cellPhone?: string | null;
+    homePhone?: string | null;
+    workPhone?: string | null;
+  };
+  notes?: string[];
+  documentType?: string;
+  originallyMissing?: string[];
+}
+
 /** Roster row the stub `_loadRosterOverride` returns (eid+name only). */
 export interface StubRosterRow {
   eid: string;
   name: string;
 }
 
-/** Mutable holder the OCR stub handler reads at run time. `rt.stubOcr` sets it. */
+/**
+ * Mutable holder the OCR stub handler reads at run time. `rt.stubOcr` sets it.
+ * `rawRecords` are FORM-APPROPRIATE raw OCR records (oath-shaped or EC-shaped)
+ * passed VERBATIM to the orchestrator's pipeline — the real `spec.matchRecord`
+ * runs on them. The stub is form-agnostic: it no longer re-maps an oath struct.
+ */
 export interface StubOcrState {
-  records: StubOcrRecord[];
+  rawRecords: Array<Record<string, unknown>>;
   roster: StubRosterRow[];
 }
 
@@ -105,20 +138,11 @@ export function makeStubOcrWorkflow(
         onReviewData: (data) => {
           lastReviewData = data;
         },
-        // LLM extraction → the synthetic records the test seeded.
+        // LLM extraction → the FORM-APPROPRIATE raw records the test seeded,
+        // passed verbatim. The stub is form-agnostic: `spec.matchRecord` runs on
+        // these for real (oath-shaped for oath, EC-shaped for EC).
         _ocrPipelineOverride: async () => ({
-          data: state.records.map((r) => ({
-            sourcePage: r.sourcePage,
-            rowIndex: r.rowIndex,
-            printedName: r.printedName,
-            employeeId: r.employeeId,
-            employeeSigned: r.employeeSigned,
-            officerSigned: r.officerSigned ?? true,
-            dateSigned: r.dateSigned,
-            notes: r.notes ?? [],
-            documentType: r.documentType ?? "expected",
-            originallyMissing: r.originallyMissing ?? [],
-          })),
+          data: state.rawRecords.map((r) => ({ ...r })),
           provider: "stub",
           attempts: 1,
           cached: false,
@@ -139,7 +163,7 @@ export function makeStubOcrWorkflow(
             runId: `stub-verify-${i}`,
             status: "done" as const,
             data: {
-              emplId: state.records[i]?.employeeId ?? "",
+              emplId: rawRecordEid(state.rawRecords[i]),
               hrStatus: "Active",
               department: "HDH",
               personOrgScreenshot: "x.png",
@@ -220,11 +244,80 @@ export async function registerOcrPdf(opts: {
 }
 
 /**
- * Build the approved-records payload the operator would submit: every stub
+ * Read the employee EID off a form-appropriate raw OCR record (oath:
+ * `employeeId`; EC: `employee.employeeId`). Used by the stub's roster
+ * derivation + synthetic person-lookup verification outcome so both forms
+ * short-circuit `matchRecord` to `matched`.
+ */
+export function rawRecordEid(record: Record<string, unknown> | undefined): string {
+  if (!record) return "";
+  if (typeof record.employeeId === "string") return record.employeeId;
+  const employee = record.employee as Record<string, unknown> | undefined;
+  if (employee && typeof employee.employeeId === "string") return employee.employeeId;
+  return "";
+}
+
+/** Read the employee NAME off a form-appropriate raw OCR record. */
+export function rawRecordName(record: Record<string, unknown> | undefined): string {
+  if (!record) return "";
+  if (typeof record.printedName === "string") return record.printedName;
+  const employee = record.employee as Record<string, unknown> | undefined;
+  if (employee && typeof employee.name === "string") return employee.name;
+  return "";
+}
+
+/**
+ * Derive a roster row per raw record (EID short-circuit → `matched`) when the
+ * test omits an explicit roster — form-agnostic via `rawRecordEid`/`rawRecordName`.
+ */
+export function deriveRosterFromRawRecords(
+  rawRecords: ReadonlyArray<Record<string, unknown>>,
+): StubRosterRow[] {
+  return rawRecords.map((r) => ({ eid: rawRecordEid(r), name: rawRecordName(r) }));
+}
+
+/**
+ * Build a raw OATH OCR record (the orchestrator pipeline shape) from a
+ * `StubOcrRecord`. Passed verbatim through `_ocrPipelineOverride`.
+ */
+export function rawOathRecordFromStub(r: StubOcrRecord): Record<string, unknown> {
+  return {
+    sourcePage: r.sourcePage,
+    rowIndex: r.rowIndex,
+    printedName: r.printedName,
+    employeeId: r.employeeId,
+    employeeSigned: r.employeeSigned,
+    officerSigned: r.officerSigned ?? true,
+    dateSigned: r.dateSigned,
+    notes: r.notes ?? [],
+    documentType: r.documentType ?? "expected",
+    originallyMissing: r.originallyMissing ?? [],
+  };
+}
+
+/**
+ * Build a raw EMERGENCY-CONTACT OCR record (the orchestrator pipeline shape,
+ * `PermissiveRecordSchema`) from a `StubEcOcrRecord`. Passed verbatim through
+ * `_ocrPipelineOverride`; the EC `matchRecord` short-circuits on the form-EID.
+ */
+export function rawEcRecordFromStub(r: StubEcOcrRecord): Record<string, unknown> {
+  return {
+    formKind: "emergency-contact",
+    sourcePage: r.sourcePage,
+    employee: { ...r.employee },
+    emergencyContact: { primary: true, ...r.emergencyContact },
+    notes: r.notes ?? [],
+    documentType: r.documentType ?? "expected",
+    originallyMissing: r.originallyMissing ?? [],
+  };
+}
+
+/**
+ * Build the approved OATH-records payload the operator would submit: every stub
  * record, marked `selected` so the oath form spec's `canFanOut` (selected +
  * 5+-digit EID) lets it fan out to one oath-signature signer row.
  */
-export function approvedRecordsFromStub(records: StubOcrRecord[]): Array<Record<string, unknown>> {
+export function approvedOathRecordsFromStub(records: StubOcrRecord[]): Array<Record<string, unknown>> {
   return records.map((r) => ({
     formKind: "oath",
     sourcePage: r.sourcePage,
@@ -238,6 +331,32 @@ export function approvedRecordsFromStub(records: StubOcrRecord[]): Array<Record<
     notes: r.notes ?? [],
     matchState: "matched",
     matchSource: "form-eid",
+    selected: true,
+    warnings: [],
+  }));
+}
+
+/**
+ * Build the approved EMERGENCY-CONTACT-records payload the operator would
+ * submit. Each record is `selected:true` so the approve route's
+ * `isSelectedRecord` passes; EC's `approveTo` has NO `canFanOut`, so every
+ * selected record fans out. The shape satisfies EC's
+ * `approveTo.deriveInput` (`employee.employeeId` + `emergencyContact`) and the
+ * `matched`/`form` provenance mirrors how `matchRecord` short-circuits on a
+ * form-EID present in the roster.
+ */
+export function approvedEcRecordsFromStub(records: StubEcOcrRecord[]): Array<Record<string, unknown>> {
+  return records.map((r) => ({
+    formKind: "emergency-contact",
+    sourcePage: r.sourcePage,
+    employee: { ...r.employee },
+    emergencyContact: { primary: true, ...r.emergencyContact },
+    notes: r.notes ?? [],
+    documentType: r.documentType ?? "expected",
+    originallyMissing: r.originallyMissing ?? [],
+    matchState: "matched",
+    matchSource: "form",
+    matchConfidence: 1.0,
     selected: true,
     warnings: [],
   }));

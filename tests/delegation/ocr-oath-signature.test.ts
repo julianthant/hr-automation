@@ -5,6 +5,8 @@ import { existsSync, readdirSync } from "node:fs";
 import {
   createDelegationRuntime,
   readQueueStateIncludingTerminals,
+  rawOathRecordFromStub,
+  approvedOathRecordsFromStub,
   type GatedWorkflowSpec,
   type StubOcrRecord,
 } from "./_runtime/index.js";
@@ -99,7 +101,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   t.onTestFinished(() => rt.cleanup());
 
   // 1. Seed synthetic records + hold every signer at `transaction` BEFORE approval.
-  rt.stubOcr(STUB_RECORDS);
+  rt.stubOcr(STUB_RECORDS.map(rawOathRecordFromStub));
   rt.holdAll("oath-signature", "transaction");
 
   // 2. Enqueue the OCR run (registers the fixture PDF) + wait for the prep gate.
@@ -111,22 +113,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   const children = await rt.approveOcr({
     sessionId: ocr.sessionId,
     runId: ocr.runId,
-    records: STUB_RECORDS.map((r) => ({
-      formKind: "oath",
-      sourcePage: r.sourcePage,
-      rowIndex: r.rowIndex,
-      printedName: r.printedName,
-      employeeId: r.employeeId,
-      employeeSigned: true,
-      dateSigned: r.dateSigned,
-      documentType: "expected",
-      originallyMissing: [],
-      notes: [],
-      matchState: "matched",
-      matchSource: "form-eid",
-      selected: true,
-      warnings: [],
-    })),
+    records: approvedOathRecordsFromStub(STUB_RECORDS),
     childWorkflow: "oath-signature",
   });
   assert.equal(children.length, 3, "approve fan-out enqueues exactly 3 signer children");
