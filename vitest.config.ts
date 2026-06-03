@@ -13,6 +13,9 @@ export default defineConfig({
   },
   test: {
     // Mirror the previous `tsx --test` discovery: only `*.test.ts` under tests/.
+    // `tests/delegation/**` is the Tier-1 delegation pool (deterministic, CI-able —
+    // real daemon + temp tracker root, no live browser); it is picked up by this
+    // glob and runs in `npm test` automatically — no separate pool required.
     include: ["tests/**/*.test.ts"],
     // `tests/live/**` is the opt-in live pool (real browsers + live UCSD SSO);
     // it runs only via `npm run test:live` (vitest.live.config.ts), never here.
