@@ -76,10 +76,17 @@ export interface LaunchOptions {
   args?: string[];
   /** Accept downloads (default: false). */
   acceptDownloads?: boolean;
+  /**
+   * Run Chromium headless. Default `false` (headed) — production never sets this;
+   * it exists for unattended integration tests (`tests/live/`). The CDP WebAuthn
+   * virtual-authenticator path (hands-off Duo) works under headless Chromium.
+   */
+  headless?: boolean;
 }
 
 /**
- * Launch a headed Chromium browser.
+ * Launch a Chromium browser (headed by default; pass `headless: true` for
+ * unattended integration tests).
  *
  * Without sessionDir: fresh context every time (default for UCPath/CRM).
  * With sessionDir: persistent context that survives across runs (for UKG).
@@ -90,11 +97,12 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
   page: Page;
 }> {
   const viewport = options.viewport === undefined ? null : options.viewport;
+  const headless = options.headless ?? false;
 
   if (options.sessionDir) {
     log.step(`Launching browser (persistent session: ${options.sessionDir})...`);
     const context = await chromium.launchPersistentContext(options.sessionDir, {
-      headless: false,
+      headless,
       viewport,
       acceptDownloads: options.acceptDownloads ?? false,
       args: options.args,
@@ -106,7 +114,7 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
 
   log.step("Launching browser...");
   const browser = await chromium.launch({
-    headless: false,
+    headless,
     args: options.args,
   });
   const context = await browser.newContext({

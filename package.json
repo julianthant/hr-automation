@@ -37,6 +37,7 @@
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "test": "vitest run --reporter=dot",
     "test:dashboard": "vitest run --config vitest.dashboard.config.ts",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "test:stderr-audit": "vitest run --reporter=dot",
     "test:verbose": "vitest run --reporter=verbose",
     "test:watch": "vitest",

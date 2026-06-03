@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 import { resolve } from "node:path";
 import { recordConsoleLog } from "./tests/log-audit-core.js";
 
@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     // Mirror the previous `tsx --test` discovery: only `*.test.ts` under tests/.
     include: ["tests/**/*.test.ts"],
+    // `tests/live/**` is the opt-in live pool (real browsers + live UCSD SSO);
+    // it runs only via `npm run test:live` (vitest.live.config.ts), never here.
+    exclude: [...configDefaults.exclude, "tests/live/**"],
     // The previous `tsx --test` runner ran files sequentially in one process.
     // Several tests rely on that: they mutate process.env, write to real
     // paths under PATHS.*, and depend on module-level dashboard caches that
