@@ -18,6 +18,8 @@ Unit tests for pure/near-pure logic. Playwright automation, login flows, and liv
 
 Static convention guards live in `tests/unit/architecture/`. Add guards when a rule is mechanical: import boundaries, default exports, signal-listener misuse, console logging outside allowed surfaces, workflow ownership leaks, and **src filename patterns** (kebab-case outside `src/dashboard/`; PascalCase components / `use*` hooks / kebab modules inside the dashboard — see `docs/engineering/codebase-conventions.md`).
 
+`code-conventions.test.ts` also enforces: **no `.tsx` outside `src/dashboard/`**, **no `AGENTS.md` under `src/`** (the repo-root `AGENTS.md` session artifact is exempt), and a broadened **console guard** matching `console.\w+` (table/dir/trace/group/…), not just log/warn/error/info/debug — keep the allowlist tight (`render-pages.ts` monkey-patches `console.warn` to mute pdfjs and is allowlisted). `runtime-policy-coverage.test.ts` side-effect-imports every workflow including `i9-lookup`; when adding a workflow, add its import there or its action descriptors go unvalidated.
+
 ## Regression clusters
 
 - Dashboard queue/rail counts: backend `wfCounts` regressions belong in `tests/unit/tracker/state-queries.test.ts` and pure count helpers under `tests/unit/tracker/` or `tests/unit/dashboard/`. Pin that counts are backend-authoritative, independent of the selected workflow, and use the same queue-surface model as the rendered rail badges. OCR prep rows that still render in the queue must remain counted until the queue no longer renders them.
