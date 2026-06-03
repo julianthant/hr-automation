@@ -20,9 +20,31 @@ Static convention guards live in `tests/unit/architecture/`. Add guards when a r
 
 `code-conventions.test.ts` also enforces: **no `.tsx` outside `src/dashboard/`**, **no `AGENTS.md` under `src/`** (the repo-root `AGENTS.md` session artifact is exempt), and a broadened **console guard** matching `console.\w+` (table/dir/trace/group/…), not just log/warn/error/info/debug — keep the allowlist tight (`render-pages.ts` monkey-patches `console.warn` to mute pdfjs and is allowlisted). `runtime-policy-coverage.test.ts` side-effect-imports every workflow including `i9-lookup`; when adding a workflow, add its import there or its action descriptors go unvalidated.
 
+## Tier-1 delegation pool (`tests/delegation/`, CI-able)
+
+Deterministic tests that prove the dashboard projection stays correct under delegation, concurrency, and cancellation — driven through the **real daemon** against a temp tracker root (no live browser, no real `.tracker/`). No separate vitest pool needed: the main `tests/**/*.test.ts` glob already picks them up, so they run in `npm test` automatically.
+
+The harness foundation lives in `tests/delegation/_runtime/` (projection tooling `snapshot-row.ts` + the daemon harness; see `tests/delegation/_runtime/CLAUDE.md`).
+
+## Mocked-integration pool (`tests/integration/`, transitional)
+
+Real kernel + real handlers + stubbed Playwright. Migration state:
+
+| Status | File | Why it stays / when it goes |
+|--------|------|-----------------------------|
+| **Keep (permanent)** | `core/mock-workflow.test.ts` | Parallel-staggered auth-gating order — logins complete before `ctx.page()` resolves; no Tier-1 equivalent planned |
+| **Keep (permanent)** | `oath-upload-smoke.test.ts` | Real `oathUploadHandler` happy path via escape hatches |
+| **Keep (permanent)** | `oath-upload-extended.test.ts` | Real handler: `skipStep` upload-only + idempotency/ticket reuse |
+| **Bridge** | `ocr/end-to-end.test.ts` | Delete when Tier-1 P2.9 (OCR→oath-signature fan-out through real daemon) is green |
+| **Bridge** | `delegation-parentrunid.test.ts` | Delete when Tier-1 P2.9 (parentRunId/archetype/traceId on real fan-out) is green; also unit-covered by `ctx-delegate-to*.test.ts` |
+| **Bridge** | `retry-original-input.test.ts` | Delete when a Tier-1 test asserts retry-after-cancel; also unit-covered by `retry-uses-original-input.test.ts` |
+| **Removed (Phase 0)** | `batch-fanout.test.ts` | Legacy in-process `runWorkflowBatch/Pool`; daemon never uses it; unit-covered |
+
+**Rule:** delete each bridge only after its Tier-1 superseder is green — coverage must never dip.
+
 ## Live integration pool (`tests/live/`, opt-in)
 
-Real end-to-end tests that hit **live UCSD systems** with a real Chromium and hands-off Duo (CDP WebAuthn). They run in a **separate pool** via `vitest.live.config.ts` (`npm run test:live`) and are **excluded from `npm test`** (`vitest.config.ts` excludes `tests/live/**`). They are the only layer that catches live SSO/DOM drift — unit/scenario/mocked-integration can't.
+Real end-to-end tests that hit **live UCSD systems** with a real Chromium and hands-off Duo (CDP WebAuthn). They run in a **separate pool** via `vitest.live.config.ts` (`npm run test:live`) and are **excluded from `npm test`** (`vitest.config.ts` excludes `tests/live/**`). They are the only layer that catches live SSO/DOM drift — unit/Tier-1-delegation/mocked-integration can't.
 
 Rules (these mirror the hard realities of live testing):
 - **Opt-in, never CI.** Require `.env` creds + `.auth/duo-webauthn.json` (the enrolled WebAuthn key) + a machine that can run Chromium. Each test **skips cleanly** (precondition guard) when those are absent — never fail/hang on a fresh clone.
