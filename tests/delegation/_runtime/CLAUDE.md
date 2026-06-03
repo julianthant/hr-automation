@@ -53,7 +53,7 @@ const rt = await createDelegationRuntime({
 | `rt.cleanup()` | `/stop` all daemons → await `runPromise`s → `closeStateDbForTests` → `rm` temp dir. Idempotent. Register with `t.onTestFinished`. |
 | `rt.stubOcr(rawRecords, roster?)` | Seed PII-FREE synthetic **raw, form-shaped** OCR records (+ optional roster) the stub `runOcrOrchestrator` returns **VERBATIM** (the REAL `spec.matchRecord` runs on them). Build them via `rawOathRecordFromStub` (oath) or `rawEcRecordFromStub` (EC). Requires the `ocr` runtime option. Call BEFORE `enqueueOcr`. (P2.9 fleshed it; P2.10 made it FORM-AGNOSTIC — `_ocrPipelineOverride` no longer re-maps an oath struct.) |
 | `rt.enqueueOcr({ fixturePath, originalName?, runId?, sessionId?, parentRunId? })` | Register a renderable PDF + enqueue an OCR run on the stub `"ocr"` daemon. Returns `{ sessionId, runId, usedFixture }`. Requires `ocr` opts. |
-| `rt.approveOcr({ sessionId, runId, records, childWorkflow })` | Drive the REAL `buildOcrApproveHandler` fan-out, redirecting the child enqueue onto `childWorkflow`'s gated daemon. Returns the enqueued `{ itemId, runId }[]`. Requires `ocr` opts. |
+| `rt.approveOcr({ sessionId, runId, records, childWorkflows })` | Drive the REAL `buildOcrApproveHandler` fan-out, redirecting each child enqueue onto the matching gated daemon. **MULTI-TARGET** (P2.12): the approve route calls the override once per fan-out target (`approveTo.workflow` per-record, `approveDocumentTo.workflow` once-per-document); each `(workflow, inputs)` whose `workflow` is in `childWorkflows` (and registered) is routed onto that gated daemon, others stay pre-emit-only. Returns ALL claimed children `{ workflow, itemId, runId }[]` tagged by workflow. Back-compat: single-target `childWorkflow: string` still accepted (= a 1-element set; P2.9 + P2.10 use it). Requires `ocr` opts. |
 | `rt.trackerDir` | The temp tracker root. |
 
 The `ocr` runtime option (`createDelegationRuntime({ workflows, ocr: { formType } })`)
@@ -64,7 +64,18 @@ fan-out test pattern is documented in `tests/delegation/CLAUDE.md`.
 `getName` / `deriveItemId` / `operatorSubject` / `label` so a gated stub can
 mirror a real workflow's config faithfully (e.g. the oath-signature stub stamping
 `emplId` + the real `alwaysBatchDelegatedMembers` policy so the projection matches
-production).
+production; the P2.12 oath-upload stub mirroring `inputSubject:"pdf"` /
+`code:"ou"` / `OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY` + stamping `pdfOriginalName`
+for the file-kind ticket title and `signerItemIds` for the doc-fan-out assertion).
+
+**OCR stub carries the operation `__traceId` onto its terminal re-stamp** (P2.12):
+`makeStubOcrWorkflow` reads `findFrozenTraceId({ workflow:"ocr", runId })` and
+includes it in the `ctx.updateData` re-stamp, so the kernel's auto-emitted
+terminal `done` row keeps the orchestrator's branded id (`ou-…` for oath, `oc-…`
+otherwise) instead of falling back to the workflow's own pre-emit code. Mirrors
+production's `latestReviewData` (which carries `__traceId`). Without it, a raw
+`timeline(...).at(-1).__traceId` assertion on the OCR root reads `oc-` even for an
+oath operation.
 
 ### Gated stub workflows (`scenario-handler.ts`)
 

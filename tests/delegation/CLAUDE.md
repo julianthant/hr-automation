@@ -17,6 +17,7 @@ projection tooling `snapshot-row.ts`). Full harness API + gotchas:
 | `ocr-oath-signature.test.ts` | **P2.9 star test** — OCR → oath-signature `approveTo` fan-out through the real daemon, under hold/cancel/release. |
 | `ocr-emergency-contact.test.ts` | **P2.10** — OCR → emergency-contact `approveTo` fan-out, same hold/cancel/release shape for a DIFFERENT form type (nested `EmergencyContactRecord` input, default delegation policy, `oc-` trace code). |
 | `ocr-verify-lookup.test.ts` | **P2.11** — OCR `verify` → person-lookup + i9-lookup **`enrichRecords`** fan-out (NO approve fan-out; verify is read-only). Asserts the full enrichment projection + a cancel-mid-enrichment invariant. See "verify enrichment fan-out shape" below. |
+| `ocr-oath-upload.test.ts` | **P2.12** — OCR (oath form) → oath-upload **`approveDocumentTo`** once-per-document fan-out. Approving an oath OCR run fans out to TWO daemons: 1 oath-signature signer row (`approveTo`) + 1 oath-upload TICKET row (`approveDocumentTo`), both under the OCR run, sharing the `ou-` trace prefix. Asserts the doc fan-out projection (ticket row file-kind title + `signerItemIds` input) + cancel-the-ticket-leaves-signer invariant. Drove the multi-target `rt.approveOcr` generalization. See "approveDocumentTo doc fan-out shape" below. |
 
 ## OCR fan-out test pattern (P2.9)
 
@@ -43,16 +44,25 @@ workflows, ocr: { formType } })`):
    to a synthetic one-pager if it can't render headlessly — records come from the
    override regardless) and enqueue the OCR run. Returns `{ sessionId, runId,
    usedFixture }`. Sync on `rt.waitForEvent("ocr:awaiting-approval", { runId })`.
-3. **`rt.approveOcr({ sessionId, runId, records, childWorkflow })`** — drive the
+3. **`rt.approveOcr({ sessionId, runId, records, childWorkflows })`** — drive the
    REAL `buildOcrApproveHandler`: the real `approveTo.deriveInput/deriveItemId/
-   canFanOut`, `childParentRunId = parentRunId ?? ocrRunId`, trace-prefix
-   propagation, and terminal OCR row all run, with the child enqueue redirected
-   onto `childWorkflow`'s gated daemon via `rt.enqueue(..., { renderAs: "batch" })`.
-   Resolves with the enqueued child runs (`{ itemId, runId }[]`) once the route's
-   BACKGROUND dispatch IIFE finishes (the helper polls the captured handle, no
-   sleeps). A fan-out target with no daemon in the runtime (e.g. `oath-upload`'s
-   once-per-document ticket when only `oath-signature` is under test) gets its
-   pending row pre-emitted but is not claimed.
+   canFanOut`, the once-per-document `approveDocumentTo` fan-out,
+   `childParentRunId = parentRunId ?? ocrRunId`, trace-prefix propagation, and
+   terminal OCR row all run, with each child enqueue redirected onto the matching
+   gated daemon (any workflow in `childWorkflows`) via `rt.enqueue(..., {
+   renderAs: "batch" })`. Resolves with ALL enqueued child runs — each tagged by
+   its `workflow` (`{ workflow, itemId, runId }[]`) — once the route's BACKGROUND
+   dispatch IIFE finishes (the helper polls the captured handle, no sleeps).
+   **`rt.approveOcr` is MULTI-TARGET** (generalized in P2.12): the approve route
+   calls the override once per fan-out target workflow (`approveTo.workflow` with
+   N inputs; `approveDocumentTo.workflow` with 1 input), and the override routes
+   each `(workflow, inputs)` whose `workflow` is in `childWorkflows` (and is
+   registered) onto that gated daemon. A target NOT requested/registered keeps
+   the pre-emit-only behavior (its pending row is emitted but never claimed).
+   Back-compat: a single-target `childWorkflow: string` is still accepted (P2.9 +
+   P2.10 use it) and treated as a 1-element set. The completion poll waits for
+   exactly the count of claimed targets named in the synchronous `fannedOut`
+   response.
 
 **Make the child stub faithful.** The gated `oath-signature` stub mirrors the
 REAL config so the projection matches production: `inputSubject:"eid"`,
@@ -153,7 +163,79 @@ invariant. **No log-audit allowlist change was needed** — the happy-path
 children complete cleanly and the cancel emits stdout (`! Cancelled by user`),
 not stderr.
 
+## approveDocumentTo doc fan-out shape (P2.12)
+
+The oath form spec declares BOTH approve targets, so approving ONE oath OCR run
+fans out to TWO different daemons:
+
+- **`approveTo`** (per-record) → **oath-signature** signer rows (itemId
+  `ocr-oath-${ocrRunId}-r${index}`) — the P2.9 path.
+- **`approveDocumentTo`** (once-per-document) → ONE **oath-upload** TICKET row
+  (itemId `ocr-oath-upload-${ocrRunId}`). Its `OathUploadInput` carries
+  `signerItemIds` = the signer itemIds actually enqueued (so the ticket can wait
+  on exactly those rows), plus `pdfFileId`, `pdfOriginalName`, `mode:"full"`,
+  `rosterMode:"download"`. The doc fan-out runs through the real route's
+  `enqueueDocFanOut`, which calls the SAME `ensureDaemonsAndEnqueueOverride` with
+  the single doc input.
+
+`single-oath.pdf` → 1 signer record → 1 signer row + 1 ticket row, both parented
+under the OCR run, all sharing the `ou-…` trace prefix.
+
+**The gated oath-upload stub mirrors the REAL config** (`inputSubject:"pdf"` →
+FILE kind, `code:"ou"`, `archetype:"single"`, the real
+`OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY`). Its `initialData`/`getName`/`getId`
+surface `pdfOriginalName` (file-kind title) + `sessionId`, and stamp
+`signerItemIds` (JSON) so the test can assert the doc fan-out handed the ticket
+the signer itemIds. Gated at `wait-signatures` (the real first step where the
+ticket parks waiting on the signers) so the test can hold/cancel/release it.
+
+**P2.12 asserts the PROJECTION of the doc fan-out — NOT the real ticket-filing
+logic.** A gated stub files no ServiceNow ticket; the real `oathUploadHandler` /
+ticket-reuse / `wait-signatures` logic stays covered by the KEPT
+`oath-upload-smoke.test.ts` + `oath-upload-extended.test.ts` integration tests
+(permanent — NOT superseded by this projection test).
+
+**Asserted invariants:** OCR parent `preview` + file-kind title + `<traceId>`
+subtitle + `ou-…` trace + terminal `done`; signer row real archetype
+`batch-member` (oath-signature `alwaysBatchDelegatedMembers` → a lone delegated
+signer renders as a 1-member batch surface), `parentRunId === ocrRunId`,
+person/eid title+subtitle, `ou-` prefix, itemId `ocr-oath-${ocrRunId}-r0`;
+**ticket row** file-kind (title = PDF filename, subtitle = `<traceId>`),
+`parentRunId === ocrRunId`, `ou-` prefix, itemId `ocr-oath-upload-${ocrRunId}`,
+input `signerItemIds === [signer itemId]` (the core P2.12 assertion); OCR root +
+signer + ticket share the same `ou-<HHMMSS>` prefix (root trace-id propagation);
+`rt.children(ocrRunId)` finds the signer + ticket (filtering the OCR
+orchestrator's synthetic `person-lookup` eid-lookup outcome row — same harness
+noise P2.9/P2.10 filter); cancel the held ticket → terminal `failed`/step
+`cancelled`, the signer UNAFFECTED (released to `done` after). **Retry-after-
+cancel SKIPPED** (see "Not yet asserted here").
+
+**Stub fidelity note (carried `__traceId`):** the OCR stub now carries the
+operation's frozen `__traceId` onto its terminal re-stamp
+(`findFrozenTraceId({ workflow:"ocr", runId })`). The orchestrator stamps the id
+(`ou-…` for oath, `oc-…` otherwise) on its rows AFTER `onReviewData` captured the
+review payload, so without this the kernel's auto-emitted terminal `done` row
+fell back to the workflow's own pre-emit code (`oc-`) and clobbered the operation
+prefix on the LATEST OCR row — making a raw `at(-1).__traceId` assertion read
+`oc-` even for oath. Production's `latestReviewData` carries `__traceId` for the
+same reason; the stub now mirrors it. (Harmless for EC/verify — the frozen id IS
+`oc-`/`vf-` there.)
+
+## Phase 2 complete — coverage map (P2.9–P2.12)
+
+Every OCR-fan-out shape now has a Tier-1 projection test through the real daemon:
+
+| Test | Workflow / shape | Fan-out mechanism |
+|------|------------------|-------------------|
+| `ocr-oath-signature.test.ts` (P2.9) | oath-signature, `single`→`batch-member` | `approveTo` (per-record) |
+| `ocr-emergency-contact.test.ts` (P2.10) | emergency-contact, `batch`/`batch-member` | `approveTo` (per-record), default delegation policy, `oc-` trace |
+| `ocr-verify-lookup.test.ts` (P2.11) | person-lookup + i9-lookup, `single` | `enrichRecords` (read-only verify; no approve) |
+| `ocr-oath-upload.test.ts` (P2.12) | oath-upload, `single` ticket | `approveDocumentTo` (once-per-document) |
+
+The multi-target `rt.approveOcr` (P2.12) is the shared seam covering BOTH
+`approveTo` + `approveDocumentTo` in one approve call.
+
 ## Not yet asserted here
 
-- **Retry-after-cancel** — P2.9 does NOT assert it; `tests/integration/
+- **Retry-after-cancel** — P2.9–P2.12 do NOT assert it; `tests/integration/
   retry-original-input.test.ts` is kept until a Tier-1 test owns it.

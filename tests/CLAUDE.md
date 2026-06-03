@@ -33,9 +33,9 @@ Real kernel + real handlers + stubbed Playwright. Migration state:
 | Status | File | Why it stays / when it goes |
 |--------|------|-----------------------------|
 | **Keep (permanent)** | `core/mock-workflow.test.ts` | Parallel-staggered auth-gating order — logins complete before `ctx.page()` resolves; no Tier-1 equivalent planned |
-| **Keep (permanent)** | `oath-upload-smoke.test.ts` | Real `oathUploadHandler` happy path via escape hatches |
-| **Keep (permanent)** | `oath-upload-extended.test.ts` | Real handler: `skipStep` upload-only + idempotency/ticket reuse |
-| **Bridge** | `retry-original-input.test.ts` | Delete when a Tier-1 test asserts retry-after-cancel; also unit-covered by `retry-uses-original-input.test.ts`. **Still kept** — P2.9 does not assert retry-after-cancel (a later task owns it). |
+| **Keep (permanent)** | `oath-upload-smoke.test.ts` | Real `oathUploadHandler` happy path via escape hatches. **NOT superseded by P2.12** — `tests/delegation/ocr-oath-upload.test.ts` asserts the `approveDocumentTo` ticket-row PROJECTION (a gated stub files no ticket); this asserts the real handler/ticket logic. |
+| **Keep (permanent)** | `oath-upload-extended.test.ts` | Real handler: `skipStep` upload-only + idempotency/ticket reuse. **NOT superseded by P2.12** (same reason — projection vs real ticket logic). |
+| **Bridge** | `retry-original-input.test.ts` | Delete when a Tier-1 test asserts retry-after-cancel; also unit-covered by `retry-uses-original-input.test.ts`. **Still kept** — P2.9–P2.12 do not assert retry-after-cancel (a later task owns it). |
 | **Removed (P2.9)** | `ocr/end-to-end.test.ts` | Superseded by `tests/delegation/ocr-oath-signature.test.ts` (OCR→oath-signature fan-out through the real daemon). Its real-orchestrator wiring lives in `tests/delegation/_runtime/ocr-stub.ts`. |
 | **Removed (P2.9)** | `delegation-parentrunid.test.ts` | parentRunId/archetype/traceId on a real fan-out are now asserted by `tests/delegation/ocr-oath-signature.test.ts`; also unit-covered by `ctx-delegate-to*.test.ts`. |
 | **Removed (Phase 0)** | `batch-fanout.test.ts` | Legacy in-process `runWorkflowBatch/Pool`; daemon never uses it; unit-covered |
