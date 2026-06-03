@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getLogRunId, getLogWorkflow, log } from "../../utils/log.js";
 import { cueDuo } from "./voice-cue.js";
+import { beginDuoWebAuthn, finishDuoWebAuthn, isDuoWebAuthnEnabled } from "./duo-webauthn.js";
 import {
   notifyAuthEvent,
   type AuthEventKind,
@@ -135,6 +136,54 @@ export const DUO_PRE_CHECK_MS = 2_000;
 export const DUO_PRE_CHECK_INTERVAL_MS = 500;
 
 /**
+ * How long to wait for Duo to approve once the WebAuthn virtual authenticator
+ * has selected its factor (opt-in `HR_AUTOMATION_DUO_WEBAUTHN=1`). Chrome answers
+ * the ceremony in well under a second; this headroom covers the SSO→app redirect
+ * chain plus the optional "Yes, this is my device" trust click. If the window
+ * elapses without success, the loop tears the authenticator down and falls back
+ * to the manual approval flow. Tests override via `webauthnGraceMs`.
+ */
+export const DUO_WEBAUTHN_GRACE_MS = 25_000;
+
+/**
+ * Bounded approval wait used by the WebAuthn path: each tick clicks the
+ * "Yes, this is my device" trust button if present, then checks the success
+ * URL (with the optional `successCheck`). Returns true on success, false when
+ * the window elapses — at which point the caller falls back to manual Duo.
+ */
+async function waitForApproval(
+  page: Page,
+  opts: {
+    urlMatches: (url: string) => boolean;
+    successCheck?: (page: Page) => Promise<boolean>;
+    timeoutMs: number;
+    intervalMs?: number;
+    abortSignal?: AbortSignal;
+  },
+): Promise<boolean> {
+  const interval = opts.intervalMs ?? 1_000;
+  const deadline = Date.now() + opts.timeoutMs;
+  while (Date.now() < deadline) {
+    opts.abortSignal?.throwIfAborted();
+    try {
+      const trust = page.getByText("Yes, this is my device");
+      if ((await trust.count()) > 0) {
+        await trust.click({ timeout: 5_000 }).catch(() => {});
+      }
+      if (opts.urlMatches(page.url())) {
+        if (!opts.successCheck || (await opts.successCheck(page).catch(() => false))) {
+          return true;
+        }
+      }
+    } catch {
+      // Page may be mid-navigation — swallow and retry.
+    }
+    await waitForDuoPoll(interval, opts.abortSignal);
+  }
+  return false;
+}
+
+/**
  * Options for polling Duo MFA approval.
  */
 export interface DuoPollOptions {
@@ -186,6 +235,14 @@ export interface DuoPollOptions {
    * interrupted.
    */
   abortSignal?: AbortSignal;
+
+  /**
+   * Override the WebAuthn approval grace window in milliseconds. Default:
+   * `DUO_WEBAUTHN_GRACE_MS` (25000ms). Only consulted when the operator opts
+   * into hands-off Duo via `HR_AUTOMATION_DUO_WEBAUTHN=1`. Tests pass small
+   * values; production should leave unset.
+   */
+  webauthnGraceMs?: number;
 
   /**
    * Determines whether the current URL indicates successful authentication.
@@ -286,6 +343,9 @@ export async function pollDuoApproval(
             !successCheck || (await successCheck(page).catch(() => false));
           if (verified) {
             log.step(`Duo skipped (cached trust) | URL: ${page.url()}`);
+            // Tear down the authenticator armed at clickSsoSubmit — no Duo
+            // prompt appeared, so it went unused (no-op when not armed).
+            await finishDuoWebAuthn(page);
             if (postApproval) await postApproval(page);
             return true;
           }
@@ -294,6 +354,39 @@ export async function pollDuoApproval(
         // Page may be navigating — swallow and retry.
       }
       await waitForDuoPoll(preCheckIntervalMs, options.abortSignal);
+    }
+  }
+
+  // Hands-off WebAuthn path (opt-in via HR_AUTOMATION_DUO_WEBAUTHN=1). Loads the
+  // enrolled credential into a CDP virtual authenticator and selects the matching
+  // factor at the Duo prompt; Chrome answers the ceremony automatically, so Duo
+  // approves with no phone push. Any failure (flag off, no credential, factor
+  // not found, ceremony rejected) degrades to the manual flow below — the
+  // operator's phone approval still works exactly as before.
+  if (isDuoWebAuthnEnabled()) {
+    const handle = await beginDuoWebAuthn(page, { abortSignal: options.abortSignal }).catch((err) => {
+      log.warn(
+        `Duo WebAuthn unavailable (${err instanceof Error ? err.message : String(err)}) — falling back to manual approval`,
+      );
+      return undefined;
+    });
+    if (handle) {
+      log.step(`Duo: asserting via WebAuthn (${handle.factorLabel}) — no phone push expected`);
+      const approved = await waitForApproval(page, {
+        urlMatches,
+        ...(successCheck ? { successCheck } : {}),
+        timeoutMs: options.webauthnGraceMs ?? DUO_WEBAUTHN_GRACE_MS,
+        abortSignal: options.abortSignal,
+      });
+      if (approved) {
+        await handle.finish({ approved: true });
+        log.step(`Duo approved via WebAuthn (${handle.factorLabel}) | URL: ${page.url()}`);
+        emitTelegram("duo-approved", systemLabel ?? "system", undefined, instance);
+        if (postApproval) await postApproval(page);
+        return true;
+      }
+      await handle.finish({ approved: false });
+      log.warn("Duo WebAuthn did not complete within grace window — falling back to manual approval");
     }
   }
 
@@ -400,6 +493,9 @@ export async function pollDuoApproval(
         }
 
         log.step(`Duo approved | URL: ${page.url()}`);
+        // Persist signCount + tear down any authenticator armed at clickSsoSubmit
+        // (no-op if WebAuthn wasn't in play).
+        await finishDuoWebAuthn(page);
         emitTelegram("duo-approved", systemLabel ?? "system", undefined, instance);
 
         // Run post-approval hook if provided
@@ -417,6 +513,7 @@ export async function pollDuoApproval(
   }
 
   log.error("Duo approval timed out");
+  await finishDuoWebAuthn(page);
   emitTelegram("duo-timeout", systemLabel ?? "system", undefined, instance);
   return false;
 }

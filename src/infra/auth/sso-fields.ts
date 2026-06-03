@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { validateEnv } from "../../utils/env.js";
 import { log } from "../../utils/log.js";
+import { armDuoWebAuthn, isDuoWebAuthnEnabled } from "./duo-webauthn.js";
 
 /**
  * Fill UCSD Shibboleth SSO credentials (username + password) on the current page.
@@ -41,6 +42,12 @@ const SSO_SUBMIT_SELECTOR = 'button[name="_eventId_proceed"]';
  * @param page - Playwright page instance
  */
 export async function clickSsoSubmit(page: Page): Promise<void> {
+  // Hands-off Duo (opt-in): arm the WebAuthn virtual authenticator BEFORE this
+  // click navigates to the Duo prompt. ACT CRM auto-fires a passkey request the
+  // instant its prompt loads, so the (resident) authenticator must already exist
+  // to answer it — otherwise Chrome's native "insert your security key" dialog
+  // blocks the page. Idempotent + best-effort; failure degrades to manual Duo.
+  if (isDuoWebAuthnEnabled()) await armDuoWebAuthn(page).catch(() => {});
   await page.locator(SSO_SUBMIT_SELECTOR).click({ timeout: 5_000 });
   log.step("SSO submit clicked");
 }
@@ -59,6 +66,29 @@ export async function isSsoFormReady(page: Page): Promise<boolean> {
   try {
     const count = await page.locator(SSO_SUBMIT_SELECTOR).count();
     return count > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wait up to `timeoutMs` for the SSO submit button to render. Unlike the
+ * one-shot `isSsoFormReady`, this *polls* — needed when a SAML redirect chain is
+ * still in flight and the form hasn't painted yet. ServiceNow is the motivating
+ * case: navigating to the HR Inquiry deep-link hops
+ * `support.ucsd.edu/esc` → `support.ucsd.edu/auth_redirect.do` → `a5.ucsd.edu`
+ * client-side, so the form isn't on the interstitial. A single `waitForLoadState`
+ * resolves on that interstitial and a form check then fails spuriously; waiting
+ * for the button itself bridges the redirect (the a5 form lands ~1–2s later).
+ * Returns true once the button appears, false on timeout.
+ */
+export async function waitForSsoForm(page: Page, timeoutMs = 15_000): Promise<boolean> {
+  try {
+    await page
+      .locator(SSO_SUBMIT_SELECTOR)
+      .first()
+      .waitFor({ state: "visible", timeout: timeoutMs });
+    return true;
   } catch {
     return false;
   }

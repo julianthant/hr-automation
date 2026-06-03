@@ -1,0 +1,673 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import type { CDPSession, Page } from "playwright";
+import { log } from "../../utils/log.js";
+
+/**
+ * Hands-off Duo MFA via CDP virtual authenticators.
+ *
+ * One or more WebAuthn credentials are enrolled once as independent Duo security
+ * keys (see `src/scripts/ops/duo-webauthn-enroll.ts`) and saved to
+ * `DUO_WEBAUTHN_CREDENTIAL_PATH` under `{ credentials: [...] }`. At login time,
+ * when the operator opts in with `HR_AUTOMATION_DUO_WEBAUTHN=1`,
+ * `beginDuoWebAuthn` loads every saved credential into a Chrome DevTools Protocol
+ * virtual authenticator (one per transport) and selects the matching WebAuthn
+ * factor at the Duo Universal Prompt. Chrome answers the ceremony automatically
+ * (presence + user-verification simulated), so Duo approves with no phone push.
+ *
+ * Two factors are covered because different UCSD apps offer different ones:
+ * - **UCPath** (and most apps) → an `internal`/"Touch ID" platform credential.
+ * - **ACT CRM** (Salesforce) → a `usb`/"Security key" roaming credential. CRM
+ *   only offers the security-key factor, and Playwright's bundled Chromium lacks
+ *   `PublicKeyCredential.isExternalCTAP2SecurityKeySupported`, which Duo probes
+ *   before showing that factor — so we shim the method to return `true`.
+ *
+ * This is **Chromium-only** (CDP `WebAuthn` domain) and entirely opt-in: with
+ * the flag unset, `pollDuoApproval` behaves exactly as before (manual approval).
+ * Any failure here is non-fatal — the caller falls back to manual Duo.
+ */
+
+/** Gitignored secrets file holding the enrolled credential(s) (private keys included). */
+export const DUO_WEBAUTHN_CREDENTIAL_PATH = ".auth/duo-webauthn.json";
+
+const DUO_WEBAUTHN_ENV_FLAG = "HR_AUTOMATION_DUO_WEBAUTHN";
+
+/** A virtual-authenticator transport. Duo platform devices register `internal`; cross-platform keys `usb`. */
+export type DuoWebAuthnTransport = "internal" | "usb";
+
+/**
+ * One enrolled Duo WebAuthn credential. `credentialId`, `privateKey`, and
+ * `userHandle` are base64 strings exactly as the CDP `WebAuthn` domain produces
+ * and consumes them.
+ */
+export interface DuoWebAuthnCredential {
+  /** Registrable domain the credential is scoped to — always `duosecurity.com`. */
+  rpId: string;
+  /** base64 credential id (the WebAuthn key handle Duo stored at registration). */
+  credentialId: string;
+  /** base64 PKCS#8 EC P-256 private key. SECRET. */
+  privateKey: string;
+  /** base64 user handle. Optional for non-resident credentials. */
+  userHandle?: string;
+  /** Signature counter; persisted and advanced after each assertion. */
+  signCount: number;
+  /** Whether the credential is discoverable/resident. Duo platform devices are non-resident. */
+  isResidentCredential: boolean;
+  /** Authenticator transport — drives which prompt factor we select. */
+  transport: DuoWebAuthnTransport;
+  /** ISO date the credential was enrolled (informational). */
+  enrolledAt?: string;
+}
+
+/**
+ * True when the operator has opted into hands-off Duo via WebAuthn. Pure so the
+ * env gate is unit-testable without touching `process.env` globally.
+ */
+export function isDuoWebAuthnEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[DUO_WEBAUTHN_ENV_FLAG] === "1";
+}
+
+/**
+ * Validate an untrusted parsed JSON value as a single `DuoWebAuthnCredential`.
+ * Returns `undefined` (never throws) when any required field is missing or
+ * malformed so callers degrade to manual Duo rather than crash a login. Pure.
+ */
+export function parseDuoWebAuthnCredential(raw: unknown): DuoWebAuthnCredential | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const str = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+  if (!str(r.rpId) || !str(r.credentialId) || !str(r.privateKey)) return undefined;
+  if (typeof r.signCount !== "number" || !Number.isFinite(r.signCount)) return undefined;
+  const transport = r.transport === "usb" ? "usb" : r.transport === "internal" ? "internal" : undefined;
+  if (!transport) return undefined;
+  return {
+    rpId: r.rpId,
+    credentialId: r.credentialId,
+    privateKey: r.privateKey,
+    ...(str(r.userHandle) ? { userHandle: r.userHandle } : {}),
+    signCount: r.signCount,
+    isResidentCredential: r.isResidentCredential === true,
+    transport,
+    ...(str(r.enrolledAt) ? { enrolledAt: r.enrolledAt } : {}),
+  };
+}
+
+/**
+ * Parse the credential-file payload into zero or more credentials. Accepts both
+ * the multi-credential shape `{ credentials: [...] }` and a legacy single
+ * top-level credential object. Structurally-invalid entries are dropped (so a
+ * partially-bad file still yields the usable credentials). Pure — no I/O.
+ */
+export function parseDuoWebAuthnCredentials(raw: unknown): DuoWebAuthnCredential[] {
+  if (raw && typeof raw === "object" && Array.isArray((raw as { credentials?: unknown }).credentials)) {
+    return (raw as { credentials: unknown[] }).credentials
+      .map((c) => parseDuoWebAuthnCredential(c))
+      .filter((c): c is DuoWebAuthnCredential => c !== undefined);
+  }
+  const single = parseDuoWebAuthnCredential(raw);
+  return single ? [single] : [];
+}
+
+/**
+ * Which Duo prompt factor to click for a given transport. Platform credentials
+ * (`internal`) surface as the "Touch ID" factor; cross-platform keys (`usb`) as
+ * "Security key". Pure — used by the runtime selector and unit-tested.
+ */
+export function factorPatternForTransport(transport: DuoWebAuthnTransport): RegExp {
+  return transport === "usb" ? /security key/i : /touch id/i;
+}
+
+/**
+ * Merge a freshly-enrolled credential into the existing set, keyed by transport:
+ * a machine has at most one platform (`internal`) and one roaming (`usb`)
+ * authenticator, so re-enrolling a transport replaces its prior entry while
+ * preserving the other. Pure — used by the enrollment script and unit-tested.
+ */
+export function mergeDuoWebAuthnCredential(
+  existing: DuoWebAuthnCredential[],
+  next: DuoWebAuthnCredential,
+): DuoWebAuthnCredential[] {
+  return [
+    ...existing.filter((c) => c.transport !== next.transport && c.credentialId !== next.credentialId),
+    next,
+  ];
+}
+
+/**
+ * Monotonic signature counter merge. WebAuthn servers may treat a counter that
+ * does not advance as a cloned-authenticator signal, so we persist the larger
+ * of the saved and freshly-observed counts. Pure.
+ */
+export function nextSignCount(saved: number, observed: number | undefined): number {
+  return Math.max(saved, observed ?? 0, 0);
+}
+
+/**
+ * Read + validate a single enrolled credential. Returns `undefined` (logs why)
+ * when absent/invalid. Retained for the legacy single-object file shape and unit
+ * tests; the runtime uses {@link loadDuoWebAuthnCredentials}.
+ */
+export function loadDuoWebAuthnCredential(
+  path: string = DUO_WEBAUTHN_CREDENTIAL_PATH,
+): DuoWebAuthnCredential | undefined {
+  return loadDuoWebAuthnCredentials(path)[0];
+}
+
+/**
+ * Read + validate every enrolled credential from the secrets file. Returns an
+ * empty array (logging why) when the file is absent, unreadable, not JSON, or
+ * holds no valid credential — callers then degrade to manual Duo.
+ */
+export function loadDuoWebAuthnCredentials(
+  path: string = DUO_WEBAUTHN_CREDENTIAL_PATH,
+): DuoWebAuthnCredential[] {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    log.warn(
+      `Duo WebAuthn enabled but no credential at ${path} — run \`npm run duo:webauthn:enroll\` or unset ${DUO_WEBAUTHN_ENV_FLAG}. Falling back to manual Duo.`,
+    );
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    log.warn(`Duo WebAuthn credential at ${path} is not valid JSON — falling back to manual Duo.`);
+    return [];
+  }
+  const creds = parseDuoWebAuthnCredentials(parsed);
+  if (creds.length === 0) {
+    log.warn(`Duo WebAuthn credential at ${path} is missing required fields — falling back to manual Duo.`);
+  }
+  return creds;
+}
+
+/**
+ * Persist advanced signature counters back to the secrets file (best-effort).
+ * Re-reads the file so a concurrent enrollment isn't clobbered, then for each
+ * credential present (in either the `{ credentials: [...] }` or legacy
+ * single-object shape) bumps `signCount` to `max(current, observed)`.
+ */
+function persistSignCounts(observed: Map<string, number>, path: string): void {
+  if (observed.size === 0) return;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return;
+  }
+
+  const bump = (entry: unknown): boolean => {
+    if (!entry || typeof entry !== "object") return false;
+    const c = entry as { credentialId?: unknown; signCount?: unknown };
+    if (typeof c.credentialId !== "string") return false;
+    const obs = observed.get(c.credentialId);
+    if (obs === undefined) return false;
+    const current = typeof c.signCount === "number" ? c.signCount : 0;
+    const next = nextSignCount(current, obs);
+    if (next === current) return false;
+    c.signCount = next;
+    return true;
+  };
+
+  let changed = false;
+  if (raw && typeof raw === "object" && Array.isArray((raw as { credentials?: unknown }).credentials)) {
+    for (const entry of (raw as { credentials: unknown[] }).credentials) {
+      changed = bump(entry) || changed;
+    }
+  } else {
+    changed = bump(raw);
+  }
+  if (!changed) return;
+
+  try {
+    writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  } catch (err) {
+    log.warn(`Could not persist Duo WebAuthn signCount to ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Browser-side shim injected before the Duo prompt scripts run. Duo gates the
+ * "Security key" factor behind `PublicKeyCredential.isExternalCTAP2SecurityKeySupported()`,
+ * which is **absent** in Playwright's bundled Chromium — so without this, Duo
+ * greys the factor as "Not supported in this browser". Forcing it to resolve
+ * `true` makes Duo offer the factor, which our virtual `usb` authenticator then
+ * answers. Self-contained (runs in the page; references only browser globals).
+ */
+export function ctap2SupportShim(): void {
+  try {
+    const pkc = (globalThis as unknown as { PublicKeyCredential?: Record<string, unknown> }).PublicKeyCredential;
+    if (pkc) {
+      pkc.isExternalCTAP2SecurityKeySupported = () => Promise.resolve(true);
+    }
+  } catch {
+    /* ignore — shim is best-effort */
+  }
+}
+
+/**
+ * An active virtual-authenticator session. The caller selects/awaits approval
+ * via the normal poll, then calls `finish` to persist counters and tear the
+ * authenticator(s) down regardless of outcome.
+ */
+export interface DuoWebAuthnHandle {
+  /** Human label of the factor that was selected (e.g. "Touch ID"). */
+  factorLabel: string;
+  /** Persist signCounts (only when approved) and remove the virtual authenticator(s). Never throws. */
+  finish(opts: { approved: boolean }): Promise<void>;
+}
+
+interface AddAuthenticatorResult {
+  authenticatorId: string;
+}
+interface GetCredentialsResult {
+  credentials: Array<{ credentialId: string; signCount: number }>;
+}
+
+async function addVirtualAuthenticator(cdp: CDPSession, transport: DuoWebAuthnTransport): Promise<string> {
+  const res = (await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport,
+      // `usb` must hold a discoverable (resident) credential so CRM's auto-fired
+      // passkey request on prompt-load is answered by the virtual authenticator,
+      // instead of stalling on Chrome's native "insert your security key" dialog.
+      hasResidentKey: transport === "usb",
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  })) as AddAuthenticatorResult;
+  return res.authenticatorId;
+}
+
+/**
+ * Resolve the WebAuthn ceremony at the Duo Universal Prompt, in two phases.
+ *
+ * **Phase 1 — auto-fire grace (no clicking).** Platform-factor apps (UCPath,
+ * UKG, Kuali, New Kronos) auto-trigger the Touch ID ceremony on prompt load; the
+ * pre-armed virtual authenticator answers it with no interaction and Duo
+ * redirects to the app in ~3s. We must NOT click during this window — clicking
+ * "Other options" navigates away from the in-flight ceremony and aborts it, and
+ * UCPath then throws a Duo `/error` when a factor is picked on the all_methods
+ * list. We watch `hasSigned`/the trust screen/the URL and return `"auto"` the
+ * moment the ceremony lands. CRM's roaming-key native dialog won't self-answer,
+ * so we bail to Phase 2 as soon as that dialog's text appears.
+ *
+ * **Phase 2 — explicit factor selection.** For CRM (security-key only) and any
+ * app whose auto-fire didn't land. `factorRes` is in **preference order** — the
+ * most-preferred factor is attempted in every state, but a *less*-preferred
+ * factor is only clicked once the full "Other options to log in" list is open, so
+ * a default screen showing a non-preferred factor doesn't pre-empt the preferred
+ * one when both are enrolled.
+ *
+ * Phase 2 handles the prompt states seen in production:
+ * - the factor list shown directly;
+ * - a default-factor screen with an "Other options" link (revealed once);
+ * - a stuck "Use Touch ID / Use your security key" sub-screen — for which the
+ *   click path (Other options → factor) fires a **fresh** in-session ceremony.
+ *   ACT CRM auto-fires a discoverable-passkey request on prompt load (before any
+ *   authenticator exists), landing on this screen; we never reload (reloading
+ *   desyncs Duo's challenge — it signs but never completes), we click through it.
+ *
+ * The reveal/back clicks fire **at most once each** — repeated clicking thrashes
+ * the prompt — and once the full list is on screen without any of our factors,
+ * it bails within ~3s instead of polling the whole timeout. Returns the clicked
+ * factor's label, or `undefined` so the caller falls back to manual Duo.
+ */
+async function selectDuoFactor(
+  page: Page,
+  factorRes: RegExp[],
+  timeoutMs: number,
+  abortSignal?: AbortSignal,
+  hasSigned?: () => Promise<boolean>,
+): Promise<string | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  let revealedList = false;
+  let steppedBack = false;
+  let listFirstSeenAt = 0;
+
+  const clickFactor = async (re: RegExp): Promise<string | undefined> => {
+    const factor = page.getByRole("link", { name: re }).first();
+    if ((await factor.count()) > 0) {
+      const label = (await factor.innerText().catch(() => "")).split("\n")[0]?.trim() || "WebAuthn";
+      await factor.click({ timeout: 5_000 });
+      return label;
+    }
+    return undefined;
+  };
+
+  // ── Phase 1: auto-fire grace — do NOT click yet ──
+  // UCPath (and other platform-factor apps) auto-trigger the Touch ID ceremony on
+  // prompt load; the pre-armed virtual authenticator answers it with no click and
+  // Duo redirects straight to the app in ~3s (verified live). Clicking "Other
+  // options" here navigates AWAY from that in-flight ceremony and aborts it —
+  // UCPath then throws a Duo /error when a factor is clicked on the all_methods
+  // list. So give the auto-fire a chance to land first. Return "auto" the instant
+  // the authenticator signs / the trust screen shows / the page leaves Duo; bail
+  // to the click path early only for CRM's roaming-key native dialog, which won't
+  // self-answer.
+  if (hasSigned) {
+    const graceDeadline = Math.min(deadline, Date.now() + 12_000);
+    while (Date.now() < graceDeadline) {
+      abortSignal?.throwIfAborted();
+      try {
+        // The authenticator answered the auto-fired ceremony — authoritative.
+        // (Do NOT treat "not on duosecurity.com" as success here: the SSO→Duo
+        // redirect can still be in flight, leaving the page on a5.ucsd.edu, which
+        // is pre-prompt, not post-success.)
+        if (await hasSigned()) return "auto";
+        if ((await page.getByText(/yes, this is my device/i).count().catch(() => 0)) > 0) return "auto";
+        if (
+          (await page
+            .getByText(/insert your security key|use your security key/i)
+            .count()
+            .catch(() => 0)) > 0
+        ) {
+          break; // CRM roaming key — needs the explicit click path below.
+        }
+      } catch {
+        /* page mid-navigation between SSO and the prompt — keep waiting */
+      }
+      await page.waitForTimeout(400);
+    }
+  }
+
+  // ── Phase 2: explicit factor selection (CRM, or an auto-fire that didn't land) ──
+  while (Date.now() < deadline) {
+    abortSignal?.throwIfAborted();
+    try {
+      // Auto-fire may still complete mid-click-path (e.g. CRM after Escape): if the
+      // authenticator has signed and we've left the Duo host, report success.
+      if (hasSigned && !page.url().includes("duosecurity.com") && (await hasSigned())) {
+        return "auto";
+      }
+
+      // CRM's auto-fired passkey request, once answered by the pre-armed
+      // resident authenticator, lands on the "Yes, this is my device" trust
+      // screen — there's no factor to click. Signal the caller to proceed to
+      // the approval wait (which clicks trust + detects the success URL).
+      if ((await page.getByText(/yes, this is my device/i).count().catch(() => 0)) > 0) {
+        return "auto";
+      }
+
+      // Is the full method list ("Other options to log in") on screen?
+      const onMethodList =
+        (await page.getByText(/other options to log in/i).count().catch(() => 0)) > 0 ||
+        (await page
+          .getByRole("link", { name: /duo push|duo mobile passcode|bypass code/i })
+          .count()
+          .catch(() => 0)) > 0;
+
+      // 1. Always try the most-preferred factor first, in any state.
+      const preferred = await clickFactor(factorRes[0]!);
+      if (preferred) return preferred;
+
+      if (onMethodList || revealedList) {
+        // The full list is open — only now settle for lower-preference factors.
+        for (const re of factorRes.slice(1)) {
+          const clicked = await clickFactor(re);
+          if (clicked) return clicked;
+        }
+        // List is open but none of our factors are present — brief grace, then bail.
+        if (!listFirstSeenAt) listFirstSeenAt = Date.now();
+        else if (Date.now() - listFirstSeenAt > 3_000) return undefined;
+      } else if (!revealedList) {
+        // CRM auto-fires a discoverable passkey request on load; if Chrome's
+        // native "insert your security key" dialog is up it blocks the DOM
+        // "Other options" click — press Escape to cancel that ceremony first.
+        const stuckOnSecurityKey =
+          (await page.getByText(/insert your security key|use your security key/i).count().catch(() => 0)) > 0;
+        if (stuckOnSecurityKey) {
+          log.step("Duo: dismissing native security-key dialog before the click path");
+          await page.keyboard.press("Escape").catch(() => {});
+          await page.waitForTimeout(500);
+        }
+
+        // A default-factor or stuck "Use <factor>" screen hides the list behind
+        // "Other options" — reveal once so our factors become clickable.
+        const other = page
+          .getByRole("link", { name: /other options|other methods/i })
+          .or(page.getByRole("button", { name: /other options|other methods/i }))
+          .first();
+        if ((await other.count()) > 0) {
+          await other.click({ timeout: 3_000 }).catch(() => {});
+          revealedList = true;
+          // Let the options list finish navigating/rendering before clicking a
+          // factor — clicking mid-render lands on a transitioning element and
+          // Duo throws an /error page (the UCPath race).
+          await page.waitForTimeout(1_500);
+        } else if (!steppedBack) {
+          // Possibly stuck on a "Use <factor>" sub-screen with no list link — step back once.
+          const back = page.getByRole("button", { name: /back/i }).first();
+          if ((await back.count()) > 0) {
+            await back.click({ timeout: 3_000 }).catch(() => {});
+            steppedBack = true;
+          }
+        }
+      }
+    } catch {
+      // Page may be mid-navigation between SSO and the Duo prompt — retry.
+    }
+    await page.waitForTimeout(600);
+  }
+  return undefined;
+}
+
+/** Active virtual-authenticator state for one page, established by `armDuoWebAuthn`. */
+interface ArmedDuoWebAuthn {
+  cdp: CDPSession;
+  authByTransport: Map<DuoWebAuthnTransport, string>;
+  setups: Array<{ cred: DuoWebAuthnCredential; authenticatorId: string }>;
+}
+
+/** One armed authenticator set per page — armed before the prompt, finished after. */
+const armedByPage = new WeakMap<Page, ArmedDuoWebAuthn>();
+
+/**
+ * Set up CDP virtual authenticators from the saved credential(s) on `page`, once.
+ *
+ * **Must run before the Duo prompt loads.** ACT CRM auto-fires a discoverable
+ * passkey request the instant its prompt renders; if no authenticator exists
+ * yet, Chrome shows a native "insert your security key" dialog that can't be
+ * dismissed from the page, and a later-added authenticator won't answer the
+ * already-pending request. Arming at `clickSsoSubmit` (the step right before the
+ * prompt) lets the resident `usb` authenticator answer that auto-fire
+ * automatically. Idempotent per page (cached in `armedByPage`); returns true when
+ * an authenticator with ≥1 credential is ready, false (logged) otherwise so
+ * callers degrade to manual Duo.
+ */
+export async function armDuoWebAuthn(page: Page): Promise<boolean> {
+  if (armedByPage.has(page)) return true;
+  const creds = loadDuoWebAuthnCredentials();
+  if (creds.length === 0) return false;
+
+  // Distinct transports, internal first — Chrome allows only one `internal`
+  // authenticator per environment, so it's the constrained add; doing it first
+  // keeps the clear/retry below from discarding an already-created `usb` one.
+  const transports = [...new Set(creds.map((c) => c.transport))].sort((a, b) =>
+    a === "internal" ? -1 : b === "internal" ? 1 : 0,
+  );
+  const hasUsb = transports.includes("usb");
+
+  let cdp: CDPSession;
+  const authByTransport = new Map<DuoWebAuthnTransport, string>();
+  const setups: Array<{ cred: DuoWebAuthnCredential; authenticatorId: string }> = [];
+  try {
+    cdp = await page.context().newCDPSession(page);
+
+    // CRM probes `isExternalCTAP2SecurityKeySupported` (absent in Playwright
+    // Chromium) before offering the security-key factor — shim it true. Inject
+    // for future navigations (addInitScript) and the current document (evaluate).
+    if (hasUsb) {
+      await page.addInitScript(ctap2SupportShim).catch(() => {});
+      await page.evaluate(ctap2SupportShim).catch(() => {});
+    }
+
+    // Clear any virtual authenticator dangling in this browser environment
+    // (Chrome allows only one `internal` authenticator at a time).
+    await cdp.send("WebAuthn.enable").catch(() => {});
+    await cdp.send("WebAuthn.disable").catch(() => {});
+    await cdp.send("WebAuthn.enable");
+
+    for (const transport of transports) {
+      let authenticatorId: string;
+      try {
+        authenticatorId = await addVirtualAuthenticator(cdp, transport);
+      } catch {
+        // Only the constrained `internal` add should ever hit this, and it's
+        // first in the loop, so a clear+retry can't lose another authenticator.
+        if (transport !== "internal") throw new Error(`addVirtualAuthenticator(${transport}) failed`);
+        await cdp.send("WebAuthn.disable").catch(() => {});
+        await cdp.send("WebAuthn.enable");
+        authenticatorId = await addVirtualAuthenticator(cdp, transport);
+      }
+      authByTransport.set(transport, authenticatorId);
+    }
+
+    for (const cred of creds) {
+      const authenticatorId = authByTransport.get(cred.transport);
+      if (!authenticatorId) continue;
+      // Store the usb credential as discoverable (needs a userHandle) so the
+      // resident `usb` authenticator can answer CRM's auto-fired passkey request.
+      const discoverable = cred.transport === "usb" && Boolean(cred.userHandle);
+      await cdp.send("WebAuthn.addCredential", {
+        authenticatorId,
+        credential: {
+          credentialId: cred.credentialId,
+          isResidentCredential: discoverable || cred.isResidentCredential,
+          rpId: cred.rpId,
+          privateKey: cred.privateKey,
+          ...(cred.userHandle ? { userHandle: cred.userHandle } : {}),
+          signCount: cred.signCount,
+        },
+      });
+      setups.push({ cred, authenticatorId });
+    }
+    if (setups.length === 0) throw new Error("no credential could be registered to an authenticator");
+  } catch (err) {
+    log.warn(
+      `Duo WebAuthn virtual authenticator setup failed (${err instanceof Error ? err.message : String(err)}) — falling back to manual Duo.`,
+    );
+    return false;
+  }
+
+  armedByPage.set(page, { cdp, authByTransport, setups });
+  log.step(`Duo WebAuthn armed (${[...authByTransport.keys()].join(", ")}) — hands-off approval enabled`);
+  return true;
+}
+
+/**
+ * Read back each credential's signature counter (best-effort), persist the
+ * monotonic max to the credential file, and tear the page's virtual
+ * authenticator(s) down. Idempotent — a no-op if the page was never armed or was
+ * already finished.
+ *
+ * signCount is persisted **unconditionally**: if the authenticator signed at all
+ * (even on an attempt that didn't complete), Duo observed the advanced counter,
+ * and persisting only on success could leave the file behind Duo's view and get
+ * the next assertion rejected as a clone.
+ */
+export async function finishDuoWebAuthn(page: Page): Promise<void> {
+  const armed = armedByPage.get(page);
+  if (!armed) return;
+  armedByPage.delete(page);
+  const { cdp, authByTransport, setups } = armed;
+
+  const observed = new Map<string, number>();
+  for (const { cred, authenticatorId } of setups) {
+    try {
+      const got = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })) as GetCredentialsResult;
+      const sc = got.credentials.find((c) => c.credentialId === cred.credentialId)?.signCount;
+      if (typeof sc === "number") observed.set(cred.credentialId, sc);
+    } catch {
+      /* counter readback is best-effort */
+    }
+  }
+  persistSignCounts(observed, DUO_WEBAUTHN_CREDENTIAL_PATH);
+
+  try {
+    for (const authenticatorId of authByTransport.values()) {
+      await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId }).catch(() => {});
+    }
+    await cdp.send("WebAuthn.disable").catch(() => {});
+    await cdp.detach().catch(() => {});
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Ensure the page is armed (arming now if `clickSsoSubmit` didn't reach it — only
+ * too late for CRM's auto-fire, fine for click-driven factors like UCPath's Touch
+ * ID), then select the WebAuthn factor at the Duo prompt. Returns a handle when
+ * WebAuthn is in play — either a factor was clicked (UCPath → Touch ID) or the
+ * pre-armed authenticator already answered an auto-fired request and we're on the
+ * trust screen (CRM). `undefined` when no authenticator is available or no
+ * factor/auto-fire is detected, so the caller falls back to manual Duo.
+ *
+ * @param factorTimeoutMs how long to wait for the Duo prompt's factor to appear
+ */
+export async function beginDuoWebAuthn(
+  page: Page,
+  opts: { abortSignal?: AbortSignal; factorTimeoutMs?: number } = {},
+): Promise<DuoWebAuthnHandle | undefined> {
+  if (!(await armDuoWebAuthn(page))) return undefined;
+  const armed = armedByPage.get(page)!;
+
+  // Factor preference: Touch ID (`internal`) first where an app offers it — it's
+  // accepted hands-off across UCSD apps. Security key (`usb`) is the fallback for
+  // apps with no Touch ID (ACT CRM). A security key registered at the Duo account
+  // level is still rejected by some apps' policies (UCPath returns a Duo /error
+  // page if picked), so it must not pre-empt a working Touch ID — `selectDuoFactor`
+  // reveals the full options list before settling for the fallback.
+  const preferenceOrder = [...new Set(armed.setups.map((s) => s.cred.transport))].sort((a, b) =>
+    a === "internal" ? -1 : b === "internal" ? 1 : 0,
+  );
+
+  // signCount probe for the silent auto-fire fast path: true once any armed
+  // credential's counter has advanced past where it started this run — i.e. the
+  // virtual authenticator answered an (auto-fired) ceremony. Compared per
+  // credential against the values loaded at arm time.
+  const initialSignCount = new Map(armed.setups.map((s) => [s.cred.credentialId, s.cred.signCount]));
+  const hasSigned = async (): Promise<boolean> => {
+    for (const { cred, authenticatorId } of armed.setups) {
+      try {
+        const got = (await armed.cdp.send("WebAuthn.getCredentials", {
+          authenticatorId,
+        })) as GetCredentialsResult;
+        const sc = got.credentials.find((c) => c.credentialId === cred.credentialId)?.signCount;
+        if (typeof sc === "number" && sc > (initialSignCount.get(cred.credentialId) ?? 0)) {
+          return true;
+        }
+      } catch {
+        /* best-effort — readback failure just means we keep polling for a factor */
+      }
+    }
+    return false;
+  };
+
+  const factorLabel = await selectDuoFactor(
+    page,
+    preferenceOrder.map(factorPatternForTransport),
+    opts.factorTimeoutMs ?? 20_000,
+    opts.abortSignal,
+    hasSigned,
+  );
+  if (!factorLabel) {
+    log.warn("Duo WebAuthn factor not found at the prompt — falling back to manual Duo.");
+    await finishDuoWebAuthn(page);
+    return undefined;
+  }
+
+  return {
+    factorLabel,
+    // `approved` is informational; persistence + teardown happen unconditionally
+    // in finishDuoWebAuthn (see its doc — the counter must stay ahead of Duo).
+    finish: async (_opts) => {
+      await finishDuoWebAuthn(page);
+    },
+  };
+}

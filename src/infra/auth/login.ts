@@ -4,7 +4,7 @@ import { pollDuoApproval } from "./duo-poll.js";
 import { requestDuoApproval } from "../../tracker/sessions/duo-queue.js";
 import { validateEnv } from "../../utils/env.js";
 import { UKG_URL } from "../../config.js";
-import { fillSsoCredentials, clickSsoSubmit, isSsoFormReady } from "./sso-fields.js";
+import { fillSsoCredentials, clickSsoSubmit, isSsoFormReady, waitForSsoForm } from "./sso-fields.js";
 import { gotoWithRetry } from "../browser/launch.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import { hrInquiry } from "../../systems/servicenow/selectors.js";
@@ -349,7 +349,13 @@ export async function ukgSubmitAndWaitForDuo(
   instance?: string,
   abortSignal?: AbortSignal,
 ): Promise<boolean> {
-  await page.locator('button[name="_eventId_proceed"]').click({ timeout: 5_000 });
+  // Route through the shared clickSsoSubmit helper (not a raw button click) so
+  // the hands-off Duo WebAuthn authenticator is armed before the Duo prompt,
+  // exactly like every other SSO flow. UKG offers Touch ID and does not auto-fire
+  // a passkey request, so late-arming in beginDuoWebAuthn would still work — but
+  // routing here keeps all six SSO flows on one arming path and is robust if
+  // UKG's Duo prompt behavior ever changes.
+  await clickSsoSubmit(page);
   log.step("Credentials submitted — waiting for Duo MFA...");
 
   const duoOptions = {
@@ -613,12 +619,13 @@ async function loginToServiceNowFlow(
     return true;
   }
 
-  // Otherwise we're on the TritON SSO page (or a redirect chain leading to it).
-  // Wait for the SSO form to appear if a redirect is still in flight.
+  // Otherwise we're mid-redirect toward the TritON SSO page. The
+  // support.ucsd.edu → auth_redirect.do → a5.ucsd.edu hop chain is client-side,
+  // so the SSO form isn't on the interstitial yet — poll for it to render (a
+  // single waitForLoadState resolves on the interstitial and the form check
+  // would then fail spuriously). The a5 form lands ~1–2s after navigation.
   if (!(await isSsoFormReady(page))) {
-    // Best-effort wait — let any in-flight redirect settle.
-    await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
-    if (!(await isSsoFormReady(page))) {
+    if (!(await waitForSsoForm(page, 15_000))) {
       log.warn(`[Auth: servicenow] SSO form not ready; URL=${page.url()}`);
       return false;
     }
