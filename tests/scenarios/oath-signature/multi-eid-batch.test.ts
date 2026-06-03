@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import assert from "node:assert/strict";
 
-import { createScenarioRuntime, snapshotRow } from "../_runtime/index.js";
+import { createScenarioRuntime, snapshotRow, snapshotGroupAnchor } from "../_runtime/index.js";
 import { oathSignatureWorkflow } from "../../../src/workflows/oath-signature/workflow.js";
 import { oathSignatureBeats, maskVolatile } from "./_beats.js";
 
@@ -156,6 +156,35 @@ describe("oath-signature scenario: multi-EID batch", () => {
           "workflow": "oath-signature",
         },
       ]
+    `);
+
+    // Group-card projection for the SAME batch surface. A person batch anchor
+    // has NO title (the count badge + member-name preview identify it), and its
+    // footer SUBTITLE is the TRACE ID — `preferTraceIdSubtitle: true` so the
+    // footer doesn't repeat an EID already shown on each member's title line.
+    // This is the rule snapshotRow's per-row projection never exercises; flip
+    // `preferTraceIdSubtitle` off in buildProjectionFromQueueSurface and this
+    // anchor subtitle regresses to a member EID, failing here.
+    const anchor = snapshotGroupAnchor({
+      trackerDir: rt.trackerDir,
+      workflow: rt.workflow,
+      parentRunId,
+      workflowLabel: oathSignatureWorkflow.config.label,
+    });
+    assert.equal(anchor.kind, "batch");
+    assert.equal(anchor.title, "", "person batch anchor carries no synthetic title");
+    assert.equal(anchor.subtitle, "<traceId>", "person batch anchor footer subtitle = trace id, never a member EID");
+    expect(anchor).toMatchInlineSnapshot(`
+      {
+        "kind": "batch",
+        "memberCount": 3,
+        "rowTypeLabel": "Batch",
+        "status": "done",
+        "subtitle": "<traceId>",
+        "surfaceType": "batch",
+        "title": "",
+        "workflowId": "oath-signature",
+      }
     `);
   });
 });
