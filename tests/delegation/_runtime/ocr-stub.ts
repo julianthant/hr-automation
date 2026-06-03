@@ -1,0 +1,246 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { defineWorkflow } from "../../../src/core/index.js";
+import { openStateDb } from "../../../src/tracker/state/db.js";
+import { registerLocalFile } from "../../../src/tracker/files/files.js";
+import { ensurePdfPageCache } from "../../../src/tracker/files/pdf-cache.js";
+import { runOcrOrchestrator } from "../../../src/workflows/ocr/orchestrator.js";
+import { ocrWorkflow } from "../../../src/workflows/ocr/index.js";
+import { OcrInputSchema, type OcrInput } from "../../../src/workflows/ocr/schema.js";
+import {
+  subscribeToApproval,
+  emitApproved,
+  type ApprovedPayload,
+} from "../../../src/services/ocr/approval-signal.js";
+import { writeOnePagePdf } from "../../_utils/one-page-pdf.js";
+import type { RegisteredWorkflow } from "../../../src/core/kernel/types.js";
+
+/**
+ * A synthetic OCR record the stub pipeline returns. PII-FREE — tests pass fake
+ * printed names + fake 5+-digit (UCPath-shaped 8-digit) EIDs; never extract real
+ * EIDs/names from the fixture PDFs. The oath form spec's `matchRecord` runs on
+ * these for real, so an EID present here that also appears in the stub roster
+ * short-circuits to `matched` (form-eid) and passes the approve fan-out's
+ * `canFanOut` (`selected` + `/^\d{5,}$/` EID).
+ */
+export interface StubOcrRecord {
+  sourcePage: number;
+  rowIndex: number;
+  printedName: string;
+  employeeId: string;
+  employeeSigned: boolean;
+  officerSigned?: boolean | null;
+  dateSigned: string;
+  notes?: string[];
+  documentType?: string;
+  originallyMissing?: string[];
+}
+
+/** Roster row the stub `_loadRosterOverride` returns (eid+name only). */
+export interface StubRosterRow {
+  eid: string;
+  name: string;
+}
+
+/** Mutable holder the OCR stub handler reads at run time. `rt.stubOcr` sets it. */
+export interface StubOcrState {
+  records: StubOcrRecord[];
+  roster: StubRosterRow[];
+}
+
+export interface StubOcrConfig {
+  /** OCR form type. Default `"oath"` (the P2.9 oath-signature fan-out). */
+  formType?: string;
+}
+
+/**
+ * Build the thin test-only `"ocr"` workflow used by the Tier-1 delegation
+ * harness — exactly the bridge-test pattern (`tests/integration/ocr/
+ * end-to-end.test.ts`, now retired), but registered as a real daemon workflow
+ * so the harness drives it end-to-end. Its handler calls the REAL
+ * `runOcrOrchestrator` with the LLM/roster/eid-lookup escape hatches stubbed
+ * (no live browser, no LLM, no SQLite deps) and parks at `awaiting-approval`
+ * via `subscribeToApproval`. The approve fan-out is driven separately by the
+ * real `buildOcrApproveHandler` (see `runtime.approveOcr`).
+ *
+ * The `state` holder is shared with `rt.stubOcr(records)` so a test sets the
+ * records AFTER construction but BEFORE enqueueing the OCR run.
+ */
+export function makeStubOcrWorkflow(
+  state: StubOcrState,
+  config: StubOcrConfig = {},
+): RegisteredWorkflow<OcrInput, readonly string[]> {
+  const formType = config.formType ?? "oath";
+  return defineWorkflow({
+    name: "ocr",
+    label: "OCR",
+    archetype: "preview",
+    inputSubject: "pdf",
+    systems: [],
+    authSteps: false,
+    steps: ocrWorkflow.config.steps,
+    schema: OcrInputSchema,
+    getName: (d) => d.pdfOriginalName ?? "",
+    getId: (d) => d.sessionId ?? "",
+    handler: async (ctx, input: OcrInput) => {
+      const orchestratorInput: OcrInput = {
+        ...input,
+        formType,
+        ...(input.parentRunId ?? ctx.parentRunId
+          ? { parentRunId: input.parentRunId ?? ctx.parentRunId }
+          : {}),
+      };
+      // Capture the orchestrator's latest rich preview payload (pdfOriginalName,
+      // records, page metadata) so the kernel's auto-emitted terminal `done`
+      // row stays a recognizable preview row instead of clobbering the rich
+      // approve-route row in latest-wins dedupe — exactly the real handler's
+      // pattern (`src/workflows/ocr/workflow.ts`).
+      let lastReviewData: Record<string, unknown> | undefined;
+      const result = await runOcrOrchestrator(orchestratorInput, {
+        runId: ctx.runId,
+        ...(ctx.trackerDir ? { trackerDir: ctx.trackerDir } : {}),
+        signal: ctx.signal,
+        onPhase: (step) => ctx.reportPhase(step),
+        onReviewData: (data) => {
+          lastReviewData = data;
+        },
+        // LLM extraction → the synthetic records the test seeded.
+        _ocrPipelineOverride: async () => ({
+          data: state.records.map((r) => ({
+            sourcePage: r.sourcePage,
+            rowIndex: r.rowIndex,
+            printedName: r.printedName,
+            employeeId: r.employeeId,
+            employeeSigned: r.employeeSigned,
+            officerSigned: r.officerSigned ?? true,
+            dateSigned: r.dateSigned,
+            notes: r.notes ?? [],
+            documentType: r.documentType ?? "expected",
+            originallyMissing: r.originallyMissing ?? [],
+          })),
+          provider: "stub",
+          attempts: 1,
+          cached: false,
+        }),
+        // Roster: the synthetic rows the test seeded (EID short-circuit to matched).
+        _loadRosterOverride: async () => state.roster.map((r) => ({ eid: r.eid, name: r.name })),
+        // person-lookup eid-lookup fan-out: no daemon — no-op enqueue + a synthetic
+        // `done` outcome per child so matched records gain a `verification` and the
+        // orchestrator reaches awaiting-approval without a live person-lookup.
+        _enqueueEidLookupOverride: async () => {
+          /* no-op: no person-lookup daemon in this runtime */
+        },
+        _disableSqliteDependencies: true,
+        _watchChildRunsOverride: async (watchOpts) =>
+          watchOpts.expectedItemIds.map((itemId, i) => ({
+            workflow: "person-lookup",
+            itemId,
+            runId: `stub-verify-${i}`,
+            status: "done" as const,
+            data: {
+              emplId: state.records[i]?.employeeId ?? "",
+              hrStatus: "Active",
+              department: "HDH",
+              personOrgScreenshot: "x.png",
+            },
+          })),
+      });
+      if (result.status !== "awaiting-approval") return;
+
+      // Park until the approve route (`rt.approveOcr`) fires `emitApproved`.
+      const payload: ApprovedPayload = await subscribeToApproval(
+        { workflow: "ocr", sessionId: input.sessionId },
+        { signal: ctx.signal, ...(ctx.trackerDir ? { trackerDir: ctx.trackerDir } : {}) },
+      );
+      // Seed the rich review payload (sans kernel-owned parentRunId) + records
+      // onto accumulated data so the kernel's terminal `done` row keeps the OCR
+      // preview identity (pdfOriginalName/mode/file-kind title) rather than
+      // collapsing to a sparse, title-less row.
+      const { parentRunId: _parentRunId, ...reviewData } = lastReviewData ?? {};
+      ctx.updateData({
+        ...reviewData,
+        mode: "prepare",
+        records: JSON.stringify(payload.records),
+        recordCount: String(payload.records.length),
+      } as Partial<OcrInput & Record<string, unknown>>);
+    },
+  }) as unknown as RegisteredWorkflow<OcrInput, readonly string[]>;
+}
+
+/**
+ * Register a renderable PDF in the temp tracker's file store so the
+ * orchestrator's inline `ensurePdfPageCache` produces a page cache without a
+ * browser. Prefers the real fixture; falls back to a synthetic one-page pdf-lib
+ * PDF if the fixture fails to render headlessly (the records come from the
+ * override regardless — the PDF only needs to render a page cache). Returns the
+ * `pdfFileId` + `pdfPath` to feed the OCR input, and whether the real fixture
+ * rendered.
+ */
+export async function registerOcrPdf(opts: {
+  trackerDir: string;
+  fixturePath: string;
+  originalName: string;
+}): Promise<{ pdfFileId: string; pdfPath: string; usedFixture: boolean }> {
+  const db = openStateDb(opts.trackerDir);
+
+  const tryRegister = async (path: string, originalName: string): Promise<string> => {
+    const { fileId } = registerLocalFile(db, {
+      kind: "pdf",
+      mimeType: "application/pdf",
+      path,
+      originalName,
+      source: "delegation-ocr-test",
+    });
+    // Force a page render now so a fallback can be chosen synchronously here
+    // (rather than failing later inside the orchestrator).
+    const pages = await ensurePdfPageCache(db, {
+      trackerDir: opts.trackerDir,
+      fileId,
+      pdfPath: path,
+    });
+    if (!pages.some((p) => p.status === "ready" && p.imagePath)) {
+      throw new Error(`PDF ${path} rendered zero ready pages`);
+    }
+    return fileId;
+  };
+
+  try {
+    const fileId = await tryRegister(opts.fixturePath, opts.originalName);
+    return { pdfFileId: fileId, pdfPath: opts.fixturePath, usedFixture: true };
+  } catch {
+    // Synthetic fallback — a minimal one-page pdf-lib PDF that always renders.
+    const uploadsDir = join(opts.trackerDir, "uploads");
+    mkdirSync(uploadsDir, { recursive: true });
+    const synthPath = join(uploadsDir, "synthetic-oath.pdf");
+    await writeOnePagePdf(synthPath);
+    const fileId = await tryRegister(synthPath, opts.originalName);
+    return { pdfFileId: fileId, pdfPath: synthPath, usedFixture: false };
+  }
+}
+
+/**
+ * Build the approved-records payload the operator would submit: every stub
+ * record, marked `selected` so the oath form spec's `canFanOut` (selected +
+ * 5+-digit EID) lets it fan out to one oath-signature signer row.
+ */
+export function approvedRecordsFromStub(records: StubOcrRecord[]): Array<Record<string, unknown>> {
+  return records.map((r) => ({
+    formKind: "oath",
+    sourcePage: r.sourcePage,
+    rowIndex: r.rowIndex,
+    printedName: r.printedName,
+    employeeId: r.employeeId,
+    employeeSigned: r.employeeSigned,
+    dateSigned: r.dateSigned,
+    documentType: r.documentType ?? "expected",
+    originallyMissing: r.originallyMissing ?? [],
+    notes: r.notes ?? [],
+    matchState: "matched",
+    matchSource: "form-eid",
+    selected: true,
+    warnings: [],
+  }));
+}
+
+export { emitApproved };
