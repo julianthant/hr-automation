@@ -27,6 +27,7 @@
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
     "setup": "tsx --env-file=.env src/scripts/ops/setup.ts",
     "setup:telegram": "tsx --env-file=.env src/scripts/ops/setup.ts --telegram",
+    "duo:webauthn:enroll": "tsx --env-file=.env src/scripts/ops/duo-webauthn-enroll.ts",
     "clean:tracker": "tsx src/scripts/ops/clean-tracker.ts",
     "schemas:export": "tsx --env-file=.env src/scripts/codegen/export-schemas.ts",
     "selectors:catalog": "tsx src/scripts/selectors/catalog.ts",
