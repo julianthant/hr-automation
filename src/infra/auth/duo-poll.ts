@@ -292,6 +292,27 @@ export async function pollDuoApproval(
     return successUrlMatch(url);
   };
 
+  // Finalize WebAuthn on EVERY exit — including a thrown abort. An armed
+  // virtual authenticator (set up at `clickSsoSubmit`) that is abandoned
+  // mid-ceremony without `finishDuoWebAuthn` leaks the CDP authenticator AND,
+  // worse, fails to persist the advanced signCount — so the NEXT assertion
+  // replays a counter Duo already observed and is rejected as a cloned key
+  // ("signs but never completes"). The daemon stop path and our live-test
+  // abort both cancel auth via `abortSignal`, so the throw-on-abort path
+  // MUST clean up exactly like a normal timeout/success. `finishDuoWebAuthn`
+  // is idempotent (no-op once the page is finished or was never armed), so
+  // the success-path calls inside the try block stay correct and this catch
+  // only fires for the abort/error escape.
+  try {
+    return await runDuoPollLoop();
+  } catch (err) {
+    await finishDuoWebAuthn(page);
+    throw err;
+  }
+
+  // ── inner loop — wrapped so any throw (abort) still finalizes WebAuthn ──
+  async function runDuoPollLoop(): Promise<boolean> {
+
   // Pre-check phase: if Duo's "Yes, this is my device" trust token is
   // cached, the SAML chain redirects through to the success URL without
   // pushing to Duo Mobile. We don't want to fire a voice cue claiming a
@@ -471,4 +492,5 @@ export async function pollDuoApproval(
   log.error("Duo approval timed out");
   await finishDuoWebAuthn(page);
   return false;
+  } // end runDuoPollLoop
 }

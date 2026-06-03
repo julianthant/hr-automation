@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pollDuoApproval, type DuoPollOptions } from "../../infra/auth/duo-poll.js";
+import { finishDuoWebAuthn } from "../../infra/auth/duo-webauthn.js";
 import { emitSessionEvent, readSessionEvents } from "../session-events.js";
 import { log } from "../../utils/log.js";
 
@@ -24,7 +25,17 @@ export async function requestDuoApproval(
     duoRequestId: requestId,
   });
 
-  await waitForDuoTurn(requestId, options.instance, options.system, options.abortSignal);
+  try {
+    await waitForDuoTurn(requestId, options.instance, options.system, options.abortSignal);
+  } catch (err) {
+    // The authenticator is armed at `clickSsoSubmit`, BEFORE this queue wait.
+    // If the wait aborts (daemon stop) we'd otherwise leave that virtual
+    // authenticator armed without persisting its signCount — desyncing Duo for
+    // the next assertion. Finalize it cleanly before propagating the abort
+    // (idempotent / no-op when WebAuthn isn't in play).
+    await finishDuoWebAuthn(page);
+    throw err;
+  }
 
   log.step(`[Duo Queue] Active: ${options.system} for ${options.instance}`);
   emitSessionEvent({
