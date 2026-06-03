@@ -43,7 +43,7 @@ const rt = await createDelegationRuntime({
 
 | Method | What it does |
 |---|---|
-| `rt.enqueue(wf, input?, { runId?, parentRunId?, itemId?, renderAs? })` | `enqueueItems` one item + wakes the daemon(s). `parentRunId` stamps `tasks.parent_run_id` (independent-child fan-out). `renderAs:"batch"` stamps `__runtimeOptions.rowShape="batch-member"` (mirrors the real `withBatchMemberRuntimeOptions`) so the row renders as a delegated batch member. Returns `{ runId, itemId }`. |
+| `rt.enqueue(wf, input?, { runId?, parentRunId?, itemId?, renderAs? })` | `enqueueItems` one item + wakes the daemon(s). `parentRunId` stamps `tasks.parent_run_id` (independent-child fan-out). `renderAs:"batch"` **merges** `rowShape:"batch-member"` into the input's `__runtimeOptions` (mirrors `withBatchMemberRuntimeOptions`) so the row renders as a delegated batch member. The **merge** (not clobber) PRESERVES any `rootTracePrefix` the real approve route already stamped on the input — so fan-out children COMPOSE `<rootPrefix>-<ownRunId4>` and root trace-id propagation stays faithful (P2.10 fix; a clobber would strip it and the child would fall back to its own workflow code). Returns `{ runId, itemId }`. |
 | `rt.waitForEvent(event, { runId?, step?, occasion?, childWorkflow?, count?, timeoutMs? })` | Tails **all** `logs/<wf>-<date>.jsonl` under the temp root and resolves once the P1.6 `event` has appeared `count` times. No sleeps. See sync-primitive section below. |
 | `rt.holdAll(wf, stage)` | Mark every run of `wf` reaching a **gated** `stage` as held until `release`/cancel. (Call BEFORE enqueue.) |
 | `rt.release(runId, stage)` | Release one held `(runId, stage)` → the run proceeds to `done`. |
@@ -51,7 +51,7 @@ const rt = await createDelegationRuntime({
 | `rt.children(parentRunId)` | Child runs (`parentRunId` on JSONL rows) across ALL row files — finds in-process delegated children whose workflow isn't a registered daemon. |
 | `rt.dashboard()` | `{ row, groupAnchor, timeline }` over `snapshot-row.ts` — the REAL projection. |
 | `rt.cleanup()` | `/stop` all daemons → await `runPromise`s → `closeStateDbForTests` → `rm` temp dir. Idempotent. Register with `t.onTestFinished`. |
-| `rt.stubOcr(records, roster?)` | Seed PII-FREE synthetic OCR records (+ optional roster) the stub `runOcrOrchestrator` returns. Requires the `ocr` runtime option. Call BEFORE `enqueueOcr`. (P2.9 — fleshed; was a throwing seam.) |
+| `rt.stubOcr(rawRecords, roster?)` | Seed PII-FREE synthetic **raw, form-shaped** OCR records (+ optional roster) the stub `runOcrOrchestrator` returns **VERBATIM** (the REAL `spec.matchRecord` runs on them). Build them via `rawOathRecordFromStub` (oath) or `rawEcRecordFromStub` (EC). Requires the `ocr` runtime option. Call BEFORE `enqueueOcr`. (P2.9 fleshed it; P2.10 made it FORM-AGNOSTIC — `_ocrPipelineOverride` no longer re-maps an oath struct.) |
 | `rt.enqueueOcr({ fixturePath, originalName?, runId?, sessionId?, parentRunId? })` | Register a renderable PDF + enqueue an OCR run on the stub `"ocr"` daemon. Returns `{ sessionId, runId, usedFixture }`. Requires `ocr` opts. |
 | `rt.approveOcr({ sessionId, runId, records, childWorkflow })` | Drive the REAL `buildOcrApproveHandler` fan-out, redirecting the child enqueue onto `childWorkflow`'s gated daemon. Returns the enqueued `{ itemId, runId }[]`. Requires `ocr` opts. |
 | `rt.trackerDir` | The temp tracker root. |
