@@ -16,6 +16,7 @@ projection tooling `snapshot-row.ts`). Full harness API + gotchas:
 | `harness-smoke.test.ts` | The linchpin: 3-child `parentRunId` fan-out, cancel one mid-hold, siblings unaffected, projection asserts, `.tracker/` untouched. Reference pattern for all delegation tests. |
 | `ocr-oath-signature.test.ts` | **P2.9 star test** — OCR → oath-signature `approveTo` fan-out through the real daemon, under hold/cancel/release. |
 | `ocr-emergency-contact.test.ts` | **P2.10** — OCR → emergency-contact `approveTo` fan-out, same hold/cancel/release shape for a DIFFERENT form type (nested `EmergencyContactRecord` input, default delegation policy, `oc-` trace code). |
+| `ocr-verify-lookup.test.ts` | **P2.11** — OCR `verify` → person-lookup + i9-lookup **`enrichRecords`** fan-out (NO approve fan-out; verify is read-only). Asserts the full enrichment projection + a cancel-mid-enrichment invariant. See "verify enrichment fan-out shape" below. |
 
 ## OCR fan-out test pattern (P2.9)
 
@@ -94,6 +95,63 @@ or `approvedEcRecordsFromStub` (EC: `selected:true` + `matchSource:"form"`, nest
   dedupe; the stub handler re-stamps the captured `onReviewData` payload + `mode:
   "prepare"` on the success path so the terminal row keeps the file-kind title —
   mirroring the real `ocrKernelHandler`.
+
+## verify enrichment fan-out shape (P2.11)
+
+`verify` is a **read-only** OCR form — NO `approveTo`/`approveDocumentTo`, so
+there is **no approve fan-out** (unlike P2.9/P2.10). Its delegation lives in the
+form spec's **`enrichRecords` hook**, which the orchestrator awaits ONCE before
+the awaiting-approval snapshot. The hook `delegateToAllImpl({ child:
+personLookupWorkflow / i9LookupWorkflow, fireAndForget: true, renderAs: "flat",
+rootTracePrefix })` to:
+
+1. **person-lookup** — every record with a `name` (itemId `ocr-verify-<runId>-r<idx>`).
+2. **i9-lookup** — oath records with `officerSigned !== true` and a parseable name
+   (itemId `ocr-verify-i9-<runId>-r<idx>`).
+
+The OCR root brands `vf` (`spec.traceCode`); every child shares the `vf-…` prefix.
+
+**Key mechanism finding (drove the test design): the children are
+DAEMON-DISPATCHED, not in-process.** `delegateToAllImpl` checks
+`isDaemonCapable(child)` FIRST — and both person-lookup and i9-lookup are in
+`WORKFLOW_LOADERS`, so it routes through `dispatchToDaemonAndWait` →
+`ensureDaemonsAndEnqueue` (NOT the in-process `runWorkflow` path; the
+"`fireAndForget` always in-process" rule is `delegateToImpl`-singular only). The
+OCR worker then waits on the children via the REAL `watchChildRuns` (SQLite task
+states). So the test registers **gated stub daemons under the names
+`person-lookup` + `i9-lookup`** (mirroring the real `code`/`inputSubject`/
+`archetype`/runtime-policy), exactly the P2.9/P2.10 gated-stub pattern, so the
+verify fan-out's `ensureDaemonsAndEnqueue` **reuses** these alive daemons rather
+than spawning real `tsx` daemon subprocesses (which crash headless). The
+children run their stub handlers to `done` → `watchChildRuns` resolves → verify
+reaches `awaiting-approval`. Faithful, no `vi.mock`.
+
+**Harness gotcha — short `idleTimeoutMs` is REQUIRED for this shape.**
+`ensureDaemonsAndEnqueue` wakes the alive daemon at its Step-5 wake BEFORE it
+commits the SQLite tasks at Step 6, so the first `/wake` misses (the daemon
+ticks, claims nothing, sleeps). With no second wake, the daemon only re-polls on
+its keepalive (`idleTimeoutMs`). Use a **short** `idleTimeoutMs` (e.g. 1000ms) so
+the child tasks claim promptly. (P2.9/P2.10 don't hit this — `rt.enqueue` /
+`rt.approveOcr` wake AFTER enqueue.) The OCR daemon is `processing` during
+enrichment, so a short idle window doesn't spin it down mid-run.
+
+**Asserted invariants:** OCR verify parent `preview` + file-kind title +
+`<traceId>` subtitle + `vf-…` trace, reaches awaiting-approval (status stays
+`running` — no approve fan-out means the operator never approves, so it never
+goes terminal `done` on its own); 3 person-lookup + 1 i9-lookup children under
+`parentRunId === ocrRunId`, natural `single` archetype, `person` kind, name
+titles, `<traceId>` subtitle (no EID on paper); group anchors `batch`/3 and
+`batch`/1 (both policies set `alwaysBatchDelegatedMembers`); `rt.children` ==
+exactly 4, no orphans/dupes; itemIds match `ocr-verify-…`/`ocr-verify-i9-…`.
+**Cancel:** cancelling the OCR **parent** mid-enrichment (synced on a held
+person-lookup `searching` stage) drives it to terminal cancelled (status
+`failed` + `Cancelled` + `step:"cancelled"`, keeps the `preview` archetype +
+file-kind title) without hanging in `watchChildRuns`. The daemon-dispatched
+children are independent daemon runs, so a parent cancel does NOT propagate to
+them (they continue on their own daemons) — the test asserts only the PARENT
+invariant. **No log-audit allowlist change was needed** — the happy-path
+children complete cleanly and the cancel emits stdout (`! Cancelled by user`),
+not stderr.
 
 ## Not yet asserted here
 

@@ -4,6 +4,7 @@ export * from "./snapshot-row.js";
 export {
   rawOathRecordFromStub,
   rawEcRecordFromStub,
+  rawVerifyRecordFromStub,
   approvedOathRecordsFromStub,
   approvedEcRecordsFromStub,
   deriveRosterFromRawRecords,
@@ -13,6 +14,7 @@ export {
 export type {
   StubOcrRecord,
   StubEcOcrRecord,
+  StubVerifyOcrRecord,
   StubRosterRow,
   StubOcrConfig,
 } from "./ocr-stub.js";
