@@ -121,31 +121,6 @@ export function __resetEntriesPayloadCacheForTests(): void {
   getCachedEntriesPayload.reset();
 }
 
-// ── telegram topic ────────────────────────────────────────────────────────────
-
-/**
- * Polls session snapshot files every 1 second and sends delta batches of
- * `telegram_sent` events.  Emits the full list on first tick, then only
- * new events on subsequent ticks.
- *
- * Identical behavior to the legacy `/events/telegram` handler.
- */
-export const telegramTopic: TopicEmitter<Record<string, never>> = (
-  _params,
-  send,
-  deps,
-) => {
-  return makeDeltaTopic(
-    async () => (await readSessionEventsTolerant(deps.dir)).filter(
-      (event) => event.type === "telegram_sent",
-    ),
-    send,
-    1_000,
-  );
-};
-
-registerTopic("telegram", telegramTopic);
-
 // ── entries topic ─────────────────────────────────────────────────────────────
 
 /**

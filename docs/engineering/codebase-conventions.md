@@ -99,7 +99,6 @@ Avoid new catch-all names such as `helpers.ts` or `misc.ts`. Prefer a **verb or 
 - Use `log.step/success/warn/error/waiting/debug`; do not use `console.log` in production `src/` modules outside explicit CLI/script surfaces.
 - Structured logs must keep a readable `message` and add fields such as `category`, `occasion`, `subject`, `system`, `step`, `attempt`, `childWorkflow`, or `durationMs` when useful.
 - Operator-facing notifications must use `data.__subject` or the shared operator subject resolver first. Run ids and session ids are debug details, not primary text.
-- Telegram messages should be routed by notification policy, not emitted ad hoc from workflow handlers.
 
 ## Playwright And Selectors
 

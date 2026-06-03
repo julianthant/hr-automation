@@ -273,8 +273,8 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   deriveItemId?: (input: TData) => string
   /**
    * Derive the operator-facing subject from raw workflow input before auth or
-   * handler execution. This label is used by queue rows, toasts, Telegram
-   * messages, task rows, and later SQLite projections.
+   * handler execution. This label is used by queue rows, toasts, task rows,
+   * and later SQLite projections.
    */
   operatorSubject?: (input: TData) => OperatorSubject | null | undefined
   handler: (ctx: Ctx<TSteps, TData>, data: TData) => Promise<void>

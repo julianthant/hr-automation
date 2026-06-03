@@ -75,7 +75,7 @@ pollDuoApproval(page, opts)
    - 2s pre-check: catch cached-trust pass-through silently
    - beginDuoWebAuthn -> selectDuoFactor (two phases, see §4) -> returns a handle
    - waitForApproval: up to DUO_WEBAUTHN_GRACE_MS (25s) for the success URL
-   - on any miss -> manual phone Duo (cue + Telegram + poll), unchanged
+   - on any miss -> manual phone Duo (cue + poll), unchanged
    - finishDuoWebAuthn on EVERY exit path: persist signCount + tear down
 ```
 

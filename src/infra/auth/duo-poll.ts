@@ -1,37 +1,8 @@
 import type { Page } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
-import { getLogRunId, getLogWorkflow, log } from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 import { cueDuo } from "./voice-cue.js";
 import { beginDuoWebAuthn, finishDuoWebAuthn, isDuoWebAuthnEnabled } from "./duo-webauthn.js";
-import {
-  notifyAuthEvent,
-  type AuthEventKind,
-} from "../../domain/notifications/telegram.js";
-
-/**
- * Fire a best-effort Telegram notification with the active log context's
- * workflow + runId. Reads ALS each call so the message includes the kernel
- * item that triggered the auth wait. Always swallows errors.
- */
-function emitTelegram(
-  kind: AuthEventKind,
-  systemLabel: string,
-  detail?: string,
-  instance?: string,
-): void {
-  const workflow = getLogWorkflow() ?? "(unknown)";
-  const runId = getLogRunId();
-  void notifyAuthEvent({
-    kind,
-    systemLabel,
-    workflow,
-    ...(runId ? { runId } : {}),
-    ...(detail ? { detail } : {}),
-    ...(instance ? { instance } : {}),
-  }).catch(() => {
-    /* notifyAuthEvent already swallows; this is belt-and-suspenders */
-  });
-}
 
 export function extractDuoVerificationCode(text: string): string | undefined {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -120,12 +91,11 @@ async function waitForDuoPoll(ms: number, abortSignal?: AbortSignal): Promise<vo
 export const DUO_POLL_INTERVAL_MS = 5_000;
 
 /**
- * Pre-announce grace window. Before firing the Telegram + voice cue + waiting
- * log, briefly check whether the page has already transitioned to the success
- * URL. When Duo's "Yes, this is my device" trust token is cached, the SAML
- * chain redirects straight through without pushing to Duo Mobile — in that
- * case we don't want to ping the operator about a Duo prompt that didn't
- * happen.
+ * Pre-announce grace window. Before firing the voice cue + waiting log,
+ * briefly check whether the page has already transitioned to the success URL.
+ * When Duo's "Yes, this is my device" trust token is cached, the SAML chain
+ * redirects straight through without pushing to Duo Mobile — in that case we
+ * don't want to announce a Duo prompt that didn't happen.
  *
  * 2000ms covers the typical SAML-redirect-with-cached-trust path observed
  * in production. Cached trust usually settles in well under a second; the
@@ -202,10 +172,10 @@ export interface DuoPollOptions {
   /**
    * Override the pre-announce grace window in milliseconds. Default:
    * `DUO_PRE_CHECK_MS` (2000ms). During this window the loop only checks
-   * for an already-matched success URL — if found, the Telegram + voice
-   * cue + waiting log are skipped entirely (cached Duo trust path). Set
-   * to 0 to disable the pre-check and notify immediately as the legacy
-   * behavior did. Tests use small values for fast asserts.
+   * for an already-matched success URL — if found, the voice cue + waiting
+   * log are skipped entirely (cached Duo trust path). Set to 0 to disable
+   * the pre-check and announce immediately. Tests use small values for fast
+   * asserts.
    */
   preCheckMs?: number;
 
@@ -218,9 +188,9 @@ export interface DuoPollOptions {
 
   /**
    * Short bounded wait for the visible Duo Mobile verification code before
-   * sending the first Telegram notification. Default: 3000ms. This lets the
-   * initial message include the same code the resend path already includes
-   * without blocking indefinitely if Duo only shows push approval.
+   * logging the waiting message. Default: 3000ms. This lets the initial log
+   * include the code without blocking indefinitely if Duo only shows push
+   * approval.
    */
   initialCodeWaitMs?: number;
 
@@ -277,10 +247,8 @@ export interface DuoPollOptions {
   systemLabel?: string;
 
   /**
-   * Optional workflow instance label (e.g. "Oath Signature 1"). Forwarded
-   * to the Telegram notifier so the emitted `telegram_sent` session event's
-   * `workflowInstance` field matches every other session event. Falls back
-   * to the workflow name when unset.
+   * Optional workflow instance label (e.g. "Oath Signature 1"). Passed
+   * through from the session queue so caller context is available.
    */
   instance?: string;
 }
@@ -309,7 +277,7 @@ export async function pollDuoApproval(
   page: Page,
   options: DuoPollOptions,
 ): Promise<boolean> {
-  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel, instance } = options;
+  const { timeoutSeconds = 180, successUrlMatch, successCheck, postApproval, recovery, systemLabel } = options;
   const pollIntervalMs = options.pollIntervalMs ?? DUO_POLL_INTERVAL_MS;
   const pollIntervalSec = pollIntervalMs / 1000;
   const preCheckMs = options.preCheckMs ?? DUO_PRE_CHECK_MS;
@@ -326,8 +294,8 @@ export async function pollDuoApproval(
 
   // Pre-check phase: if Duo's "Yes, this is my device" trust token is
   // cached, the SAML chain redirects through to the success URL without
-  // pushing to Duo Mobile. We don't want to fire a Telegram + voice cue
-  // claiming a Duo prompt was sent in that case.
+  // pushing to Duo Mobile. We don't want to fire a voice cue claiming a
+  // Duo prompt was sent in that case.
   //
   // Silent loop — only check the success condition; skip recovery, the
   // tryAgain button, the trust button, and the Stale-Request guard
@@ -381,7 +349,6 @@ export async function pollDuoApproval(
       if (approved) {
         await handle.finish({ approved: true });
         log.step(`Duo approved via WebAuthn (${handle.factorLabel}) | URL: ${page.url()}`);
-        emitTelegram("duo-approved", systemLabel ?? "system", undefined, instance);
         if (postApproval) await postApproval(page);
         return true;
       }
@@ -398,15 +365,12 @@ export async function pollDuoApproval(
   // they're not looking at the terminal. Never blocks; never throws.
   await cueDuo(systemLabel ?? "system").catch(() => {});
 
-  // Best-effort Telegram DM. Activated when TELEGRAM_BOT_TOKEN +
-  // TELEGRAM_CHAT_ID are set; otherwise no-op.
   const initialDuoCode = await readDuoVerificationCodeWhenVisible(page, {
     timeoutMs: initialCodeWaitMs,
     intervalMs: initialCodeWaitIntervalMs,
     abortSignal: options.abortSignal,
   });
   let lastDuoCode = initialDuoCode;
-  emitTelegram("duo-waiting", systemLabel ?? "system", buildDuoWaitingDetail(initialDuoCode), instance);
 
   log.waiting(
     initialDuoCode
@@ -435,18 +399,11 @@ export async function pollDuoApproval(
           options.abortSignal,
         );
         const codeForResend = resentDuoCode?.trim() || lastDuoCode;
-        const resentDetail = buildDuoResentDetail(resentDuoCode, lastDuoCode);
         lastDuoCode = codeForResend;
         log.waiting(
           codeForResend
             ? `Duo prompt resent — enter code ${codeForResend} in Duo Mobile...`
             : "Duo push resent — approve on your phone...",
-        );
-        emitTelegram(
-          "duo-resent",
-          systemLabel ?? "system",
-          resentDetail,
-          instance,
         );
         await waitForDuoPoll(pollIntervalMs, options.abortSignal);
         continue;
@@ -496,7 +453,6 @@ export async function pollDuoApproval(
         // Persist signCount + tear down any authenticator armed at clickSsoSubmit
         // (no-op if WebAuthn wasn't in play).
         await finishDuoWebAuthn(page);
-        emitTelegram("duo-approved", systemLabel ?? "system", undefined, instance);
 
         // Run post-approval hook if provided
         if (postApproval) {
@@ -514,6 +470,5 @@ export async function pollDuoApproval(
 
   log.error("Duo approval timed out");
   await finishDuoWebAuthn(page);
-  emitTelegram("duo-timeout", systemLabel ?? "system", undefined, instance);
   return false;
 }

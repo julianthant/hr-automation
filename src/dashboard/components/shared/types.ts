@@ -324,7 +324,6 @@ export type RunEventType =
   | "item_start" | "item_complete"
   | "step_change"
   | "screenshot"
-  | "telegram_sent"
   | "ucpath_idle_signal"
   | "daemon_phase";
 

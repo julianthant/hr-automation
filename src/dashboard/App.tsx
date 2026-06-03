@@ -19,7 +19,6 @@ import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { prefetchRosters } from "./components/hooks/useRosters";
 import { prefetchFormTypes } from "./components/hooks/useFormTypes";
-import { useTelegramToasts } from "./components/hooks/useTelegramToasts";
 import { useCaptureToasts } from "./components/hooks/useCaptureToasts";
 import { resolveActionToastsForEntry } from "./components/hooks/useActionToasts";
 import { WorkflowsProvider, useWorkflow, useWorkflows, autoLabel } from "./lib/workflows-context";
@@ -116,7 +115,6 @@ export function App() {
 
   // Pre-flight check on mount
   usePreflight();
-  useTelegramToasts();
   useCaptureToasts();
 
   // Prime caches at app boot so the Run modal's first paint already has

@@ -62,7 +62,7 @@ OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr
 - No default exports in `src/`.
 - No `page.locator(...)` inline in system files (architecture guard enforces this).
 - Shared helpers used by 2+ workflows (or 1 workflow + tracker/dashboard/core/OCR) → promote out of `src/workflows/<workflow>/`. Shared homes listed in `src/workflows/CLAUDE.md`.
-- Use `log.*` with structured fields; no ad hoc `console.*`, toasts, or Telegram messages.
+- Use `log.*` with structured fields; no ad hoc `console.*` or toasts.
 
 ## Best Practices
 
