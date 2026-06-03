@@ -340,7 +340,7 @@ export function makeGatedWorkflow(
     deriveItemId: spec.deriveItemId ?? ((input) => input.id),
     operatorSubject:
       spec.operatorSubject ?? ((input) => ({ kind: "person", label: input.name ?? input.id })),
-    handler: async (ctx, input) => {
+    handler: async (ctx) => {
       for (const stage of spec.stages) {
         await ctx.step(stage, async () => {
           if (gated.has(stage) && coordinator.shouldHold(spec.name, ctx.runId, stage)) {

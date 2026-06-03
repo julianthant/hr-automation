@@ -7,6 +7,7 @@ import { registerLocalFile } from "../../../src/tracker/files/files.js";
 import { ensurePdfPageCache } from "../../../src/tracker/files/pdf-cache.js";
 import { runOcrOrchestrator } from "../../../src/workflows/ocr/orchestrator.js";
 import { ocrWorkflow } from "../../../src/workflows/ocr/index.js";
+import { findFrozenTraceId } from "../../../src/tracker/find-latest-entry.js";
 import { OcrInputSchema, type OcrInput } from "../../../src/workflows/ocr/schema.js";
 import {
   subscribeToApproval,
@@ -211,8 +212,21 @@ export function makeStubOcrWorkflow(
       // kernel's own delegated-scope handling.
       const reviewData: Record<string, unknown> = { ...(lastReviewData ?? {}) };
       delete reviewData.parentRunId;
+      // Carry the operation's frozen `__traceId` onto the re-stamp. The
+      // orchestrator stamps it (`ou-…` for oath via `spec.traceCode`, `oc-…`
+      // otherwise) on every row it emits, but AFTER `onReviewData` captured
+      // `lastReviewData` — so without this, the kernel's auto-emitted terminal
+      // `done` row would fall back to the workflow's own pre-emit code (`oc-`)
+      // and clobber the operation prefix on the latest OCR row. Production's
+      // `latestReviewData` carries `__traceId` for the same reason; mirror it.
+      const frozenTraceId = findFrozenTraceId({
+        workflow: "ocr",
+        runId: ctx.runId,
+        ...(ctx.trackerDir ? { trackerDir: ctx.trackerDir } : {}),
+      });
       ctx.updateData({
         ...reviewData,
+        ...(frozenTraceId ? { __traceId: frozenTraceId } : {}),
         mode: "prepare",
         records: JSON.stringify(payload.records),
         recordCount: String(payload.records.length),

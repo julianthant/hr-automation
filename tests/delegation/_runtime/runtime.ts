@@ -24,7 +24,6 @@ import type { OcrInput } from "../../../src/workflows/ocr/schema.js";
 import {
   createGateCoordinator,
   makeGatedWorkflow,
-  type GateCoordinator,
   type GatedInput,
   type GatedWorkflowSpec,
 } from "./scenario-handler.js";
@@ -149,6 +148,8 @@ export interface CreateDelegationRuntimeOpts {
 
 /** One OCR child run enqueued onto its gated daemon by `approveOcr`. */
 export interface ApprovedChild {
+  /** The workflow this child was enqueued onto (its gated daemon). */
+  workflow: string;
   itemId: string;
   runId: string;
 }
@@ -179,11 +180,26 @@ export interface ApproveOcrOpts {
   /** The approved records (selected + EID) the operator would submit. */
   records: Array<Record<string, unknown>>;
   /**
-   * The gated child daemon to fan out onto (the `approveTo.workflow`, e.g.
-   * `"oath-signature"`). The real approve route resolves the per-record itemIds
-   * + inputs via the form spec; the override enqueues each onto this daemon.
+   * The gated child daemon(s) to fan out onto. The approve fan-out can land
+   * children on MULTIPLE daemons by the `workflow` arg the route hands the
+   * override:
+   * - `approveTo.workflow` (per-record, e.g. `"oath-signature"`).
+   * - `approveDocumentTo.workflow` (once-per-document, e.g. `"oath-upload"`).
+   * Each `(workflow, inputs)` whose `workflow` is in this set is routed onto
+   * that gated daemon as a controllable child run; a target NOT in the set
+   * keeps the existing pre-emit-only behavior (a pending row, never claimed).
+   * The resolved `approveOcr` result returns ALL claimed children tagged by
+   * `workflow`, so a test can assert each target's rows.
+   *
+   * Either `childWorkflows` (the multi-target form) or the back-compat
+   * single-target `childWorkflow` must be provided.
    */
-  childWorkflow: string;
+  childWorkflows?: ReadonlyArray<string>;
+  /**
+   * Back-compat single-target alias for `childWorkflows: [childWorkflow]`. P2.9
+   * + P2.10 use this. Prefer `childWorkflows` for multi-target fan-out (P2.12).
+   */
+  childWorkflow?: string;
 }
 
 export interface DelegationRuntime {
@@ -246,11 +262,13 @@ export interface DelegationRuntime {
 
   /**
    * Drive the REAL approve fan-out (`buildOcrApproveHandler`) for an OCR run:
-   * the real `approveTo.deriveInput/deriveItemId/canFanOut`, trace-prefix
-   * propagation, `childParentRunId`, and terminal OCR row all run, with the
-   * child enqueue redirected onto `childWorkflow`'s gated daemon via
-   * `rt.enqueue(..., { renderAs: "batch" })`. Resolves with the enqueued child
-   * runs once the approve route's background dispatch completes.
+   * the real `approveTo.deriveInput/deriveItemId/canFanOut`, the once-per-
+   * document `approveDocumentTo` fan-out, trace-prefix propagation,
+   * `childParentRunId`, and terminal OCR row all run, with each child enqueue
+   * redirected onto the matching gated daemon (any workflow in
+   * `childWorkflows`) via `rt.enqueue(..., { renderAs: "batch" })`. Resolves
+   * with ALL enqueued child runs — each tagged by its `workflow` — once the
+   * approve route's background dispatch completes.
    */
   approveOcr(opts: ApproveOcrOpts): Promise<ApprovedChild[]>;
 }
@@ -648,19 +666,39 @@ export async function createDelegationRuntime(
 
   const approveOcr: DelegationRuntime["approveOcr"] = async (approveOcrOpts) => {
     requireOcr("approveOcr");
+    // Resolve the target set: the multi-target `childWorkflows`, or the
+    // back-compat single-target `childWorkflow` treated as a 1-element set. A
+    // workflow is "claimed" (routed onto its gated daemon) when it's BOTH in
+    // this set AND registered with the runtime; anything else gets the existing
+    // pre-emit-only behavior (a pending row, never claimed).
+    const targetSet = new Set<string>(
+      approveOcrOpts.childWorkflows ??
+        (approveOcrOpts.childWorkflow ? [approveOcrOpts.childWorkflow] : []),
+    );
+    if (targetSet.size === 0) {
+      throw new Error(
+        "approveOcr: pass `childWorkflows` (multi-target) or `childWorkflow` (single-target).",
+      );
+    }
     const enqueuedChildren: ApprovedChild[] = [];
     const handler = buildOcrApproveHandler({
       trackerDir,
-      // The real approve route resolves per-record itemIds + inputs via the form
-      // spec; redirect the child enqueue onto the gated daemon so each becomes a
-      // controllable, individually-cancellable child run. Returning `enqueued`
-      // lets the route create dependency rows + the terminal OCR row.
+      // The real approve route resolves per-record + once-per-document itemIds +
+      // inputs via the form spec, then calls this override once per target
+      // workflow (`approveTo.workflow` with N inputs; `approveDocumentTo.workflow`
+      // with 1 input). Redirect each child enqueue onto its gated daemon so each
+      // becomes a controllable, individually-cancellable child run. Returning
+      // `enqueued` lets the route create dependency rows + the terminal OCR row.
       ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId, overrideOpts) => {
         const enqueued: Array<{ id: string; runId?: string }> = [];
-        const isRegistered = workflows.has(workflow);
+        // Route onto the gated daemon only when the target is BOTH requested
+        // (in `targetSet`) AND registered. A registered-but-unrequested workflow
+        // is intentionally left as pre-emit-only so a test can opt out of
+        // claiming a target it didn't ask for.
+        const shouldClaim = targetSet.has(workflow) && workflows.has(workflow);
         for (let i = 0; i < inputs.length; i++) {
           const itemId = deriveItemId(inputs[i], i);
-          if (isRegistered) {
+          if (shouldClaim) {
             // Redirect onto the gated daemon → a controllable child run.
             const { runId: childRunId } = await enqueue(
               workflow,
@@ -672,14 +710,12 @@ export async function createDelegationRuntime(
               },
             );
             enqueued.push({ id: itemId, runId: childRunId });
-            if (workflow === approveOcrOpts.childWorkflow) {
-              enqueuedChildren.push({ itemId, runId: childRunId });
-            }
+            enqueuedChildren.push({ workflow, itemId, runId: childRunId });
           } else {
-            // A fan-out target with no daemon in this runtime (e.g. the
-            // once-per-document `oath-upload` ticket when only oath-signature is
-            // under test). Pre-emit its pending row through the route's hook so
-            // the projection still nests it, but don't try to claim it.
+            // A fan-out target this runtime isn't claiming (e.g. only the
+            // per-record target is under test, or a target with no daemon).
+            // Pre-emit its pending row through the route's hook so the
+            // projection still nests it, but don't try to claim it.
             const childRunId = randomUUID();
             overrideOpts?.onPreEmitPending?.(inputs[i], childRunId, overrideOpts.parentRunId, itemId);
             enqueued.push({ id: itemId, runId: childRunId });
@@ -700,16 +736,19 @@ export async function createDelegationRuntime(
     }
     // The actual enqueue runs inside the approve route's BACKGROUND dispatch
     // IIFE, so `res` returns before children are enqueued. The synchronous
-    // `fannedOut` response names the per-record targets; wait until the override
-    // has enqueued exactly that many onto `childWorkflow` (no sleeps — poll the
-    // captured handle).
+    // `fannedOut` response names every fan-out target (per-record + doc); wait
+    // until the override has claimed exactly the count we expect across the
+    // requested-and-registered targets (no sleeps — poll the captured handle).
     const body = res.body as { ok: true; fannedOut: Array<{ workflow: string; itemId: string }> };
-    const expected = body.fannedOut.filter((f) => f.workflow === approveOcrOpts.childWorkflow).length;
+    const expected = body.fannedOut.filter(
+      (f) => targetSet.has(f.workflow) && workflows.has(f.workflow),
+    ).length;
     const start = Date.now();
     while (enqueuedChildren.length < expected) {
       if (Date.now() - start > 10_000) {
         throw new Error(
-          `approveOcr: only ${enqueuedChildren.length}/${expected} ${approveOcrOpts.childWorkflow} children enqueued within 10s`,
+          `approveOcr: only ${enqueuedChildren.length}/${expected} children enqueued within 10s ` +
+            `(targets=${[...targetSet].join(",")})`,
         );
       }
       await new Promise((r) => setTimeout(r, 25));
