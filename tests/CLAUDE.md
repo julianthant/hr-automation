@@ -46,6 +46,13 @@ Real kernel + real handlers + stubbed Playwright. Migration state:
 
 Real end-to-end tests that hit **live UCSD systems** with a real Chromium and hands-off Duo (CDP WebAuthn). They run in a **separate pool** via `vitest.live.config.ts` (`npm run test:live`) and are **excluded from `npm test`** (`vitest.config.ts` excludes `tests/live/**`). They are the only layer that catches live SSO/DOM drift — unit/Tier-1-delegation/mocked-integration can't.
 
+Tests in the pool:
+
+| File | What it covers (unique value) |
+|------|------------------------------|
+| `auth.test.ts` | Each of the six SSO flows **independently** (one browser, one flow at a time) via `DUO_LOGIN_FLOWS` — catches per-flow SSO/Duo DOM drift. |
+| `session-launch-multi.test.ts` | `Session.launch` authenticating **≥2 systems** via the production **parallel-staggered Duo** path (parallel `prepareLogin` → `settleMs` → `staggerMs`-spaced Submit → `maxConcurrentDuos` semaphore) — the path the dashboard/daemon actually run; `auth.test.ts` logs in serially and `integration/core/mock-workflow.test.ts` stubs the logins, so neither hits the real concurrent multi-system auth. **System pair: `kuali` + `old-kronos`** pulled from `separationsWorkflow.config.systems` (drops `ucpath`/`new-kronos` to keep two Duos, not four, well under the 180s timeout). **Knobs = production defaults stated explicitly** (`settleMs:2000`, `staggerMs:5000`, `maxConcurrentDuos:1` — one phone prompt at a time). A custom `launchFn` wrapping `launchBrowser({ headless, ... })` makes it headless by default (`Session.launch`'s built-in `defaultLaunchOne` always launches headed). Awaits `session.page(id)` for both systems (resolves only after each readyPromise clears) and asserts each landed off the SSO/Duo URL. Teardown is graceful `session.close()` only — never force-kill (signCount desync). |
+
 Rules (these mirror the hard realities of live testing):
 - **Opt-in, never CI.** Require `.env` creds + `.auth/duo-webauthn.json` (the enrolled WebAuthn key) + a machine that can run Chromium. Each test **skips cleanly** (precondition guard) when those are absent — never fail/hang on a fresh clone.
 - **Serial, clean teardown.** Duo signCount is global server state; the pool is single-fork. Never force-kill mid-ceremony (desyncs signCount → next run rejected as a clone; resync via the one-liner in `docs/engineering/hands-off-duo-webauthn.md` §6).

@@ -25,6 +25,8 @@ systems: [{
 
 Tuning knobs live on `LaunchOpts` (`staggerMs`, `settleMs`, `maxConcurrentDuos`) and are primarily for tests. Production callers don't pass them.
 
+The ≥2-system parallel-staggered path is exercised live (real concurrent Duos, not stubbed) by `tests/live/session-launch-multi.test.ts` (opt-in `npm run test:live`; kuali + old-kronos at the production default knobs). `tests/integration/core/mock-workflow.test.ts` still asserts the staggered ORDERING with stubbed logins for the CI pool.
+
 ## Login Flows
 
 Six UCSD Shibboleth SSO flows, all gated by Duo MFA and all sharing one auth
