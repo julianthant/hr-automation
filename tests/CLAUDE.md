@@ -35,9 +35,9 @@ Real kernel + real handlers + stubbed Playwright. Migration state:
 | **Keep (permanent)** | `core/mock-workflow.test.ts` | Parallel-staggered auth-gating order — logins complete before `ctx.page()` resolves; no Tier-1 equivalent planned |
 | **Keep (permanent)** | `oath-upload-smoke.test.ts` | Real `oathUploadHandler` happy path via escape hatches |
 | **Keep (permanent)** | `oath-upload-extended.test.ts` | Real handler: `skipStep` upload-only + idempotency/ticket reuse |
-| **Bridge** | `ocr/end-to-end.test.ts` | Delete when Tier-1 P2.9 (OCR→oath-signature fan-out through real daemon) is green |
-| **Bridge** | `delegation-parentrunid.test.ts` | Delete when Tier-1 P2.9 (parentRunId/archetype/traceId on real fan-out) is green; also unit-covered by `ctx-delegate-to*.test.ts` |
-| **Bridge** | `retry-original-input.test.ts` | Delete when a Tier-1 test asserts retry-after-cancel; also unit-covered by `retry-uses-original-input.test.ts` |
+| **Bridge** | `retry-original-input.test.ts` | Delete when a Tier-1 test asserts retry-after-cancel; also unit-covered by `retry-uses-original-input.test.ts`. **Still kept** — P2.9 does not assert retry-after-cancel (a later task owns it). |
+| **Removed (P2.9)** | `ocr/end-to-end.test.ts` | Superseded by `tests/delegation/ocr-oath-signature.test.ts` (OCR→oath-signature fan-out through the real daemon). Its real-orchestrator wiring lives in `tests/delegation/_runtime/ocr-stub.ts`. |
+| **Removed (P2.9)** | `delegation-parentrunid.test.ts` | parentRunId/archetype/traceId on a real fan-out are now asserted by `tests/delegation/ocr-oath-signature.test.ts`; also unit-covered by `ctx-delegate-to*.test.ts`. |
 | **Removed (Phase 0)** | `batch-fanout.test.ts` | Legacy in-process `runWorkflowBatch/Pool`; daemon never uses it; unit-covered |
 
 **Rule:** delete each bridge only after its Tier-1 superseder is green — coverage must never dip.
