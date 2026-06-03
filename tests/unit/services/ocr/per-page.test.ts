@@ -222,6 +222,10 @@ test("concurrent per-page Gemini runs share in-memory key throttle state", async
       providerId: "gemini",
       keyIndex: id === "gemini-1" ? 1 : 2,
       rotationKey,
+      priority: 1,
+      // Single-model chain so a 429 throttles the whole key and the next page
+      // rotates to the other key (the behavior this test pins).
+      models: [{ id: "gemini-2.5-flash", limit: { rpm: 1000, tpm: 1_000_000, rpd: 1000, imgTokens: 1 } }],
       callOcr: async (_imagePath: string, prompt: string) => {
         const seen = seenByPrompt.get(prompt) ?? [];
         seen.push(id);
@@ -233,7 +237,7 @@ test("concurrent per-page Gemini runs share in-memory key throttle state", async
         if (prompt === "Call A" && id === "gemini-2") {
           await releaseFirstCall.promise;
         }
-        return [{ name: `${prompt}-${id}` }];
+        return { json: [{ name: `${prompt}-${id}` }] };
       },
     } as PoolKey);
   const pool = [makeKey("gemini-1", "k1"), makeKey("gemini-2", "k2")];

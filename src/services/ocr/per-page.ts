@@ -1,10 +1,9 @@
 import path from "node:path";
 import type { ZodType } from "zod/v4";
 import { log } from "../../utils/log.js";
-import { classifyOcrError } from "./error-classification.js";
 import { buildVisionPool, summarizePool, type PoolKey } from "./per-page-pool.js";
-import { getOrCreateKeyRotation, type KeyRotation } from "./rotation.js";
-import { OcrAllKeysExhaustedError, type ProviderKey } from "./types.js";
+import { errorToRateLimitInfo } from "./rate-limit-headers.js";
+import { type Candidate, getUsageTracker, type UsageTracker } from "./usage-tracker.js";
 
 export interface PerPageOcrRequest<T> {
   /** PNG filenames inside `pageImagesDir`, 1-indexed by page (e.g. page-01.png). */
@@ -23,7 +22,7 @@ export interface PerPageOcrRequest<T> {
    * doesn't hit the network. Defaults to `buildVisionPool()`.
    */
   pool?: PoolKey[];
-  /** Override the rotation-state directory for tests. */
+  /** Override the usage-tracker state directory for tests. */
   cacheDir?: string;
 }
 
@@ -34,18 +33,18 @@ export interface PerPageOcrResult<T> {
     page: number;
     success: boolean;
     error?: string;
-    /** Pool entry id that succeeded (or the last one tried on failure). */
+    /** Pool entry (and model) that succeeded, or the last one tried on failure. */
     poolKeyId?: string;
-    /** All pool entry ids attempted for this page (failures + the final success). */
+    /** All `provider-key:model` combos attempted for this page. */
     attemptedKeys?: string[];
     /** How many provider calls were issued for this page. */
     attempts?: number;
   }>;
-  /** Compact pool summary (e.g. `"gemini=6 mistral=2 groq=7"`) for logging. */
+  /** Compact pool summary (e.g. `"gemini=6 groq=7 mistral=2"`) for logging. */
   poolSummary: string;
 }
 
-/** @internal — test escape hatch. Bypasses the pool entirely. */
+/** @internal — test escape hatch. Bypasses the pool + tracker entirely. */
 type CallSinglePageFn = (args: {
   imagePath: string;
   prompt: string;
@@ -59,38 +58,64 @@ export function __setPerPageCallForTests(fn: CallSinglePageFn | undefined): void
   _callSinglePageForTests = fn;
 }
 
+interface PageOutcome {
+  page: number;
+  success: boolean;
+  error?: string;
+  poolKeyId?: string;
+  attemptedKeys?: string[];
+  attempts?: number;
+  rawRecords?: unknown[];
+}
+
+/** Per-page wait budget: how long a single page may pace itself before failing. */
+function maxWaitMs(): number {
+  const env = Number.parseInt(process.env.OCR_PAGE_MAX_WAIT_MS ?? "", 10);
+  return Number.isFinite(env) && env >= 0 ? env : 120_000;
+}
+const MAX_SINGLE_WAIT_MS = 15_000;
+
+function comboId(provider: string, keyIndex: number, model: string): string {
+  return `${provider}-${keyIndex}:${model}`;
+}
+
+function buildCandidates(pool: PoolKey[]): Candidate[] {
+  return pool.flatMap((k) =>
+    k.models.map((m) => ({
+      provider: k.providerId,
+      keyValue: k.rotationKey,
+      keyIndex: k.keyIndex,
+      model: m.id,
+      limit: m.limit,
+      priority: k.priority,
+    })),
+  );
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 /**
- * OCR every page of a pre-rendered PDF in parallel using the multi-
- * provider key pool. Returns the merged records array (sorted by
- * sourcePage) plus a per-page status array.
+ * OCR every page of a pre-rendered PDF in parallel. Each page is dispatched
+ * through the usage tracker, which picks the best available (provider, key,
+ * model) cell — pacing within each provider's RPM/TPM/RPD and falling back
+ * across the model chain then other keys on a 429/quota/transient error. The
+ * tracker is shared in-memory per `cacheDir`, so concurrent runs see each
+ * other's throttle state.
  *
- * Concurrency = `min(pool.length, OCR_PAGE_CONCURRENCY ?? pool.length)`.
- * Each page is initially assigned to `pool[i % pool.length]`; on
- * failure that page walks through the rest of the pool (up to
- * `OCR_PER_PAGE_MAX_RETRIES` other keys, default 2) before giving up.
- *
- * Pages that fail completely surface as `success: false` with the
- * last error message and are omitted from `records`. The caller
- * decides whether to fall back to whole-PDF OCR or surface the
- * partial result.
+ * Concurrency = `min(pool.length, OCR_PAGE_CONCURRENCY ?? pool.length)`. Pages
+ * that fail completely surface as `success: false` and are omitted from
+ * `records`; the caller decides whether to surface the partial result.
  */
-export async function runOcrPerPage<T>(
-  req: PerPageOcrRequest<T>,
-): Promise<PerPageOcrResult<T>> {
+export async function runOcrPerPage<T>(req: PerPageOcrRequest<T>): Promise<PerPageOcrResult<T>> {
   const pool = req.pool ?? buildVisionPool();
   const poolSummary = summarizePool(pool);
   if (pool.length === 0 && !_callSinglePageForTests) {
     throw new Error(
-      "runOcrPerPage: no vision API keys configured (set GEMINI_API_KEY*, MISTRAL_API_KEY*, GROQ_API_KEY*, or SAMBANOVA_API_KEY*)",
+      "runOcrPerPage: no vision API keys configured (set GEMINI_API_KEY*, GROQ_API_KEY*, MISTRAL_API_KEY*, OPEN_ROUTER_API_KEY*, or SAMBANOVA_API_KEY*)",
     );
   }
 
   const concurrencyEnv = Number.parseInt(process.env.OCR_PAGE_CONCURRENCY ?? "", 10);
-  // Default concurrency = pool size (when running real keys) or 4 (the
-  // legacy default that pre-dated the multi-provider pool — preserved
-  // for tests that swap in `_callSinglePageForTests` and don't care
-  // about real pool semantics). Env-override clamps to a sane upper
-  // bound so OCR_PAGE_CONCURRENCY=999 doesn't melt anything.
   const fallbackConcurrency = pool.length > 0 ? pool.length : 4;
   const concurrency = Math.max(
     1,
@@ -99,119 +124,149 @@ export async function runOcrPerPage<T>(
       : fallbackConcurrency,
   );
 
-  const maxRetriesEnv = Number.parseInt(
-    process.env.OCR_PER_PAGE_MAX_RETRIES ?? "",
-    10,
-  );
-  // Default to "walk every key in the pool before giving up". The previous
-  // default of 2 meant a Gemini 503 surge (entire model overloaded — every
-  // key returns the same error) only tried 3 keys even when 8 were configured.
-  // Users explicitly want "retry with a different api key" until exhausted.
-  const maxRetries =
-    Number.isFinite(maxRetriesEnv) && maxRetriesEnv >= 0
-      ? maxRetriesEnv
-      : Math.max(pool.length - 1, 2);
-  const geminiRotation = buildGeminiRotation(pool, req.cacheDir ?? DEFAULT_CACHE_DIR);
+  // The test-fn path bypasses the pool + tracker entirely, so don't even create
+  // (and flush an empty state file for) the tracker in that case.
+  const usingTestFn = Boolean(_callSinglePageForTests);
+  const tracker = usingTestFn ? null : getUsageTracker(req.cacheDir ?? DEFAULT_CACHE_DIR);
+  const candidates = usingTestFn ? [] : buildCandidates(pool);
+  const poolByKey = new Map(pool.map((k) => [`${k.providerId}-${k.keyIndex}`, k]));
 
   const tasks = req.pagesAsImages.map((filename, idx) => ({
     pageNum: idx + 1,
     imagePath: path.join(req.pageImagesDir, filename),
   }));
-
-  type PageOutcome = {
-    page: number;
-    success: boolean;
-    error?: string;
-    poolKeyId?: string;
-    attemptedKeys?: string[];
-    attempts?: number;
-    rawRecords?: unknown[];
-  };
   const results: PageOutcome[] = new Array(tasks.length);
 
   const limit = makeLimiter(concurrency);
   await Promise.all(
     tasks.map((t) =>
       limit(async () => {
-        const initialIdx = pool.length > 0 ? (t.pageNum - 1) % pool.length : 0;
-        // Build the try-order: initial key first, then `maxRetries` more
-        // keys round-robin starting from the next slot. Avoids re-trying
-        // the same provider key twice.
-        const tryOrder: PoolKey[] = [];
-        for (let r = 0; r <= maxRetries && r < pool.length; r++) {
-          tryOrder.push(pool[(initialIdx + r) % pool.length]);
-        }
-
-        let lastError: unknown;
-        let lastPoolKeyId: string | undefined;
-        let attemptsMade = 0;
-        const attemptedPoolKeyIds = new Set<string>();
-        for (const candidate of tryOrder.length > 0 ? tryOrder : [null]) {
-          const resolved = resolvePoolKey(candidate, geminiRotation);
-          if (resolved === null) continue;
-          const { key: k, rotationKey } = resolved;
-          if (k && attemptedPoolKeyIds.has(k.id)) continue;
-          if (k) attemptedPoolKeyIds.add(k.id);
-          attemptsMade += 1;
-          try {
-            const { json, poolKeyId } = await callSinglePage({
-              imagePath: t.imagePath,
-              prompt: req.prompt,
-              pageNum: t.pageNum,
-              key: k,
-            });
-            if (rotationKey && geminiRotation) {
-              geminiRotation.rotation.markSuccess();
-              geminiRotation.rotation.flush();
-            }
-            const arr = Array.isArray(json) ? (json as unknown[]) : [json];
-            results[t.pageNum - 1] = {
-              page: t.pageNum,
-              success: true,
-              poolKeyId,
-              attemptedKeys: [...attemptedPoolKeyIds],
-              attempts: attemptsMade,
-              rawRecords: arr,
-            };
-            return;
-          } catch (err) {
-            lastError = err;
-            lastPoolKeyId = k?.id;
-            if (rotationKey && geminiRotation) {
-              markPerPageGeminiKeyFailure(geminiRotation.rotation, rotationKey, err);
-              geminiRotation.rotation.flush();
-            }
-            const msg = err instanceof Error ? err.message : String(err);
-            // Don't retry on auth errors — that key is dead for this run.
-            // The next key in tryOrder may still be valid.
-            if (/401|invalid\s*api\s*key|unauthor/i.test(msg)) continue;
-            // For 429 / quota / network, also continue to next key.
-            // Anything else: also try the next key — best-effort.
-          }
-        }
-
-        const errMsg =
-          lastError instanceof Error ? lastError.message : String(lastError);
-        log.warn(
-          `runOcrPerPage page ${t.pageNum} failed after ${attemptsMade} attempt(s): ${errMsg}`,
-        );
-        results[t.pageNum - 1] = {
-          page: t.pageNum,
-          success: false,
-          error: errMsg,
-          poolKeyId: lastPoolKeyId,
-          attemptedKeys: [...attemptedPoolKeyIds],
-          attempts: attemptsMade,
-        };
+        results[t.pageNum - 1] = tracker
+          ? await ocrPageViaPool(t.pageNum, t.imagePath, req.prompt, candidates, poolByKey, tracker)
+          : await ocrPageViaTestFn(t.pageNum, t.imagePath, req.prompt, pool);
       }),
     ),
   );
+  tracker?.flush();
 
-  // Schema-validate each record from each successful page; drop invalids.
-  // Some models (notably Gemini 3) sometimes wrap records in a per-page
-  // object: `[{pageNumber, documentType, records: [...]}]` instead of the
-  // flat `[{...}, {...}]` we asked for. Unwrap before validation so the
-  // schema doesn't strip the actual record fields.
+  return finalize(results, req.schema, poolSummary);
+}
+
+/** Test path: one attempt per page through the injected callback. */
+async function ocrPageViaTestFn(
+  pageNum: number,
+  imagePath: string,
+  prompt: string,
+  pool: PoolKey[],
+): Promise<PageOutcome> {
+  // The page's assigned pool key id — reported as the attempted key on failure
+  // (the test-fn supplies its own poolKeyId on success).
+  const assignedId = pool.length > 0 ? pool[(pageNum - 1) % pool.length].id : undefined;
+  try {
+    const { json, poolKeyId } = await _callSinglePageForTests!({ imagePath, prompt, pageNum });
+    return {
+      page: pageNum,
+      success: true,
+      poolKeyId,
+      attemptedKeys: [poolKeyId],
+      attempts: 1,
+      rawRecords: Array.isArray(json) ? (json as unknown[]) : [json],
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn(`runOcrPerPage page ${pageNum} failed: ${msg}`);
+    return {
+      page: pageNum,
+      success: false,
+      error: msg,
+      poolKeyId: assignedId,
+      attemptedKeys: assignedId ? [assignedId] : [],
+      attempts: 1,
+    };
+  }
+}
+
+/** Real path: tracker-driven (key, model) selection with backoff + pacing. */
+async function ocrPageViaPool(
+  pageNum: number,
+  imagePath: string,
+  prompt: string,
+  candidates: Candidate[],
+  poolByKey: Map<string, PoolKey>,
+  tracker: UsageTracker,
+): Promise<PageOutcome> {
+  const tried = new Set<string>();
+  let remaining = [...candidates];
+  let attempts = 0;
+  let waited = 0;
+  let lastError: unknown;
+  let lastPoolKeyId: string | undefined;
+  const budget = maxWaitMs();
+
+  while (remaining.length > 0) {
+    const res = tracker.reserve(remaining);
+    if (res.kind === "exhausted") {
+      lastError = lastError ?? new Error("all vision keys exhausted (rate-limited, quota-out, or dead)");
+      break;
+    }
+    if (res.kind === "wait") {
+      const w = Math.min(res.waitMs, MAX_SINGLE_WAIT_MS);
+      if (waited + w > budget) {
+        lastError = lastError ?? new Error(`rate-limited on every key; waited ${waited}ms (budget ${budget}ms)`);
+        break;
+      }
+      waited += w;
+      await sleep(w);
+      continue;
+    }
+
+    const { token } = res;
+    const combo = comboId(token.provider, token.keyIndex, token.model);
+    tried.add(combo);
+    remaining = remaining.filter((c) => comboId(c.provider, c.keyIndex, c.model) !== combo);
+    const key = poolByKey.get(`${token.provider}-${token.keyIndex}`);
+    if (!key) continue;
+    lastPoolKeyId = key.id;
+    attempts += 1;
+    try {
+      const outcome = await key.callOcr(imagePath, prompt, token.model);
+      tracker.commit(token, outcome.promptTokens);
+      const arr = Array.isArray(outcome.json) ? (outcome.json as unknown[]) : [outcome.json];
+      return {
+        page: pageNum,
+        success: true,
+        poolKeyId: combo,
+        attemptedKeys: [...tried],
+        attempts,
+        rawRecords: arr,
+      };
+    } catch (err) {
+      lastError = err;
+      tracker.penalize(token, errorToRateLimitInfo(token.provider, err));
+    }
+  }
+
+  const errMsg = lastError instanceof Error ? lastError.message : String(lastError);
+  log.warn(`runOcrPerPage page ${pageNum} failed after ${attempts} attempt(s): ${errMsg}`);
+  return {
+    page: pageNum,
+    success: false,
+    error: errMsg,
+    poolKeyId: lastPoolKeyId,
+    attemptedKeys: [...tried],
+    attempts,
+  };
+}
+
+/** Shared post-processing: unwrap nested shapes, inject defaults, schema-validate. */
+function finalize<T>(
+  results: PageOutcome[],
+  schema: ZodType<T>,
+  poolSummary: string,
+): PerPageOcrResult<T> {
+  // Some models (notably Gemini 3) wrap records in a per-page object:
+  // `[{pageNumber, documentType, records: [...]}]` instead of the flat array
+  // we asked for. Unwrap before validation so the schema doesn't strip fields.
   for (const r of results) {
     if (!r.success || !r.rawRecords) continue;
     r.rawRecords = r.rawRecords.flatMap((rec) => {
@@ -225,32 +280,18 @@ export async function runOcrPerPage<T>(
     });
   }
 
-  // Three fields are injected before `safeParse`:
-  //   - rowIndex (default = array index): sign-in sheets have many rows; LLM
-  //     occasionally drops the field on single-record pages
-  //   - employeeSigned (default = true): worst case operator deselects in the
-  //     preview pane
-  //   - sourcePage (runner-authoritative): the LLM sees one page at a time
-  //     and has no concept of absolute page number; we override whatever it
-  //     sent so r.page is always the source of truth
-  // Spread order: defaults first, LLM record next (overwrites the defaults
-  // for rowIndex/employeeSigned), sourcePage last (always wins). Schemas
-  // that don't declare these fields silently strip them via Zod's default
-  // object behavior.
+  // Inject rowIndex (array position), employeeSigned (default true), and the
+  // runner-authoritative sourcePage before validation. Spread order: defaults
+  // first, LLM record next, sourcePage last (always wins).
   const records: Array<T & { sourcePage: number }> = [];
   for (const r of results) {
     if (!r.success || !r.rawRecords) continue;
     for (const [idx, rec] of r.rawRecords.entries()) {
       const withInjects =
         rec && typeof rec === "object"
-          ? {
-              rowIndex: idx,
-              employeeSigned: true,
-              ...(rec as Record<string, unknown>),
-              sourcePage: r.page,
-            }
+          ? { rowIndex: idx, employeeSigned: true, ...(rec as Record<string, unknown>), sourcePage: r.page }
           : rec;
-      const parsed = req.schema.safeParse(withInjects);
+      const parsed = schema.safeParse(withInjects);
       if (!parsed.success) {
         const rawJson = (() => {
           try {
@@ -285,90 +326,6 @@ export async function runOcrPerPage<T>(
   };
 }
 
-async function callSinglePage(args: {
-  imagePath: string;
-  prompt: string;
-  pageNum: number;
-  key: PoolKey | null;
-}): Promise<{ json: unknown; poolKeyId: string }> {
-  if (_callSinglePageForTests) {
-    return _callSinglePageForTests({
-      imagePath: args.imagePath,
-      prompt: args.prompt,
-      pageNum: args.pageNum,
-    });
-  }
-  if (!args.key) {
-    throw new Error("runOcrPerPage: no pool key available");
-  }
-  const json = await args.key.callOcr(args.imagePath, args.prompt);
-  return { json, poolKeyId: args.key.id };
-}
-
-interface GeminiRotation {
-  rotation: KeyRotation;
-  poolKeyByRotationKey: Map<string, PoolKey>;
-}
-
-function buildGeminiRotation(pool: PoolKey[], cacheDir: string): GeminiRotation | null {
-  const geminiKeys = pool.filter((key) => key.providerId === "gemini" && key.rotationKey);
-  if (geminiKeys.length === 0) return null;
-  const rotationKeys = geminiKeys.map((key) => key.rotationKey!);
-  return {
-    rotation: getOrCreateKeyRotation("gemini-per-page", rotationKeys, cacheDir),
-    poolKeyByRotationKey: new Map(geminiKeys.map((key) => [key.rotationKey!, key])),
-  };
-}
-
-function resolvePoolKey(
-  candidate: PoolKey | null,
-  geminiRotation: GeminiRotation | null,
-): { key: PoolKey | null; rotationKey?: ProviderKey } | null {
-  if (!candidate || candidate.providerId !== "gemini" || !geminiRotation) {
-    return { key: candidate };
-  }
-  try {
-    const rotationKey = geminiRotation.rotation.pickNext();
-    const key = geminiRotation.poolKeyByRotationKey.get(rotationKey.value);
-    if (!key) {
-      geminiRotation.rotation.markDead(rotationKey);
-      return null;
-    }
-    return { key, rotationKey };
-  } catch (err) {
-    if (err instanceof OcrAllKeysExhaustedError) return null;
-    throw err;
-  }
-}
-
-function markPerPageGeminiKeyFailure(
-  rotation: KeyRotation,
-  key: ProviderKey,
-  err: unknown,
-): void {
-  switch (classifyOcrError(err)) {
-    case "auth":
-      rotation.markDead(key);
-      return;
-    case "quota-exhausted":
-      rotation.markQuotaExhausted(key, nextUtcMidnight());
-      return;
-    case "rate-limit":
-      rotation.markRateLimited(key, Date.now() + 60_000);
-      return;
-    case "transient":
-      rotation.markRateLimited(key, Date.now() + 5_000);
-      return;
-    case "permanent":
-      return;
-  }
-}
-
-function nextUtcMidnight(): number {
-  const now = new Date();
-  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
-}
-
 function makeLimiter(n: number) {
   let active = 0;
   const queue: Array<() => void> = [];
@@ -377,8 +334,16 @@ function makeLimiter(n: number) {
     const run = (): void => {
       active += 1;
       fn().then(
-        (val) => { active -= 1; queue.shift()?.(); resolve(val); },
-        (err) => { active -= 1; queue.shift()?.(); reject(err); },
+        (val) => {
+          active -= 1;
+          queue.shift()?.();
+          resolve(val);
+        },
+        (err) => {
+          active -= 1;
+          queue.shift()?.();
+          reject(err);
+        },
       );
     };
     if (active < n) run();
