@@ -20,6 +20,15 @@ Static convention guards live in `tests/unit/architecture/`. Add guards when a r
 
 `code-conventions.test.ts` also enforces: **no `.tsx` outside `src/dashboard/`**, **no `AGENTS.md` under `src/`** (the repo-root `AGENTS.md` session artifact is exempt), and a broadened **console guard** matching `console.\w+` (table/dir/trace/group/…), not just log/warn/error/info/debug — keep the allowlist tight (`render-pages.ts` monkey-patches `console.warn` to mute pdfjs and is allowlisted). `runtime-policy-coverage.test.ts` side-effect-imports every workflow including `i9-lookup`; when adding a workflow, add its import there or its action descriptors go unvalidated.
 
+## Frontend component tests (jsdom pool)
+
+React component tests live in `tests/dashboard/**/*.test.tsx` and run in a **separate vitest pool** via `vitest.dashboard.config.ts` (`environment: "jsdom"`, `globals: true`), deliberately kept apart from the main node pool so `expect` + `@testing-library/jest-dom` matchers don't leak into the `node:assert` suite. The main config globs only `tests/**/*.test.ts` (note: `.ts`, **not** `.tsx`), so component tests never run under `npm test` and the two pools stay isolated.
+
+- Run with `npm run test:dashboard` (plain `npm test` does **not** include them).
+- Render via `renderWithProviders` (`tests/_utils/render-with-providers.tsx`) — wraps required context (TooltipProvider, TerminalDrawerProvider, batch context). `tests/dashboard-setup.ts` extends `expect` with jest-dom matchers, runs `afterEach(cleanup)`, and stubs `fetch`/`EventSource`.
+- Assert rendered output + affordances (which action buttons show per status, subtitle/trace-id fallbacks, 0-member anchor fallback); build props from the **real** projection helpers where possible. Boundary-mock only `useWorkflow`/toast/network — button *dispatch wiring* is out of scope for this layer.
+- Covered today: `RowFooter` status-gating matrix, `WorkflowBox` session-card subtitle, `DaemonBatchRow` 0-member fallback.
+
 ## Regression clusters
 
 - Dashboard queue/rail counts: backend `wfCounts` regressions belong in `tests/unit/tracker/state-queries.test.ts` and pure count helpers under `tests/unit/tracker/` or `tests/unit/dashboard/`. Pin that counts are backend-authoritative, independent of the selected workflow, and use the same queue-surface model as the rendered rail badges. OCR prep rows that still render in the queue must remain counted until the queue no longer renders them.
@@ -38,7 +47,7 @@ Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifi
 
 - Playwright automation (`src/*/navigate.ts`, `extract.ts`, `enter.ts`)
 - Auth/login flows (require Duo MFA)
-- Dashboard React hooks (browser-only state + SSE)
+- Dashboard React hooks (browser-only state + SSE) — but React **components** now have a jsdom harness; see "Frontend component tests" above
 - Excel file I/O and screenshot helpers
 - CLI command scaffolding (Commander parsing)
 
@@ -56,6 +65,7 @@ npm test                    # Run all tests (dot reporter — live progress, qui
 npm run test:verbose        # Per-test pass/fail lines (best for one file or -t filter)
 npm run test:watch          # Watch mode for iterative dev
 npm run test:architecture   # Just the static convention guards
+npm run test:dashboard      # React component tests (jsdom pool — separate from npm test)
 npm run typecheck:all       # Typecheck tests + src together
 npx vitest run tests/unit/workflows/separations/schema.test.ts --reporter=verbose   # Single file
 npx vitest run -t "ANNUAL_DATES" --reporter=verbose                                  # Filter by test name
