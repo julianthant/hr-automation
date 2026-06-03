@@ -29,6 +29,18 @@ React component tests live in `tests/dashboard/**/*.test.tsx` and run in a **sep
 - Assert rendered output + affordances (which action buttons show per status, subtitle/trace-id fallbacks, 0-member anchor fallback); build props from the **real** projection helpers where possible. Boundary-mock only `useWorkflow`/toast/network — button *dispatch wiring* is out of scope for this layer.
 - Covered today: `RowFooter` status-gating matrix, `WorkflowBox` session-card subtitle, `DaemonBatchRow` 0-member fallback.
 
+## Live integration pool (`tests/live/`, opt-in)
+
+Real end-to-end tests that hit **live UCSD systems** with a real Chromium and hands-off Duo (CDP WebAuthn). They run in a **separate pool** via `vitest.live.config.ts` (`npm run test:live`) and are **excluded from `npm test`** (`vitest.config.ts` excludes `tests/live/**`). They are the only layer that catches live SSO/DOM drift — unit/scenario/mocked-integration can't.
+
+Rules (these mirror the hard realities of live testing):
+- **Opt-in, never CI.** Require `.env` creds + `.auth/duo-webauthn.json` (the enrolled WebAuthn key) + a machine that can run Chromium. Each test **skips cleanly** (precondition guard) when those are absent — never fail/hang on a fresh clone.
+- **Serial, clean teardown.** Duo signCount is global server state; the pool is single-fork. Never force-kill mid-ceremony (desyncs signCount → next run rejected as a clone; resync via the one-liner in `docs/engineering/hands-off-duo-webauthn.md` §6).
+- **No dashboard pollution.** Workflow e2e (later) drives `runOneItem` with the tracker pointed at a `mkdtemp` dir — rows never touch `.tracker/`, so nothing shows in the dashboard. Auth smoke emits no rows at all.
+- **Non-mutating.** Auth smoke lands read-only. Workflow e2e runs in **dry-run** (no Save/Submit) — see `docs/engineering/hands-off-duo-webauthn.md` and the workflow `dryRun` flags.
+- **Hands-off setup** lives in `tests/live/_setup.ts` (loads real `.env`, sets `HR_AUTOMATION_DUO_WEBAUTHN=1`). NO log-audit setup — live auth logs to stderr legitimately. Headless by default; `HR_TEST_HEADED=1` to watch.
+- **Flow list is shared.** The six SSO flows come from `src/infra/auth/duo-login-flows.ts` (one source of truth with the `test-login` CLI) — add a 7th flow there and it's covered everywhere.
+
 ## Regression clusters
 
 - Dashboard queue/rail counts: backend `wfCounts` regressions belong in `tests/unit/tracker/state-queries.test.ts` and pure count helpers under `tests/unit/tracker/` or `tests/unit/dashboard/`. Pin that counts are backend-authoritative, independent of the selected workflow, and use the same queue-surface model as the rendered rail badges. OCR prep rows that still render in the queue must remain counted until the queue no longer renders them.
@@ -66,6 +78,7 @@ npm run test:verbose        # Per-test pass/fail lines (best for one file or -t 
 npm run test:watch          # Watch mode for iterative dev
 npm run test:architecture   # Just the static convention guards
 npm run test:dashboard      # React component tests (jsdom pool — separate from npm test)
+npm run test:live           # Live e2e: real browser + live UCSD SSO + hands-off Duo (opt-in; skips without creds)
 npm run typecheck:all       # Typecheck tests + src together
 npx vitest run tests/unit/workflows/separations/schema.test.ts --reporter=verbose   # Single file
 npx vitest run -t "ANNUAL_DATES" --reporter=verbose                                  # Filter by test name

@@ -18,6 +18,7 @@ Returns `{ browser, context, page }`.
 - `viewport?: { width, height } | null` - default `null`, so the viewport tracks the OS window size. Pass a fixed size only when the workflow needs fixed rendering.
 - `args?: string[]` — extra Chromium args (e.g., `--window-position`, `--window-size` for tiling)
 - `acceptDownloads?: boolean` — default false, must opt-in for download workflows
+- `headless?: boolean` — default false (headed). Opt-in for unattended integration tests (`tests/live/`); production never sets it. The CDP WebAuthn hands-off Duo path works under headless Chromium.
 
 ## `gotoWithRetry(page, url, verify?, retries?, timeout?)`
 
@@ -25,7 +26,7 @@ Retrying navigation helper for transient network/chrome-error failures. Optional
 
 ## Gotchas
 
-- Always headed (`headless: false`) — no headless option exposed. Requires display.
+- Headed by default; pass `headless: true` (opt-in, tests only — production omits it) for unattended runs. Headed mode requires a display.
 - In persistent mode, `browser` is `null` — callers must check before calling `browser.close()`
 - Existing pages from prior persistent sessions may have stale state
 - Multiple workers using same `sessionDir` will conflict — use unique per-worker dirs (e.g., `ukg_session_worker1`)
