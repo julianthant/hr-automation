@@ -18,6 +18,7 @@ projection tooling `snapshot-row.ts`). Full harness API + gotchas:
 | `ocr-emergency-contact.test.ts` | **P2.10** — OCR → emergency-contact `approveTo` fan-out, same hold/cancel/release shape for a DIFFERENT form type (nested `EmergencyContactRecord` input, default delegation policy, `oc-` trace code). |
 | `ocr-verify-lookup.test.ts` | **P2.11** — OCR `verify` → person-lookup + i9-lookup **`enrichRecords`** fan-out (NO approve fan-out; verify is read-only). Asserts the full enrichment projection + a cancel-mid-enrichment invariant. See "verify enrichment fan-out shape" below. |
 | `ocr-oath-upload.test.ts` | **P2.12** — OCR (oath form) → oath-upload **`approveDocumentTo`** once-per-document fan-out. Approving an oath OCR run fans out to TWO daemons: 1 oath-signature signer row (`approveTo`) + 1 oath-upload TICKET row (`approveDocumentTo`), both under the OCR run, sharing the `ou-` trace prefix. Asserts the doc fan-out projection (ticket row file-kind title + `signerItemIds` input) + cancel-the-ticket-leaves-signer invariant. Drove the multi-target `rt.approveOcr` generalization. See "approveDocumentTo doc fan-out shape" below. |
+| `concurrency-soak.test.ts` | **P3.13** — Concurrency/soak: 2 parents × [3+2] children in flight concurrently, children cancelled at DIFFERENT stages, looped `SOAK_ITERATIONS` times. Pins no-stall / no-orphan / no-count-drift / sibling-independence / projection / group-anchor invariants every iteration plus cross-iteration drift checks. See "Concurrency/soak (P3.13)" below. |
 
 ## OCR fan-out test pattern (P2.9)
 
@@ -235,7 +236,45 @@ Every OCR-fan-out shape now has a Tier-1 projection test through the real daemon
 The multi-target `rt.approveOcr` (P2.12) is the shared seam covering BOTH
 `approveTo` + `approveDocumentTo` in one approve call.
 
+## Concurrency/soak (P3.13)
+
+`concurrency-soak.test.ts` is the Phase 3 stress/soak Tier-1 test. It drives
+TWO parents each fanning out children concurrently through the REAL daemon, then
+cancels children at DIFFERENT points, and loops the whole scenario N times.
+
+### Scenario shape (per iteration)
+
+- **Parent A** — 3 children (A1, A2, A3): A1 + A2 cancelled mid-hold at `transaction`; A3 released → done.
+- **Parent B** — 2 children (B1, B2): B1 released → done; B2 cancelled mid-hold at `transaction`.
+- **Total in flight**: 5 children → `instances: 5` (one daemon = one concurrent run).
+- **Workflow**: `soak-child`, stages `["load", "transaction", "finalize"]`, gate `"transaction"`.
+
+### Soak knob
+
+```
+SOAK_ITERATIONS (default 5)
+HR_SOAK_ITERATIONS=50 npx vitest run tests/delegation/concurrency-soak.test.ts
+```
+
+Default keeps `npm test` wall-time well under 30s (5 iterations × ~80ms each).
+Crank with the env var for local heavy soak runs.
+
+### Invariants asserted every iteration
+
+1. **No stalls**: every child reaches `done` or `failed`+`cancelled` — none stuck `claimed`/`queued`.
+2. **No orphans**: `rt.children(parentA)` == 3 exactly; `rt.children(parentB)` == 2 exactly; no run under the wrong parent; no duplicates.
+3. **No count drift**: 5 distinct child runIds across both parents; cancelled → `status:"failed"`, `step:"cancelled"`, `statusLabel:"Cancelled"`; released → `statusLabel:"Done"`.
+4. **Sibling independence**: releasing A3 while A1/A2 are being cancelled reaches done cleanly.
+5. **Projection**: `archetype:"batch-member"` + correct `parentRunId` for every child.
+6. **Group anchors**: parentA `memberCount === 3`; parentB `memberCount === 2`.
+7. **`.tracker/` untouched**: temp dir only; real `.tracker/` snapshot unchanged.
+8. **Cross-iteration count stability**: prior-iteration parents checked in every subsequent iteration (drift across iterations == bug).
+
+### ONE `rt` across all iterations
+
+The runtime is shared across soak iterations (cheaper startup; fresh `parentRunId`s per iteration provide isolation). This makes cross-iteration drift visible as an assertion failure rather than silently hiding it.
+
 ## Not yet asserted here
 
-- **Retry-after-cancel** — P2.9–P2.12 do NOT assert it; `tests/integration/
+- **Retry-after-cancel** — P2.9–P3.13 do NOT assert it; `tests/integration/
   retry-original-input.test.ts` is kept until a Tier-1 test owns it.
