@@ -1,41 +1,60 @@
 /**
- * Multi-provider vision-OCR key pool. Used by `runOcrPerPage` to fan
- * pages out across every available API key on every supported provider
- * in parallel — Gemini primary, plus OpenAI-compatible fallbacks
- * (Mistral / Groq / Sambanova) so a 30-page PDF can finish in roughly
- * `ceil(pages / pool.length)` round-trips instead of `pages / 6`.
+ * Multi-provider vision-OCR key pool. Used by `runOcrPerPage` to fan pages out
+ * across every available API key — and every model in each provider's fallback
+ * chain — in parallel. Gemini primary, then Groq / Mistral / OpenRouter /
+ * SambaNova (OpenAI-compatible). A 100-page PDF finishes in roughly
+ * `ceil(pages / pool.length)` rounds instead of one-at-a-time.
  *
- * The pool is built dynamically from `process.env` at call time; only
- * keys that are actually set show up. Each entry is a `PoolKey` with a
- * `callOcr(imagePath, prompt)` method that returns parsed JSON. Errors
- * (network, 4xx, 5xx, JSON parse) bubble up to the per-page driver so
- * it can mark that page failed and (optionally) retry on a different
- * key.
+ * The pool is built from `process.env` at call time; only providers with keys
+ * configured show up. Each entry is a `PoolKey` (one provider+key) carrying that
+ * provider's model fallback chain. `callOcr(imagePath, prompt, model)` runs OCR
+ * with a specific model and returns `{ json, promptTokens }`. On a non-2xx it
+ * throws `OcrHttpError` (status + headers + body) so the per-page runner can
+ * extract the exact retry delay and feed the usage tracker.
+ *
+ * Models, limits, and the provider set live in `provider-limits.ts`; override
+ * any chain via `OCR_<PROVIDER>_MODELS` (comma-separated) env.
  */
 import fs from "node:fs/promises";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { log } from "../../utils/log.js";
-import { readGeminiKeys, parseJsonLoose } from "./env-keys.js";
+import { parseJsonLoose } from "./env-keys.js";
+import {
+  type ModelSpec,
+  type VisionProviderId,
+  providerConfig,
+  resolveModelChain,
+  visionProviderConfigs,
+} from "./provider-limits.js";
+import { OcrHttpError } from "./rate-limit-headers.js";
+
+export interface OcrCallOutcome {
+  /** Parsed JSON from the model (array of records, or an object the runner unwraps). */
+  json: unknown;
+  /** Prompt tokens the provider reported, for TPM reconciliation. */
+  promptTokens?: number;
+}
 
 export interface PoolKey {
-  /** Stable id for logging — e.g. `"gemini-1"`, `"mistral-2"`. */
+  /** Stable id for logging — e.g. `"gemini-1"`, `"groq-2"`. */
   id: string;
-  /** Provider family. Used by callers to bias/distribute work. */
-  providerId: "gemini" | "mistral" | "groq" | "sambanova";
+  /** Provider family. */
+  providerId: VisionProviderId;
   /** 1-based index within the provider's key set. */
   keyIndex: number;
-  /** Raw key value for in-memory rotation only. Never log this field. */
-  rotationKey?: string;
-  /** Run OCR on a single PNG using this provider+key. Returns parsed JSON. */
-  callOcr(imagePath: string, prompt: string): Promise<unknown>;
+  /** Raw key value — used for in-memory usage tracking only. Never log this. */
+  rotationKey: string;
+  /** This provider's model fallback chain (first = primary). */
+  models: ModelSpec[];
+  /** Provider priority (lower = preferred). */
+  priority: number;
+  /** Run OCR on a single PNG with a specific model. Returns parsed JSON + token usage. */
+  callOcr(imagePath: string, prompt: string, model: string): Promise<OcrCallOutcome>;
 }
 
 // ─── Env reading ─────────────────────────────────────────────
 
 function readKeys(prefix: string, max = 8): string[] {
   const out: string[] = [];
-  // First slot is unsuffixed (e.g. GEMINI_API_KEY); subsequent are
-  // numbered (GEMINI_API_KEY2 .. GEMINI_API_KEYN).
   const first = (process.env[prefix] ?? "").trim();
   if (first) out.push(first);
   for (let i = 2; i <= max; i++) {
@@ -47,86 +66,42 @@ function readKeys(prefix: string, max = 8): string[] {
 
 // ─── Provider call implementations ───────────────────────────
 
-async function callGemini(
-  apiKey: string,
-  imagePath: string,
-  prompt: string,
-): Promise<unknown> {
-  // gemini-3-flash-preview is Google's newest multimodal model (per
-  // googleapis/python-genai/codegen_instructions.md, "use gemini-3-flash-preview
-  // for general text and multimodal tasks"). Best vision OCR quality
-  // available with usable quota. Override via OCR_GEMINI_MODEL env, e.g.:
-  //   OCR_GEMINI_MODEL=gemini-2.5-flash       (older but stable)
-  //   OCR_GEMINI_MODEL=gemini-2.5-flash-lite  (low latency / high volume)
-  //   OCR_GEMINI_MODEL=gemini-3-pro-preview   (highest quality, slower)
-  const modelName = process.env.OCR_GEMINI_MODEL ?? "gemini-3-flash-preview";
+async function callGemini(apiKey: string, imagePath: string, prompt: string, model: string): Promise<OcrCallOutcome> {
   const png = await fs.readFile(imagePath);
-  log.step(`[ocr/gemini] sending page ${imagePath.split("/").pop()} → model=${modelName}, prompt=${prompt.length}c, image=${png.length}B`);
-  const genai = new GoogleGenerativeAI(apiKey);
-  const model = genai.getGenerativeModel({
-    model: modelName,
-    generationConfig: { responseMimeType: "application/json" },
-  });
-  const parts = [
-    { text: prompt },
-    { inlineData: { mimeType: "image/png", data: png.toString("base64") } },
-  ] as const;
-
-  function logComplete(full: string, chunkCount: number, mode: "stream" | "single") {
-    const detail =
-      mode === "stream"
-        ? `${chunkCount} chunks, ${full.length}c`
-        : `non-streaming, ${full.length}c`;
-    log.success(
-      `[ocr/gemini] response complete (${detail}) — raw: ${full.slice(0, 400).replace(/\n/g, " ")}${full.length > 400 ? "…" : ""}`,
-    );
-  }
-
-  // Prefer streaming so chunks appear in dashboard logs; fall back to a single
-  // `generateContent` when the SDK's SSE parser hits leftover buffer at EOF
-  // ("Failed to parse stream") — seen with preview models + @google/generative-ai.
-  try {
-    const stream = (await model.generateContentStream([...parts])) as {
-      stream: AsyncIterable<{ text(): string }>;
-    };
-    let full = "";
-    let chunkCount = 0;
-    for await (const chunk of stream.stream) {
-      const piece = chunk.text();
-      if (!piece) continue;
-      full += piece;
-      chunkCount += 1;
-      log.step(
-        `[ocr/gemini] chunk ${chunkCount} (+${piece.length}c, total ${full.length}c): ${piece.slice(0, 120).replace(/\n/g, " ")}`,
-      );
-    }
-    logComplete(full, chunkCount, "stream");
-    return parseJsonLoose(full);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const streamParseFailed =
-      /Failed to parse stream/i.test(msg) || /Error parsing JSON response/i.test(msg);
-    if (!streamParseFailed) throw err;
-
-    log.warn(`[ocr/gemini] stream ended unparsable for SDK (${msg.slice(0, 160)}); using generateContent`);
-    const raw = (await model.generateContent([...parts])) as {
-      response: { text(): string };
-    };
-    const full = raw.response.text();
-    logComplete(full, 0, "single");
-    return parseJsonLoose(full);
-  }
+  log.step(`[ocr/gemini] page ${imagePath.split("/").pop()} → model=${model}, prompt=${prompt.length}c, image=${png.length}B`);
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          { parts: [{ text: prompt }, { inline_data: { mime_type: "image/png", data: png.toString("base64") } }] },
+        ],
+        generationConfig: { responseMimeType: "application/json", temperature: 0 },
+      }),
+    },
+  );
+  const bodyText = await resp.text();
+  if (!resp.ok) throw new OcrHttpError("gemini", resp.status, resp.headers, bodyText);
+  const data = JSON.parse(bodyText) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: { promptTokenCount?: number };
+  };
+  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  log.success(`[ocr/gemini] ${model} done (${text.length}c): ${text.slice(0, 200).replace(/\n/g, " ")}`);
+  return { json: parseJsonLoose(text), promptTokens: data.usageMetadata?.promptTokenCount };
 }
 
 async function callOpenAICompatVision(args: {
+  provider: VisionProviderId;
   endpoint: string;
   apiKey: string;
   model: string;
   imagePath: string;
   prompt: string;
-  /** Most providers honor `response_format: {type: "json_object"}`; Groq has spotty support per-model. */
   jsonMode: boolean;
-}): Promise<unknown> {
+}): Promise<OcrCallOutcome> {
   const png = await fs.readFile(args.imagePath);
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
   const body: Record<string, unknown> = {
@@ -140,140 +115,74 @@ async function callOpenAICompatVision(args: {
         ],
       },
     ],
-    // Cap output so a runaway model doesn't burn quota; OCR responses
-    // for one form fit comfortably in 4 KB of tokens.
-    max_tokens: 4096,
     temperature: 0,
   };
-  if (args.jsonMode) {
-    body.response_format = { type: "json_object" };
-  }
+  if (args.jsonMode) body.response_format = { type: "json_object" };
   const resp = await fetch(args.endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${args.apiKey}`,
-    },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${args.apiKey}` },
     body: JSON.stringify(body),
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`${args.endpoint} ${resp.status}: ${text.slice(0, 300)}`);
-  }
-  const data = (await resp.json()) as {
+  const raw = await resp.text();
+  if (!resp.ok) throw new OcrHttpError(args.provider, resp.status, resp.headers, raw);
+  const data = JSON.parse(raw) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number };
   };
   const text = data.choices?.[0]?.message?.content ?? "";
-  return parseJsonLoose(text);
+  return { json: parseJsonLoose(text), promptTokens: data.usage?.prompt_tokens };
 }
 
 // ─── Pool builder ────────────────────────────────────────────
 
 /**
- * Read every supported provider's keys out of `process.env` and return
- * a flat pool. Order: Gemini first (best OCR quality), then Mistral
- * (Pixtral), then Groq (Llama 4 vision — fastest), then Sambanova
- * (Llama 3.2 vision). Empty if no keys are configured.
- *
- * Override any provider's model via env:
- *   OCR_GEMINI_MODEL   (default `gemini-2.5-flash`)
- *   OCR_MISTRAL_MODEL  (default `pixtral-12b-2409`)
- *   OCR_GROQ_MODEL     (default `meta-llama/llama-4-scout-17b-16e-instruct`)
- *   OCR_SAMBANOVA_MODEL (default `Llama-3.2-90B-Vision-Instruct`)
- *
- * Disable any provider by unsetting its keys. Disable the entire pool
- * (force the legacy whole-PDF path) by unsetting all of them.
+ * Read every supported provider's keys out of `process.env` and return a flat
+ * pool ordered by provider priority (Gemini → Groq → Mistral → OpenRouter →
+ * SambaNova). Each entry carries that provider's model fallback chain. Empty if
+ * no keys are configured. Disable a provider by unsetting its keys.
  */
 export function buildVisionPool(): PoolKey[] {
   const pool: PoolKey[] = [];
 
-  // Gemini — direct SDK, JSON mode native, model env-overridable.
-  const geminiKeys = readGeminiKeys();
-  geminiKeys.forEach((key, i) => {
-    const idx = i + 1;
-    pool.push({
-      id: `gemini-${idx}`,
-      providerId: "gemini",
-      keyIndex: idx,
-      rotationKey: key,
-      callOcr: (imagePath, prompt) => callGemini(key, imagePath, prompt),
+  for (const cfg of visionProviderConfigs()) {
+    const keys = readKeys(cfg.keyEnvPrefix);
+    if (keys.length === 0) continue;
+    const models = resolveModelChain(cfg);
+    keys.forEach((key, i) => {
+      const idx = i + 1;
+      pool.push({
+        id: `${cfg.id}-${idx}`,
+        providerId: cfg.id,
+        keyIndex: idx,
+        rotationKey: key,
+        models,
+        priority: cfg.priority,
+        callOcr: (imagePath, prompt, model) =>
+          cfg.id === "gemini"
+            ? callGemini(key, imagePath, prompt, model)
+            : callOpenAICompatVision({
+                provider: cfg.id,
+                endpoint: cfg.endpoint!,
+                apiKey: key,
+                model,
+                imagePath,
+                prompt,
+                jsonMode: cfg.jsonMode,
+              }),
+      });
     });
-  });
-
-  // Mistral — OpenAI-compatible /v1/chat/completions with image_url.
-  const mistralKeys = readKeys("MISTRAL_API_KEY");
-  const mistralModel = process.env.OCR_MISTRAL_MODEL ?? "pixtral-12b-2409";
-  mistralKeys.forEach((key, i) => {
-    const idx = i + 1;
-    pool.push({
-      id: `mistral-${idx}`,
-      providerId: "mistral",
-      keyIndex: idx,
-      callOcr: (imagePath, prompt) =>
-        callOpenAICompatVision({
-          endpoint: "https://api.mistral.ai/v1/chat/completions",
-          apiKey: key,
-          model: mistralModel,
-          imagePath,
-          prompt,
-          jsonMode: true,
-        }),
-    });
-  });
-
-  // Groq — OpenAI-compatible. Vision models live on the same endpoint.
-  // JSON mode is best-effort; the loose parser handles markdown-fenced
-  // output some Llama variants emit.
-  const groqKeys = readKeys("GROQ_API_KEY");
-  const groqModel =
-    process.env.OCR_GROQ_MODEL ?? "meta-llama/llama-4-scout-17b-16e-instruct";
-  groqKeys.forEach((key, i) => {
-    const idx = i + 1;
-    pool.push({
-      id: `groq-${idx}`,
-      providerId: "groq",
-      keyIndex: idx,
-      callOcr: (imagePath, prompt) =>
-        callOpenAICompatVision({
-          endpoint: "https://api.groq.com/openai/v1/chat/completions",
-          apiKey: key,
-          model: groqModel,
-          imagePath,
-          prompt,
-          jsonMode: false,
-        }),
-    });
-  });
-
-  // Sambanova — OpenAI-compatible.
-  const sambanovaKeys = readKeys("SAMBANOVA_API_KEY");
-  const sambanovaModel =
-    process.env.OCR_SAMBANOVA_MODEL ?? "Llama-3.2-90B-Vision-Instruct";
-  sambanovaKeys.forEach((key, i) => {
-    const idx = i + 1;
-    pool.push({
-      id: `sambanova-${idx}`,
-      providerId: "sambanova",
-      keyIndex: idx,
-      callOcr: (imagePath, prompt) =>
-        callOpenAICompatVision({
-          endpoint: "https://api.sambanova.ai/v1/chat/completions",
-          apiKey: key,
-          model: sambanovaModel,
-          imagePath,
-          prompt,
-          jsonMode: true,
-        }),
-    });
-  });
+  }
 
   return pool;
 }
 
-/**
- * Describe the pool composition for log lines. Doesn't expose key
- * material — only the per-provider count.
- */
+/** Default model chain for a provider id (used when a PoolKey omits `models`). */
+export function defaultModelChain(provider: VisionProviderId): ModelSpec[] {
+  const cfg = providerConfig(provider);
+  return cfg ? resolveModelChain(cfg) : [];
+}
+
+/** Describe the pool composition for log lines (no key material). */
 export function summarizePool(pool: PoolKey[]): string {
   const grouped = Object.groupBy(pool, (k) => k.providerId);
   const parts = Object.entries(grouped).map(([p, keys]) => `${p}=${keys!.length}`);

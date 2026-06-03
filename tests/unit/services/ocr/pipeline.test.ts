@@ -42,7 +42,15 @@ test("runOcrPipeline returns per-page status with success and failure flags", as
       schemaName: "Test",
       _renderOverride: async () => ["page-01.png", "page-02.png", "page-03.png"],
       _poolOverride: [
-        { id: "test-1", providerId: "gemini", keyIndex: 1, callOcr: async () => ({}) },
+        {
+          id: "test-1",
+          providerId: "gemini",
+          keyIndex: 1,
+          rotationKey: "k1",
+          priority: 1,
+          models: [{ id: "test-model", limit: { rpm: 1000, tpm: 1_000_000, rpd: 1000, imgTokens: 1 } }],
+          callOcr: async () => ({ json: [] }),
+        },
       ],
     });
     assert.equal(result.pages.length, 3, "all 3 pages reported");
@@ -72,7 +80,15 @@ test("runOcrPipeline returns all-failed result instead of falling back to whole-
       schemaName: "Test",
       _renderOverride: async () => ["page-01.png", "page-02.png"],
       _poolOverride: [
-        { id: "test-1", providerId: "gemini", keyIndex: 1, callOcr: async () => ({}) },
+        {
+          id: "test-1",
+          providerId: "gemini",
+          keyIndex: 1,
+          rotationKey: "k1",
+          priority: 1,
+          models: [{ id: "test-model", limit: { rpm: 1000, tpm: 1_000_000, rpd: 1000, imgTokens: 1 } }],
+          callOcr: async () => ({ json: [] }),
+        },
       ],
     });
     assert.equal(result.data.length, 0);
@@ -99,7 +115,15 @@ test("runOcrPipeline fails the row when zero pages render", async () => {
         schemaName: "Test",
         _renderOverride: async () => [],
         _poolOverride: [
-          { id: "test-1", providerId: "gemini", keyIndex: 1, callOcr: async () => ({}) },
+          {
+          id: "test-1",
+          providerId: "gemini",
+          keyIndex: 1,
+          rotationKey: "k1",
+          priority: 1,
+          models: [{ id: "test-model", limit: { rpm: 1000, tpm: 1_000_000, rpd: 1000, imgTokens: 1 } }],
+          callOcr: async () => ({ json: [] }),
+        },
         ],
       }),
       /PDF page render failed/,

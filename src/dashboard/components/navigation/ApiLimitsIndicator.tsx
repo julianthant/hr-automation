@@ -19,16 +19,17 @@ interface OcrKeyStatus {
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
-type ProviderId = "gemini" | "mistral" | "groq" | "sambanova";
+type ProviderId = "gemini" | "groq" | "mistral" | "openrouter" | "sambanova";
 
 const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Gemini",
-  mistral: "Mistral",
   groq: "Groq",
+  mistral: "Mistral",
+  openrouter: "OpenRouter",
   sambanova: "Sambanova",
 };
 
-const PROVIDER_ORDER: ProviderId[] = ["gemini", "mistral", "groq", "sambanova"];
+const PROVIDER_ORDER: ProviderId[] = ["gemini", "groq", "mistral", "openrouter", "sambanova"];
 
 const STATE_LABEL: Record<KeyStateKind, string> = {
   "available": "available",
@@ -158,8 +159,9 @@ export function ApiLimitsIndicator() {
 
   const byProvider: Record<ProviderId, OcrKeyStatus[]> = {
     gemini: [],
-    mistral: [],
     groq: [],
+    mistral: [],
+    openrouter: [],
     sambanova: [],
   };
   for (const s of statuses) (byProvider[s.providerId] ??= []).push(s);
