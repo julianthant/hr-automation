@@ -15,6 +15,7 @@ projection tooling `snapshot-row.ts`). Full harness API + gotchas:
 |------|-------|
 | `harness-smoke.test.ts` | The linchpin: 3-child `parentRunId` fan-out, cancel one mid-hold, siblings unaffected, projection asserts, `.tracker/` untouched. Reference pattern for all delegation tests. |
 | `ocr-oath-signature.test.ts` | **P2.9 star test** — OCR → oath-signature `approveTo` fan-out through the real daemon, under hold/cancel/release. |
+| `ocr-emergency-contact.test.ts` | **P2.10** — OCR → emergency-contact `approveTo` fan-out, same hold/cancel/release shape for a DIFFERENT form type (nested `EmergencyContactRecord` input, default delegation policy, `oc-` trace code). |
 
 ## OCR fan-out test pattern (P2.9)
 
@@ -22,14 +23,20 @@ The OCR → downstream `approveTo` fan-out is exercised through three harness
 seams, all gated on the `ocr` runtime option (`createDelegationRuntime({
 workflows, ocr: { formType } })`):
 
-1. **`rt.stubOcr(records, roster?)`** — seed PII-FREE synthetic records (fake
-   names + UCPath-shaped `10######` EIDs) the stub `runOcrOrchestrator` returns.
-   The thin test-only `"ocr"` workflow + daemon (`_runtime/ocr-stub.ts`) drives
-   the REAL orchestrator with stubbed LLM/roster/eid-lookup (`_ocrPipelineOverride`
-   / `_loadRosterOverride` / `_enqueueEidLookupOverride` / `_watchChildRunsOverride`
-   / `_disableSqliteDependencies`) — no browser, no LLM, no SQLite deps. When
-   `roster` is omitted, one roster row per record is derived (EID short-circuit →
-   `matched`). Call BEFORE `enqueueOcr`.
+1. **`rt.stubOcr(rawRecords, roster?)`** — seed PII-FREE synthetic **raw OCR
+   records** (fake names + UCPath-shaped `10######` EIDs) the stub
+   `runOcrOrchestrator` returns **VERBATIM**. The thin test-only `"ocr"` workflow +
+   daemon (`_runtime/ocr-stub.ts`) drives the REAL orchestrator with stubbed
+   LLM/roster/eid-lookup (`_ocrPipelineOverride` / `_loadRosterOverride` /
+   `_enqueueEidLookupOverride` / `_watchChildRunsOverride` /
+   `_disableSqliteDependencies`) — no browser, no LLM, no SQLite deps. **The stub
+   is FORM-AGNOSTIC** (P2.10): `_ocrPipelineOverride` returns the seeded records
+   untouched and the REAL `spec.matchRecord` runs on them, so the test supplies
+   form-shaped raw records — oath-shaped via `rawOathRecordFromStub`, EC-shaped
+   via `rawEcRecordFromStub` (`PermissiveRecordSchema` shape: `employee.{name,
+   employeeId}` + nested `emergencyContact`). When `roster` is omitted, one roster
+   row per record is derived via the form-agnostic `rawRecordEid`/`rawRecordName`
+   extractors (EID short-circuit → `matched`). Call BEFORE `enqueueOcr`.
 2. **`rt.enqueueOcr({ fixturePath, originalName? })`** — register a renderable
    PDF (prefers the real fixture e.g. `tests/data/multiple-oath.pdf`; falls back
    to a synthetic one-pager if it can't render headlessly — records come from the
@@ -55,6 +62,24 @@ a batch surface even singly), and a spec `initialData` stamping `emplId` + an
 EID). `makeGatedWorkflow`'s `GatedWorkflowSpec` was extended to accept
 `runtimePolicy` / `initialData` / `getId` / `getName` / `deriveItemId` /
 `operatorSubject` / `label` for exactly this faithfulness.
+
+The gated `emergency-contact` stub (P2.10) mirrors EC: `inputSubject:"name"`,
+`code:"ec"`, `archetype:"batch"`, the real
+`EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY` (**default** delegation policy — NO
+`alwaysBatchDelegatedMembers`). Its `initialData`/`getId`/`getName`/`deriveItemId`
+read the **nested** `EmergencyContactRecord` (`employee.employeeId` /
+`employee.name`), stamping flat `emplId`/`employeeName` so the title resolves to
+the employee name and the subtitle to the EID. Because EC fans out **3** members
+under one parentRunId, they still group into a `batch` anchor via the count-≥2
+path in `buildTrackerQueueSurfaces` — `alwaysBatchDelegatedMembers` only matters
+for the lone-member case. EC has no `traceCode`, so the OCR root + every child
+keep the default `oc-…` prefix (oath brands `ou-` via `spec.traceCode`).
+
+**Approve payloads:** build the selected/approved records via
+`approvedOathRecordsFromStub` (oath: `selected:true` + `matchSource:"form-eid"`)
+or `approvedEcRecordsFromStub` (EC: `selected:true` + `matchSource:"form"`, nested
+`employee`/`emergencyContact` satisfying `approveTo.deriveInput`; EC has no
+`approveTo.canFanOut`, so every selected record fans out).
 
 ### Subtitle truth (assert the real projection, not a guess)
 
