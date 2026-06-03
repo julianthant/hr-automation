@@ -56,22 +56,22 @@ export function oathSignatureBeats(
 
 /**
  * Convenience masking helper — replaces volatile fields (per-run identifiers,
- * instance counter, last-4-runId subtitle suffix) with stable placeholders so
- * `toMatchInlineSnapshot()` locks the shape across runs, not the specific id
- * values.
+ * instance counter) with stable placeholders so `toMatchInlineSnapshot()` locks
+ * the shape across runs, not the specific id values.
+ *
+ * The retired `Oath · <last4>` subtitle masking was dead code: the EID-signer
+ * flow now resolves a person-kind footer subtitle to the EID (flat single) or
+ * the trace id (batch/preview anchor), never the legacy `Oath · xxxx` template,
+ * so the regex never matched. Trace ids are already scrubbed by `snapshotRow`.
  */
 export function maskVolatile<T extends {
   runId: string;
   itemId: string;
   data: Record<string, string>;
-  subtitle?: string | undefined;
   parentRunId?: string | null;
 }>(
   snap: T,
 ): T {
-  const subtitle = typeof snap.subtitle === "string"
-    ? snap.subtitle.replace(/^Oath · [0-9a-f]{4}$/, "Oath · <last4>")
-    : snap.subtitle;
   const parentRunId = typeof snap.parentRunId === "string" && /#[0-9a-f]{8}$/.test(snap.parentRunId)
     ? snap.parentRunId.replace(/#[0-9a-f]{8}$/, "#<run>")
     : snap.parentRunId;
@@ -80,7 +80,6 @@ export function maskVolatile<T extends {
     runId: "<runId>",
     itemId: "<itemId>",
     ...(parentRunId !== undefined ? { parentRunId } : {}),
-    ...(subtitle !== undefined ? { subtitle } : {}),
     data: { ...snap.data, instance: "<instance>" },
   };
 }

@@ -10,9 +10,17 @@ Snapshots should cover row title, subtitle, status, archetype, surface placement
 
 - Build workflow-specific `ScenarioBeat[]` helpers in `_beats.ts`.
 - Use `createScenarioRuntime({ workflow })`.
-- Snapshot through `snapshotRow(...)` so rows pass through the same projection/display pipeline as the dashboard.
-- Mask volatile ids before inline snapshots.
+- Snapshot a FLAT row through `snapshotRow(...)`; snapshot a BATCH/PREVIEW group card through `snapshotGroupAnchor(...)`. Both pass rows through the same projection/display pipeline as the dashboard.
+- Mask volatile ids before inline snapshots (`maskVolatile` for oath-signature) OR pass a fixed `runId` to `enqueue(...)` so the snapshot's `runId` field is deterministic. Trace ids are auto-scrubbed by the snapshot helpers.
 - Regenerate with `npx vitest run tests/scenarios/<workflow>/ -u` only for legitimate row-shape changes, then review the diff.
+
+## Snapshot fidelity (do NOT regress)
+
+The snapshot helpers route through the SAME code the React queue panel uses, so a status/subtitle bug in source surfaces as a snapshot diff:
+
+- **Status label + secondary tag** come from the real `resolveQueueRowStatus` + the workflow's `statusExtensions` (registered via `queue-row-status-index.js`). So derived statuses (person-lookup `notFound`, OCR `needsReview`) and the A/IA secondary chip appear in `statusLabel` / `secondaryTag` exactly as rendered. Do NOT reimplement status logic in the harness.
+- **Group-anchor subtitle** comes from `buildProjectionFromQueueSurface` with `preferTraceIdSubtitle: true`. A person batch/preview anchor's footer subtitle is the TRACE ID (never a repeated member EID); a file/catalog anchor's is always the trace id. `snapshotRow` (per-row projection) does NOT exercise this — use `snapshotGroupAnchor` for it.
+- **Surface collapse** mirrors the dashboard's two-stage dedup: `dedupeLatestByIdWithCarriedEmplId` (latest row per `id`) → `groupMergedTrackerEntries` (one primary per merge key). Both stages are required — skipping the first ties the `activityTimestamp` sort across a run's pending/running/done rows (they share `firstLogTs`) and flakily picks a stale primary.
 
 ## Isolation
 
