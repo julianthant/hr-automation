@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { defineWorkflow } from "../../../src/core/index.js";
@@ -207,7 +207,10 @@ export function makeStubOcrWorkflow(
       // onto accumulated data so the kernel's terminal `done` row keeps the OCR
       // preview identity (pdfOriginalName/mode/file-kind title) rather than
       // collapsing to a sparse, title-less row.
-      const { parentRunId: _parentRunId, ...reviewData } = lastReviewData ?? {};
+      // Strip the kernel-owned parentRunId so the re-stamp doesn't fight the
+      // kernel's own delegated-scope handling.
+      const reviewData: Record<string, unknown> = { ...(lastReviewData ?? {}) };
+      delete reviewData.parentRunId;
       ctx.updateData({
         ...reviewData,
         mode: "prepare",
