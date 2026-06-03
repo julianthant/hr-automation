@@ -15,8 +15,6 @@ import {
   checkPlaywrightBrowsers,
   checkDirWritable,
   renderResults,
-  validateBotToken,
-  discoverChatId,
   writeEnvVar,
 } from "../../../../src/scripts/ops/setup.js";
 import { readFileSync } from "node:fs";
@@ -240,75 +238,6 @@ describe("renderResults", () => {
   });
 });
 
-describe("validateBotToken", () => {
-  it("rejects empty input", () => {
-    assert.equal(validateBotToken("").ok, false);
-  });
-
-  it("rejects short tokens (no colon)", () => {
-    assert.equal(validateBotToken("abc").ok, false);
-  });
-
-  it("accepts the BotFather token format", () => {
-    const r = validateBotToken("7234567890:AAH-abcdefghijklmnopqrstuvwxyz1234");
-    assert.equal(r.ok, true);
-  });
-
-  it("trims whitespace before validating", () => {
-    const r = validateBotToken("  7234567890:AAH-abcdefghijklmnopqrstuvwxyz1234  ");
-    assert.equal(r.ok, true);
-    if (r.ok) assert.equal(r.token, "7234567890:AAH-abcdefghijklmnopqrstuvwxyz1234");
-  });
-});
-
-describe("discoverChatId", () => {
-  function mockGetUpdates(payload: unknown): typeof fetch {
-    return (async () => new Response(JSON.stringify(payload))) as typeof fetch;
-  }
-
-  it("returns the chat_id of the most recent message", async () => {
-    const fetchFn = mockGetUpdates({
-      ok: true,
-      result: [
-        { update_id: 1, message: { chat: { id: 111 } } },
-        { update_id: 2, message: { chat: { id: 222 } } },
-        { update_id: 3, message: { chat: { id: 333 } } },
-      ],
-    });
-    const r = await discoverChatId("111:AAA", { fetchFn });
-    assert.deepEqual(r, { ok: true, chatId: "333" });
-  });
-
-  it("returns ok:false when no updates exist", async () => {
-    const fetchFn = mockGetUpdates({ ok: true, result: [] });
-    const r = await discoverChatId("111:AAA", { fetchFn });
-    assert.equal(r.ok, false);
-  });
-
-  it("returns ok:false on Telegram API error response", async () => {
-    const fetchFn = mockGetUpdates({ ok: false, description: "Unauthorized" });
-    const r = await discoverChatId("111:AAA", { fetchFn });
-    assert.equal(r.ok, false);
-  });
-
-  it("returns ok:false on network error", async () => {
-    const failing: typeof fetch = async () => {
-      throw new Error("ECONNREFUSED");
-    };
-    const r = await discoverChatId("111:AAA", { fetchFn: failing });
-    assert.equal(r.ok, false);
-  });
-
-  it("returns ok:false when the most recent update has no message.chat.id", async () => {
-    const fetchFn = mockGetUpdates({
-      ok: true,
-      result: [{ update_id: 1, edited_channel_post: {} }],
-    });
-    const r = await discoverChatId("111:AAA", { fetchFn });
-    assert.equal(r.ok, false);
-  });
-});
-
 describe("writeEnvVar", () => {
   let tmp: string;
   beforeEach(() => {
@@ -319,25 +248,25 @@ describe("writeEnvVar", () => {
   });
 
   it("creates .env with a single key=value line when file is missing", () => {
-    writeEnvVar(tmp, "TELEGRAM_BOT_TOKEN", "111:AAA");
+    writeEnvVar(tmp, "SOME_TOKEN", "abc123");
     const env = readFileSync(join(tmp, ".env"), "utf-8");
-    assert.match(env, /^TELEGRAM_BOT_TOKEN=111:AAA$/m);
+    assert.match(env, /^SOME_TOKEN=abc123$/m);
   });
 
   it("appends a new key when .env exists without it", () => {
     writeFileSync(join(tmp, ".env"), "UCPATH_USER_ID=foo\nUCPATH_PASSWORD=bar\n");
-    writeEnvVar(tmp, "TELEGRAM_BOT_TOKEN", "111:AAA");
+    writeEnvVar(tmp, "SOME_TOKEN", "abc123");
     const env = readFileSync(join(tmp, ".env"), "utf-8");
     assert.match(env, /UCPATH_USER_ID=foo/);
-    assert.match(env, /^TELEGRAM_BOT_TOKEN=111:AAA$/m);
+    assert.match(env, /^SOME_TOKEN=abc123$/m);
   });
 
   it("overwrites an existing key in place (idempotent re-runs)", () => {
-    writeFileSync(join(tmp, ".env"), "TELEGRAM_BOT_TOKEN=old\nUCPATH_USER_ID=foo\n");
-    writeEnvVar(tmp, "TELEGRAM_BOT_TOKEN", "new");
+    writeFileSync(join(tmp, ".env"), "SOME_TOKEN=old\nUCPATH_USER_ID=foo\n");
+    writeEnvVar(tmp, "SOME_TOKEN", "new");
     const env = readFileSync(join(tmp, ".env"), "utf-8");
-    assert.match(env, /^TELEGRAM_BOT_TOKEN=new$/m);
-    assert.doesNotMatch(env, /TELEGRAM_BOT_TOKEN=old/);
+    assert.match(env, /^SOME_TOKEN=new$/m);
+    assert.doesNotMatch(env, /SOME_TOKEN=old/);
     assert.match(env, /^UCPATH_USER_ID=foo$/m);
   });
 

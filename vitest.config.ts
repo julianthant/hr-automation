@@ -36,9 +36,9 @@ export default defineConfig({
     // node:assert/strict carries assertions; vitest's `expect` is not used.
     globals: false,
     // node:test had effectively no per-test timeout for short waits; vitest
-    // defaults to 5s, which trips tests that exercise the real 5s production
-    // AbortSignal.timeout (e.g. infra/auth/telegram-notify). 30s matches the
-    // node:test runner's old behavior comfortably.
+    // defaults to 5s, which trips tests that exercise AbortSignal.timeout
+    // production paths. 30s matches the node:test runner's old behavior
+    // comfortably.
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

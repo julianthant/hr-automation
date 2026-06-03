@@ -34,13 +34,13 @@ describe("parseSubsQuery", () => {
   });
 
   test("rejects non-array JSON", () => {
-    const result = parseSubsQuery(JSON.stringify({ id: "s1", topic: "telegram" }));
+    const result = parseSubsQuery(JSON.stringify({ id: "s1", topic: "sessions" }));
     assert.ok("error" in result, "should return error for non-array");
     assert.ok((result as { error: string }).error.includes("array"));
   });
 
   test("rejects element with missing id field", () => {
-    const result = parseSubsQuery(JSON.stringify([{ topic: "telegram", params: {} }]));
+    const result = parseSubsQuery(JSON.stringify([{ topic: "sessions", params: {} }]));
     assert.ok("error" in result, "should return error for missing id");
   });
 
@@ -52,28 +52,28 @@ describe("parseSubsQuery", () => {
   test("rejects duplicate subscription ids", () => {
     const result = parseSubsQuery(
       JSON.stringify([
-        { id: "s1", topic: "telegram", params: {} },
         { id: "s1", topic: "sessions", params: {} },
+        { id: "s1", topic: "entries", params: {} },
       ]),
     );
     assert.ok("error" in result, "should return error for duplicate ids");
     assert.ok((result as { error: string }).error.includes("duplicate"));
   });
 
-  test("parses a valid telegram-only subscription", () => {
-    const raw = JSON.stringify([{ id: "s1", topic: "telegram", params: {} }]);
+  test("parses a valid single subscription", () => {
+    const raw = JSON.stringify([{ id: "s1", topic: "sessions", params: {} }]);
     const result = parseSubsQuery(raw);
     assert.ok(!("error" in result), `unexpected error: ${JSON.stringify(result)}`);
     const subs = result as Array<{ id: string; topic: string; params: unknown }>;
     assert.equal(subs.length, 1);
     assert.equal(subs[0].id, "s1");
-    assert.equal(subs[0].topic, "telegram");
+    assert.equal(subs[0].topic, "sessions");
   });
 
   test("parses multiple subscriptions with different ids", () => {
     const raw = JSON.stringify([
-      { id: "s1", topic: "telegram", params: {} },
-      { id: "s2", topic: "sessions", params: {} },
+      { id: "s1", topic: "sessions", params: {} },
+      { id: "s2", topic: "entries", params: {} },
     ]);
     const result = parseSubsQuery(raw);
     assert.ok(!("error" in result));
@@ -165,106 +165,26 @@ describe("/events/hub integration", () => {
   });
 
   test("returns 400 for non-array subs param", async () => {
-    const subs = encodeURIComponent(JSON.stringify({ id: "s1", topic: "telegram" }));
+    const subs = encodeURIComponent(JSON.stringify({ id: "s1", topic: "sessions" }));
     const res = await fetch(`http://localhost:${port}/events/hub?subs=${subs}`);
     assert.equal(res.status, 400);
   });
 
   test("skips unknown topic but keeps connection open", async () => {
-    // Two subs: one unknown, one telegram — hub should still emit for telegram
+    // Two subs: one unknown, one sessions — hub should still emit for sessions
     const subs = encodeURIComponent(
       JSON.stringify([
         { id: "u1", topic: "no-such-topic", params: {} },
-        { id: "t1", topic: "telegram", params: {} },
+        { id: "s1", topic: "sessions", params: {} },
       ]),
     );
     const envelopes = await collectHubEnvelopes(
       `http://localhost:${port}/events/hub?subs=${subs}`,
       { stopAfter: 1, timeoutMs: 2500 },
     );
-    // The telegram sub should have emitted at least one envelope
+    // The sessions sub should have emitted at least one envelope
     assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
-    assert.equal(envelopes[0].sub, "t1");
-  });
-
-  test("hub emits envelope with sub id and data for telegram subscription", async () => {
-    // Write a telegram_sent session event so the first tick has data
-    mkdirSync(sessionsDir(dir), { recursive: true });
-    const sessionsDated = sessionFilePath(new Date().toISOString().slice(0, 10), dir);
-    appendFileSync(
-      sessionsDated,
-      JSON.stringify({
-        type: "telegram_sent",
-        timestamp: new Date().toISOString(),
-        pid: process.pid,
-        message: "Test telegram message",
-      }) + "\n",
-    );
-
-    const subs = encodeURIComponent(
-      JSON.stringify([{ id: "s1", topic: "telegram", params: {} }]),
-    );
-    const envelopes = await collectHubEnvelopes(
-      `http://localhost:${port}/events/hub?subs=${subs}`,
-      { stopAfter: 1, timeoutMs: 2500 },
-    );
-
-    assert.ok(envelopes.length >= 1, "expected at least 1 envelope");
-    const first = envelopes[0];
-    assert.equal(first.sub, "s1");
-    assert.ok(Array.isArray(first.data), "data should be an array of session events");
-    const events = first.data as Array<{ type: string }>;
-    assert.ok(
-      events.some((e) => e.type === "telegram_sent"),
-      "expected telegram_sent in data",
-    );
-  });
-
-  test("legacy /events/telegram returns 404 (removed — use /events/hub)", async () => {
-    const res = await fetch(`http://localhost:${port}/events/telegram`);
-    assert.equal(res.status, 404, "legacy endpoint should return 404 after removal");
-  });
-
-  test("hub emits telegram envelope when events live in a dated sessions file", async () => {
-    const iso = new Date().toISOString();
-    mkdirSync(sessionsDir(dir), { recursive: true });
-    const sessionsFile = sessionFilePath(dateLocal(new Date(iso)), dir);
-    appendFileSync(
-      sessionsFile,
-      JSON.stringify({
-        type: "telegram_sent",
-        timestamp: iso,
-        pid: process.pid,
-        message: "Dated snapshot file message",
-      }) + "\n",
-    );
-
-    const subs = encodeURIComponent(
-      JSON.stringify([{ id: "s1", topic: "telegram", params: {} }]),
-    );
-    const envelopes = await collectHubEnvelopes(
-      `http://localhost:${port}/events/hub?subs=${subs}`,
-      { stopAfter: 1, timeoutMs: 2500 },
-    );
-
-    assert.ok(envelopes.length >= 1);
     assert.equal(envelopes[0].sub, "s1");
-    const events = envelopes[0].data as Array<{ type: string }>;
-    assert.ok(events.some((e) => e.type === "telegram_sent"));
-  });
-
-  test("hub emits envelope with no event field for telegram (event is undefined)", async () => {
-    const subs = encodeURIComponent(
-      JSON.stringify([{ id: "s1", topic: "telegram", params: {} }]),
-    );
-    const envelopes = await collectHubEnvelopes(
-      `http://localhost:${port}/events/hub?subs=${subs}`,
-      { stopAfter: 1, timeoutMs: 2500 },
-    );
-
-    assert.ok(envelopes.length >= 1);
-    // telegram topic doesn't use the event field
-    assert.equal(envelopes[0].event, undefined);
   });
 });
 

@@ -17,7 +17,7 @@ Cross-codebase patterns and mistakes to avoid. Read this before non-trivial work
 
 ## Kernel Patterns
 
-- **Always declare operatorSubject:** Used by queue rows, Telegram, logs. Prefer EID-based over freeform names.
+- **Always declare operatorSubject:** Used by queue rows, toasts, logs. Prefer EID-based over freeform names.
 - **Use ctx.step, not inline error handling:** The kernel wraps your step blocks, screenshots on failure, emits correctly.
 - **Live-page probes for dupe-protection:** Check the live page before submitting (e.g., `findExistingTerminationTransaction`, "no oath signature" sentinel). EID match beats name match — Kuali↔UCPath name variants silently miss dupes.
 - **Understand authChain:** Onboarding runs 2 Duos (CRM, UCPath+I9). Separations runs 4. Check the workflow's `systems` list.

@@ -30,7 +30,6 @@ export type SessionEventType =
   | "item_start" | "item_complete" | "item_cancelled"
   | "step_change"
   | "screenshot"
-  | "telegram_sent"
   | "ucpath_idle_signal"
   | "daemon_phase"
   | "daemon_log";

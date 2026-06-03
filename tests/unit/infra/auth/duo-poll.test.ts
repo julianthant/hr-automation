@@ -170,7 +170,7 @@ describe("Duo verification code helpers", () => {
     assert.equal(extractDuoVerificationCode(text), undefined);
   });
 
-  it("builds a Telegram detail that carries the Duo code when available", () => {
+  it("builds a waiting detail that carries the Duo code when available", () => {
     assert.equal(buildDuoWaitingDetail("7078"), "Enter Duo code 7078 in Duo Mobile");
   });
 
@@ -178,7 +178,7 @@ describe("Duo verification code helpers", () => {
     assert.equal(buildDuoWaitingDetail(undefined), "Approve on your phone");
   });
 
-  it("carries the last visible Duo code into the push resent Telegram detail", () => {
+  it("carries the last visible Duo code into the push resent detail", () => {
     assert.equal(buildDuoResentDetail(undefined, "3158"), "Enter Duo code 3158 in Duo Mobile");
   });
 
@@ -190,7 +190,7 @@ describe("Duo verification code helpers", () => {
     assert.equal(buildDuoResentDetail(undefined, undefined), "Push resent");
   });
 
-  it("waits briefly for the initial Duo code before building the first Telegram message", async () => {
+  it("waits briefly for the initial Duo code before the first poll iteration", async () => {
     let reads = 0;
     const page = {
       locator: () => ({

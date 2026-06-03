@@ -97,16 +97,14 @@ const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> =
   item_complete:    { glyph: "▩", color: "#6b7280" },
   step_change:      { glyph: "→", color: "#6b7280" },
   screenshot:       { glyph: "⬛", color: "#a78bfa" },
-  telegram_sent:    { glyph: "✉", color: "#0ea5e9" },
   ucpath_idle_signal: { glyph: "◔", color: "#22c55e" },
   daemon_phase:     { glyph: "◉", color: "#64748b" },
 };
 
 // Fallback for any event type the backend ships before the frontend registers
 // it — must not crash the LogPanel. Backend session-event types are a moving
-// target (e.g. telegram_sent landed before this map was updated), and a
-// runtime undefined-lookup unmounts the whole tree because EventLine has no
-// error boundary above it.
+// target, and a runtime undefined-lookup unmounts the whole tree because
+// EventLine has no error boundary above it.
 const UNKNOWN_EVENT_VISUAL = { glyph: "·", color: "#6b7280" } as const;
 
 function EventLine({ event }: { event: RunEvent }) {

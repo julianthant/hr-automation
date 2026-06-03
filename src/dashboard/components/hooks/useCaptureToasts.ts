@@ -6,9 +6,8 @@ import type { CaptureSessionEvent } from "@/components/capture/capture-types";
 import { sseHub } from "@/lib/sse-hub";
 
 /**
- * Companion to `useTelegramToasts` for capture lifecycle events. Mounted
- * once at the App root so capture activity surfaces toasts even when the
- * modal isn't open.
+ * Toast hook for capture lifecycle events. Mounted once at the App root
+ * so capture activity surfaces toasts even when the modal isn't open.
  *
  * Two suppression rules so toasts don't double up with the modal's own
  * inline UI:
