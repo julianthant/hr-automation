@@ -5,26 +5,28 @@ Schema-bound OCR primitive used by OCR-backed workflows. Prep workflows default 
 ## Contracts
 
 - `ocrDocument` returns `OcrResult<T[]>`; whole-PDF results are never cached.
-- `.ocr-cache/` is retained only for provider key rotation state, not extracted OCR results.
-- Per-page OCR dispatches pages across all configured keys/providers with concurrency capped by `OCR_PAGE_CONCURRENCY`.
+- Per-page OCR dispatches pages across all configured keys/providers/models with concurrency capped by `OCR_PAGE_CONCURRENCY`; a page paces itself within each cell's limits and falls back across the model chain, then other keys, before failing.
 - Per-page failures stay visible as failed pages; the pipeline should not silently fall back to whole-PDF on partial failure.
 - Whole-PDF OCR is reached through `/api/ocr/reocr-whole-pdf`.
-- Cohere is intentionally not in the vision pool.
 
-## Key Rotation
+## Usage tracking (per-page) — `usage-tracker.ts`
 
-`KeyRotation` persists provider key state at `<cacheDir>/rotation-state-{provider}.json`. The dashboard passes `runtimeDir(trackerDir)` and the default `cacheDir` is `.tracker/runtime`, so in normal operation the file lives at `.tracker/runtime/rotation-state-{provider}.json` (moved out of the `.tracker/` root in the 2026-06-01 tracker-dir restructure).
+The per-page pool's admission control is `UsageTracker`, **not** the old flat-60s-after-429 scheme. It tracks live windows per `(provider, key, model)` cell — RPM, TPM, RPD (UTC daily) — plus a cooldown and a dead flag. `reserve()` only hands out a cell with headroom on all three windows now, charging it optimistically so concurrent runs see the spend; `commit()` reconciles the estimate with the real `prompt_tokens`; `penalize()` applies the server's own retry signal.
 
-- 429/rate-limit text → throttled briefly.
-- quota/exhaustion text → quota-exhausted until next UTC day.
-- auth/invalid-key text → dead for this session.
-- timeouts/network resets → transient throttle, then rotate.
+- Limits seed from `provider-limits.ts` (free-tier, best-effort, env-overridable) and are corrected at runtime by parsed `Retry-After` / `x-ratelimit-reset-*` / Gemini `RetryInfo` (`rate-limit-headers.ts`). Pool `callOcr` throws `OcrHttpError` (status + headers + body) so classification is precise.
+- rate-limit → cooldown = server delay (or exponential backoff + jitter); quota → cooldown until ~UTC midnight + cell parked as daily-exhausted; auth → dead; transient → short backoff.
+- State persists at `<cacheDir>/ocr-usage-state.json`, one in-memory instance per `cacheDir` (concurrent runs share throttle state). Default `cacheDir` is `.tracker/runtime`.
+- `getOcrKeyStatuses` (`/api/ocr/key-status`) reports each pool key's worst cell state + summed daily count from this file.
 
-Gemini text helpers used by OCR matching/disambiguation should share this rotation path, not hand-roll key loops.
+`KeyRotation` (`rotation.ts`) still backs the **whole-PDF** path (`index.ts`) and Gemini text helpers (disambiguation/lookup-suggestions), persisting `rotation-state-{provider}.json`. Those text helpers should share that rotation path, not hand-roll key loops.
 
-## Providers
+## Providers — `provider-limits.ts`
 
-Whole-PDF path is Gemini-only. Per-page path uses configured keys for Gemini, Mistral, Groq, and Sambanova. Model names and overrides live in code/env; read the provider modules instead of copying them here.
+The vision pool is config-driven: `visionProviderConfigs()` lists **Gemini → Groq → Mistral → OpenRouter → SambaNova** by priority, each with a model **fallback chain** (free-tier limits are per-model, so one key exhausted on its primary model can still use the next). Override any chain with `OCR_<PROVIDER>_MODELS` (comma list) or the legacy single `OCR_<PROVIDER>_MODEL`. Defaults verified live 2026-06-02; whole-PDF path stays Gemini-only.
+
+- **Cerebras** is excluded: no Cerebras-hosted model accepts image input (text-only). Useful only for text post-processing, not OCR.
+- **Cohere** is excluded by choice: `command-a-vision` now does image OCR, but it's a single trial key (~1k calls/month).
+- **OCRSpace** is excluded: free tier caps at 1 MB / 3 pages — too small for heavy PDFs.
 
 ## Tests
 
@@ -39,6 +41,7 @@ Use `__setCacheDirForTests` and `__setProviderForTests` to isolate cache paths a
 
 ## Lessons Learned
 
+- **2026-06-03: Per-page limiter rebuilt as a proactive usage tracker + multi-model fallback.** The old per-page path tracked throttle state for Gemini keys only (via `KeyRotation`) and waited a flat 60s after any 429; Mistral/Groq/SambaNova keys had zero throttle memory, and the OpenAI-compat path discarded the response headers. Replaced with `usage-tracker.ts` (windowed RPM/TPM/RPD per `(provider, key, model)`, proactive admission, header-driven cooldowns, exponential backoff + jitter, persisted to `ocr-usage-state.json`) + `rate-limit-headers.ts` (parses `Retry-After` / `x-ratelimit-reset-*` / Gemini `RetryInfo`) + `provider-limits.ts` (config-driven model fallback chains). Pool entries now carry a model chain and `callOcr(imagePath, prompt, model)` returns `{ json, promptTokens }`, throwing `OcrHttpError` on non-2xx. Two stale model defaults were dead and failing 100%: Mistral `pixtral-12b-2409` (removed) and SambaNova `Llama-3.2-90B-Vision-Instruct` (removed 2025-04). OpenRouter (7 free keys) wired into the pool. Gemini `callOcr` moved from the streaming SDK to a REST `generateContent` call so status/body/`usageMetadata` are captured. Whole-PDF (`index.ts`) still uses `KeyRotation`. Probes: `scripts/ocr/probe-providers.ts` (key validity) + `scripts/ocr/probe-vision.ts` (free-tier callability + token cost).
 - **2026-05-19: Oath approve payloads normalize OCR names before daemon enqueue.** Queue rows should show display-case names, while raw OCR records remain in prep payloads for review.
 - **2026-05-18: Oath UPAY585 EIDs may be handwritten in the top page margin.** Prompts must scan the whole page, not only printed boxes.
 - **2026-05-01: Per-page is the only auto path.** Failed pages surface to review; whole-PDF is a manual recovery action.
