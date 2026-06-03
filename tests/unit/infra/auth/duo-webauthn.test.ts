@@ -18,11 +18,15 @@ import {
 } from "../../../../src/infra/auth/duo-webauthn.js";
 import { log } from "../../../../src/utils/log.js";
 
+// All fixture identifiers below are SYNTHETIC placeholders — not real Duo
+// credentials. The parser only checks that these fields are non-empty strings
+// (no base64/DER decoding), so opaque test tokens exercise every path. Do not
+// paste values from `.auth/duo-webauthn.json` here; that file holds real keys.
 const VALID: DuoWebAuthnCredential = {
   rpId: "duosecurity.com",
-  credentialId: "rZrKrwIX8nXY==",
-  privateKey: "MIGHAgEAMBMGByqGSM49==",
-  userHandle: "DUHMZISRN04XM2QNEQNO",
+  credentialId: "test-credential-id-internal",
+  privateKey: "test-fake-private-key-not-real",
+  userHandle: "test-user-handle",
   signCount: 3,
   isResidentCredential: false,
   transport: "internal",
@@ -163,13 +167,13 @@ describe("loadDuoWebAuthnCredential", () => {
 
   it("returns the first credential of a multi-credential file", () => {
     const p = join(tmp, "multi-first.json");
-    const usb: DuoWebAuthnCredential = { ...VALID, transport: "usb", credentialId: "qhNNTCW==" };
+    const usb: DuoWebAuthnCredential = { ...VALID, transport: "usb", credentialId: "test-credential-id-usb" };
     writeFileSync(p, JSON.stringify({ credentials: [VALID, usb] }));
     assert.deepEqual(loadDuoWebAuthnCredential(p), VALID);
   });
 });
 
-const USB: DuoWebAuthnCredential = { ...VALID, transport: "usb", credentialId: "qhNNTCW==" };
+const USB: DuoWebAuthnCredential = { ...VALID, transport: "usb", credentialId: "test-credential-id-usb" };
 
 describe("parseDuoWebAuthnCredentials", () => {
   it("parses the { credentials: [...] } multi-credential shape in order", () => {
