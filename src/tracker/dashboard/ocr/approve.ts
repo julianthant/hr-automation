@@ -9,7 +9,13 @@ import { rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate, findFrozenTraceId } from "../../find-latest-entry.js";
 import { tracePrefix } from "../../../domain/queue-trace-id.js";
 import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
-import { readFormType, readParentRunId, readDryRun } from "./shared.js";
+import {
+  readFormType,
+  readParentRunId,
+  readDryRun,
+  readOperationWorkflow,
+  isOperationCoordinatorWorkflow,
+} from "./shared.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
@@ -65,6 +71,7 @@ export function buildOcrApproveHandler(
     }
 
     const approveTo = spec.approveTo;
+    const operationWorkflow = readOperationWorkflow(input.sessionId, trackerDir);
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
     // Fanned-out children nest under the run that owns approval: the delegating
     // parent run when OCR was delegated (oath-upload legacy / EC delegation),
@@ -100,7 +107,18 @@ export function buildOcrApproveHandler(
       };
     }
 
-    const approveDocumentTo = spec.approveDocumentTo;
+    // Route the document (ticket) fan-out by operation intent:
+    //   - oath-signature PDF run → signs oaths only, files NO ServiceNow ticket.
+    //   - oath-upload full run → the oath-upload task already exists (born at
+    //     upload, option A) and files the ticket itself; do NOT create a second
+    //     ticket row — it learns its signer set from this approval's
+    //     `fannedOutItemIds` via subscribeToApproval.
+    //   - standalone OCR oath run (no operationWorkflow) → legacy behavior: the
+    //     once-per-document fan-out creates the oath-upload ticket row here.
+    const approveDocumentTo =
+      operationWorkflow === "oath-signature" || operationWorkflow === "oath-upload"
+        ? undefined
+        : spec.approveDocumentTo;
 
     const fannedOut: Array<{ workflow: string; itemId: string }> = [];
     const enqueueInputs: unknown[] = [];
@@ -331,6 +349,18 @@ export function buildOcrApproveHandler(
           },
           trackerDir,
         );
+        // Mirror "approved" onto the operation coordinator row (oath-signature /
+        // emergency-contact) so its denormalized OCR status doesn't sit stale at
+        // "awaiting review" in the transient window after approve and before the
+        // fanned-out member rows materialize. Parallels the discard/failure
+        // mirrors; no-ops for oath-upload (a real task, not a coordinator row)
+        // and standalone OCR runs (no coordinator row).
+        mirrorOperationApproved({
+          operationWorkflow,
+          sessionId: input.sessionId,
+          parentRunId,
+          trackerDir,
+        });
         // Wake any kernel-path handler subscribed via
         // `subscribeToApproval`. Dashboard-path runs (no kernel wrapping)
         // have no subscriber — emitApproved silently no-ops when the
@@ -473,6 +503,51 @@ async function enqueueDocFanOut(args: {
         );
       },
     },
+  );
+}
+
+/**
+ * Mirror an approved OCR prep onto its `operation` coordinator row so the
+ * coordinator's denormalized OCR status reads "approved" during the transient
+ * window after approve and before the fanned-out member rows materialize (once
+ * members exist, `OperationRow` hides the OCR status line). Parallels the
+ * discard/failure mirrors.
+ *
+ * Only oath-signature / emergency-contact runs have a coordinator row
+ * (`OPERATION_COORDINATOR_WORKFLOWS`); an oath-upload full run's "operation" is
+ * a real daemon task (not a display row) and a standalone OCR run has none —
+ * both no-op here. The prior row is re-read so its display metadata + `operation`
+ * archetype survive; only the OCR status fields flip.
+ */
+function mirrorOperationApproved(args: {
+  operationWorkflow: string | undefined;
+  sessionId: string;
+  parentRunId: string | undefined;
+  trackerDir: string | undefined;
+}): void {
+  const { operationWorkflow, sessionId, parentRunId, trackerDir } = args;
+  if (parentRunId === undefined || operationWorkflow === undefined) return;
+  if (!isOperationCoordinatorWorkflow(operationWorkflow)) return;
+  const operationItemId = `ocr-prep-${sessionId}`;
+  const prior = findLatestEntryForPredicate({
+    workflow: operationWorkflow,
+    ...(trackerDir !== undefined ? { trackerDir } : {}),
+    lookbackDays: SESSION_LOOKBACK_DAYS,
+    predicate: (row) => row.id === operationItemId && row.runId === parentRunId && Boolean(row.data),
+  });
+  if (!prior?.data) return;
+  emitTrackerRow(
+    {
+      workflow: operationWorkflow,
+      timestamp: new Date().toISOString(),
+      id: operationItemId,
+      runId: parentRunId,
+      ...(prior.parentRunId ? { parentRunId: prior.parentRunId } : {}),
+      status: "running",
+      step: "approved",
+      data: { ...prior.data, archetype: "operation", ocrStatus: "approved", ocrStep: "approved" },
+    },
+    trackerDir,
   );
 }
 

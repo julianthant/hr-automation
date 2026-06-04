@@ -132,6 +132,7 @@ async function handlePrepare(
   writeFileSync(pdfPath, file.data);
 
   const formType = fields.formType?.trim() ?? "";
+  const targetWorkflow = fields.targetWorkflow?.trim() || undefined;
   const rosterMode = (fields.rosterMode?.trim() ?? "existing") as "existing" | "download";
   const rosterPath = fields.rosterPath?.trim() || undefined;
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
@@ -168,6 +169,7 @@ async function handlePrepare(
     pdfOriginalName,
     pdfFileId,
     formType,
+    ...(targetWorkflow ? { targetWorkflow } : {}),
     rosterMode,
     rosterPath,
     sessionId,

@@ -4,7 +4,8 @@
  * Replaces the prior "orchestrator emits `done step=awaiting-approval` and
  * returns" contract. Under the new contract the OCR row stays `running
  * step=awaiting-approval` until the operator approves (→ `done`) or
- * discards (→ `failed step=discarded`).
+ * discards (→ `failed step=discarded`), or hard-fails before the operator can
+ * act (→ `failed step!=discarded`).
  *
  * The kernel-path OCR handler awaits `subscribeToApproval` so the kernel
  * only emits the terminal row when the operator acts. The dashboard-path
@@ -61,6 +62,15 @@ export class OcrApprovalCancelledError extends Error {
   }
 }
 
+/** Distinct error for OCR prep failures that are not operator discards. */
+export class OcrApprovalFailedError extends Error {
+  readonly failed = true as const;
+  constructor(public readonly reason: string) {
+    super(`OCR approval wait failed: ${reason}`);
+    this.name = "OcrApprovalFailedError";
+  }
+}
+
 interface Listener {
   resolve: (payload: ApprovedPayload) => void;
   reject: (err: Error) => void;
@@ -91,8 +101,8 @@ function dropListener(key: string, listener: Listener): void {
 /**
  * Wait for the operator to approve or discard the OCR row keyed by
  * `(workflow, sessionId)`. Resolves with the approved payload, rejects
- * with `OcrDiscardedError` on discard, or `OcrApprovalCancelledError`
- * when the AbortSignal fires.
+ * with `OcrDiscardedError` on discard, `OcrApprovalFailedError` on a hard OCR
+ * prep failure, or `OcrApprovalCancelledError` when the AbortSignal fires.
  *
  * JSONL polling backstop catches an approve/discard that landed before
  * the subscription registered (or that happened out-of-process for a
@@ -166,8 +176,11 @@ export function subscribeToApproval(
         settleResolve(latest.payload);
         return;
       }
-      // discarded
-      settleReject(new OcrDiscardedError(latest.reason));
+      if (latest.kind === "discarded") {
+        settleReject(new OcrDiscardedError(latest.reason));
+        return;
+      }
+      settleReject(new OcrApprovalFailedError(latest.reason));
     };
 
     const scheduleNextPoll = (): void => {
@@ -265,12 +278,19 @@ interface JsonlLatestDiscardState {
   kind: "discarded";
   reason: string;
 }
-type JsonlLatestApproval = JsonlLatestApprovalState | JsonlLatestDiscardState;
+interface JsonlLatestFailedState {
+  kind: "failed";
+  reason: string;
+}
+type JsonlLatestApproval =
+  | JsonlLatestApprovalState
+  | JsonlLatestDiscardState
+  | JsonlLatestFailedState;
 
 /**
  * Read the OCR JSONL for `sessionId` and return the latest terminal
- * approval state (approved | discarded), or null when no terminal row
- * exists yet. Looks at today's and yesterday's JSONL so a session that
+ * approval state (approved | discarded | failed), or null when no terminal
+ * row exists yet. Looks at today's and yesterday's JSONL so a session that
  * crossed midnight is still picked up.
  */
 function readLatestOcrApprovalState(
@@ -325,15 +345,22 @@ interface ApprovalRow {
   error?: string;
 }
 
-function classifyApprovalRow(row: Partial<ApprovalRow>): "approved" | "discarded" | null {
+function classifyApprovalRow(row: Partial<ApprovalRow>): JsonlLatestApproval["kind"] | null {
   if (row.status === "done" && row.step === "approved") return "approved";
   if (row.status === "failed" && row.step === "discarded") return "discarded";
+  if (row.status === "failed") return "failed";
   return null;
 }
 
 function interpretRow(row: ApprovalRow): JsonlLatestApproval {
   if (row.status === "failed" && row.step === "discarded") {
     return { kind: "discarded", reason: row.error ?? "operator discarded OCR prep" };
+  }
+  if (row.status === "failed") {
+    return {
+      kind: "failed",
+      reason: row.error ?? (row.step ? `OCR prep failed at ${row.step}` : "OCR prep failed"),
+    };
   }
   // Approved — parse records / fannedOutItemIds from the row's data field.
   const data = row.data ?? {};

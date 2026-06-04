@@ -416,6 +416,19 @@ export function App() {
   const handleOpenReview = useCallback((runId: string) => {
     setReviewingPrepId(runId);
   }, []);
+  // Operation coordinator rows link to their OCR review row, which lives in the
+  // OCR panel. Switch to the OCR workflow, select the OCR row (by its id =
+  // sessionId), and arm the Preview/review gate by setting reviewingPrepId to
+  // the OCR run's id — the gate compares `reviewingPrepId === selectedEntry.runId`,
+  // so selecting alone would land on the default Events tab, not the review tab.
+  const handleOpenOcrReview = useCallback(
+    (target: { sessionId: string; runId: string }) => {
+      if (workflow !== "ocr") handleWorkflowChange("ocr");
+      setSelectedId(target.sessionId);
+      setReviewingPrepId(target.runId);
+    },
+    [workflow, handleWorkflowChange],
+  );
   const handleReupload = useCallback(
     (reuploadFor: { sessionId: string; previousRunId: string }) => {
       setRunModalReuploadFor(reuploadFor);
@@ -595,6 +608,7 @@ export function App() {
           reviewingPrepId={reviewingPrepId}
           onOpenReview={handleOpenReview}
           onReupload={handleReupload}
+          onOpenOcrReview={handleOpenOcrReview}
           batchQueueParentRunId={batchQueueParentRunId}
           onEnterBatchQueue={handleEnterBatchQueue}
           onExitBatchQueue={handleExitBatchQueue}

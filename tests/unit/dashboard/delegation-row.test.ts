@@ -111,7 +111,7 @@ test("single-signer approved batch card shows duration and child row retry/delet
   assert.match(html, /aria-label="Delete this (entry|run) permanently"/);
 });
 
-test("running single-signer child shows uniform retry/delete footer ops", () => {
+test("running single-signer child shows uniform cancel footer op", () => {
   const html = renderDelegationRow(
     {
       workflow: "ocr",
@@ -140,10 +140,11 @@ test("running single-signer child shows uniform retry/delete footer ops", () => 
     "OCR",
   );
 
-  // Footers are uniform: every single-signer/preview card shows retry + delete
-  // regardless of status. Per-status gating is the kernel's job (action
-  // descriptors), not the row component's.
+  // Footers are uniform and status-gated by projection actions. A running
+  // single delegated child should expose the same cancel affordance as an
+  // ordinary running row, not only terminal retry/delete buttons.
   assert.match(html, /\d+m \d+s|\d+s/);
-  assert.match(html, /aria-label="Retry this run"/);
-  assert.match(html, /aria-label="Delete this (entry|run) permanently"/);
+  assert.match(html, /aria-label="Stop running item"/);
+  assert.doesNotMatch(html, /aria-label="Retry this run"/);
+  assert.doesNotMatch(html, /aria-label="Delete this (entry|run) permanently"/);
 });

@@ -52,10 +52,26 @@ function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {
         members: surface.members.map(toDashboardEntry),
         titleOverride: surface.titleOverride,
       };
+    case "operation":
+      return {
+        kind: "operation",
+        parentRunId: surface.parentRunId,
+        parent: toDashboardEntry(surface.parent),
+        members: surface.members.map(toDashboardEntry),
+        ...(surface.ocr ? { ocr: surface.ocr } : {}),
+        titleOverride: surface.titleOverride,
+      };
   }
 }
 
-export type QueueGroupSurfaceKind = "preview" | "batch";
+export type QueueGroupSurfaceKind = "preview" | "batch" | "operation";
+
+export interface OperationOcrLink {
+  runId: string;
+  sessionId?: string;
+  status: string;
+  step?: string;
+}
 
 export interface PreviewSurface {
   kind: "preview";
@@ -74,7 +90,16 @@ export interface BatchSurface {
   titleOverride?: string;
 }
 
-export type QueueGroupSurface = PreviewSurface | BatchSurface;
+export interface OperationSurface {
+  kind: "operation";
+  parentRunId: string;
+  parent: TrackerEntry;
+  members: TrackerEntry[];
+  ocr?: OperationOcrLink;
+  titleOverride?: string;
+}
+
+export type QueueGroupSurface = PreviewSurface | BatchSurface | OperationSurface;
 
 export interface BuildQueueSurfacesInput {
   entries: TrackerEntry[];

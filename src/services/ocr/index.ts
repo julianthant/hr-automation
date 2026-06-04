@@ -183,6 +183,7 @@ export {
   emitDiscarded,
   OcrDiscardedError,
   OcrApprovalCancelledError,
+  OcrApprovalFailedError,
   type ApprovalKey,
   type ApprovedPayload,
   type SubscribeOpts,

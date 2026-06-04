@@ -84,7 +84,7 @@ export interface RowSnapshot {
  * the per-row projection and never exercises that rule; this helper does.
  */
 export interface GroupAnchorSnapshot {
-  kind: "batch" | "preview";
+  kind: "batch" | "preview" | "operation";
   workflowId: string;
   /** The group card's resolved title (empty string for a person batch anchor). */
   title: string;

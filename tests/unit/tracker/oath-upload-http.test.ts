@@ -79,11 +79,13 @@ test("buildOathUploadCancelHandler: writes step=cancel-requested sentinel on the
   }
 });
 
-test("buildOathUploadStartHandler: passes dryRun to runOathUploadCli input", async () => {
+test("buildOathUploadStartHandler: defaults to upload-only and passes dryRun", async () => {
   let dryRun: boolean | undefined;
+  let mode: string | undefined;
   const h = buildOathUploadStartHandler({
     runOathUploadCli: async (inputs) => {
       dryRun = inputs[0]?.dryRun;
+      mode = inputs[0]?.mode;
     },
   });
   const r = await h({
@@ -97,6 +99,7 @@ test("buildOathUploadStartHandler: passes dryRun to runOathUploadCli input", asy
   assert.equal(r.status, 202);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(dryRun, true);
+  assert.equal(mode, "upload-only");
 });
 
 test("buildOathUploadStartHandler: passes upload-only mode to runOathUploadCli input", async () => {
@@ -116,6 +119,26 @@ test("buildOathUploadStartHandler: passes upload-only mode to runOathUploadCli i
   assert.equal(r.status, 202);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(mode, "upload-only");
+});
+
+test("buildOathUploadStartHandler: rejects full mode because OCR prepare owns it", async () => {
+  let called = false;
+  const h = buildOathUploadStartHandler({
+    runOathUploadCli: async () => {
+      called = true;
+    },
+  });
+  const r = await h({
+    pdfPath: "/tmp/oath.pdf",
+    pdfOriginalName: "oath.pdf",
+    pdfHash: "a".repeat(64),
+    sessionId: "session-full",
+    mode: "full",
+  });
+  assert.equal(r.status, 400);
+  assert.equal(r.body.ok, false);
+  assert.match("error" in r.body ? r.body.error : "", /ocr\/prepare/);
+  assert.equal(called, false);
 });
 
 test("buildOathUploadCancelHandler: returns 400 when no active row for sessionId", async () => {

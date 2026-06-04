@@ -13,7 +13,18 @@ export type RowArchetype =
   /** Anchor row over N people/subjects, or a parent that will fan out to people after approval. */
   | "batch"
   /** Peer person/subject row under a batch anchor or grouped input-run parent. */
-  | "batch-member";
+  | "batch-member"
+  /**
+   * Top-level run tracker / coordinator for an OCR-backed target workflow
+   * (oath-signature, emergency-contact). Lives in the target workflow's panel,
+   * holds lightweight OCR status before approval, and summarizes the fanned-out
+   * child rows (signers / contacts) after approval. Distinct from `batch`: it is
+   * a coordinator that may have zero members for most of its life, not a batch
+   * anchor over a known person set. It is a **display** row with no daemon task
+   * of its own, stamped explicitly at the OCR prepare route — it is intentionally
+   * NOT a `WorkflowArchetype`, so `deriveRowArchetype` never produces it.
+   */
+  | "operation";
 
 /**
  * Workflow-level archetype. Declared on every `defineWorkflow({...})` call.
@@ -34,6 +45,7 @@ const LABELS: Record<RowArchetype, string> = {
   "preview": "Preview",
   "batch": "Batch",
   "batch-member": "Batch member",
+  "operation": "Operation",
 };
 
 export function archetypeRowTypeLabel(archetype: RowArchetype): string {
@@ -75,7 +87,13 @@ export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
 }
 
 export function isRowArchetype(v: string): v is RowArchetype {
-  return v === "single" || v === "preview" || v === "batch" || v === "batch-member";
+  return (
+    v === "single" ||
+    v === "preview" ||
+    v === "batch" ||
+    v === "batch-member" ||
+    v === "operation"
+  );
 }
 
 /**

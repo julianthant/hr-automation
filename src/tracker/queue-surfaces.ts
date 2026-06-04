@@ -21,6 +21,18 @@ function isBatchAnchor(entry: TrackerEntry): boolean {
   return classifyTrackerRow(entry).shape === "batch";
 }
 
+/**
+ * Operation anchors are top-level coordinator rows for OCR-backed target
+ * workflows (oath-signature, emergency-contact). They are always visible in
+ * their own workflow panel, hold lightweight OCR status before approval, and
+ * summarize fanned-out child rows (signers / contacts) after approval. Unlike a
+ * batch anchor they have no daemon task of their own and may sit with zero
+ * members for most of their life.
+ */
+function isOperationAnchor(entry: TrackerEntry): boolean {
+  return classifyTrackerRow(entry).shape === "operation";
+}
+
 function isPreviewAnchor(entry: TrackerEntry): boolean {
   const classification = classifyTrackerRow(entry);
   if (classification.shape === "preview") return true;
@@ -136,7 +148,34 @@ export interface TrackerBatchSurface {
   titleOverride?: string;
 }
 
-export type TrackerQueueGroupSurface = TrackerPreviewSurface | TrackerBatchSurface;
+/**
+ * Lightweight OCR status link surfaced on an operation row before approval.
+ * The live `status`/`step` are read from the linked OCR row when present in the
+ * source entries (cross-workflow), falling back to the values denormalized onto
+ * the operation row's own `data.ocrStatus`/`data.ocrStep` at prepare time. This
+ * is a status/link join — the full OCR review row stays in the OCR panel and is
+ * never duplicated into the operation surface.
+ */
+export interface TrackerOperationOcrLink {
+  runId: string;
+  sessionId?: string;
+  status: string;
+  step?: string;
+}
+
+export interface TrackerOperationSurface {
+  kind: "operation";
+  parentRunId: string;
+  parent: TrackerEntry;
+  members: TrackerEntry[];
+  ocr?: TrackerOperationOcrLink;
+  titleOverride?: string;
+}
+
+export type TrackerQueueGroupSurface =
+  | TrackerPreviewSurface
+  | TrackerBatchSurface
+  | TrackerOperationSurface;
 
 export interface TrackerQueueSurfaces {
   groupRows: TrackerQueueGroupSurface[];
@@ -165,6 +204,37 @@ function titleOverrideForAnchor(entry: TrackerEntry): string | undefined {
   return undefined;
 }
 
+function stringData(entry: TrackerEntry, key: string): string | undefined {
+  const value = entry.data?.[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+/**
+ * Resolve the lightweight OCR status link for an operation row from the values
+ * denormalized onto the row at prepare time and kept fresh by the OCR
+ * orchestrator / approve / discard paths (`data.ocrRunId`, `data.ocrSessionId`,
+ * `data.ocrStatus`, `data.ocrStep`).
+ *
+ * The OCR review row itself lives in the OCR workflow's panel — it is NEVER in
+ * this (target-workflow) panel's entries (the entries payload is workflow
+ * scoped, `WHERE workflow = @workflow`), so a cross-workflow row lookup would
+ * never fire in production. The operation row carries its own copy of the OCR
+ * status for display; the full review UI stays in the OCR panel.
+ */
+function resolveOperationOcrLink(parent: TrackerEntry): TrackerOperationOcrLink | undefined {
+  const ocrRunId = stringData(parent, "ocrRunId");
+  const ocrSessionId = stringData(parent, "ocrSessionId");
+  const status = stringData(parent, "ocrStatus");
+  const step = stringData(parent, "ocrStep");
+  if (!ocrRunId && !status) return undefined;
+  return {
+    runId: ocrRunId ?? "",
+    ...(ocrSessionId ? { sessionId: ocrSessionId } : {}),
+    status: status ?? "running",
+    ...(step ? { step } : {}),
+  };
+}
+
 /**
  * Canonical queue **surface** model: one group card + zero or more flat rows.
  * Shared by dashboard `buildQueueSurfaces` and sidebar / wfCounts aggregation
@@ -179,9 +249,15 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   const membersByParentRunId = buildMembersByParentRunId(visibleSources, rootPersistingRunIds);
   const batchAnchors = visibleEntries.filter(isVisibleBatchAnchor);
   const previewAnchors = visibleEntries.filter(isVisiblePreviewAnchor);
+  const operationAnchors = visibleEntries.filter(isOperationAnchor);
   const batchAnchorRunIds = new Set(batchAnchors.map((entry) => entry.runId ?? entry.id));
   const previewAnchorRunIds = new Set(previewAnchors.map((entry) => entry.runId ?? entry.id));
-  const anchoredParentRunIds = new Set([...batchAnchorRunIds, ...previewAnchorRunIds]);
+  const operationAnchorRunIds = new Set(operationAnchors.map((entry) => entry.runId ?? entry.id));
+  const anchoredParentRunIds = new Set([
+    ...batchAnchorRunIds,
+    ...previewAnchorRunIds,
+    ...operationAnchorRunIds,
+  ]);
   const approvalParentRunIds = new Set([...previewAnchorRunIds]);
   const singleChildEntries: TrackerEntry[] = [];
 
@@ -196,6 +272,25 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
       parent,
       members,
       approvalState: isApprovedPreviewRow(parent) ? "approved" : "awaiting-approval",
+    });
+  }
+
+  // Operation coordinator rows: always visible in their own panel even at zero
+  // members. Their member children (signers / contacts) attach by parentRunId
+  // after approval; the OCR relation is surfaced as a lightweight status link
+  // (from the denormalized `data.ocr*` fields on the row), never duplicated as a
+  // full OCR row.
+  for (const parent of operationAnchors) {
+    const parentRunId = parent.runId ?? parent.id;
+    const members = membersByParentRunId.get(parentRunId) ?? [];
+    const ocr = resolveOperationOcrLink(parent);
+    groupRows.push({
+      kind: "operation",
+      parentRunId,
+      parent,
+      members,
+      ...(ocr ? { ocr } : {}),
+      ...(titleOverrideForAnchor(parent) ? { titleOverride: titleOverrideForAnchor(parent) } : {}),
     });
   }
 
@@ -229,7 +324,9 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
 
   const groupedParentRunIds = new Set(groupRows.map((surface) => surface.parentRunId));
   const visibleFlatEntries = visibleEntries.filter((entry) => {
-    if (isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry)) return false;
+    if (isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry) || isOperationAnchor(entry)) {
+      return false;
+    }
     if (entry.parentRunId && groupedParentRunIds.has(entry.parentRunId)) return false;
     if (entry.parentRunId && membersByParentRunId.has(entry.parentRunId)) return false;
     return true;

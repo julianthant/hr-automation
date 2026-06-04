@@ -8,6 +8,10 @@ import {
   type OathUploadHandlerOpts,
 } from "../../../../src/workflows/oath-upload/handler.js";
 import type { ChildOutcome } from "../../../../src/tracker/delegation/watch-child-runs.js";
+import {
+  OcrApprovalFailedError,
+  OcrDiscardedError,
+} from "../../../../src/services/ocr/approval-signal.js";
 
 function makeFakeCtx() {
   const stepCalls: string[] = [];
@@ -243,6 +247,132 @@ test("oathUploadHandler: upload-only mode skips the signature wait then submits"
     assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0099999");
     assert.equal(updates.find((u) => u.uploadMode)?.uploadMode, "upload-only");
     assert.equal(updates.find((u) => u.signerCount)?.signerCount, "skipped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler born-at-upload: wait-approval learns the signer set, then waits + files (option A)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-born-"));
+  try {
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let subscribedSession = "";
+    let watchedItemIds: string[] = [];
+    let submitCalled = false;
+
+    await oathUploadHandler(ctx as never, {
+      pdfFileId: "file-1",
+      pdfOriginalName: "oaths.pdf",
+      sessionId: "sess-op",
+      mode: "full",
+      rosterMode: "download",
+      // NO signerItemIds → born at upload, learns them at approval.
+    }, {
+      trackerDir: dir,
+      _resolvePdfOverride: RESOLVE_PDF,
+      _subscribeToApprovalOverride: async (opts) => {
+        subscribedSession = opts.sessionId;
+        return {
+          records: [],
+          fannedOutItemIds: ["ocr-oath-sess-op-r0", "ocr-oath-sess-op-r1"],
+        };
+      },
+      _watchChildRunsOverride: async (opts) => {
+        watchedItemIds = opts.expectedItemIds;
+        return opts.expectedItemIds.map(doneOutcome);
+      },
+      _loginOverride: async () => true,
+      _gotoOverride: async () => {},
+      _verifyOverride: async () => {},
+      _fillFormOverride: async () => {},
+      _submitOverride: async () => { submitCalled = true; return "HRC0099999"; },
+    });
+
+    assert.equal(subscribedSession, "sess-op", "waits on its own OCR session for approval");
+    assert.ok(stepCalls.includes("wait-approval"), "the leading wait-approval step ran");
+    assert.deepEqual(
+      watchedItemIds,
+      ["ocr-oath-sess-op-r0", "ocr-oath-sess-op-r1"],
+      "waits on exactly the signer set learned at approval",
+    );
+    assert.equal(updates.find((u) => u.signerCount)?.signerCount, "2");
+    assert.ok(updates.some((u) => u.status === "awaiting-approval"));
+    assert.ok(submitCalled, "files the ticket after approval + signatures");
+    assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0099999");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler born-at-upload: a discarded OCR prep THROWS and never files the ticket", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-born-discard-"));
+  try {
+    const { ctx, stepCalls } = makeFakeCtx();
+    let submitCalled = false;
+
+    await assert.rejects(
+      oathUploadHandler(ctx as never, {
+        pdfFileId: "file-1",
+        pdfOriginalName: "oaths.pdf",
+        sessionId: "sess-discard",
+        mode: "full",
+        rosterMode: "download",
+      }, {
+        trackerDir: dir,
+        _resolvePdfOverride: RESOLVE_PDF,
+        _subscribeToApprovalOverride: async () => {
+          throw new OcrDiscardedError("operator discarded");
+        },
+        _watchChildRunsOverride: async () => {
+          throw new Error("must not wait on signers after a discard");
+        },
+        _loginOverride: async () => true,
+        _submitOverride: async () => { submitCalled = true; return "HRC-NOPE"; },
+      }),
+      /OCR prep was discarded.*NOT filing/,
+    );
+
+    assert.equal(submitCalled, false, "no ticket on discard");
+    assert.ok(stepCalls.includes("wait-approval"));
+    assert.ok(!stepCalls.includes("wait-signatures"));
+    assert.ok(!stepCalls.includes("submit"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler born-at-upload: a hard OCR failure THROWS and never files the ticket", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-born-ocr-failed-"));
+  try {
+    const { ctx, stepCalls } = makeFakeCtx();
+    let submitCalled = false;
+
+    await assert.rejects(
+      oathUploadHandler(ctx as never, {
+        pdfFileId: "file-1",
+        pdfOriginalName: "oaths.pdf",
+        sessionId: "sess-ocr-failed",
+        mode: "full",
+        rosterMode: "download",
+      }, {
+        trackerDir: dir,
+        _resolvePdfOverride: RESOLVE_PDF,
+        _subscribeToApprovalOverride: async () => {
+          throw new OcrApprovalFailedError("OCR provider exhausted");
+        },
+        _watchChildRunsOverride: async () => {
+          throw new Error("must not wait on signers after OCR failure");
+        },
+        _loginOverride: async () => true,
+        _submitOverride: async () => { submitCalled = true; return "HRC-NOPE"; },
+      }),
+      /OCR prep failed.*NOT filing.*OCR provider exhausted/,
+    );
+
+    assert.equal(submitCalled, false, "no ticket on OCR failure");
+    assert.ok(stepCalls.includes("wait-approval"));
+    assert.ok(!stepCalls.includes("wait-signatures"));
+    assert.ok(!stepCalls.includes("submit"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
