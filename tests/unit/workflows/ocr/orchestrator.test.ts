@@ -211,6 +211,110 @@ test("delegated orchestrator re-stamps parentRunId on EVERY self-emitted row", a
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("orchestrator stamps data.parallelWorkers on EVERY OCR row when run options carry a worker count", async () => {
+  // The OCR row is the durable bridge across the upload → approve boundary: the
+  // approve route reads the operator's worker count back off it (shared.ts) to
+  // size its signer/contact fan-out. So parallelWorkers must ride EVERY
+  // self-emitted row (the re-stamp set) — the dashboard collapses a run to its
+  // latest row, so a stamp on only the pending row would vanish.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-workers",
+      rosterPath,
+      rosterMode: "existing",
+      runOptions: { parallelWorkers: 4 },
+    },
+    {
+      runId: "run-workers",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-workers-r0",
+        runId: "verify-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+      }],
+    },
+  );
+
+  assert.ok(writtenEntries.length >= 3, "expected multiple emitted rows");
+  for (const entry of writtenEntries) {
+    assert.equal(
+      entry.data?.parallelWorkers,
+      "4",
+      `every emitted row must carry data.parallelWorkers (offender: ${entry.status}/${entry.step ?? ""})`,
+    );
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator omits data.parallelWorkers when run options are absent (Auto)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ data?: Record<string, string> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-auto",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-auto",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-auto-r0",
+        runId: "verify-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+      }],
+    },
+  );
+
+  assert.ok(writtenEntries.length >= 3, "expected multiple emitted rows");
+  for (const entry of writtenEntries) {
+    assert.equal(entry.data?.parallelWorkers, undefined, "Auto stamps no parallelWorkers");
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("orchestrator's terminal failed row keeps the rich preview payload (mode/preview + records)", async () => {
   // Regression: a failed OCR prep run must stay a recognizable *preview* row so
   // the dashboard keeps showing its Preview tab. The orchestrator surfaces its

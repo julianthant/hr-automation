@@ -3,6 +3,7 @@ import { emitTrackerRow } from "../../jsonl.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 import { buildTraceId } from "../../../domain/queue-trace-id.js";
+import { serializeRunOptionsForData, type RunOptions } from "../../../domain/run-options.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
@@ -34,6 +35,13 @@ export interface PrepareInput {
    * distinguishes them. Absent → standalone OCR-hub upload (current behavior).
    */
   targetWorkflow?: string;
+  /**
+   * Operator-chosen Automation-workers setting. Threaded into the OCR
+   * orchestrator (which stamps it on every OCR row + raises the lookup fan-out
+   * daemon target) and stamped on the operation / oath-upload coordinator rows
+   * for display. Absent → Auto. See `src/domain/run-options.ts`.
+   */
+  runOptions?: RunOptions;
 }
 
 export interface PrepareResponse {
@@ -61,6 +69,8 @@ export interface OathUploadPrepareEnqueueArgs {
   pdfFileId?: string;
   dryRun?: boolean;
   trackerDir?: string;
+  /** Operator's Automation-workers setting — stamped on the born-at-upload row (display). */
+  runOptions?: RunOptions;
 }
 
 export function buildOcrPrepareHandler(
@@ -142,6 +152,9 @@ export function buildOcrPrepareHandler(
         operationRunId,
         __id: operationItemId,
         __traceId: operationTraceId,
+        // Surface the operator's worker count on the coordinator row (display);
+        // the approve fan-out reads it back off the OCR row, not this one.
+        ...serializeRunOptionsForData(input.runOptions),
         ...(input.dryRun ? { dryRun: "true" } : {}),
       };
       operationRef = {
@@ -214,6 +227,7 @@ export function buildOcrPrepareHandler(
             ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
             ...(input.dryRun ? { dryRun: input.dryRun } : {}),
             ...(trackerDir !== undefined ? { trackerDir } : {}),
+            ...(input.runOptions ? { runOptions: input.runOptions } : {}),
           });
           if (!delegationParentRunId) {
             // Fail loud, don't run orphaned. The oath-upload approve path SKIPS
@@ -272,6 +286,7 @@ export function buildOcrPrepareHandler(
               dryRun: input.dryRun,
               ...(delegationParentRunId ? { parentRunId: delegationParentRunId } : {}),
               ...(wantsOperationRow || isOathUploadTarget ? { operationWorkflow: input.targetWorkflow } : {}),
+              ...(input.runOptions ? { runOptions: input.runOptions } : {}),
             },
             {
               runId,
@@ -381,6 +396,7 @@ async function defaultEnqueueOathUploadAtPrepare(
               status: "ocr-prep",
               __id: emittedItemId,
               __traceId: buildTraceId({ code: "ou", runId: childRunId, at: new Date() }),
+              ...serializeRunOptionsForData(args.runOptions),
               ...(args.dryRun ? { dryRun: "true" } : {}),
             },
             input: oathUploadInput,

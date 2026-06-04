@@ -18,6 +18,7 @@ import { z } from "zod/v4";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
+import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
 import { parsePersonOrgNameInput } from "../../../systems/ucpath/person-org-summary.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -335,9 +336,13 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
 
   // ─── Cross-system enrichment (mirrors force-research.ts) ──────────────
   async enrichRecords(input): Promise<VerifyPreviewRecord[]> {
-    const { records, runId, sessionId, trackerDir, date, parentSubject, rootTracePrefix } =
+    const { records, runId, sessionId, trackerDir, date, parentSubject, rootTracePrefix, runOptions } =
       input;
     const recs = records as unknown[];
+
+    // Operator's Automation-workers setting → daemon flags for both fan-outs.
+    // Auto → {} (default reuse-or-spawn-one); explicit N>1 → { parallel: N }.
+    const enrichDaemonFlags = runOptionsToDaemonFlags(runOptions);
 
     // Dynamic imports avoid an import cycle (mirrors force-research.ts).
     const { delegateToAllImpl } = await import("../../../core/delegate.js");
@@ -393,6 +398,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         renderAs: "flat",
         fireAndForget: true,
         rootTracePrefix,
+        ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
         deriveItemId: (inp: PersonLookupChildInput) =>
           plInputToItemId.get(JSON.stringify(inp)) ?? "",
       });
@@ -476,6 +482,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         renderAs: "flat",
         fireAndForget: true,
         rootTracePrefix,
+        ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
         deriveItemId: (inp: I9ChildInput) => i9InputToItemId.get(JSON.stringify(inp)) ?? "",
       });
 

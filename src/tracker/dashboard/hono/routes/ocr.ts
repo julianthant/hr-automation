@@ -20,6 +20,7 @@ import { jsonResponse, readJsonRequest } from "../responses.js";
 import { log } from "../../../../utils/log.js";
 import { getOcrKeyStatuses } from "../../../../services/ocr/key-status.js";
 import { runtimeDir } from "../../../paths.js";
+import { normalizeRunOptions } from "../../../../domain/run-options.js";
 
 export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
   const handlers = {
@@ -133,6 +134,17 @@ async function handlePrepare(
 
   const formType = fields.formType?.trim() ?? "";
   const targetWorkflow = fields.targetWorkflow?.trim() || undefined;
+  // Automation-workers run setting from the upload modal. Auto (absent/"auto")
+  // → no run options; an invalid explicit value fails loud as a 400 here.
+  let runOptions;
+  try {
+    runOptions = normalizeRunOptions({ parallelWorkers: fields.parallelWorkers });
+  } catch (err) {
+    return jsonResponse(
+      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
   const rosterMode = (fields.rosterMode?.trim() ?? "existing") as "existing" | "download";
   const rosterPath = fields.rosterPath?.trim() || undefined;
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
@@ -170,6 +182,7 @@ async function handlePrepare(
     pdfFileId,
     formType,
     ...(targetWorkflow ? { targetWorkflow } : {}),
+    ...(runOptions.parallelWorkers !== undefined ? { runOptions } : {}),
     rosterMode,
     rosterPath,
     sessionId,

@@ -8,6 +8,7 @@
  * each spec — see `src/workflows/ocr/form-registry.ts`.
  */
 import type { ZodType } from "zod/v4";
+import type { RunOptions } from "../../domain/run-options.js";
 
 /** A single roster row, as loaded by `src/services/matching/`. Shape mirrors RosterRow used today. */
 export interface RosterRow {
@@ -183,6 +184,13 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
     parentSubject: string | undefined;
     /** Root trace PREFIX (`<code>-<HHMMSS>`) for child trace propagation. */
     rootTracePrefix: string;
+    /**
+     * Operator-chosen run options (Automation-workers setting). Map to daemon
+     * flags via `runOptionsToDaemonFlags` and pass as `daemonFlags` to the
+     * hook's `delegateToAllImpl` fan-outs so enrichment honors the worker
+     * setting. Absent → Auto (default reuse-or-spawn-one).
+     */
+    runOptions: RunOptions | undefined;
     /** Emit a progress snapshot mid-enrichment (re-renders the Preview tab). */
     emitProgress: (records: TPreview[]) => void;
   }): Promise<TPreview[]>;
