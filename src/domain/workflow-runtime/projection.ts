@@ -351,6 +351,36 @@ function operationSurfaceStatus(surface: Extract<TrackerQueueGroupSurface, { kin
   return surface.parent.status || "running";
 }
 
+/**
+ * The entry whose title / subtitle / step / itemId anchors a group surface
+ * card. Preview and operation surfaces always carry a real parent row; a batch
+ * surface uses its parent when present and otherwise falls back to its first
+ * member (an `alwaysBatchDelegatedMembers` one-member batch has no parent row).
+ */
+function surfaceAnchorEntry(surface: TrackerQueueGroupSurface): TrackerEntry | undefined {
+  switch (surface.kind) {
+    case "preview":
+    case "operation":
+      return surface.parent;
+    case "batch":
+      return surface.parent ?? surface.members[0];
+  }
+}
+
+/** Roll up a group surface's card status from its parent row + member rows. */
+function computeGroupStatus(surface: TrackerQueueGroupSurface): string {
+  switch (surface.kind) {
+    case "preview":
+      return surface.parent.status;
+    case "operation":
+      return operationSurfaceStatus(surface);
+    case "batch":
+      return surface.parent && surface.parent.status !== "done"
+        ? surface.parent.status
+        : memberAggregateStatus(surface.members);
+  }
+}
+
 function operationCoordinatorActions(
   policy: WorkflowRuntimePolicy,
   targets: readonly WorkflowActionTargetDescriptor[],
@@ -372,22 +402,10 @@ export function buildProjectionFromQueueSurface(
   const members = surface.members.map((member) =>
     buildWorkflowRunProjection(member, context, { surfaceType: "single" }),
   );
-  const anchor = surface.kind === "preview"
-    ? surface.parent
-    : surface.kind === "operation"
-      ? surface.parent
-    : surface.kind === "batch" && surface.parent
-      ? surface.parent
-      : surface.members[0];
+  const anchor = surfaceAnchorEntry(surface);
   const fallbackWorkflow = anchor?.workflow ?? "workflow";
   const policy = context.policy ?? getWorkflowRuntimePolicy(fallbackWorkflow, context.runtimePolicies);
-  const status = surface.kind === "preview"
-    ? surface.parent.status
-    : surface.kind === "operation"
-      ? operationSurfaceStatus(surface)
-    : surface.kind === "batch" && surface.parent && surface.parent.status !== "done"
-      ? surface.parent.status
-    : memberAggregateStatus(surface.members);
+  const status = computeGroupStatus(surface);
   const targetEntries = surface.members.length > 0
     ? surface.members
     : surface.kind === "preview"

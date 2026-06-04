@@ -363,7 +363,6 @@ async function reEnqueueEntry(
         trackerDir: dir,
         id,
         inheritFrom: { id, runId: resolvedRunId },
-        status: "pending",
         db: stores.taskStore.db,
       });
       if (!priorEntry) {

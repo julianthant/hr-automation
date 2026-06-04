@@ -22,6 +22,8 @@ export interface OperationRowProps {
   selectedId?: string | null;
   onSelect: (id: string) => void;
   onDelete?: (id: string) => void;
+  /** Gallery/dev fixtures can render the expanded state by default. */
+  defaultExpanded?: boolean;
   /**
    * Open the OCR review row for this operation (cross-workflow navigation).
    * Needs both the OCR row's id (`sessionId`, to select it) and its `runId`
@@ -42,7 +44,9 @@ function ocrStatusLabel(status: string): string {
     case "failed":
       return "failed";
     default:
-      return "running";
+      // Surface any other live OCR step verbatim (e.g. "wait-signatures")
+      // instead of masking every unmapped status as "running".
+      return status;
   }
 }
 
@@ -90,9 +94,10 @@ export function OperationRow({
   selectedId,
   onSelect,
   onDelete,
+  defaultExpanded = false,
   onOpenOcrReview,
 }: OperationRowProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const showOcrStatus = members.length === 0 && Boolean(ocr);
   // Narrow once so the "Open OCR review" button needs no non-null assertion and
   // can hand both ids to the cross-workflow navigation callback.

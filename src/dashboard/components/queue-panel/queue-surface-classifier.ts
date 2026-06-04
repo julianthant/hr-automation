@@ -67,7 +67,7 @@ function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {
 export type QueueGroupSurfaceKind = "preview" | "batch" | "operation";
 
 export interface OperationOcrLink {
-  runId: string;
+  runId?: string;
   sessionId?: string;
   status: string;
   step?: string;
