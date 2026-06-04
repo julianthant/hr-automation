@@ -157,7 +157,7 @@ export interface TrackerBatchSurface {
  * never duplicated into the operation surface.
  */
 export interface TrackerOperationOcrLink {
-  runId: string;
+  runId?: string;
   sessionId?: string;
   status: string;
   step?: string;
@@ -228,7 +228,7 @@ function resolveOperationOcrLink(parent: TrackerEntry): TrackerOperationOcrLink 
   const step = stringData(parent, "ocrStep");
   if (!ocrRunId && !status) return undefined;
   return {
-    runId: ocrRunId ?? "",
+    ...(ocrRunId ? { runId: ocrRunId } : {}),
     ...(ocrSessionId ? { sessionId: ocrSessionId } : {}),
     status: status ?? "running",
     ...(step ? { step } : {}),
@@ -284,13 +284,14 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     const parentRunId = parent.runId ?? parent.id;
     const members = membersByParentRunId.get(parentRunId) ?? [];
     const ocr = resolveOperationOcrLink(parent);
+    const titleOverride = titleOverrideForAnchor(parent);
     groupRows.push({
       kind: "operation",
       parentRunId,
       parent,
       members,
       ...(ocr ? { ocr } : {}),
-      ...(titleOverrideForAnchor(parent) ? { titleOverride: titleOverrideForAnchor(parent) } : {}),
+      ...(titleOverride ? { titleOverride } : {}),
     });
   }
 

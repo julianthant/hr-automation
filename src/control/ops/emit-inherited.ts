@@ -47,7 +47,20 @@ export interface EmitInheritedRowArgs {
   db?: Database;
 }
 
-export function findInheritedPriorEntry(args: EmitInheritedRowArgs): TrackerEntry | null {
+/**
+ * Lookup-only subset of {@link EmitInheritedRowArgs}: the fields
+ * {@link findInheritedPriorEntry} actually reads to locate the prior row. The
+ * emit-side fields (`status`, `step`, `error`, `input`, `data`, `parentRunId`)
+ * are intentionally excluded so callers that only look up a prior row don't pass
+ * a dead `status` they expect to filter on — the predicate, not `status`, scopes
+ * the match.
+ */
+export type FindInheritedPriorEntryArgs = Pick<
+  EmitInheritedRowArgs,
+  "workflow" | "trackerDir" | "id" | "runId" | "inheritFrom" | "predicate" | "db"
+>;
+
+export function findInheritedPriorEntry(args: FindInheritedPriorEntryArgs): TrackerEntry | null {
   const inheritId = args.inheritFrom?.id ?? args.id;
   const inheritRunId = args.inheritFrom?.runId ?? args.runId;
   return findLatestEntryForPredicate({

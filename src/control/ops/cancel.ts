@@ -110,7 +110,6 @@ export function buildCancelQueuedHandler(dir: string) {
         trackerDir: dir,
         id: req.id,
         ...(auditRunId ? { runId: auditRunId } : {}),
-        status: "failed",
         db: stores.taskStore.db,
       });
       if (!priorEntry) {
@@ -212,7 +211,6 @@ export function buildCancelRunningHandler(dir: string) {
       trackerDir: dir,
       id: req.id,
       runId: req.runId,
-      status: "failed",
       db: stores.taskStore.db,
     });
     if (latest?.status === "running") {

@@ -8,11 +8,17 @@ import { WorkflowsProvider } from "@/lib/workflows-context";
 import type { TrackerEntry, WorkflowInstanceState } from "@/components/shared/types";
 import { EntryItem } from "@/components/queue-panel/EntryItem";
 import { DaemonBatchRow } from "@/components/queue-panel/DaemonBatchRow";
+import { OperationRow } from "@/components/queue-panel/OperationRow";
 import { StatPills } from "@/components/queue-panel/StatPills";
 import { QueueSortDropdown } from "@/components/queue-panel/QueueSortDropdown";
 import { RetryAllButton } from "@/components/queue-panel/RetryAllButton";
 import { StopAllButton } from "@/components/queue-panel/StopAllButton";
 import { DeleteAllButton } from "@/components/queue-panel/DeleteAllButton";
+import {
+  buildQueueProjectionRows,
+  type OperationSurface,
+  type QueueGroupProjectionRow,
+} from "@/components/queue-panel/queue-surface-classifier";
 import { DEFAULT_QUEUE_SORT_MODE, type QueueSortMode } from "@/components/queue-panel/queue-sort";
 import { WorkflowBox } from "@/components/terminal-drawer/WorkflowBox";
 import { LiveIndicator } from "@/components/terminal-drawer/LiveIndicator";
@@ -45,6 +51,7 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
 
 const DATE = "2026-06-01";
 const NOOP = () => {};
+const EMPTY_DISPLAY_NAMES = new Map<string, string>();
 
 /** Relative ISO start so session-card elapsed timers read as live. */
 function agoIso(secondsAgo: number): string {
@@ -144,7 +151,7 @@ function Flat({ entry, selected = false }: { entry: TrackerEntry; selected?: boo
     <EntryItem
       entry={entry}
       projection={buildWorkflowRunProjection(entry as unknown as TrackerEntryJsonl, {})}
-      displayNames={new Map()}
+      displayNames={EMPTY_DISPLAY_NAMES}
       selected={selected}
       onSelect={NOOP}
       date={DATE}
@@ -185,6 +192,57 @@ function Batch({
       isBatchQueueFocused={false}
       onEnterBatchQueue={NOOP}
       onDeletedIds={NOOP}
+    />
+  );
+}
+
+type OperationGalleryRow = QueueGroupProjectionRow & { surface: OperationSurface };
+
+function buildOperationGalleryRow(
+  parent: TrackerEntry,
+  members: TrackerEntry[],
+  workflowLabel: string,
+): OperationGalleryRow {
+  const projected = buildQueueProjectionRows({
+    entries: [parent],
+    delegationSourceEntries: [parent, ...members],
+    workflow: parent.workflow,
+    workflowLabel,
+    displayNames: EMPTY_DISPLAY_NAMES,
+  });
+  const operation = projected.groupRows.find(
+    (group): group is OperationGalleryRow =>
+      group.surface.kind === "operation" &&
+      group.surface.parentRunId === (parent.runId ?? parent.id),
+  );
+  if (!operation) {
+    throw new Error(`UI gallery operation fixture did not produce an operation surface for ${parent.id}`);
+  }
+  return operation;
+}
+
+function OperationFixture({
+  fixture,
+  defaultExpanded = false,
+}: {
+  fixture: OperationGalleryRow;
+  defaultExpanded?: boolean;
+}) {
+  return (
+    <OperationRow
+      date={DATE}
+      parentRunId={fixture.surface.parentRunId}
+      projection={fixture.projection}
+      displayNames={EMPTY_DISPLAY_NAMES}
+      parent={fixture.surface.parent}
+      members={fixture.surface.members}
+      ocr={fixture.surface.ocr}
+      selected={false}
+      selectedId={null}
+      onSelect={NOOP}
+      onDelete={NOOP}
+      defaultExpanded={defaultExpanded}
+      onOpenOcrReview={NOOP}
     />
   );
 }
@@ -440,6 +498,78 @@ const previewReadOnly = row({
   },
 });
 
+// --- OPERATION: target-workflow coordinator rows for OCR-backed PDF runs. ---
+const OPERATION_PRE_RUN = "op-oath-pre-1";
+const operationPreApprovalParent = row({
+  id: "ocr-prep-sess-op-pre",
+  runId: OPERATION_PRE_RUN,
+  workflow: "oath-signature",
+  status: "running",
+  step: "ocr-prep",
+  firstLogTs: "2026-06-01T09:58:00.000Z",
+  lastLogMessage: "OCR prep running in the OCR panel…",
+  runOrdinal: 1,
+  data: {
+    archetype: "operation",
+    mode: "prepare",
+    formType: "oath",
+    queueRowKind: "file",
+    pdfOriginalName: "Oath_Packet_Batch.pdf",
+    ocrRunId: "ocr-run-op-pre",
+    ocrSessionId: "sess-op-pre",
+    ocrStatus: "awaiting-review",
+    ocrStep: "awaiting-approval",
+    operationWorkflow: "oath-signature",
+    operationKind: "oath",
+    operationRunId: OPERATION_PRE_RUN,
+    __traceId: "os-095800-opre",
+  },
+});
+
+const OPERATION_POST_RUN = "op-oath-post-1";
+const operationPostApprovalParent = row({
+  id: "ocr-prep-sess-op-post",
+  runId: OPERATION_POST_RUN,
+  workflow: "oath-signature",
+  status: "running",
+  step: "approved",
+  firstLogTs: "2026-06-01T10:02:00.000Z",
+  lastLogMessage: "Waiting on signer rows…",
+  runOrdinal: 1,
+  data: {
+    archetype: "operation",
+    mode: "prepare",
+    formType: "oath",
+    queueRowKind: "file",
+    pdfOriginalName: "Oath_Packet_Approved.pdf",
+    ocrRunId: "ocr-run-op-post",
+    ocrSessionId: "sess-op-post",
+    ocrStatus: "approved",
+    ocrStep: "approved",
+    operationWorkflow: "oath-signature",
+    operationKind: "oath",
+    operationRunId: OPERATION_POST_RUN,
+    __traceId: "os-100200-opst",
+  },
+});
+
+const operationMembers = [
+  member("opm-1", "done", "Amara Brooks", "10041001", OPERATION_POST_RUN),
+  member("opm-2", "running", "Noah Kim", "10041002", OPERATION_POST_RUN),
+  member("opm-3", "pending", "Elena Vega", "10041003", OPERATION_POST_RUN),
+];
+
+const operationPreApproval = buildOperationGalleryRow(
+  operationPreApprovalParent,
+  [],
+  "Oath Signature",
+);
+const operationPostApproval = buildOperationGalleryRow(
+  operationPostApprovalParent,
+  operationMembers,
+  "Oath Signature",
+);
+
 function QueueRowsTab() {
   return (
     <div className="grid grid-cols-1 min-[820px]:grid-cols-2 gap-4 items-start">
@@ -529,6 +659,18 @@ function QueueRowsTab() {
       </Variant>
       <Variant label="preview row · read-only (verify)" axes="preview · kind=file · awaiting-approval" note="no approveTo → no Approve button; operator inspects then discards">
         <Flat entry={previewReadOnly} />
+      </Variant>
+
+      {/* ---- OPERATION ---- */}
+      <Section
+        title="operation"
+        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. The OCR review row stays in the OCR panel; this row tracks the target workflow and expands inline after approval."
+      />
+      <Variant label="operation · before approval" axes="operation · 0 members · OCR status" note="selectable coordinator row + lightweight OCR status/link">
+        <OperationFixture fixture={operationPreApproval} />
+      </Variant>
+      <Variant label="operation · expanded after approval" axes="operation · inline member rows · mixed status" note="signer/contact rows stay under the coordinator instead of opening a batch page">
+        <OperationFixture fixture={operationPostApproval} defaultExpanded />
       </Variant>
     </div>
   );

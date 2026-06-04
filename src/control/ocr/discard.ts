@@ -50,7 +50,6 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       trackerDir,
       id: input.sessionId,
       runId: input.runId,
-      status: "failed",
       db: stores.taskStore.db,
     });
     if (!ocrPriorEntry) {
@@ -83,7 +82,6 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
         trackerDir,
         id: parentItemId,
         runId: parentRunId,
-        status: "failed",
         db: stores.taskStore.db,
       });
       if (!parentPriorEntry) {
