@@ -23,6 +23,9 @@ import { DEFAULT_QUEUE_SORT_MODE, type QueueSortMode } from "@/components/queue-
 import { WorkflowBox } from "@/components/terminal-drawer/WorkflowBox";
 import { LiveIndicator } from "@/components/terminal-drawer/LiveIndicator";
 import { BrowserChip } from "@/components/terminal-drawer/BrowserChip";
+import { RunSettingsMenu } from "@/components/navigation/RunSettingsMenu";
+import { AutomationWorkersField } from "@/components/run-modal/AutomationWorkersField";
+import { AUTO_WORKERS, type StepPreset, type WorkerChoice } from "@/lib/run-settings";
 import { EmptyState } from "@/components/shared/EmptyState";
 import type { AuthState } from "@/components/shared/types";
 import { buildWorkflowRunProjection } from "../../../domain/workflow-runtime/projection.js";
@@ -904,9 +907,25 @@ const controlEntries: TrackerEntry[] = [
   statusQueued,
 ];
 
+const SAMPLE_PRESETS: StepPreset[] = [
+  {
+    id: "lookup-only",
+    label: "Lookup only",
+    skipSteps: ["save"],
+    description: "Resolve EID + active status; skip the UCPath write.",
+  },
+];
+
 function ControlsTab() {
   const [filter, setFilter] = useState<string | null>(null);
   const [sort, setSort] = useState<QueueSortMode>(DEFAULT_QUEUE_SORT_MODE);
+  // Parallel-workers run setting demos — the input-run gear (RunSettingsMenu)
+  // and the upload-modal field (AutomationWorkersField). Stateful so the radio
+  // selection + the gear's active accent update live.
+  const [gearWorkers, setGearWorkers] = useState<WorkerChoice>(AUTO_WORKERS);
+  const [activeGearWorkers, setActiveGearWorkers] = useState<WorkerChoice>("4");
+  const [activeGearPreset, setActiveGearPreset] = useState<string>("full");
+  const [fieldWorkers, setFieldWorkers] = useState<WorkerChoice>(AUTO_WORKERS);
   return (
     <div className="grid grid-cols-1 min-[820px]:grid-cols-2 gap-4 items-start">
       <Section title="filter + sort" sub="The queue header's stat/filter pills and the sort dropdown. Stateful here." />
@@ -935,6 +954,57 @@ function ControlsTab() {
       <Variant label="DeleteAllButton" axes="bulk delete" note="POSTs /api/.../delete-all">
         <div className="px-3 py-2 flex">
           <DeleteAllButton workflow="onboarding" date={DATE} entries={[{ id: "s-done" }]} onDeleted={NOOP} />
+        </div>
+      </Variant>
+
+      <Section
+        title="run settings"
+        sub="The parallel-workers run option surfaces: the input-run settings gear (RunSettingsMenu) and the upload modal's Automation-workers field (AutomationWorkersField). Both feed src/lib/run-settings.ts."
+      />
+      <Variant
+        label="RunSettingsMenu — Auto (default)"
+        axes="workers only · no presets"
+        note="click the gear to open; Auto + Full → no accent"
+      >
+        <div className="px-3 py-3 flex items-center gap-4">
+          <RunSettingsMenu
+            workerChoice={gearWorkers}
+            onSelectWorker={setGearWorkers}
+            presets={[]}
+            presetId="full"
+            onSelectPreset={NOOP}
+            workflowLabel="Person Lookup"
+          />
+          <span className="font-mono text-[11px] text-muted-foreground">workers={gearWorkers}</span>
+        </div>
+      </Variant>
+      <Variant
+        label="RunSettingsMenu — active"
+        axes="workers + run-mode presets"
+        note="any non-default choice → primary accent + dot"
+      >
+        <div className="px-3 py-3 flex items-center gap-4">
+          <RunSettingsMenu
+            workerChoice={activeGearWorkers}
+            onSelectWorker={setActiveGearWorkers}
+            presets={SAMPLE_PRESETS}
+            presetId={activeGearPreset}
+            onSelectPreset={setActiveGearPreset}
+            workflowLabel="Separations"
+          />
+          <span className="font-mono text-[11px] text-muted-foreground">
+            workers={activeGearWorkers} · preset={activeGearPreset}
+          </span>
+        </div>
+      </Variant>
+      <Variant
+        label="AutomationWorkersField"
+        axes="upload-modal radio strip"
+        note="RunModal's Automation-workers section (real component)"
+        width={460}
+      >
+        <div className="px-3 py-3">
+          <AutomationWorkersField value={fieldWorkers} onChange={setFieldWorkers} />
         </div>
       </Variant>
 
