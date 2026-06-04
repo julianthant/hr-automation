@@ -241,7 +241,7 @@ function CaptureLightboxShell({
       aria-label={ariaLabel}
       onClick={onClose}
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ backgroundColor: "hsl(15 11% 4% / 0.92)" }}
+      style={{ backgroundColor: "color-mix(in srgb, var(--background) 92%, transparent)" }}
     >
       <button
         type="button"

@@ -143,7 +143,7 @@ function PlaceholderTile() {
       className="aspect-[3/4] rounded-md"
       style={{
         border: "1px solid var(--capture-border-subtle)",
-        background: "linear-gradient(135deg, #181819 0%, #131314 100%)",
+        background: "linear-gradient(135deg, var(--capture-bg-raised) 0%, var(--capture-bg-modal) 100%)",
       }}
       aria-hidden
     />

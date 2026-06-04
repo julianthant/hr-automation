@@ -30,7 +30,7 @@ export function LeftColumn({
           to fit the 192px frame regardless of the baked-in attributes. */}
       <div
         className="rounded-[10px] p-[14px] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
-        style={{ backgroundColor: "#FFFFFF", width: 192, height: 192 }}
+        style={{ backgroundColor: "white", width: 192, height: 192 }} // QR codes require a solid white background to scan reliably
         aria-label="QR code for capture URL"
         dangerouslySetInnerHTML={{ __html: started.qrSvg }}
       />

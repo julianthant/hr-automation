@@ -1,4 +1,4 @@
-import { Images, Inbox } from "lucide-react";
+import { ArrowLeft, Images, Inbox } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import type { TrackerEntry } from "@/components/shared/types";
 import { EntryItem } from "./EntryItem";
@@ -84,7 +84,7 @@ export function BatchQueueToolbar({
           title="Back to queue"
           className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary/40 text-foreground hover:bg-secondary/70 shrink-0"
         >
-          ←
+          <ArrowLeft className="h-4 w-4" aria-hidden />
         </button>
         <span className="text-muted-foreground/60">/</span>
         <span className="font-semibold text-[13px] text-foreground truncate min-w-0 flex-1">
@@ -109,7 +109,7 @@ export function BatchQueueToolbar({
                 : "border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
             )}
           >
-            <Images className="h-4 w-4" />
+            <Images className="h-4 w-4" aria-hidden />
           </button>
         ) : null}
       </div>

@@ -93,10 +93,10 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
   },
   /** Delegated OCR only (`parentRunId`) — trackers use `status: done` + `awaiting-approval`. */
   needsReview: {
-    badge: "bg-sky-500/12 text-sky-600 dark:text-sky-400 border border-sky-500/35",
+    badge: "bg-info/12 text-info border border-info/35",
     icon: ClipboardList,
     iconClass: "",
-    iconColor: "text-sky-600 dark:text-sky-400",
+    iconColor: "text-info",
     label: "Needs review",
   },
   /** Person Lookup — UCPath had no matching row (tracker status is still `done`). */
