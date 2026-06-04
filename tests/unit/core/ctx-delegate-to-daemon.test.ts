@@ -334,6 +334,88 @@ describe("dispatchToDaemonAndWait — daemon-dispatch path of delegateToAll (Fin
     assert.equal((pending!.data as { pdfOriginalName?: string }).pdfOriginalName, "upload-packet.pdf");
   });
 
+  test("forwards daemonFlags to ensureDaemonsAndEnqueue (OCR worker-count escape hatch)", async () => {
+    const { defineWorkflow } = await import("../../../src/core/index.js");
+    const { delegateToAllImpl } = await import("../../../src/core/delegate.js");
+    const clientMod = await import("../../../src/core/daemon/client.js");
+    const watchMod = await import("../../../src/tracker/delegation/watch-child-runs.js");
+
+    const ensureDaemonsAndEnqueue = clientMod.ensureDaemonsAndEnqueue as ReturnType<typeof vi.fn>;
+    const watchChildRuns = watchMod.watchChildRuns as ReturnType<typeof vi.fn>;
+
+    const child = defineWorkflow({
+      name: "daemon-test-child",
+      archetype: "single",
+      systems: [],
+      authSteps: false,
+      steps: ["work"] as const,
+      schema: z.object({ payload: z.string() }),
+      detailFields: [{ key: "payload", label: "Payload" }],
+      getName: (d) => d.payload ?? "",
+      getId: (d) => d.payload ?? "",
+      handler: async () => {},
+    });
+
+    const items = [{ itemId: "flag-A", runId: "flag-run-A" }];
+    ensureDaemonsAndEnqueue.mockImplementation(buildEnqueueMock(items));
+    watchChildRuns.mockResolvedValue([
+      { workflow: "daemon-test-child", itemId: "flag-A", runId: "flag-run-A", status: "done" },
+    ]);
+
+    await delegateToAllImpl({
+      parentRunId: "parent-flags",
+      trackerDir,
+      child,
+      inputs: [{ payload: "A" }],
+      fireAndForget: false,
+      daemonFlags: { parallel: 4 },
+    });
+
+    // The third positional arg to ensureDaemonsAndEnqueue is the DaemonFlags.
+    const [, , flags] = ensureDaemonsAndEnqueue.mock.calls[0] as [unknown, unknown, unknown];
+    assert.deepEqual(flags, { parallel: 4 }, "daemonFlags forwarded as the spawn-flags argument");
+  });
+
+  test("omits daemonFlags → ensureDaemonsAndEnqueue gets {} (default reuse-or-spawn-one)", async () => {
+    const { defineWorkflow } = await import("../../../src/core/index.js");
+    const { delegateToAllImpl } = await import("../../../src/core/delegate.js");
+    const clientMod = await import("../../../src/core/daemon/client.js");
+    const watchMod = await import("../../../src/tracker/delegation/watch-child-runs.js");
+
+    const ensureDaemonsAndEnqueue = clientMod.ensureDaemonsAndEnqueue as ReturnType<typeof vi.fn>;
+    const watchChildRuns = watchMod.watchChildRuns as ReturnType<typeof vi.fn>;
+
+    const child = defineWorkflow({
+      name: "daemon-test-child",
+      archetype: "single",
+      systems: [],
+      authSteps: false,
+      steps: ["work"] as const,
+      schema: z.object({ payload: z.string() }),
+      detailFields: [{ key: "payload", label: "Payload" }],
+      getName: (d) => d.payload ?? "",
+      getId: (d) => d.payload ?? "",
+      handler: async () => {},
+    });
+
+    const items = [{ itemId: "noflag-A", runId: "noflag-run-A" }];
+    ensureDaemonsAndEnqueue.mockImplementation(buildEnqueueMock(items));
+    watchChildRuns.mockResolvedValue([
+      { workflow: "daemon-test-child", itemId: "noflag-A", runId: "noflag-run-A", status: "done" },
+    ]);
+
+    await delegateToAllImpl({
+      parentRunId: "parent-noflags",
+      trackerDir,
+      child,
+      inputs: [{ payload: "A" }],
+      fireAndForget: false,
+    });
+
+    const [, , flags] = ensureDaemonsAndEnqueue.mock.calls[0] as [unknown, unknown, unknown];
+    assert.deepEqual(flags, {}, "no daemonFlags → default {} flags");
+  });
+
   test("input-order preservation: missing outcome synthesized as failed using expected runId (not empty string)", async () => {
     const { defineWorkflow } = await import("../../../src/core/index.js");
     const { delegateToAllImpl } = await import("../../../src/core/delegate.js");
