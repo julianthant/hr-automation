@@ -42,6 +42,7 @@ import { runOcrPipeline } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import { buildTraceId, tracePrefix } from "../../domain/queue-trace-id.js";
+import { runOptionsToDaemonFlags, serializeRunOptionsForData } from "../../domain/run-options.js";
 import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
 import {
@@ -239,6 +240,15 @@ export async function runOcrOrchestrator(
       ? input.parentSubject.trim()
       : undefined;
 
+  // Operator's Automation-workers setting. `lookupDaemonFlags` raises the
+  // alive-daemon target for the person-lookup fan-out below (and is forwarded to
+  // `enrichRecords`); `serializedWorkerData` stamps `data.parallelWorkers` onto
+  // EVERY OCR row (via writeTracker's re-stamp set) so the approve route can read
+  // the worker count back at approve time — the OCR row is the durable bridge
+  // across the upload → approve boundary. Auto → {} flags / no stamp.
+  const lookupDaemonFlags = runOptionsToDaemonFlags(input.runOptions);
+  const serializedWorkerData = serializeRunOptionsForData(input.runOptions);
+
   let lastAnnouncedPhase: string | undefined;
   // Latest rich preview payload (records + page metadata) emitted via
   // `emitSnapshot`. Hoisted above the try so the failure path can re-stamp it
@@ -284,6 +294,10 @@ export async function runOcrOrchestrator(
     // Carry the target-workflow operation intent so the approve route can route
     // the fan-out (e.g. an oath-signature PDF run fans signers but no ticket).
     if (input.operationWorkflow) flat.operationWorkflow = input.operationWorkflow;
+    // Carry the operator's worker count so the approve route can apply the same
+    // setting to its signer/contact fan-out (read back via shared.ts). Rides
+    // every row in the re-stamp set, surviving the dashboard's latest-wins dedupe.
+    if (serializedWorkerData.parallelWorkers) flat.parallelWorkers = serializedWorkerData.parallelWorkers;
     if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,
@@ -858,6 +872,10 @@ export async function runOcrOrchestrator(
             // every person-lookup child COMPOSES `<prefix>-<ownRunId4>` —
             // visibly one operation, each child individually greppable.
             rootTracePrefix: tracePrefix(traceId),
+            // Operator's Automation-workers setting raises the person-lookup
+            // daemon target for the lookup fan-out. Auto → {} (default reuse-or-
+            // spawn-one), so only spread when an explicit N>1 was chosen.
+            ...(lookupDaemonFlags.parallel ? { daemonFlags: lookupDaemonFlags } : {}),
             deriveItemId: deriveChildItemId,
             // The OCR pending row carries pdfFileId / sessionId / parent
             // subject context — re-emit those onto each child pending row
@@ -919,6 +937,7 @@ export async function runOcrOrchestrator(
           date,
           parentSubject: cachedParentSubject,
           rootTracePrefix: tracePrefix(traceId),
+          runOptions: input.runOptions,
           emitProgress: (recs: unknown[]) =>
             emitSnapshot(recs, "person-lookup", "running", { failedPages, emptyPages, pageStatusSummary }),
         }) as Promise<unknown[]>,
