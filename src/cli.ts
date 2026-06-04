@@ -129,12 +129,32 @@ program
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
   .action(async (opts: { port?: number; prod?: boolean; clean?: boolean }) => {
+    // Dashboard runs default to hands-off Duo. Without it, a daemon login
+    // (person-lookup, oath-signature, …) stalls on Duo's native "insert your
+    // security key and touch it" dialog — Duo defaults to the security-key
+    // factor once the hands-off WebAuthn key is enrolled, and the native dialog
+    // blocks the page with nothing to answer it, so the run hangs at auth.
+    // Setting the flag arms the enrolled virtual key so the prompt auto-approves;
+    // spawned daemons inherit it via `{ ...process.env }` (daemon/registry.ts),
+    // which is where auth actually happens. Falls back to manual Duo cleanly when
+    // `.auth/duo-webauthn.json` is absent. Set HR_AUTOMATION_DUO_WEBAUTHN=0 to
+    // force manual approval.
+    if (process.env.HR_AUTOMATION_DUO_WEBAUTHN === undefined) {
+      process.env.HR_AUTOMATION_DUO_WEBAUTHN = "1";
+    }
+    const handsOffDuo = process.env.HR_AUTOMATION_DUO_WEBAUTHN === "1";
     const port = opts.port ?? 3838;
     // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.
     startDashboard("all", port, {
       noClean: opts.clean === false,
       serveStatic: Boolean(opts.prod),
     });
+
+    log.step(
+      handsOffDuo
+        ? "Hands-off Duo ON — daemon logins auto-approve via the enrolled WebAuthn key (set HR_AUTOMATION_DUO_WEBAUTHN=0 to require manual approval)."
+        : "Hands-off Duo OFF — daemon logins require manual Duo approval.",
+    );
 
     if (opts.prod) {
       // Production mode: serve built HTML from SSE server only
