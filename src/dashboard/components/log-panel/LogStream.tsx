@@ -376,7 +376,7 @@ export function LogStream({
         {tab?.source === "screenshots" || tab?.source === "edit-data" || tab?.source === "preview" ? (
           <div />
         ) : (
-          <div className="flex items-center gap-2 leading-none">
+          <div className="flex items-center gap-2 leading-none" aria-live="polite">
             <span className="relative flex items-center justify-center w-[7px] h-[7px]">
               <span className="absolute inset-0 rounded-full bg-primary/50 motion-safe:animate-ping" />
               <span className="relative w-[7px] h-[7px] rounded-full bg-primary" />
