@@ -6,6 +6,7 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { formatEntryTime, getRunNumber } from "@/components/shared/entry-display";
 import { QueueRowCard } from "./QueueRowCard";
+import { StatusCounts } from "./StatusCounts";
 import {
   aggregateBatchCounts,
   pickPreviewChildren,
@@ -147,12 +148,7 @@ export function GroupRowBase({
               row (no-title anchor), spans are nowrap + shrink-0 and the gap is
               tightened so 4 counts + badge don't wrap. */}
           <div className="flex flex-nowrap items-center gap-x-2.5 font-mono text-[10.5px] mb-1.5">
-            <span className="text-success shrink-0 whitespace-nowrap">● {counts.done} done</span>
-            <span className="text-primary shrink-0 whitespace-nowrap">● {counts.running} running</span>
-            <span className="text-warning shrink-0 whitespace-nowrap">● {counts.queued} queued</span>
-            {counts.failed > 0 && (
-              <span className="text-destructive shrink-0 whitespace-nowrap">● {counts.failed} failed</span>
-            )}
+            <StatusCounts counts={counts} />
             {!hasTitle && (
               <span className={cn(countBadgeClass, "ml-auto")}>
                 {counts.done} / {counts.total}
