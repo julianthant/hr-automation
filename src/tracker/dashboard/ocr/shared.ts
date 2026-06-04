@@ -1,5 +1,6 @@
 import type { TrackerEntry } from "../../jsonl.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
+import { parseParallelWorkers } from "../../../domain/run-options.js";
 
 const WORKFLOW = "ocr";
 const SESSION_LOOKBACK_DAYS = 7;
@@ -82,4 +83,28 @@ export function readDryRun(sessionId: string, trackerDir: string | undefined): b
     return v === "true" || v === "1";
   });
   return e !== undefined;
+}
+
+/**
+ * The operator's Automation-workers count for this OCR run, read back off the
+ * OCR row's `data.parallelWorkers` (stamped by the orchestrator on every row).
+ * The durable bridge across the upload → approve boundary: the approve route maps
+ * it to daemon flags so its signer/contact fan-out honors the chosen worker
+ * count. `undefined` for Auto (no explicit choice). Lenient on a malformed stored
+ * value (returns `undefined`) — readers don't fail loud; the stamp came from our
+ * own serializer, so this is belt-and-suspenders.
+ */
+export function readParallelWorkers(sessionId: string, trackerDir: string | undefined): number | undefined {
+  const e = walkOcrJsonl(
+    sessionId,
+    trackerDir,
+    (row) => row.data?.parallelWorkers !== undefined && row.data.parallelWorkers !== "",
+  );
+  const raw = e?.data?.parallelWorkers;
+  if (raw === undefined) return undefined;
+  try {
+    return parseParallelWorkers(raw);
+  } catch {
+    return undefined;
+  }
 }

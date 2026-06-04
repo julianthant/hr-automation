@@ -36,7 +36,13 @@ function oathRecord(opts: {
   };
 }
 
-function seedOathOcrRow(dir: string, sessionId: string, runId: string, traceId?: string): void {
+function seedOathOcrRow(
+  dir: string,
+  sessionId: string,
+  runId: string,
+  traceId?: string,
+  extraData?: Record<string, unknown>,
+): void {
   mkdirSync(rowsDir(dir), { recursive: true });
   appendFileSync(
     rowFilePath("ocr", todayLocal(), dir),
@@ -53,6 +59,7 @@ function seedOathOcrRow(dir: string, sessionId: string, runId: string, traceId?:
         pdfOriginalName: "roster.pdf",
         pdfFileId: "file-abc",
         ...(traceId ? { __traceId: traceId } : {}),
+        ...extraData,
       },
     }) + "\n",
   );
@@ -172,6 +179,79 @@ test("oath approve: selected-but-EID-less records are NOT enqueued and NOT waite
     // oath-upload waits on exactly the one enqueued signer row.
     const docInput = uploadCall!.inputs[0] as { signerItemIds: string[] };
     assert.deepEqual(docInput.signerItemIds, ["ocr-oath-ocr-run-skip-r0"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oath approve applies the saved worker count as { parallel: N } to the signer fan-out, NOT the ticket", async () => {
+  // The OCR row carries the operator's Automation-workers count
+  // (data.parallelWorkers, stamped at prep). The approve route reads it back and
+  // sizes the per-record oath-signature fan-out's daemon target — but leaves the
+  // once-per-document oath-upload ticket at default (it is one row that waits for
+  // the signers, not parallel work).
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-workers-"));
+  try {
+    seedOathOcrRow(dir, "sess-w", "ocr-run-w", undefined, { parallelWorkers: "4" });
+
+    const calls: Array<{ workflow: string; flags: unknown }> = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId, opts) => {
+        const itemIds = inputs.map((inp, i) => deriveItemId(inp, i));
+        calls.push({ workflow, flags: opts?.flags });
+        return { enqueued: itemIds.map((id) => ({ id })) };
+      },
+    });
+
+    const res = await handler({
+      sessionId: "sess-w",
+      runId: "ocr-run-w",
+      records: [
+        oathRecord({ employeeId: "10000001", printedName: "DOE, JANE" }),
+        oathRecord({ employeeId: "10000002", printedName: "ROE, RICHARD" }),
+      ],
+    });
+    assert.equal(res.status, 200);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const sigCall = calls.find((c) => c.workflow === "oath-signature");
+    const uploadCall = calls.find((c) => c.workflow === "oath-upload");
+    assert.ok(sigCall, "oath-signature enqueued");
+    assert.ok(uploadCall, "oath-upload enqueued");
+    assert.deepEqual(sigCall!.flags, { parallel: 4 }, "signer fan-out gets the saved worker count");
+    assert.equal(uploadCall!.flags, undefined, "oath-upload ticket stays at default (one row)");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oath approve passes no worker flags when the OCR row has no parallelWorkers (Auto)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-auto-"));
+  try {
+    seedOathOcrRow(dir, "sess-auto", "ocr-run-auto");
+
+    const calls: Array<{ workflow: string; flags: unknown }> = [];
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId, opts) => {
+        const itemIds = inputs.map((inp, i) => deriveItemId(inp, i));
+        calls.push({ workflow, flags: opts?.flags });
+        return { enqueued: itemIds.map((id) => ({ id })) };
+      },
+    });
+
+    const res = await handler({
+      sessionId: "sess-auto",
+      runId: "ocr-run-auto",
+      records: [oathRecord({ employeeId: "10000001", printedName: "DOE, JANE" })],
+    });
+    assert.equal(res.status, 200);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const sigCall = calls.find((c) => c.workflow === "oath-signature");
+    assert.ok(sigCall, "oath-signature enqueued");
+    assert.equal(sigCall!.flags, undefined, "Auto → no worker flags on the signer fan-out");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
