@@ -59,6 +59,7 @@ import {
 } from "../domain/row-archetype.js"
 import { listWorkflowNames } from "./workflow-loaders.js"
 import { ensureDaemonsAndEnqueue } from "./daemon/client.js"
+import type { DaemonFlags } from "./daemon/types.js"
 import { watchChildRuns, type ChildOutcome } from "../tracker/delegation/watch-child-runs.js"
 import { emitTrackerRow, type StampedData } from "../tracker/jsonl.js"
 import { buildPendingTrackerData } from "./pending-data.js"
@@ -487,6 +488,13 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   rootCode?: string
   /** Inherited ROOT trace PREFIX — propagated to every child to compose its own tail. */
   rootTracePrefix?: string
+  /**
+   * Daemon spawn flags for the fan-out's `ensureDaemonsAndEnqueue` — lets a
+   * caller raise the alive-daemon target for the children (e.g. OCR's
+   * `{ parallel: N }` from the operator's worker setting). Omitted/`{}` keeps
+   * the default reuse-or-spawn-one behavior. See `src/domain/run-options.ts`.
+   */
+  daemonFlags?: DaemonFlags
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
 
@@ -506,7 +514,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   await ensureDaemonsAndEnqueue(
     args.child,
     queuedInputs as TChildData[],
-    {},
+    args.daemonFlags ?? {},
     {
       trackerDir: args.trackerDir,
       parentRunId: args.parentRunId,
@@ -655,6 +663,14 @@ export async function delegateToAllImpl<TChildData, TChildSteps extends readonly
    * computes for the oath form here.
    */
   rootTracePrefix?: string
+  /**
+   * Daemon spawn flags for the daemon-capable fan-out path — forwarded to
+   * `dispatchToDaemonAndWait` → `ensureDaemonsAndEnqueue` so a caller can raise
+   * the alive-daemon target (OCR's `{ parallel: N }` from the operator's worker
+   * setting). No-op on the in-process pool path (no daemons). Internal escape
+   * hatch only — NOT added to the public `ctx.delegateToAll` API.
+   */
+  daemonFlags?: DaemonFlags
 }): Promise<ChildRunResult<TChildData>[]> {
   if (args.inputs.length === 0) return []
   if (isDaemonCapable(args.child.config.name)) {
