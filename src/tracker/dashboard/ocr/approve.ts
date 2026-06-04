@@ -14,8 +14,11 @@ import {
   readParentRunId,
   readDryRun,
   readOperationWorkflow,
+  readParallelWorkers,
   isOperationCoordinatorWorkflow,
 } from "./shared.js";
+import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
+import type { DaemonFlags } from "../../../core/daemon/types.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
@@ -43,6 +46,13 @@ export interface ApproveHandlerOpts {
     deriveItemId: (input: unknown, idx: number) => string,
     opts?: {
       parentRunId?: string;
+      /**
+       * Daemon spawn flags applied to the per-record `approveTo` fan-out from the
+       * operator's saved worker count (real path passes them as the 3rd
+       * positional arg to `ensureDaemonsAndEnqueue`; the override receives them
+       * here so tests can assert). Absent → default reuse-or-spawn-one.
+       */
+      flags?: DaemonFlags;
       onPreEmitPending?: (
         item: unknown,
         runId: string,
@@ -94,6 +104,17 @@ export function buildOcrApproveHandler(
     });
     const ocrRootTracePrefix = ocrRootFrozenId ? tracePrefix(ocrRootFrozenId) : undefined;
     const dryRun = readDryRun(input.sessionId, trackerDir);
+    // Operator's saved Automation-workers count → daemon flags for the per-record
+    // signer/contact fan-out (the durable bridge: stamped on the OCR row at prep,
+    // read back here at approve). The once-per-document oath-upload ticket stays
+    // at default — it is a single row that waits for the signers, not parallel
+    // work. Auto → {} (default reuse-or-spawn-one).
+    const approveDaemonFlags = runOptionsToDaemonFlags(
+      ((): { parallelWorkers?: number } | undefined => {
+        const n = readParallelWorkers(input.sessionId, trackerDir);
+        return n !== undefined ? { parallelWorkers: n } : undefined;
+      })(),
+    );
     const latestReviewData = readLatestOcrReviewData(input.sessionId, input.runId, trackerDir);
     const parentSubject = parentRunId && approveTo
       ? readParentSubjectFromReviewData(latestReviewData)
@@ -212,6 +233,7 @@ export function buildOcrApproveHandler(
               (_inp, idx) => itemIds[idx],
               {
                 ...(childParentRunId ? { parentRunId: childParentRunId } : {}),
+                ...(approveDaemonFlags.parallel ? { flags: approveDaemonFlags } : {}),
                 onPreEmitPending: emitFallbackChildPending,
               },
             );
@@ -231,7 +253,7 @@ export function buildOcrApproveHandler(
             dispatchResult = await ensureDaemonsAndEnqueue(
               childWf,
               enqueueInputs as never,
-              {},
+              approveDaemonFlags,
               {
                 trackerDir,
                 deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
