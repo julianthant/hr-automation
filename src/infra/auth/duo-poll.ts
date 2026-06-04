@@ -354,6 +354,7 @@ export async function pollDuoApproval(
   // operator's phone approval still works exactly as before.
   if (isDuoWebAuthnEnabled()) {
     const handle = await beginDuoWebAuthn(page, { abortSignal: options.abortSignal }).catch((err) => {
+      if (options.abortSignal?.aborted) throw err;
       log.warn(
         `Duo WebAuthn unavailable (${err instanceof Error ? err.message : String(err)}) — falling back to manual approval`,
       );

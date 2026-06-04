@@ -1,45 +1,37 @@
-import { describe, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, vi, beforeEach, afterEach, afterAll } from "vitest";
 import assert from "node:assert/strict";
-
-// Partial-mock the WebAuthn module: keep the REAL arm/finish/begin logic
-// (so the page-keyed WeakMap, factor selection, and CDP teardown all run for
-// real against our fake CDP session), but stub `loadDuoWebAuthnCredentials` so
-// the test never touches the gitignored real `.auth/duo-webauthn.json` and runs
-// on a fresh clone / CI. A synthetic `internal` credential is enough to arm one
-// virtual authenticator.
-vi.mock("../../../../src/infra/auth/duo-webauthn.js", async (importActual) => {
-  const actual = await importActual<typeof import("../../../../src/infra/auth/duo-webauthn.js")>();
-  return {
-    ...actual,
-    loadDuoWebAuthnCredentials: () => [
-      {
-        rpId: "duosecurity.com",
-        credentialId: "test-credential-id-internal",
-        privateKey: "test-fake-private-key-not-real",
-        userHandle: "test-user-handle",
-        signCount: 7,
-        isResidentCredential: false,
-        transport: "internal" as const,
-        enrolledAt: "2026-06-03",
-      },
-    ],
-  };
-});
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { pollDuoApproval } from "../../../../src/infra/auth/duo-poll.js";
-import { armDuoWebAuthn } from "../../../../src/infra/auth/duo-webauthn.js";
+import { armDuoWebAuthn, type DuoWebAuthnCredential } from "../../../../src/infra/auth/duo-webauthn.js";
 import { log } from "../../../../src/utils/log.js";
 
 /**
  * Safety pin for the live-pool invariant "never abandon a Duo ceremony mid-flight"
  * — applied to the ABORT path. The daemon stop path and the live multi-system test
  * both cancel auth via `abortSignal`; if `pollDuoApproval` threw the abort without
- * calling `finishDuoWebAuthn`, the armed CDP virtual authenticator would leak and —
- * worse — its advanced signCount would never persist, so Duo would reject the next
- * assertion as a cloned key. This test arms a (fake-CDP-backed) page, aborts a
- * pending poll, and asserts the authenticator was torn down (removeVirtualAuthenticator
- * + WebAuthn.disable + detach) exactly as on a clean timeout/success exit.
+ * calling `finishDuoWebAuthn`, the armed CDP virtual authenticator would leak and
+ * the observed signCount would not be reconciled beyond the pre-arm reservation.
+ * This test arms a (fake-CDP-backed) page, aborts a pending poll, and asserts the
+ * authenticator was torn down (removeVirtualAuthenticator + WebAuthn.disable +
+ * detach) exactly as on a clean timeout/success exit.
  */
+
+const CREDENTIAL: DuoWebAuthnCredential = {
+  rpId: "duosecurity.com",
+  credentialId: "test-credential-id-internal",
+  privateKey: "test-fake-private-key-not-real",
+  userHandle: "test-user-handle",
+  signCount: 7,
+  isResidentCredential: false,
+  transport: "internal",
+  enrolledAt: "2026-06-03",
+};
+
+const tmp = mkdtempSync(join(tmpdir(), "duo-poll-abort-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 interface CdpCall {
   method: string;
@@ -100,12 +92,22 @@ function makeFakePage(cdp: import("playwright").CDPSession): import("playwright"
 
 describe("pollDuoApproval — WebAuthn teardown on abort", () => {
   let prevFlag: string | undefined;
+  let prevCredentialPath: string | undefined;
+  let prevLockDir: string | undefined;
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let stepSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     prevFlag = process.env.HR_AUTOMATION_DUO_WEBAUTHN;
+    prevCredentialPath = process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH;
+    prevLockDir = process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR;
     process.env.HR_AUTOMATION_DUO_WEBAUTHN = "1";
+    process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH = join(tmp, `credential-${Date.now()}.json`);
+    process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR = join(tmp, `lock-${Date.now()}`);
+    writeFileSync(
+      process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH,
+      JSON.stringify({ credentials: [CREDENTIAL] }),
+    );
     // The arming + fallback paths log via log.step/log.warn legitimately; mute
     // so the stderr audit stays clean while we exercise the abort.
     warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
@@ -115,6 +117,10 @@ describe("pollDuoApproval — WebAuthn teardown on abort", () => {
   afterEach(() => {
     if (prevFlag === undefined) delete process.env.HR_AUTOMATION_DUO_WEBAUTHN;
     else process.env.HR_AUTOMATION_DUO_WEBAUTHN = prevFlag;
+    if (prevCredentialPath === undefined) delete process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH;
+    else process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH = prevCredentialPath;
+    if (prevLockDir === undefined) delete process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR;
+    else process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR = prevLockDir;
     warnSpy.mockRestore();
     stepSpy.mockRestore();
   });
@@ -160,10 +166,9 @@ describe("pollDuoApproval — WebAuthn teardown on abort", () => {
     );
 
     // The safety guarantee: abort still finalized WebAuthn — the authenticator
-    // was removed and the CDP session detached, and the advanced signCount was
-    // read back for persistence. Before the fix, the abort threw straight out
-    // of the poll loop and these never ran (leaked authenticator + signCount
-    // desync → next Duo assertion rejected as a clone).
+    // was removed and the CDP session detached, and the signCount was read back
+    // for persistence beyond the pre-arm reservation. Before the fix, the abort
+    // threw straight out of the poll loop and these never ran.
     assert.ok(
       fake.calls.some((c) => c.method === "WebAuthn.removeVirtualAuthenticator"),
       "abort path must remove the virtual authenticator",

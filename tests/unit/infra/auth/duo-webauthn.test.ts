@@ -9,11 +9,14 @@ import {
   parseDuoWebAuthnCredentials,
   factorPatternForTransport,
   nextSignCount,
+  reserveDuoWebAuthnSignCounts,
+  acquireDuoWebAuthnLock,
   loadDuoWebAuthnCredential,
   loadDuoWebAuthnCredentials,
   mergeDuoWebAuthnCredential,
   ctap2SupportShim,
   DUO_WEBAUTHN_CREDENTIAL_PATH,
+  DUO_WEBAUTHN_SIGNCOUNT_RESERVE,
   type DuoWebAuthnCredential,
 } from "../../../../src/infra/auth/duo-webauthn.js";
 import { log } from "../../../../src/utils/log.js";
@@ -32,6 +35,7 @@ const VALID: DuoWebAuthnCredential = {
   transport: "internal",
   enrolledAt: "2026-06-02",
 };
+const USB: DuoWebAuthnCredential = { ...VALID, transport: "usb", credentialId: "test-credential-id-usb" };
 
 const tmp = mkdtempSync(join(tmpdir(), "duo-webauthn-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -123,6 +127,54 @@ describe("nextSignCount", () => {
   });
 });
 
+describe("reserveDuoWebAuthnSignCounts", () => {
+  it("persists a counter window without mutating the CDP seed credentials", () => {
+    const p = join(tmp, "reserve.json");
+    const internal: DuoWebAuthnCredential = { ...VALID, signCount: 3 };
+    const usb: DuoWebAuthnCredential = { ...USB, signCount: 8 };
+    writeFileSync(p, JSON.stringify({ credentials: [internal, usb] }));
+
+    assert.equal(reserveDuoWebAuthnSignCounts([internal, usb], p), true);
+
+    const saved = loadDuoWebAuthnCredentials(p);
+    assert.equal(saved.find((c) => c.transport === "internal")?.signCount, 3 + DUO_WEBAUTHN_SIGNCOUNT_RESERVE);
+    assert.equal(saved.find((c) => c.transport === "usb")?.signCount, 8 + DUO_WEBAUTHN_SIGNCOUNT_RESERVE);
+    assert.equal(internal.signCount, 3);
+    assert.equal(usb.signCount, 8);
+  });
+
+  it("returns false when the file does not contain the target credential", () => {
+    const p = join(tmp, "reserve-missing.json");
+    writeFileSync(p, JSON.stringify({ credentials: [USB] }));
+
+    assert.equal(reserveDuoWebAuthnSignCounts([VALID], p), false);
+  });
+});
+
+describe("acquireDuoWebAuthnLock", () => {
+  it("serializes contenders until the current holder releases", async () => {
+    const lockDir = join(tmp, "duo-lock");
+    const first = await acquireDuoWebAuthnLock({ lockDir, staleMs: 10_000, pollMs: 5 });
+    let secondResolved = false;
+
+    const secondPromise = acquireDuoWebAuthnLock({ lockDir, staleMs: 10_000, pollMs: 5 }).then((lock) => {
+      secondResolved = true;
+      return lock;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(secondResolved, false);
+
+    first.release();
+    const second = await Promise.race([
+      secondPromise,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("second lock did not acquire")), 1_000)),
+    ]);
+    assert.equal(secondResolved, true);
+    second.release();
+  });
+});
+
 describe("loadDuoWebAuthnCredential", () => {
   it("defaults to the gitignored .auth path", () => {
     assert.equal(DUO_WEBAUTHN_CREDENTIAL_PATH, ".auth/duo-webauthn.json");
@@ -172,8 +224,6 @@ describe("loadDuoWebAuthnCredential", () => {
     assert.deepEqual(loadDuoWebAuthnCredential(p), VALID);
   });
 });
-
-const USB: DuoWebAuthnCredential = { ...VALID, transport: "usb", credentialId: "test-credential-id-usb" };
 
 describe("parseDuoWebAuthnCredentials", () => {
   it("parses the { credentials: [...] } multi-credential shape in order", () => {

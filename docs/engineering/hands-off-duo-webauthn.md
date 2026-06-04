@@ -65,6 +65,9 @@ Touch ID; ACT CRM offers only a security key. `.auth/duo-webauthn.json` holds
 
 ```
 clickSsoSubmit(page)            -> armDuoWebAuthn(page)   (if flag on; idempotent, WeakMap-cached)
+   |                                 - acquire .auth/duo-webauthn.lock
+   |                                 - re-read the credential file after the lock
+   |                                 - reserve a future signCount window on disk
    |                                 - one CDP virtual authenticator PER TRANSPORT
    |                                 - internal first (Chrome allows one internal authenticator/env)
    |                                 - inject CTAP2 shim if a usb cred is loaded
@@ -76,7 +79,7 @@ pollDuoApproval(page, opts)
    - beginDuoWebAuthn -> selectDuoFactor (two phases, see §4) -> returns a handle
    - waitForApproval: up to DUO_WEBAUTHN_GRACE_MS (25s) for the success URL
    - on any miss -> manual phone Duo (cue + poll), unchanged
-   - finishDuoWebAuthn on EVERY exit path: persist signCount + tear down
+   - finishDuoWebAuthn on EVERY exit path: persist observed signCount, tear down, release lock
 ```
 
 **Arm at `clickSsoSubmit`, not in `pollDuoApproval`.** ACT CRM auto-fires a
@@ -85,6 +88,19 @@ exists yet, Chrome shows a native "insert your security key" dialog that can't b
 dismissed from the page and blocks the DOM click path. `clickSsoSubmit` is the
 universal step right before the Duo prompt for **all six** flows, so it is the
 arming point. `beginDuoWebAuthn` also late-arms (idempotent) as a safety net.
+
+**The credential file is single-writer.** Hands-off mode acquires
+`.auth/duo-webauthn.lock` before seeding CDP and holds it until
+`finishDuoWebAuthn`. That serializes independent Node processes, not just the
+systems inside one `Session.launch`, so two browsers cannot replay the same saved
+counter at the same time.
+
+**signCount is reserved before CDP signs.** After the lock is acquired, the
+runtime re-reads `.auth/duo-webauthn.json`, writes each loaded credential's
+persisted `signCount` ahead by a small window, then seeds CDP with the pre-reserve
+count. A normal assertion lands inside the reserved window. If the process is
+aborted or even hard-killed after Duo observes a signature, the file should still
+be at-or-ahead of the server's last-seen counter instead of behind it.
 
 ---
 
@@ -152,7 +168,7 @@ re-run the previously-flaky flow (UCPath) a few times solo.
 |---|---|---|
 | UCPath `prompt → all_methods → /frame/v4/error`, then manual fallback | `selectDuoFactor` clicked "Other options" **during** the platform auto-fire, aborting it; the security-key fallback is then rejected by UCPath | **Never click during Phase 1.** Wait for the auto-fire (signCount probe / trust screen). |
 | "asserting via WebAuthn (auto)" then "did not complete within grace window" while the page is still on `a5.ucsd.edu` | A premature "not on `duosecurity.com` ⇒ success" check fired **pre-prompt**, while the SSO→Duo redirect was still in flight | Gate "auto" on `hasSigned` (the authenticator actually signed), **never** on the URL not being the Duo host. |
-| Ceremony "signs but never completes" — prompt hangs on "Use Touch ID" | **signCount desync.** A run that is `kill -9`'d mid-ceremony signs (Duo observes counter+1) but `finishDuoWebAuthn` never persists, so the next run replays a counter Duo already saw → Duo **rejects the assertion as a cloned key** | Bump every `signCount` in `.auth/duo-webauthn.json` well above anything Duo could have observed (e.g. to 1000), then re-test **without force-killing**. Production exits cleanly via `finishDuoWebAuthn`, so this only bites during aggressive manual testing. |
+| Ceremony "signs but never completes" — prompt hangs on "Use Touch ID" | **signCount desync.** This should be uncommon now because arming takes a cross-process lock and reserves counters before CDP can sign. It can still happen after manual file edits, old stale credentials, or experiments outside the shared runtime | Bump every `signCount` in `.auth/duo-webauthn.json` well above anything Duo could have observed (e.g. to 100000), then re-test **without force-killing**. |
 | ServiceNow fails before reaching Duo: "SSO form not ready" on `support.ucsd.edu/auth_redirect.do` | The `support.ucsd.edu/esc → auth_redirect.do → a5.ucsd.edu` SAML chain is client-side; a one-shot `domcontentloaded` check resolves on the interstitial before the form renders | `waitForSsoForm` polls for the submit button (`src/infra/auth/sso-fields.ts`). |
 | Duo greys "Security key — Not supported in this browser" (CRM) | Playwright Chromium lacks `isExternalCTAP2SecurityKeySupported` | `ctap2SupportShim` forces it true (auto-injected when a usb cred is loaded). |
 | Chrome native "insert your security key" dialog blocks the page (CRM) | Authenticator armed **after** the prompt; CRM auto-fires on load | Arm at `clickSsoSubmit` (before the prompt). Phase 2 also presses Escape to recover. |
@@ -161,7 +177,7 @@ re-run the previously-flaky flow (UCPath) a few times solo.
 
 ### signCount resync one-liner
 ```bash
-node -e "const p='./.auth/duo-webauthn.json';const f=require(p);f.credentials.forEach(c=>c.signCount=1000);require('fs').writeFileSync(p,JSON.stringify(f,null,2));console.log('resynced')"
+node -e "const p='./.auth/duo-webauthn.json';const f=require(p);f.credentials.forEach(c=>c.signCount=100000);require('fs').writeFileSync(p,JSON.stringify(f,null,2)+'\n');console.log('resynced')"
 ```
 
 ---
@@ -177,6 +193,8 @@ node -e "const p='./.auth/duo-webauthn.json';const f=require(p);f.credentials.fo
 | `DUO_WEBAUTHN_GRACE_MS` (25s) | `duo-poll.ts` | Post-factor wait for the success URL before manual fallback |
 | `waitForSsoForm` | `sso-fields.ts` | Polls for the SSO submit button across redirect chains |
 | `DUO_WEBAUTHN_CREDENTIAL_PATH` | `duo-webauthn.ts` | `.auth/duo-webauthn.json` (gitignored secret) |
+| `DUO_WEBAUTHN_LOCK_DIR` | `duo-webauthn.ts` | `.auth/duo-webauthn.lock` cross-process single-writer lock |
+| `DUO_WEBAUTHN_SIGNCOUNT_RESERVE` | `duo-webauthn.ts` | Counter headroom written before CDP signs |
 
 ---
 

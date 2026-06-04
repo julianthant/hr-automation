@@ -1,4 +1,6 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { CDPSession, Page } from "playwright";
 import { log } from "../../utils/log.js";
 
@@ -24,12 +26,24 @@ import { log } from "../../utils/log.js";
  * This is **Chromium-only** (CDP `WebAuthn` domain) and entirely opt-in: with
  * the flag unset, `pollDuoApproval` behaves exactly as before (manual approval).
  * Any failure here is non-fatal — the caller falls back to manual Duo.
+ *
+ * The credential file is guarded by a cross-process lock while a page is armed.
+ * Before CDP receives a credential, the runtime also reserves future signCount
+ * values on disk; that way an abort or hard kill after Duo observes a signature
+ * should not leave the next run replaying a stale counter.
  */
 
 /** Gitignored secrets file holding the enrolled credential(s) (private keys included). */
 export const DUO_WEBAUTHN_CREDENTIAL_PATH = ".auth/duo-webauthn.json";
+export const DUO_WEBAUTHN_LOCK_DIR = ".auth/duo-webauthn.lock";
+export const DUO_WEBAUTHN_SIGNCOUNT_RESERVE = 10;
 
 const DUO_WEBAUTHN_ENV_FLAG = "HR_AUTOMATION_DUO_WEBAUTHN";
+const DUO_WEBAUTHN_CREDENTIAL_PATH_ENV = "HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH";
+const DUO_WEBAUTHN_LOCK_DIR_ENV = "HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR";
+const DUO_WEBAUTHN_LOCK_STALE_MS_ENV = "HR_AUTOMATION_DUO_WEBAUTHN_LOCK_STALE_MS";
+const DUO_WEBAUTHN_LOCK_STALE_MS = 10 * 60_000;
+const DUO_WEBAUTHN_LOCK_POLL_MS = 250;
 
 /** A virtual-authenticator transport. Duo platform devices register `internal`; cross-platform keys `usb`. */
 export type DuoWebAuthnTransport = "internal" | "usb";
@@ -64,6 +78,14 @@ export interface DuoWebAuthnCredential {
  */
 export function isDuoWebAuthnEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[DUO_WEBAUTHN_ENV_FLAG] === "1";
+}
+
+function duoWebAuthnCredentialPath(env: NodeJS.ProcessEnv = process.env): string {
+  return env[DUO_WEBAUTHN_CREDENTIAL_PATH_ENV]?.trim() || DUO_WEBAUTHN_CREDENTIAL_PATH;
+}
+
+function duoWebAuthnLockDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env[DUO_WEBAUTHN_LOCK_DIR_ENV]?.trim() || DUO_WEBAUTHN_LOCK_DIR;
 }
 
 /**
@@ -141,13 +163,201 @@ export function nextSignCount(saved: number, observed: number | undefined): numb
   return Math.max(saved, observed ?? 0, 0);
 }
 
+export interface DuoWebAuthnLock {
+  release(): void;
+}
+
+interface DuoWebAuthnLockOwner {
+  pid: number;
+  token: string;
+  acquiredAt: string;
+  updatedAt: string;
+}
+
+function numericEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function duoWebAuthnAbortReason(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  return reason instanceof Error ? reason : new Error(reason ? String(reason) : "Duo WebAuthn lock wait aborted");
+}
+
+async function waitForDuoWebAuthnLock(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  try {
+    await sleep(ms, undefined, { signal: abortSignal });
+  } catch (err) {
+    if (abortSignal?.aborted) throw duoWebAuthnAbortReason(abortSignal);
+    throw err;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readLockOwner(ownerPath: string): DuoWebAuthnLockOwner | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(ownerPath, "utf8")) as Partial<DuoWebAuthnLockOwner>;
+    if (
+      typeof raw.pid === "number" &&
+      typeof raw.token === "string" &&
+      typeof raw.acquiredAt === "string" &&
+      typeof raw.updatedAt === "string"
+    ) {
+      return raw as DuoWebAuthnLockOwner;
+    }
+  } catch {
+    /* missing/corrupt owner metadata falls back to mtime staleness */
+  }
+  return undefined;
+}
+
+function lockMtimeMs(lockDir: string, ownerPath: string): number {
+  try {
+    return statSync(ownerPath).mtimeMs;
+  } catch {
+    return statSync(lockDir).mtimeMs;
+  }
+}
+
+function isDuoWebAuthnLockStale(lockDir: string, ownerPath: string, staleMs: number): boolean {
+  const owner = readLockOwner(ownerPath);
+  if (owner && !isProcessAlive(owner.pid)) return true;
+  try {
+    return Date.now() - lockMtimeMs(lockDir, ownerPath) > staleMs;
+  } catch {
+    return true;
+  }
+}
+
+function writeLockOwner(ownerPath: string, owner: DuoWebAuthnLockOwner): void {
+  writeFileSync(ownerPath, `${JSON.stringify(owner)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
+export async function acquireDuoWebAuthnLock(
+  opts: {
+    abortSignal?: AbortSignal;
+    lockDir?: string;
+    staleMs?: number;
+    pollMs?: number;
+  } = {},
+): Promise<DuoWebAuthnLock> {
+  const lockDir = opts.lockDir ?? duoWebAuthnLockDir();
+  const ownerPath = join(lockDir, "owner.json");
+  const staleMs = opts.staleMs ?? numericEnv(DUO_WEBAUTHN_LOCK_STALE_MS_ENV, DUO_WEBAUTHN_LOCK_STALE_MS);
+  const pollMs = opts.pollMs ?? DUO_WEBAUTHN_LOCK_POLL_MS;
+
+  mkdirSync(dirname(lockDir), { recursive: true, mode: 0o700 });
+  while (true) {
+    opts.abortSignal?.throwIfAborted();
+    try {
+      mkdirSync(lockDir, { mode: 0o700 });
+      break;
+    } catch (err) {
+      if (!(err && typeof err === "object" && "code" in err && err.code === "EEXIST")) throw err;
+      if (isDuoWebAuthnLockStale(lockDir, ownerPath, staleMs)) {
+        rmSync(lockDir, { recursive: true, force: true });
+        continue;
+      }
+      await waitForDuoWebAuthnLock(pollMs, opts.abortSignal);
+    }
+  }
+
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const owner: DuoWebAuthnLockOwner = {
+    pid: process.pid,
+    token,
+    acquiredAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    writeLockOwner(ownerPath, owner);
+  } catch (err) {
+    rmSync(lockDir, { recursive: true, force: true });
+    throw err;
+  }
+
+  let released = false;
+  const stillOwner = (): boolean => readLockOwner(ownerPath)?.token === token;
+  const heartbeat = setInterval(() => {
+    try {
+      if (!stillOwner()) return;
+      writeLockOwner(ownerPath, { ...owner, updatedAt: new Date().toISOString() });
+    } catch {
+      /* lock may have been released or stolen */
+    }
+  }, Math.min(5_000, Math.max(1_000, staleMs / 4)));
+  heartbeat.unref?.();
+
+  return {
+    release: () => {
+      if (released) return;
+      released = true;
+      clearInterval(heartbeat);
+      if (stillOwner()) rmSync(lockDir, { recursive: true, force: true });
+    },
+  };
+}
+
+export function reserveDuoWebAuthnSignCounts(
+  credentials: DuoWebAuthnCredential[],
+  path: string = duoWebAuthnCredentialPath(),
+  reserveBy: number = DUO_WEBAUTHN_SIGNCOUNT_RESERVE,
+): boolean {
+  if (credentials.length === 0) return true;
+  const targetIds = new Set(credentials.map((c) => c.credentialId));
+  const reserve = Math.max(1, Math.trunc(reserveBy));
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return false;
+  }
+
+  const reserveOne = (entry: unknown): boolean => {
+    if (!entry || typeof entry !== "object") return false;
+    const c = entry as { credentialId?: unknown; signCount?: unknown };
+    if (typeof c.credentialId !== "string" || !targetIds.has(c.credentialId)) return false;
+    const current = typeof c.signCount === "number" && Number.isFinite(c.signCount) ? c.signCount : 0;
+    c.signCount = Math.max(current, 0) + reserve;
+    return true;
+  };
+
+  let changed = false;
+  if (raw && typeof raw === "object" && Array.isArray((raw as { credentials?: unknown }).credentials)) {
+    for (const entry of (raw as { credentials: unknown[] }).credentials) {
+      changed = reserveOne(entry) || changed;
+    }
+  } else {
+    changed = reserveOne(raw);
+  }
+  if (!changed) return false;
+
+  try {
+    writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Read + validate a single enrolled credential. Returns `undefined` (logs why)
  * when absent/invalid. Retained for the legacy single-object file shape and unit
  * tests; the runtime uses {@link loadDuoWebAuthnCredentials}.
  */
 export function loadDuoWebAuthnCredential(
-  path: string = DUO_WEBAUTHN_CREDENTIAL_PATH,
+  path: string = duoWebAuthnCredentialPath(),
 ): DuoWebAuthnCredential | undefined {
   return loadDuoWebAuthnCredentials(path)[0];
 }
@@ -158,7 +368,7 @@ export function loadDuoWebAuthnCredential(
  * holds no valid credential — callers then degrade to manual Duo.
  */
 export function loadDuoWebAuthnCredentials(
-  path: string = DUO_WEBAUTHN_CREDENTIAL_PATH,
+  path: string = duoWebAuthnCredentialPath(),
 ): DuoWebAuthnCredential[] {
   let text: string;
   try {
@@ -461,6 +671,7 @@ interface ArmedDuoWebAuthn {
   cdp: CDPSession;
   authByTransport: Map<DuoWebAuthnTransport, string>;
   setups: Array<{ cred: DuoWebAuthnCredential; authenticatorId: string }>;
+  lock: DuoWebAuthnLock;
 }
 
 /** One armed authenticator set per page — armed before the prompt, finished after. */
@@ -479,23 +690,34 @@ const armedByPage = new WeakMap<Page, ArmedDuoWebAuthn>();
  * an authenticator with ≥1 credential is ready, false (logged) otherwise so
  * callers degrade to manual Duo.
  */
-export async function armDuoWebAuthn(page: Page): Promise<boolean> {
+export async function armDuoWebAuthn(page: Page, opts: { abortSignal?: AbortSignal } = {}): Promise<boolean> {
   if (armedByPage.has(page)) return true;
-  const creds = loadDuoWebAuthnCredentials();
+  let creds = loadDuoWebAuthnCredentials();
   if (creds.length === 0) return false;
 
-  // Distinct transports, internal first — Chrome allows only one `internal`
-  // authenticator per environment, so it's the constrained add; doing it first
-  // keeps the clear/retry below from discarding an already-created `usb` one.
-  const transports = [...new Set(creds.map((c) => c.transport))].sort((a, b) =>
-    a === "internal" ? -1 : b === "internal" ? 1 : 0,
-  );
-  const hasUsb = transports.includes("usb");
-
-  let cdp: CDPSession;
+  let cdp: CDPSession | undefined;
+  let lock: DuoWebAuthnLock | undefined;
   const authByTransport = new Map<DuoWebAuthnTransport, string>();
   const setups: Array<{ cred: DuoWebAuthnCredential; authenticatorId: string }> = [];
   try {
+    lock = await acquireDuoWebAuthnLock({ abortSignal: opts.abortSignal });
+
+    // Re-read after acquiring the cross-process lock so this browser seeds from
+    // the latest counter persisted by the previous hands-off login.
+    creds = loadDuoWebAuthnCredentials();
+    if (creds.length === 0) throw new Error("no Duo WebAuthn credentials available after lock acquisition");
+    if (!reserveDuoWebAuthnSignCounts(creds)) {
+      throw new Error("could not reserve Duo WebAuthn signCount before arming");
+    }
+
+    // Distinct transports, internal first — Chrome allows only one `internal`
+    // authenticator per environment, so it's the constrained add; doing it first
+    // keeps the clear/retry below from discarding an already-created `usb` one.
+    const transports = [...new Set(creds.map((c) => c.transport))].sort((a, b) =>
+      a === "internal" ? -1 : b === "internal" ? 1 : 0,
+    );
+    const hasUsb = transports.includes("usb");
+
     cdp = await page.context().newCDPSession(page);
 
     // CRM probes `isExternalCTAP2SecurityKeySupported` (absent in Playwright
@@ -548,13 +770,25 @@ export async function armDuoWebAuthn(page: Page): Promise<boolean> {
     }
     if (setups.length === 0) throw new Error("no credential could be registered to an authenticator");
   } catch (err) {
+    for (const authenticatorId of authByTransport.values()) {
+      await cdp?.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId }).catch(() => {});
+    }
+    await cdp?.send("WebAuthn.disable").catch(() => {});
+    await cdp?.detach().catch(() => {});
     log.warn(
       `Duo WebAuthn virtual authenticator setup failed (${err instanceof Error ? err.message : String(err)}) — falling back to manual Duo.`,
     );
+    lock?.release();
+    if (opts.abortSignal?.aborted) throw err;
     return false;
   }
 
-  armedByPage.set(page, { cdp, authByTransport, setups });
+  if (!cdp || !lock) {
+    lock?.release();
+    return false;
+  }
+
+  armedByPage.set(page, { cdp, authByTransport, setups, lock });
   log.step(`Duo WebAuthn armed (${[...authByTransport.keys()].join(", ")}) — hands-off approval enabled`);
   return true;
 }
@@ -568,13 +802,15 @@ export async function armDuoWebAuthn(page: Page): Promise<boolean> {
  * signCount is persisted **unconditionally**: if the authenticator signed at all
  * (even on an attempt that didn't complete), Duo observed the advanced counter,
  * and persisting only on success could leave the file behind Duo's view and get
- * the next assertion rejected as a clone.
+ * the next assertion rejected as a clone. Arming pre-reserves counter headroom;
+ * finish still reads back the observed value in case a prompt signs more than
+ * the reserved window expected.
  */
 export async function finishDuoWebAuthn(page: Page): Promise<void> {
   const armed = armedByPage.get(page);
   if (!armed) return;
   armedByPage.delete(page);
-  const { cdp, authByTransport, setups } = armed;
+  const { cdp, authByTransport, setups, lock } = armed;
 
   const observed = new Map<string, number>();
   for (const { cred, authenticatorId } of setups) {
@@ -586,7 +822,7 @@ export async function finishDuoWebAuthn(page: Page): Promise<void> {
       /* counter readback is best-effort */
     }
   }
-  persistSignCounts(observed, DUO_WEBAUTHN_CREDENTIAL_PATH);
+  persistSignCounts(observed, duoWebAuthnCredentialPath());
 
   try {
     for (const authenticatorId of authByTransport.values()) {
@@ -596,6 +832,8 @@ export async function finishDuoWebAuthn(page: Page): Promise<void> {
     await cdp.detach().catch(() => {});
   } catch {
     /* best-effort */
+  } finally {
+    lock.release();
   }
 }
 
@@ -614,7 +852,7 @@ export async function beginDuoWebAuthn(
   page: Page,
   opts: { abortSignal?: AbortSignal; factorTimeoutMs?: number } = {},
 ): Promise<DuoWebAuthnHandle | undefined> {
-  if (!(await armDuoWebAuthn(page))) return undefined;
+  if (!(await armDuoWebAuthn(page, { abortSignal: opts.abortSignal }))) return undefined;
   const armed = armedByPage.get(page)!;
 
   // Factor preference: Touch ID (`internal`) first where an app offers it — it's
