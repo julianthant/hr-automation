@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 
 import { isDashboardInputRunWorkflow } from "../../../../domain/dashboard-run-surfaces.js";
+import { normalizeRunOptions, type RunOptions } from "../../../../domain/run-options.js";
 import {
   enqueueFromHttp,
   validateEnqueueRequest,
@@ -26,6 +27,7 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
         parentRunId?: unknown;
         skipSteps?: unknown;
         preset?: unknown;
+        parallelWorkers?: unknown;
       };
       const workflow = input.workflow?.trim();
       if (!workflow) return jsonResponse({ ok: false, error: "workflow is required" }, 400);
@@ -80,6 +82,16 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
         preset = input.preset.trim();
       }
 
+      // Automation-workers run setting: Auto (absent/"auto") → no daemon flags;
+      // an explicit N → raise the alive-daemon target for this run. Invalid
+      // explicit values fail loud here as a 400 (no silent clamp).
+      let runOptions: RunOptions;
+      try {
+        runOptions = normalizeRunOptions({ parallelWorkers: input.parallelWorkers });
+      } catch (err) {
+        return jsonResponse({ ok: false, workflow, enqueued: 0, error: errorMessage(err) }, 400);
+      }
+
       const validation = await validateEnqueueRequest(workflow, input.inputs);
       if (!validation.ok) {
         return jsonResponse({ ok: false, workflow, enqueued: 0, error: validation.error }, 400);
@@ -108,6 +120,7 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
       void enqueueFromHttp(workflow, enqueueInputs, {
         trackerDir: deps.dir,
         ...(parentRunId ? { parentRunId } : {}),
+        ...(runOptions.parallelWorkers !== undefined ? { runOptions } : {}),
       }).catch((err) => {
         log.error(`[POST /api/enqueue] background task failed: ${errorMessage(err)}`);
       });

@@ -51,6 +51,33 @@ test("enqueueFromHttp keeps a single input-run item unparented so it renders as 
   assert.equal((queuedInputs[0] as { __runtimeOptions?: unknown }).__runtimeOptions, undefined);
 });
 
+test("enqueueFromHttp forwards an explicit worker count as { parallel: N } daemon flags", async () => {
+  const result = await enqueueFromHttp("person-lookup", [{ name: "Doe, Jane" }], {
+    trackerDir: tempTrackerDir(),
+    runOptions: { parallelWorkers: 4 },
+  });
+
+  assert.equal(result.ok, true);
+
+  const mock = await enqueueMock();
+  const [, , flags] = mock.mock.calls[0] as [unknown, unknown, unknown];
+  assert.deepEqual(flags, { parallel: 4 });
+});
+
+test("enqueueFromHttp passes {} flags for Auto (no runOptions) and for an explicit 1", async () => {
+  await enqueueFromHttp("person-lookup", [{ name: "Doe, Jane" }], { trackerDir: tempTrackerDir() });
+  await enqueueFromHttp("person-lookup", [{ name: "Roe, Ann" }], {
+    trackerDir: tempTrackerDir(),
+    runOptions: { parallelWorkers: 1 },
+  });
+
+  const mock = await enqueueMock();
+  const [, , autoFlags] = mock.mock.calls[0] as [unknown, unknown, unknown];
+  const [, , oneFlags] = mock.mock.calls[1] as [unknown, unknown, unknown];
+  assert.deepEqual(autoFlags, {}, "Auto → no daemon flags");
+  assert.deepEqual(oneFlags, {}, "explicit 1 → no daemon flags (default reuse-or-spawn-one)");
+});
+
 test("enqueueFromHttp marks multi-value input-run batches as normal batch members", async () => {
   const result = await enqueueFromHttp(
     "person-lookup",
