@@ -23,7 +23,7 @@ interface AutomationWorkersFieldProps {
 export function AutomationWorkersField({ value, onChange, disabled = false }: AutomationWorkersFieldProps) {
   return (
     <section>
-      <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+      <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
         Automation workers
       </div>
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Automation workers">

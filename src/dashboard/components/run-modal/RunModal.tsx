@@ -426,7 +426,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
           {showOathUploadMode && (
             <section>
-              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
                 Mode
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -450,7 +450,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
           {showFormType && !effectiveLockedFormType && !reuploadFor && formOptions.length > 0 && (
             <section>
-              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
                 Form type
               </div>
               <div className="flex flex-col gap-1.5">
@@ -518,7 +518,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
 
           {effectiveShowRoster && (
             <section>
-              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground/70">
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground">
                 Roster
               </div>
               <div>
