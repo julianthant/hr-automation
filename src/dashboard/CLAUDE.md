@@ -9,6 +9,18 @@ React SPA for real-time workflow monitoring: queue on the left, log/detail surfa
 - Theme tokens live in `index.css`; fonts are Inter and JetBrains Mono.
 - No framer-motion.
 
+## UI editing rules
+
+Follow these when adding or editing ANY dashboard component. Items marked **[guarded]** fail `tests/unit/architecture/frontend-tailwind-compliance.test.ts` — run `npm run test:architecture` before declaring UI work done.
+
+- **Color = design tokens only. [guarded]** Never use Tailwind palette classes (`text-sky-500`, `bg-amber-400`, `border-slate-700`) or raw `#hex` / `rgb()` / `hsl()` literals in `.tsx`. Use the semantic tokens — `primary`, `secondary`, `muted`, `accent`, `destructive`, `info`, `success`, `warning`, `border`, `ring`, `foreground`/`background`, `sidebar*` — or the categorical log accents `log-cyan|log-teal|log-violet|log-slate`. House tint pattern: `bg-<token>/12–15` + solid `text-<token>` + `border-<token>/30` (see `shared/status-styles.ts`). Need a color the tokens don't cover? **Add a token** to `index.css` (light `:root` + `.dark` + the `@theme inline` `--color-*` map), don't inline it. The ONLY sanctioned raw hex is `#4ade80` / `#fbbf24`.
+- **Icons = lucide, never glyphs.** Use `lucide-react` components — never unicode/emoji characters (`▲ ← ● ⚠ ✓ ✗`) as icons. An icon-only button needs an `aria-label` (or `title` / sr-only text); a decorative icon inside an already-labeled control gets `aria-hidden`.
+- **Interactive = real elements.** Use `<button>` / `<a>`, not `<div onClick>`. If a non-button must be clickable, add `role`, `tabIndex={0}`, AND an `onKeyDown` (Enter/Space) plus `cursor-pointer`. Any `<button>` that is not a form submit gets `type="button"`.
+- **Focus stays visible.** Don't `outline-none` without a replacement. The global base (`index.css`) gives native elements an `outline-ring/50` focus ring; if you override it, add `focus-visible:ring-2 focus-visible:ring-ring` — a background-tint-only focus state is too weak.
+- **Async / live regions announce.** Streaming logs, live counts, validation, and status that change without a user action need `aria-live="polite"` (or `role="alert"` for blocking errors). Buttons firing async actions disable while pending.
+- **Contrast + labels.** `text-muted-foreground` (and any `/NN` opacity on it) is for secondary/hint text only — primary titles and meaningful values use `text-foreground`. Every form control needs a `<label htmlFor>` or `aria-label`; a placeholder is not an accessible name.
+- **Motion / layout. [guarded]** Animations use Tailwind utilities with `motion-safe:` / `motion-reduce:animate-none` (no `@keyframes`, no inline `animation:`); z-index stays on the `z-*` scale (no `z-[...]`); `<img>` needs `srcSet` + `sizes` + `loading`/`fetchPriority`; use `shrink-0`, not `flex-shrink-0`.
+
 ## Operator Text
 
 Use the shared operator subject (`data.__subject`) as primary text for toasts, queue rows, delegation batches, and batch members. Raw run ids/session ids are fallback or debug detail only.
