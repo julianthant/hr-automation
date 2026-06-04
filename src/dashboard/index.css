@@ -20,6 +20,18 @@
   --accent-foreground: hsl(21.3158 55.0725% 27.0588%);
   --destructive: hsl(0 68.3761% 45.8824%);
   --destructive-foreground: hsl(0 0% 100%);
+  /* Semantic state tokens (audit 2026-06-04) — light. danger == --destructive. */
+  --info: hsl(211 80% 43%);
+  --info-foreground: hsl(0 0% 100%);
+  --success: hsl(142 60% 33%);
+  --success-foreground: hsl(0 0% 100%);
+  --warning: hsl(38 92% 40%);
+  --warning-foreground: hsl(0 0% 100%);
+  /* Categorical log/event accents — distinct hues, theme-managed (light). */
+  --log-cyan: hsl(190 80% 36%);
+  --log-teal: hsl(172 66% 33%);
+  --log-violet: hsl(258 60% 54%);
+  --log-slate: hsl(215 16% 42%);
   --border: hsl(28.0000 21.1268% 86.0784%);
   --input: hsl(28.0000 21.1268% 86.0784%);
   --ring: hsl(22.7273 82.5000% 31.3725%);
@@ -89,6 +101,14 @@
   --success-foreground: hsl(0 0% 100%);
   --warning: hsl(45 93% 47%);
   --warning-foreground: hsl(0 0% 0%);
+  /* Semantic + categorical accents (audit 2026-06-04) — dark.
+     --success/--warning already defined above; danger == --destructive. */
+  --info: hsl(211 85% 66%);
+  --info-foreground: hsl(211 80% 12%);
+  --log-cyan: hsl(189 85% 62%);
+  --log-teal: hsl(172 60% 55%);
+  --log-violet: hsl(258 85% 76%);
+  --log-slate: hsl(215 18% 62%);
   --focus: hsl(29.3182 41.9048% 58.8235%);
   --separator: hsl(25.0000 17.6471% 13.3333%);
   --scrollbar: hsl(22.5 7% 44.7%);
@@ -146,6 +166,16 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-log-cyan: var(--log-cyan);
+  --color-log-teal: var(--log-teal);
+  --color-log-violet: var(--log-violet);
+  --color-log-slate: var(--log-slate);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
