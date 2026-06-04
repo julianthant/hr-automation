@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, FileScan, Loader2, RotateCw, UploadCloud } from "lucide-react";
+import { AlertTriangle, Check, FileScan, Loader2, RotateCw, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -1098,8 +1098,8 @@ function renderFormCard(args: {
       signatureBadge={renderSignatureBadge(r, args.cfg.hasSignature)}
       documentTypeBadge={
         isUnknown ? (
-          <span className="rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px font-mono text-[10px] uppercase text-destructive">
-            ⚠ unknown
+          <span className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px font-mono text-[10px] uppercase text-destructive">
+            <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden /> unknown
           </span>
         ) : undefined
       }
@@ -1293,15 +1293,15 @@ function renderSignatureBadge(r: AnyPreviewRecord, hasSignature: boolean): React
   const oath = r;
   if (oath.employeeSigned === false) {
     return (
-      <span className="rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
-        ⚠ employee unsigned
+      <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
+        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden /> employee unsigned
       </span>
     );
   }
   if (oath.officerSigned === false) {
     return (
-      <span className="rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
-        ⚠ officer unsigned
+      <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
+        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden /> officer unsigned
       </span>
     );
   }

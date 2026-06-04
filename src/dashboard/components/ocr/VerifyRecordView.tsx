@@ -56,7 +56,7 @@ function CheckRow({ check }: { check: VerifyCheck }) {
     <div
       className={`flex items-start gap-3 rounded-md px-3 py-2.5 ${
         check.status === "found"
-          ? "bg-blue-500/5 ring-1 ring-blue-500/20"
+          ? "bg-info/5 ring-1 ring-info/20"
           : check.status === "missing"
             ? "bg-destructive/5"
             : "bg-transparent"
@@ -68,7 +68,7 @@ function CheckRow({ check }: { check: VerifyCheck }) {
           <Check className="h-3.5 w-3.5 text-success" aria-label="Present on paper" />
         )}
         {check.status === "found" && (
-          <Search className="h-3.5 w-3.5 text-blue-500" aria-label="Looked up" />
+          <Search className="h-3.5 w-3.5 text-info" aria-label="Looked up" />
         )}
         {check.status === "missing" && (
           <X className="h-3.5 w-3.5 text-destructive" aria-label="Not found" />
@@ -96,7 +96,7 @@ function CheckRow({ check }: { check: VerifyCheck }) {
               {check.status === "found" && <SourceBadge source={check.source} />}
             </>
           ) : (
-            <span className="text-sm text-muted-foreground/60">— not found</span>
+            <span className="text-sm text-muted-foreground">— not found</span>
           )}
         </div>
       </div>
@@ -158,7 +158,7 @@ export function VerifyRecordView({ record }: VerifyRecordViewProps) {
           </div>
           {checks.some((c) => c.status === "found") && (
             <p className="mt-1 text-xs text-muted-foreground/70">
-              Write <span className="font-medium text-blue-500">looked-up</span> values onto the physical form.
+              Write <span className="font-medium text-info">looked-up</span> values onto the physical form.
             </p>
           )}
         </div>
