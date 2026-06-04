@@ -67,6 +67,8 @@ Optional but recommended. `--roster-url` downloads the latest roster from ShareP
 
 Handwritten emergency-contact PDFs are prepped through the **`ocr` workflow** in the dashboard Run flow: select **`ocr`** in the TopBar, choose form type **Emergency contact**, upload the PDF, review extracted records, then approve to enqueue **`emergency-contact`** kernel items (daemon queue).
 
+The **Run Emergency Contact** button (`targetWorkflow="emergency-contact"`) creates an `operation` coordinator row in the Emergency Contact panel at `/api/ocr/prepare`; the OCR run is delegated under it and the approved contact rows parent to it as inline expandable member rows (OCR status before approval). The OCR review row stays the one real row in the OCR panel. See `src/workflows/ocr/CLAUDE.md` (2026-06-03 operation-tracking lesson).
+
 - **HTTP:** `/api/ocr/*` — see [`src/tracker/dashboard/hono/routes/ocr.ts`](../../tracker/dashboard/hono/routes/ocr.ts) and handlers under [`src/tracker/dashboard/ocr/`](../../tracker/dashboard/ocr/).
 - **Operator narrative:** [`src/workflows/ocr/CLAUDE.md`](../ocr/CLAUDE.md).
 

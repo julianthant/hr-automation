@@ -32,6 +32,7 @@ Every workflow must declare `archetype` and `runtimePolicy`; architecture guards
 - `single` — one person/subject, one row.
 - `preview` — one review/approval row; OCR is the current preview workflow.
 - `batch` — anchor row over multiple person/subject rows, or a parent that will fan out to person rows after approval.
+- `operation` — a top-level coordinator row for an OCR-backed target workflow (oath-signature / emergency-contact), created at PDF upload in the target panel with the OCR run delegated under it. Display-only (no daemon task); stamped explicitly at `/api/ocr/prepare` as a direct `archetype: "operation"` literal on the row's `data` (not a named override param) — it is NOT a `WorkflowArchetype`, so `deriveRowArchetype` never produces it and no `defineWorkflow` declares it. Shows denormalized OCR status before approval, signer/contact member summary after. See `src/workflows/ocr/CLAUDE.md`.
 - `parentRunId` means delegated scope only; it never changes stamped row shape.
 - `batch-member` — one person/subject row that belongs to a grouped parent run.
 - Dispatch markers are `single` rows with `data.delegationRole = "dispatch"` for terminal-at-enqueue handoffs.
