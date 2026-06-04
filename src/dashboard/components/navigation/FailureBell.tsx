@@ -68,6 +68,9 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {unreadCount > 0 ? `${unreadCount} unread failure${unreadCount === 1 ? "" : "s"}` : ""}
+      </span>
       <PopoverTrigger asChild>
         <button
           type="button"
