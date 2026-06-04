@@ -8,7 +8,7 @@ import { WorkflowsProvider } from "@/lib/workflows-context";
 import type { TrackerEntry, WorkflowInstanceState } from "@/components/shared/types";
 import { EntryItem } from "@/components/queue-panel/EntryItem";
 import { DaemonBatchRow } from "@/components/queue-panel/DaemonBatchRow";
-import { OperationRow } from "@/components/queue-panel/OperationRow";
+import { OperationRowUnified } from "@/components/queue-panel/operation-row-variants";
 import { StatPills } from "@/components/queue-panel/StatPills";
 import { QueueSortDropdown } from "@/components/queue-panel/QueueSortDropdown";
 import { RetryAllButton } from "@/components/queue-panel/RetryAllButton";
@@ -24,7 +24,7 @@ import { WorkflowBox } from "@/components/terminal-drawer/WorkflowBox";
 import { LiveIndicator } from "@/components/terminal-drawer/LiveIndicator";
 import { BrowserChip } from "@/components/terminal-drawer/BrowserChip";
 import { RunSettingsMenu } from "@/components/navigation/RunSettingsMenu";
-import { AutomationWorkersField } from "@/components/run-modal/AutomationWorkersField";
+import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 import { AUTO_WORKERS, type StepPreset, type WorkerChoice } from "@/lib/run-settings";
 import { EmptyState } from "@/components/shared/EmptyState";
 import type { AuthState } from "@/components/shared/types";
@@ -83,7 +83,7 @@ function Variant({ label, axes, note, width = 380, children }: VariantProps) {
         {note && <div className="mt-0.5 text-[10.5px] text-muted-foreground/80">{note}</div>}
       </div>
       {/* Mimic the owning column width so wrapping/truncation matches reality. */}
-      <div className="pb-2" style={{ width }}>
+      <div className="pb-2" style={{ width: `min(100%, ${width}px)` }}>
         {children}
       </div>
     </div>
@@ -224,15 +224,18 @@ function buildOperationGalleryRow(
   return operation;
 }
 
-function OperationFixture({
+/** Redesign harness — the new single-card coordinator (work zone above footer). */
+function OpUnifiedFixture({
   fixture,
   defaultExpanded = false,
+  expandedExtra,
 }: {
   fixture: OperationGalleryRow;
   defaultExpanded?: boolean;
+  expandedExtra?: ReactNode;
 }) {
   return (
-    <OperationRow
+    <OperationRowUnified
       date={DATE}
       parentRunId={fixture.surface.parentRunId}
       projection={fixture.projection}
@@ -246,6 +249,7 @@ function OperationFixture({
       onDelete={NOOP}
       defaultExpanded={defaultExpanded}
       onOpenOcrReview={NOOP}
+      expandedExtra={expandedExtra}
     />
   );
 }
@@ -381,15 +385,17 @@ function member(
   name: string,
   emplId: string,
   parentRunId: string,
+  error?: string,
 ): TrackerEntry {
   return row({
     id,
     workflow: "oath-signature",
     status,
     parentRunId,
-    firstLogTs: "2026-06-01T09:05:00.000Z",
+    ...(error ? { error } : {}),
+    firstLogTs: agoIso(status === "running" ? 120 : status === "pending" ? 60 : 420),
     lastLogTs:
-      status === "running" || status === "pending" ? undefined : "2026-06-01T09:07:00.000Z",
+      status === "running" || status === "pending" ? undefined : agoIso(30),
     data: {
       archetype: "batch-member",
       queueRowKind: "person",
@@ -430,7 +436,7 @@ const emptyBatchAnchor = row({
   workflow: "oath-signature",
   status: "running",
   step: "ocr",
-  firstLogTs: "2026-06-01T09:50:00.000Z",
+  firstLogTs: agoIso(300),
   lastLogMessage: "Awaiting OCR approval…",
   runOrdinal: 1,
   data: {
@@ -474,6 +480,7 @@ const approvalNeedsReview = row({
   parentRunId: "ou-parent-1",
   firstLogTs: "2026-06-01T09:50:00.000Z",
   lastLogTs: "2026-06-01T09:52:00.000Z",
+  lastLogMessage: "Review extracted rows in the Preview tab…",
   runOrdinal: 1,
   data: {
     archetype: "preview",
@@ -491,6 +498,7 @@ const previewReadOnly = row({
   step: "awaiting-approval",
   firstLogTs: "2026-06-01T09:50:00.000Z",
   lastLogTs: "2026-06-01T09:52:00.000Z",
+  lastLogMessage: "Inspect completeness report…",
   runOrdinal: 1,
   data: {
     archetype: "preview",
@@ -560,6 +568,18 @@ const operationMembers = [
   member("opm-1", "done", "Amara Brooks", "10041001", OPERATION_POST_RUN),
   member("opm-2", "running", "Noah Kim", "10041002", OPERATION_POST_RUN),
   member("opm-3", "pending", "Elena Vega", "10041003", OPERATION_POST_RUN),
+  member(
+    "opm-4",
+    "failed",
+    "Diego Santos",
+    "10041004",
+    OPERATION_POST_RUN,
+    "Signature field never rendered after 3 attempts",
+  ),
+  // Extra members (>4) so the scroll cap on the expanded list is demonstrable.
+  member("opm-5", "done", "Priya Shah", "10041005", OPERATION_POST_RUN),
+  member("opm-6", "pending", "Marcus Bell", "10041006", OPERATION_POST_RUN),
+  member("opm-7", "done", "Lena Ortiz", "10041007", OPERATION_POST_RUN),
 ];
 
 const operationPreApproval = buildOperationGalleryRow(
@@ -618,9 +638,9 @@ function QueueRowsTab() {
       {/* ---- BATCH ---- */}
       <Section
         title="batch"
-        sub="Neutral DaemonBatchRow group card (count badge + member preview). Identical for every workflow. Title optional; subtitle = trace id. An anchor can sit at 0 members before it fans out (real transient state — see below)."
+        sub="Dedicated queue-ledger row for batches. It is not a tracker/coordinator parent: title is optional, subtitle = trace id, member preview is compact, and clicking opens the dedicated batch queue view for large fan-outs."
       />
-      <Variant label="with title (file)" axes="batch · 4 members · titled" note="title from the batch's file/spec">
+      <Variant label="with title (file)" axes="batch · 4 members · titled" note="title from the batch's file/spec; footer uses bulk retry/delete">
         <Batch
           parentRunId={FILE_BATCH_RUN}
           members={fileBatchMembers}
@@ -629,7 +649,7 @@ function QueueRowsTab() {
           subtitle="oc-090500-aprv"
         />
       </Variant>
-      <Variant label="no title (person anchor)" axes="batch · 6 members · no title · incl. failed" note="4-count status line + badge — checking overflow">
+      <Variant label="no title (person anchor)" axes="batch · 6 members · no title · incl. failed" note="member-name preview + initials identify the batch without inventing a parent title">
         <Batch
           parentRunId={PERSON_BATCH_RUN}
           members={personBatchMembers}
@@ -638,7 +658,7 @@ function QueueRowsTab() {
           subtitle="ob-090500-7f31"
         />
       </Variant>
-      <Variant label="0 members (pre-fan-out)" axes="batch · 0 members · file · running" note="oath-signature PDF anchor during OCR approval — 0/0, but footer falls back to the anchor so time/elapsed/retry+delete stay">
+      <Variant label="0 members (pre-fan-out)" axes="batch · 0 members · file · running" note="oath-signature PDF anchor during OCR approval — empty strip, but footer falls back to the anchor so time/elapsed/retry+delete stay">
         <Batch
           parentRunId={EMPTY_BATCH_RUN}
           members={emptyBatchMembers}
@@ -667,13 +687,35 @@ function QueueRowsTab() {
       {/* ---- OPERATION ---- */}
       <Section
         title="operation"
-        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. The OCR review row stays in the OCR panel; this row tracks the target workflow and expands inline after approval."
+        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. One card: header → work zone → footer. The OCR-status / member section sits INSIDE the card above the footer; members are EntryItem single rows, capped to scroll after ~4."
       />
-      <Variant label="operation · before approval" axes="operation · 0 members · OCR status" note="selectable coordinator row + lightweight OCR status/link">
-        <OperationFixture fixture={operationPreApproval} />
+      <Variant label="before approval" axes="awaiting review · header jump" note="no middle strip — badge + blue OCR jump in header; footer is the true bottom edge">
+        <OpUnifiedFixture fixture={operationPreApproval} />
       </Variant>
-      <Variant label="operation · expanded after approval" axes="operation · inline member rows · mixed status" note="signer/contact rows stay under the coordinator instead of opening a batch page">
-        <OperationFixture fixture={operationPostApproval} defaultExpanded />
+      <Variant label="after approval (expanded)" axes="member single rows · counts · scroll-capped" note="status tally beside chevron; list scrolls past ~4 rows">
+        <OpUnifiedFixture fixture={operationPostApproval} defaultExpanded />
+      </Variant>
+      <Variant
+        label="after approval (expanded) · nested batch"
+        axes="batch row inside expand · then singles"
+        note="batch ledger nested above fanned-out EntryItems — same components as the batch section"
+      >
+        <OpUnifiedFixture
+          fixture={operationPostApproval}
+          defaultExpanded
+          expandedExtra={
+            <Batch
+              parentRunId={`${OPERATION_POST_RUN}-nested-batch`}
+              members={fileBatchMembers}
+              workflowLabel="Oath Signature"
+              title="Approved_Oath_Batch.pdf"
+              subtitle="oc-090500-aprv"
+            />
+          }
+        />
+      </Variant>
+      <Variant label="after approval (collapsed)" axes="status counts only" note="collapsed: per-status tally beside chevron, members hidden">
+        <OpUnifiedFixture fixture={operationPostApproval} />
       </Variant>
     </div>
   );
@@ -713,11 +755,6 @@ const sessInFlight = session({
   itemInFlight: true,
   currentStep: "fill-award",
   sessions: [{ sessionId: "s1", browsers: [browser("ucpath", "authed"), browser("crm", "authed")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(90), level: "info", message: "Daemon ready — watching queue" },
-    { ts: agoIso(70), level: "info", message: "Picked up item 10012345 (Maria Gonzalez)" },
-    { ts: agoIso(12), level: "info", message: "Step: fill-award" },
-  ],
 });
 
 const sessAuthing = session({
@@ -726,11 +763,6 @@ const sessAuthing = session({
   startedAt: agoIso(18),
   currentStep: "auth",
   sessions: [{ sessionId: "s2", browsers: [browser("ucpath", "authenticating"), browser("kuali", "idle")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(18), level: "info", message: "Daemon started" },
-    { ts: agoIso(15), level: "info", message: "Launching browsers: ucpath, kuali" },
-    { ts: agoIso(4), level: "info", message: "Authenticating UCPath…" },
-  ],
 });
 
 const sessDuo = session({
@@ -739,10 +771,6 @@ const sessDuo = session({
   startedAt: agoIso(135),
   currentStep: "auth",
   sessions: [{ sessionId: "s3", browsers: [browser("ucpath", "duo_waiting"), browser("crm", "authed")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(40), level: "info", message: "Authenticating UCPath…" },
-    { ts: agoIso(20), level: "warn", message: "Duo push sent — awaiting approval on phone" },
-  ],
 });
 
 const sessIdleUcpath = session({
@@ -752,10 +780,6 @@ const sessIdleUcpath = session({
   daemonPhase: "idle",
   sessions: [{ sessionId: "s4", browsers: [browser("ucpath", "authed")] }],
   ucpathIdle: { lastTouchAt: agoIso(120), refreshing: false },
-  recentDaemonLogs: [
-    { ts: agoIso(200), level: "info", message: "Daemon ready — watching queue" },
-    { ts: agoIso(120), level: "info", message: "Idle — UCPath kept warm (reload in 5m)" },
-  ],
 });
 
 const sessIdleLogs = session({
@@ -767,12 +791,6 @@ const sessIdleLogs = session({
   currentTraceId: "pl-093100-bb02",
   daemonPhase: "idle",
   sessions: [{ sessionId: "s5", browsers: [browser("crm", "authed")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(60), level: "info", message: "Daemon ready — watching queue" },
-    { ts: agoIso(40), level: "info", message: "Processed item 10090011 in 18s" },
-    { ts: agoIso(25), level: "warn", message: "CRM search returned 0 rows for 'Jordan Vale'" },
-    { ts: agoIso(8), level: "error", message: "Retry 1/3: navigation timeout, re-authing" },
-  ],
 });
 
 const sessKeepalive = session({
@@ -781,10 +799,6 @@ const sessKeepalive = session({
   startedAt: agoIso(420),
   daemonPhase: "keepalive",
   sessions: [{ sessionId: "s6", browsers: [browser("ucpath", "authed"), browser("crm", "authed")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(400), level: "info", message: "Daemon ready — watching queue" },
-    { ts: agoIso(30), level: "info", message: "Keepalive — verifying browser health" },
-  ],
 });
 
 const sessComplete = session({
@@ -796,10 +810,6 @@ const sessComplete = session({
   pidAlive: false,
   finalStatus: "done",
   sessions: [{ sessionId: "s7", browsers: [browser("ucpath", "authed")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(60), level: "info", message: "Processed item 10090022 in 22s" },
-    { ts: agoIso(20), level: "info", message: "Run complete — daemon exiting" },
-  ],
 });
 
 const sessFailed = session({
@@ -811,24 +821,6 @@ const sessFailed = session({
   pidAlive: false,
   finalStatus: "failed",
   sessions: [{ sessionId: "s8", browsers: [browser("ucpath", "failed")] }],
-  recentDaemonLogs: [
-    { ts: agoIso(80), level: "info", message: "Picked up item 10055512 (Aisha Khan)" },
-    { ts: agoIso(30), level: "error", message: "Selector timeout: award amount field never appeared" },
-    { ts: agoIso(10), level: "error", message: "Run failed after 3 retries" },
-  ],
-});
-
-// A daemon that just spawned: browsers authing, but no daemon-log line has
-// streamed in yet. The "Daemon log (0)" section must still render (empty
-// state when expanded) rather than vanishing — guards the always-present
-// contract in WorkflowBox.
-const sessNoLogs = session({
-  instance: "Emergency Contact 1",
-  workflow: "emergency-contact",
-  startedAt: agoIso(6),
-  currentStep: "auth",
-  sessions: [{ sessionId: "s9", browsers: [browser("ucpath", "authenticating")] }],
-  recentDaemonLogs: [],
 });
 
 const sessCrashed = session({
@@ -847,9 +839,7 @@ function SessionCardsTab() {
       <TerminalDrawerProvider>
         <p className="mb-4 text-[12px] text-muted-foreground">
           The real <span className="font-mono">WorkflowBox</span> card from the terminal drawer.
-          The collapsible <span className="font-mono">Daemon log</span> is a standard element on every
-          session card (only the crashed-on-launch card omits it — it renders a compact early-return
-          shell). Icon + step pipeline resolve from the live registry; the{" "}
+          Icon + step pipeline resolve from the live registry; the{" "}
           <span className="font-mono">queued</span> chip and idle-refresh ring are driven by{" "}
           <span className="font-mono">/api/queue-depth</span> + <span className="font-mono">/api/daemons</span>{" "}
           polling, so they reflect whatever the backend reports (typically 0 here). Clicking a card sets
@@ -869,7 +859,7 @@ function SessionCardsTab() {
           <Variant width={290} label="idle + UCPath ring" axes="active · daemonPhase=idle · ucpathIdle set" note="idle-refresh countdown ring on the UCPath tile">
             <div className="px-2"><WorkflowBox workflow={sessIdleUcpath} /></div>
           </Variant>
-          <Variant width={290} label="idle · warn/error log" axes="active · daemonPhase=idle" note="daemon log with info/warn/error tints">
+          <Variant width={290} label="idle · last trace id" axes="active · daemonPhase=idle · currentTraceId set" note="subtitle shows trace id after last run">
             <div className="px-2"><WorkflowBox workflow={sessIdleLogs} /></div>
           </Variant>
           <Variant width={290} label="keepalive" axes="active · daemonPhase=keepalive" note="'keepalive — checking browsers'">
@@ -880,9 +870,6 @@ function SessionCardsTab() {
           </Variant>
           <Variant width={290} label="failed" axes="!active · finalStatus=failed" note="dimmed; failed auth tile">
             <div className="px-2"><WorkflowBox workflow={sessFailed} /></div>
-          </Variant>
-          <Variant width={290} label="no logs yet" axes="active · recentDaemonLogs=[]" note="fresh daemon — 'Daemon log (0)' still renders (empty state when expanded)">
-            <div className="px-2"><WorkflowBox workflow={sessNoLogs} /></div>
           </Variant>
           <Variant width={290} label="crashed on launch" axes="crashedOnLaunch" note="compact destructive card; points to the queue row">
             <div className="px-2"><WorkflowBox workflow={sessCrashed} /></div>
@@ -919,9 +906,9 @@ const SAMPLE_PRESETS: StepPreset[] = [
 function ControlsTab() {
   const [filter, setFilter] = useState<string | null>(null);
   const [sort, setSort] = useState<QueueSortMode>(DEFAULT_QUEUE_SORT_MODE);
-  // Parallel-workers run setting demos — the input-run gear (RunSettingsMenu)
-  // and the upload-modal field (AutomationWorkersField). Stateful so the radio
-  // selection + the gear's active accent update live.
+  // Parallel-workers run setting demos — the input-run gear (RunSettingsMenu,
+  // which embeds the WorkerStepper) and the standalone WorkerStepper used in the
+  // upload-modal footer. Stateful so the stepper + gear accent update live.
   const [gearWorkers, setGearWorkers] = useState<WorkerChoice>(AUTO_WORKERS);
   const [activeGearWorkers, setActiveGearWorkers] = useState<WorkerChoice>("4");
   const [activeGearPreset, setActiveGearPreset] = useState<string>("full");
@@ -959,7 +946,7 @@ function ControlsTab() {
 
       <Section
         title="run settings"
-        sub="The parallel-workers run option surfaces: the input-run settings gear (RunSettingsMenu) and the upload modal's Automation-workers field (AutomationWorkersField). Both feed src/lib/run-settings.ts."
+        sub="The parallel-workers run option surfaces: the input-run settings gear (RunSettingsMenu, which embeds the stepper) and the standalone WorkerStepper used in the upload-modal footer. Both feed src/lib/run-settings.ts."
       />
       <Variant
         label="RunSettingsMenu — Auto (default)"
@@ -998,13 +985,41 @@ function ControlsTab() {
         </div>
       </Variant>
       <Variant
-        label="AutomationWorkersField"
-        axes="upload-modal radio strip"
-        note="RunModal's Automation-workers section (real component)"
-        width={460}
+        label="WorkerStepper — modal footer"
+        axes="− value + · Auto…8 · matches Run/Cancel"
+        note="footer variant beside Run-modal buttons at h-[38px]; compact variant stays h-8 in the gear"
       >
+        <div className="px-3 py-3 flex items-center gap-2.5">
+          <WorkerStepper value={fieldWorkers} onChange={setFieldWorkers} variant="footer" />
+          <button
+            type="button"
+            className={cn(
+              MODAL_FOOTER_CONTROL_HEIGHT,
+              "flex-1 min-w-[6rem] rounded-[7px] border border-border px-3.5 text-[12.5px] font-medium text-foreground",
+            )}
+          >
+            Run
+          </button>
+          <button
+            type="button"
+            className={cn(
+              MODAL_FOOTER_CONTROL_HEIGHT,
+              "shrink-0 rounded-[7px] border border-border px-5 text-[12.5px] font-medium text-muted-foreground",
+            )}
+          >
+            Cancel
+          </button>
+        </div>
+      </Variant>
+      <Variant label="WorkerStepper — compact (gear)" axes="h-8 · input-run settings">
+        <div className="px-3 py-3 flex items-center gap-4">
+          <WorkerStepper value={fieldWorkers} onChange={setFieldWorkers} />
+          <span className="font-mono text-[11px] text-muted-foreground">value={fieldWorkers}</span>
+        </div>
+      </Variant>
+      <Variant label="WorkerStepper — disabled" axes="disabled state">
         <div className="px-3 py-3">
-          <AutomationWorkersField value={fieldWorkers} onChange={setFieldWorkers} />
+          <WorkerStepper value="4" onChange={NOOP} disabled />
         </div>
       </Variant>
 

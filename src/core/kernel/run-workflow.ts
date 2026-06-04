@@ -286,7 +286,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     const rowArchetype = deriveRowArchetype(
       resolveArchetype(wf.config, handlerInput),
       opts.parentRunId,
-      runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
+      runtimeOptions?.rowShape ? { memberShape: runtimeOptions.rowShape } : undefined,
     )
     await withTrackedWorkflow(
       wf.config.name,

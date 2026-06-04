@@ -49,7 +49,8 @@ test("delegated OCR needs-review rows keep normal retry delete and timer footer 
     _hash: "needs-review-1",
   } as TrackerEntry);
 
-  assert.match(html, /Needs review/);
+  assert.match(html, /awaiting review/);
+  assert.doesNotMatch(html, /Review extracted rows/);
   assert.match(html, /0m 48s/);
   assert.match(html, /aria-label="Retry this run"/);
   assert.match(html, /aria-label="Delete this entry permanently"/);

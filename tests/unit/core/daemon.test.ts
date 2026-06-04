@@ -478,6 +478,110 @@ test('runWorkflowDaemon: browser disconnect cancels in-flight step errors', asyn
   }
 })
 
+test('runWorkflowDaemon: /stop force-cancels an in-flight handler parked in a signal-only wait (no live browser)', async () => {
+  // Regression: oath-upload's `wait-approval` step parks the handler in
+  // `subscribeToApproval` — a NON-Playwright, signal-only await — with NO
+  // live browser (ServiceNow auth is deferred until after the wait). A
+  // force-stop tears the daemon down by aborting the LAUNCH controller and
+  // killing chromium, but neither unblocks a signal-only await. Pre-fix the
+  // force-stop never aborted the in-flight run's per-run AbortController, so
+  // the claim loop stayed blocked on `await runOneItem`, never re-observed
+  // `shuttingDown`, and never reached the outer-finally shutdown sweep — a
+  // deadlock: the daemon stayed alive forever and the row stayed "running".
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-signal-wait-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  let port: number | undefined
+  let inFlight: { itemId: string; runId: string } | null = null
+  let runPromise: Promise<void> | undefined
+  try {
+    const started = deferred()
+    const wf = defineWorkflow({
+      name: 'dint-stop-signal-wait',
+      schema: z.object({ id: z.string() }),
+      steps: ['wait-approval'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('wait-approval', async () => {
+          started.resolve()
+          // Signal-only await: resolves only when ctx.signal aborts. No
+          // Playwright call, no browser — killing chromium does nothing.
+          await new Promise<void>((_resolve, reject) => {
+            if (ctx.signal.aborted) {
+              reject(new Error('aborted before wait'))
+              return
+            }
+            ctx.signal.addEventListener(
+              'abort',
+              () => reject(new Error('approval wait aborted')),
+              { once: true },
+            )
+          })
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-stop-signal-wait', [{ id: 'held' }], (d) => d.id, dir)
+    runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    ;({ port } = await waitForDaemon('dint-stop-signal-wait', dir))
+    await started.promise
+
+    const status = (await fetch(`http://127.0.0.1:${port}/status`).then((r) => r.json())) as {
+      inFlight: string | null
+      inFlightRunId: string | null
+    }
+    if (status.inFlight && status.inFlightRunId) {
+      inFlight = { itemId: status.inFlight, runId: status.inFlightRunId }
+    }
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    })
+
+    // The daemon MUST exit. Pre-fix this races to the timeout (deadlock).
+    await Promise.race([
+      runPromise,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('daemon did not stop while parked in a signal-only wait (deadlock)')),
+          4_000,
+        ),
+      ),
+    ])
+
+    const [task] = taskStore.listTasksForWorkflow('dint-stop-signal-wait')
+    assert.equal(task.state, 'cancelled')
+  } finally {
+    // Best-effort: if the daemon is still parked (fix absent → /stop
+    // deadlocked), /cancel-current DOES abort ctx.signal and unblocks the
+    // handler, so the leaked daemon exits instead of hanging the runner.
+    if (port !== undefined && inFlight) {
+      await fetch(`http://127.0.0.1:${port}/cancel-current`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(inFlight),
+      }).catch(() => {})
+    }
+    if (runPromise) {
+      await Promise.race([
+        runPromise.catch(() => {}),
+        new Promise((r) => setTimeout(r, 2_000)),
+      ])
+    }
+    taskStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: in-flight shutdown-cancel rows preserve title and row archetype', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-running-display-'))

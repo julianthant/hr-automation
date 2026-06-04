@@ -3,6 +3,7 @@ import { normalizeDetailField } from './registry.js'
 import type { WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
+import { isMemberRowShape, type MemberRowShape } from '../../domain/row-archetype.js'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -44,7 +45,7 @@ export function toRecord(input: unknown): Record<string, unknown> | null {
 export interface SplitInput {
   cleaned: unknown
   prefilled: Record<string, unknown> | null
-  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTracePrefix?: string } | null
+  runtimeOptions: { skipSteps?: string[]; preset?: string; rowShape?: MemberRowShape; rootCode?: string; rootTracePrefix?: string } | null
 }
 
 export function splitPrefilled(input: unknown): SplitInput {
@@ -66,8 +67,8 @@ export function splitPrefilled(input: unknown): SplitInput {
 
 function normalizeRuntimeOptions(
   raw: Record<string, unknown>,
-): { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTracePrefix?: string } | null {
-  const out: { skipSteps?: string[]; preset?: string; rowShape?: 'batch-member'; rootCode?: string; rootTracePrefix?: string } = {}
+): { skipSteps?: string[]; preset?: string; rowShape?: MemberRowShape; rootCode?: string; rootTracePrefix?: string } | null {
+  const out: { skipSteps?: string[]; preset?: string; rowShape?: MemberRowShape; rootCode?: string; rootTracePrefix?: string } = {}
   const skipSteps = raw.skipSteps
   if (Array.isArray(skipSteps) && skipSteps.every((s): s is string => typeof s === 'string')) {
     if (skipSteps.length > 0) out.skipSteps = [...skipSteps]
@@ -75,8 +76,8 @@ function normalizeRuntimeOptions(
   if (typeof raw.preset === 'string' && raw.preset.length > 0) {
     out.preset = raw.preset
   }
-  if (raw.rowShape === 'batch-member') {
-    out.rowShape = 'batch-member'
+  if (isMemberRowShape(raw.rowShape)) {
+    out.rowShape = raw.rowShape
   }
   // Provenance code for the trace-id prefix — the delegating parent's 2-char
   // workflow code. Rides the existing `__runtimeOptions` channel (like

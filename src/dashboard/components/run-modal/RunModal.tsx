@@ -16,7 +16,7 @@ import { getRunModalConfig, type RunModalSubmitResponse } from "@/lib/run-modal-
 import { useRosters, refreshRosters, type RosterListing } from "@/components/hooks/useRosters";
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
-import { AutomationWorkersField } from "./AutomationWorkersField";
+import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
@@ -28,7 +28,8 @@ async function sha256OfFile(file: File): Promise<string> {
 
 /**
  * File-upload "Run" modal — drives every workflow whose Run affordance
- * uploads a PDF (emergency-contact, ocr, oath-upload as of writing).
+ * uploads a PDF (emergency-contact, oath-signature, ocr, oath-upload as of
+ * writing).
  *
  * Per-workflow behavior (title, submit URL, which sections
  * to render, success-toast shape) is declared in
@@ -42,20 +43,14 @@ interface RunModalProps {
   workflow: string;
   /** When set, the modal is in "reupload" mode for the given session. */
   reuploadFor?: { sessionId: string; previousRunId: string };
-  /**
-   * When set with `workflow="ocr"`: pre-selects the formType, hides the
-   * form-type chooser, and skips the `/api/ocr/forms` fetch. Used by the
-   * oath-signature InputRunPanel to open the modal preset to oath.
-   */
-  lockedFormType?: string;
 }
 
-export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedFormType: lockedFormTypeProp }: RunModalProps) {
+export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModalProps) {
   const config = getRunModalConfig(workflow);
-  // Per-workflow registry can lock the form type so the modal hides the
-  // picker and force-injects the value on submit. The prop variant is the
-  // InputRunPanel path; both feed the same `effectiveLockedFormType`.
-  const effectiveLockedFormType = lockedFormTypeProp ?? config?.lockedFormType;
+  // The workflow's registry entry can lock the form type so the modal hides
+  // the picker and force-injects the value on submit (emergency-contact →
+  // emergency-contact, oath-signature → oath).
+  const effectiveLockedFormType = config?.lockedFormType;
   const showRoster = config?.sections.roster ?? false;
   // When the registry locks the form type, the OCR backend still needs the
   // formType field on the FormData — flip the section flag on so submit
@@ -453,9 +448,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
                 Form type
               </div>
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                 {formOptions.map((opt) => (
-                  <label key={opt.formType} className="flex items-center gap-2 cursor-pointer">
+                  <label key={opt.formType} className="flex shrink-0 items-center gap-2 cursor-pointer">
                     <input
                       type="radio"
                       name="formType"
@@ -577,14 +572,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             </section>
           )}
 
-          {effectiveShowWorkers && (
-            <AutomationWorkersField
-              value={workerChoice}
-              onChange={setWorkerChoice}
-              disabled={submitting}
-            />
-          )}
-
           {error && (
             <div
               role="alert"
@@ -602,13 +589,23 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
           )}
         </div>
 
-        <DialogFooter className="grid grid-cols-4 gap-2.5 border-t border-border/60 px-[38px] py-[18px] mt-[24px]">
+        <DialogFooter className="flex flex-row items-center gap-2.5 border-t border-border/60 px-[38px] py-[18px] mt-[24px] [&_button]:box-border">
+          {effectiveShowWorkers && (
+            <WorkerStepper
+              value={workerChoice}
+              onChange={setWorkerChoice}
+              disabled={submitting}
+              variant="footer"
+              className="shrink-0"
+            />
+          )}
           <button
             type="button"
             onClick={handleSubmit}
             disabled={files.length === 0 || submitting}
             className={cn(
-              "col-span-3 inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5 py-2.5",
+              MODAL_FOOTER_CONTROL_HEIGHT,
+              "flex-1 inline-flex items-center justify-center gap-1.5 rounded-[7px] px-3.5",
               "text-[12.5px] font-medium",
               "bg-transparent transition-colors",
               "border",
@@ -654,7 +651,8 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             onClick={() => onOpenChange(false)}
             disabled={submitting}
             className={cn(
-              "col-span-1 inline-flex items-center justify-center rounded-[7px] px-3 py-2.5",
+              MODAL_FOOTER_CONTROL_HEIGHT,
+              "shrink-0 inline-flex items-center justify-center rounded-[7px] px-5",
               "text-[12.5px] font-medium",
               "bg-transparent transition-colors",
               "border",

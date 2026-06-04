@@ -176,7 +176,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
   pending: "Queued",
   skipped: "Skipped",
-  needsReview: "Needs review",
+  needsReview: "awaiting review",
   notFound: "Not found",
 };
 

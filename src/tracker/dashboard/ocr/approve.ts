@@ -141,6 +141,18 @@ export function buildOcrApproveHandler(
         ? undefined
         : spec.approveDocumentTo;
 
+    // When this OCR run belongs to a target-workflow OPERATION coordinator
+    // (oath-signature / emergency-contact PDF upload), its per-record fan-out
+    // rows are the coordinator's members — stamp them `operation-member` (the
+    // operation analogue of `batch-member`) so they nest inside the operation
+    // card, not as a standalone batch. A standalone OCR run (no operationWorkflow)
+    // and oath-upload (a real `single` ticket task, not a coordinator) keep the
+    // natural archetype. See `src/services/ocr/forms/shared.ts`.
+    const fanOutAsOperationMember = isOperationCoordinatorWorkflow(operationWorkflow);
+    const fanMemberShape: "operation-member" | undefined = fanOutAsOperationMember
+      ? "operation-member"
+      : undefined;
+
     const fannedOut: Array<{ workflow: string; itemId: string }> = [];
     const enqueueInputs: unknown[] = [];
     const itemIds: string[] = [];
@@ -157,13 +169,16 @@ export function buildOcrApproveHandler(
         const baseFanInput = approveTo.deriveInput(rec as never);
         const fanInput =
           baseFanInput && typeof baseFanInput === "object"
-            ? withRootTracePrefixRuntimeOption(
-                {
-                  ...(baseFanInput as Record<string, unknown>),
-                  ...(dryRun ? { dryRun: true } : {}),
-                  ...(parentSubject ? { parentSubject } : {}),
-                },
-                ocrRootTracePrefix,
+            ? withMemberShapeRuntimeOption(
+                withRootTracePrefixRuntimeOption(
+                  {
+                    ...(baseFanInput as Record<string, unknown>),
+                    ...(dryRun ? { dryRun: true } : {}),
+                    ...(parentSubject ? { parentSubject } : {}),
+                  },
+                  ocrRootTracePrefix,
+                ),
+                fanMemberShape,
               )
             : baseFanInput;
         const itemId = approveTo.deriveItemId(rec as never, input.runId, index);
@@ -218,7 +233,7 @@ export function buildOcrApproveHandler(
                 data: {
                   ...buildFallbackPendingData(item),
                   ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                  archetype: "single",
+                  archetype: fanMemberShape ?? "single",
                 },
                 ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
                 ...(childInput ? { input: childInput } : {}),
@@ -276,6 +291,7 @@ export function buildOcrApproveHandler(
                         archetype: deriveRowArchetype(
                           resolveArchetype(childWf.config, item),
                           passedParentRunId ?? childParentRunId,
+                          fanMemberShape ? { memberShape: fanMemberShape } : undefined,
                         ),
                       },
                       ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
@@ -618,6 +634,30 @@ function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix
     __runtimeOptions: {
       ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
       rootTracePrefix,
+    },
+  } as TInput;
+}
+
+/**
+ * Merge a member `rowShape` onto a fan-out child's `__runtimeOptions` so the
+ * stamped archetype survives the SQLite task store to the daemon worker's
+ * `run-one-item` re-emit (mirrors `rowShape: "batch-member"` for delegated
+ * batches; `normalizeRuntimeOptions` carries it through). No-op when the shape
+ * is absent (standalone OCR / oath-upload) or the input isn't a plain object.
+ */
+function withMemberShapeRuntimeOption<TInput>(
+  input: TInput,
+  rowShape: "operation-member" | undefined,
+): TInput {
+  if (!rowShape || !input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const current = (input as Record<string, unknown>).__runtimeOptions;
+  return {
+    ...(input as Record<string, unknown>),
+    __runtimeOptions: {
+      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
+      rowShape,
     },
   } as TInput;
 }

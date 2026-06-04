@@ -168,7 +168,6 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
           open={modalOpen}
           onOpenChange={setModalOpen}
           workflow={config.runEmptyAction.modalWorkflow}
-          lockedFormType={config.runEmptyAction.lockedFormType}
         />
       )}
     </form>

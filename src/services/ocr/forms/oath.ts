@@ -19,7 +19,7 @@ import type {
 } from "../../../workflows/ocr/types.js";
 import type { OathSignerInput } from "../../../workflows/oath-signature/schema.js";
 import type { OathUploadInput } from "../../../workflows/oath-upload/schema.js";
-import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
+import { DocumentTypeSchema, LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
 
@@ -42,7 +42,7 @@ export const OathRosterOcrRecordSchema = z.object({
       return trimmed.length === 0 ? null : trimmed;
     }),
   notes: z.array(z.string()).default([]),
-  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
 });
 export type OathRosterOcrRecord = z.infer<typeof OathRosterOcrRecordSchema>;
@@ -66,7 +66,7 @@ export const OathPreviewRecordSchema = OathRosterOcrRecordSchema.extend({
       }),
     )
     .optional(),
-  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
   verification: VerificationSchema.optional(),
   selected: z.boolean(),
@@ -102,7 +102,7 @@ For each record extract these fields:
 - dateSigned: the date signed (typical formats: MM/DD/YYYY, M/D/YY, M-D-YY). Null if blank.
 - employeeSigned: true if the employee signature line has any writing/scribble. False for an empty box. For sign-in sheets with one signature column, set true if the row's signature box is filled.
 - officerSigned: true if the authorized-officer / witness signature is filled. Null for sign-in sheets with one signature column. False for UPAY585/UPAY586 when empty.
-- documentType: "expected" for signin/upay585/upay586. "unknown" for blank, garbage, or non-form pages.
+- documentType: emit the LITERAL string "expected" for any real form (signin/upay585/upay586), or the LITERAL string "unknown" for a blank, garbage, or non-form page. Do NOT put the format name (e.g. "upay586") here — only "expected" or "unknown".
 - originallyMissing: array of field names that were genuinely BLANK on the paper (not just hard to read). Use [] when nothing was missing.
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;

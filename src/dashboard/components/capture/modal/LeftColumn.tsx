@@ -24,30 +24,16 @@ export function LeftColumn({
   if (!started) return null;
 
   return (
-    <div className="flex flex-col items-center gap-4">
-      {/* QR — server-generated SVG; we control the input.
-          Inner SVG ships with width=200; the [&>svg] selector forces it
-          to fit the 192px frame regardless of the baked-in attributes. */}
-      <div
-        className="rounded-[10px] p-[14px] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
-        style={{ backgroundColor: "white", width: 192, height: 192 }} // QR codes require a solid white background to scan reliably
-        aria-label="QR code for capture URL"
-        dangerouslySetInnerHTML={{ __html: started.qrSvg }}
-      />
-
-      {/* Shortcode — manual fallback if the QR can't be scanned. */}
-      <div
-        className="font-mono text-[28px] font-light"
-        style={{
-          color: "var(--capture-fg-primary)",
-          letterSpacing: "0.14em",
-          lineHeight: 1.1,
-        }}
-        aria-label={`Manual entry shortcode ${started.shortcode}`}
-      >
-        {started.shortcode}
-      </div>
-    </div>
+    <div
+      className="box-border shrink-0 rounded-[10px] p-[14px] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+      style={{
+        backgroundColor: "white",
+        width: "var(--capture-band-h, 12rem)",
+        height: "var(--capture-band-h, 12rem)",
+      }}
+      aria-label="QR code for capture URL"
+      dangerouslySetInnerHTML={{ __html: started.qrSvg }}
+    />
   );
 }
 

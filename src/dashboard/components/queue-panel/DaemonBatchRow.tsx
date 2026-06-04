@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import { resolveDaemonBatchQueueTitle } from "./batch-queue-view";
-import { GroupRowBase } from "./group-row-base";
 import { BatchFooterActions } from "./BatchFooterActions";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
+import { BatchRowUnified } from "./batch-row-variants";
 
 export interface DaemonBatchRowProps {
   workflow: string;
@@ -55,15 +55,10 @@ export function DaemonBatchRow({
 }: DaemonBatchRowProps) {
   // Footer source: members once they exist, else the batch anchor (so a
   // 0-member pre-fan-out batch still shows time / elapsed / retry+delete).
-  // `members` stays as-is for the count badge + progress bar (0/0).
+  // `members` stays as-is for the count badge + preview (0/0).
   const footerEntries = useMemo(
     () => (memberEntries.length > 0 ? memberEntries : anchorEntry ? [anchorEntry] : memberEntries),
     [memberEntries, anchorEntry],
-  );
-  const firstTimestamp = useMemo(
-    () =>
-      [...footerEntries].sort((a, b) => a.timestamp.localeCompare(b.timestamp))[0]?.timestamp,
-    [footerEntries],
   );
   const title = useMemo(
     () => resolveDaemonBatchQueueTitle(workflowLabel, memberEntries, batchParentRunId, titleOverride),
@@ -82,18 +77,18 @@ export function DaemonBatchRow({
   );
 
   return (
-    <GroupRowBase
-      variant="batch"
-      title={projection?.title ?? title}
+    <BatchRowUnified
+      date={date}
       parentRunId={batchParentRunId}
+      title={projection?.title ?? title}
+      subtitle={projection?.subtitle}
+      projection={projection}
       members={memberEntries}
-      countTone="neutral"
-      footerSecondaryId={projection?.subtitle}
-      firstTimestamp={firstTimestamp}
-      elapsedEntries={footerEntries}
-      isFocused={isBatchQueueFocused}
+      anchorEntry={anchorEntry}
+      selected={isBatchQueueFocused}
+      isQueueFocused={isBatchQueueFocused}
       drillInEnabled={batchDrillInEnabled}
-      onEnter={onEnterBatchQueue}
+      onEnterBatchQueue={onEnterBatchQueue}
       footerActions={footerActions}
     />
   );

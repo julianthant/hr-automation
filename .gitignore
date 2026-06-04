@@ -71,8 +71,5 @@ Thumbs.db
 /notes.md
 .worktrees/
 
-# claude-mem session artifacts (regenerated each session for Codex context injection)
-AGENTS.md
-
 # Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.
 tests/data/*.pdf

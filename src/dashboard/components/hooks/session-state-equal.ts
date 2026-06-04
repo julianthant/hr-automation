@@ -19,19 +19,6 @@ export function sessionStateEqual(a: SessionState, b: SessionState): boolean {
   return true;
 }
 
-function daemonLogsEqual(
-  a: WorkflowInstanceState["recentDaemonLogs"],
-  b: WorkflowInstanceState["recentDaemonLogs"],
-): boolean {
-  const al = a?.length ?? 0;
-  const bl = b?.length ?? 0;
-  if (al !== bl) return false;
-  if (al === 0) return true;
-  const la = a![al - 1];
-  const lb = b![bl - 1];
-  return la.ts === lb.ts && la.message === lb.message;
-}
-
 export function workflowEqual(a: WorkflowInstanceState, b: WorkflowInstanceState): boolean {
   return (
     a.instance === b.instance &&
@@ -47,7 +34,6 @@ export function workflowEqual(a: WorkflowInstanceState, b: WorkflowInstanceState
     a.daemonPhase === b.daemonPhase &&
     a.ucpathIdle?.lastTouchAt === b.ucpathIdle?.lastTouchAt &&
     a.ucpathIdle?.refreshing === b.ucpathIdle?.refreshing &&
-    daemonLogsEqual(a.recentDaemonLogs, b.recentDaemonLogs) &&
     sessionsEqual(a.sessions, b.sessions)
   );
 }

@@ -43,6 +43,7 @@ export function getHeic2anyAsset(): Buffer | undefined {
 
 export const captureRegistrations: Record<string, { label: string; contextHints?: string[] }> = {
   "oath-signature": { label: "Capture paper roster" },
+  "emergency-contact": { label: "Capture emergency contact forms" },
 };
 
 export function serializeCaptureSession(session: CaptureSession): {

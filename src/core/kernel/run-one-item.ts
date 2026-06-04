@@ -309,7 +309,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   const rowArchetype = deriveRowArchetype(
     resolveArchetype(wf.config, handlerInput),
     args.parentRunId,
-    runtimeOptions?.rowShape === 'batch-member' ? { member: true } : undefined,
+    runtimeOptions?.rowShape ? { memberShape: runtimeOptions.rowShape } : undefined,
   )
   // Seed the subject-semantics axis (kind) + the frozen trace id onto the
   // initial data so they ride EVERY row for this run — pending, the synthetic

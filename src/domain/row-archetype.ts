@@ -24,7 +24,18 @@ export type RowArchetype =
    * of its own, stamped explicitly at the OCR prepare route — it is intentionally
    * NOT a `WorkflowArchetype`, so `deriveRowArchetype` never produces it.
    */
-  | "operation";
+  | "operation"
+  /**
+   * Peer person/subject row fanned out under an {@link "operation"} coordinator
+   * (an oath-signature signer / emergency-contact contact row created by the OCR
+   * approve fan-out of a target-workflow operation run). The operation analogue
+   * of `batch-member`: it nests under the operation parent (`parentRunId`) and
+   * renders inside the coordinator card, NOT as a standalone single row or under
+   * a batch anchor. Stamped via the `operation-member` row-shape runtime option
+   * (set on the fan-out input when `operationWorkflow` is an operation
+   * coordinator), so it survives the SQLite task store to the daemon re-emit.
+   */
+  | "operation-member";
 
 /**
  * Workflow-level archetype. Declared on every `defineWorkflow({...})` call.
@@ -46,7 +57,20 @@ const LABELS: Record<RowArchetype, string> = {
   "batch": "Batch",
   "batch-member": "Batch member",
   "operation": "Operation",
+  "operation-member": "Operation member",
 };
+
+/**
+ * Member row shapes — the delegated/fanned-out peer rows that nest under a
+ * grouping anchor. `batch-member` nests under a `batch` anchor; `operation-member`
+ * nests under an `operation` coordinator. Carried on the `rowShape` runtime
+ * option so the shape survives the SQLite task store to the daemon re-emit.
+ */
+export type MemberRowShape = "batch-member" | "operation-member";
+
+export function isMemberRowShape(v: unknown): v is MemberRowShape {
+  return v === "batch-member" || v === "operation-member";
+}
 
 export function archetypeRowTypeLabel(archetype: RowArchetype): string {
   return LABELS[archetype];
@@ -92,7 +116,8 @@ export function isRowArchetype(v: string): v is RowArchetype {
     v === "preview" ||
     v === "batch" ||
     v === "batch-member" ||
-    v === "operation"
+    v === "operation" ||
+    v === "operation-member"
   );
 }
 
@@ -175,7 +200,8 @@ export function resolveArchetype<TInput>(
  * Used by pre-emit write sites that don't go through withTrackedWorkflow.
  *
  * Mapping:
- *   member option                  → "batch-member"
+ *   memberShape (rowShape option)  → that shape ("batch-member" | "operation-member")
+ *   member: true                   → "batch-member" (legacy renderAs:"batch" path)
  *   workflowArchetype === "preview" → "preview"
  *   workflowArchetype === "batch"  → "batch"
  *   everything else                → "single"
@@ -186,8 +212,9 @@ export function resolveArchetype<TInput>(
 export function deriveRowArchetype(
   workflowArchetype: WorkflowArchetype,
   _parentRunId?: string,
-  opts?: { member?: boolean },
+  opts?: { member?: boolean; memberShape?: MemberRowShape },
 ): RowArchetype {
+  if (opts?.memberShape) return opts.memberShape;
   if (opts?.member) return "batch-member";
   if (workflowArchetype === "preview") return "preview";
   return workflowArchetype === "batch" ? "batch" : "single";

@@ -10,9 +10,10 @@ import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "@/components/shared/EmptyState";
 import {
+  BatchQueueBackButton,
   BatchQueueMemberList,
-  BatchQueueToolbar,
-  buildSyntheticBatchQueueAnchor,
+  BatchQueuePrepReviewButton,
+  BatchQueuePreviewButton,
 } from "./batch-queue-view";
 import { DaemonBatchRow } from "./DaemonBatchRow";
 import { OperationRow } from "./OperationRow";
@@ -81,8 +82,8 @@ interface QueuePanelProps {
    */
   onOpenOcrReview?: (target: { sessionId: string; runId: string }) => void;
   /**
-   * When set, the panel shows `BatchQueueToolbar` + `BatchQueueMemberList` for
-   * that batch anchor only (delegation children today; same shell for future daemon batches).
+   * When set, the panel shows the consolidated batch toolbar + `BatchQueueMemberList`
+   * for that batch anchor only (delegation children today; same shell for future daemon batches).
    */
   batchQueueParentRunId?: string | null;
   /** Enter batch-queue mode scoped to entries whose parent run id matches. */
@@ -130,15 +131,19 @@ function QueueSortToolbar({
   value,
   onChange,
   disabled,
+  leading,
   actions,
 }: {
   value: QueueSortMode;
   onChange: (mode: QueueSortMode) => void;
   disabled: boolean;
+  /** Rendered before the sort dropdown (batch-queue Back affordance). */
+  leading?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
     <div className="flex min-h-8 items-center gap-1.5 min-w-0">
+      {leading ? <div className="flex shrink-0 items-center gap-1">{leading}</div> : null}
       <QueueSortDropdown
         value={value}
         onChange={onChange}
@@ -245,33 +250,6 @@ export function QueuePanel({
   const queueSurfaces = queueProjectionRows.surfaces;
 
   const batchMembersByParentRunId = queueSurfaces.membersByParentRunId;
-
-  /**
-   * Toolbar title row for batch-queue mode: OCR prep anchor row if present,
-   * else a synthetic row for daemon/dashboard batch ids.
-   */
-  const resolvedBatchToolbarEntry = useMemo(() => {
-    if (!batchQueueParentRunId) return null;
-    const previewSurface = queueSurfaces.groupRows.find(
-      (surface) =>
-        surface.kind === "preview" &&
-        surface.parentRunId === batchQueueParentRunId,
-    );
-    if (previewSurface?.parent) return previewSurface.parent;
-    const members = batchMembersByParentRunId.get(batchQueueParentRunId) ?? [];
-    return buildSyntheticBatchQueueAnchor(
-      batchQueueParentRunId,
-      members,
-      workflowLabel,
-      workflow,
-    );
-  }, [
-    batchQueueParentRunId,
-    queueSurfaces,
-    batchMembersByParentRunId,
-    workflowLabel,
-    workflow,
-  ]);
 
   const focusedBatchProjection = useMemo(
     () =>
@@ -561,30 +539,36 @@ export function QueuePanel({
 
   return (
     <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] shrink-0 flex flex-col bg-background">
-      {batchQueueParentRunId && resolvedBatchToolbarEntry ? (
-        <BatchQueueToolbar
-          batchAnchor={resolvedBatchToolbarEntry}
-          titleOverride={
-            batchAnchorIsPrep
-              ? undefined
-              : resolvedBatchToolbarEntry.data?.__name as string | undefined
-          }
-          projection={focusedBatchProjection}
-          anchorKind={batchAnchorIsPrep ? "prep" : "daemon"}
-          memberCount={batchQueueMembers.length}
-          batchPreviewActive={selectedId === null}
-          onBack={() => onExitBatchQueue?.()}
-          onOpenBatchPreview={onOpenBatchPreview}
-          onOpenPrepReview={
-            batchAnchorIsPrep
-              ? () => {
-                  const runId =
-                    resolvedBatchToolbarEntry.runId ?? resolvedBatchToolbarEntry.id;
-                  onOpenReview?.(runId);
-                }
-              : undefined
-          }
-        />
+      {batchQueueParentRunId ? (
+        // Batch-queue mode: one consolidated toolbar (the old title/"Started …"
+        // header band is gone). Back sits before the sort dropdown; the
+        // screenshot-preview (and prep-review for prep anchors) sit after the
+        // bulk actions — i.e. after the trash.
+        <div className="shrink-0 px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/60">
+          <QueueSortToolbar
+            value={queueSortMode}
+            onChange={onQueueSortModeChange}
+            disabled={loading}
+            leading={<BatchQueueBackButton onBack={() => onExitBatchQueue?.()} />}
+            actions={
+              <>
+                {queueBulkActionsSlot}
+                {onOpenBatchPreview ? (
+                  <BatchQueuePreviewButton
+                    active={selectedId === null}
+                    memberCount={batchQueueMembers.length}
+                    onOpen={onOpenBatchPreview}
+                  />
+                ) : null}
+                {batchAnchorIsPrep ? (
+                  <BatchQueuePrepReviewButton
+                    onOpen={() => onOpenReview?.(batchQueueParentRunId)}
+                  />
+                ) : null}
+              </>
+            }
+          />
+        </div>
       ) : (
         <div className="flex flex-col shrink-0 border-b border-border bg-card/60">
           <div className="h-[69.5px] flex items-center px-3 min-[1440px]:px-4 py-2">
@@ -605,17 +589,6 @@ export function QueuePanel({
           </div>
         </div>
       )}
-
-      {batchQueueParentRunId ? (
-        <div className="shrink-0 px-3 min-[1440px]:px-4 py-2 border-b border-border bg-card/50">
-          <QueueSortToolbar
-            value={queueSortMode}
-            onChange={onQueueSortModeChange}
-            disabled={loading}
-            actions={queueBulkActionsSlot}
-          />
-        </div>
-      ) : null}
 
       <div ref={scrollAreaRef} className="flex-1 overflow-y-auto border-b border-border">
         {batchQueueParentRunId ? (

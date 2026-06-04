@@ -17,6 +17,7 @@ import {
   getRunNumber,
   resolveEntryId,
   resolveEntryName,
+  resolveQueueRowLiveMessage,
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { QueueRowCard } from "./QueueRowCard";
@@ -97,7 +98,7 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     icon: ClipboardList,
     iconClass: "",
     iconColor: "text-info",
-    label: "Needs review",
+    label: "awaiting review",
   },
   /** Person Lookup — UCPath had no matching row (tracker status is still `done`). */
   notFound: {
@@ -181,7 +182,6 @@ function EntryItemImpl({
   const name = projection?.title ?? title ?? resolvedName;
   const isFailed = entry.status === "failed" && !isCancelled;
   const isDone = entry.status === "done" && !isOcrDelegatedNeedsReview;
-  const isPending = entry.status === "pending";
   const cfg = resolveStatusConfig(entry, derivedStatus);
   const StatusIcon = cfg.icon;
 
@@ -203,11 +203,10 @@ function EntryItemImpl({
   // stamped `data.__preset` (set at runOneItem startup).
   const presetId = typeof entry.data?.__preset === "string" ? entry.data.__preset : undefined;
   const footerSecondaryId = projection?.subtitle ?? subtitle ?? resolveEntryId(entry);
+  const liveMessage = resolveQueueRowLiveMessage(entry);
   const showLiveRow =
     (isFailed && Boolean(entry.error)) ||
-    Boolean(
-      (isDaemonRunning || isPending || isOcrDelegatedNeedsReview) && entry.lastLogMessage,
-    );
+    Boolean(isDaemonRunning && !isOcrDelegatedNeedsReview && liveMessage);
 
   const personLookupStatusTag = resolveQueueRowStatus(entry, { isDone }).secondaryTag;
 
@@ -304,7 +303,7 @@ function EntryItemImpl({
                 <span className="truncate">{entry.error}</span>
               </span>
             ) : (
-              <span className="text-primary/85 truncate block">{entry.lastLogMessage}</span>
+              <span className="text-primary/85 truncate block">{liveMessage}</span>
             )}
           </div>
         )}

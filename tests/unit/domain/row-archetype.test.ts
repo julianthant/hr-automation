@@ -13,6 +13,7 @@ const CANONICAL: RowArchetype[] = [
   "batch-member",
   "batch",
   "operation",
+  "operation-member",
 ];
 
 describe("row-archetype", () => {
@@ -22,6 +23,7 @@ describe("row-archetype", () => {
     assert.equal(archetypeRowTypeLabel("batch"), "Batch");
     assert.equal(archetypeRowTypeLabel("batch-member"), "Batch member");
     assert.equal(archetypeRowTypeLabel("operation"), "Operation");
+    assert.equal(archetypeRowTypeLabel("operation-member"), "Operation member");
   });
 
   it("resolveRowArchetype returns every canonical data.archetype value", () => {
@@ -69,5 +71,21 @@ describe("row-archetype", () => {
   it("deriveRowArchetype: member option → batch-member", () => {
     assert.equal(deriveRowArchetype("single", "parent-run-1", { member: true }), "batch-member");
     assert.equal(deriveRowArchetype("batch", undefined, { member: true }), "batch-member");
+  });
+
+  it("deriveRowArchetype: memberShape wins → the requested member shape", () => {
+    assert.equal(
+      deriveRowArchetype("single", "parent-run-1", { memberShape: "operation-member" }),
+      "operation-member",
+    );
+    assert.equal(
+      deriveRowArchetype("single", "parent-run-1", { memberShape: "batch-member" }),
+      "batch-member",
+    );
+    // memberShape takes precedence over the legacy `member` boolean.
+    assert.equal(
+      deriveRowArchetype("single", undefined, { member: true, memberShape: "operation-member" }),
+      "operation-member",
+    );
   });
 });

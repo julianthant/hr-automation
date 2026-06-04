@@ -1,4 +1,4 @@
-import type { TrackerEntry } from "./types";
+import { formatStepName, type TrackerEntry } from "./types";
 import type { MergedEntryGroup } from "../../../tracker/queue-row-count.js";
 import { readQueueTitle } from "../../../domain/queue-title.js";
 import { resolveQueueRowPresentation } from "../../../domain/queue-row-presentation.js";
@@ -14,6 +14,23 @@ function firstNonBlank(...values: Array<string | undefined>): string {
     if (trimmed) return trimmed;
   }
   return "";
+}
+
+/**
+ * Subline under the queue row title while the row is in-flight. Prefers the
+ * latest log line; falls back to the current step so running rows still show a
+ * description before logs stream in.
+ */
+export function resolveQueueRowLiveMessage(entry: TrackerEntry): string | null {
+  const fromLog = entry.lastLogMessage?.trim();
+  if (fromLog) return fromLog;
+  if (entry.status === "failed" && entry.error?.trim()) return entry.error.trim();
+  const step = entry.step?.trim();
+  if (step === "awaiting-approval") return "Awaiting operator review…";
+  if (step) return `${formatStepName(step)}…`;
+  if (entry.status === "running") return "Running…";
+  if (entry.status === "pending") return "Queued…";
+  return null;
 }
 
 /** OCR prep rows — short queue labels by form instead of workflow "OCR". */

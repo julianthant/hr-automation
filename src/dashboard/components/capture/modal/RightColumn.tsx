@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import type { CaptureSessionInfo, CaptureState, CaptureValidation } from "../capture-types.js";
 import { CapturePhotoTile } from "../CapturePhotoTile.js";
 import type { StartedSession } from "./index.js";
@@ -8,17 +9,6 @@ import { isTerminal } from "./capture-state-terminal.js";
 const photoSrc = (sessionId: string, index: number) =>
   `/api/capture/photos/${encodeURIComponent(sessionId)}/${index}`;
 
-function describeStatus(state: CaptureState, phoneConnected: boolean, photoCount: number): string {
-  if (state === "finalizing") return "Bundling photos for handoff…";
-  if (state === "finalized") return "Sent to handler. Closing automatically…";
-  if (state === "finalize_failed") return "Couldn't send to handler.";
-  if (state === "expired") return "Session expired.";
-  if (state === "discarded") return "Session discarded.";
-  if (!phoneConnected) return "Waiting for phone to scan QR.";
-  if (photoCount === 0) return "Phone connected — awaiting photos.";
-  return `Phone connected — ${photoCount} photo${photoCount === 1 ? "" : "s"} received.`;
-}
-
 export interface RightColumnProps {
   state: CaptureState;
   started: StartedSession | null;
@@ -28,12 +18,15 @@ export interface RightColumnProps {
   retrying: boolean;
   finalizeDisabled: boolean;
   photoCount: number;
+  /** When false, validation renders outside (modal grid row below). */
+  showValidation?: boolean;
   onPhotoView: (photoIndex: number) => void;
   onPhotoDelete: (photoIndex: number) => void;
   onFinalize: () => void;
   onRetryHandoff: () => void;
   onDiscard: () => void;
   onCloseAndStartNew: () => void;
+  className?: string;
 }
 
 export function RightColumn({
@@ -45,12 +38,14 @@ export function RightColumn({
   retrying,
   finalizeDisabled,
   photoCount,
+  showValidation = true,
   onPhotoView,
   onPhotoDelete,
   onFinalize,
   onRetryHandoff,
   onDiscard,
   onCloseAndStartNew,
+  className,
 }: RightColumnProps) {
   if (state === "starting" || state === "error") {
     return (
@@ -63,65 +58,26 @@ export function RightColumn({
   const photos = info?.photos ?? [];
   const blurFlaggedCount = photos.filter((p) => p.blurFlagged).length;
   const sessionTerminal = isTerminal(state);
-  const phoneConnected = info?.phoneConnectedAt != null;
 
   return (
-    <div className="flex flex-col gap-[22px]">
-      {/* STATUS */}
-      <div>
-        <div
-          className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1"
-          style={{ color: "var(--capture-fg-faint)" }}
-        >
-          Status
-        </div>
-        <div
-          className="flex items-center gap-2.5 py-1 text-[12px]"
-          style={{ color: "var(--capture-fg-secondary)" }}
-          aria-live="polite"
-        >
-          <span
-            className="inline-block h-[5px] w-[5px] rounded-full shrink-0"
-            style={{ backgroundColor: "var(--capture-fg-secondary)" }}
-            aria-hidden
+    <div className={cn("flex min-h-0 flex-col gap-[22px]", className)}>
+      <div className="grid grid-cols-4 gap-2.5">
+        {photos.map((p) => (
+          <CapturePhotoTile
+            key={`${p.index}-${p.uploadedAt}`}
+            photo={p}
+            imageSrc={started ? photoSrc(started.sessionId, p.index) : ""}
+            onView={() => onPhotoView(p.index)}
+            onDelete={sessionTerminal ? undefined : () => onPhotoDelete(p.index)}
+            justArrived={p.index === arrivedIndex}
+            disabled={sessionTerminal}
           />
-          <span>{describeStatus(state, phoneConnected, photos.length)}</span>
-        </div>
-      </div>
-
-      {/* PHOTOS */}
-      <div>
-        <div
-          className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2"
-          style={{ color: "var(--capture-fg-faint)" }}
-        >
-          Live photos · <span className="font-mono tabular-nums" style={{ color: "var(--capture-fg-secondary)" }}>{photos.length}</span>
-        </div>
-        <div className="grid grid-cols-4 gap-2.5">
-          {photos.map((p) => (
-            <CapturePhotoTile
-              key={`${p.index}-${p.uploadedAt}`}
-              photo={p}
-              imageSrc={started ? photoSrc(started.sessionId, p.index) : ""}
-              onView={() => onPhotoView(p.index)}
-              onDelete={sessionTerminal ? undefined : () => onPhotoDelete(p.index)}
-              justArrived={p.index === arrivedIndex}
-              disabled={sessionTerminal}
-            />
+        ))}
+        {!sessionTerminal &&
+          Array.from({ length: Math.max(0, 4 - photos.length) }).map((_, i) => (
+            <PlaceholderTile key={`ph-${i}`} />
           ))}
-          {!sessionTerminal &&
-            Array.from({ length: Math.max(0, 4 - photos.length) }).map((_, i) => (
-              <PlaceholderTile key={`ph-${i}`} />
-            ))}
-        </div>
       </div>
-
-      <ValidationBanner
-        validation={validation}
-        blurFlaggedCount={blurFlaggedCount}
-        photoCount={photos.length}
-        active={state === "open"}
-      />
 
       <ActionRow
         state={state}
@@ -133,6 +89,15 @@ export function RightColumn({
         onDiscard={onDiscard}
         onCloseAndStartNew={onCloseAndStartNew}
       />
+
+      {showValidation && (
+        <ValidationBanner
+          validation={validation}
+          blurFlaggedCount={blurFlaggedCount}
+          photoCount={photos.length}
+          active={state === "open"}
+        />
+      )}
     </div>
   );
 }

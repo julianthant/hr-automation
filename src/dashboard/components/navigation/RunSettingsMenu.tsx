@@ -2,11 +2,10 @@ import { useState } from "react";
 import { Settings2, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { WorkerStepper } from "@/components/shared/WorkerStepper";
 import {
   AUTO_WORKERS,
   FULL_PRESET_ID,
-  WORKER_CHOICES,
-  workerChoiceDescription,
   workerChoiceLabel,
   type StepPreset,
   type WorkerChoice,
@@ -84,24 +83,10 @@ export function RunSettingsMenu({
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-72 p-1.5">
-        <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
-          Automation workers
+        <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+          <span className="text-[13px] font-medium text-foreground">Workers</span>
+          <WorkerStepper value={workerChoice} onChange={onSelectWorker} />
         </div>
-        <ul role="radiogroup" aria-label="Automation workers" className="flex flex-col">
-          {WORKER_CHOICES.map((choice) => (
-            <RadioRow
-              key={choice}
-              id={`workers-${choice}`}
-              label={workerChoiceLabel(choice)}
-              description={workerChoiceDescription(choice)}
-              selected={choice === workerChoice}
-              onSelect={() => {
-                onSelectWorker(choice);
-                setOpen(false);
-              }}
-            />
-          ))}
-        </ul>
 
         {presets.length > 0 && (
           <>
@@ -109,7 +94,7 @@ export function RunSettingsMenu({
             <div className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
               Run mode
             </div>
-            <ul role="radiogroup" aria-label="Run mode" className="flex flex-col">
+            <ul role="radiogroup" aria-label="Run mode" className="flex flex-col gap-1.5 px-0.5">
               <RadioRow
                 id={FULL_PRESET_ID}
                 label="Full"
