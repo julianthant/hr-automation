@@ -8,11 +8,11 @@ interface BrowserChipProps {
 }
 
 const chipStyles: Record<AuthState, string> = {
-  idle: "bg-[#22222a] text-[#555] border-[#2a2a35]",
-  authenticating: "bg-[#2563eb22] text-[#60a5fa] border-[#2563eb44]",
-  authed: "bg-[#16a34a22] text-[#4ade80] border-[#16a34a33]",
-  duo_waiting: "bg-[#eab30822] text-[#fbbf24] border-[#eab30833] motion-safe:animate-pulse",
-  failed: "bg-[#ef444422] text-[#f87171] border-[#ef444444]",
+  idle: "bg-muted text-muted-foreground border-border",
+  authenticating: "bg-info/15 text-info border-info/30",
+  authed: "bg-success/15 text-success border-success/30",
+  duo_waiting: "bg-warning/15 text-warning border-warning/30 motion-safe:animate-pulse",
+  failed: "bg-destructive/15 text-destructive border-destructive/30",
 };
 
 const chipIcons: Record<AuthState, React.ReactNode> = {

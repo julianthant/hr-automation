@@ -91,8 +91,8 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
           "border-accent-foreground/40",
           open ? "border-b" : "border-t",
           "text-[12px] text-muted-foreground",
-          "hover:bg-white/5 transition-colors",
-          "outline-none focus-visible:bg-white/5",
+          "hover:bg-foreground/5 transition-colors",
+          "outline-none focus-visible:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring",
           "select-none cursor-pointer",
           "shrink-0",
         )}

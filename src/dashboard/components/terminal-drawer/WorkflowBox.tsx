@@ -28,18 +28,18 @@ const UCPATH_IDLE_REFRESH_MS = 5 * 60 * 1000;
  * -------------------------------------------------------------------- */
 const authColor: Record<AuthState, string> = {
   idle: "text-muted-foreground",
-  authenticating: "text-[#60a5fa]",
+  authenticating: "text-info",
   authed: "text-[#4ade80]",
   duo_waiting: "text-[#fbbf24]",
-  failed: "text-[#f87171]",
+  failed: "text-destructive",
 };
 
 const authBg: Record<AuthState, string> = {
   idle: "bg-muted/20 border-border/60",
-  authenticating: "bg-[#2563eb]/10 border-[#2563eb]/30",
-  authed: "bg-[#16a34a]/10 border-[#16a34a]/30",
-  duo_waiting: "bg-[#eab308]/10 border-[#eab308]/40 motion-safe:animate-pulse",
-  failed: "bg-[#ef4444]/10 border-[#ef4444]/40",
+  authenticating: "bg-info/10 border-info/30",
+  authed: "bg-success/10 border-success/30",
+  duo_waiting: "bg-warning/10 border-warning/40 motion-safe:animate-pulse",
+  failed: "bg-destructive/10 border-destructive/40",
 };
 
 const authLabel: Record<AuthState, string> = {
@@ -92,7 +92,7 @@ function UcpathIdleCountdownRing({
   if (refreshing) {
     return (
       <Loader2
-        className="w-[13px] h-[13px] shrink-0 animate-spin motion-reduce:animate-none text-zinc-300/85"
+        className="w-[13px] h-[13px] shrink-0 animate-spin motion-reduce:animate-none text-foreground/85"
         aria-label="UCPath idle refresh in progress"
       />
     );
@@ -151,7 +151,7 @@ function UcpathIdleCountdownRing({
         strokeLinecap="round"
         className={cn(
           "transition-[stroke-dashoffset,stroke] duration-300",
-          overdue ? "stroke-[#fbbf24]/80" : "stroke-zinc-100/90",
+          overdue ? "stroke-[#fbbf24]/80" : "stroke-foreground/90",
         )}
         strokeDasharray={c}
         strokeDashoffset={dashOffset}
@@ -418,10 +418,11 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
 
   if (workflow.crashedOnLaunch) {
     return (
-      <div
+      <button
+        type="button"
         className={cn(
           "shrink-0 w-[290px] rounded-xl border border-destructive/30 bg-destructive/5 p-2.5",
-          "flex flex-col cursor-pointer transition-colors",
+          "flex flex-col cursor-pointer transition-colors text-left",
           isFocused && "ring-1 ring-primary",
         )}
         onClick={() => setFocusedInstance(instance)}
@@ -436,7 +437,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
         <p className="mt-1 text-[10.5px] text-destructive/80 leading-tight">
           Check Queue row for details
         </p>
-      </div>
+      </button>
     );
   }
 
@@ -461,7 +462,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const borderClass = isFocused
     ? "border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.6),0_0_14px_hsl(var(--primary)/0.18)]"
     : itemInFlight && active
-      ? "border-[#22d3ee]/30 shadow-[0_0_0_1px_rgba(34,211,238,0.10)]"
+      ? "border-log-cyan/30 shadow-[0_0_0_1px_color-mix(in_srgb,var(--log-cyan)_10%,transparent)]"
       : "border-border";
 
   // Footer right slot — lifecycle descriptor (matches header subline semantics).
@@ -470,14 +471,14 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const stepClass = !active
     ? "text-muted-foreground"
     : itemInFlight
-      ? "text-[#22d3ee]"
+      ? "text-log-cyan"
       : daemonPhase === "keepalive" || daemonPhase === "idle"
         ? "text-muted-foreground"
         : currentStep && /auth/i.test(currentStep)
-          ? "text-[#60a5fa]"
+          ? "text-info"
           : authedBrowsers === totalBrowsers && totalBrowsers > 0
             ? "text-muted-foreground"
-            : "text-[#60a5fa]";
+            : "text-info";
 
   // Workflow icon — resolved from the registry's `iconName` declaration,
   // with a generic `Workflow` fallback + console.warn for missing entries.
@@ -639,7 +640,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                     className={cn(
                       "w-1.5 h-1.5 rounded-full shrink-0",
                       done && "bg-[#4ade80]/85",
-                      running && "bg-primary shadow-[0_0_0_2px_rgba(184,135,82,0.18)]",
+                      running && "bg-primary shadow-[0_0_0_2px_color-mix(in_srgb,var(--primary)_18%,transparent)]",
                       !done && !running && "bg-muted border border-border",
                     )}
                     title={formatStepName(s)}
@@ -690,7 +691,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                   const timeStr = isNaN(d.getTime()) ? "" : `${hh}:${mm}:${ss}`;
                   const msgColor =
                     l.level === "error"
-                      ? "text-[#f87171]"
+                      ? "text-destructive"
                       : l.level === "warn"
                         ? "text-[#fbbf24]"
                         : "text-muted-foreground";
