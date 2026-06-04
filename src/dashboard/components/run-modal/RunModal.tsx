@@ -15,6 +15,13 @@ import type { PriorRunSummary } from "@/components/shared/types";
 import { getRunModalConfig, type RunModalSubmitResponse } from "@/lib/run-modal-registry";
 import { useRosters, refreshRosters, type RosterListing } from "@/components/hooks/useRosters";
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
+import {
+  AUTO_WORKERS,
+  WORKER_CHOICES,
+  workerChoiceLabel,
+  workerChoiceToParam,
+  type WorkerChoice,
+} from "@/lib/run-settings";
 
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
@@ -63,6 +70,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const showDuplicateCheck = config?.sections.duplicateCheck ?? false;
   const showDryRun = config?.sections.dryRun ?? false;
   const showOathUploadMode = config?.sections.oathUploadMode ?? false;
+  const showWorkers = config?.sections.workers ?? false;
   const allowMultipleFiles = Boolean(config?.allowMultipleFiles && !reuploadFor);
 
   const [files, setFiles] = useState<File[]>([]);
@@ -78,7 +86,12 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
   const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
   const [dryRun, setDryRun] = useState(false);
   const [oathUploadMode, setOathUploadMode] = useState<"full" | "upload-only">("full");
+  const [workerChoice, setWorkerChoice] = useState<WorkerChoice>(AUTO_WORKERS);
   const effectiveShowRoster = showRoster && oathUploadMode === "full";
+  // Workers only matter for the OCR-hub fan-out path. Upload-only oath-upload is
+  // a single ServiceNow ticket row with nothing to parallelize, so the section
+  // self-hides there (it stays hidden, not just disabled).
+  const effectiveShowWorkers = showWorkers && !(showOathUploadMode && oathUploadMode === "upload-only");
   const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType, oathUploadMode };
   const file = files[0] ?? null;
 
@@ -188,6 +201,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
     setRosterMode("existing");
     setDryRun(false);
     setOathUploadMode("full");
+    setWorkerChoice(AUTO_WORKERS);
   }, [open]);
 
   if (!config) {
@@ -302,6 +316,15 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             }
           }
           if (showDryRun && dryRun) fd.append("dryRun", "true");
+          // Automation-workers run setting — only for the OCR-backed prepare
+          // path, and only when the operator picked an explicit count (Auto
+          // sends nothing → backend reuses-or-spawns-one).
+          {
+            const parallelWorkers = workerChoiceToParam(workerChoice);
+            if (effectiveShowWorkers && parallelWorkers !== undefined) {
+              fd.append("parallelWorkers", String(parallelWorkers));
+            }
+          }
           if (reuploadFor) {
             fd.append("sessionId", reuploadFor.sessionId);
             fd.append("previousRunId", reuploadFor.previousRunId);
@@ -556,6 +579,47 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
                   </span>
                 </span>
               </label>
+            </section>
+          )}
+
+          {effectiveShowWorkers && (
+            <section>
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground/70">
+                Automation workers
+              </div>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Automation workers">
+                {WORKER_CHOICES.map((choice) => {
+                  const active = workerChoice === choice;
+                  return (
+                    <button
+                      key={choice}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      disabled={submitting}
+                      onClick={() => setWorkerChoice(choice)}
+                      className={cn(
+                        "min-w-11 rounded-[7px] border px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border",
+                        "disabled:cursor-not-allowed disabled:opacity-60",
+                        submitting ? "" : "cursor-pointer hover:bg-muted/25",
+                      )}
+                      style={{
+                        borderColor: active ? "var(--capture-border-cta)" : "var(--capture-border-subtle)",
+                        backgroundColor: active ? "var(--capture-bg-raised)" : "transparent",
+                        color: active ? "var(--capture-fg-primary)" : "var(--capture-fg-muted)",
+                      }}
+                    >
+                      {workerChoiceLabel(choice)}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 text-[11px] leading-[1.45] text-muted-foreground">
+                {workerChoice === AUTO_WORKERS
+                  ? "Reuse existing workers; start one if needed."
+                  : `Ensure at least ${workerChoice} worker${workerChoice === "1" ? "" : "s"} are running for the downstream fan-out.`}
+              </div>
             </section>
           )}
 

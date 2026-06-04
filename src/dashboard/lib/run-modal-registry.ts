@@ -49,6 +49,9 @@ export interface RunModalToast {
  * - `roster`: roster-mode picker (use latest local | download fresh).
  * - `duplicateCheck`: hash the PDF on pick and surface prior runs.
  * - `oathUploadMode`: full delegated flow vs ServiceNow upload-only.
+ * - `workers`: Automation-workers picker — how many browser workers to target
+ *   for the OCR-backed run's downstream fan-out. Only meaningful for the
+ *   `/api/ocr/prepare` path (hidden in oath-upload's upload-only mode).
  */
 export interface RunModalSections {
   formType?: boolean;
@@ -56,6 +59,7 @@ export interface RunModalSections {
   duplicateCheck?: boolean;
   dryRun?: boolean;
   oathUploadMode?: boolean;
+  workers?: boolean;
 }
 
 export interface RunModalConfig {
@@ -97,7 +101,7 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
     targetWorkflow: () => "emergency-contact",
-    sections: { roster: true, dryRun: true },
+    sections: { roster: true, dryRun: true, workers: true },
     lockedFormType: "emergency-contact",
     allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
@@ -121,7 +125,7 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     // Dedicated OCR runs have no Approve flow (just inspecting OCR output),
     // so dry-run is meaningless here. Delegations from emergency-contact /
     // oath keep their own dry-run toggles.
-    sections: { roster: true, formType: true },
+    sections: { roster: true, formType: true, workers: true },
     allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
@@ -150,8 +154,10 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       oathUploadMode === "upload-only" ? undefined : "oath-upload",
     lockedFormType: "oath",
     // Roster picker is required for Full process because the OCR prep needs a
-    // roster to match the OCR'd names → EIDs before fanning out.
-    sections: { roster: true, duplicateCheck: true, dryRun: true, oathUploadMode: true },
+    // roster to match the OCR'd names → EIDs before fanning out. Workers only
+    // apply to Full process (the OCR-hub fan-out); the section self-hides in
+    // upload-only mode.
+    sections: { roster: true, duplicateCheck: true, dryRun: true, oathUploadMode: true, workers: true },
     allowMultipleFiles: true,
     buildSuccessToast: (resp, file) => ({
       title: resp.sessionId
