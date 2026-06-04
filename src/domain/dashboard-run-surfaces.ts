@@ -11,6 +11,7 @@ export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [
   "emergency-contact",
   "ocr",
   "oath-upload",
+  "oath-signature",
 ] as const;
 
 export const RETIRED_DASHBOARD_WORKFLOWS = [

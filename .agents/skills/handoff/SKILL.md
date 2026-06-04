@@ -72,7 +72,6 @@ git log --oneline master..HEAD
 
 - Relevant CLAUDE.md files: <paths>
 - Relevant memory entries: <paths under `~/.claude/projects/.../memory/` if any>
-- Related past sessions: <claude-mem observation IDs if clearly relevant>
 ```
 
 ## How to fill it in
@@ -91,7 +90,7 @@ git log --oneline master..HEAD
 
 5. **Verification commands.** Use commands the project actually has — check `package.json` scripts (or equivalent for the project) rather than guessing. For repos following the user's standard layout, defaults are typically `npm run typecheck`, `npm run test`, `npm run test:architecture`, `npm run lint`.
 
-6. **Pointers.** Link to the CLAUDE.md files the new session should read first — the project root's CLAUDE.md plus any subsystem CLAUDE.md the work touches. Include memory entries from `~/.claude/projects/<project-slug>/memory/` if any are load-bearing for this task. Include claude-mem observation IDs only when clearly relevant.
+6. **Pointers.** Link to the CLAUDE.md files the new session should read first — the project root's CLAUDE.md plus any subsystem CLAUDE.md the work touches. Include memory entries from `~/.claude/projects/<project-slug>/memory/` if any are load-bearing for this task.
 
 ## Versatility
 

@@ -19,7 +19,7 @@ import {
   EmergencyContactSchema,
   type EmergencyContactRecord,
 } from "../../../workflows/emergency-contact/schema.js";
-import { LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
+import { DocumentTypeSchema, LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── Permissive OCR-pass schema ────────────────────────────
 
@@ -47,7 +47,7 @@ export const PermissiveRecordSchema = z.object({
   employee: PermissiveEmployeeSchema,
   emergencyContact: EmergencyContactSchema,
   notes: z.array(z.string()).default([]),
-  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
 });
 export type PermissiveRecord = z.infer<typeof PermissiveRecordSchema>;
@@ -65,7 +65,7 @@ export const PreviewRecordSchema = PermissiveRecordSchema.extend({
     .array(z.object({ eid: z.string(), name: z.string(), score: z.number() }))
     .optional(),
   addressMatch: z.enum(["match", "differ", "missing"]).optional(),
-  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
   verification: VerificationSchema.optional(),
   selected: z.boolean(),

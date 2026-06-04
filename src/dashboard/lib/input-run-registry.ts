@@ -53,10 +53,11 @@ export interface InputRunConfig {
    * upload-run path (e.g. PDF → OCR → fan-out).
    */
   runEmptyAction?: {
-    /** Pass-through to RunModal's `workflow` prop. */
+    /**
+     * Pass-through to RunModal's `workflow` prop — must be an upload-run
+     * workflow. The modal's own registry entry owns any locked formType.
+     */
     modalWorkflow: string;
-    /** When `modalWorkflow === "ocr"`, pre-selects formType and hides the chooser. */
-    lockedFormType?: string;
   };
 }
 
@@ -148,7 +149,7 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
       regex: /^\d{5,}$/,
       message: "EID must be numeric (5+ digits)",
     }),
-    runEmptyAction: { modalWorkflow: "ocr", lockedFormType: "oath" },
+    runEmptyAction: { modalWorkflow: "oath-signature" },
   },
   "crm-doc-download": {
     placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",

@@ -25,11 +25,8 @@ export function ExpiryFooter({
 
   return (
     <div
-      className="flex items-center justify-between text-[11.5px] pt-3.5"
-      style={{
-        borderTop: "1px solid var(--capture-border-subtle)",
-        color: "var(--capture-fg-muted)",
-      }}
+      className="flex items-center justify-between text-[11.5px]"
+      style={{ color: "var(--capture-fg-muted)" }}
     >
       <span className="flex items-center gap-2">
         <span

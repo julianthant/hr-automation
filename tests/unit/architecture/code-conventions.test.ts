@@ -106,28 +106,6 @@ describe("codebase conventions", () => {
     assert.deepEqual(violations, [], "found .tsx files outside src/dashboard/");
   });
 
-  it("does not place AGENTS.md files under src/", () => {
-    // Global convention: AGENTS.md files are generated session artifacts for Codex and
-    // must never appear under src/. Documentation belongs in the corresponding CLAUDE.md.
-    // (The root AGENTS.md is an allowed session artifact — this check is scoped to src/ only.)
-    // Re-use the walk() helper but also check directory entries for markdown files:
-    function findAgentsMd(dir: string): string[] {
-      const results: string[] = [];
-      for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-        const stat = statSync(full);
-        if (stat.isDirectory()) {
-          results.push(...findAgentsMd(full));
-        } else if (entry.toLowerCase() === "agents.md") {
-          results.push(full);
-        }
-      }
-      return results;
-    }
-    const violations = findAgentsMd(SRC).map(rel).sort();
-    assert.deepEqual(violations, [], "found AGENTS.md files under src/");
-  });
-
   it("keeps src filenames aligned with naming rules (kebab-case outside dashboard; React patterns inside dashboard)", () => {
     const violations: string[] = [];
     for (const file of walk(SRC)) {

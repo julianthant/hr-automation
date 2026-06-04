@@ -86,9 +86,10 @@ export interface RunModalConfig {
   /**
    * If set, the workflow's run modal locks the OCR `formType` to this value
    * — picker is hidden, the field is force-injected on submit. Used so
-   * `emergency-contact` and `oath-upload` can each surface a dedicated
-   * Run button that delegates to the shared `/api/ocr/prepare` endpoint
-   * without making the operator pick the form type a second time.
+   * `emergency-contact`, `oath-signature`, and `oath-upload` can each
+   * surface a dedicated Run button that delegates to the shared
+   * `/api/ocr/prepare` endpoint without making the operator pick the form
+   * type a second time.
    */
   lockedFormType?: string;
 }
@@ -109,19 +110,27 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       description: file.name,
     }),
   },
-  ocr: {
-    title: ({ lockedFormType }) =>
-      lockedFormType === "oath" ? "Run Oath Signature" : "OCR — Prepare",
-    srDescription: ({ lockedFormType }) =>
-      lockedFormType === "oath"
-        ? "Upload a PDF for oath preparation, choose roster source and form handling options, then submit."
-        : "Upload a PDF to run OCR preparation; choose roster source and form type, then submit.",
+  "oath-signature": {
+    title: () => "Run Oath Signature",
+    srDescription: () =>
+      "Upload a PDF of the paper oath roster, choose roster source, optionally enable dry run, then submit to start OCR preparation. On approve, OCR fans out one signer per approved record into the Oath Signature queue.",
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
-    // A "Run Oath Signature" entry (locked to the oath form) gets an
-    // oath-signature operation row; a bare OCR prep gets none.
-    targetWorkflow: ({ lockedFormType }) =>
-      lockedFormType === "oath" ? "oath-signature" : undefined,
+    targetWorkflow: () => "oath-signature",
+    sections: { roster: true, dryRun: true, workers: true },
+    lockedFormType: "oath",
+    allowMultipleFiles: true,
+    buildSuccessToast: (_resp, file) => ({
+      title: "Preparation started",
+      description: file.name,
+    }),
+  },
+  ocr: {
+    title: () => "OCR — Prepare",
+    srDescription: () =>
+      "Upload a PDF to run OCR preparation; choose roster source and form type, then submit.",
+    submitUrl: ({ reuploadFor }) =>
+      reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
     // Dedicated OCR runs have no Approve flow (just inspecting OCR output),
     // so dry-run is meaningless here. Delegations from emergency-contact /
     // oath keep their own dry-run toggles.

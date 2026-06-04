@@ -199,13 +199,15 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.subtitle, undefined);
   });
 
-  it("uses the TRACE ID (not the EID) as a one-member person batch group subtitle", () => {
+  it("derives the PARENT trace id (shared prefix, parent runId4 tail) as a one-member person batch group subtitle", () => {
     // oath-signature / person-lookup fan-out: a lone delegated person member
-    // renders as a one-member batch (alwaysBatchDelegatedMembers). The member
-    // carries an EID — shown on the member-preview's title-line right — so the
-    // group card's footer subtitle must fall THROUGH the EID to the trace id,
-    // never repeat the EID and never go blank (the prior `batchParent`-gated
-    // `undefined`).
+    // renders as a one-member batch (alwaysBatchDelegatedMembers) with NO parent
+    // row in panel (the parent run lives in another workflow's tracker). The
+    // group card's footer id must identify the PARENT run — derived from
+    // `parentRunId` as `<sharedPrefix>-<parentRunId4>` — NOT the member's own
+    // trace id and never the EID. The member preview renders its OWN trace
+    // (`os-090551-ad01`), so parent footer and member read as one operation yet
+    // differ in the final 4.
     const member = entry({
       workflow: "oath-signature",
       id: "ocr-oath-f85c86b9-r0",
@@ -233,7 +235,10 @@ describe("workflow runtime projection adapters", () => {
     });
 
     assert.equal(projection.surfaceType, "batch");
-    assert.equal(projection.subtitle, "os-090551-ad01");
+    // Shared prefix `os-090551`, parent's runId4 tail `f85c` (from parentRunId
+    // "f85c86b9-2d85") — distinct from the member's own `-ad01` tail.
+    assert.equal(projection.subtitle, "os-090551-f85c");
+    assert.notEqual(projection.subtitle, "os-090551-ad01");
     assert.notEqual(projection.subtitle, "10874100");
   });
 
@@ -477,26 +482,48 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(beforeProjection.actions.find((action) => action.kind === "delete")?.enabled, false);
     assert.equal(beforeProjection.batchMembers.length, 0);
 
-    // After approval: signer children summarized inline, OCR not duplicated.
+    // After approval: signer children are `operation-member` rows (the operation
+    // analogue of `batch-member`) — collected as the coordinator's inline members,
+    // OCR not duplicated. Each member carries its OWN trace tail (`-s1nr`); the
+    // coordinator footer keeps the operation's own trace (`-op01`), so parent and
+    // member share the `ou-101010` prefix yet differ in the final 4.
     const signer = entry({
       workflow: "oath-signature",
       id: "10000001",
       runId: "signer-run-1",
       parentRunId: "op-run-1",
       status: "running",
-      data: { archetype: "batch-member", name: "Jane Doe", emplId: "10000001" },
+      data: {
+        archetype: "operation-member",
+        queueRowKind: "person",
+        name: "Jane Doe",
+        emplId: "10000001",
+        __traceId: "ou-101010-s1nr",
+      },
     });
     const after = buildTrackerQueueSurfaces({
       entries: [operation, signer],
       delegationSourceEntries: [operation, signer],
       runtimePolicies: phase4Policies,
     });
-    const afterProjection = buildProjectionFromQueueSurface(after.groupRows[0]!, {
+    const afterSurface = after.groupRows[0]!;
+    assert.equal(afterSurface.kind, "operation", "operation-member child stays under the operation surface");
+    assert.deepEqual(
+      afterSurface.members.map((m) => m.runId),
+      ["signer-run-1"],
+      "operation-member is collected as an operation member, not its own anchor",
+    );
+    const afterProjection = buildProjectionFromQueueSurface(afterSurface, {
       runtimePolicies: phase4Policies,
     });
     assert.equal(afterProjection.surfaceType, "operation");
     assert.deepEqual(afterProjection.batchMembers.map((member) => member.runId), ["signer-run-1"]);
+    // Member renders as a single row (operation-member → single surface type).
+    assert.equal(afterProjection.batchMembers[0]!.surfaceType, "single");
     assert.equal(afterProjection.status, "running");
+    // Coordinator footer = operation's own trace, NOT the member's tail.
+    assert.equal(afterProjection.subtitle, "ou-101010-op01");
+    assert.notEqual(afterProjection.subtitle, "ou-101010-s1nr");
   });
 
   it("projects a discarded operation coordinator as failed, not running", () => {

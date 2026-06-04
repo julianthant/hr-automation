@@ -7,7 +7,6 @@ import {
   KeyRound,
   Loader2,
   Hourglass,
-  ChevronRight,
 } from "lucide-react";
 import type { AuthState, WorkflowInstanceState } from "@/components/shared/types";
 import { formatStepName } from "@/components/shared/types";
@@ -374,7 +373,6 @@ interface WorkflowBoxProps {
  *     amber duo-glow on individual browser tiles).
  */
 export function WorkflowBox({ workflow }: WorkflowBoxProps) {
-  const [logsOpen, setLogsOpen] = useState(false);
   const {
     instance,
     workflow: workflowName,
@@ -389,7 +387,6 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     sessions,
     daemonPhase,
     ucpathIdle,
-    recentDaemonLogs,
   } = workflow;
   const { focusedInstance, setFocusedInstance } = useTerminalDrawer();
   const meta = useWorkflow(workflowName ?? "");
@@ -411,10 +408,6 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     : 0;
 
   const queued = workflowName ? queueDepth[workflowName] ?? 0 : 0;
-
-  // Machine-scoped daemon log lines. Always present (the section renders even
-  // at 0 entries), so default to an empty array rather than gating on length.
-  const daemonLogs = recentDaemonLogs ?? [];
 
   if (workflow.crashedOnLaunch) {
     return (
@@ -651,68 +644,6 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
             })}
           </div>
         )}
-
-        {/* Collapsible daemon log lines — machine-scoped session-log entries
-            surfaced here in the terminal drawer, never in per-run Events tabs.
-            This is a STANDARD element on every session card (the crashed-on-
-            launch card returns early above and is the only one that omits it).
-            It renders even at 0 entries — a fresh daemon whose first log line
-            hasn't arrived yet still shows "Daemon log (0)" rather than a gap,
-            so the section never appears/disappears as lines stream in. */}
-        <div className="border-t border-border/40 pt-1.5">
-            <button
-              type="button"
-              className="flex items-center gap-1 w-full text-left text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLogsOpen((o) => !o);
-              }}
-            >
-              <ChevronRight
-                className={cn(
-                  "w-2.5 h-2.5 shrink-0 transition-transform",
-                  logsOpen && "rotate-90",
-                )}
-              />
-              <span>Daemon log ({daemonLogs.length})</span>
-            </button>
-            {logsOpen && daemonLogs.length === 0 && (
-              <div className="mt-1 font-mono text-[9.5px] leading-[1.35] text-muted-foreground/50 pl-[14px]">
-                No daemon log entries yet
-              </div>
-            )}
-            {logsOpen && daemonLogs.length > 0 && (
-              <div className="mt-1 max-h-[120px] overflow-y-auto flex flex-col gap-[2px]">
-                {[...daemonLogs].reverse().map((l, i) => {
-                  const d = new Date(l.ts);
-                  const hh = String(d.getHours()).padStart(2, "0");
-                  const mm = String(d.getMinutes()).padStart(2, "0");
-                  const ss = String(d.getSeconds()).padStart(2, "0");
-                  const timeStr = isNaN(d.getTime()) ? "" : `${hh}:${mm}:${ss}`;
-                  const msgColor =
-                    l.level === "error"
-                      ? "text-destructive"
-                      : l.level === "warn"
-                        ? "text-[#fbbf24]"
-                        : "text-muted-foreground";
-                  return (
-                    <div
-                      // eslint-disable-next-line react/no-array-index-key
-                      key={i}
-                      className="flex items-start gap-1.5 font-mono text-[9.5px] leading-[1.35]"
-                    >
-                      {timeStr && (
-                        <span className="shrink-0 text-muted-foreground/50 tabular-nums">
-                          {timeStr}
-                        </span>
-                      )}
-                      <span className={cn("break-all", msgColor)}>{l.message}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
 
         {/* Footer: queued chip + spacer + current-step descriptor. */}
         <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground min-h-[16px]">

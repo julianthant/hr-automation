@@ -71,63 +71,71 @@
 }
 
 .dark {
-  --background: hsl(15 20.0000% 3.9216%);
-  --foreground: hsl(24.0000 21.1268% 86.0784%);
-  --card: hsl(15 11.1111% 7.0588%);
-  --card-foreground: hsl(24.0000 21.1268% 86.0784%);
-  --popover: hsl(15 14.2857% 5.4902%);
-  --popover-foreground: hsl(24.0000 21.1268% 86.0784%);
-  --primary: hsl(29.3182 41.9048% 58.8235%);
-  --primary-foreground: hsl(27.2727 73.3333% 5.8824%);
-  --secondary: hsl(15 16.6667% 9.4118%);
-  --secondary-foreground: hsl(25.2632 9.3596% 60.1961%);
-  --muted: hsl(15 15.3846% 10.1961%);
-  --muted-foreground: hsl(22.5000 7.0175% 44.7059%);
-  --accent: hsl(27.2727 35.4839% 12.1569%);
-  --accent-foreground: hsl(30.6250 52.7473% 64.3137%);
-  --destructive: hsl(0 84.2365% 60.1961%);
-  --destructive-foreground: hsl(0 85.7143% 97.2549%);
+  /* Neutral near-black retheme (2026-06-04). Unified onto the --capture-*
+     "Editorial Calm" ladder: hue 240, ~4% sat, near-black surfaces, near-
+     white neutral primary, muted-but-legible status hues. The whole
+     dashboard now reads like the capture/run-modal reference. */
+  --background: hsl(240 4% 4%);
+  --foreground: hsl(240 5% 96%);
+  --card: hsl(240 4% 7%);
+  --card-foreground: hsl(240 5% 96%);
+  --popover: hsl(240 4% 8%);
+  --popover-foreground: hsl(240 5% 96%);
+  --primary: hsl(240 5% 90%);
+  --primary-foreground: hsl(240 6% 10%);
+  --secondary: hsl(240 4% 10%);
+  --secondary-foreground: hsl(240 4% 80%);
+  --muted: hsl(240 4% 9%);
+  --muted-foreground: hsl(240 4% 56%);
+  --accent: hsl(240 4% 13%);
+  --accent-foreground: hsl(240 5% 92%);
+  --destructive: hsl(0 58% 62%);
+  --destructive-foreground: hsl(0 0% 98%);
 
   /* HeroUI component overrides (Calendar, etc.) */
-  --surface: hsl(15 11.1111% 7.0588%);
-  --surface-foreground: hsl(24.0000 21.1268% 86.0784%);
-  --overlay: hsl(15 14.2857% 5.4902%);
-  --overlay-foreground: hsl(24.0000 21.1268% 86.0784%);
-  --default: hsl(25 17.6% 18%);
-  --default-foreground: hsl(24.0000 21.1268% 86.0784%);
-  --danger: hsl(0 84.2365% 60.1961%);
-  --danger-foreground: hsl(0 85.7143% 97.2549%);
-  --success: hsl(142 71% 45%);
-  --success-foreground: hsl(0 0% 100%);
-  --warning: hsl(45 93% 47%);
-  --warning-foreground: hsl(0 0% 0%);
-  /* Semantic + categorical accents (audit 2026-06-04) — dark.
+  --surface: hsl(240 4% 7%);
+  --surface-foreground: hsl(240 5% 96%);
+  --overlay: hsl(240 4% 5%);
+  --overlay-foreground: hsl(240 5% 96%);
+  --default: hsl(240 4% 16%);
+  --default-foreground: hsl(240 5% 92%);
+  --danger: hsl(0 58% 62%);
+  --danger-foreground: hsl(0 0% 98%);
+  --success: hsl(142 48% 55%);
+  --success-foreground: hsl(142 40% 8%);
+  --warning: hsl(38 55% 58%);
+  --warning-foreground: hsl(38 60% 8%);
+  /* Semantic + categorical accents — muted to sit on near-black
+     (audit 2026-06-04, retoned neutral 2026-06-04). Solid text-<token>
+     stays legible (~AA+) on the #0a0a0b background.
      --success/--warning already defined above; danger == --destructive. */
-  --info: hsl(211 85% 66%);
-  --info-foreground: hsl(211 80% 12%);
-  --log-cyan: hsl(189 85% 62%);
-  --log-teal: hsl(172 60% 55%);
-  --log-violet: hsl(258 85% 76%);
-  --log-slate: hsl(215 18% 62%);
-  --focus: hsl(29.3182 41.9048% 58.8235%);
-  --separator: hsl(25.0000 17.6471% 13.3333%);
-  --scrollbar: hsl(22.5 7% 44.7%);
-  --border: hsl(25.0000 17.6471% 13.3333%);
-  --input: hsl(27.6923 18.3099% 13.9216%);
-  --ring: hsl(29.3182 41.9048% 58.8235%);
-  --chart-1: hsl(29.3182 41.9048% 58.8235%);
-  --chart-2: hsl(32.1327 94.6188% 43.7255%);
-  --chart-3: hsl(12.5581 67.5393% 62.5490%);
-  --chart-4: hsl(31.6535 65.1282% 61.7647%);
-  --chart-5: hsl(28.2119 67.1111% 44.1176%);
-  --sidebar: hsl(20 17.6471% 3.3333%);
-  --sidebar-foreground: hsl(24.7059 17.1717% 80.5882%);
-  --sidebar-primary: hsl(29.3182 41.9048% 58.8235%);
-  --sidebar-primary-foreground: hsl(27.2727 73.3333% 5.8824%);
-  --sidebar-accent: hsl(30 30.7692% 10.1961%);
-  --sidebar-accent-foreground: hsl(30.6250 52.7473% 64.3137%);
-  --sidebar-border: hsl(24 17.2414% 11.3725%);
-  --sidebar-ring: hsl(29.3182 41.9048% 58.8235%);
+  --info: hsl(211 62% 64%);
+  --info-foreground: hsl(211 60% 10%);
+  --log-cyan: hsl(189 58% 58%);
+  --log-teal: hsl(172 44% 54%);
+  --log-violet: hsl(258 55% 72%);
+  --log-slate: hsl(215 16% 60%);
+  --focus: hsl(240 4% 50%);
+  --separator: hsl(240 3% 13%);
+  --scrollbar: hsl(240 4% 30%);
+  --border: hsl(240 3% 14%);
+  --input: hsl(240 4% 16%);
+  --ring: hsl(240 4% 50%);
+  /* Categorical chart ramp: neutral light → muted info/success/warning/violet,
+     derived from the retoned status accents so charts read on-theme. */
+  --chart-1: hsl(240 5% 78%);
+  --chart-2: hsl(211 62% 64%);
+  --chart-3: hsl(142 48% 55%);
+  --chart-4: hsl(38 55% 58%);
+  --chart-5: hsl(258 55% 72%);
+  --sidebar: hsl(240 4% 3%);
+  --sidebar-foreground: hsl(240 4% 80%);
+  --sidebar-primary: hsl(240 5% 90%);
+  --sidebar-primary-foreground: hsl(240 6% 10%);
+  --sidebar-accent: hsl(240 4% 13%);
+  --sidebar-accent-foreground: hsl(240 5% 92%);
+  --sidebar-border: hsl(240 3% 12%);
+  --sidebar-ring: hsl(240 4% 50%);
   --font-sans: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-serif: "IBM Plex Serif", "Georgia", ui-serif, serif;
   --font-mono: "IBM Plex Mono", "Fira Code", ui-monospace, monospace;
@@ -137,7 +145,7 @@
   --shadow-blur: 4px;
   --shadow-spread: 0px;
   --shadow-opacity: 0.4;
-  --shadow-color: #010000;
+  --shadow-color: #000000;
   --shadow-2xs: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.20);
   --shadow-xs: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.20);
   --shadow-sm: 0 1px 4px 0px hsl(0 100.0000% 0.1961% / 0.40), 0 1px 2px -1px hsl(0 100.0000% 0.1961% / 0.40);
@@ -252,20 +260,20 @@
    HeroUI uses --accent for interactive (today, selected) and --muted for subdued text.
    Our shadcn theme uses these differently, so we scope overrides to the calendar. */
 .dark .calendar {
-  --accent: hsl(29.3 41.9% 58.8%);
-  --accent-foreground: hsl(27.3 73.3% 5.9%);
-  --muted: hsl(22.5 7% 44.7%);
-  --default: hsl(25 17.6% 18%);
-  --default-foreground: hsl(24 21.1% 86.1%);
+  --accent: hsl(240 5% 90%);
+  --accent-foreground: hsl(240 6% 10%);
+  --muted: hsl(240 4% 56%);
+  --default: hsl(240 4% 16%);
+  --default-foreground: hsl(240 5% 92%);
 }
 .dark .calendar__nav-button {
-  color: hsl(24 21.1% 86.1%);
+  color: hsl(240 5% 92%);
 }
 .dark .calendar__nav-button:hover {
-  background: hsl(25 17.6% 18%);
+  background: hsl(240 4% 16%);
 }
 .dark .calendar__header-cell {
-  color: hsl(22.5 7% 55%);
+  color: hsl(240 4% 56%);
 }
 
 /* ========================================================================

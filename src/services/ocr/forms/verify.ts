@@ -26,7 +26,7 @@ import {
 } from "../eid-lookup-results.js";
 import { watchChildRuns } from "../../../tracker/delegation/watch-child-runs.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
-import { MatchStateSchema, VerificationSchema } from "./shared.js";
+import { DocumentTypeSchema, MatchStateSchema, VerificationSchema } from "./shared.js";
 
 // ─── OCR-pass record (one page / record of a mixed PDF) ─────
 
@@ -47,7 +47,7 @@ export const VerifyOcrRecordSchema = z.object({
   officerSigned: z.boolean().nullable().optional(),
   /** oath: authorized-official name if printed. */
   paperOfficialName: z.string().nullable().optional(),
-  documentType: z.enum(["expected", "unknown"]).default("expected"),
+  documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
   notes: z.array(z.string()).default([]),
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { CapturePhotoLightbox } from "../CapturePhotoLightbox.js";
@@ -13,16 +13,18 @@ import type {
 import { ModalChrome } from "./ModalChrome.js";
 import { LeftColumn } from "./LeftColumn.js";
 import { RightColumn } from "./RightColumn.js";
+import { ValidationBanner } from "./ValidationBanner.js";
+import { CaptureStatusBlock } from "./CaptureStatusBlock.js";
+import { CAPTURE_MODAL_GRID_COLS } from "./capture-modal-layout.js";
 import { ExpiryFooter } from "./ExpiryFooter.js";
 import { isTerminal } from "./capture-state-terminal.js";
 
 /**
  * Operator-side capture modal — wider 2-column layout.
  *
- * Left column (240px):  QR card · LAN URL · shortcode · phone-status
- *                       pill · Finalize / Discard / Retry buttons ·
- *                       expiry timer with extend.
- * Right column (1fr):   live thumbnail mirror grid · validation banner.
+ * Left column (auto):  QR square sized to the photo grid + action row height.
+ * Right column (1fr):   live thumbnail mirror grid · actions · validation
+ *                       on the row below.
  *
  * State machine (8 states from visual direction §3):
  *   starting | error | open (waiting) | open (phone connected) |
@@ -49,7 +51,6 @@ export interface StartedSession {
   token: string;
   captureUrl: string;
   qrSvg: string;
-  shortcode: string;
   expiresAt: number;
 }
 
@@ -75,6 +76,8 @@ export function CaptureModal({
   // for the thumb-enter animation without replaying it on every render.
   const seenIndicesRef = useRef<Set<number>>(new Set());
   const finalizedAtRef = useRef<number | null>(null);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
+  const rightBandRef = useRef<HTMLDivElement>(null);
 
   // SSE stream — only open while dialog is open.
   const { sessions, lastEvent, connected: sseConnected, findSession } = useCaptureSession({
@@ -91,6 +94,43 @@ export function CaptureModal({
     if (!info) return "open";
     return info.state;
   }, [phase, info]);
+
+  // QR is a square exactly as tall as the photo grid + action row (measured on the right).
+  useLayoutEffect(() => {
+    const band = rightBandRef.current;
+    const body = modalBodyRef.current;
+    if (!band || !body) return;
+    let frame = 0;
+    let cancelled = false;
+    const sync = (): void => {
+      window.cancelAnimationFrame(frame);
+      let pass = 0;
+      const settle = (): void => {
+        if (cancelled) return;
+        const h = band.getBoundingClientRect().height;
+        if (h <= 0) return;
+        const current = Number.parseFloat(body.style.getPropertyValue("--capture-band-h"));
+        if (Number.isFinite(current) && Math.abs(current - h) <= 0.01) return;
+        body.style.setProperty("--capture-band-h", `${h}px`);
+        body.style.setProperty("--capture-qr-col", `${h}px`);
+        if (pass < 8) {
+          pass += 1;
+          frame = window.requestAnimationFrame(settle);
+        }
+      };
+      frame = window.requestAnimationFrame(settle);
+    };
+    const ro = new ResizeObserver(sync);
+    ro.observe(band);
+    sync();
+    window.addEventListener("resize", sync);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", sync);
+      ro.disconnect();
+    };
+  }, [effectiveState, info?.photos.length, started, validation]);
 
   // ── Lifecycle: reset on open, register-with-toast-hook, unregister
   useEffect(() => {
@@ -133,7 +173,6 @@ export function CaptureModal({
           !data.token ||
           !data.captureUrl ||
           !data.qrSvg ||
-          !data.shortcode ||
           !data.expiresAt
         ) {
           throw new Error(data.error ?? "Couldn't start capture session");
@@ -143,7 +182,6 @@ export function CaptureModal({
           token: data.token,
           captureUrl: data.captureUrl,
           qrSvg: data.qrSvg,
-          shortcode: data.shortcode,
           expiresAt: data.expiresAt,
         });
         setPhase("session");
@@ -379,12 +417,15 @@ export function CaptureModal({
           contextHint={info?.contextHint ?? contextHint}
           onClose={handleClose}
         />
-        <div className="px-[38px] pt-[28px]">
-          {/* ───────── Two-column main content ───────── */}
-          <div
-            className="grid gap-9"
-            style={{ gridTemplateColumns: "192px 1fr", alignItems: "start" }}
-          >
+        <div
+          ref={modalBodyRef}
+          className="px-[38px] pt-[28px] pb-[26px]"
+          style={{
+            ["--capture-band-h" as string]: "12rem",
+            ["--capture-qr-col" as string]: "var(--capture-band-h)",
+          }}
+        >
+          <div className="flex items-start gap-9">
             <LeftColumn
               state={effectiveState}
               started={started}
@@ -393,13 +434,15 @@ export function CaptureModal({
               onCloseAndStartNew={() => onOpenChange(false)}
             />
 
-            <RightColumn
+            <div ref={rightBandRef} className="min-w-0 flex-1">
+              <RightColumn
               state={effectiveState}
               started={started}
               info={info}
               validation={validation}
               arrivedIndex={arrivedIndex}
               retrying={retrying}
+              showValidation={false}
               finalizeDisabled={
                 effectiveState !== "open" ||
                 validating ||
@@ -417,61 +460,85 @@ export function CaptureModal({
               onRetryHandoff={handleRetryHandoff}
               onDiscard={handleDiscard}
               onCloseAndStartNew={() => onOpenChange(false)}
-            />
+              />
+            </div>
           </div>
 
-          {/* ───────── Shared bottom row: URL (left) + Expiry (right) ───────── */}
+          {started && (
+            <div className="mt-4 flex gap-9">
+              <div className="shrink-0" style={{ width: "var(--capture-qr-col)" }} aria-hidden />
+              <div className="min-w-0 flex-1">
+                <ValidationBanner
+                  validation={validation}
+                  blurFlaggedCount={info?.photos.filter((p) => p.blurFlagged).length ?? 0}
+                  photoCount={info?.photos.length ?? 0}
+                  active={effectiveState === "open"}
+                />
+              </div>
+            </div>
+          )}
+
           {started && (
             <div
-              className="grid gap-9 mt-4 pb-[26px]"
-              style={{ gridTemplateColumns: "192px 1fr", alignItems: "center" }}
+              className="mt-4 grid gap-x-9 gap-y-0"
+              style={{ gridTemplateColumns: CAPTURE_MODAL_GRID_COLS }}
             >
-              {/* URL field */}
-              <div className="w-full">
+              <CaptureStatusBlock
+                className="min-w-0"
+                state={effectiveState}
+                phoneConnected={info?.phoneConnectedAt != null}
+                photoCount={info?.photos.length ?? 0}
+              />
+              {!isTerminal(effectiveState) && <div aria-hidden className="min-h-0" />}
+
+              <div
+                className="mt-3.5 border-t"
+                style={{ borderColor: "var(--capture-border-subtle)" }}
+              />
+              {!isTerminal(effectiveState) && (
                 <div
-                  className="text-center font-sans text-[9.5px] uppercase tracking-[0.10em] mb-1.5 font-medium"
-                  style={{ color: "var(--capture-fg-faint)" }}
+                  className="mt-3.5 border-t"
+                  style={{ borderColor: "var(--capture-border-subtle)" }}
+                />
+              )}
+
+              <div className="flex min-w-0 items-baseline gap-3 pt-3.5">
+                <code
+                  className="flex-1 truncate font-mono text-[11.5px]"
+                  style={{ color: "var(--capture-fg-body)" }}
+                  title={started.captureUrl}
                 >
-                  URL
-                </div>
-                <div
-                  className="flex items-baseline gap-3 py-2"
-                  style={{ borderBottom: "1px solid var(--capture-border-subtle)" }}
+                  {started.captureUrl}
+                </code>
+                <button
+                  type="button"
+                  aria-label="Copy URL"
+                  onClick={handleCopy}
+                  className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
+                  style={{
+                    color: "var(--capture-fg-muted)",
+                    backgroundColor: "transparent",
+                    border: 0,
+                    padding: 0,
+                    ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+                  }}
                 >
-                  <code
-                    className="flex-1 truncate font-mono text-[11.5px]"
-                    style={{ color: "var(--capture-fg-body)" }}
-                    title={started.captureUrl}
-                  >
-                    {started.captureUrl}
-                  </code>
-                  <button
-                    type="button"
-                    aria-label="Copy URL"
-                    onClick={handleCopy}
-                    className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
-                    style={{
-                      color: "var(--capture-fg-muted)",
-                      backgroundColor: "transparent",
-                      border: 0,
-                      padding: 0,
-                      ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
+                  Copy
+                </button>
               </div>
 
-              {/* Expiry footer */}
-              <ExpiryFooter
-                expiresAt={started.expiresAt}
-                currentExpiresAt={info?.expiresAt ?? started.expiresAt}
-                now={now}
-                extending={extending}
-                onExtend={handleExtend}
-                terminal={isTerminal(effectiveState)}
-              />
+              {!isTerminal(effectiveState) && (
+                <div className="pt-3.5 min-w-0">
+                  <ExpiryFooter
+                    expiresAt={started.expiresAt}
+                    currentExpiresAt={info?.expiresAt ?? started.expiresAt}
+                    now={now}
+                    extending={extending}
+                    onExtend={handleExtend}
+                    terminal={false}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

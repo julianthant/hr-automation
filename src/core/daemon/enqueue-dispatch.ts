@@ -160,8 +160,10 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
   const baseData = buildTrackerDataForInput(input);
   const { cleaned, runtimeOptions } = splitPrefilled(input);
   const handlerInput = wf.config.schema.parse(cleaned) as TData;
-  const rowArchetype = runtimeOptions?.rowShape === "batch-member"
-    ? deriveRowArchetype(resolveArchetype(wf.config, handlerInput), parentRunId, { member: true })
+  const rowArchetype = runtimeOptions?.rowShape
+    ? deriveRowArchetype(resolveArchetype(wf.config, handlerInput), parentRunId, {
+        memberShape: runtimeOptions.rowShape,
+      })
     : undefined;
   return buildPendingTrackerData({
     workflow: wf,

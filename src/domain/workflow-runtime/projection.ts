@@ -6,6 +6,7 @@ import {
   hasDelegationRole,
   resolveRowArchetype,
 } from "../row-archetype.js";
+import { runIdFragment, tracePrefix } from "../queue-trace-id.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
 import {
   buildTrackerQueueSurfaces,
@@ -215,10 +216,12 @@ function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolic
   return firstNonBlank(data.__id, data.__name, entry.id) || undefined;
 }
 
-/** Map stamped row archetype to queue surface type; batch-member renders as single. */
+/** Map stamped row archetype to queue surface type; member rows render as single. */
 export function entrySurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
   const archetype = resolveRowArchetype(entry);
-  return archetype === "batch-member" ? "single" : archetype;
+  return archetype === "batch-member" || archetype === "operation-member"
+    ? "single"
+    : archetype;
 }
 
 function rowTypeLabelFor(surfaceType: WorkflowSurfaceType): string {
@@ -367,6 +370,32 @@ function surfaceAnchorEntry(surface: TrackerQueueGroupSurface): TrackerEntry | u
   }
 }
 
+/**
+ * A batch card's footer id must identify the **parent run** (the batch/operation
+ * that owns the members), derived from `parentRunId` so it shares the members'
+ * trace PREFIX but carries the parent's OWN `runId4` tail. Members render their
+ * own trace id (`resolveEntryId`), so the parent footer and the member rows read
+ * as one operation yet differ in the final 4 — never identical.
+ *
+ * When a real parent row exists its own trace already equals `<prefix>-<parentRunId4>`,
+ * so this is a no-op there. The derivation is what fixes a cross-workflow
+ * delegated batch with no parent row in panel (person-lookup / oath-signature
+ * fan-out under an OCR operation): its anchor falls back to `members[0]`, which
+ * would otherwise leak the *member's* tail as the parent footer id.
+ */
+function deriveBatchAnchorSubtitle(
+  surface: TrackerQueueGroupSurface,
+  anchor: TrackerEntry | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  if (surface.kind !== "batch") return fallback;
+  const anchorTrace = anchor?.data?.__traceId;
+  if (typeof anchorTrace !== "string" || !anchorTrace) return fallback;
+  const prefix = tracePrefix(anchorTrace);
+  const tail = runIdFragment(surface.parentRunId);
+  return prefix && tail ? `${prefix}-${tail}` : fallback;
+}
+
 /** Roll up a group surface's card status from its parent row + member rows. */
 function computeGroupStatus(surface: TrackerQueueGroupSurface): string {
   switch (surface.kind) {
@@ -456,7 +485,7 @@ export function buildProjectionFromQueueSurface(
     workflowId: fallbackWorkflow,
     itemId: surface.kind === "preview" ? surface.parent.id : groupParent?.id ?? surface.parentRunId,
     title: batchGroupTitle(surface, context, policy),
-    subtitle: anchorProjection?.subtitle,
+    subtitle: deriveBatchAnchorSubtitle(surface, anchor, anchorProjection?.subtitle),
     status,
     step: surface.kind === "preview" ? surface.parent.step : groupParent?.step,
     surfaceType,

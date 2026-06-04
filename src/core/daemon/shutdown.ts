@@ -95,6 +95,31 @@ export function createAbortLaunchAndKillSession<TData, TSteps extends readonly s
     if (!state.launchAbort.signal.aborted) {
       state.launchAbort.abort(new Error(reason))
     }
+    // Force-stop must also abort the IN-FLIGHT run's per-run AbortController,
+    // not just the launch controller + chromium below. A handler parked in a
+    // NON-Playwright, signal-only await — e.g. oath-upload's `wait-approval`
+    // (`subscribeToApproval`), which blocks with NO live browser because
+    // ServiceNow auth is deferred until after the wait — is unreachable by the
+    // chromium kill: killing chrome only unwinds handlers blocked inside a
+    // Playwright call. Without this cancel, force-stopping such a daemon
+    // DEADLOCKS — the claim loop stays blocked on `await runOneItem`, so it
+    // never re-observes `shuttingDown` and never reaches the outer-finally
+    // shutdown sweep (`runDaemonShutdownCleanup`) that would otherwise cancel
+    // the run. Mirrors the browser-disconnect path, which already routes the
+    // active run through `runRegistry.cancel`. `hardKillAfterMs: 0` skips the
+    // registry watchdog since we tear chromium down right here.
+    const activeRunId = state.activeRun?.runId
+    if (activeRunId) {
+      void runRegistry
+        .cancel(activeRunId, { reason: `daemon_shutdown (${reason})`, hardKillAfterMs: 0 })
+        .catch((err) => {
+          log.warn(
+            `[Daemon ${wf.config.name}/${instanceId}] shutdown cancel of in-flight run failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        })
+    }
     const session = state.activeSession
     if (!session) return
     session.killChromeHard(2_000).catch((err) => {
