@@ -41,13 +41,21 @@ const SSO_SUBMIT_SELECTOR = 'button[name="_eventId_proceed"]';
  *
  * @param page - Playwright page instance
  */
-export async function clickSsoSubmit(page: Page): Promise<void> {
+export async function clickSsoSubmit(page: Page, opts: { abortSignal?: AbortSignal } = {}): Promise<void> {
+  opts.abortSignal?.throwIfAborted();
   // Hands-off Duo (opt-in): arm the WebAuthn virtual authenticator BEFORE this
   // click navigates to the Duo prompt. ACT CRM auto-fires a passkey request the
   // instant its prompt loads, so the (resident) authenticator must already exist
   // to answer it — otherwise Chrome's native "insert your security key" dialog
   // blocks the page. Idempotent + best-effort; failure degrades to manual Duo.
-  if (isDuoWebAuthnEnabled()) await armDuoWebAuthn(page).catch(() => {});
+  if (isDuoWebAuthnEnabled()) {
+    try {
+      await armDuoWebAuthn(page, { abortSignal: opts.abortSignal });
+    } catch (err) {
+      if (opts.abortSignal?.aborted) throw err;
+    }
+  }
+  opts.abortSignal?.throwIfAborted();
   await page.locator(SSO_SUBMIT_SELECTOR).click({ timeout: 5_000 });
   log.step("SSO submit clicked");
 }

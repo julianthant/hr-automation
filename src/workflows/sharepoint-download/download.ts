@@ -205,7 +205,7 @@ export async function loginToSharePoint(
   if (onShibboleth) {
     log.step("UCSD Shibboleth SSO detected — filling credentials...");
     await fillSsoCredentials(page);
-    await clickSsoSubmit(page);
+    await clickSsoSubmit(page, { abortSignal: opts.abortSignal });
   } else if (onAdfs) {
     await handleAdfsLogin(page);
   }

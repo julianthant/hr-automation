@@ -127,7 +127,7 @@ export async function ucpathSubmitAndWaitForDuo(
   };
   page.on("framenavigated", navListener);
 
-  await clickSsoSubmit(page);
+  await clickSsoSubmit(page, { abortSignal });
   log.step(`After login click | URL: ${page.url()}`);
 
   // Wait for Duo approval — poll for URL change or "Yes, this is my device" button
@@ -258,7 +258,7 @@ async function loginToACTCrmFlow(
   // Fill SSO credentials and submit
   await fillSsoCredentials(page);
   await debugScreenshot(page, "debug-03-credentials-filled", { fullPage: true });
-  await clickSsoSubmit(page);
+  await clickSsoSubmit(page, { abortSignal });
 
   await debugScreenshot(page, "debug-04-after-login-click", { fullPage: true });
 
@@ -355,7 +355,7 @@ export async function ukgSubmitAndWaitForDuo(
   // a passkey request, so late-arming in beginDuoWebAuthn would still work — but
   // routing here keeps all six SSO flows on one arming path and is robust if
   // UKG's Duo prompt behavior ever changes.
-  await clickSsoSubmit(page);
+  await clickSsoSubmit(page, { abortSignal });
   log.step("Credentials submitted — waiting for Duo MFA...");
 
   const duoOptions = {
@@ -443,9 +443,10 @@ export async function kualiSubmitAndWaitForDuo(
   }
 
   try {
-    await clickSsoSubmit(page);
+    await clickSsoSubmit(page, { abortSignal });
     log.step("Kuali: credentials submitted — waiting for Duo MFA...");
-  } catch {
+  } catch (err) {
+    if (abortSignal?.aborted) throw err;
     if (page.url().includes("duosecurity.com")) {
       log.step("Kuali SSO auto-forwarded to Duo — waiting for approval...");
     } else if (page.url().includes("kualibuild")) {
@@ -552,7 +553,7 @@ export async function newKronosSubmitAndWaitForDuo(
     if (!prep) return false;
   }
 
-  await clickSsoSubmit(page);
+  await clickSsoSubmit(page, { abortSignal });
   log.step("New Kronos: credentials submitted — waiting for Duo MFA...");
 
   const duoOptions = {
@@ -633,8 +634,9 @@ async function loginToServiceNowFlow(
 
   try {
     await fillSsoCredentials(page);
-    await clickSsoSubmit(page);
+    await clickSsoSubmit(page, { abortSignal });
   } catch (err) {
+    if (abortSignal?.aborted) throw err;
     log.warn(
       `[Auth: servicenow] SSO field fill failed: ${err instanceof Error ? err.message : err}`,
     );
