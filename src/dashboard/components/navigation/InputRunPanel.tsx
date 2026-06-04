@@ -6,7 +6,8 @@ import { getInputRunConfig } from "@/lib/input-run-registry";
 import { RunModal } from "@/components/run-modal/RunModal";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 import { useWorkflow } from "@/lib/workflows-context";
-import { StepPresetMenu, FULL_PRESET_ID } from "./StepPresetMenu";
+import { RunSettingsMenu } from "./RunSettingsMenu";
+import { AUTO_WORKERS, FULL_PRESET_ID, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 
 interface InputRunPanelProps {
   workflow: string;
@@ -38,6 +39,8 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
   const [modalOpen, setModalOpen] = useState(false);
   // Per-page-load ephemeral preset selection — resets to "Full" on reload.
   const [presetId, setPresetId] = useState<string>(FULL_PRESET_ID);
+  // Per-page-load ephemeral Automation-workers selection — resets to Auto.
+  const [workerChoice, setWorkerChoice] = useState<WorkerChoice>(AUTO_WORKERS);
 
   if (!config) return null;
 
@@ -61,6 +64,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
     try {
       const parentRunId =
         batchQueueParentRunId;
+      const parallelWorkers = workerChoiceToParam(workerChoice);
       const res = await fetch("/api/enqueue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -71,6 +75,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
           ...(selectedPreset
             ? { skipSteps: selectedPreset.skipSteps, preset: selectedPreset.id }
             : {}),
+          ...(parallelWorkers !== undefined ? { parallelWorkers } : {}),
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {
@@ -150,14 +155,14 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
           <Play aria-hidden className="w-3.5 h-3.5" />
         )}
       </button>
-      {presets.length > 0 && (
-        <StepPresetMenu
-          presets={presets}
-          selectedId={presetId}
-          onSelect={setPresetId}
-          workflowLabel={workflowDef?.label ?? workflow}
-        />
-      )}
+      <RunSettingsMenu
+        workerChoice={workerChoice}
+        onSelectWorker={setWorkerChoice}
+        presets={presets}
+        presetId={presetId}
+        onSelectPreset={setPresetId}
+        workflowLabel={workflowDef?.label ?? workflow}
+      />
       {config.runEmptyAction && (
         <RunModal
           open={modalOpen}
