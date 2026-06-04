@@ -39,6 +39,14 @@ export default [
     files: ["tests/**/*.ts"],
     rules: {
       "unused-imports/no-unused-vars": "off",
+      // Mirror the src convention: `_`-prefixed vars/args are intentionally
+      // unused (e.g. destructure-to-omit `const { privateKey: _omit, ...rest }`).
+      // The tests block otherwise falls back to the recommended
+      // `@typescript-eslint/no-unused-vars` with no ignore pattern.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { varsIgnorePattern: "^_", argsIgnorePattern: "^_" },
+      ],
     },
   },
 ];
