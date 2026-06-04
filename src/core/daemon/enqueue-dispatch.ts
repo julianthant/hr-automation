@@ -15,6 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { loadWorkflow } from "../workflow-loaders.js";
+import { runOptionsToDaemonFlags, type RunOptions } from "../../domain/run-options.js";
 import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
@@ -35,6 +36,13 @@ export interface EnqueueFromHttpOptions {
   trackerDir?: string;
   /** Stamps every queued item + pre-emitted tracker rows with this parent run id. */
   parentRunId?: string;
+  /**
+   * Operator-chosen run options (Automation-workers setting). Mapped to daemon
+   * spawn flags via `runOptionsToDaemonFlags` — Auto/`1` → no flags (reuse or
+   * spawn one); `N > 1` → `{ parallel: N }` (ensure ≥N daemons alive). See
+   * `src/domain/run-options.ts`.
+   */
+  runOptions?: RunOptions;
 }
 
 export interface EnqueueValidateResult {
@@ -185,6 +193,11 @@ export async function enqueueFromHttp(
     typeof trackerDirOrOptions === "object" && trackerDirOrOptions
       ? trackerDirOrOptions.parentRunId
       : undefined;
+  const runOptions =
+    typeof trackerDirOrOptions === "object" && trackerDirOrOptions
+      ? trackerDirOrOptions.runOptions
+      : undefined;
+  const daemonFlags = runOptionsToDaemonFlags(runOptions);
 
   if (!Array.isArray(inputs) || inputs.length === 0) {
     return { ok: false, workflow: workflowName, enqueued: 0, error: "inputs must be a non-empty array" };
@@ -249,7 +262,7 @@ export async function enqueueFromHttp(
     await ensureDaemonsAndEnqueue(
       wf,
       queuedInputs,
-      {},
+      daemonFlags,
       {
         trackerDir,
         ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
