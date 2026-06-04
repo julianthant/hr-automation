@@ -113,6 +113,7 @@ export function SearchBar({ onSelect }: SearchBarProps) {
         <input
           ref={inputRef}
           type="text"
+          aria-label="Search history"
           placeholder="Search history (email, emplId, docId, name)..."
           value={q}
           onChange={(e) => setQ(e.target.value)}

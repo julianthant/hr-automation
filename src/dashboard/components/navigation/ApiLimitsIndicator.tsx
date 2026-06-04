@@ -69,9 +69,9 @@ function StateDot({ kind }: { kind: KeyStateKind }) {
     <span
       className={cn(
         "inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-px",
-        kind === "available" && "bg-emerald-400",
-        kind === "throttled" && "bg-amber-400",
-        kind === "quota-exhausted" && "bg-orange-500",
+        kind === "available" && "bg-success",
+        kind === "throttled" && "bg-warning",
+        kind === "quota-exhausted" && "bg-destructive",
         kind === "dead" && "bg-destructive",
       )}
     />
@@ -84,9 +84,9 @@ function StateChip({ state }: { state: OcrKeyStatus["state"] }) {
     <span
       className={cn(
         "font-mono text-[10px] tabular-nums",
-        kind === "available" && "text-emerald-400/80",
-        kind === "throttled" && "text-amber-400",
-        kind === "quota-exhausted" && "text-orange-500",
+        kind === "available" && "text-success/80",
+        kind === "throttled" && "text-warning",
+        kind === "quota-exhausted" && "text-destructive",
         kind === "dead" && "text-destructive",
       )}
     >
@@ -192,8 +192,8 @@ export function ApiLimitsIndicator() {
           <span
             className={cn(
               "w-[5px] h-[5px] rounded-full shrink-0 transition-colors",
-              !loading && health === "good" && "bg-emerald-400",
-              !loading && health === "warn" && "bg-amber-400",
+              !loading && health === "good" && "bg-success",
+              !loading && health === "warn" && "bg-warning",
               !loading && health === "critical" && "bg-destructive",
               (!loading && health === "empty") || loading ? "bg-muted-foreground/40" : "",
             )}
