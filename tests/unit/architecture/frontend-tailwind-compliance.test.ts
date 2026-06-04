@@ -128,4 +128,43 @@ describe("dashboard Tailwind compliance", () => {
   it("keeps dashboard images responsive and explicit about loading priority", () => {
     assert.deepEqual(collectDashboardImageIssues().sort(), []);
   });
+
+  it("uses design tokens for color in dashboard components (no Tailwind palette classes or raw hex)", () => {
+    // The dashboard is fully token-driven via index.css (light + dark). Component
+    // color must come from the semantic tokens (primary/secondary/muted/accent/
+    // destructive/info/success/warning/border/...) or the categorical log accents
+    // (log-cyan/teal/violet/slate) — never a Tailwind palette class
+    // (text-sky-500, bg-amber-400, ...) or a raw hex, both of which bypass theming
+    // and silently break in the opposite color mode. See the 2026-06-04 UI/UX audit.
+    //
+    // Sanctioned exceptions (documented contract in shared/status-styles.ts):
+    //   #4ade80 (done/green) and #fbbf24 (pending/amber).
+    // Scope: .tsx component files only — index.css legitimately defines the token
+    // values, and .ts modules (status-styles.ts) are the sanctioned color source.
+    const PALETTE =
+      /\b(?:bg|text|border|ring|ring-offset|from|to|via|fill|stroke|outline|decoration|divide|placeholder|caret|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|100|200|300|400|500|600|700|800|900|950)\b/;
+    const SANCTIONED = /#4ade80|#fbbf24/gi;
+    const HEX = /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/;
+
+    const violations: string[] = [];
+    for (const file of walk(DASHBOARD).filter((f) => f.endsWith(".tsx"))) {
+      const path = rel(file);
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, index) => {
+          if (PALETTE.test(line)) {
+            violations.push(
+              `${path}:${index + 1} uses a Tailwind palette color class — use a semantic/categorical token instead`,
+            );
+          }
+          if (HEX.test(line.replace(SANCTIONED, ""))) {
+            violations.push(
+              `${path}:${index + 1} uses a raw hex color — use a design token (var(--…) or the matching utility) instead`,
+            );
+          }
+        });
+    }
+
+    assert.deepEqual(violations.sort(), []);
+  });
 });
