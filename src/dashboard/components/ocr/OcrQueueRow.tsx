@@ -132,6 +132,7 @@ export function OcrQueueRow({ entry, isReviewing, onOpenReview, onReupload }: Oc
           </span>
           {onReupload && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id });
