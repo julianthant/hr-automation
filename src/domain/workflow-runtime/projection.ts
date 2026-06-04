@@ -237,7 +237,9 @@ function batchGroupTitle(
     ? surface.parent
     : surface.kind === "batch"
       ? surface.parent
-      : undefined;
+      : surface.kind === "operation"
+        ? surface.parent
+        : undefined;
 
   // Person batches carry no synthetic title — the count badge + member-name
   // preview already identify the bag of people. Session-local ordinals
@@ -325,6 +327,43 @@ export function deriveRowTypeLabelForEntry(
   return label;
 }
 
+/** Aggregate a batch/operation group's status from its member rows. */
+function memberAggregateStatus(members: readonly TrackerEntry[]): string {
+  if (members.some((member) => member.status === "running")) return "running";
+  if (members.some((member) => member.status === "pending" || member.status === "skipped")) {
+    return "pending";
+  }
+  if (members.some((member) => member.status === "failed")) return "failed";
+  return "done";
+}
+
+function operationSurfaceStatus(surface: Extract<TrackerQueueGroupSurface, { kind: "operation" }>): string {
+  if (surface.members.length > 0) return memberAggregateStatus(surface.members);
+  if (surface.parent.status === "failed" || surface.parent.status === "done") {
+    return surface.parent.status;
+  }
+  if (surface.ocr?.status === "failed" || surface.ocr?.status === "discarded") {
+    return "failed";
+  }
+  if (surface.ocr?.status === "approved" || surface.ocr?.status === "done") {
+    return "done";
+  }
+  return surface.parent.status || "running";
+}
+
+function operationCoordinatorActions(
+  policy: WorkflowRuntimePolicy,
+  targets: readonly WorkflowActionTargetDescriptor[],
+): WorkflowActionDescriptor[] {
+  // Operation coordinators are display rows that own/cancel OCR prep before
+  // fan-out. Retrying one as a normal workflow row would enqueue the target
+  // workflow with a synthetic OCR-prep input, so expose only cancel/delete.
+  const allowed = policy.rowActions.filter((action) =>
+    action.kind === "cancel" || action.kind === "delete"
+  );
+  return withRowTargets(allowed, targets);
+}
+
 export function buildProjectionFromQueueSurface(
   surface: TrackerQueueGroupSurface,
   context: WorkflowProjectionContext,
@@ -335,6 +374,8 @@ export function buildProjectionFromQueueSurface(
   );
   const anchor = surface.kind === "preview"
     ? surface.parent
+    : surface.kind === "operation"
+      ? surface.parent
     : surface.kind === "batch" && surface.parent
       ? surface.parent
       : surface.members[0];
@@ -342,29 +383,33 @@ export function buildProjectionFromQueueSurface(
   const policy = context.policy ?? getWorkflowRuntimePolicy(fallbackWorkflow, context.runtimePolicies);
   const status = surface.kind === "preview"
     ? surface.parent.status
+    : surface.kind === "operation"
+      ? operationSurfaceStatus(surface)
     : surface.kind === "batch" && surface.parent && surface.parent.status !== "done"
       ? surface.parent.status
-    : surface.members.some((member) => member.status === "running")
-      ? "running"
-      : surface.members.some((member) => member.status === "pending" || member.status === "skipped")
-        ? "pending"
-        : surface.members.some((member) => member.status === "failed")
-          ? "failed"
-          : "done";
+    : memberAggregateStatus(surface.members);
   const targetEntries = surface.members.length > 0
     ? surface.members
     : surface.kind === "preview"
       ? [surface.parent]
+      : surface.kind === "operation"
+        ? [surface.parent]
       : surface.kind === "batch" && surface.parent
         ? [surface.parent]
         : [];
-  const rowTargetEntries = surface.kind === "preview" ? [surface.parent] : [];
+  const rowTargetEntries = surface.kind === "preview"
+    ? [surface.parent]
+    : surface.kind === "operation" && surface.members.length === 0
+      ? [surface.parent]
+      : [];
   const groupActions = withTargets(policy.groupActions, actionTargets(targetEntries));
   const actions = surface.kind === "preview"
     ? [
         ...withRowTargets(policy.rowActions, actionTargets(rowTargetEntries)),
         ...groupActions,
       ]
+    : surface.kind === "operation" && surface.members.length === 0
+      ? operationCoordinatorActions(policy, actionTargets(rowTargetEntries))
     : groupActions;
   // The group card's footer subtitle is the anchor's — resolved with
   // `preferTraceIdSubtitle` so a person batch/preview anchor shows the TRACE ID
@@ -379,16 +424,23 @@ export function buildProjectionFromQueueSurface(
         preferTraceIdSubtitle: true,
       })
     : undefined;
-  const batchParent = surface.kind === "batch" ? surface.parent : undefined;
+  // The group's anchor row for itemId/step purposes — batch (when a parent row
+  // exists) and operation surfaces both carry a real parent row; preview is
+  // handled separately below.
+  const groupParent = surface.kind === "operation"
+    ? surface.parent
+    : surface.kind === "batch"
+      ? surface.parent
+      : undefined;
 
   return {
     runId: surface.parentRunId,
     workflowId: fallbackWorkflow,
-    itemId: surface.kind === "preview" ? surface.parent.id : batchParent?.id ?? surface.parentRunId,
+    itemId: surface.kind === "preview" ? surface.parent.id : groupParent?.id ?? surface.parentRunId,
     title: batchGroupTitle(surface, context, policy),
     subtitle: anchorProjection?.subtitle,
     status,
-    step: surface.kind === "preview" ? surface.parent.step : batchParent?.step,
+    step: surface.kind === "preview" ? surface.parent.step : groupParent?.step,
     surfaceType,
     rowTypeLabel: rowTypeLabelFor(surfaceType),
     actions,

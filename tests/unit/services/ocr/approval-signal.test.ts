@@ -10,6 +10,7 @@ import {
   emitDiscarded,
   OcrDiscardedError,
   OcrApprovalCancelledError,
+  OcrApprovalFailedError,
   _resetApprovalSignalRegistryForTests,
 } from "../../../../src/services/ocr/approval-signal.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
@@ -135,6 +136,46 @@ test("approval-signal: JSONL backstop picks up discarded row out-of-process", as
       (err: unknown) => {
         assert.ok(err instanceof OcrDiscardedError);
         assert.equal((err as OcrDiscardedError).reason, "operator discarded");
+        return true;
+      },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("approval-signal: JSONL backstop rejects on hard OCR prep failure", async () => {
+  _resetApprovalSignalRegistryForTests();
+  const dir = mkdtempSync(join(tmpdir(), "ocr-approval-"));
+  try {
+    const key = { workflow: "ocr", sessionId: "session-jsonl-failed" };
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    mkdirSync(rowsDir(dir), { recursive: true });
+    const path = rowFilePath("ocr", `${yyyy}-${mm}-${dd}`, dir);
+    writeFileSync(path, JSON.stringify({
+      workflow: "ocr",
+      id: key.sessionId,
+      runId: `${key.sessionId}#1`,
+      timestamp: new Date().toISOString(),
+      status: "failed",
+      step: "ocr",
+      error: "OCR provider exhausted",
+    }) + "\n");
+
+    const ctrl = new AbortController();
+    await assert.rejects(
+      subscribeToApproval(key, {
+        signal: ctrl.signal,
+        trackerDir: dir,
+        initialPollMs: 5,
+        pollMs: 60_000,
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof OcrApprovalFailedError);
+        assert.equal((err as OcrApprovalFailedError).reason, "OCR provider exhausted");
         return true;
       },
     );

@@ -10,7 +10,7 @@ import {
   PriorTrackerRowNotFoundError,
 } from "../ops/emit-inherited.js";
 import { openControlStores } from "../ops/shared.js";
-import { readFormType, readParentRunId } from "../../tracker/dashboard/ocr/shared.js";
+import { readFormType, readParentRunId, readOperationWorkflow } from "../../tracker/dashboard/ocr/shared.js";
 import { emitDiscarded } from "../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
@@ -65,7 +65,17 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     const parentRunId = input.parentRunId || readParentRunId(input.sessionId, opts.trackerDir);
     const formType = input.formType || readFormType(input.sessionId, opts.trackerDir);
     const spec = formType ? getFormSpec(formType) : null;
-    const parentWorkflow = input.parentWorkflow || spec?.approveTo?.workflow;
+    const operationWorkflow = readOperationWorkflow(input.sessionId, opts.trackerDir);
+    // For an oath-upload operation the "parent" is a REAL daemon task, not a
+    // display coordinator row, and it self-aborts via the discard signal +
+    // the JSONL approval backstop (subscribeToApproval → OcrDiscardedError). Do
+    // NOT mirror a discard onto an oath-signature row that doesn't exist. For
+    // oath-signature / emergency-contact the operation workflow equals
+    // `spec.approveTo.workflow`, so the existing mirror finds the operation row.
+    const parentWorkflow =
+      operationWorkflow === "oath-upload"
+        ? undefined
+        : input.parentWorkflow || operationWorkflow || spec?.approveTo?.workflow;
     const parentItemId = input.parentItemId || `ocr-prep-${input.sessionId}`;
     if (parentRunId && parentWorkflow) {
       const parentPriorEntry = findInheritedPriorEntry({
@@ -146,6 +156,10 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
             status: "failed",
             step: "discarded",
             db: stores.taskStore.db,
+            // Keep the denormalized OCR status on an operation coordinator row in
+            // sync so its surface reads "discarded" (the row's own ocr* fields,
+            // since the OCR review row is in a different panel).
+            data: { ocrStatus: "discarded", ocrStep: "discarded" },
             ...(input.reason ? { error: input.reason } : {}),
           });
         } catch (err) {

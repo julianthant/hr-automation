@@ -1,5 +1,5 @@
 /** Queue/card surface shape — mirrors row archetypes; batch-member rows render as `single`. */
-export type WorkflowSurfaceType = "single" | "preview" | "batch";
+export type WorkflowSurfaceType = "single" | "preview" | "batch" | "operation";
 
 export type WorkflowActionKind =
   | "cancel"

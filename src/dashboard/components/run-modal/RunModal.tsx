@@ -292,6 +292,15 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor, lockedForm
             }
           }
           if (showFormType && formType) fd.append("formType", formType);
+          // Target-workflow operation intent — lets the backend tell an
+          // oath-signature PDF run from an oath-upload full run (both
+          // formType=oath). Only meaningful for /api/ocr/prepare.
+          {
+            const target = config.targetWorkflow?.(ctx);
+            if (target && submitUrl.endsWith("/api/ocr/prepare")) {
+              fd.append("targetWorkflow", target);
+            }
+          }
           if (showDryRun && dryRun) fd.append("dryRun", "true");
           if (reuploadFor) {
             fd.append("sessionId", reuploadFor.sessionId);

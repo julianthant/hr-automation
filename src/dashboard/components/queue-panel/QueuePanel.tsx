@@ -15,6 +15,7 @@ import {
   buildSyntheticBatchQueueAnchor,
 } from "./batch-queue-view";
 import { DaemonBatchRow } from "./DaemonBatchRow";
+import { OperationRow } from "./OperationRow";
 import { DelegationRow } from "@/components/ocr/DelegationRow";
 import type { TrackerEntry } from "@/components/shared/types";
 import { isDiscardedPrepRow } from "@/components/ocr/types";
@@ -72,6 +73,13 @@ interface QueuePanelProps {
   onOpenReview?: (runId: string) => void;
   /** Open RunModal in reupload mode for the given OCR session. */
   onReupload?: (reuploadFor: { sessionId: string; previousRunId: string }) => void;
+  /**
+   * Open the OCR review row for an operation coordinator (cross-workflow: the
+   * OCR review row lives in the OCR panel). Receives the OCR row's id
+   * (`sessionId`) and its `runId` so the OCR panel can both select the row and
+   * arm its Preview/review gate.
+   */
+  onOpenOcrReview?: (target: { sessionId: string; runId: string }) => void;
   /**
    * When set, the panel shows `BatchQueueToolbar` + `BatchQueueMemberList` for
    * that batch anchor only (delegation children today; same shell for future daemon batches).
@@ -196,6 +204,7 @@ export function QueuePanel({
   reviewingPrepId,
   onOpenReview,
   onReupload,
+  onOpenOcrReview,
   batchQueueParentRunId,
   onEnterBatchQueue,
   onExitBatchQueue,
@@ -333,6 +342,22 @@ export function QueuePanel({
     return reorderByIds(batchSurfaces, (row) => row.surface.parentRunId, ids);
   }, [batchSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
 
+  const operationSurfaces = useMemo(
+    () => pickProjectionRows(queueProjectionRows.groupRows, "operation"),
+    [queueProjectionRows.groupRows],
+  );
+
+  const sortedOperationSurfaces = useMemo(() => {
+    const ids = sortDaemonBatchParentIds(
+      operationSurfaces.map((row) => row.surface.parentRunId),
+      batchMembersByParentRunId,
+      queueSortMode,
+      workflowLabel,
+      displayNames,
+    );
+    return reorderByIds(operationSurfaces, (row) => row.surface.parentRunId, ids);
+  }, [operationSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
+
   /** Preview cards respect StatPills — show when parent or any child matches. */
   const visiblePreviewSurfaces = useMemo(
     () =>
@@ -351,10 +376,20 @@ export function QueuePanel({
     [sortedBatchSurfaces, statusFilter],
   );
 
+  /** Operation coordinator cards: visible when the row or any member matches. */
+  const visibleOperationSurfaces = useMemo(
+    () =>
+      sortedOperationSurfaces.filter((surface) =>
+        queueGroupMatchesStatusFilter(statusFilter, surface.surface.members, surface.surface.parent),
+      ),
+    [sortedOperationSurfaces, statusFilter],
+  );
+
   /** Group cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
   const hasGroupQueueCards =
     visiblePreviewSurfaces.length > 0 ||
-    visibleBatchSurfaces.length > 0;
+    visibleBatchSurfaces.length > 0 ||
+    visibleOperationSurfaces.length > 0;
 
   const filtered = useMemo(() => {
     let result = queueProjectionRows.flatEntries;
@@ -495,6 +530,24 @@ export function QueuePanel({
             onDeletedIds={onBulkDeleted}
           />
         );
+      case "operation":
+        return (
+          <OperationRow
+            key={`operation-${surface.parentRunId}`}
+            date={date}
+            parentRunId={surface.parentRunId}
+            projection={projection}
+            displayNames={displayNames}
+            parent={surface.parent}
+            members={surface.members}
+            ocr={surface.ocr}
+            selected={selectedId === surface.parent.id}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onDelete={onDelete}
+            {...(onOpenOcrReview ? { onOpenOcrReview } : {})}
+          />
+        );
       default:
         return assertNeverSurface(surface);
     }
@@ -502,6 +555,7 @@ export function QueuePanel({
 
   const visibleGroupSurfaces: QueueGroupProjectionRow[] = [
     ...visiblePreviewSurfaces,
+    ...visibleOperationSurfaces,
     ...visibleBatchSurfaces,
   ];
 

@@ -12,6 +12,7 @@ const CANONICAL: RowArchetype[] = [
   "preview",
   "batch-member",
   "batch",
+  "operation",
 ];
 
 describe("row-archetype", () => {
@@ -20,6 +21,7 @@ describe("row-archetype", () => {
     assert.equal(archetypeRowTypeLabel("preview"), "Preview");
     assert.equal(archetypeRowTypeLabel("batch"), "Batch");
     assert.equal(archetypeRowTypeLabel("batch-member"), "Batch member");
+    assert.equal(archetypeRowTypeLabel("operation"), "Operation");
   });
 
   it("resolveRowArchetype returns every canonical data.archetype value", () => {

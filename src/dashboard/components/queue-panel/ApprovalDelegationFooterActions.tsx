@@ -1,5 +1,7 @@
 import type { TrackerEntry } from "@/components/shared/types";
+import { BumpButton } from "@/components/shared/BumpButton";
 import { RetryButton } from "@/components/shared/RetryButton";
+import { RowCancelButton } from "@/components/shared/RowCancelButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
 import { BatchFooterActions } from "./BatchFooterActions";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
@@ -36,15 +38,35 @@ export function ApprovalDelegationFooterActions({
 
   if (delegatedEntries.length <= 1) {
     const target = delegatedEntries[0] ?? parent;
+    const targetProjection = projection?.batchMembers.find(
+      (member) => member.runId === (target.runId ?? target.id),
+    );
+    const targetActions = targetProjection?.actions ?? actions;
 
     return (
       <>
+        <BumpButton
+          workflow={target.workflow}
+          id={target.id}
+          runId={target.runId}
+          subject={targetProjection?.title}
+          actions={targetActions}
+        />
         <RetryButton
           workflow={target.workflow}
           id={target.id}
           runId={target.runId}
           date={date}
-          actions={actions}
+          actions={targetActions}
+        />
+        <RowCancelButton
+          workflow={target.workflow}
+          id={target.id}
+          runId={target.runId}
+          date={date}
+          subject={targetProjection?.title}
+          entry={target}
+          actions={targetActions}
         />
         {onDelete && date ? (
           <DeleteButton
@@ -52,7 +74,7 @@ export function ApprovalDelegationFooterActions({
             id={target.id}
             date={date}
             runId={target.runId}
-            actions={actions}
+            actions={targetActions}
             onDeleted={onDelete}
           />
         ) : null}

@@ -2,6 +2,12 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { log } from "../../utils/log.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
+import {
+  subscribeToApproval,
+  OcrDiscardedError,
+  OcrApprovalFailedError,
+  type ApprovedPayload,
+} from "../../services/ocr/approval-signal.js";
 import { openControlDb } from "../../core/control-db.js";
 import { getRegisteredFile, hashFile } from "../../tracker/files/files.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -31,6 +37,7 @@ import type { OathUploadInput } from "./schema.js";
  * different daemon, so no deadlock.
  */
 export const oathUploadStepList = [
+  "wait-approval",
   "wait-signatures",
   "servicenow-auth",
   "open-hr-form",
@@ -52,6 +59,10 @@ const HR_FORM_VALUES = {
 export interface OathUploadHandlerOpts {
   trackerDir?: string;
   // Test escape hatches.
+  _subscribeToApprovalOverride?: (opts: {
+    sessionId: string;
+    trackerDir?: string;
+  }) => Promise<ApprovedPayload>;
   _watchChildRunsOverride?: (opts: {
     workflow: string;
     expectedItemIds: string[];
@@ -92,8 +103,61 @@ export async function oathUploadHandler(
     ...(input.dryRun ? { dryRun: true } : {}),
   });
 
+  // ─── 0. Wait for OCR approval (born-at-upload "full" runs only) ──────────
+  // Option A: a full oath upload is created at upload time (before OCR review)
+  // and walks OCR prep → awaiting approval → wait signatures → submit as ONE
+  // row. When the row arrives WITHOUT `signerItemIds` (mode "full"), it learns
+  // its signer set here by waiting cross-process for the operator to approve the
+  // OCR prep (the approve route stamps `fannedOutItemIds` on the OCR row). Rows
+  // born with `signerItemIds` already set (legacy approve fan-out) or
+  // `upload-only` rows skip this step.
+  let signerItemIds = input.signerItemIds ?? [];
+  const needsApprovalWait = input.mode === "full" && signerItemIds.length === 0;
+  if (needsApprovalWait) {
+    await ctx.step("wait-approval", async () => {
+      ctx.updateData({ status: "awaiting-approval" });
+      log.step(
+        `[oath-upload] waiting for the operator to approve the OCR prep (session ${input.sessionId}) before filing`,
+      );
+      const subscribe = opts._subscribeToApprovalOverride
+        ? (k: { sessionId: string }) =>
+            opts._subscribeToApprovalOverride!({
+              sessionId: k.sessionId,
+              ...(trackerDir !== undefined ? { trackerDir } : {}),
+            })
+        : (k: { sessionId: string }) =>
+            subscribeToApproval(
+              { workflow: "ocr", sessionId: k.sessionId },
+              { signal: ctx.signal, ...(trackerDir !== undefined ? { trackerDir } : {}) },
+            );
+      try {
+        const payload = await subscribe({ sessionId: input.sessionId });
+        signerItemIds = [...(payload.fannedOutItemIds ?? [])];
+        ctx.updateData({ status: "approved", signerCount: String(signerItemIds.length) });
+        log.success(
+          `[oath-upload] OCR prep approved — ${signerItemIds.length} signer row(s) to wait on before filing`,
+        );
+      } catch (err) {
+        if (err instanceof OcrDiscardedError) {
+          throw new Error(
+            `oath-upload: OCR prep was discarded — NOT filing the HR ticket (${err.reason})`,
+            { cause: err },
+          );
+        }
+        if (err instanceof OcrApprovalFailedError) {
+          throw new Error(
+            `oath-upload: OCR prep failed — NOT filing the HR ticket (${err.reason})`,
+            { cause: err },
+          );
+        }
+        throw err;
+      }
+    });
+  } else {
+    ctx.skipStep("wait-approval");
+  }
+
   // ─── 1. Wait for the signer rows ────────────────────────────────────────
-  const signerItemIds = input.signerItemIds ?? [];
   if (input.mode === "upload-only" || signerItemIds.length === 0) {
     if (input.mode !== "upload-only" && signerItemIds.length === 0) {
       log.step("[oath-upload] no signer itemIds to wait for — filing ticket directly");

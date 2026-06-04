@@ -281,6 +281,9 @@ export async function runOcrOrchestrator(
     // PDF filename, subtitle to the trace id (not the literal "OCR").
     flat.queueRowKind = "file";
     flat.__traceId = traceId;
+    // Carry the target-workflow operation intent so the approve route can route
+    // the fan-out (e.g. an oath-signature PDF run fans signers but no ticket).
+    if (input.operationWorkflow) flat.operationWorkflow = input.operationWorkflow;
     if (cachedParentSubject) flat.parentSubject = cachedParentSubject;
     emit({
       workflow: WORKFLOW,

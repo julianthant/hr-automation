@@ -65,6 +65,15 @@ export interface RunModalConfig {
   srDescription: (ctx: RunModalContext) => string;
   /** POST endpoint for the upload. Receives the same ctx so reupload routing is per-workflow. */
   submitUrl: (ctx: RunModalContext) => string;
+  /**
+   * The target workflow whose operation / single coordinator row owns this OCR
+   * run, sent to `/api/ocr/prepare` as `targetWorkflow`. This is what lets the
+   * backend tell an oath-signature PDF run (`"oath-signature"`) from an
+   * oath-upload full run (`"oath-upload"`) — both submit `formType=oath`. Return
+   * `undefined` for a standalone OCR prep (no coordinator row). Only sent when
+   * the submit goes to `/api/ocr/prepare`.
+   */
+  targetWorkflow?: (ctx: RunModalContext) => string | undefined;
   sections: RunModalSections;
   /** Sonner toast emitted on a successful submit. */
   buildSuccessToast: (resp: RunModalSubmitResponse, file: File) => RunModalToast;
@@ -87,6 +96,7 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       "Upload a PDF of the emergency contact form, choose roster source, optionally enable dry run, then submit to start OCR preparation.",
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
+    targetWorkflow: () => "emergency-contact",
     sections: { roster: true, dryRun: true },
     lockedFormType: "emergency-contact",
     allowMultipleFiles: true,
@@ -104,6 +114,10 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
         : "Upload a PDF to run OCR preparation; choose roster source and form type, then submit.",
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
+    // A "Run Oath Signature" entry (locked to the oath form) gets an
+    // oath-signature operation row; a bare OCR prep gets none.
+    targetWorkflow: ({ lockedFormType }) =>
+      lockedFormType === "oath" ? "oath-signature" : undefined,
     // Dedicated OCR runs have no Approve flow (just inspecting OCR output),
     // so dry-run is meaningless here. Delegations from emergency-contact /
     // oath keep their own dry-run toggles.
@@ -130,6 +144,10 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
         : oathUploadMode === "upload-only"
           ? "/api/oath-upload/start"
           : "/api/ocr/prepare",
+    // Full mode (the OCR-hub entry) is born as the oath-upload single row;
+    // upload-only posts straight to /api/oath-upload/start (no OCR prep).
+    targetWorkflow: ({ oathUploadMode }) =>
+      oathUploadMode === "upload-only" ? undefined : "oath-upload",
     lockedFormType: "oath",
     // Roster picker is required for Full process because the OCR prep needs a
     // roster to match the OCR'd names → EIDs before fanning out.

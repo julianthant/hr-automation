@@ -440,6 +440,97 @@ describe("workflow runtime projection adapters", () => {
     // No batch members — single archetype row.
     assert.equal(projection.batchMembers.length, 0);
   });
+
+  it("projects an operation coordinator surface — OCR status before approval, signer summary after", () => {
+    const operation = entry({
+      workflow: "oath-signature",
+      id: "op-1",
+      runId: "op-run-1",
+      status: "running",
+      data: {
+        archetype: "operation",
+        queueRowKind: "file",
+        pdfOriginalName: "oaths.pdf",
+        ocrRunId: "ocr-run-1",
+        ocrStatus: "running",
+        ocrStep: "awaiting-approval",
+        __traceId: "ou-101010-op01",
+      },
+    });
+
+    // Before approval: operation surface carries the OCR link, no members.
+    const before = buildTrackerQueueSurfaces({
+      entries: [operation],
+      delegationSourceEntries: [operation],
+      runtimePolicies: phase4Policies,
+    });
+    const beforeProjection = buildProjectionFromQueueSurface(before.groupRows[0]!, {
+      runtimePolicies: phase4Policies,
+    });
+    assert.equal(beforeProjection.surfaceType, "operation");
+    assert.equal(beforeProjection.rowTypeLabel, "Operation");
+    assert.equal(beforeProjection.title, "oaths.pdf");
+    assert.equal(beforeProjection.runId, "op-run-1");
+    assert.equal(beforeProjection.status, "running");
+    assert.deepEqual(beforeProjection.actions.map((action) => action.kind), ["cancel", "delete"]);
+    assert.equal(beforeProjection.actions.find((action) => action.kind === "cancel")?.enabled, true);
+    assert.equal(beforeProjection.actions.find((action) => action.kind === "delete")?.enabled, false);
+    assert.equal(beforeProjection.batchMembers.length, 0);
+
+    // After approval: signer children summarized inline, OCR not duplicated.
+    const signer = entry({
+      workflow: "oath-signature",
+      id: "10000001",
+      runId: "signer-run-1",
+      parentRunId: "op-run-1",
+      status: "running",
+      data: { archetype: "batch-member", name: "Jane Doe", emplId: "10000001" },
+    });
+    const after = buildTrackerQueueSurfaces({
+      entries: [operation, signer],
+      delegationSourceEntries: [operation, signer],
+      runtimePolicies: phase4Policies,
+    });
+    const afterProjection = buildProjectionFromQueueSurface(after.groupRows[0]!, {
+      runtimePolicies: phase4Policies,
+    });
+    assert.equal(afterProjection.surfaceType, "operation");
+    assert.deepEqual(afterProjection.batchMembers.map((member) => member.runId), ["signer-run-1"]);
+    assert.equal(afterProjection.status, "running");
+  });
+
+  it("projects a discarded operation coordinator as failed, not running", () => {
+    const operation = entry({
+      workflow: "emergency-contact",
+      id: "op-discarded",
+      runId: "op-run-discarded",
+      status: "failed",
+      step: "discarded",
+      data: {
+        archetype: "operation",
+        queueRowKind: "file",
+        pdfOriginalName: "contacts.pdf",
+        ocrRunId: "ocr-run-discarded",
+        ocrStatus: "discarded",
+        ocrStep: "discarded",
+      },
+    });
+
+    const surfaces = buildTrackerQueueSurfaces({
+      entries: [operation],
+      delegationSourceEntries: [operation],
+      runtimePolicies: phase4Policies,
+    });
+    const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
+      runtimePolicies: phase4Policies,
+    });
+
+    assert.equal(projection.surfaceType, "operation");
+    assert.equal(projection.status, "failed");
+    assert.equal(projection.step, "discarded");
+    assert.equal(projection.actions.find((action) => action.kind === "cancel")?.enabled, false);
+    assert.equal(projection.actions.find((action) => action.kind === "delete")?.enabled, true);
+  });
 });
 
 describe("workflow runtime projection — phase 5 standard workflows", () => {

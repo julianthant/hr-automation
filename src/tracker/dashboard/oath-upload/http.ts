@@ -102,17 +102,17 @@ export function buildOathUploadStartHandler(
     if (!/^[0-9a-f]{64}$/.test(input.pdfHash ?? "")) {
       return { status: 400, body: { ok: false, error: "invalid pdfHash" } };
     }
-    const mode = input.mode ?? "full";
+    const mode = input.mode ?? "upload-only";
     if (mode !== "full" && mode !== "upload-only") {
       return { status: 400, body: { ok: false, error: "invalid mode" } };
     }
-    const rosterMode = input.rosterMode ?? "download";
-    if (mode === "full" && rosterMode === "existing" && !input.rosterPath) {
+    if (mode === "full") {
       return {
         status: 400,
-        body: { ok: false, error: 'rosterMode="existing" requires rosterPath' },
+        body: { ok: false, error: "full oath-upload runs must start via /api/ocr/prepare" },
       };
     }
+    const rosterMode = input.rosterMode ?? "download";
     const sessionId = input.sessionId ?? randomUUID();
     void runCli([
       {

@@ -1,7 +1,10 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
-import { buildTrackerQueueSurfaces } from "../../../src/tracker/queue-surfaces.js";
+import {
+  buildTrackerQueueSurfaces,
+  countTopLevelQueueSurfaceRows,
+} from "../../../src/tracker/queue-surfaces.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
 import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
 import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/oath-signature/workflow.js";
@@ -374,5 +377,137 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.equal(result.groupRows[0]?.parentRunId, "ocr-run-2");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["lookup-2", "active-2"]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
+  });
+
+  it("renders an operation coordinator as an operation surface with the OCR status link before approval", () => {
+    // The target-workflow operation row lives in the oath-signature panel. The
+    // OCR review row stays in the OCR panel (workflow-scoped payload), so the
+    // operation row carries its own denormalized OCR status for display.
+    const operation = entry({
+      workflow: "oath-signature",
+      id: "op-1",
+      runId: "op-run-1",
+      status: "running",
+      data: {
+        archetype: "operation",
+        queueRowKind: "file",
+        pdfOriginalName: "oaths.pdf",
+        ocrRunId: "ocr-run-1",
+        ocrSessionId: "ocr-session-1",
+        ocrStatus: "running",
+        ocrStep: "awaiting-approval",
+      },
+    });
+
+    const result = buildTrackerQueueSurfaces({
+      entries: [operation],
+      delegationSourceEntries: [operation],
+    });
+
+    assert.equal(result.groupRows.length, 1);
+    const surface = result.groupRows[0];
+    assert.equal(surface?.kind, "operation");
+    assert.equal(surface?.parentRunId, "op-run-1");
+    assert.deepEqual(surface?.members.map((e) => e.id), [], "no members before approval");
+    // OCR status comes through as a lightweight link, never a duplicated row.
+    assert.equal(surface?.kind === "operation" ? surface.ocr?.runId : null, "ocr-run-1");
+    assert.equal(surface?.kind === "operation" ? surface.ocr?.status : null, "running");
+    assert.equal(surface?.kind === "operation" ? surface.ocr?.step : null, "awaiting-approval");
+    assert.equal(
+      countTopLevelQueueSurfaceRows({ entries: [operation], delegationSourceEntries: [operation] }),
+      1,
+      "operation row is one top-level queue row",
+    );
+    assert.deepEqual(result.flatEntries.map((e) => e.id), []);
+  });
+
+  it("summarizes signer children under the operation surface after approval without duplicating the OCR row", () => {
+    const operation = entry({
+      workflow: "oath-signature",
+      id: "op-2",
+      runId: "op-run-2",
+      status: "running",
+      data: {
+        archetype: "operation",
+        queueRowKind: "file",
+        pdfOriginalName: "oaths.pdf",
+        ocrRunId: "ocr-run-2",
+      },
+    });
+    const ocr = entry({
+      workflow: "ocr",
+      id: "ocr-session-2",
+      runId: "ocr-run-2",
+      parentRunId: "op-run-2",
+      status: "done",
+      step: "approved",
+      data: { archetype: "preview", mode: "prepare", formType: "oath" },
+    });
+    const signer1 = entry({
+      workflow: "oath-signature",
+      id: "10000001",
+      runId: "signer-run-1",
+      parentRunId: "op-run-2",
+      status: "running",
+      data: { archetype: "batch-member" },
+    });
+    const signer2 = entry({
+      workflow: "oath-signature",
+      id: "10000002",
+      runId: "signer-run-2",
+      parentRunId: "op-run-2",
+      status: "pending",
+      data: { archetype: "batch-member" },
+    });
+
+    const result = buildTrackerQueueSurfaces({
+      entries: [operation, signer1, signer2],
+      delegationSourceEntries: [operation, ocr, signer1, signer2],
+      runtimePolicies: new Map([["oath-signature", OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY]]),
+    });
+
+    // ONE operation surface — the signers fold in as members, NOT a second batch
+    // surface (the operation anchor claims their parentRunId).
+    assert.equal(result.groupRows.length, 1);
+    const surface = result.groupRows[0];
+    assert.equal(surface?.kind, "operation");
+    assert.deepEqual(surface?.members.map((e) => e.id), ["10000001", "10000002"]);
+    assert.equal(
+      surface?.members.some((m) => m.workflow === "ocr"),
+      false,
+      "OCR preview is not folded into the operation members",
+    );
+    assert.deepEqual(result.flatEntries.map((e) => e.id), []);
+  });
+
+  it("operation surface reflects a discarded OCR prep through the denormalized status link", () => {
+    // The discard route stamps the terminal OCR status back onto the operation
+    // row (the OCR review row is in a different panel), so the operation surface
+    // reads "discarded" from its own data.
+    const operation = entry({
+      workflow: "emergency-contact",
+      id: "op-3",
+      runId: "op-run-3",
+      status: "failed",
+      data: {
+        archetype: "operation",
+        queueRowKind: "file",
+        pdfOriginalName: "contacts.pdf",
+        ocrRunId: "ocr-run-3",
+        ocrStatus: "discarded",
+        ocrStep: "discarded",
+      },
+    });
+
+    const result = buildTrackerQueueSurfaces({
+      entries: [operation],
+      delegationSourceEntries: [operation],
+    });
+
+    assert.equal(result.groupRows.length, 1);
+    const surface = result.groupRows[0];
+    assert.equal(surface?.kind, "operation");
+    assert.equal(surface?.kind === "operation" ? surface.ocr?.status : null, "discarded");
+    assert.equal(surface?.kind === "operation" ? surface.ocr?.step : null, "discarded");
   });
 });

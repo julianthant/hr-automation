@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
+import { dateLocal, readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { rowFilePath, rowsDir, logFilePath, logsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
@@ -1243,6 +1243,48 @@ describe("buildCancelRunningHandler", () => {
     assert.equal(logs[0].runId, "run-cancel-running");
     assert.match(logs[0].message, /Cancellation requested by dashboard/);
     workerStore.close();
+  });
+
+  it("treats a missing-owner running tracker row as stale and emits a cancelled row", async () => {
+    emitTrackerRow(
+      {
+        workflow: "oath-upload",
+        timestamp: new Date().toISOString(),
+        id: "ou-183816-0001",
+        runId: "stale-oath-upload-run",
+        parentRunId: "ocr-parent-run",
+        status: "running",
+        step: "awaiting-approval",
+        data: {
+          archetype: "single",
+          pdfOriginalName: "single-oath.pdf",
+          __queueTitle: "single-oath.pdf",
+          sessionId: "ou-183816-0001",
+        },
+      },
+      tmp,
+    );
+
+    const result = await buildCancelRunningHandler(tmp)({
+      workflow: "oath-upload",
+      id: "ou-183816-0001",
+      runId: "stale-oath-upload-run",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, "stale-tracker");
+
+    const rows = readFileSync(rowFilePath("oath-upload", dateLocal(), tmp), "utf-8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { id?: string; runId?: string; status?: string; step?: string; parentRunId?: string; data?: Record<string, string> });
+    const latest = rows[rows.length - 1];
+    assert.equal(latest.id, "ou-183816-0001");
+    assert.equal(latest.runId, "stale-oath-upload-run");
+    assert.equal(latest.status, "failed");
+    assert.equal(latest.step, "cancelled");
+    assert.equal(latest.parentRunId, "ocr-parent-run");
+    assert.equal(latest.data?.pdfOriginalName, "single-oath.pdf");
   });
 });
 

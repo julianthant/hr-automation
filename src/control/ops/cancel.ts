@@ -54,6 +54,7 @@ export interface CancelActiveBulkItem {
 export type CancelRunningResult =
   | { ok: true; accepted: true; mode: "worker-command"; commandId: string }
   | { ok: true; accepted: true; mode: "in-process"; alreadyCancelled?: boolean }
+  | { ok: true; accepted: true; mode: "stale-tracker" }
   | { ok: false; error: string; status?: number };
 
 export interface KillBrowserRequest {
@@ -205,6 +206,21 @@ export function buildCancelRunningHandler(dir: string) {
         ...(inProcess.alreadyCancelled ? { alreadyCancelled: true } : {}),
       };
     }
+
+    const latest = findInheritedPriorEntry({
+      workflow: req.workflow,
+      trackerDir: dir,
+      id: req.id,
+      runId: req.runId,
+      status: "failed",
+      db: stores.taskStore.db,
+    });
+    if (latest?.status === "running") {
+      appendQueueFailedAudit(req.workflow, req.id, req.runId, DASHBOARD_CANCEL_ERROR, dir);
+      emitDashboardCancelTrackerRow(req.workflow, req.id, req.runId, dir, stores.taskStore.db);
+      return { ok: true, accepted: true, mode: "stale-tracker" };
+    }
+
     return {
       ok: false,
       error:
