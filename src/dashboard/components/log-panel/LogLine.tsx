@@ -3,7 +3,10 @@ import { cn } from "@/lib/utils";
 import {
   Pencil, MousePointer, ArrowDownToLine, Search, ListFilter,
   KeyRound, Download, Check, X, Hourglass, ArrowRight, ChevronRight,
+  Play, Square, Plus, Minus, Monitor, Power, Pause, Camera, Activity,
+  Dot,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { LogCategory, RunEvent } from "@/components/shared/types";
 import { resolveRunEventTimestamp } from "@/components/shared/types";
 import { getLogCategory } from "@/components/shared/types";
@@ -11,17 +14,17 @@ import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
 import { formatLogMessageForDisplay } from "./log-display";
 
 const ICON_MAP: Record<LogCategory, { icon: typeof Check; color: string }> = {
-  fill: { icon: Pencil, color: "text-cyan-400" },
-  navigate: { icon: MousePointer, color: "text-slate-400" },
-  extract: { icon: ArrowDownToLine, color: "text-amber-400" },
-  search: { icon: Search, color: "text-blue-400" },
-  select: { icon: ListFilter, color: "text-teal-400" },
-  auth: { icon: KeyRound, color: "text-purple-400" },
-  download: { icon: Download, color: "text-green-400" },
+  fill: { icon: Pencil, color: "text-log-cyan" },
+  navigate: { icon: MousePointer, color: "text-log-slate" },
+  extract: { icon: ArrowDownToLine, color: "text-warning" },
+  search: { icon: Search, color: "text-info" },
+  select: { icon: ListFilter, color: "text-log-teal" },
+  auth: { icon: KeyRound, color: "text-log-violet" },
+  download: { icon: Download, color: "text-success" },
   success: { icon: Check, color: "text-[#4ade80]" },
   error: { icon: X, color: "text-destructive" },
   waiting: { icon: Hourglass, color: "text-[#fbbf24]" },
-  step: { icon: ArrowRight, color: "text-blue-400" },
+  step: { icon: ArrowRight, color: "text-info" },
   debug: { icon: ChevronRight, color: "text-muted-foreground/40" },
 };
 
@@ -51,7 +54,15 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
         "transition-colors hover:bg-foreground/[0.02]",
         isCurrent && "bg-primary/[0.05]",
       )}
+      role="button"
+      tabIndex={0}
       onClick={() => onCopy(`${ts} ${message}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onCopy(`${ts} ${message}`);
+        }
+      }}
     >
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{ts}</span>
       <Icon className={cn("w-[14px] h-[14px] shrink-0", color)} />
@@ -79,36 +90,37 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
 
 export const LogLine = memo(LogLineImpl);
 
-const EVENT_VISUAL: Record<RunEvent["type"], { glyph: string; color: string }> = {
-  workflow_start:   { glyph: "▶", color: "#3b82f6" },
-  workflow_end:     { glyph: "■", color: "#6b7280" },
-  session_create:   { glyph: "◇", color: "#6b7280" },
-  session_close:    { glyph: "◆", color: "#6b7280" },
-  browser_launch:   { glyph: "⊞", color: "#8b5cf6" },
-  browser_close:    { glyph: "⊟", color: "#6b7280" },
-  auth_start:       { glyph: "⏵", color: "#f59e0b" },
-  auth_complete:    { glyph: "✓", color: "#10b981" },
-  auth_failed:      { glyph: "✗", color: "#ef4444" },
-  duo_request:      { glyph: "⏸", color: "#f59e0b" },
-  duo_start:        { glyph: "⏵", color: "#f59e0b" },
-  duo_complete:     { glyph: "✓", color: "#10b981" },
-  duo_timeout:      { glyph: "✗", color: "#ef4444" },
-  item_start:       { glyph: "▦", color: "#e5e5e5" },
-  item_complete:    { glyph: "▩", color: "#6b7280" },
-  step_change:      { glyph: "→", color: "#6b7280" },
-  screenshot:       { glyph: "⬛", color: "#a78bfa" },
-  ucpath_idle_signal: { glyph: "◔", color: "#22c55e" },
-  daemon_phase:     { glyph: "◉", color: "#64748b" },
+const EVENT_VISUAL: Record<RunEvent["type"], { icon: LucideIcon; colorClass: string }> = {
+  workflow_start:     { icon: Play,       colorClass: "text-info" },
+  workflow_end:       { icon: Square,     colorClass: "text-muted-foreground" },
+  session_create:     { icon: Plus,       colorClass: "text-muted-foreground" },
+  session_close:      { icon: Minus,      colorClass: "text-muted-foreground" },
+  browser_launch:     { icon: Monitor,    colorClass: "text-log-violet" },
+  browser_close:      { icon: Power,      colorClass: "text-muted-foreground" },
+  auth_start:         { icon: KeyRound,   colorClass: "text-warning" },
+  auth_complete:      { icon: Check,      colorClass: "text-success" },
+  auth_failed:        { icon: X,          colorClass: "text-destructive" },
+  duo_request:        { icon: Pause,      colorClass: "text-warning" },
+  duo_start:          { icon: KeyRound,   colorClass: "text-warning" },
+  duo_complete:       { icon: Check,      colorClass: "text-success" },
+  duo_timeout:        { icon: X,          colorClass: "text-destructive" },
+  item_start:         { icon: Activity,   colorClass: "text-foreground" },
+  item_complete:      { icon: Check,      colorClass: "text-muted-foreground" },
+  step_change:        { icon: ArrowRight, colorClass: "text-muted-foreground" },
+  screenshot:         { icon: Camera,     colorClass: "text-log-violet" },
+  ucpath_idle_signal: { icon: Hourglass,  colorClass: "text-success" },
+  daemon_phase:       { icon: Activity,   colorClass: "text-log-slate" },
 };
 
 // Fallback for any event type the backend ships before the frontend registers
 // it — must not crash the LogPanel. Backend session-event types are a moving
 // target, and a runtime undefined-lookup unmounts the whole tree because
 // EventLine has no error boundary above it.
-const UNKNOWN_EVENT_VISUAL = { glyph: "·", color: "#6b7280" } as const;
+const UNKNOWN_EVENT_VISUAL: { icon: LucideIcon; colorClass: string } = { icon: Dot, colorClass: "text-muted-foreground" };
 
 function EventLine({ event }: { event: RunEvent }) {
   const v = EVENT_VISUAL[event.type] ?? UNKNOWN_EVENT_VISUAL;
+  const Icon = v.icon;
   // Match LogLine's timestamp format + column geometry so Events + regular
   // log lines line up vertically in the stream (same px-6, min-w-[72px],
   // 14px icon, gap-3.5, font-mono text-[13px]).
@@ -127,20 +139,15 @@ function EventLine({ event }: { event: RunEvent }) {
         event.screenshotKind,
         event.screenshotLabel,
         event.screenshotFileCount != null ? `${event.screenshotFileCount}p` : null,
-      ].filter(Boolean).join(" \u2014 ")
+      ].filter(Boolean).join(" — ")
     : event.type;
   const suffix = event.type !== "screenshot" && detail ? ` ${detail}` : "";
   return (
     <div className="flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{time}</span>
-      <span
-        className="shrink-0 text-center"
-        style={{ color: v.color, width: 14, fontSize: 14 }}
-      >
-        {v.glyph}
-      </span>
+      <Icon className={cn("w-[14px] h-[14px] shrink-0", v.colorClass)} aria-hidden />
       <span className="flex-1 break-words text-secondary-foreground">
-        <span style={{ color: v.color }}>{label}</span>
+        <span className={v.colorClass}>{label}</span>
         {suffix && <span className="text-muted-foreground">{suffix}</span>}
       </span>
     </div>
