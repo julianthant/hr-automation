@@ -1,5 +1,17 @@
 # ServiceNow Lessons Learned
 
+## 2026-06-04 — `.select2-drop-active` is NOT unique; scope the drop search by field name
+
+**Tried:** `select2DropSearch` = `page.locator(".select2-drop-active input.select2-input")` and `select2ResultOption` = `.select2-drop-active .select2-result-label` filtered by text — relying on the JSDoc claim that Select2 v3 keeps only one drop active at a time.
+
+**Failed because:** False for this ServiceNow build. After the `Specifically:` drop is used and `Category:` is opened, BOTH drops keep `class="select2-drop-active"` AND both keep their search input (`input.select2-input`) in the DOM (`aria-expanded="true"` on both). `.select2-drop-active input.select2-input` then resolves to 2 elements and `locator.fill` dies: `strict mode violation: ... resolved to 2 elements` — so `fill-form` failed on `Category` and the oath-upload ticket never filed (run `ou-120730-30e8`, 2026-06-04).
+
+**Fix:** Scope by the per-drop search input's accessible name, which is unique and stable: `Select Specifically:` / `Select Category:` (note the `Select ` prefix — distinct from the choice anchor's `Specifically:` / `Category:`). `select2DropSearch(page, fieldLabel)` → `getByRole("combobox", { name: \`Select ${fieldLabel}:\` })`. `select2ResultOption(page, fieldLabel, label)` scopes the `.select2-result-label` rows to that field's own `.select2-drop` ancestor (xpath from the search input), so it can't pick a row out of a sibling field's lingering-active drop. Callers in `oath-upload/fill-form.ts` pass `"Specifically"` / `"Category"`. Verified against the strict-mode DOM dump from the failing run (the form is behind UCSD SSO+Duo, so the run's error is the authoritative live snapshot).
+
+**Selector:** `hrInquiry.select2DropSearch`, `hrInquiry.select2ResultOption`
+
+**Tags:** servicenow, select2, combobox, typeahead, drop-active, strict-mode, oath-upload
+
 ## 2026-06-02 — "Specifically:"/"Category:" are Select2 v3, not plain comboboxes
 
 **Tried:** `hrInquiry.specificallyInput` = `getByRole("combobox", { name: "Specifically:" })`, then click → type → click option.
