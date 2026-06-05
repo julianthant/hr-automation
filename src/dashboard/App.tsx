@@ -54,6 +54,7 @@ import {
 } from "./components/queue-panel/queue-sort";
 import { AppErrorBoundary } from "./components/shared/AppErrorBoundary";
 import { UiGallery } from "./components/dev/UiGallery";
+import { OcrToolbarGallery } from "./components/dev/OcrToolbarGallery";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -716,10 +717,21 @@ export function DashboardApp() {
   // TEMPORARY dev route — ?view=ui-gallery catalogs the dashboard's reusable
   // surfaces (queue rows, session cards, controls) with the real components.
   // Remove this gate + src/dashboard/components/dev/UiGallery.tsx when done.
-  if (new URLSearchParams(window.location.search).get("view") === "ui-gallery") {
+  const devView = new URLSearchParams(window.location.search).get("view");
+  if (devView === "ui-gallery") {
     return (
       <AppErrorBoundary>
         <UiGallery />
+      </AppErrorBoundary>
+    );
+  }
+  // TEMPORARY dev route — ?view=ocr-toolbar-gallery showcases OCR Review header
+  // toolbar action-cluster redesign candidates. Remove this gate +
+  // src/dashboard/components/dev/OcrToolbarGallery.tsx once a direction is picked.
+  if (devView === "ocr-toolbar-gallery") {
+    return (
+      <AppErrorBoundary>
+        <OcrToolbarGallery />
       </AppErrorBoundary>
     );
   }
