@@ -72,6 +72,25 @@ describe("CaptureSessionStore", () => {
     assert.equal(b!.index, 1);
   });
 
+  it("markPhoneConnected extends an open session to a 60-minute idle window", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    now += 1_000;
+    store.markPhoneConnected(s.sessionId, { userAgent: "iPhone" });
+    assert.equal(store.getById(s.sessionId)!.expiresAt, now + 60 * 60_000);
+  });
+
+  it("addPhoto uses the 60-minute idle window after phone connection", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    store.markPhoneConnected(s.sessionId);
+    now += 60_000;
+    store.addPhoto(s.sessionId, photoInput("a.jpg", 100));
+    assert.equal(store.getById(s.sessionId)!.expiresAt, now + 60 * 60_000);
+  });
+
   it("setState transitions and is irreversible from terminal", () => {
     const store = createSessionStore({ now: () => 0 });
     const s = store.create({ workflow: "x", onFinalize });
@@ -104,6 +123,34 @@ describe("CaptureSessionStore", () => {
     assert.equal(swept, 1);
     assert.equal(store.getById(a.sessionId)!.state, "expired");
     assert.equal(store.getById(b.sessionId)!.state, "finalized");
+  });
+
+  it("sweepExpired does not expire finalizing sessions", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    store.setState(s.sessionId, "finalizing");
+    now += 16 * 60_000;
+    const swept = store.sweepExpired();
+    assert.equal(swept, 0);
+    assert.equal(store.getById(s.sessionId)!.state, "finalizing");
+  });
+
+  it("getByToken expires a stale open session before returning it", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    now += 16 * 60_000;
+    assert.equal(store.getByToken(s.token)!.state, "expired");
+  });
+
+  it("addPhoto rejects a stale open session", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    now += 16 * 60_000;
+    assert.equal(store.addPhoto(s.sessionId, photoInput("late.jpg")), undefined);
+    assert.equal(store.getById(s.sessionId)!.state, "expired");
   });
 
   it("listAll returns all sessions sorted by createdAt DESC", () => {

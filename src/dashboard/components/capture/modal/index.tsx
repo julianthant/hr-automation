@@ -16,7 +16,6 @@ import { RightColumn } from "./RightColumn.js";
 import { ValidationBanner } from "./ValidationBanner.js";
 import { CaptureStatusBlock } from "./CaptureStatusBlock.js";
 import { CAPTURE_MODAL_GRID_COLS } from "./capture-modal-layout.js";
-import { ExpiryFooter } from "./ExpiryFooter.js";
 import { isTerminal } from "./capture-state-terminal.js";
 
 /**
@@ -67,9 +66,7 @@ export function CaptureModal({
   const [validation, setValidation] = useState<CaptureValidation | null>(null);
   const [validating, setValidating] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [extending, setExtending] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [now, setNow] = useState(() => Date.now());
   const [arrivedIndex, setArrivedIndex] = useState<number | null>(null);
 
   // Track previously-seen photo indices so we can flag the freshest one
@@ -195,13 +192,6 @@ export function CaptureModal({
       cancelled = true;
     };
   }, [open, started, phase, workflow, contextHint]);
-
-  // ── Tick clock for expiry display while modal is open
-  useEffect(() => {
-    if (!open) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(id);
-  }, [open]);
 
   // ── Watch for newly-arrived photos via lastEvent so the bounce only
   //    plays for the new tile, not every existing one.
@@ -337,26 +327,6 @@ export function CaptureModal({
     onOpenChange(false);
   }, [started, info?.photos.length, onOpenChange]);
 
-  const handleExtend = useCallback(async () => {
-    if (!started || extending) return;
-    setExtending(true);
-    try {
-      const resp = await fetch("/api/capture/extend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: started.sessionId, byMs: 5 * 60_000 }),
-      });
-      if (!resp.ok) {
-        const body = (await resp.json().catch(() => ({}))) as { error?: string };
-        toast.error("Couldn't extend session", { description: body.error ?? `HTTP ${resp.status}` });
-      } else {
-        toast.success("Session extended", { description: "+5 min" });
-      }
-    } finally {
-      setExtending(false);
-    }
-  }, [started, extending]);
-
   const handleDeletePhoto = useCallback(
     async (index: number) => {
       if (!started) return;
@@ -489,20 +459,12 @@ export function CaptureModal({
                 phoneConnected={info?.phoneConnectedAt != null}
                 photoCount={info?.photos.length ?? 0}
               />
-              {!isTerminal(effectiveState) && <div aria-hidden className="min-h-0" />}
-
               <div
-                className="mt-3.5 border-t"
+                className="col-span-2 mt-3.5 border-t"
                 style={{ borderColor: "var(--capture-border-subtle)" }}
               />
-              {!isTerminal(effectiveState) && (
-                <div
-                  className="mt-3.5 border-t"
-                  style={{ borderColor: "var(--capture-border-subtle)" }}
-                />
-              )}
 
-              <div className="flex min-w-0 items-baseline gap-3 pt-3.5">
+              <div className="col-span-2 flex min-w-0 items-baseline gap-3 pt-3.5">
                 <code
                   className="flex-1 truncate font-mono text-[11.5px]"
                   style={{ color: "var(--capture-fg-body)" }}
@@ -526,19 +488,6 @@ export function CaptureModal({
                   Copy
                 </button>
               </div>
-
-              {!isTerminal(effectiveState) && (
-                <div className="pt-3.5 min-w-0">
-                  <ExpiryFooter
-                    expiresAt={started.expiresAt}
-                    currentExpiresAt={info?.expiresAt ?? started.expiresAt}
-                    now={now}
-                    extending={extending}
-                    onExtend={handleExtend}
-                    terminal={false}
-                  />
-                </div>
-              )}
             </div>
           )}
         </div>

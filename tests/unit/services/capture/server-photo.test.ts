@@ -53,6 +53,21 @@ describe("handleManifest", () => {
     assert.notEqual(store.getById(s.sessionId)!.phoneConnectedAt, undefined);
   });
 
+  it("returns an expired manifest without reconnecting the phone", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    now += 16 * 60_000;
+    const r = handleManifest(s.token, {
+      store,
+      phoneInfo: { userAgent: "iPhone", ip: "10.0.0.5" },
+    });
+    assert.equal(r.status, 200);
+    const body = r.body as { state: string };
+    assert.equal(body.state, "expired");
+    assert.equal(store.getById(s.sessionId)!.phoneConnectedAt, undefined);
+  });
+
   it("returns 404 for unknown token", () => {
     const store = createSessionStore();
     const r = handleManifest("nope", { store });
@@ -108,6 +123,19 @@ describe("handleUpload", () => {
       { store, photosDir: tmp },
     );
     assert.equal(r.status, 409);
+  });
+
+  it("rejects upload after idle expiry (409)", async () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    now += 16 * 60_000;
+    const r = await handleUpload(
+      { token: s.token, bytes: Buffer.from([0]), originalName: "x.jpg" },
+      { store, photosDir: tmp },
+    );
+    assert.equal(r.status, 409);
+    assert.equal(store.getById(s.sessionId)!.state, "expired");
   });
 
   it("rejects empty bytes (400)", async () => {
@@ -179,6 +207,43 @@ describe("handleDeletePhoto", () => {
       { store, photosDir: tmp },
     );
     assert.equal(r.status, 400);
+  });
+
+  it("returns 409 when deleting after idle expiry", async () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    await handleUpload(
+      { token: s.token, bytes: Buffer.from([1]), originalName: "a.jpg" },
+      { store, photosDir: tmp },
+    );
+    now += 16 * 60_000;
+    const r = await handleDeletePhoto({ token: s.token, index: 0 }, { store, photosDir: tmp });
+    assert.equal(r.status, 409);
+  });
+
+  it("does not reuse a surviving photo filename after delete", async () => {
+    const store = createSessionStore();
+    const s = store.create({ workflow: "x", onFinalize });
+    await handleUpload(
+      { token: s.token, bytes: Buffer.from([1]), originalName: "a.jpg" },
+      { store, photosDir: tmp },
+    );
+    await handleUpload(
+      { token: s.token, bytes: Buffer.from([2]), originalName: "b.jpg" },
+      { store, photosDir: tmp },
+    );
+    await handleUpload(
+      { token: s.token, bytes: Buffer.from([3]), originalName: "c.jpg" },
+      { store, photosDir: tmp },
+    );
+    await handleDeletePhoto({ token: s.token, index: 1 }, { store, photosDir: tmp });
+    await handleUpload(
+      { token: s.token, bytes: Buffer.from([4]), originalName: "d.jpg" },
+      { store, photosDir: tmp },
+    );
+    const filenames = store.getById(s.sessionId)!.photos.map((p) => p.filename);
+    assert.equal(new Set(filenames).size, filenames.length);
   });
 });
 
@@ -366,6 +431,15 @@ describe("handleExtend", () => {
       { sessionId: s.sessionId, byMs: 60_000 },
       { store },
     );
+    assert.equal(r.status, 409);
+  });
+
+  it("returns 409 after idle expiry", () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize });
+    now += 16 * 60_000;
+    const r = handleExtend({ sessionId: s.sessionId, byMs: 60_000 }, { store });
     assert.equal(r.status, 409);
   });
 });

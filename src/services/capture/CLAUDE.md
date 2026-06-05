@@ -49,12 +49,14 @@ open ──upload──► open ──finalize──► finalizing ──bundle 
        ↓
     discarded (terminal)
    ↘
-    sweepExpired (15-min idle)
+    sweepExpired / stale read (idle expiry)
        ↓
     expired (terminal)
 ```
 
 Terminal states: `finalized`, `discarded`, `expired`. `setState` ignores transitions out of terminal — once a session is done, it stays done.
+
+Idle expiry is backend-enforced, not just UI copy: store reads (`getById`/`getByToken`/`listAll`) expire stale open sessions before returning them, and the dashboard server calls `captureStore.sweepExpired()` in its 15s sweep loop. New sessions get a 15-minute pre-phone window; the first manifest hit marks the phone connected and switches activity refreshes to a 60-minute idle window. Upload/replace/reorder refresh expiry from current time; finalizing sessions do not expire mid-handoff.
 
 ## Two-key lookup
 
@@ -71,7 +73,7 @@ The phone never learns the sessionId; the dashboard never echoes the token after
 - **Easiest tunnel path**: `npm run dashboard:tunneled` (requires `brew install cloudflared`). Wraps `scripts/dashboard-tunneled.sh` — starts an anonymous Cloudflare quick tunnel pointed at `localhost:3838`, captures the fresh `https://*.trycloudflare.com` URL, exports it as `CAPTURE_PUBLIC_URL`, then runs `npm run dashboard`. Ctrl+C kills both. The script passes `--config /dev/null --origincert /dev/null` so the quick tunnel doesn't accidentally inherit a pre-existing named-tunnel cred-file from `~/.cloudflared/`, which produces edge-side 404s if it does.
 - **Sessions are in-memory** — restarting the dashboard loses all open sessions. There's no persistence today; if you add it later, the hook is the dashboard startup function next to the existing tracker cleanup calls.
 - **`onFinalize` is fire-and-forget**: HTTP returns 200 immediately, the bundle runs in the background. If the bundle or `onFinalize` throws, the session goes `discarded` and the photos stay on disk for forensics.
-- **Token leak** is the primary security risk. Mitigations: 16-char random tokens (96-bit entropy, unguessable), 15-min idle expiry, no token re-issue on expiry. Not an external-facing tool — LAN-only by design; operator's WiFi is the boundary.
+- **Token leak** is the primary security risk. Mitigations: 16-char random tokens (96-bit entropy, unguessable), backend-enforced idle expiry (15 min before phone connection, 60 min after connection/activity), no token re-issue on expiry. The UI intentionally does not show a countdown/Extend affordance; expired sessions surface as terminal and require starting a new capture.
 - **`onFinalize` dispatch lives in `src/tracker/dashboard.ts`** (`makeCaptureFinalize`). It branches on `session.workflow` and routes the bundled PDF to the appropriate downstream prepare flow. Today: `oath-signature` → `runPaperOathPrepare`. Unknown workflows log a warn and leave the PDF on disk for manual handling. To add a new consumer: import its prepare function and add a case to the dispatcher.
 
 ## Test recipe

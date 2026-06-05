@@ -86,6 +86,19 @@ describe("handleFinalize", () => {
     );
     assert.equal(r.status, 409);
   });
+
+  it("rejects finalize after idle expiry (409)", async () => {
+    let now = 1_000_000;
+    const store = createSessionStore({ now: () => now });
+    const s = store.create({ workflow: "x", onFinalize: async () => {} });
+    now += 16 * 60_000;
+    const r = await handleFinalize(
+      { token: s.token },
+      { store, photosDir: tmp, uploadsDir: tmp },
+    );
+    assert.equal(r.status, 409);
+    assert.equal(store.getById(s.sessionId)!.state, "expired");
+  });
 });
 
 describe("handleDiscard", () => {

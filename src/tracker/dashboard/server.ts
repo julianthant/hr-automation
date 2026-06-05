@@ -17,6 +17,7 @@ import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { createDashboardHonoApp } from "./hono/app.js";
+import { captureStore } from "./capture-state.js";
 import {
   scanFailurePatterns,
   scanOrphanedQueueItems,
@@ -124,6 +125,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const sweepInterval = setInterval(() => {
     void scanFailurePatterns(stateDb, projectionReady, dir);
     void scanOrphanedQueueItems(dir);
+    captureStore.sweepExpired();
   }, 15_000);
   sweepInterval.unref();
   const screenshotSweepInterval = setInterval(() => {

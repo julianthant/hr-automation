@@ -25,6 +25,10 @@ function genShortcode(): string {
   return `${out.slice(0, 2)}-${out.slice(2, 4)}`;
 }
 
+function uniquePhotoFilename(ext: string): string {
+  return `${Date.now()}-${randomBytes(4).toString("hex")}${ext}`;
+}
+
 const MIME_BY_EXT: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
@@ -244,10 +248,7 @@ export async function handleUpload(
   // exact and let the phone's polyfill convert before the bundle step.
   const mime = mimeFromExt(input.originalName);
   const ext = extFromMime(mime, ".jpg");
-  // Write under the next-stable-index slot; replace-photo writes a
-  // timestamp-suffixed name to keep both copies on disk.
-  const provisionalIndex = session.photos.length;
-  const filename = `${String(provisionalIndex).padStart(3, "0")}${ext}`;
+  const filename = uniquePhotoFilename(ext);
   const fullPath = join(dir, filename);
   const photo = await persistPhoto(fullPath, input.bytes, { filename, mime }, input.blurScore,
     (m) => ctx.store.addPhoto(session.sessionId, m));
@@ -282,6 +283,12 @@ export async function handleDeletePhoto(
   const session = ctx.store.getByToken(input.token);
   if (!session) {
     return { status: 404, body: { ok: false, error: "session not found" } };
+  }
+  if (session.state !== "open") {
+    return {
+      status: 409,
+      body: { ok: false, error: `session is ${session.state}` },
+    };
   }
   if (!Number.isInteger(input.index) || input.index < 0) {
     return { status: 400, body: { ok: false, error: "index out of range" } };
@@ -351,7 +358,7 @@ export async function handleReplacePhoto(
   // Old file stays on disk as a forensic record; the photo serving route
   // resolves through the store, not the directory, so it never serves
   // an orphaned old copy.
-  const filename = `${String(input.index).padStart(3, "0")}-${Date.now()}${ext}`;
+  const filename = `${String(input.index).padStart(3, "0")}-${uniquePhotoFilename(ext)}`;
   const fullPath = join(dir, filename);
   const result = await persistPhoto(fullPath, input.bytes, { filename, mime }, input.blurScore,
     (m) => ctx.store.replacePhoto(session.sessionId, input.index, m));
