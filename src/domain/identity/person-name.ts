@@ -98,6 +98,41 @@ export function toLastFirstSearchName(raw: string | null | undefined): string {
   return displayPersonName(`${parts.slice(-1).join(" ")}, ${parts.slice(0, -1).join(" ")}`);
 }
 
+/**
+ * Ordered UCPath Person Org search names for ambiguous OCR/operator input.
+ * UCPath requires comma-form `Last, First Middle`, but source text may be
+ * natural `First Last` or no-comma `Last First`. Keep the most likely
+ * normalization first and include conservative fallbacks for no-comma input.
+ */
+export function buildLastFirstSearchNames(raw: string | null | undefined): string[] {
+  const display = displayPersonName(raw);
+  if (!display) return [];
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string): void => {
+    const normalized = displayPersonName(value);
+    if (!normalized) return;
+    const key = canonicalPersonNameKey(normalized);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(normalized);
+  };
+
+  add(toLastFirstSearchName(display));
+  if (display.includes(",")) return out;
+
+  const parts = display.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    add(`${parts[0]}, ${parts.slice(1).join(" ")}`);
+  }
+  if (parts.length >= 3) {
+    add(`${parts.slice(0, 2).join(" ")}, ${parts.slice(2).join(" ")}`);
+  }
+
+  return out;
+}
+
 export function parseLastFirstName(raw: string | null | undefined): ParsedLastFirstName | null {
   const display = displayPersonName(raw);
   const commaIdx = display.indexOf(",");

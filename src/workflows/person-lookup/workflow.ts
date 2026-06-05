@@ -141,6 +141,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     ctx.updateData({ emplId: "Error" });
     throw err;
   }
+  ctx.updateData({ searchName: lookup.selection.searchName });
   if (lookup.results.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
     ctx.updateData({ emplId: "Not found" });
@@ -264,11 +265,12 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     return;
   }
 
+  const searchName = String(ctx.data.searchName ?? input.name).trim();
   let parsed: ReturnType<typeof parseNameInput>;
   try {
-    parsed = parseNameInput(input.name);
+    parsed = parseNameInput(searchName);
   } catch (err) {
-    log.error(`CRM cross-verify: invalid name "${input.name}" — ${errorMessage(err)}`);
+    log.error(`CRM cross-verify: invalid name "${searchName}" — ${errorMessage(err)}`);
     ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
@@ -277,13 +279,13 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   try {
     crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {
-    log.error(`CRM cross-verify: search failed for "${input.name}" — ${errorMessage(err)}`);
+    log.error(`CRM cross-verify: search failed for "${searchName}" — ${errorMessage(err)}`);
     ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
 
   if (crmRecords.length === 0) {
-    log.step(`CRM: no records for "${input.name}"`);
+    log.step(`CRM: no records for "${searchName}"`);
     ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
@@ -401,7 +403,9 @@ async function activeStatusStep<TSteps extends readonly string[]>(
   }
 
   const { deriveInput, results } = resolveActiveStatusResultsForPersonLookup({
-    input,
+    input: !isEidInput(input) && typeof ctx.data.searchName === "string"
+      ? { ...input, name: ctx.data.searchName }
+      : input,
     sdcmpFromSearch,
     crmMatchedEmplId:
       typeof ctx.data.crmMatchedEmplId === "string" ? ctx.data.crmMatchedEmplId : undefined,

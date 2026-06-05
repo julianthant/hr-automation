@@ -10,6 +10,7 @@ import {
   searchByName,
   type EidSearchResult,
 } from "../../systems/ucpath/person-org-summary.js";
+import { buildLastFirstSearchNames } from "../../domain/identity/person-name.js";
 
 export interface PersonLookupRunResult {
   input: PersonLookupInput;
@@ -32,10 +33,13 @@ export async function lookupPersonInUcpath(
   options: {
     keepNonHdh?: boolean;
     onAfterSearchAttempt?: (attempt: EidSearchResult) => Promise<void>;
+    searchByNameImpl?: typeof searchByName;
+    searchByEidImpl?: typeof searchByEid;
   } = {},
 ): Promise<PersonLookupRunResult> {
   if (input.kind === "by-eid") {
-    const result = await searchByEid(page, input.emplId);
+    const searchByEidImpl = options.searchByEidImpl ?? searchByEid;
+    const result = await searchByEidImpl(page, input.emplId);
     const results = result ? [result] : [];
     return {
       input,
@@ -45,15 +49,28 @@ export async function lookupPersonInUcpath(
     };
   }
 
-  const search = await searchByName(page, input.name, {
-    keepNonHdh: options.keepNonHdh,
-    onAfterSearchAttempt: options.onAfterSearchAttempt,
-  });
-  const results = search.sdcmpResults;
+  const candidateNames = buildLastFirstSearchNames(input.name);
+  const namesToTry = candidateNames.length > 0 ? candidateNames : [input.name];
+  const searchByNameImpl = options.searchByNameImpl ?? searchByName;
+  const allAttempts: EidSearchResult[] = [];
+  let selectedInput: PersonLookupInput = { kind: "by-name", name: namesToTry[0] ?? input.name };
+  let results: PersonLookupResult[] = [];
+
+  for (const name of namesToTry) {
+    const search = await searchByNameImpl(page, name, {
+      keepNonHdh: options.keepNonHdh,
+      onAfterSearchAttempt: options.onAfterSearchAttempt,
+    });
+    allAttempts.push(...search.allAttempts);
+    selectedInput = { kind: "by-name", name };
+    results = search.sdcmpResults;
+    if (results.length > 0) break;
+  }
+
   return {
-    input,
+    input: selectedInput,
     results,
-    selection: derivePersonLookupSelection(input, results),
-    allAttempts: search.allAttempts,
+    selection: derivePersonLookupSelection(selectedInput, results),
+    allAttempts,
   };
 }
