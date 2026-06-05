@@ -8,6 +8,7 @@ import {
   titleCasePersonToken,
   toLastFirstName,
   toLastFirstSearchName,
+  buildLastFirstSearchNames,
 } from "../../../src/domain/identity/person-name.js";
 
 describe("person-name identity helpers", () => {
@@ -109,5 +110,22 @@ describe("toLastFirstSearchName", () => {
 
   it("strips a trailing period after middle initial in Last, First display", () => {
     assert.equal(displayPersonName("Barahona Martell, Carlos D."), "Barahona Martell, Carlos D");
+  });
+});
+
+describe("buildLastFirstSearchNames", () => {
+  it("tries natural First Last names as Last, First first", () => {
+    assert.deepEqual(buildLastFirstSearchNames("Mia Tran"), ["Tran, Mia", "Mia, Tran"]);
+  });
+
+  it("adds no-comma Last First Middle as a fallback", () => {
+    assert.deepEqual(
+      buildLastFirstSearchNames("Tran Mia V"),
+      ["V, Tran Mia", "Tran, Mia V"],
+    );
+  });
+
+  it("collapses extra comma OCR variants without adding fallback noise", () => {
+    assert.deepEqual(buildLastFirstSearchNames("Goiset, Nadia, K"), ["Goiset, Nadia K"]);
   });
 });
