@@ -110,9 +110,19 @@ function displayItemTimestamp(item: DisplayItem): string {
   return item.entry.timestamp ?? (typeof item.entry.ts === "number" ? new Date(item.entry.ts).toISOString() : "");
 }
 
-function mergeDisplayItems(logs: CollapsedLogEntry[], events: RunEvent[]): DisplayItem[] {
+export function mergeDisplayItems(logs: CollapsedLogEntry[], events: RunEvent[]): DisplayItem[] {
   const logItems = logs.map((entry) => ({ kind: "log" as const, entry }));
-  const eventItems = events.map((entry) => ({ kind: "event" as const, entry }));
+  // Drop `step_change` events from the merged "all" view: every `ctx.step`
+  // transition already shows here as the richer `Phase: X` / `Phase done: X`
+  // log line (level "step"), so rendering the bare `step_change` event line
+  // too would double up each transition. The events still flow to session
+  // state (they drive the session card's `currentStep`) and remain visible in
+  // the dedicated Events tab, which renders `events` directly and bypasses
+  // this merge. This is the render-time replacement for the old emit-time
+  // dedup that used to suppress the event entirely (and broke `currentStep`).
+  const eventItems = events
+    .filter((entry) => entry.type !== "step_change")
+    .map((entry) => ({ kind: "event" as const, entry }));
   const result: DisplayItem[] = [];
   let i = 0;
   let j = 0;

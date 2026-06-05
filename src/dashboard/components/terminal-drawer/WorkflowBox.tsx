@@ -163,7 +163,6 @@ function deriveSessionCardCopy(args: {
   active: boolean;
   finalStatus: "done" | "failed" | null;
   itemInFlight: boolean;
-  currentItemId: string | null;
   currentStep: string | null;
   authedBrowsers: number;
   totalBrowsers: number;
@@ -174,7 +173,6 @@ function deriveSessionCardCopy(args: {
     active,
     finalStatus,
     itemInFlight,
-    currentItemId,
     currentStep,
     authedBrowsers,
     totalBrowsers,
@@ -195,9 +193,12 @@ function deriveSessionCardCopy(args: {
   }
 
   if (itemInFlight) {
-    const sub = currentItemId ?? (currentStep ? formatStepName(currentStep) : "processing…");
-    const foot = currentStep ? formatStepName(currentStep) : currentItemId ?? "running…";
-    return { subline: sub, footerStep: foot };
+    // The footer is "what step is it in" — never a raw item id. With
+    // `step_change` events now flowing to session state (see emitStepChange),
+    // `currentStep` is populated for the run; the fallback only covers the
+    // brief window before the first step fires.
+    const stepLabel = currentStep ? formatStepName(currentStep) : null;
+    return { subline: stepLabel ?? "processing…", footerStep: stepLabel ?? "running…" };
   }
 
   if (daemonPhase === "keepalive") {
@@ -379,7 +380,6 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     startedAt,
     active,
     pidAlive,
-    currentItemId,
     currentTraceId,
     itemInFlight,
     currentStep,
@@ -441,13 +441,17 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     active: !!active,
     finalStatus: finalStatus ?? null,
     itemInFlight: !!itemInFlight,
-    currentItemId: currentItemId ?? null,
     currentStep: currentStep ?? null,
     authedBrowsers,
     totalBrowsers,
     daemonPhase,
     queued,
   });
+
+  // Subtitle: the running run's trace id WHILE in flight (correlates the live
+  // card with its queue row/logs); once the item finishes, fall back to the
+  // phase subline rather than leaving a stale trace id in the description.
+  const subtitle = itemInFlight && currentTraceId ? currentTraceId : subline;
 
   // Card border tint reflects "current state" — in-flight cards get a
   // subtle cyan ring so an operator can pick out the working session
@@ -513,14 +517,13 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                 {displayInstance(instance)}
               </span>
             </div>
-            {/* Subtitle: the running run's trace id (same id its queue row
-                shows). Kept after the item completes; falls back to the phase
-                subline for a daemon that's authenticating/idle with no run. */}
+            {/* Subtitle: trace id while in flight, else the phase subline
+                (idle/complete/authenticating) — see `subtitle` above. */}
             <div
               className="mt-0.5 text-[10.5px] font-mono text-muted-foreground truncate leading-tight"
-              title={currentTraceId ?? subline}
+              title={subtitle}
             >
-              {currentTraceId ?? subline}
+              {subtitle}
             </div>
           </div>
 

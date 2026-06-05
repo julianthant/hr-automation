@@ -19,7 +19,7 @@ interface StepPipelineProps {
 
 // ── Auth-step grouping ────────────────────────────────────────────────────────
 
-type StepStatus = "pending" | "running" | "completed" | "failed";
+type StepStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 interface StepView {
   name: string;
@@ -63,6 +63,7 @@ function groupAuthSteps(steps: StepView[]): PipelineNode[] {
 /** Derive a collapsed status from the children of an auth-group super-chip. */
 function authGroupStatus(children: StepView[]): StepStatus {
   if (children.some((c) => c.status === "failed")) return "failed";
+  if (children.some((c) => c.status === "cancelled")) return "cancelled";
   if (children.every((c) => c.status === "completed")) return "completed";
   if (children.some((c) => c.status === "running")) return "running";
   return "pending";
@@ -85,6 +86,22 @@ function normalizeStepName(step: string): string {
   const failedIdx = step.indexOf(":failed:");
   if (failedIdx === -1) return step;
   return step.slice(0, failedIdx);
+}
+
+/**
+ * Display label for a pipeline step. The OCR-exclusive `awaiting-approval`
+ * terminal phase reads "Awaiting Approval" only for a DELEGATED run — one a
+ * target workflow (oath-signature / oath-upload / emergency-contact) consumes,
+ * so it carries `parentRunId` and a real operator-approval gate. A STANDALONE
+ * OCR run (no `parentRunId`) is inspect-and-discard: nothing downstream awaits
+ * approval, so its terminal phase reads "Review" instead. Mirrors the
+ * `OcrReviewPane` Approve-button gate (approval ≡ delegation). Every other step
+ * falls through to `formatStepName`. (`awaiting-approval` is unique to OCR's
+ * step list, so this never affects another workflow's timeline.)
+ */
+function pipelineStepLabel(step: string, entry?: TrackerEntry): string {
+  if (step === "awaiting-approval" && !entry?.parentRunId) return "Review";
+  return formatStepName(step);
 }
 
 /** Build a hover title string summarizing per-system auth status + timing. */
@@ -158,6 +175,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
   const isComplete = groupStatus === "completed";
   const isActive = groupStatus === "running";
   const isFailedStep = groupStatus === "failed";
+  const isCancelledStep = groupStatus === "cancelled";
   const isPending = groupStatus === "pending";
 
   const hoverTitle = buildAuthGroupTitle(children);
@@ -179,6 +197,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
               isComplete && "text-[#4ade80] font-medium",
               isActive && "text-primary font-semibold",
               isFailedStep && "text-destructive font-semibold",
+              isCancelledStep && "text-warning font-semibold",
               isPending && "text-muted-foreground/50 font-medium",
             )}
           >
@@ -204,6 +223,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
                   isComplete && "bg-[#4ade80]/80",
                   isActive && "bg-primary/25",
                   isFailedStep && "bg-destructive/80",
+                  isCancelledStep && "bg-warning/80",
                 )}
                 style={authRailStyle(groupStatus)}
               />
@@ -222,6 +242,7 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
               "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
               isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
               isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
+              isCancelledStep && (durationLabel ? "text-warning/70" : "text-warning/40"),
               isActive && "text-primary/70",
               isPending && "text-muted-foreground/35",
             )}
@@ -274,6 +295,85 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
 }
 
 /**
+ * Pure derivation of per-step view state from the run's reported step/status.
+ * Exported for unit testing — the component renders whatever this returns.
+ *
+ * Cancellation is the subtle case. A cancelled run is `status="failed"` with
+ * the `step="cancelled"` sentinel, so `currentStep` no longer names the step
+ * it was sitting on — without recovery it falls into the "failed + unknown
+ * step → step 0" path and the highlight snaps back to the first step. We
+ * recover the reached step from `stepDurations`: every COMPLETED step has a
+ * recorded duration, so the step it was stopped on is the one just after the
+ * furthest step that has one (clamped to the last step). That step is marked
+ * `cancelled` (amber), matching the row's "Cancelled" badge, rather than a
+ * misleading red `failed`.
+ */
+export function computeStepViews(
+  steps: string[],
+  currentStep: string | null,
+  status: string,
+  stepDurations?: Record<string, number>,
+): StepView[] {
+  const isDone = status === "done";
+  const isFailed = status === "failed";
+  const isCancelled = isFailed && currentStep === "cancelled";
+
+  // Strip ":failed:<reason>" suffix while preserving the "auth:<id>" prefix.
+  // The previous implementation used .split(":")[0] which incorrectly mapped
+  // "auth:kuali" → "auth", causing auth-step highlighting to always fall back
+  // to index 0.
+  const normalizedStep = currentStep ? normalizeStepName(currentStep) : null;
+  const resolvedIdx = normalizedStep ? steps.indexOf(normalizedStep) : -1;
+
+  // Furthest step with a recorded duration = furthest COMPLETED step; the run
+  // was stopped on the next one (clamped to the last step).
+  const lastTimedIdx = steps.reduce(
+    (max, step, i) => (stepDurations?.[step] !== undefined ? i : max),
+    -1,
+  );
+  const cancelledAtIdx = Math.min(lastTimedIdx + 1, steps.length - 1);
+
+  // Which step the rail highlights:
+  //   • cancelled → the recovered cancellation point (above)
+  //   • failed with an unknown/missing step (workflow died before emitting a
+  //     `running` event) → step 0, so *something* reads as the failure point
+  //   • otherwise → the reported step
+  const currentIdx = isCancelled
+    ? cancelledAtIdx
+    : isFailed && resolvedIdx < 0
+      ? 0
+      : resolvedIdx;
+
+  const awaitingIdx = steps.indexOf("awaiting-approval");
+  // New approval contract (2026-05-25): OCR awaiting-approval is
+  // `status="running" step="awaiting-approval"`. Old contract emitted
+  // `status="done"` at that step; legacy rows may still surface that
+  // shape, so accept both.
+  const gateAwaitingApproval =
+    awaitingIdx >= 0 &&
+    normalizedStep === "awaiting-approval" &&
+    (status === "running" || status === "done");
+
+  return steps.map((step, i) => {
+    const isComplete = gateAwaitingApproval ? i < awaitingIdx : isDone || i < currentIdx;
+    const isCancelStep = isCancelled && i === currentIdx;
+    const isActive = !isDone && !isFailed && i === currentIdx;
+    const isFailedStep = isFailed && !isCancelled && i === currentIdx;
+    const isPending = !isComplete && !isActive && !isFailedStep && !isCancelStep;
+
+    let derivedStatus: StepStatus;
+    if (isComplete) derivedStatus = "completed";
+    else if (isCancelStep) derivedStatus = "cancelled";
+    else if (isActive) derivedStatus = "running";
+    else if (isFailedStep) derivedStatus = "failed";
+    else derivedStatus = "pending";
+
+    const durationMs = isPending ? undefined : stepDurations?.[step];
+    return { name: step, status: derivedStatus, durationMs };
+  });
+}
+
+/**
  * Segmented progress rail — one flex-1 column per step, equal horizontal
  * space. Each column stacks (left-aligned, vertically centered in the
  * 69.5 px band):
@@ -287,58 +387,21 @@ function AuthSuperChip({ children }: AuthSuperChipProps) {
  *   • If status is "failed" but no currentStep is reported (workflow died
  *     before emitting a `running` event), we treat step 0 as the failed
  *     step so the failure marker is always visible.
+ *   • A cancelled run is `status="failed" step="cancelled"` — the sentinel
+ *     loses the reached step, so we recover it from `stepDurations` and mark
+ *     that step `cancelled` (amber) instead of snapping the highlight back to
+ *     step 0. See `computeStepViews`.
  *   • Pending steps use a dashed rail so "not yet run" reads visually
  *     distinct from "ran quickly" (solid green).
  *   • Consecutive steps matching `auth:*` are collapsed into a single
  *     "Authenticating (N)" super-chip. Hover reveals per-system detail
  *     (Radix popover), no click / expansion state.
  */
-export function StepPipeline({ steps, currentStep, status, stepDurations }: StepPipelineProps) {
+export function StepPipeline({ steps, currentStep, status, stepDurations, entry }: StepPipelineProps) {
   if (steps.length === 0) return null;
 
-  const isDone = status === "done";
-  const isFailed = status === "failed";
-
-  // Strip ":failed:<reason>" suffix while preserving the "auth:<id>" prefix.
-  // The previous implementation used .split(":")[0] which incorrectly mapped
-  // "auth:kuali" → "auth", causing auth-step highlighting to always fall back
-  // to index 0.
-  const normalizedStep = currentStep ? normalizeStepName(currentStep) : null;
-  const resolvedIdx = normalizedStep ? steps.indexOf(normalizedStep) : -1;
-  // Failed workflow with no reported step (or an unrecognized one) → mark
-  // the first step as failed so the user sees *something* is red, not a
-  // row of indistinguishable pending.
-  const currentIdx = isFailed && resolvedIdx < 0 ? 0 : resolvedIdx;
-
-  const awaitingIdx = steps.indexOf("awaiting-approval");
-  // New approval contract (2026-05-25): OCR awaiting-approval is
-  // `status="running" step="awaiting-approval"`. Old contract emitted
-  // `status="done"` at that step; legacy rows may still surface that
-  // shape, so accept both.
-  const gateAwaitingApproval =
-    awaitingIdx >= 0 &&
-    normalizedStep === "awaiting-approval" &&
-    (status === "running" || status === "done");
-
-  // Build StepView array for all steps
-  const stepViews: StepView[] = steps.map((step, i) => {
-    const isComplete = gateAwaitingApproval ? i < awaitingIdx : isDone || i < currentIdx;
-    const isActive = !isDone && !isFailed && i === currentIdx;
-    const isFailedStep = isFailed && i === currentIdx;
-    const isPending = !isComplete && !isActive && !isFailedStep;
-
-    let derivedStatus: StepStatus;
-    if (isComplete) derivedStatus = "completed";
-    else if (isActive) derivedStatus = "running";
-    else if (isFailedStep) derivedStatus = "failed";
-    else derivedStatus = "pending";
-
-    const durationMs = isPending ? undefined : stepDurations?.[step];
-    return { name: step, status: derivedStatus, durationMs };
-  });
-
   // Group auth steps into super-chips
-  const nodes = groupAuthSteps(stepViews);
+  const nodes = groupAuthSteps(computeStepViews(steps, currentStep, status, stepDurations));
 
   return (
     <div className="border-b border-border">
@@ -358,6 +421,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
           const isComplete = stepStatus === "completed";
           const isActive = stepStatus === "running";
           const isFailedStep = stepStatus === "failed";
+          const isCancelledStep = stepStatus === "cancelled";
           const isPending = stepStatus === "pending";
 
           const durationLabel =
@@ -372,9 +436,11 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
                     ? "active"
                     : isFailedStep
                       ? "failed"
-                      : isComplete
-                        ? "complete"
-                        : "pending"
+                      : isCancelledStep
+                        ? "cancelled"
+                        : isComplete
+                          ? "complete"
+                          : "pending"
               }
             >
               <span
@@ -383,11 +449,12 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
                   isComplete && "text-[#4ade80] font-medium",
                   isActive && "text-primary font-semibold",
                   isFailedStep && "text-destructive font-semibold",
+                  isCancelledStep && "text-warning font-semibold",
                   isPending && "text-muted-foreground/50 font-medium",
                 )}
-                title={formatStepName(step)}
+                title={pipelineStepLabel(step, entry)}
               >
-                {formatStepName(step)}
+                {pipelineStepLabel(step, entry)}
               </span>
 
               <div
@@ -414,6 +481,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
                       isComplete && "bg-[#4ade80]/80",
                       isActive && "bg-primary/25",
                       isFailedStep && "bg-destructive/80",
+                      isCancelledStep && "bg-warning/80",
                     )}
                   />
                 )}
@@ -430,6 +498,7 @@ export function StepPipeline({ steps, currentStep, status, stepDurations }: Step
                   "text-[10px] font-mono tabular-nums leading-none h-[10px] transition-colors",
                   isComplete && (durationLabel ? "text-[#4ade80]/70" : "text-[#4ade80]/40"),
                   isFailedStep && (durationLabel ? "text-destructive/70" : "text-destructive/40"),
+                  isCancelledStep && (durationLabel ? "text-warning/70" : "text-warning/40"),
                   isActive && "text-primary/70",
                   isPending && "text-muted-foreground/35",
                 )}

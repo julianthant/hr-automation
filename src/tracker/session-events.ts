@@ -1,19 +1,14 @@
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
 import {
-  logFilePath,
-  logsDir,
   parseSessionFilename,
-  parseWorkflowDateFilename,
   sessionFilePath,
   sessionsDir,
 } from "./paths.js";
-import { makeTailState, tailIncremental } from "./tail-incremental.js";
 import { getLogRunId } from "../utils/log-context.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applySessionEventLive } from "./state/runtime.js";
-import { isStateDbReady, openStateDb } from "./state/db.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -212,129 +207,26 @@ export function emitWorkflowEnd(instance: string, finalStatus?: "done" | "failed
   emitSessionEvent({ type: "workflow_end", workflowInstance: instance, finalStatus }, dir);
 }
 
-const STEP_LOG_DEDUPE_WINDOW_MS = 50;
-const STEP_LOG_TAIL_BYTES = 2048;
-
 /**
- * Dedupe `step_change` session events against `step` log entries written
- * within the last 50ms for the same (runId, step). Prefers a constant-time
- * SQLite seek on idx_logs_item_run when projection is ready; falls back to
- * a bounded-byte tail read of today's logs JSONL otherwise.
+ * Emit a `step_change` session event. This is the ONLY carrier of a daemon's
+ * live `currentStep` — `rebuildSessionState` derives `WorkflowInstanceState.
+ * currentStep` solely from these events, which in turn drives the session
+ * card's footer step text + micro step pipeline.
  *
- * The previous "tail-read" implementation was a `readFileSync` of the full
- * `*-logs.jsonl` followed by `.split("\n")` and a tail-slice — by midday on
- * a busy daemon that was multi-MB-per-`markStep` × N workflow files. The
- * current impl reads at most ~2 KB (or the full file if smaller) via
- * `openSync`/`readSync`, which covers far more than the 50ms window can
- * produce.
+ * The `workflow` arg is retained for caller compatibility but no longer used:
+ * a previous "dedupe against a recent `step:start` log within 50ms" guard
+ * lived here, but `Stepper.announce` writes that very `step:start` log
+ * IMMEDIATELY before calling this — so the guard matched on every `ctx.step`
+ * and suppressed the event for the whole run, leaving `currentStep` null and
+ * the session card stuck showing the item id instead of the step. The
+ * duplicate-line concern it was solving (the log-panel "all" tab showing both
+ * the `Phase: X` log line and the `step_change` event line) is now handled at
+ * render time in `mergeDisplayItems` (LogStream), which drops the redundant
+ * `step_change` events from the merged view while keeping them in the
+ * dedicated Events tab — and, crucially, keeps them flowing to session state.
  */
-function recentStepLogExists(
-  workflow: string,
-  runId: string,
-  step: string,
-  dir: string,
-): boolean {
-  const cutoffMs = Date.now() - STEP_LOG_DEDUPE_WINDOW_MS;
-
-  // SQLite path — uses idx_logs_item_run (workflow, tracker_date, item_id,
-  // run_id, ts_ms). We don't have item_id from the caller (emitStepChange
-  // has only workflow + runId), so we filter by (workflow, tracker_date,
-  // run_id, ts_ms >= cutoff, level = 'step') and let SQLite pick the index.
-  // run_id is highly selective on its own, and ts_ms >= cutoff limits the
-  // scan to the last 50ms of rows.
-  if (isStateDbReady(dir)) {
-    try {
-      const db = openStateDb(dir);
-      // Escape SQL LIKE wildcards (%, _) and the escape character (\) in
-      // @step so the substring match is literal — same semantics as the
-      // JSONL fallback's String.includes. Without this, a future step name
-      // containing % or _ would over-match. Use \ as the escape character
-      // (uncommon in step names; see ESCAPE clause).
-      const row = db.prepare(`
-        SELECT 1
-        FROM logs
-        WHERE workflow = @workflow
-          AND tracker_date = @date
-          AND run_id = @runId
-          AND level = 'step'
-          AND ts_ms >= @cutoff
-          AND message LIKE
-            '%' ||
-            REPLACE(REPLACE(REPLACE(@step, '\\', '\\\\'), '%', '\\%'), '_', '\\_')
-            || '%' ESCAPE '\\'
-        LIMIT 1
-      `).get({
-        workflow,
-        date: dateLocal(),
-        runId,
-        cutoff: cutoffMs,
-        step,
-      });
-      return row !== undefined;
-    } catch {
-      // Fall through to JSONL path on any SQLite hiccup.
-    }
-  }
-
-  // JSONL fallback — bounded byte tail read of today's logs file. ~2 KB
-  // covers the last ~10–20 lines, which is far more than the 50ms window
-  // can produce. Avoids the multi-MB readFileSync the previous impl did.
-  const path = logFilePath(workflow, dateLocal(), dir);
-  let size: number;
-  try { size = statSync(path).size; } catch { return false; }
-  const tailBytes = Math.min(size, STEP_LOG_TAIL_BYTES);
-  if (tailBytes === 0) return false;
-
-  const state = makeTailState();
-  const startsMidFile = size > tailBytes;
-  if (startsMidFile) state.lastSize = size - tailBytes;
-  const lines = tailIncremental(path, state);
-  // Drop the first (possibly partial) line if we didn't seek to the beginning.
-  if (startsMidFile) lines.shift();
-
-  for (const line of lines) {
-    try {
-      const log = JSON.parse(line);
-      if (
-        log.runId === runId &&
-        log.level === "step" &&
-        typeof log.message === "string" &&
-        log.message.includes(step) &&
-        new Date(log.ts).getTime() >= cutoffMs
-      ) {
-        return true;
-      }
-    } catch { /* skip malformed line */ }
-  }
-  return false;
-}
-
-export function emitStepChange(instance: string, step: string, dir?: string, workflow?: string): void {
+export function emitStepChange(instance: string, step: string, dir?: string, _workflow?: string): void {
   const resolvedDir = dir ?? DEFAULT_DIR;
-  const runId = getLogRunId();
-  if (runId) {
-    if (workflow && recentStepLogExists(workflow, runId, step, resolvedDir)) {
-      return;
-    }
-    // Scan all of today's log files in the `logs/` subdir (since we don't have
-    // the workflow name here, only the instance label). Constant-cost: each
-    // scan reads the tail of one or two small JSONL files.
-    if (!workflow) {
-      const today = dateLocal();
-      const logs = logsDir(resolvedDir);
-      let workflowFiles: string[] = [];
-      try {
-        workflowFiles = existsSync(logs) ? readdirSync(logs) : [];
-      } catch { /* dir might not exist yet */ }
-      for (const f of workflowFiles) {
-        const parsed = parseWorkflowDateFilename(f);
-        if (!parsed || parsed.date !== today) continue;
-        if (recentStepLogExists(parsed.workflow, runId, step, resolvedDir)) {
-          return; // dedupe
-        }
-      }
-    }
-  }
   emitSessionEvent({ type: "step_change", workflowInstance: instance, currentStep: step }, resolvedDir);
 }
 
