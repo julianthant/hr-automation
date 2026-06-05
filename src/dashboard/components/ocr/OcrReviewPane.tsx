@@ -29,10 +29,9 @@ import { EmptyPagePlaceholder } from "./EmptyPagePlaceholder";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
 import { VerifyRecordView } from "./VerifyRecordView";
-import type { VerifyPreviewRecord } from "./types";
+import type { VerifyLookupKind, VerifyPreviewRecord } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
-import { useFormTypes, formTypeHasApproveFanOut } from "@/components/hooks/useFormTypes";
 import {
   useTaskDependencies,
   type TaskDependencyChild,
@@ -254,9 +253,13 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch,
     />
   );
 });
-setOcrDownstreamRenderer("verify", ({ record }) =>
+setOcrDownstreamRenderer("verify", ({ record, onRelookup, relookupPending }) =>
   "checks" in record ? (
-    <VerifyRecordView record={record as VerifyPreviewRecord} />
+    <VerifyRecordView
+      record={record as VerifyPreviewRecord}
+      onRelookup={onRelookup}
+      relookupPending={relookupPending}
+    />
   ) : null,
 );
 
@@ -286,19 +289,16 @@ function useOcrReviewPrepApi(
     if (!prepActive || !entry) return null;
     return resolveOcrConfigForEntry(entry);
   }, [prepActive, entry]);
-  // Show Approve when the OCR row is a DELEGATION (a downstream workflow set
-  // `parentRunId` — the old oath-upload / EC delegation shape) OR the form
-  // type fans out downstream rows on approve (`approveTo` / `approveDocumentTo`).
-  // The OCR-hub flow runs OCR standalone (operator uploads straight to OCR, no
-  // parentRunId), so the fan-out forms (oath, emergency-contact) must still
-  // surface Approve. A truly dedicated OCR run (a form with no fan-out) keeps
-  // the button hidden — there's nothing to dispatch.
-  const formOptions = useFormTypes();
-  const hasApproveFanOut = useMemo(
-    () => formTypeHasApproveFanOut(entry?.data?.formType),
-    [entry?.data?.formType, formOptions],
-  );
-  const isDelegation = Boolean(prepActive && entry && (entry.parentRunId || hasApproveFanOut));
+  // Show Approve ONLY when the OCR row is a DELEGATION — a target workflow
+  // (oath-signature / oath-upload / emergency-contact) ran OCR as a sub-step and
+  // set `parentRunId`, so downstream steps consume the approved data. A
+  // STANDALONE OCR run (operator uploaded straight to the OCR panel, no
+  // `parentRunId`) is inspect-and-discard only: nothing downstream consumes its
+  // output, so there is nothing to approve — the operator reads the extraction
+  // and ×-discards. Real fan-out (signers / EC fills / tickets) is reached
+  // exclusively through a target panel, never a standalone OCR approve. (This is
+  // the form-spec-agnostic rule: approval ≡ delegation, not `hasApproveFanOut`.)
+  const isDelegation = Boolean(prepActive && entry && entry.parentRunId);
   const data = useMemo(
     () => (cfg && entry ? cfg.parseRow(entry.data) ?? null : null),
     [entry?.data, cfg, entry],
@@ -323,6 +323,9 @@ function useOcrReviewPrepApi(
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => { setSubmitting(false); }, [sessionId, runId]);
   const [researchingIndices, setResearchingIndices] = useState<Set<number>>(new Set());
+  // verify per-check relookup pending — keyed `${recordIndex}:${lookup}`.
+  const [relookupPending, setRelookupPending] = useState<Set<string>>(new Set());
+  useEffect(() => { setRelookupPending(new Set()); }, [sessionId, runId]);
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
   const { summary: dependencySummary, children: dependencyChildren } = useTaskDependencies(
     prepActive && entry ? (entry.runId ?? entry.id) : undefined,
@@ -524,6 +527,42 @@ function useOcrReviewPrepApi(
   function triggerForceResearchForIndex(originalIndex: number): void {
     void handleForceResearch([originalIndex]);
   }
+
+  // verify: re-run ONE background lookup (person | i9) for ONE record. The
+  // request stays open for the whole lookup; the row re-emits with patched
+  // `data.records` when it resolves, so the spinner clears as the new value
+  // streams back in. Keyed by `${recordIndex}:${lookup}` so person + i9 (and
+  // distinct records) track independently.
+  const handleRelookup = useCallback(
+    async (recordIndex: number, lookup: VerifyLookupKind): Promise<void> => {
+      const key = `${recordIndex}:${lookup}`;
+      setRelookupPending((prev) => new Set(prev).add(key));
+      try {
+        const r = await fetch("/api/ocr/verify-relookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, runId, recordIndex, lookup }),
+        });
+        if (!r.ok) {
+          const body = (await r.json()) as { error?: string };
+          toast.error("Re-lookup failed", { description: body.error });
+        } else {
+          toast.success(lookup === "i9" ? "Re-ran I-9 signer lookup" : "Re-ran person lookup");
+        }
+      } catch (err) {
+        toast.error("Re-lookup failed", {
+          description: err instanceof Error ? err.message : "Network error",
+        });
+      } finally {
+        setRelookupPending((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [sessionId, runId],
+  );
 
   function addBlankRow(page: number): void {
     if (!cfg) return;
@@ -871,6 +910,8 @@ function useOcrReviewPrepApi(
                         dependencyChildren,
                         researchingIndices,
                         onForceResearchSingle: cfg.supportsForceResearch ? triggerForceResearchForIndex : undefined,
+                        onRelookup: handleRelookup,
+                        relookupPendingKeys: relookupPending,
                         onRemoveRecord: removeRecord,
                         removeBusy: submitting,
                         hideHeader: true,
@@ -894,6 +935,8 @@ function useOcrReviewPrepApi(
                   dependencyChildren,
                   researchingIndices,
                   onForceResearchSingle: cfg.supportsForceResearch ? triggerForceResearchForIndex : undefined,
+                  onRelookup: handleRelookup,
+                  relookupPendingKeys: relookupPending,
                   onRemoveRecord: removeRecord,
                   removeBusy: submitting,
                   rowOnPage: rowIdx + 1,
@@ -1030,6 +1073,10 @@ function renderFormCard(args: {
   dependencyChildren: TaskDependencyChild[];
   researchingIndices: ReadonlySet<number>;
   onForceResearchSingle?: (index: number) => void;
+  /** verify: re-run ONE lookup for this record. */
+  onRelookup?: (index: number, lookup: VerifyLookupKind) => void;
+  /** verify: pending relookup keys (`${index}:${lookup}`) across all records. */
+  relookupPendingKeys?: ReadonlySet<string>;
   onRemoveRecord: (index: number) => void;
   removeBusy: boolean;
   hideHeader?: boolean;
@@ -1054,6 +1101,16 @@ function renderFormCard(args: {
   const matchStateBadge = renderMatchBadge({ record: r });
   const isUnknown = r.documentType === "unknown";
   const isResearching = args.researchingIndices.has(args.originalIndex);
+  // verify: which lookups are re-running for THIS record (derived from the
+  // global `${index}:${lookup}` pending set).
+  const recordRelookupPending: ReadonlySet<VerifyLookupKind> | undefined =
+    args.relookupPendingKeys
+      ? new Set(
+          (["person", "i9"] as VerifyLookupKind[]).filter((lk) =>
+            args.relookupPendingKeys!.has(`${args.originalIndex}:${lk}`),
+          ),
+        )
+      : undefined;
 
   const removeFromPileBanner = isUnknown ? (
     <span>
@@ -1116,6 +1173,10 @@ function renderFormCard(args: {
         record: r,
         onChange: (next) => args.onChange(next),
         isResearching,
+        onRelookup: args.onRelookup
+          ? (lookup) => args.onRelookup!(args.originalIndex, lookup)
+          : undefined,
+        relookupPending: recordRelookupPending,
       })}
     </PrepReviewFormCard>
   );

@@ -33,6 +33,13 @@ const ALLOWED_CALLERS = new Set<string>([
   // escape hatch as force-research: `fireAndForget: true` + `deriveItemId` for
   // stable per-record item IDs that correlate child outcomes back to records.
   "src/services/ocr/forms/verify.ts",
+  // `verify-relookup` is the verify analogue of force-research: an
+  // operator-driven HTTP entrypoint that re-runs ONE background lookup
+  // (person-lookup or i9-lookup) for ONE verify record from the review pane.
+  // Same escape-hatch needs as force-research/verify: `fireAndForget: true` +
+  // `deriveItemId` for a fresh per-invocation item id its own `watchChildRuns`
+  // correlates.
+  "src/workflows/ocr/verify-relookup.ts",
 ]);
 
 const IGNORED_FILES = new Set<string>([

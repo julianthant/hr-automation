@@ -324,6 +324,32 @@ export interface VerifyCheck {
   status: "present" | "found" | "missing";
 }
 
+/**
+ * Which background lookup populates a verify check — the two enrichment
+ * fan-outs in `verify`'s `enrichRecords` hook. `person` is person-lookup
+ * (name / EID / active status / CRM employment + oath dates); `i9` is
+ * i9-lookup (the Section-2 "Authorized Official Signer"). Drives the per-check
+ * retry button (`/api/ocr/verify-relookup`) so a failed lookup can be re-run
+ * individually. Mirrors `VerifyRelookupKind` in
+ * `src/workflows/ocr/verify-relookup.ts`.
+ */
+export type VerifyLookupKind = "person" | "i9";
+
+/** Map a `VerifyCheck.key` to the lookup that fills it, or null if on-paper-only. */
+export function verifyCheckLookupKind(key: string): VerifyLookupKind | null {
+  if (key === "officialSigner") return "i9";
+  if (
+    key === "name" ||
+    key === "eid" ||
+    key === "employmentDate" ||
+    key === "oathDate" ||
+    key === "activeStatus"
+  ) {
+    return "person";
+  }
+  return null;
+}
+
 export interface VerifyPreviewRecord {
   formKind: "oath" | "emergency-contact" | "unknown";
   sourcePage: number;

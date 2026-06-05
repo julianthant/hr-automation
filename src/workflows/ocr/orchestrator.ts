@@ -249,6 +249,14 @@ export async function runOcrOrchestrator(
   const lookupDaemonFlags = runOptionsToDaemonFlags(input.runOptions);
   const serializedWorkerData = serializeRunOptionsForData(input.runOptions);
 
+  // A STANDALONE OCR run (no `parentRunId`) has no downstream consumer to
+  // approve for — its terminal phase is a "review", not an "awaiting approval"
+  // gate. Mirrors the dashboard's StepPipeline label + OcrReviewPane Approve
+  // gate (approval ≡ delegation). DISPLAY-only: the tracker `step` key stays
+  // `awaiting-approval` (the real parked state); only operator-facing log
+  // wording changes.
+  const isStandaloneReview = !input.parentRunId;
+
   let lastAnnouncedPhase: string | undefined;
   // Latest rich preview payload (records + page metadata) emitted via
   // `emitSnapshot`. Hoisted above the try so the failure path can re-stamp it
@@ -266,7 +274,9 @@ export async function runOcrOrchestrator(
     }
     if (status === "running" && step && step !== lastAnnouncedPhase) {
       lastAnnouncedPhase = step;
-      log.step(`Phase: ${step}`);
+      const phaseLabel =
+        step === "awaiting-approval" && isStandaloneReview ? "review" : step;
+      log.step(`Phase: ${phaseLabel}`);
     }
     // Stamp __id so the dashboard's resolveEntryId surfaces a stable handle
     // on every row. Kernel runWorkflow computes this via getId; this
@@ -982,7 +992,9 @@ export async function runOcrOrchestrator(
     // OCR prep parked at awaiting-approval (the operator-approval gate). Run-scope
     // log → logs/ocr-<date>.jsonl; see docs/engineering/structured-log-events.md.
     log.success({
-      message: `[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`,
+      message: isStandaloneReview
+        ? `[ocr] preparation complete — ready for review (${records.length} record(s), ${verifiedCount} verified now)`
+        : `[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`,
       event: "ocr:awaiting-approval",
       category: "ocr",
       occasion: "waiting",
