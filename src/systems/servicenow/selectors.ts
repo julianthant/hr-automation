@@ -69,19 +69,37 @@ export const hrInquiry = {
       ),
 
   /**
-   * Search box inside the currently-open Select2 dropdown. Select2 v3 appends a
-   * single `.select2-drop.select2-drop-active` to `<body>`; only one dropdown
-   * is open at a time, so this is unambiguous across the form's comboboxes.
+   * Search box inside an open Select2 dropdown, scoped to ONE field by the
+   * drop search input's accessible name (`Select Specifically:` /
+   * `Select Category:` — note the `Select ` prefix, distinct from the choice
+   * anchor's `Specifically:` / `Category:`). Pass the bare field label
+   * (`"Specifically"` | `"Category"`).
+   *
+   * Why scoped, not `.select2-drop-active`: this ServiceNow build does NOT
+   * remove `select2-drop-active` from a drop once another opens, and it keeps
+   * each closed drop's search input in the DOM. So
+   * `.select2-drop-active input.select2-input` resolves to BOTH fields' inputs
+   * and `fill` dies on a strict-mode violation. The per-field accessible name
+   * is unambiguous regardless of how many drops linger. See LESSONS.md
+   * (2026-06-04).
    */
-  // verified 2026-06-02
-  select2DropSearch: (page: Page): Locator =>
-    page.locator(".select2-drop-active input.select2-input"),
+  // verified 2026-06-04
+  select2DropSearch: (page: Page, fieldLabel: string): Locator =>
+    page.getByRole("combobox", { name: `Select ${fieldLabel}:` }),
 
-  /** A result row in the open Select2 dropdown, matched by visible label. */
-  // verified 2026-06-02
-  select2ResultOption: (page: Page, label: string): Locator =>
+  /**
+   * A result row in a specific field's open Select2 dropdown, matched by
+   * visible label. Scoped to the field's own `.select2-drop` (via its search
+   * input's accessible name) so it never picks a row out of a sibling field's
+   * lingering-active drop. Pass the bare field label + the option text.
+   */
+  // verified 2026-06-04
+  select2ResultOption: (page: Page, fieldLabel: string, label: string): Locator =>
     page
-      .locator(".select2-drop-active .select2-result-label")
+      .getByRole("combobox", { name: `Select ${fieldLabel}:` })
+      .locator(
+        'xpath=ancestor::div[contains(concat(" ",normalize-space(@class)," ")," select2-drop ")][1]//*[contains(concat(" ",normalize-space(@class)," ")," select2-result-label ")]',
+      )
       .filter({ hasText: label })
       .first(),
 

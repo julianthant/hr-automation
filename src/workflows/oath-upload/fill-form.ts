@@ -33,12 +33,12 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
   await safeClick(hrInquiry.specificallyChoice(page), {
     label: "servicenow hr inquiry specifically combobox",
   });
-  await safeFill(hrInquiry.select2DropSearch(page), v.specifically, {
+  await safeFill(hrInquiry.select2DropSearch(page, "Specifically"), v.specifically, {
     label: "servicenow hr inquiry specifically",
   });
   await page.waitForTimeout(800);
   try {
-    await safeClick(hrInquiry.select2ResultOption(page, v.specifically), {
+    await safeClick(hrInquiry.select2ResultOption(page, "Specifically", v.specifically), {
       timeout: 3_000,
       label: "servicenow hr inquiry specifically option",
     });
@@ -59,12 +59,12 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
     await safeClick(hrInquiry.categoryChoice(page), {
       label: "servicenow hr inquiry category combobox",
     });
-    await safeFill(hrInquiry.select2DropSearch(page), v.category, {
+    await safeFill(hrInquiry.select2DropSearch(page, "Category"), v.category, {
       label: "servicenow hr inquiry category",
     });
     await page.waitForTimeout(500);
     try {
-      await safeClick(hrInquiry.select2ResultOption(page, v.category), {
+      await safeClick(hrInquiry.select2ResultOption(page, "Category", v.category), {
         timeout: 3_000,
         label: "servicenow hr inquiry category option",
       });
