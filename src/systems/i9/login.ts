@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
-import { validateEnv } from "../../utils/env.js";
+import { validateI9Env } from "../../utils/env.js";
 import { I9_URL } from "../../config.js";
 import { login as loginSelectors } from "./selectors.js";
 import { safeClick, safeFill } from "../common/index.js";
@@ -9,14 +9,15 @@ import { safeClick, safeFill } from "../common/index.js";
  * Authenticate to I9 Complete (Tracker I-9 by Mitratech).
  *
  * Two-step login: email first, then password.
- * Uses UCPATH_USER_ID@ucsd.edu as the email and UCPATH_PASSWORD.
+ * Uses I9_USER_ID + I9_PASSWORD when set, otherwise falls back to
+ * UCPATH_USER_ID@ucsd.edu + UCPATH_PASSWORD.
  * No Duo MFA — standard email/password auth.
  *
  * After login, domain changes from stse.i9complete.com to wwwe.i9complete.com.
  * A training notification popup appears and must be dismissed.
  */
 export async function loginToI9(page: Page): Promise<boolean> {
-  const { userId, password } = validateEnv();
+  const { userId, password } = validateI9Env();
   const email = userId.includes("@") ? userId : `${userId}@ucsd.edu`;
 
   log.step("Navigating to I9 Complete...");

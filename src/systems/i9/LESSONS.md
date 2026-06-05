@@ -45,3 +45,13 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `summary.heading`, `summary.signedSection2Row` in `selectors.ts`; consumed from `signer.ts::lookupSection2Signer`.
 **References:** Mapped live against profile 2082422 on 2026-04-22 via Playwright CLI.
 **Tags:** summary, audit-trail, signer, section2, historical, unsigned, signed, row, createdby
+
+## 2026-06-04 — I-9 credentials can differ from UCPath credentials
+
+**Tried:** Reusing `validateEnv()` inside `loginToI9`, which always pulls `UCPATH_USER_ID` and `UCPATH_PASSWORD`, then relying on OCR verify's delegated `i9-lookup` rows to authenticate with I-9 Complete.
+
+**Failed because:** Tracker I-9 / I9 Complete can have a separate password from UCPath. When the I-9-specific credential differs, the daemon starts under the wrong password source and delegated signer lookups fail or get cancelled before lookup.
+
+**Fix:** Use `validateI9Env()` for `loginToI9`. It reads `I9_USER_ID` and `I9_PASSWORD` when either I-9-specific credential is configured, requires both to avoid mixing credential pairs, and falls back to the UCPath pair only when both I-9 vars are absent. Keep `.env.example` documenting the optional override.
+
+**Tags:** i9, auth, credentials, env, daemon, login, verify, signer
