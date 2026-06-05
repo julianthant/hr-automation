@@ -786,8 +786,10 @@ const sessIdleLogs = session({
   instance: "Person Lookup 1",
   workflow: "person-lookup",
   startedAt: agoIso(300),
-  // Idle daemon that already processed an item — keeps the last run's trace id
-  // in the subtitle (mirrors the kept-after-complete backend behavior).
+  // Idle daemon that already processed an item. currentTraceId is still set
+  // (the last run's id) but the subtitle now HIDES it once the item is no
+  // longer in flight — it falls back to the phase subline ("idle — waiting for
+  // work"). Exercises that the trace id shows only while itemInFlight.
   currentTraceId: "pl-093100-bb02",
   daemonPhase: "idle",
   sessions: [{ sessionId: "s5", browsers: [browser("crm", "authed")] }],
@@ -847,7 +849,7 @@ function SessionCardsTab() {
           <span className="font-mono">/api/daemon/stop</span> — don&apos;t click it against a live daemon.
         </p>
         <div className="grid grid-cols-1 min-[680px]:grid-cols-2 min-[1040px]:grid-cols-3 gap-4 items-start">
-          <Variant width={290} label="in-flight" axes="active · itemInFlight · 2 browsers authed" note="cyan border tint; subline = current item">
+          <Variant width={290} label="in-flight" axes="active · itemInFlight · 2 browsers authed" note="cyan border tint; subtitle = trace id, footer = current step">
             <div className="px-2"><WorkflowBox workflow={sessInFlight} /></div>
           </Variant>
           <Variant width={290} label="authenticating" axes="active · auth · 1/2 authed" note="blue step; one tile still spinning">
@@ -859,7 +861,7 @@ function SessionCardsTab() {
           <Variant width={290} label="idle + UCPath ring" axes="active · daemonPhase=idle · ucpathIdle set" note="idle-refresh countdown ring on the UCPath tile">
             <div className="px-2"><WorkflowBox workflow={sessIdleUcpath} /></div>
           </Variant>
-          <Variant width={290} label="idle · last trace id" axes="active · daemonPhase=idle · currentTraceId set" note="subtitle shows trace id after last run">
+          <Variant width={290} label="idle (had a run)" axes="active · daemonPhase=idle · currentTraceId set" note="trace id hidden once idle; subtitle falls back to phase">
             <div className="px-2"><WorkflowBox workflow={sessIdleLogs} /></div>
           </Variant>
           <Variant width={290} label="keepalive" axes="active · daemonPhase=keepalive" note="'keepalive — checking browsers'">

@@ -61,6 +61,7 @@ Full reference: `docs/engineering/tracker-reference.md`.
 - Do not resurrect `markStaleRunningEntries`; long Duo/Kronos waits can look stale but be valid.
 - SIGINT writes must be synchronous because `process.exit` follows immediately.
 - Do not wrap synchronous append calls in async mutexes; `appendFileSync` with `O_APPEND` provides the read-after-write behavior tests rely on.
+- `emitStepChange` must ALWAYS emit — never dedup it against step logs. It is the only carrier of a daemon's live `currentStep` (`rebuildSessionState` reads nothing else). A prior 50ms "skip if a recent `step:start` log exists" guard silently broke the session card: `Stepper.announce` writes that log immediately before calling `emitStepChange`, so the guard matched every `ctx.step` and `currentStep` stayed null. Dedup the resulting duplicate log/event lines at render time (dashboard `mergeDisplayItems`), not at emit time.
 
 ## Adding Tracking
 
