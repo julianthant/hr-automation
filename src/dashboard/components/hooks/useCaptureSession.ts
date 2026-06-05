@@ -41,7 +41,15 @@ function reduceSession(s: CaptureSessionInfo, ev: CaptureSessionEvent): CaptureS
   const p = ev.payload;
   switch (ev.type) {
     case "phone_connected":
-      return { ...s, phoneConnectedAt: ev.ts };
+      return {
+        ...s,
+        phoneConnectedAt: ev.ts,
+        ...(
+          typeof (p as { expiresAt?: unknown }).expiresAt === "number"
+            ? { expiresAt: (p as { expiresAt: number }).expiresAt }
+            : {}
+        ),
+      };
     case "photo_added": {
       const photo = p as unknown as CapturePhotoSummary;
       const existing = s.photos.findIndex((x) => x.index === photo.index);

@@ -73,7 +73,8 @@ const TERMINAL_STATES: ReadonlySet<CaptureSessionState> = new Set([
   "expired",
 ]);
 
-const SESSION_TTL_MS = 15 * 60 * 1_000;
+const PRE_CONNECT_TTL_MS = 15 * 60 * 1_000;
+const CONNECTED_IDLE_TTL_MS = 60 * 60 * 1_000;
 
 export interface CreateSessionInput {
   workflow: string;
@@ -154,8 +155,19 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
     return randomBytes(12).toString("base64url");
   }
 
+  function ttlFor(s: CaptureSession): number {
+    return s.phoneConnectedAt == null ? PRE_CONNECT_TTL_MS : CONNECTED_IDLE_TTL_MS;
+  }
+
   function bumpExpiry(s: CaptureSession): void {
-    s.expiresAt = now() + SESSION_TTL_MS;
+    s.expiresAt = now() + ttlFor(s);
+  }
+
+  function expireIfDue(s: CaptureSession): void {
+    if (s.state !== "open") return;
+    if (now() < s.expiresAt) return;
+    s.state = "expired";
+    emit(s.sessionId, "expired", {});
   }
 
   function buildPhoto(
@@ -188,7 +200,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
         workflow,
         contextHint,
         createdAt: t,
-        expiresAt: t + SESSION_TTL_MS,
+        expiresAt: t + PRE_CONNECT_TTL_MS,
         state: "open",
         photos: [],
         onFinalize,
@@ -208,16 +220,22 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
     },
 
     getById(sessionId): CaptureSession | undefined {
-      return sessions.get(sessionId);
+      const s = sessions.get(sessionId);
+      if (s) expireIfDue(s);
+      return s;
     },
 
     getByToken(token): CaptureSession | undefined {
       const id = tokenIndex.get(token);
-      return id ? sessions.get(id) : undefined;
+      if (!id) return undefined;
+      const s = sessions.get(id);
+      if (s) expireIfDue(s);
+      return s;
     },
 
     addPhoto(sessionId, input): CapturedPhoto | undefined {
       const s = sessions.get(sessionId);
+      if (s) expireIfDue(s);
       if (!s || TERMINAL_STATES.has(s.state)) return undefined;
       const idx = nextPhotoIndex.get(sessionId) ?? 0;
       nextPhotoIndex.set(sessionId, idx + 1);
@@ -232,6 +250,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
 
     removePhoto(sessionId, photoIndex): CapturedPhoto | undefined {
       const s = sessions.get(sessionId);
+      if (s) expireIfDue(s);
       if (!s || TERMINAL_STATES.has(s.state)) return undefined;
       const arrIdx = s.photos.findIndex((p) => p.index === photoIndex);
       if (arrIdx < 0) return undefined;
@@ -244,6 +263,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
       | { old: CapturedPhoto; replaced: CapturedPhoto }
       | undefined {
       const s = sessions.get(sessionId);
+      if (s) expireIfDue(s);
       if (!s || TERMINAL_STATES.has(s.state)) return undefined;
       const arrIdx = s.photos.findIndex((p) => p.index === photoIndex);
       if (arrIdx < 0) return undefined;
@@ -267,6 +287,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
 
     reorderPhotos(sessionId, fromIndex, toIndex): boolean {
       const s = sessions.get(sessionId);
+      if (s) expireIfDue(s);
       if (!s || TERMINAL_STATES.has(s.state)) return false;
       const len = s.photos.length;
       if (
@@ -333,6 +354,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
 
     extend(sessionId, byMs): number | undefined {
       const s = sessions.get(sessionId);
+      if (s) expireIfDue(s);
       if (!s || TERMINAL_STATES.has(s.state)) return undefined;
       if (!Number.isFinite(byMs) || byMs <= 0) return undefined;
       s.expiresAt = s.expiresAt + byMs;
@@ -343,13 +365,17 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
     markPhoneConnected(sessionId, info): boolean {
       const s = sessions.get(sessionId);
       if (!s) return false;
+      expireIfDue(s);
+      if (TERMINAL_STATES.has(s.state)) return false;
       if (s.phoneConnectedAt != null) return true;
       s.phoneConnectedAt = now();
       if (info?.userAgent) s.phoneUserAgent = info.userAgent;
       if (info?.ip) s.phoneIp = info.ip;
+      if (s.state === "open") bumpExpiry(s);
       emit(sessionId, "phone_connected", {
         userAgent: info?.userAgent,
         ip: info?.ip,
+        expiresAt: s.expiresAt,
       });
       return true;
     },
@@ -358,7 +384,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
       const t = now();
       let count = 0;
       for (const s of sessions.values()) {
-        if (TERMINAL_STATES.has(s.state)) continue;
+        if (s.state !== "open" || TERMINAL_STATES.has(s.state)) continue;
         if (t >= s.expiresAt) {
           s.state = "expired";
           emit(s.sessionId, "expired", {});
@@ -369,6 +395,7 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
     },
 
     listAll(): CaptureSession[] {
+      for (const s of sessions.values()) expireIfDue(s);
       return [...sessions.values()].sort((a, b) => b.createdAt - a.createdAt);
     },
 
