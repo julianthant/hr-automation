@@ -1,10 +1,23 @@
-import { Check, Search, X } from "lucide-react";
-import type { VerifyCheck, VerifyPreviewRecord } from "./types";
+import { Check, RotateCw, Search, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  verifyCheckLookupKind,
+  type VerifyCheck,
+  type VerifyLookupKind,
+  type VerifyPreviewRecord,
+} from "./types";
 
 export interface VerifyRecordViewProps {
   record: VerifyPreviewRecord;
   /** Unused — read-only view; kept for registry signature parity. */
   onChange?: (next: VerifyPreviewRecord) => void;
+  /**
+   * Re-run ONE background lookup for this record (`/api/ocr/verify-relookup`).
+   * Wired only for failed (`missing`) lookup-backed checks.
+   */
+  onRelookup?: (lookup: VerifyLookupKind) => void;
+  /** Which lookups are currently re-running for this record. */
+  relookupPending?: ReadonlySet<VerifyLookupKind>;
 }
 
 function FormKindChip({ formKind }: { formKind: VerifyPreviewRecord["formKind"] }) {
@@ -48,19 +61,68 @@ function SourceBadge({ source }: { source: VerifyCheck["source"] }) {
   );
 }
 
-function CheckRow({ check }: { check: VerifyCheck }) {
+/**
+ * Re-run button for a failed lookup check. Spins + disables while the lookup
+ * is in flight (the request stays open for the whole lookup, so the row
+ * re-emits with patched data when it resolves).
+ */
+function RelookupButton({
+  label,
+  pending,
+  onClick,
+}: {
+  label: string;
+  pending: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      title={pending ? `Re-running ${label} lookup…` : `Re-run ${label} lookup`}
+      aria-label={pending ? `Re-running ${label} lookup` : `Re-run ${label} lookup`}
+      className={cn(
+        "inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground outline-none transition-colors",
+        "hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+        "disabled:cursor-wait disabled:opacity-60",
+      )}
+    >
+      <RotateCw
+        className={cn("h-3 w-3", pending && "animate-spin motion-reduce:animate-none")}
+        aria-hidden
+      />
+    </button>
+  );
+}
+
+function CheckRow({
+  check,
+  onRelookup,
+  relookupPending,
+}: {
+  check: VerifyCheck;
+  onRelookup?: (lookup: VerifyLookupKind) => void;
+  relookupPending?: ReadonlySet<VerifyLookupKind>;
+}) {
   const isPresentOrFound = check.status === "present" || check.status === "found";
   const value = check.status === "present" ? check.paperValue : check.foundValue;
 
+  // Option A: only FAILED (missing) lookup-backed checks get a retry button.
+  const lookupKind = check.status === "missing" ? verifyCheckLookupKind(check.key) : null;
+  const canRelookup = lookupKind !== null && onRelookup !== undefined;
+  const pending = lookupKind !== null && (relookupPending?.has(lookupKind) ?? false);
+
   return (
     <div
-      className={`flex items-start gap-3 rounded-md px-3 py-2.5 ${
+      className={cn(
+        "flex items-start gap-3 rounded-md px-3 py-2.5",
         check.status === "found"
           ? "bg-info/5 ring-1 ring-info/20"
           : check.status === "missing"
             ? "bg-destructive/5"
-            : "bg-transparent"
-      }`}
+            : "bg-transparent",
+      )}
     >
       {/* Status icon */}
       <div className="mt-px shrink-0">
@@ -84,9 +146,10 @@ function CheckRow({ check }: { check: VerifyCheck }) {
           {isPresentOrFound && value ? (
             <>
               <span
-                className={`truncate text-sm font-medium ${
-                  check.status === "found" ? "text-foreground" : "text-foreground/80"
-                }`}
+                className={cn(
+                  "truncate text-sm font-medium",
+                  check.status === "found" ? "text-foreground" : "text-foreground/80",
+                )}
               >
                 {value}
               </span>
@@ -96,7 +159,19 @@ function CheckRow({ check }: { check: VerifyCheck }) {
               {check.status === "found" && <SourceBadge source={check.source} />}
             </>
           ) : (
-            <span className="text-sm text-muted-foreground">— not found</span>
+            <span
+              className="text-sm text-muted-foreground"
+              aria-live={pending ? "polite" : undefined}
+            >
+              {pending ? "Looking up…" : "— not found"}
+            </span>
+          )}
+          {canRelookup && (
+            <RelookupButton
+              label={check.label}
+              pending={pending}
+              onClick={() => onRelookup!(lookupKind)}
+            />
           )}
         </div>
       </div>
@@ -107,9 +182,10 @@ function CheckRow({ check }: { check: VerifyCheck }) {
 /**
  * Read-only completeness report for a verify OCR record. Shows each check
  * from `record.checks` so the operator can copy "found" values onto the
- * physical form before filing.
+ * physical form before filing. Failed (`missing`) lookup-backed checks carry a
+ * ↻ retry that re-runs just that lookup for this record.
  */
-export function VerifyRecordView({ record }: VerifyRecordViewProps) {
+export function VerifyRecordView({ record, onRelookup, relookupPending }: VerifyRecordViewProps) {
   const checks = record.checks ?? [];
   const resolvedName =
     record.name || (typeof record.printedName === "string" ? record.printedName : null) || "(no name)";
@@ -153,14 +229,14 @@ export function VerifyRecordView({ record }: VerifyRecordViewProps) {
           </p>
           <div className="flex flex-col gap-1">
             {checks.map((check) => (
-              <CheckRow key={check.key} check={check} />
+              <CheckRow
+                key={check.key}
+                check={check}
+                onRelookup={onRelookup}
+                relookupPending={relookupPending}
+              />
             ))}
           </div>
-          {checks.some((c) => c.status === "found") && (
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              Write <span className="font-medium text-info">looked-up</span> values onto the physical form.
-            </p>
-          )}
         </div>
       )}
     </div>

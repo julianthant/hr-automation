@@ -5,6 +5,7 @@ import {
   parseVerifyPrepareRowData,
   type OathPreviewRecord,
   type PreviewRecord,
+  type VerifyLookupKind,
   type VerifyPreviewRecord,
 } from "../components/ocr/types";
 
@@ -56,6 +57,10 @@ export interface OcrDownstreamConfig {
     /** Re-run lookups for this record (OCR pane only — `/api/ocr/force-research`). */
     onForceResearch?: (record: AnyOcrPreviewRecord) => void;
     isResearching?: boolean;
+    /** Verify-only: re-run ONE background lookup for this record (`/api/ocr/verify-relookup`). */
+    onRelookup?: (lookup: VerifyLookupKind) => void;
+    /** Verify-only: which lookups are currently re-running for this record. */
+    relookupPending?: ReadonlySet<VerifyLookupKind>;
   }) => ReactNode;
 }
 

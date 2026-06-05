@@ -10,6 +10,7 @@ import {
   buildOcrPrepareHandler,
   buildOcrReocrWholePdfHandler,
   buildOcrRetryPageHandler,
+  buildOcrVerifyRelookupHandler,
 } from "../../ocr/index.js";
 import { buildOcrDiscardHandler } from "../../../../control/ocr/discard.js";
 import { registerLocalFile } from "../../../files/files.js";
@@ -29,6 +30,7 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
     approve: buildOcrApproveHandler({ trackerDir: deps.dir }),
     discard: buildOcrDiscardHandler({ trackerDir: deps.dir }),
     forceResearch: buildOcrForceResearchHandler({ trackerDir: deps.dir }),
+    verifyRelookup: buildOcrVerifyRelookupHandler({ trackerDir: deps.dir }),
     retryPage: buildOcrRetryPageHandler({ trackerDir: deps.dir }),
     reocrWholePdf: buildOcrReocrWholePdfHandler({ trackerDir: deps.dir }),
   };
@@ -81,6 +83,19 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
       recordIndices: Array.isArray(parsed.body.recordIndices)
         ? parsed.body.recordIndices.map(Number)
         : [],
+    });
+    return jsonResponse(result.body, result.status);
+  });
+
+  app.post("/api/ocr/verify-relookup", async (c) => {
+    const parsed = await readJsonRequest(c.req.raw, 4096);
+    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const lookup = String(parsed.body.lookup ?? "");
+    const result = await handlers.verifyRelookup({
+      sessionId: String(parsed.body.sessionId ?? ""),
+      runId: String(parsed.body.runId ?? ""),
+      recordIndex: Number(parsed.body.recordIndex ?? -1),
+      lookup: lookup === "i9" ? "i9" : "person",
     });
     return jsonResponse(result.body, result.status);
   });

@@ -57,6 +57,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/ocr/approve-batch" },
   { method: "POST", path: "/api/ocr/discard-prepare" },
   { method: "POST", path: "/api/ocr/force-research" },
+  { method: "POST", path: "/api/ocr/verify-relookup" },
   { method: "POST", path: "/api/ocr/retry-page" },
   { method: "POST", path: "/api/ocr/reocr-whole-pdf" },
   { method: "GET", path: "/api/oath-upload/check-duplicate" },
