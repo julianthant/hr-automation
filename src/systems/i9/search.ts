@@ -9,6 +9,11 @@ import {
 } from "./navigate.js";
 import { safeClick, safeFill } from "../common/index.js";
 
+export interface I9SearchOptions {
+  /** Close the Kendo search dialog after parsing. Defaults to true. */
+  closeDialog?: boolean;
+}
+
 /**
  * Search for an existing employee in I9 Complete.
  *
@@ -32,7 +37,10 @@ import { safeClick, safeFill } from "../common/index.js";
 export async function searchI9Employee(
   page: Page,
   criteria: I9SearchCriteria,
+  options: I9SearchOptions = {},
 ): Promise<I9SearchResult[]> {
+  const closeDialog = options.closeDialog ?? true;
+
   // Open search dialog by clicking "Search Options"
   log.step("Opening I9 search dialog...");
   await clickWithKendoRecovery(page, dashboard.searchOptionsButton(page), "search options", 5_000);
@@ -95,8 +103,47 @@ export async function searchI9Employee(
 
   // Parse results grid
   log.debug(`I9 search complete — post-parse state: ${await snapshotKendoWindows(page)}`);
-  await closeAllKendoWindows(page);
-  return parseSearchResults(page);
+  const results = await parseSearchResults(page);
+  if (closeDialog) await closeAllKendoWindows(page);
+  return results;
+}
+
+export function isIncompleteI9SectionAction(nextAction: string): boolean {
+  return /^complete\s+section\s+[12]$/i.test(nextAction.trim().replace(/\s+/g, " "));
+}
+
+export function isSelectableI9SignerLookupAction(nextAction: string): boolean {
+  const normalized = nextAction.trim().replace(/\s+/g, " ");
+  return normalized.length > 0 && !isIncompleteI9SectionAction(normalized);
+}
+
+export function pickI9SignerSearchResult(
+  results: readonly I9SearchResult[],
+): I9SearchResult | undefined {
+  return results.find((result) => isSelectableI9SignerLookupAction(result.nextAction));
+}
+
+export async function openI9SearchResult(page: Page, result: I9SearchResult): Promise<void> {
+  const row = searchSelectors.resultRows(page).nth(result.rowIndex);
+  const lastNameLink = row
+    .getByRole("link", { name: new RegExp(`^${escapeRegExp(result.lastName)}$`, "i") }) // allow-inline-selector -- row-scoped search-result last-name link
+    .first();
+  const fallbackLink = row.getByRole("link").first(); // allow-inline-selector -- row-scoped fallback when link accessible name includes extra text
+  const target = result.lastName ? lastNameLink.or(fallbackLink).first() : fallbackLink;
+
+  log.step(
+    `Opening I9 search result row ${result.rowIndex + 1}: ${result.lastName}, ${result.firstName} — ${result.nextAction}`,
+  );
+  await safeClick(target, {
+    timeout: 10_000,
+    label: "i9 selected search result last name",
+  });
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -132,12 +179,14 @@ async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
     const i9Id = cellTexts[5] ?? "";
     const nextAction = cellTexts[6] ?? "";
     const startDate = cellTexts[7] ?? "";
+    const createdOn = cellTexts[8] ?? "";
 
     // Extract nav URL from the link in the row
     const link = row.getByRole("link"); // allow-inline-selector -- row-scoped link readback
     const navUrl = await link.first().getAttribute("href").catch(() => "") ?? "";
 
     results.push({
+      rowIndex: i,
       lastName: lastName.trim(),
       firstName: firstName.trim(),
       employer: employer.trim(),
@@ -146,6 +195,7 @@ async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
       i9Id: i9Id.trim(),
       nextAction: nextAction.trim(),
       startDate: startDate.trim(),
+      createdOn: createdOn.trim(),
       navUrl,
     });
   }

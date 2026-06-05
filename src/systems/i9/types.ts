@@ -28,6 +28,7 @@ export interface I9SearchCriteria {
 }
 
 export interface I9SearchResult {
+  rowIndex: number;
   lastName: string;
   firstName: string;
   employer: string;
@@ -36,5 +37,6 @@ export interface I9SearchResult {
   i9Id: string;
   nextAction: string;
   startDate: string;
+  createdOn: string;
   navUrl: string;
 }
