@@ -1,4 +1,5 @@
 import { defineWorkflow, runWorkflow } from "../../core/index.js";
+import type { Ctx } from "../../core/kernel/types.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
@@ -28,6 +29,32 @@ const I9_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
 };
 
 const i9LookupSteps = ["lookup"] as const;
+
+type I9LookupCtx = Pick<
+  Ctx<typeof i9LookupSteps, I9LookupInput>,
+  "page" | "screenshot" | "step" | "updateData"
+>;
+
+export async function handleI9Lookup(
+  ctx: I9LookupCtx,
+  input: I9LookupInput,
+  lookupImpl: typeof lookupSection2Signer = lookupSection2Signer,
+): Promise<void> {
+  const page = await ctx.page("i9");
+  await ctx.step("lookup", async () => {
+    const result = await lookupImpl(page, {
+      lastName: input.lastName,
+      firstName: input.firstName,
+      ...(input.ssn ? { ssn: input.ssn } : {}),
+    });
+    ctx.updateData({
+      signerName: result.signerName ?? "",
+      i9Status: result.status,
+      ...(result.profileId ? { profileId: result.profileId } : {}),
+    });
+    await ctx.screenshot({ kind: "form", label: "i9-lookup-summary", systems: ["i9"] });
+  });
+}
 
 /**
  * I9 Lookup workflow — **delegated-only**.
@@ -70,30 +97,15 @@ export const i9LookupWorkflow = defineWorkflow({
   schema: I9LookupInputSchema,
   runtimePolicy: I9_LOOKUP_WORKFLOW_RUNTIME_POLICY,
   detailFields: [
-    { key: "signerName", label: "Signed By" },
+    { key: "signerName", label: "Authorized Official Signer" },
     { key: "i9Status", label: "I-9 Status" },
   ],
   operatorSubject: (input) =>
     buildOperatorSubject({
       kind: "person",
       value: `${input.lastName}, ${input.firstName}`,
-      prefix: "I9 Lookup",
     }),
-  handler: async (ctx, input) => {
-    const page = await ctx.page("i9");
-    await ctx.step("lookup", async () => {
-      const result = await lookupSection2Signer(page, {
-        lastName: input.lastName,
-        firstName: input.firstName,
-        ...(input.ssn ? { ssn: input.ssn } : {}),
-      });
-      ctx.updateData({
-        signerName: result.signerName ?? "",
-        i9Status: result.status,
-        ...(result.profileId ? { profileId: result.profileId } : {}),
-      });
-    });
-  },
+  handler: handleI9Lookup,
 });
 
 export async function runI9LookupWorkflow(input: I9LookupInput): Promise<void> {
