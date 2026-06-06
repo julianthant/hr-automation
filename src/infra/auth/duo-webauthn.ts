@@ -352,6 +352,37 @@ export function reserveDuoWebAuthnSignCounts(
 }
 
 /**
+ * Resync margin applied when a hands-off assertion *signed* but Duo never
+ * completed — the signature of a signCount drift: the local counter fell at/below
+ * Duo's server-side counter, so Duo treats the assertion as a possible clone and
+ * silently refuses to advance (the prompt hangs on "Use Touch ID"). Deliberately
+ * larger than {@link DUO_WEBAUTHN_SIGNCOUNT_RESERVE} so a *single* login retry
+ * clears even a multi-step drift within the kernel's 3-attempt budget — the +10
+ * reserve alone only leapfrogs +10 per attempt, so a drift > +30 would exhaust
+ * the retries before recovering.
+ */
+export const DUO_WEBAUTHN_SIGNCOUNT_RESYNC = 100;
+
+/**
+ * Jump every enrolled credential's persisted signCount forward by `margin` so the
+ * NEXT {@link armDuoWebAuthn} seeds the CDP authenticator above Duo's server-side
+ * counter. Called from the poll loop when a WebAuthn assertion signed but did not
+ * complete (the clone-rejection hang). Best-effort and design-consistent — reuses
+ * {@link reserveDuoWebAuthnSignCounts}'s monotonic file bump, so it is safe even
+ * when the failure was not counter-related (counters only ever move forward).
+ * Returns true when the file was bumped, false when no credential is
+ * available/writable.
+ */
+export function resyncDuoWebAuthnSignCounts(
+  path: string = duoWebAuthnCredentialPath(),
+  margin: number = DUO_WEBAUTHN_SIGNCOUNT_RESYNC,
+): boolean {
+  const creds = loadDuoWebAuthnCredentials(path);
+  if (creds.length === 0) return false;
+  return reserveDuoWebAuthnSignCounts(creds, path, margin);
+}
+
+/**
  * Read + validate a single enrolled credential. Returns `undefined` (logs why)
  * when absent/invalid. Retained for the legacy single-object file shape and unit
  * tests; the runtime uses {@link loadDuoWebAuthnCredentials}.

@@ -4,6 +4,7 @@ import {
   DUO_POLL_INTERVAL_MS,
   DUO_PRE_CHECK_MS,
   DUO_PRE_CHECK_INTERVAL_MS,
+  DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS,
   buildDuoResentDetail,
   buildDuoWaitingDetail,
   extractDuoVerificationCode,
@@ -131,6 +132,25 @@ describe("DuoPollOptions interface", () => {
     const opts: DuoPollOptions = { successUrlMatch: "kualibuild" };
     assert.equal(opts.preCheckMs, undefined);
     assert.equal(opts.preCheckIntervalMs, undefined);
+  });
+
+  it("accepts optional webauthnFallbackSeconds override", () => {
+    const opts: DuoPollOptions = {
+      successUrlMatch: "kualibuild",
+      webauthnFallbackSeconds: 5,
+    };
+    assert.equal(opts.webauthnFallbackSeconds, 5);
+  });
+
+  it("webauthnFallbackSeconds is optional", () => {
+    const opts: DuoPollOptions = { successUrlMatch: "kualibuild" };
+    assert.equal(opts.webauthnFallbackSeconds, undefined);
+  });
+});
+
+describe("DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS constant", () => {
+  it("is a short window (30s) — long enough to hand-rescue, short enough to fail fast into the retry", () => {
+    assert.equal(DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS, 30);
   });
 });
 

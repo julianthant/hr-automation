@@ -2,7 +2,12 @@ import type { Page } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "../../utils/log.js";
 import { cueDuo } from "./voice-cue.js";
-import { beginDuoWebAuthn, finishDuoWebAuthn, isDuoWebAuthnEnabled } from "./duo-webauthn.js";
+import {
+  beginDuoWebAuthn,
+  finishDuoWebAuthn,
+  isDuoWebAuthnEnabled,
+  resyncDuoWebAuthnSignCounts,
+} from "./duo-webauthn.js";
 
 export function extractDuoVerificationCode(text: string): string | undefined {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -116,6 +121,19 @@ export const DUO_PRE_CHECK_INTERVAL_MS = 500;
 export const DUO_WEBAUTHN_GRACE_MS = 25_000;
 
 /**
+ * Shortened manual-approval window used ONLY after a hands-off WebAuthn assertion
+ * signed but did not complete within its grace window (the signCount-drift hang
+ * seen as "stuck on Use Touch ID"). On that path no phone push was ever sent — the
+ * prompt is stuck mid-WebAuthn-ceremony — so the normal 180s "approve on your
+ * phone" wait cannot complete on its own and would just stall before the kernel's
+ * auto-retry (which re-arms from the resynced counter and approves hands-off). We
+ * keep a SHORT window rather than skipping it so the operator can still hand-rescue
+ * the *visible* browser via "Other options → Duo Push", then fail fast into the
+ * retry. Tests/callers override via `webauthnFallbackSeconds`.
+ */
+export const DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS = 30;
+
+/**
  * Bounded approval wait used by the WebAuthn path: each tick clicks the
  * "Yes, this is my device" trust button if present, then checks the success
  * URL (with the optional `successCheck`). Returns true on success, false when
@@ -213,6 +231,14 @@ export interface DuoPollOptions {
    * values; production should leave unset.
    */
   webauthnGraceMs?: number;
+
+  /**
+   * Override the shortened manual-approval window (in seconds) applied only after
+   * a WebAuthn assertion signed but did not complete in its grace window
+   * (`DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS`, 30s). Not consulted on the normal
+   * (WebAuthn-off, or factor-not-found) manual path. Tests pass small values.
+   */
+  webauthnFallbackSeconds?: number;
 
   /**
    * Determines whether the current URL indicates successful authentication.
@@ -313,6 +339,11 @@ export async function pollDuoApproval(
   // ── inner loop — wrapped so any throw (abort) still finalizes WebAuthn ──
   async function runDuoPollLoop(): Promise<boolean> {
 
+  // Set when a hands-off WebAuthn assertion signed but did not complete in its
+  // grace window — shortens the manual fallback (no push was sent; the retry
+  // heals it hands-off). See DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS.
+  let webauthnFellBack = false;
+
   // Pre-check phase: if Duo's "Yes, this is my device" trust token is
   // cached, the SAML chain redirects through to the success URL without
   // pushing to Duo Mobile. We don't want to fire a voice cue claiming a
@@ -375,7 +406,21 @@ export async function pollDuoApproval(
         return true;
       }
       await handle.finish({ approved: false });
-      log.warn("Duo WebAuthn did not complete within grace window — falling back to manual approval");
+      // The authenticator signed but Duo never redirected to success — the classic
+      // signCount-drift "stuck on Use Touch ID" hang: the local counter fell
+      // at/below Duo's server-side counter, so Duo treats the assertion as a
+      // possible clone and silently refuses. Resync the persisted counter forward
+      // so the kernel's NEXT login attempt re-arms above Duo's counter and approves
+      // hands-off. Best-effort + monotonic, so it's safe even if the failure wasn't
+      // counter-related. Then take the SHORTENED manual window below (no push was
+      // sent — the full 180s wait would just stall before the auto-retry).
+      const resynced = resyncDuoWebAuthnSignCounts();
+      webauthnFellBack = true;
+      log.warn(
+        resynced
+          ? "Duo WebAuthn signed but did not complete (likely signCount drift) — bumped counter; brief manual window, then auto-retry"
+          : "Duo WebAuthn did not complete within grace window — brief manual window, then auto-retry",
+      );
     }
   }
 
@@ -400,7 +445,15 @@ export async function pollDuoApproval(
       : "Waiting for Duo approval (approve on your phone)...",
   );
 
-  for (let elapsed = 0; elapsed < timeoutSeconds; elapsed += pollIntervalSec) {
+  // After a WebAuthn assertion signed-but-stalled, no push was sent, so cap the
+  // manual wait to a short window: long enough for the operator to hand-rescue the
+  // visible browser via "Other options → Duo Push", short enough to fail fast into
+  // the kernel's auto-retry (which re-arms from the resynced counter).
+  const effectiveTimeoutSeconds = webauthnFellBack
+    ? Math.min(timeoutSeconds, options.webauthnFallbackSeconds ?? DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS)
+    : timeoutSeconds;
+
+  for (let elapsed = 0; elapsed < effectiveTimeoutSeconds; elapsed += pollIntervalSec) {
     options.abortSignal?.throwIfAborted();
     try {
       // Run optional recovery callback to handle mid-auth errors (e.g., SAML redirects)
@@ -490,7 +543,11 @@ export async function pollDuoApproval(
     await waitForDuoPoll(pollIntervalMs, options.abortSignal);
   }
 
-  log.error("Duo approval timed out");
+  log.error(
+    webauthnFellBack
+      ? "Duo WebAuthn fallback window elapsed without manual rescue — returning false so the kernel retries (re-arms from the resynced counter)"
+      : "Duo approval timed out",
+  );
   await finishDuoWebAuthn(page);
   return false;
   } // end runDuoPollLoop
