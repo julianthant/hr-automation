@@ -10,6 +10,7 @@ import {
   factorPatternForTransport,
   nextSignCount,
   reserveDuoWebAuthnSignCounts,
+  resyncDuoWebAuthnSignCounts,
   acquireDuoWebAuthnLock,
   loadDuoWebAuthnCredential,
   loadDuoWebAuthnCredentials,
@@ -17,6 +18,7 @@ import {
   ctap2SupportShim,
   DUO_WEBAUTHN_CREDENTIAL_PATH,
   DUO_WEBAUTHN_SIGNCOUNT_RESERVE,
+  DUO_WEBAUTHN_SIGNCOUNT_RESYNC,
   type DuoWebAuthnCredential,
 } from "../../../../src/infra/auth/duo-webauthn.js";
 import { log } from "../../../../src/utils/log.js";
@@ -148,6 +150,43 @@ describe("reserveDuoWebAuthnSignCounts", () => {
     writeFileSync(p, JSON.stringify({ credentials: [USB] }));
 
     assert.equal(reserveDuoWebAuthnSignCounts([VALID], p), false);
+  });
+});
+
+describe("resyncDuoWebAuthnSignCounts", () => {
+  it("jumps every enrolled credential forward by the resync margin", () => {
+    const p = join(tmp, "resync.json");
+    writeFileSync(
+      p,
+      JSON.stringify({ credentials: [{ ...VALID, signCount: 5 }, { ...USB, signCount: 9 }] }),
+    );
+
+    assert.equal(resyncDuoWebAuthnSignCounts(p), true);
+
+    const saved = loadDuoWebAuthnCredentials(p);
+    assert.equal(saved.find((c) => c.transport === "internal")?.signCount, 5 + DUO_WEBAUTHN_SIGNCOUNT_RESYNC);
+    assert.equal(saved.find((c) => c.transport === "usb")?.signCount, 9 + DUO_WEBAUTHN_SIGNCOUNT_RESYNC);
+  });
+
+  it("accepts a custom margin", () => {
+    const p = join(tmp, "resync-custom.json");
+    writeFileSync(p, JSON.stringify({ credentials: [{ ...VALID, signCount: 1 }] }));
+
+    assert.equal(resyncDuoWebAuthnSignCounts(p, 42), true);
+    assert.equal(loadDuoWebAuthnCredentials(p)[0]?.signCount, 1 + 42);
+  });
+
+  it("is a larger jump than the per-arm reserve so one retry clears a multi-step drift", () => {
+    assert.ok(DUO_WEBAUTHN_SIGNCOUNT_RESYNC > DUO_WEBAUTHN_SIGNCOUNT_RESERVE);
+  });
+
+  it("returns false (no-op) when the credential file is absent", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    try {
+      assert.equal(resyncDuoWebAuthnSignCounts(join(tmp, "does-not-exist.json")), false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
