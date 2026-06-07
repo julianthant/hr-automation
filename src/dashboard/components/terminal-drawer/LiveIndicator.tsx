@@ -8,7 +8,26 @@ import { cn } from "@/lib/utils";
  * eye finds it before the clock when scanning the bottom of the screen
  * for "is the dashboard still receiving updates?".
  */
-export function LiveIndicator({ connected }: { connected: boolean }) {
+export function LiveIndicator({
+  connected,
+  viewingHistory = false,
+}: {
+  connected: boolean;
+  /** Viewing a past date — the stream isn't "live", so show a muted History pill. */
+  viewingHistory?: boolean;
+}) {
+  if (viewingHistory) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium leading-none shrink-0 bg-muted text-muted-foreground border border-border"
+      >
+        <div aria-hidden className="w-[6px] h-[6px] rounded-full bg-muted-foreground" />
+        History
+      </div>
+    );
+  }
   return (
     <div
       role="status"

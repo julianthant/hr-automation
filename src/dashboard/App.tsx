@@ -693,7 +693,7 @@ export function App() {
         })()}
       </div>
       </OcrReviewPrepProvider>
-      <TerminalDrawer connected={connected} />
+      <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} />
       {/* Reupload RunModal — opened by the Reupload action in the OCR review toolbar */}
       <RunModal
         open={runModalOpen}

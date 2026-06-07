@@ -14,6 +14,8 @@ const MIN_BODY_HEIGHT = 32;
 interface TerminalDrawerProps {
   /** SSE-backend connection state, surfaced as the right-edge Live pill. */
   connected: boolean;
+  /** When viewing a past date, the Live pill downgrades to a muted History pill. */
+  viewingHistory?: boolean;
 }
 
 /**
@@ -33,7 +35,7 @@ interface TerminalDrawerProps {
  * Only workflows whose process is alive (or crashed-on-launch) and whose
  * batch has not ended are shown.
  */
-export function TerminalDrawer({ connected }: TerminalDrawerProps) {
+export function TerminalDrawer({ connected, viewingHistory = false }: TerminalDrawerProps) {
   const { open, toggle } = useTerminalDrawer();
   const clock = useClock();
   const { state } = useSessions();
@@ -43,6 +45,17 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
   const visible = state.workflows.filter((w) => w.pidAlive || w.crashedOnLaunch);
   const active = visible.filter((w) => w.active || w.crashedOnLaunch);
   const count = active.length;
+
+  // Bucket active sessions so the collapsed bar shows health at a glance —
+  // a red "failed" dot draws the eye before the operator expands the drawer.
+  let running = 0;
+  let idle = 0;
+  let failed = 0;
+  for (const w of active) {
+    if (w.crashedOnLaunch || w.finalStatus === "failed") failed += 1;
+    else if (w.itemInFlight) running += 1;
+    else idle += 1;
+  }
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
@@ -100,14 +113,14 @@ export function TerminalDrawer({ connected }: TerminalDrawerProps) {
         <span className="flex items-center gap-3 min-w-0">
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
-          <CountBadge count={count} />
+          <SessionSummary count={count} running={running} idle={idle} failed={failed} />
         </span>
         {/* Right edge: Live pill, then the clock. Live sits before the
             clock so the operator's eye lands on connection state first
             when scanning the screen's bottom-right corner — the clock is
             ambient and only checked on demand. */}
         <span className="flex items-center gap-3 shrink-0">
-          <LiveIndicator connected={connected} />
+          <LiveIndicator connected={connected} viewingHistory={viewingHistory} />
           <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none">
             {clock}
           </span>
@@ -171,6 +184,62 @@ function CountBadge({ count, noun = "active" }: { count: number; noun?: string }
         )}
       />
       <span className="font-mono tabular-nums">{count} {noun}</span>
+    </span>
+  );
+}
+
+/**
+ * Collapsed-bar session summary. With nothing active it falls back to the muted
+ * "0 active" badge; otherwise it breaks the active count into running / idle /
+ * failed status dots (failed first, in destructive) so the operator reads
+ * session health without expanding the drawer.
+ */
+function SessionSummary({
+  count,
+  running,
+  idle,
+  failed,
+}: {
+  count: number;
+  running: number;
+  idle: number;
+  failed: number;
+}) {
+  if (count === 0) return <CountBadge count={0} />;
+  return (
+    <span
+      className="inline-flex items-center gap-2.5"
+      aria-label={`${running} running, ${idle} idle, ${failed} failed`}
+    >
+      {failed > 0 && <DotGroup tone="failed" n={failed} label="failed" />}
+      {running > 0 && <DotGroup tone="running" n={running} label="running" />}
+      {idle > 0 && <DotGroup tone="idle" n={idle} label="idle" />}
+    </span>
+  );
+}
+
+function DotGroup({
+  tone,
+  n,
+  label,
+}: {
+  tone: "running" | "idle" | "failed";
+  n: number;
+  label: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground leading-none">
+      <span
+        aria-hidden
+        className={cn(
+          "w-1.5 h-1.5 rounded-full",
+          tone === "failed" && "bg-destructive",
+          tone === "running" && "bg-info motion-safe:animate-pulse",
+          tone === "idle" && "bg-muted-foreground",
+        )}
+      />
+      <span className="font-mono tabular-nums">{n}</span>
+      <span>{label}</span>
     </span>
   );
 }
