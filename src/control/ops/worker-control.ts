@@ -441,7 +441,9 @@ export function buildStopDaemonInstanceHandler(dir: string) {
   return async (req: StopDaemonInstanceRequest): Promise<StopDaemonInstanceResult> => {
     const workflow = req.workflow?.trim();
     const instance = req.instance?.trim();
-    const force = req.force !== false; // default to force teardown
+    // Per-instance session-card stops default to forceful teardown;
+    // workflow-scoped stop remains graceful by default.
+    const force = req.force ?? true;
     const fail = (error: string): StopDaemonInstanceResult => ({
       ok: false,
       workflow: workflow ?? "",
@@ -475,7 +477,7 @@ export function buildStopDaemonInstanceHandler(dir: string) {
     const target = pid ? alive.find((d) => d.pid === pid) : undefined;
     // Whether another daemon will survive to absorb a reassigned item — best-
     // effort hint for the operator toast; the daemon makes the real decision.
-    const reassignable = alive.some((d) => d.pid !== pid);
+    const reassignable = pid != null && alive.some((d) => d.pid !== pid);
 
     let daemonStopped = false;
     if (target) {

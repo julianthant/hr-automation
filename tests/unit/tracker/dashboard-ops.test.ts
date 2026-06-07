@@ -8,7 +8,9 @@
  */
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
+import { createServer, type Server } from "http";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "fs";
+import type { AddressInfo } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 import { dateLocal, readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
@@ -17,6 +19,12 @@ import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
+import {
+  ensureDaemonsDir,
+  invalidateAliveDaemonsCache,
+  lockfilePath,
+  writeLockfile,
+} from "../../../src/core/daemon/registry.js";
 import {
   buildDeleteBulkHandler,
   buildDeleteEntryHandler,
@@ -29,6 +37,7 @@ import {
   buildKillBrowserHandler,
   buildQueueBumpHandler,
   buildSaveDataHandler,
+  buildStopDaemonInstanceHandler,
   buildStopWorkerHandler,
   buildDaemonsListHandler,
   buildRetryBulkHandler,
@@ -58,9 +67,28 @@ beforeEach(() => {
   mkdirSync(sessionsDir(tmp), { recursive: true });
 });
 afterEach(() => {
+  invalidateAliveDaemonsCache();
   closeStateDbForTests(tmp);
   if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });
+
+async function startWhoamiServer(workflow: string, instanceId: string): Promise<{
+  server: Server;
+  port: number;
+}> {
+  const server = createServer((req, res) => {
+    if (req.url !== "/whoami") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ workflow, instanceId }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return { server, port: address.port };
+}
 
 describe("findEntryInput", () => {
   it("returns the input from a pending tracker row", () => {
@@ -1338,6 +1366,48 @@ describe("dashboard worker command helpers", () => {
     assert.equal(workerStore.getCommand(drain.commandId)?.commandType, "drain_worker");
     assert.equal(workerStore.getCommand(drain.commandId)?.state, "queued");
     workerStore.close();
+  });
+
+  it("per-instance daemon stop is not reassignable when the instance has no pid", async () => {
+    const workflow = "person-lookup";
+    const instance = "Person Lookup 1";
+    const peerInstanceId = "per-peer";
+    const { server, port } = await startWhoamiServer(workflow, peerInstanceId);
+    try {
+      ensureDaemonsDir(tmp);
+      writeLockfile(
+        {
+          workflow,
+          instanceId: peerInstanceId,
+          pid: process.pid,
+          port,
+          startedAt: new Date().toISOString(),
+          hostname: "test-peer",
+          version: 1,
+        },
+        lockfilePath(workflow, peerInstanceId, tmp),
+      );
+      writeFileSync(
+        sessionFilePath(dateLocal(), tmp),
+        JSON.stringify({
+          type: "workflow_start",
+          timestamp: new Date().toISOString(),
+          workflowInstance: instance,
+        }) + "\n",
+      );
+
+      const result = await buildStopDaemonInstanceHandler(tmp)({
+        workflow,
+        instance,
+        force: true,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.daemonStopped, false);
+      assert.equal(result.reassignable, false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("daemon list omits terminal dead workers that no longer have a live lockfile", async () => {
