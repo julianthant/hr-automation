@@ -101,7 +101,7 @@ const PermissiveEmployeeSchema = z.object({
 });
 
 export const PermissiveRecordSchema = z.object({
-  formKind: z.literal("emergency-contact").default("emergency-contact"),
+  formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("emergency-contact"),
   sourcePage: z.number().int().positive(),
   employee: PermissiveEmployeeSchema,
   emergencyContact: PermissiveEmergencyContactOcrSchema,
@@ -137,12 +137,18 @@ export type PreviewRecord = z.infer<typeof PreviewRecordSchema>;
 
 const EC_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
 
-The PDF is a stack of UCSD R&R Emergency Contact Information forms — one form per page (occasionally a page may not be a form at all). For each page produce one record.
+The PDF is a stack of UCSD R&R Emergency Contact Information forms. BEFORE extracting fields, classify each page:
+- "emergency-contact" — UCSD R&R Emergency Contact Information form
+- "oath"              — UC loyalty oath / patent acknowledgment form (UPAY585, UPAY586, or a multi-row sign-in sheet)
+- "unknown"           — blank, irrelevant, or does not match any of the above
 
-For each page:
-1. Classify document type: "expected" if UCSD R&R Emergency Contact form; "unknown" otherwise.
-2. After extracting fields, list which expected fields were BLANK or ILLEGIBLE on the paper.
-   The expected fields: employee.name, employee.employeeId, emergencyContact.name, emergencyContact.relationship, emergencyContact.address, emergencyContact.cellPhone/homePhone/workPhone (any one suffices).
+For each page produce one record with:
+- formKind: classify as "emergency-contact", "oath", or "unknown". Set "oath" if the page is a UC loyalty oath form, "unknown" for blank/irrelevant pages. Leave EC-specific fields (employee, emergencyContact) null for non-EC pages.
+
+For each page also:
+1. Classify document type: "expected" if any recognized form (EC or oath); "unknown" for blank/irrelevant pages.
+2. After extracting fields, list which expected EC fields were BLANK or ILLEGIBLE on the paper (for non-EC pages use []).
+   The expected EC fields: employee.name, employee.employeeId, emergencyContact.name, emergencyContact.relationship, emergencyContact.address, emergencyContact.cellPhone/homePhone/workPhone (any one suffices).
 
 Field-level rules:
 - Extract every record visible; one per page.
@@ -292,14 +298,19 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   applyCarryForward({ v2, v1 }): PreviewRecord {
-    // See oath.applyCarryForward for the rationale on the per-form-type
-    // assertion + why we tolerate `undefined` from legacy JSONL rows.
+    // Only reject merging two DIFFERENT known kinds (mirrors verify.applyCarryForward).
+    // Legacy JSONL rows (parsed without Zod defaults) may have formKind undefined —
+    // tolerate them. Also tolerate "oath"/"unknown" classifications (a re-run that
+    // re-classified the same page); carry v2 formKind forward.
+    const v1Kind = v1.formKind as string | undefined;
+    const v2Kind = v2.formKind as string | undefined;
     if (
-      (v1.formKind !== undefined && v1.formKind !== "emergency-contact") ||
-      (v2.formKind !== undefined && v2.formKind !== "emergency-contact")
+      v1Kind !== undefined &&
+      v2Kind !== undefined &&
+      v1Kind !== v2Kind
     ) {
       throw new Error(
-        `emergency-contact.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
+        `emergency-contact.applyCarryForward: cross-form-kind carry-forward not supported (v1=${v1Kind}, v2=${v2Kind})`,
       );
     }
     return {
@@ -339,6 +350,11 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     },
     deriveItemId(_record, parentRunId, index): string {
       return `ocr-ec-${parentRunId}-r${index}`;
+    },
+    canFanOut(record): boolean {
+      // Skip records classified as non-EC pages (oath or unknown) — they have
+      // no EC-shape fields and must not be fanned out as emergency-contact records.
+      return (record.formKind as string) === "emergency-contact";
     },
   },
 

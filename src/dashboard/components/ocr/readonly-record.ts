@@ -63,7 +63,17 @@ function boolCheck(key: string, label: string, yes: boolean): VerifyCheck {
     : { key, label, onPaper: false, paperValue: null, foundValue: null, source: "paper", status: "missing", missingLabel: "No" };
 }
 
-/** Build the read-only completeness checklist for a standalone oath / EC record. */
+/**
+ * Build the read-only completeness checklist for a standalone oath / EC record.
+ *
+ * Special case: an oath-run record whose `formKind` was classified as
+ * "emergency-contact" or "unknown" by the model. The oath prompt does not
+ * extract EC-specific fields (`employee`, `emergencyContact`), so we can only
+ * show the fields that ARE present in the oath shape: `printedName`, `employeeId`,
+ * and the active-status lookup result. Oath signature checks are skipped (the
+ * `formKind === "oath"` guard handles that). An EC-shape record in an EC run is
+ * unaffected — it goes through the `else` branch as before.
+ */
 export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): VerifyCheck[] {
   const activeStatus = activeStatusValue(record.verification);
   const activeCheck = valueCheck("activeStatus", "Active Status", activeStatus, "ucpath");
@@ -79,7 +89,19 @@ export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): 
     ];
   }
 
-  // emergency-contact
+  // An oath-SHAPED record re-classified as "emergency-contact" or "unknown"
+  // (i.e. from an oath OCR run, not a real EC run). The oath prompt does not
+  // extract EC-specific fields — show only what we have from the oath shape.
+  if ("printedName" in record || "employeeId" in record) {
+    const oathShaped = record as OathPreviewRecord;
+    return [
+      valueCheck("name", "Printed Name", nonEmpty(oathShaped.printedName), "paper"),
+      valueCheck("eid", "Employee ID", nonEmpty(oathShaped.employeeId), "paper"),
+      activeCheck,
+    ];
+  }
+
+  // emergency-contact record from a real EC run
   return [
     valueCheck("name", "Name", nonEmpty(record.employee?.name), "paper"),
     valueCheck("eid", "Employee ID", nonEmpty(record.employee?.employeeId), "ucpath"),
@@ -87,6 +109,17 @@ export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): 
     valueCheck("ecRelationship", "Relationship", nonEmpty(record.emergencyContact?.relationship), "paper"),
     activeCheck,
   ];
+}
+
+/**
+ * Produce the hint text shown when a page inside an oath run was recognized as
+ * a non-oath form. The hint tells the operator to re-run through the correct workflow.
+ */
+function wrongFormKindHint(formKind: string): string {
+  if (formKind === "emergency-contact") {
+    return "This page looks like an Emergency Contact form, not an oath — re-run it through the Emergency Contact or Verify workflow to extract its fields.";
+  }
+  return "This page was not recognized as an oath form — re-run it through the Verify workflow to confirm its content.";
 }
 
 /** Project a standalone oath / EC record onto a read-only `VerifyPreviewRecord`. */
@@ -110,6 +143,28 @@ export function toReadonlyVerifyRecord(
       checks,
     };
   }
+
+  // Oath-SHAPED record re-classified as "emergency-contact" or "unknown" by the
+  // model (i.e. from an oath OCR run). Render with the correct doc-kind chip and
+  // an honest hint so the operator knows to use the right workflow. The oath prompt
+  // does not extract EC fields, so we can only surface what the oath shape carries.
+  if ("printedName" in record || "employeeId" in record) {
+    const oathShaped = record as OathPreviewRecord;
+    const hint = wrongFormKindHint(record.formKind as string);
+    const warnings = record.warnings.includes(hint) ? record.warnings : [...record.warnings, hint];
+    return {
+      formKind: record.formKind as VerifyPreviewRecord["formKind"],
+      sourcePage: record.sourcePage,
+      printedName: oathShaped.printedName,
+      employeeId: oathShaped.employeeId ?? "",
+      name: nonEmpty(oathShaped.printedName) ?? "",
+      matchState: record.matchState as VerifyPreviewRecord["matchState"],
+      selected: record.selected,
+      warnings,
+      checks,
+    };
+  }
+
   return {
     formKind: "emergency-contact",
     sourcePage: record.sourcePage,

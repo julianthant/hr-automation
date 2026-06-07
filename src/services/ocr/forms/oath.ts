@@ -24,7 +24,7 @@ import { DocumentTypeSchema, LLM_HIGH_CONFIDENCE, MatchStateSchema, Verification
 // ─── OCR-pass record (one row of a paper roster) ──────────
 
 export const OathRosterOcrRecordSchema = z.object({
-  formKind: z.literal("oath").default("oath"),
+  formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("oath"),
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative().optional(),
   printedName: z.string().optional(),
@@ -79,30 +79,30 @@ export type OathPreviewRecord = z.infer<typeof OathPreviewRecordSchema>;
 
 const OATH_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF page.
 
-The PDF is a stack of paper oath signature documents in one of three formats — each page is one of:
-- "signin"  — multi-row sign-in sheet (many records per page)
-- "upay585" — single-form per page, UPAY585 (1997, includes Patent Acknowledgment)
-- "upay586" — single-form per page, UPAY586 (2015 DocuSign, oath only)
-- "unknown" — blank, irrelevant, or doesn't match any of the above
+The PDF is a stack of paper oath signature documents. BEFORE extracting fields, classify each page:
+- "oath"              — UC loyalty oath / patent acknowledgment (signin sheet, UPAY585, or UPAY586)
+- "emergency-contact" — UCSD R&R Emergency Contact Information form
+- "unknown"           — blank, irrelevant, or does not match any of the above
 
 OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
 \`\`\`json
 [
-  { "rowIndex": 0, "printedName": "Doe, Jane, A", "employeeId": "10000001", "dateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "documentType": "expected", "originallyMissing": [] }
+  { "formKind": "oath", "rowIndex": 0, "printedName": "Doe, Jane, A", "employeeId": "10000001", "dateSigned": "4-23-26", "employeeSigned": true, "officerSigned": true, "documentType": "expected", "originallyMissing": [] }
 ]
 \`\`\`
 
 Do NOT wrap records in a page object. Do NOT nest under "records" or "data" keys. The top-level value MUST be a JSON array. Each element is exactly one record. Multi-row sign-in sheets emit multiple array elements; single-form pages (UPAY585/UPAY586) emit exactly one element.
 
 For each record extract these fields:
+- formKind: classify the page — "oath", "emergency-contact", or "unknown". Set "emergency-contact" if the page is a UCSD R&R Emergency Contact Information form. Set "unknown" for a blank or irrelevant page. Oath pages (signin, UPAY585, UPAY586) get "oath". Leave oath-specific fields (printedName, dateSigned, employeeSigned, officerSigned) null for non-oath pages.
 - rowIndex: 0-indexed position on the page, starting from 0 for the first record
 - printedName: the printed/handwritten name on the form. ALWAYS attempt a best-guess transcription — speak the name out loud as you read it. Only set null if the field is genuinely BLANK (no writing at all). Faint or hard-to-read writing should still be transcribed.
 - employeeId: the full Employee ID number. UCPath IDs are exactly 8 digits starting with "10" (e.g. "10874100"). Scan the ENTIRE page for this number before returning null, including the top page margin, the white space above the form header, and handwritten notes outside the printed Employee ID box. Standalone handwritten 8-digit numbers above the form header are usually the correct employeeId, especially on UPAY585 scans where the printed Employee ID box is faint, clipped, or partially filled. Copy ALL digits exactly as printed — do NOT drop the leading "10". Return null ONLY when the whole page has no readable Employee ID anywhere. If you can read any digits, return them all.
-- dateSigned: the date signed (typical formats: MM/DD/YYYY, M/D/YY, M-D-YY). Null if blank.
-- employeeSigned: true if the employee signature line has any writing/scribble. False for an empty box. For sign-in sheets with one signature column, set true if the row's signature box is filled.
-- officerSigned: true if the authorized-officer / witness signature is filled. Null for sign-in sheets with one signature column. False for UPAY585/UPAY586 when empty.
-- documentType: emit the LITERAL string "expected" for any real form (signin/upay585/upay586), or the LITERAL string "unknown" for a blank, garbage, or non-form page. Do NOT put the format name (e.g. "upay586") here — only "expected" or "unknown".
+- dateSigned: the date signed (typical formats: MM/DD/YYYY, M/D/YY, M-D-YY). Null if blank or if formKind is not "oath".
+- employeeSigned: true if the employee signature line has any writing/scribble. False for an empty box. For sign-in sheets with one signature column, set true if the row's signature box is filled. Null if formKind is not "oath".
+- officerSigned: true if the authorized-officer / witness signature is filled. Null for sign-in sheets with one signature column. False for UPAY585/UPAY586 when empty. Null if formKind is not "oath".
+- documentType: emit the LITERAL string "expected" for any real form (oath or emergency-contact), or the LITERAL string "unknown" for a blank, garbage, or non-form page. Do NOT put the format name (e.g. "upay586") here — only "expected" or "unknown".
 - originallyMissing: array of field names that were genuinely BLANK on the paper (not just hard to read). Use [] when nothing was missing.
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
@@ -363,25 +363,24 @@ export const oathOcrFormSpec: OcrFormSpec<
     // the OcrFormSpec generic, but `applyCarryForward` in carry-forward.ts
     // uses `as never` casts that erase the discriminant, AND v1 records
     // come from a JSON.parse of a previous run's JSONL (`readPreviousRecords`
-    // in orchestrator.ts) which bypasses Zod's `.default("oath")` — so a
-    // legacy row may have `formKind: undefined`. Skip merging from legacy
-    // rows to avoid cross-form contamination. Reject affirmative wrong tags.
-    if (v1.formKind !== undefined && v1.formKind !== "oath") {
+    // in orchestrator.ts) which bypasses Zod's defaults — so a legacy row
+    // may have `formKind: undefined`. Only reject merging two DIFFERENT known
+    // kinds (mirrors `verify.applyCarryForward`). Tolerate undefined (legacy)
+    // and tolerate "emergency-contact"/"unknown" (a re-run that re-classified
+    // the same page) by carrying the v2 formKind forward.
+    const v1Kind = v1.formKind as string | undefined;
+    const v2Kind = v2.formKind as string | undefined;
+    if (
+      v1Kind !== undefined &&
+      v2Kind !== undefined &&
+      v1Kind !== v2Kind
+    ) {
       throw new Error(
-        `oath.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
+        `oath.applyCarryForward: cross-form-kind carry-forward not supported (v1=${v1Kind}, v2=${v2Kind})`,
       );
-    }
-    if (v2.formKind !== undefined && v2.formKind !== "oath") {
-      throw new Error(
-        `oath.applyCarryForward: cross-form-type carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
-      );
-    }
-    if (v1.formKind === undefined) {
-      log.warn("oath.applyCarryForward: legacy v1 row has no formKind — merging as oath (pre-formKind JSONL)");
     }
     return {
       ...v2,
-      formKind: "oath",
       employeeId: v1.employeeId || v2.employeeId,
       matchState: v1.matchState !== "lookup-pending" && v1.matchState !== "lookup-running"
         ? v1.matchState
@@ -419,6 +418,9 @@ export const oathOcrFormSpec: OcrFormSpec<
       return `ocr-oath-${parentRunId}-r${index}`;
     },
     canFanOut(record): boolean {
+      // Skip records classified as non-oath pages (EC or unknown) — they have
+      // no oath-shape signer data and must not be fanned out as oath signers.
+      if ((record.formKind as string) !== "oath") return false;
       return hasOathSignerInput(record);
     },
   },

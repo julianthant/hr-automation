@@ -177,6 +177,117 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
   });
 });
 
+// ─── PermissiveRecordSchema.formKind enum (2026-06-06) ─────────────────────
+// The EC schema now accepts "oath" and "unknown" so the EC OCR pass can classify
+// pages that turned out to be oath forms or blank pages.
+
+describe("PermissiveRecordSchema — formKind enum (EC run classifying non-EC pages)", () => {
+  it("defaults formKind to 'emergency-contact' when omitted", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 1,
+      employee: { name: "Alex Johnson", employeeId: "10123456" },
+      emergencyContact: { name: "Pat Johnson", relationship: "Spouse", primary: true },
+      notes: [],
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(parsed.success, `parse should succeed: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
+    assert.equal(parsed.data.formKind, "emergency-contact");
+  });
+
+  it("accepts formKind 'oath' (oath page inside an EC run)", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 2,
+      formKind: "oath",
+      employee: { name: null, employeeId: null },
+      emergencyContact: { name: null, relationship: null, primary: true },
+      notes: [],
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(parsed.success, `oath formKind must be valid in EC schema: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
+    assert.equal(parsed.data.formKind, "oath");
+  });
+
+  it("accepts formKind 'unknown' (blank page inside an EC run)", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 3,
+      formKind: "unknown",
+      employee: { name: null, employeeId: null },
+      emergencyContact: { name: null, relationship: null, primary: true },
+      notes: [],
+      documentType: "unknown",
+      originallyMissing: [],
+    });
+    assert.ok(parsed.success, `unknown formKind must be valid in EC schema: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
+    assert.equal(parsed.data.formKind, "unknown");
+  });
+});
+
+// ─── emergencyContactOcrFormSpec.approveTo.canFanOut ─────────────────────────
+// An oath/unknown page classified inside an EC run must NOT be fanned out as an
+// emergency-contact row.
+
+describe("emergencyContactOcrFormSpec.approveTo.canFanOut", () => {
+  const canFanOut = emergencyContactOcrFormSpec.approveTo!.canFanOut!;
+
+  it("returns true for a properly classified EC record", () => {
+    assert.equal(
+      canFanOut({
+        formKind: "emergency-contact",
+        sourcePage: 1,
+        employee: { name: "Alex Johnson", employeeId: "10123456" },
+        emergencyContact: { name: "Pat Johnson", relationship: "Spouse", primary: true, sameAddressAsEmployee: true, address: null },
+        notes: [],
+        documentType: "expected",
+        originallyMissing: [],
+        matchState: "matched",
+        selected: true,
+        warnings: [],
+      }),
+      true,
+    );
+  });
+
+  it("returns false for a record classified as 'oath' (oath page inside EC run)", () => {
+    assert.equal(
+      canFanOut({
+        formKind: "oath",
+        sourcePage: 2,
+        employee: { name: null, employeeId: "" },
+        emergencyContact: { name: null, relationship: null, primary: true, sameAddressAsEmployee: true, address: null },
+        notes: [],
+        documentType: "expected",
+        originallyMissing: [],
+        matchState: "extracted",
+        selected: true,
+        warnings: [],
+      }),
+      false,
+      "oath-classified record must not fan out as an EC row",
+    );
+  });
+
+  it("returns false for a record classified as 'unknown'", () => {
+    assert.equal(
+      canFanOut({
+        formKind: "unknown",
+        sourcePage: 3,
+        employee: { name: null, employeeId: "" },
+        emergencyContact: { name: null, relationship: null, primary: true, sameAddressAsEmployee: true, address: null },
+        notes: [],
+        documentType: "unknown",
+        originallyMissing: [],
+        matchState: "extracted",
+        selected: true,
+        warnings: [],
+      }),
+      false,
+      "unknown-classified record must not fan out as an EC row",
+    );
+  });
+});
+
 describe("emergencyContactOcrFormSpec.matchRecord auto-accept floor", () => {
   it("auto-accepts exact single candidate (score 1.0 ≥ ROSTER_AUTO_ACCEPT)", async () => {
     const result = await emergencyContactOcrFormSpec.matchRecord({

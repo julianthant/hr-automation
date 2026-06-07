@@ -474,7 +474,7 @@ export type OathMatchState =
 export type OathMatchSource = "roster" | "eid-lookup" | "llm" | "form-eid" | "manual";
 
 export interface OathPreviewRecord {
-  formKind: "oath";
+  formKind: "oath" | "emergency-contact" | "unknown";
   sourcePage: number;
   rowIndex: number;
   printedName: string;
