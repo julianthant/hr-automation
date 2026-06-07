@@ -48,6 +48,58 @@ export const record = {
     page
       .locator(`td:has-text("${label}")`)
       .locator("xpath=following-sibling::td[1]"),
+
+  /**
+   * Visualforce label → value locator strategy 3 (broader fallback): label in
+   * ANY cell (`<th>` OR `<td>`), value in the next sibling `<td>`. Catches
+   * record-page rows whose label cell tag varies between the rowheader (`<th>`)
+   * and a plain data cell (`<td>`) — a single `.or()` chain so one extract pass
+   * tries both without the caller ordering them. UNVERIFIED against the live
+   * CRM record page — added 2026-06-07 as a strictly-additive permissiveness
+   * widening; needs a live-CRM re-verify.
+   * @tags visualforce, label, value, th, td, extract, record, fallback, crm
+   */
+  cellLabelFollowingTd: (page: Page, label: string): Locator =>
+    page
+      .locator(`th:has-text("${label}")`)
+      .locator("xpath=following-sibling::td[1]")
+      .or(
+        page
+          .locator(`td:has-text("${label}")`)
+          .locator("xpath=following-sibling::td[1]"),
+      ),
+
+  /**
+   * Visualforce label → value locator strategy 4 (row-scoped fallback): find
+   * the table ROW that contains the label, then read its LAST cell as the value
+   * — robust when the value sits in the same `<tr>` as the label but is NOT the
+   * immediate following sibling (extra spacer/format cells between label and
+   * value), and when the label text is split across child nodes inside the
+   * label cell (the `:has-text` row match still accumulates the descendant
+   * text). UNVERIFIED against the live CRM record page — added 2026-06-07 as a
+   * strictly-additive fallback; needs a live-CRM re-verify.
+   * @tags visualforce, label, value, row, last-cell, extract, record, fallback, crm
+   */
+  rowLabelLastCell: (page: Page, label: string): Locator =>
+    page
+      .locator(`tr:has-text("${label}")`)
+      .locator("td:last-child"),
+
+  /**
+   * Salesforce Lightning record-detail fallback: a `slds-form-element` whose
+   * label text matches, read its value control. Lightning renders fields as
+   * label/value div pairs (`.slds-form-element__label` + `.slds-form-element__control`)
+   * rather than the Visualforce `<th>/<td>` table — this catches a record page
+   * served by the Lightning UI instead of classic Visualforce. UNVERIFIED
+   * against the live CRM record page — added 2026-06-07 as a strictly-additive
+   * fallback; needs a live-CRM re-verify.
+   * @tags lightning, label, value, form-element, extract, record, fallback, crm
+   */
+  lightningFieldValue: (page: Page, label: string): Locator =>
+    page
+      .locator(
+        `.slds-form-element:has(.slds-form-element__label:has-text("${label}")) .slds-form-element__control`,
+      ),
 };
 
 // ─── Section navigation ────────────────────────────────────────────────────

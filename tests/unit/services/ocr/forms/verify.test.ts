@@ -7,6 +7,10 @@ import {
   buildVerifyChecks,
   applyPersonLookupToVerifyRecord,
   applyI9ToVerifyRecord,
+  buildVerifyPersonLookupInput,
+  verifyPlPatchKind,
+  type VerifyPlEidInput,
+  type VerifyPlNameInput,
   type VerifyPreviewRecord,
   type VerifyCheck,
 } from "../../../../../src/services/ocr/forms/verify.js";
@@ -279,6 +283,92 @@ describe("applyI9ToVerifyRecord", () => {
     applyI9ToVerifyRecord(rec, { signerName: "", i9Status: "unable-to-access" });
     assert.equal(rec.officialSigner, undefined);
     assert.equal(rec.officialSignerStatus, "unable-to-access");
+  });
+});
+
+describe("buildVerifyPersonLookupInput", () => {
+  const ctx = { taskGroupId: "sess-1" };
+
+  it("chooses the EID-input variant when the record has a normalized EID", () => {
+    const rec = makePreview({ name: "Brusher, Kelly", employeeId: "10514074" });
+    const chosen = buildVerifyPersonLookupInput(rec, ctx);
+    assert.ok(chosen);
+    assert.equal(chosen.kind, "eid");
+    const input = chosen.input as VerifyPlEidInput;
+    assert.equal(input.emplId, "10514074");
+    // The OCR-printed name rides along as a CRM-search fallback.
+    assert.equal(input.name, "Brusher, Kelly");
+    assert.equal(input.includeCrmDates, true);
+    assert.equal(input.keepNonHdh, true);
+    assert.equal(input.taskGroupId, "sess-1");
+  });
+
+  it("normalizes a noisy EID (spaces/dashes) before choosing the EID variant", () => {
+    const rec = makePreview({ name: "Doe, Jane", employeeId: "10-514-074" });
+    const chosen = buildVerifyPersonLookupInput(rec, ctx);
+    assert.ok(chosen);
+    assert.equal(chosen.kind, "eid");
+    assert.equal((chosen.input as VerifyPlEidInput).emplId, "10514074");
+  });
+
+  it("treats a malformed/short EID as no-EID and falls back to the name variant", () => {
+    const rec = makePreview({ name: "Doe, Jane", employeeId: "999" });
+    const chosen = buildVerifyPersonLookupInput(rec, ctx);
+    assert.ok(chosen);
+    assert.equal(chosen.kind, "name");
+    const input = chosen.input as VerifyPlNameInput;
+    assert.equal(input.name, "Doe, Jane");
+    assert.ok(!("emplId" in input));
+  });
+
+  it("chooses the name-input variant when there is a name but no EID", () => {
+    const rec = makePreview({ name: "Tran, Mia", employeeId: "" });
+    const chosen = buildVerifyPersonLookupInput(rec, ctx);
+    assert.ok(chosen);
+    assert.equal(chosen.kind, "name");
+    assert.equal((chosen.input as VerifyPlNameInput).name, "Tran, Mia");
+  });
+
+  it("falls back to printedName when name is blank (EID variant)", () => {
+    const rec = makePreview({ name: "", printedName: "Brusher, Kelly", employeeId: "10514074" });
+    const chosen = buildVerifyPersonLookupInput(rec, ctx);
+    assert.ok(chosen);
+    assert.equal(chosen.kind, "eid");
+    assert.equal((chosen.input as VerifyPlEidInput).name, "Brusher, Kelly");
+  });
+
+  it("drives by EID alone even when no name is present", () => {
+    const rec = makePreview({ name: "", printedName: null, employeeId: "10514074" });
+    const chosen = buildVerifyPersonLookupInput(rec, ctx);
+    assert.ok(chosen);
+    assert.equal(chosen.kind, "eid");
+    const input = chosen.input as VerifyPlEidInput;
+    assert.equal(input.emplId, "10514074");
+    // No name available — the optional CRM-fallback name is omitted.
+    assert.ok(!("name" in input));
+  });
+
+  it("returns null when neither a name nor an EID is present", () => {
+    const rec = makePreview({ name: "", printedName: null, employeeId: "" });
+    assert.equal(buildVerifyPersonLookupInput(rec, ctx), null);
+  });
+
+  it("threads parentSubject only when supplied", () => {
+    const rec = makePreview({ name: "Doe, Jane", employeeId: "10514074" });
+    const withParent = buildVerifyPersonLookupInput(rec, { taskGroupId: "s", parentSubject: "Roster" });
+    assert.equal(withParent?.input.parentSubject, "Roster");
+    const without = buildVerifyPersonLookupInput(rec, { taskGroupId: "s" });
+    assert.ok(without);
+    assert.ok(!("parentSubject" in without.input));
+  });
+});
+
+describe("verifyPlPatchKind", () => {
+  it("maps the EID-input kind to verify-only (form EID stands)", () => {
+    assert.equal(verifyPlPatchKind("eid"), "verify-only");
+  });
+  it("maps the name-input kind to name (name→EID resolution)", () => {
+    assert.equal(verifyPlPatchKind("name"), "name");
   });
 });
 
