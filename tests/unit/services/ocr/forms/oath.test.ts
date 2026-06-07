@@ -78,6 +78,34 @@ describe("OathRosterOcrRecordSchema", () => {
     const parsed = OathRosterOcrRecordSchema.parse({ sourcePage: 1 });
     assert.equal(parsed.formKind, "oath");
   });
+
+  // Regression (F13, 2026-06-07): the prompt tells the model to NULL
+  // oath-specific fields (printedName, dateSigned, employeeSigned, officerSigned)
+  // for non-oath pages. `z.string().optional()` / `z.boolean().optional()`
+  // REJECT an explicit `null` (they only allow `undefined`), so a correctly
+  // classified EC/unknown page with those fields nulled was schema-dropped →
+  // per-page.ts flipped it to success:false → data loss. printedName /
+  // employeeSigned are now `.nullable().optional()`.
+  it("accepts null cross-form fields on a wrong-form page (EC/unknown inside an oath run)", () => {
+    const parsed = OathRosterOcrRecordSchema.safeParse({
+      sourcePage: 2,
+      formKind: "emergency-contact",
+      printedName: null,
+      employeeId: null,
+      dateSigned: null,
+      employeeSigned: null,
+      officerSigned: null,
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(
+      parsed.success,
+      `wrong-form oath record with nulled cross-form fields must parse — got: ${JSON.stringify(!parsed.success && parsed.error.issues)}`,
+    );
+    assert.equal(parsed.data.printedName, null);
+    assert.equal(parsed.data.employeeSigned, null);
+    assert.equal(parsed.data.formKind, "emergency-contact");
+  });
 });
 
 // ─── oathOcrFormSpec.approveTo.canFanOut ─────────────────────────────────────

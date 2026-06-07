@@ -27,10 +27,17 @@ export const OathRosterOcrRecordSchema = z.object({
   formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("oath"),
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative().optional(),
-  printedName: z.string().optional(),
+  // `nullable` because the prompt tells the model to NULL oath-specific fields
+  // (printedName, employeeSigned, …) on non-oath pages (EC/unknown classified
+  // inside an oath run). `.optional()` alone rejects an explicit `null`, which
+  // would schema-drop a correctly-classified wrong-form page (per-page.ts then
+  // flips it to success:false → data loss). Mirrors the 2026-06-04
+  // documentType tolerant-coercion precedent. dateSigned/officerSigned are
+  // already nullable below.
+  printedName: z.string().nullable().optional(),
   confidence: z.number().min(0).max(1).optional(),
   employeeId: z.string().nullable().optional(),
-  employeeSigned: z.boolean().optional(),
+  employeeSigned: z.boolean().nullable().optional(),
   officerSigned: z.boolean().nullable().optional(),
   dateSigned: z
     .string()

@@ -222,6 +222,36 @@ describe("PermissiveRecordSchema — formKind enum (EC run classifying non-EC pa
     assert.ok(parsed.success, `unknown formKind must be valid in EC schema: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
     assert.equal(parsed.data.formKind, "unknown");
   });
+
+  // Regression (F13, 2026-06-07): the prompt tells the model to NULL EC-specific
+  // fields (employee, emergencyContact) for non-EC pages. Those were non-nullable
+  // objects, so a correctly classified oath/unknown page with them nulled was
+  // schema-dropped → per-page.ts flipped it to success:false → data loss. They
+  // are now `z.preprocess(v => v ?? {}, …)` so a `null` coerces to an empty
+  // object the permissive sub-schema fills with defaults (downstream
+  // `record.employee.X` reads stay null-safe).
+  it("accepts null cross-form fields on a wrong-form page (oath/unknown inside an EC run)", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 4,
+      formKind: "oath",
+      employee: null,
+      emergencyContact: null,
+      notes: [],
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(
+      parsed.success,
+      `wrong-form EC record with nulled employee/emergencyContact must parse — got: ${JSON.stringify(!parsed.success && parsed.error.issues)}`,
+    );
+    assert.equal(parsed.data.formKind, "oath");
+    // null coerces to a defaulted object — downstream reads stay null-safe.
+    assert.equal(parsed.data.employee.employeeId, "");
+    assert.equal(parsed.data.employee.name, undefined);
+    assert.equal(parsed.data.emergencyContact.name, undefined);
+    // The EC sub-schema's blank-address transform still runs → defaults to true.
+    assert.equal(parsed.data.emergencyContact.sameAddressAsEmployee, true);
+  });
 });
 
 // ─── emergencyContactOcrFormSpec.approveTo.canFanOut ─────────────────────────

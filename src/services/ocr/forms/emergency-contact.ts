@@ -103,8 +103,16 @@ const PermissiveEmployeeSchema = z.object({
 export const PermissiveRecordSchema = z.object({
   formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("emergency-contact"),
   sourcePage: z.number().int().positive(),
-  employee: PermissiveEmployeeSchema,
-  emergencyContact: PermissiveEmergencyContactOcrSchema,
+  // `z.preprocess(v => v ?? {}, …)` because the prompt tells the model to NULL
+  // EC-specific fields (employee, emergencyContact) on non-EC pages (oath/unknown
+  // classified inside an EC run). A bare non-nullable object would schema-drop
+  // that correctly-classified wrong-form page (per-page.ts then flips it to
+  // success:false → data loss). Coercing `null → {}` lets the permissive
+  // sub-schemas fill their defaults, keeping downstream `record.employee.X` /
+  // `record.emergencyContact.X` reads null-safe. Mirrors the 2026-06-04
+  // documentType tolerant-coercion precedent.
+  employee: z.preprocess((v) => v ?? {}, PermissiveEmployeeSchema),
+  emergencyContact: z.preprocess((v) => v ?? {}, PermissiveEmergencyContactOcrSchema),
   notes: z.array(z.string()).default([]),
   documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
