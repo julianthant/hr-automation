@@ -322,8 +322,11 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       );
     }
     return {
+      // Spread v2 WITHOUT pinning formKind: the v2 record reflects this run's
+      // re-classification, so its kind (which may differ from v1's "emergency-
+      // contact" if the page was re-classified) carries forward — identical to
+      // oath.applyCarryForward, which deliberately omits its own formKind pin.
       ...v2,
-      formKind: "emergency-contact",
       employee: {
         ...v2.employee,
         employeeId: v1.employee.employeeId || v2.employee.employeeId,
