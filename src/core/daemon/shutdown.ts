@@ -4,7 +4,6 @@ import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
 import { runRegistry } from '../run-registry.js'
 import { findAliveDaemons, filterResponsiveDaemons } from './registry.js'
-import { wakeDaemons } from './client.js'
 import {
   readQueueState,
   markItemCancelled,
@@ -18,75 +17,25 @@ import {
   isTerminalTrackerEntryStatus,
   type StampedData,
 } from '../../tracker/jsonl.js'
-import { buildHttpPendingData, buildTrackerDataForInput } from './enqueue-dispatch.js'
-import { deriveRowArchetype, resolveArchetype } from '../../domain/row-archetype.js'
 import { isStateDbReady, openStateDb } from '../../tracker/state/db.js'
 import type { ControlTaskStore } from '../task-store/index.js'
 import { emitItemCancelled } from '../../tracker/session-events.js'
-import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import type { Daemon } from './types.js'
 import type { DaemonPhase, DaemonState } from './daemon-types.js'
+import {
+  buildShutdownTrackerData,
+  reassignInFlightItem,
+  failInFlightItem,
+  SHUTDOWN_NO_DAEMON_FAIL_REASON,
+  SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
+  type ShutdownTrackerDataOpts,
+} from './in-flight-shutdown.js'
 
-export interface ShutdownTrackerDataOpts {
-  /**
-   * The run's id. When provided, the frozen `data.__traceId` from this run's
-   * pending row is carried forward onto the rebuilt cancelled/shutdown row.
-   * The trace id is stamped once at pre-emit and embeds the original
-   * timestamp, so it cannot be regenerated from `input` here — rebuilding
-   * would mint a *different* id than the pending row displayed. Cancellation
-   * must change status only, never the row's trace-id identity, so we inherit
-   * the value instead of dropping it.
-   */
-  runId?: string
-  trackerDir?: string
-}
-
-export function buildShutdownTrackerData<TData, TSteps extends readonly string[]>(
-  wf: RegisteredWorkflow<TData, TSteps>,
-  input: unknown,
-  parentRunId?: string,
-  opts?: ShutdownTrackerDataOpts,
-): Record<string, string> {
-  let data: Record<string, string>
-  try {
-    data = buildHttpPendingData(wf, input, parentRunId)
-  } catch (err) {
-    log.warn(
-      `[Daemon ${wf.config.name}] buildShutdownTrackerData fell back to minimal stamp: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    )
-    data = buildTrackerDataForInput(input)
-    data.archetype = deriveRowArchetype(
-      resolveArchetype(wf.config, input as TData),
-      parentRunId,
-    )
-  }
-  preserveFrozenTraceId(data, wf.config.name, opts)
-  return data
-}
-
-/**
- * Carry the frozen `data.__traceId` from the run's pending row onto a rebuilt
- * cancelled/shutdown row. `buildShutdownTrackerData` re-derives display fields
- * from `input`, which reproduces name/EID/archetype/queueRowKind but NOT the
- * trace id (it embeds the original pre-emit timestamp). Without this, a
- * cancelled row would lose the trace-id subtitle/hover it showed while
- * pending — cancellation would silently mutate row identity, not just status.
- */
-function preserveFrozenTraceId(
-  data: Record<string, string>,
-  workflow: string,
-  opts: ShutdownTrackerDataOpts | undefined,
-): void {
-  if (!opts?.runId || data.__traceId) return
-  const priorTraceId = findFrozenTraceId({
-    workflow,
-    runId: opts.runId,
-    ...(opts.trackerDir ? { trackerDir: opts.trackerDir } : {}),
-  })
-  if (priorTraceId) data.__traceId = priorTraceId
-}
+// Re-export the row-data builder (moved to `in-flight-shutdown.ts` to break the
+// shutdown ↔ in-flight-helpers module cycle) so existing importers — `daemon.ts`
+// and `tests/unit/core/daemon/shutdown.test.ts` — keep importing it from here.
+export { buildShutdownTrackerData }
+export type { ShutdownTrackerDataOpts }
 
 export function createAbortLaunchAndKillSession<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
@@ -317,6 +266,14 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
         state.reassignInFlight && otherAlive.length > 0 && inFlightSnapshot.taskId
           ? await filterResponsiveDaemons(otherAlive)
           : []
+      // Normalized identity for the shared reassign/fail helpers.
+      const shutdownItem = {
+        itemId: inFlightSnapshot.itemId,
+        runId: inFlightSnapshot.runId,
+        ...(inFlightSnapshot.taskId ? { taskId: inFlightSnapshot.taskId } : {}),
+        input: existingTask?.input,
+        ...(existingTask?.parentRunId ? { parentRunId: existingTask.parentRunId } : {}),
+      }
       if (skipShutdownEmit) {
         state.activeRun = null
       } else if (
@@ -330,75 +287,31 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
         // item is still in-flight at cleanup time. Best-effort: if the
         // re-queue throws, the item stays claimed and a peer's dead-worker
         // recovery sweep re-queues it.
-        const taskId = inFlightSnapshot.taskId
-        const parentRunId = existingTask?.parentRunId
-        try {
-          taskStore.returnTaskToQueued({ taskId })
-          emitTrackerRow(
-            {
-              workflow: wf.config.name,
-              timestamp: new Date().toISOString(),
-              id: inFlightSnapshot.itemId,
-              runId: inFlightSnapshot.runId,
-              status: 'pending',
-              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId, {
-                runId: inFlightSnapshot.runId,
-                trackerDir,
-              }) as StampedData,
-              ...(parentRunId ? { parentRunId } : {}),
-            },
-            trackerDir,
-          )
-          await wakeDaemons(responsivePeers)
-          log.step(
-            `[Daemon ${wf.config.name}/${instanceId}] per-instance stop — reassigned in-flight item ${inFlightSnapshot.itemId} to ${responsivePeers.length} responsive daemon(s)`,
-          )
-        } catch {
-          /* best-effort — dead-worker recovery on a peer re-queues it */
-        }
+        await reassignInFlightItem({
+          wf,
+          item: { ...shutdownItem, taskId: inFlightSnapshot.taskId },
+          responsivePeers,
+          taskStore,
+          trackerDir,
+          logTag: `Daemon ${wf.config.name}/${instanceId}`,
+        })
         state.activeRun = null
       } else if (state.reassignInFlight && otherAlive.length > 0) {
         // Reassign was requested and a peer LOOKS alive (PID + lockfile), but
         // none answered `/whoami` — the peers are wedged/zombie. Fail the item
         // loudly rather than requeue it to a daemon that will never claim it.
-        const nowIso = new Date().toISOString()
-        const failReason =
-          'Daemon stopped and no responsive peer daemon was available to finish this item.'
         log.warn(
           `[Daemon ${wf.config.name}/${instanceId}] per-instance stop — ${otherAlive.length} peer(s) appeared alive but none responded to /whoami; failing in-flight item ${inFlightSnapshot.itemId} instead of parking it`,
         )
-        try {
-          await markItemFailed(
-            wf.config.name,
-            inFlightSnapshot.itemId,
-            failReason,
-            inFlightSnapshot.runId,
-            trackerDir,
-          )
-        } catch {
-          /* best-effort — tracker row below is the user-visible signal */
-        }
-        try {
-          const parentRunId = existingTask?.parentRunId
-          emitTrackerRow(
-            {
-              workflow: wf.config.name,
-              timestamp: nowIso,
-              id: inFlightSnapshot.itemId,
-              runId: inFlightSnapshot.runId,
-              status: 'failed',
-              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId, {
-                runId: inFlightSnapshot.runId,
-                trackerDir,
-              }) as StampedData,
-              ...(parentRunId ? { parentRunId } : {}),
-              error: failReason,
-            },
-            trackerDir,
-          )
-        } catch {
-          /* best-effort */
-        }
+        await failInFlightItem({
+          wf,
+          item: shutdownItem,
+          failReason: SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
+          taskStore,
+          trackerDir,
+          bestEffort: true,
+          settleDependency: false,
+        })
         state.activeRun = null
       } else if (state.forceShutdown) {
         // Force-stop with no spare to absorb the item (stop-all, SIGINT, or
@@ -407,40 +320,15 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
         // red Failed badge, retriable). A deliberate per-item cancel never
         // reaches this sweep (the daemon stays alive), so a non-reassign
         // force-shutdown is always a genuine failure here.
-        const nowIso = new Date().toISOString()
-        const failReason = 'Daemon stopped and no other daemon is available to finish this item.'
-        try {
-          await markItemFailed(
-            wf.config.name,
-            inFlightSnapshot.itemId,
-            failReason,
-            inFlightSnapshot.runId,
-            trackerDir,
-          )
-        } catch {
-          /* best-effort — queue event append; tracker row below is the user-visible signal */
-        }
-        try {
-          const parentRunId = existingTask?.parentRunId
-          emitTrackerRow(
-            {
-              workflow: wf.config.name,
-              timestamp: nowIso,
-              id: inFlightSnapshot.itemId,
-              runId: inFlightSnapshot.runId,
-              status: 'failed',
-              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId, {
-                runId: inFlightSnapshot.runId,
-                trackerDir,
-              }) as StampedData,
-              ...(parentRunId ? { parentRunId } : {}),
-              error: failReason,
-            },
-            trackerDir,
-          )
-        } catch {
-          /* best-effort */
-        }
+        await failInFlightItem({
+          wf,
+          item: shutdownItem,
+          failReason: SHUTDOWN_NO_DAEMON_FAIL_REASON,
+          taskStore,
+          trackerDir,
+          bestEffort: true,
+          settleDependency: false,
+        })
         state.activeRun = null
       } else {
         // Non-force shutdown while processing (browser disconnect / crash).
