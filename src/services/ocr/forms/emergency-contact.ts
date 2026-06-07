@@ -352,9 +352,13 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       return `ocr-ec-${parentRunId}-r${index}`;
     },
     canFanOut(record): boolean {
-      // Skip records classified as non-EC pages (oath or unknown) — they have
-      // no EC-shape fields and must not be fanned out as emergency-contact records.
-      return (record.formKind as string) === "emergency-contact";
+      // Skip records EXPLICITLY classified as non-EC pages (oath or unknown) —
+      // they have no EC-shape fields. A record with no formKind (legacy/partial
+      // row) defaults to emergency-contact, so it still fans out (preserves the
+      // prior "every selected EC record fans out" behavior).
+      const kind = record.formKind as string | undefined;
+      if (kind === "oath" || kind === "unknown") return false;
+      return true;
     },
   },
 
