@@ -4,12 +4,22 @@
  * and emergency-contact/prepare.ts.
  *
  * Phases (each emits a tracker `running` event with `step` set):
- *   loading-roster → ocr (read + match + disambiguate) → person-lookup → awaiting-approval
+ *   loading-roster → ocr (read + match + disambiguate) → person-lookup
+ *   → [DELEGATED] awaiting-approval  |  [STANDALONE] done
  *
- * Returns when the row reaches `awaiting-approval`. The OCR row stays
- * `running step=awaiting-approval` (not `done`) — the row only becomes
- * terminal when the operator approves (via the approve route or via the
- * kernel handler's approval-signal wait) or discards.
+ * **Delegated run** (`parentRunId` set — OCR as a sub-step of a target
+ * workflow such as oath-signature or emergency-contact): parks at
+ * `running step=awaiting-approval` after person-lookup and waits for the
+ * operator to approve / discard / reupload. The OCR row only becomes
+ * terminal when the operator approves (via the approve route or the kernel
+ * handler's approval-signal wait) or discards. Emits `ocr:awaiting-approval`.
+ *
+ * **Standalone run** (no `parentRunId` — operator uploaded directly to the
+ * OCR panel): has no downstream consumer, so it completes terminal `done`
+ * immediately after person-lookup. No parked "review" step; the operator
+ * reads a read-only completeness card. The Approve button is UI-gated on
+ * `parentRunId`, so a standalone run can never be approved. Emits
+ * `ocr:review-complete`.
  *
  * The user's approve / discard / reupload click is handled via separate
  * HTTP endpoints; see `src/tracker/dashboard/ocr/approve.ts` and
