@@ -50,7 +50,7 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
   return (
     <div
       className={cn(
-        "group flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed cursor-pointer relative",
+        "group flex items-start gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed cursor-pointer relative",
         "transition-colors hover:bg-foreground/[0.02]",
         isCurrent && "bg-primary/[0.05]",
       )}
@@ -64,10 +64,10 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
         }
       }}
     >
-      <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{ts}</span>
-      <Icon className={cn("w-[14px] h-[14px] shrink-0", color)} />
+      <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px] mt-[3px]">{ts}</span>
+      <Icon className={cn("w-[14px] h-[14px] shrink-0 mt-[3px]", color)} />
       <span className={cn(
-        "flex-1 break-words",
+        "flex-1 min-w-0 break-words",
         category === "success" && "text-[#4ade80]",
         category === "error" && "text-destructive",
         category === "debug" && "text-muted-foreground/60",
@@ -143,10 +143,10 @@ function EventLine({ event }: { event: RunEvent }) {
     : event.type;
   const suffix = event.type !== "screenshot" && detail ? ` ${detail}` : "";
   return (
-    <div className="flex items-center gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
-      <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px]">{time}</span>
-      <Icon className={cn("w-[14px] h-[14px] shrink-0", v.colorClass)} aria-hidden />
-      <span className="flex-1 break-words text-secondary-foreground">
+    <div className="flex items-start gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
+      <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px] mt-[3px]">{time}</span>
+      <Icon className={cn("w-[14px] h-[14px] shrink-0 mt-[3px]", v.colorClass)} aria-hidden />
+      <span className="flex-1 min-w-0 break-words text-secondary-foreground">
         <span className={v.colorClass}>{label}</span>
         {suffix && <span className="text-muted-foreground">{suffix}</span>}
       </span>
