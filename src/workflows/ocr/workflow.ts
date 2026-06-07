@@ -4,6 +4,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { runOcrOrchestrator } from "./orchestrator.js";
+import { findFrozenTraceId } from "../../tracker/find-latest-entry.js";
 import { ocrStatusExtensions } from "../../tracker/dashboard/ocr-status.js";
 import { OcrInputSchema, type OcrInput } from "./schema.js";
 import {
@@ -42,10 +43,14 @@ export const OCR_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
 const ocrSteps = [
   "loading-roster",
   "ocr",
-  "matching",
-  "disambiguating",
+  // `matching` + `disambiguating` are sub-phases of extraction and are folded
+  // into the single `ocr` step (operator-facing: "OCR" covers read → match →
+  // disambiguate). The orchestrator reports them under `ocr`; legacy persisted
+  // rows parked at the old step names are remapped in `computeOcrPipelineView`.
   "person-lookup",
-  "verification",
+  // `awaiting-approval` is the DELEGATED-run gate only; a standalone run
+  // completes `done` at `person-lookup`. The old synthetic `verification` step
+  // was retired — person-lookup owns verification now.
   "awaiting-approval",
 ] as const;
 
@@ -131,6 +136,31 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
     const { parentRunId: _parentRunId, ...reviewData } = lastReviewData ?? {};
     ctx.updateData({ ...reviewData, mode: "prepare" } as Partial<OcrInput & Record<string, unknown>>);
     throw err;
+  }
+  if (result.status === "complete") {
+    // STANDALONE review run (verify / standalone oath / EC, 2026-06-06): the
+    // orchestrator already emitted the rich terminal `done` snapshot and
+    // returned `complete` WITHOUT parking on the approval signal (a standalone
+    // run has no downstream consumer — approval ≡ delegation). Seed that rich
+    // payload onto accumulated data so the kernel's auto-emitted terminal `done`
+    // row keeps the OCR preview identity (`mode:"prepare"` → Preview gate,
+    // file-kind PDF title, `records` for the completeness card) instead of
+    // collapsing to a sparse, title-less row that clobbers the orchestrator's
+    // rich one under the dashboard's latest-wins dedupe. Same seeding as the
+    // failure path above and the approve path below; mirrors the OCR stub's
+    // `complete` branch (tests/delegation/_runtime/ocr-stub.ts).
+    const { parentRunId: _completeParentRunId, ...reviewData } = lastReviewData ?? {};
+    const frozenTraceId = findFrozenTraceId({
+      workflow: "ocr",
+      runId: ctx.runId,
+      ...(ctx.trackerDir ? { trackerDir: ctx.trackerDir } : {}),
+    });
+    ctx.updateData({
+      ...reviewData,
+      ...(frozenTraceId ? { __traceId: frozenTraceId } : {}),
+      mode: "prepare",
+    } as Partial<OcrInput & Record<string, unknown>>);
+    return;
   }
   if (result.status !== "awaiting-approval") {
     // "discarded" — orchestrator already stopped emitting; the

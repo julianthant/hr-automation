@@ -1,7 +1,7 @@
 import type { RegisteredWorkflow } from './types.js'
 import { makeAuthObserver } from '../../tracker/sessions/auth-observer.js'
 import type { ScreenshotFn } from './types.js'
-import { buildUcpathIdleHooks } from './ucpath-idle-hooks.js'
+import { buildIdleRefreshHooks } from './idle-refresh-hooks.js'
 
 /**
  * Build a SessionObserver that routes Session.launch lifecycle hooks into
@@ -61,6 +61,6 @@ export function buildSessionObserver<TData, TSteps extends readonly string[]>(
       void authObs.onAuthFailed!(systemId, browserId)
       sessionCtx.setAuthState(browserId, systemId, 'failed')
     },
-    ...buildUcpathIdleHooks(sessionCtx.instance, trackerDir),
+    ...buildIdleRefreshHooks(sessionCtx.instance, trackerDir),
   }
 }

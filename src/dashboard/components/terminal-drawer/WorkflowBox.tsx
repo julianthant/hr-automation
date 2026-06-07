@@ -17,9 +17,11 @@ import { useDaemons } from "@/components/hooks/useDaemons";
 import { useNow } from "@/components/hooks/useNow";
 import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
-
-/** Mirrors `DEFAULT_UCPATH_IDLE_THRESHOLD_MS` in `src/core/kernel/session.ts`. */
-const UCPATH_IDLE_REFRESH_MS = 5 * 60 * 1000;
+import {
+  idleRefreshCadence,
+  isIdleRefreshSystem,
+  DEFAULT_IDLE_REFRESH_CADENCE,
+} from "../../../domain/idle-refresh.js";
 
 /* ----------------------------------------------------------------------
  * Auth-state visual tokens. Single source of truth for every system tile
@@ -78,21 +80,26 @@ function AuthIcon({ state, className }: { state: AuthState; className?: string }
   }
 }
 
-function UcpathIdleCountdownRing({
+function IdleCountdownRing({
+  systemId,
   lastTouchAt,
   refreshing,
   cycling,
 }: {
+  systemId: string;
   lastTouchAt: string;
   refreshing: boolean;
   cycling: boolean;
 }) {
   const now = useNow();
+  const refreshMs =
+    idleRefreshCadence(systemId)?.thresholdMs ?? DEFAULT_IDLE_REFRESH_CADENCE.thresholdMs;
+  const refreshMins = Math.round(refreshMs / 60_000);
   if (refreshing) {
     return (
       <Loader2
         className="w-[13px] h-[13px] shrink-0 animate-spin motion-reduce:animate-none text-foreground/85"
-        aria-label="UCPath idle refresh in progress"
+        aria-label={`${systemId} idle refresh in progress`}
       />
     );
   }
@@ -101,15 +108,13 @@ function UcpathIdleCountdownRing({
 
   const elapsedMs = Math.max(0, now - startMs);
   const cycleElapsedMs =
-    cycling && elapsedMs >= UCPATH_IDLE_REFRESH_MS
-      ? elapsedMs % UCPATH_IDLE_REFRESH_MS
-      : elapsedMs;
-  const overdue = !cycling && elapsedMs >= UCPATH_IDLE_REFRESH_MS;
+    cycling && elapsedMs >= refreshMs ? elapsedMs % refreshMs : elapsedMs;
+  const overdue = !cycling && elapsedMs >= refreshMs;
   /** 1 → just touched, 0 → idle reload due. */
   const remainingRatio = overdue
     ? 0
-    : Math.max(0, Math.min(1, 1 - cycleElapsedMs / UCPATH_IDLE_REFRESH_MS));
-  const remainingMs = Math.max(0, UCPATH_IDLE_REFRESH_MS - cycleElapsedMs);
+    : Math.max(0, Math.min(1, 1 - cycleElapsedMs / refreshMs));
+  const remainingMs = Math.max(0, refreshMs - cycleElapsedMs);
 
   const size = 13;
   const stroke = 2;
@@ -118,11 +123,11 @@ function UcpathIdleCountdownRing({
   const dashOffset = c * (1 - remainingRatio);
   const secsLeft = Math.ceil(remainingMs / 1000);
   const aria = overdue
-    ? "UCPath idle interval complete; page refresh pending"
-    : `UCPath idle: ${secsLeft}s until 5-minute page refresh`;
+    ? `${systemId} idle interval complete; page refresh pending`
+    : `${systemId} idle: ${secsLeft}s until ${refreshMins}-minute page refresh`;
   const title = overdue
-    ? "5 min idle window complete — refresh pending"
-    : `Elapsed toward 5 min UCPath refresh · ${secsLeft}s left`;
+    ? `${refreshMins} min idle window complete — refresh pending`
+    : `Elapsed toward ${refreshMins} min ${systemId} refresh · ${secsLeft}s left`;
   return (
     <svg
       width={size}
@@ -386,7 +391,7 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
     finalStatus,
     sessions,
     daemonPhase,
-    ucpathIdle,
+    idleBySystem,
   } = workflow;
   const { focusedInstance, setFocusedInstance } = useTerminalDrawer();
   const meta = useWorkflow(workflowName ?? "");
@@ -572,7 +577,9 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                     authBg[b.authState],
                   )}
                   title={
-                    b.system === "ucpath" && b.authState === "authed" && ucpathIdle?.lastTouchAt
+                    isIdleRefreshSystem(b.system) &&
+                    b.authState === "authed" &&
+                    idleBySystem?.[b.system]?.lastTouchAt
                       ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
                       : `${b.system} · ${authLabel[b.authState]}`
                   }
@@ -587,14 +594,15 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
                         {b.system}
                       </span>
                     </div>
-                    {b.system === "ucpath" &&
+                    {isIdleRefreshSystem(b.system) &&
                       b.authState === "authed" &&
                       !itemInFlight &&
-                      ucpathIdle?.lastTouchAt != null &&
-                      ucpathIdle.lastTouchAt.length > 0 && (
-                        <UcpathIdleCountdownRing
-                          lastTouchAt={ucpathIdle.lastTouchAt}
-                          refreshing={!!ucpathIdle.refreshing}
+                      idleBySystem?.[b.system]?.lastTouchAt != null &&
+                      idleBySystem[b.system].lastTouchAt.length > 0 && (
+                        <IdleCountdownRing
+                          systemId={b.system}
+                          lastTouchAt={idleBySystem[b.system].lastTouchAt}
+                          refreshing={!!idleBySystem[b.system].refreshing}
                           cycling={active && !itemInFlight}
                         />
                       )}

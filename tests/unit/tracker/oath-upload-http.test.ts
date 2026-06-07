@@ -153,9 +153,10 @@ test("buildOathUploadCancelHandler: returns 400 when no active row for sessionId
   }
 });
 
-test("sweepStuckOathUploadRows: marks pending/running rows as failed step=swept", () => {
+test("sweepStuckOathUploadRows: marks pending/running rows failed and preserves the reached step", () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-sweep-"));
   try {
+    // Step-less pending row → swept row must stay step-less (step-0 fallback).
     trackEvent({
       workflow: "oath-upload",
       timestamp: new Date().toISOString(),
@@ -164,12 +165,14 @@ test("sweepStuckOathUploadRows: marks pending/running rows as failed step=swept"
       status: "pending",
       data: {},
     }, dir);
+    // Running row parked on a real step → swept row must preserve it.
     trackEvent({
       workflow: "oath-upload",
       timestamp: new Date().toISOString(),
       id: "s-run",
       runId: "r-run",
       status: "running",
+      step: "wait-signatures",
       data: {},
     }, dir);
     // A done row should NOT be touched.
@@ -187,15 +190,18 @@ test("sweepStuckOathUploadRows: marks pending/running rows as failed step=swept"
 
     const file = rowFilePath("oath-upload", dateLocal(), dir);
     const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    const sweptForPend = lines.find((l) => l.id === "s-pend" && l.step === "swept");
-    const sweptForRun = lines.find((l) => l.id === "s-run" && l.step === "swept");
+    const sweptForPend = lines.find((l) => l.id === "s-pend" && l.status === "failed");
+    const sweptForRun = lines.find((l) => l.id === "s-run" && l.status === "failed");
     assert.ok(sweptForPend, "expected sweep entry for pending row");
     assert.ok(sweptForRun, "expected sweep entry for running row");
-    assert.equal(sweptForPend.status, "failed");
     assert.match(sweptForPend.error ?? "", /Dashboard restarted/);
+    // Step preservation: the running row's reached step rides onto the failed
+    // row; the step-less pending row gains none (keeps the step-0 fallback).
+    assert.equal("step" in sweptForPend, false);
+    assert.equal(sweptForRun.step, "wait-signatures");
 
-    // No new entry for the done row.
-    const sweptForDone = lines.find((l) => l.id === "s-done" && l.step === "swept");
+    // No new failed entry for the done row.
+    const sweptForDone = lines.find((l) => l.id === "s-done" && l.status === "failed");
     assert.equal(sweptForDone, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });

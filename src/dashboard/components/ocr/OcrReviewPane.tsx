@@ -13,7 +13,6 @@ import {
 import type { TrackerEntry } from "@/components/shared/types";
 import {
   type PreviewRecord,
-  type Verification,
   type FailedPage,
 } from "./types";
 import { type OathPreviewRecord } from "./types";
@@ -29,6 +28,8 @@ import { EmptyPagePlaceholder } from "./EmptyPagePlaceholder";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
 import { VerifyRecordView } from "./VerifyRecordView";
+import { toReadonlyVerifyRecord } from "./readonly-record";
+import { RecordScreenshotStrip } from "./RecordScreenshotStrip";
 import type { VerifyLookupKind, VerifyPreviewRecord } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
@@ -484,26 +485,11 @@ function useOcrReviewPrepApi(
     () => records.filter((r) => isApprovable(r)),
     [records],
   );
-  const { selectedCount, unselectedApprovableCount } = useMemo(() => {
-    const selected = approvableRecords.filter((r) => r.selected).length;
-    return {
-      selectedCount: selected,
-      unselectedApprovableCount: approvableRecords.length - selected,
-    };
-  }, [approvableRecords]);
+  const selectedCount = useMemo(
+    () => approvableRecords.filter((r) => r.selected).length,
+    [approvableRecords],
+  );
   const hasPendingDependencies = (dependencySummary?.pending ?? 0) > 0;
-
-  function selectAllApprovable(): void {
-    setLocalEdits((prev) => {
-      const next = { ...prev };
-      recordRows.forEach(({ record: r, originalIndex: idx }) => {
-        if (!isApprovable(r)) return;
-        if (r.selected) return;
-        next[idx] = { ...r, selected: true } as AnyPreviewRecord;
-      });
-      return next;
-    });
-  }
 
   async function handleForceResearch(indices: number[]) {
     setResearchingIndices(new Set(indices));
@@ -724,103 +710,73 @@ function useOcrReviewPrepApi(
                 }}
               />
             )}
-            {/* Quiet typographic trio: muted text links · middle dot · single amber pill.
-                Only the Approve button reads as a "button"; Reupload and the record count
-                are inline links with subtle hover affordance (color lift + underline). */}
-            <div className="flex items-center gap-3">
-              {onReupload && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
-                  }
-                  disabled={submitting}
-                  title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
-                  className={cn(
-                    "group inline-flex items-center gap-1.5 text-[13px] font-medium leading-none",
-                    "text-muted-foreground/85 transition-colors duration-150 ease-out",
-                    "cursor-pointer hover:text-foreground hover:underline underline-offset-[3px] decoration-1",
-                    "active:opacity-70",
-                    "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:no-underline disabled:hover:text-muted-foreground/85",
-                    "rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-foreground/40",
-                  )}
-                >
-                  <UploadCloud
-                    className="h-3 w-3 shrink-0 opacity-70 transition-opacity duration-150 group-hover:opacity-100"
-                    aria-hidden
-                  />
-                  Reupload
-                </button>
-              )}
+            {/* Variant B — "connected segmented group": one cohesive pill binds
+                the secondary Reupload control to a hairline-divided, filled-primary
+                Approve segment, so the cluster reads as a single deliberate control.
+                Read-only (standalone OCR) shows just Reupload; delegated adds the
+                divider + Approve. No standalone record-count chip. */}
+            {(onReupload || isDelegation) && (
+              <div className="inline-flex h-8 shrink-0 items-center rounded-lg border border-border bg-secondary/40 p-0.5">
+                {onReupload && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
+                    }
+                    disabled={submitting}
+                    aria-label="Reupload corrected PDF"
+                    title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
+                    className={cn(
+                      "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground",
+                      "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
+                      "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                    )}
+                  >
+                    <UploadCloud className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    Reupload
+                  </button>
+                )}
 
-              {/* Middle-dot separator — only between Reupload and the record count */}
-              {onReupload && (
-                <span aria-hidden className="select-none text-muted-foreground/35 leading-none">
-                  ·
-                </span>
-              )}
-
-              {isDelegation && unselectedApprovableCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={selectAllApprovable}
-                  disabled={submitting}
-                  title={`Click to select all ${unselectedApprovableCount} approvable record${unselectedApprovableCount === 1 ? "" : "s"}`}
-                  className={cn(
-                    "inline-flex items-baseline gap-1 text-[13px] font-medium leading-none",
-                    "text-muted-foreground/85 transition-colors duration-150 ease-out",
-                    "cursor-pointer hover:text-foreground hover:underline underline-offset-[3px] decoration-1",
-                    "active:opacity-70",
-                    "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:no-underline disabled:hover:text-muted-foreground/85",
-                    "rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-foreground/40",
-                  )}
-                >
-                  <span className="font-mono tabular-nums">{recordRows.length}</span>
-                  <span>records</span>
-                </button>
-              ) : (
-                <span
-                  className="inline-flex items-baseline gap-1 text-[13px] font-medium leading-none text-muted-foreground/70"
-                  title={isDelegation ? "All approvable records selected" : undefined}
-                >
-                  <span className="font-mono tabular-nums">{recordRows.length}</span>
-                  <span>records</span>
-                </span>
-              )}
-
-              {isDelegation && (
-                <button
-                  type="button"
-                  onClick={handleApprove}
-                  disabled={submitting || selectedCount <= 0 || hasPendingDependencies}
-                  title={
-                    hasPendingDependencies
-                      ? "Wait for OCR lookup retries to finish before approving."
-                      : selectedCount <= 0
-                        ? "Select at least one approvable record (checkbox)."
-                        : undefined
-                  }
-                  className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3.5 text-xs font-semibold leading-none",
-                    "bg-primary text-primary-foreground",
-                    "transition-[background-color,transform] duration-150 ease-out",
-                    "hover:bg-primary/90 active:translate-y-[0.5px]",
-                    // Disabled (no selection / pending deps) → dim. Submitting keeps full
-                    // saturation so the spinner reads as "working" not "dead".
-                    "disabled:cursor-not-allowed",
-                    !submitting && "disabled:opacity-50 disabled:active:translate-y-0",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                  )}
-                >
-                  {submitting ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
-                  ) : (
-                    <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  )}
-                  <span className="tabular-nums">Approve {selectedCount}</span>
-                </button>
-              )}
-            </div>
+                {isDelegation && (
+                  <>
+                    {onReupload && (
+                      <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleApprove}
+                      disabled={submitting || selectedCount <= 0 || hasPendingDependencies}
+                      aria-label={`Approve ${selectedCount} ${selectedCount === 1 ? "record" : "records"}`}
+                      title={
+                        hasPendingDependencies
+                          ? "Wait for OCR lookup retries to finish before approving."
+                          : selectedCount <= 0
+                            ? "Select at least one approvable record (checkbox)."
+                            : undefined
+                      }
+                      className={cn(
+                        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold leading-none text-primary-foreground",
+                        "transition-[background-color,transform] duration-150 ease-out",
+                        "hover:bg-primary/90 active:translate-y-[0.5px]",
+                        // Disabled (no selection / pending deps) → dim. Submitting keeps full
+                        // saturation so the spinner reads as "working" not "dead".
+                        "disabled:cursor-not-allowed",
+                        !submitting && "disabled:opacity-50 disabled:active:translate-y-0",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      )}
+                    >
+                      {submitting ? (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+                      ) : (
+                        <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      )}
+                      <span className="tabular-nums">Approve {selectedCount}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
   );
@@ -899,12 +855,24 @@ function useOcrReviewPrepApi(
                         onBatchSelectedChange: (selected) =>
                           setRecord(originalIndex, { ...record, selected } as AnyPreviewRecord),
                       })}
+                      screenshotStrip={
+                        !isDelegation
+                          ? recordScreenshotStrip({
+                              ocrRunId: runId,
+                              recordIndex: originalIndex,
+                              recordFormKind: record.formKind,
+                              runFormType: cfg.formKind,
+                              relookupPendingKeys: relookupPending,
+                            })
+                          : undefined
+                      }
                       formCard={renderFormCard({
                         record,
                         cfg,
                         totalPages,
                         originalIndex,
                         rowOrdinal,
+                        ocrRunId: runId,
                         entryStatus: entry.status,
                         entryStep: entry.step,
                         dependencyChildren,
@@ -915,6 +883,9 @@ function useOcrReviewPrepApi(
                         onRemoveRecord: removeRecord,
                         removeBusy: submitting,
                         hideHeader: true,
+                        readOnly: !isDelegation,
+                        // Strip is lifted to the pair block above — don't render it in the card.
+                        omitScreenshotStrip: true,
                         onChange: (next) => setRecord(originalIndex, next),
                       })}
                     />
@@ -930,6 +901,7 @@ function useOcrReviewPrepApi(
                   totalPages,
                   originalIndex,
                   rowOrdinal: ordinals[rowIdx],
+                  ocrRunId: runId,
                   entryStatus: entry.status,
                   entryStep: entry.step,
                   dependencyChildren,
@@ -941,6 +913,7 @@ function useOcrReviewPrepApi(
                   removeBusy: submitting,
                   rowOnPage: rowIdx + 1,
                   totalRowsOnPage: group.length,
+                  readOnly: !isDelegation,
                   onChange: (next) => setRecord(originalIndex, next),
                 })}
               </div>
@@ -1062,12 +1035,24 @@ function isApprovable(record: AnyPreviewRecord): boolean {
   return matchOk && notUnknown && verifyOk && eidOk;
 }
 
+/**
+ * Returns the subset of `["person", "i9"]` lookup kinds that are currently
+ * pending for `idx` inside the global `${idx}:${kind}` pending set.
+ * Single source for the kind list used by both `renderFormCard` and
+ * `recordScreenshotStrip`.
+ */
+function pendingLookupKeysFor(keys: ReadonlySet<string>, idx: number): VerifyLookupKind[] {
+  return (["person", "i9"] as VerifyLookupKind[]).filter((lk) => keys.has(`${idx}:${lk}`));
+}
+
 function renderFormCard(args: {
   record: AnyPreviewRecord;
   cfg: OcrDownstreamConfigType;
   totalPages: number;
   originalIndex: number;
   rowOrdinal: number;
+  /** OCR prep run id — addresses the per-record lookup screenshots (verify). */
+  ocrRunId: string;
   entryStatus: string;
   entryStep?: string;
   dependencyChildren: TaskDependencyChild[];
@@ -1082,6 +1067,10 @@ function renderFormCard(args: {
   hideHeader?: boolean;
   rowOnPage?: number;
   totalRowsOnPage?: number;
+  /** Standalone (non-delegated) run → render the read-only ✓/✗ checklist, not the editable form. */
+  readOnly: boolean;
+  /** Single-record pair lifts the screenshot strip to the pair block — don't render it in the card. */
+  omitScreenshotStrip?: boolean;
   onChange: (r: AnyPreviewRecord) => void;
 }): ReactNode {
   const r = args.record;
@@ -1105,11 +1094,7 @@ function renderFormCard(args: {
   // global `${index}:${lookup}` pending set).
   const recordRelookupPending: ReadonlySet<VerifyLookupKind> | undefined =
     args.relookupPendingKeys
-      ? new Set(
-          (["person", "i9"] as VerifyLookupKind[]).filter((lk) =>
-            args.relookupPendingKeys!.has(`${args.originalIndex}:${lk}`),
-          ),
-        )
+      ? new Set(pendingLookupKeysFor(args.relookupPendingKeys, args.originalIndex))
       : undefined;
 
   const removeFromPileBanner = isUnknown ? (
@@ -1120,6 +1105,84 @@ function renderFormCard(args: {
   ) : undefined;
   const signatureBanner = renderOathSignatureBanner(r, args.cfg.hasSignature);
 
+  // verify: the footer "retry" re-runs PERSON LOOKUP for this one record,
+  // reusing the run (no new row) via /api/ocr/verify-relookup; oath/EC keep the
+  // force-research button. The screenshot strip (verify only) renders the
+  // record's per-lookup PNGs between the header and the body.
+  const isVerify = args.cfg.formKind === "verify";
+  const personRelookupPending = recordRelookupPending?.has("person") ?? false;
+  const footerActionNode: ReactNode = isVerify
+    ? args.onRelookup
+      ? (
+        <button
+          type="button"
+          onClick={() => args.onRelookup!(args.originalIndex, "person")}
+          disabled={personRelookupPending}
+          title="Re-run person lookup for this record"
+          aria-label="Re-run person lookup for this record"
+          className={cn(
+            "inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground outline-none transition-colors",
+            "hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+            "disabled:cursor-wait disabled:opacity-60",
+          )}
+        >
+          <RotateCw className={cn("h-3.5 w-3.5", personRelookupPending && "animate-spin motion-reduce:animate-none")} aria-hidden />
+        </button>
+      )
+      : undefined
+    : args.onForceResearchSingle
+      ? (
+        <button
+          type="button"
+          onClick={() => args.onForceResearchSingle!(args.originalIndex)}
+          disabled={isResearching}
+          title="Re-run lookup for this record"
+          aria-label="Re-run lookup for this record"
+          className={cn(
+            "inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground outline-none transition-colors",
+            "hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+            "disabled:cursor-wait disabled:opacity-60",
+          )}
+        >
+          <RotateCw className={cn("h-3.5 w-3.5", isResearching && "animate-spin motion-reduce:animate-none")} aria-hidden />
+        </button>
+      )
+      : undefined;
+  // Read-only review rows (verify + standalone oath/EC) get the lookup
+  // screenshot strip. In the single-record pair it is LIFTED to its own
+  // full-width block (omitScreenshotStrip) so only the multi-record card renders
+  // it inline here.
+  const screenshotStripNode: ReactNode =
+    args.readOnly && !args.omitScreenshotStrip ? (
+      <RecordScreenshotStrip
+        ocrRunId={args.ocrRunId}
+        recordIndex={args.originalIndex}
+        formKind={r.formKind}
+        runFormType={args.cfg.formKind}
+        refreshKey={recordRelookupPending ? recordRelookupPending.size : 0}
+      />
+    ) : undefined;
+
+  // The body: a standalone oath/EC run is READ-ONLY (no downstream consumer, so
+  // nothing to edit) — render the same ✓/✗ completeness checklist as a verify
+  // card via `VerifyRecordView`. A delegated run keeps the editable form (its
+  // edits feed the downstream write), and `verify` uses its own read-only
+  // renderer (which also wires the per-check relookup).
+  const recordBody: ReactNode =
+    args.readOnly && !isVerify ? (
+      <VerifyRecordView record={toReadonlyVerifyRecord(r as OathPreviewRecord | PreviewRecord)} />
+    ) : (
+      args.cfg.renderEditor({
+        record: r,
+        onChange: (next) => args.onChange(next),
+        isResearching,
+        onRelookup: args.onRelookup
+          ? (lookup) => args.onRelookup!(args.originalIndex, lookup)
+          : undefined,
+        relookupPending: recordRelookupPending,
+      })
+    );
+
   return (
     <PrepReviewFormCard
       pageLocation={pageLocation}
@@ -1127,32 +1190,15 @@ function renderFormCard(args: {
       rowOrdinal={args.rowOrdinal}
       workflowStatusPhase={workflowStatusPhase}
       matchStateBadge={matchStateBadge}
-      employmentStatusBadge={renderEmploymentStatusBadge(r.verification)}
-      footerAction={
-        args.onForceResearchSingle ? (
-          <button
-            type="button"
-            onClick={() => args.onForceResearchSingle!(args.originalIndex)}
-            disabled={isResearching}
-            title="Re-run lookup for this record"
-            aria-label="Re-run lookup for this record"
-            className={cn(
-              "inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground outline-none transition-colors",
-              "hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-              "disabled:cursor-wait disabled:opacity-60",
-            )}
-          >
-            <RotateCw className={cn("h-3.5 w-3.5", isResearching && "animate-spin motion-reduce:animate-none")} aria-hidden />
-          </button>
-        ) : undefined
-      }
+      footerAction={footerActionNode}
+      screenshotStrip={screenshotStripNode}
       onDeleteRecord={() => {
         if (args.removeBusy) return;
         if (!window.confirm("Remove this record from the batch?")) return;
         args.onRemoveRecord(args.originalIndex);
       }}
       deleteDisabled={args.removeBusy}
-      signatureBadge={renderSignatureBadge(r, args.cfg.hasSignature)}
+      documentKindChip={renderDocumentKindChip(r.formKind)}
       documentTypeBadge={
         isUnknown ? (
           <span className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px font-mono text-[10px] uppercase text-destructive">
@@ -1169,16 +1215,34 @@ function renderFormCard(args: {
         args.onChange({ ...r, selected: next } as AnyPreviewRecord)
       }
     >
-      {args.cfg.renderEditor({
-        record: r,
-        onChange: (next) => args.onChange(next),
-        isResearching,
-        onRelookup: args.onRelookup
-          ? (lookup) => args.onRelookup!(args.originalIndex, lookup)
-          : undefined,
-        relookupPending: recordRelookupPending,
-      })}
+      {recordBody}
     </PrepReviewFormCard>
+  );
+}
+
+/**
+ * Build the lookup-screenshot strip for a read-only review record. Lifted to its
+ * own full-width block in the single-record pair (between the header and the
+ * PDF/checklist columns); self-hides when the record has no captured shots.
+ */
+function recordScreenshotStrip(args: {
+  ocrRunId: string;
+  recordIndex: number;
+  recordFormKind: string;
+  runFormType: OcrDownstreamConfigType["formKind"];
+  relookupPendingKeys?: ReadonlySet<string>;
+}): ReactNode {
+  const refreshKey = args.relookupPendingKeys
+    ? pendingLookupKeysFor(args.relookupPendingKeys, args.recordIndex).length
+    : 0;
+  return (
+    <RecordScreenshotStrip
+      ocrRunId={args.ocrRunId}
+      recordIndex={args.recordIndex}
+      formKind={args.recordFormKind}
+      runFormType={args.runFormType}
+      refreshKey={refreshKey}
+    />
   );
 }
 
@@ -1212,7 +1276,7 @@ function renderFormCardNav(args: {
         entryStep: args.entryStep,
         dependencyChildren: args.dependencyChildren,
       })}
-      signatureBadge={renderSignatureBadge(args.record, args.cfg.hasSignature)}
+      documentKindChip={renderDocumentKindChip(args.record.formKind)}
       documentTypeBadge={
         isUnknown ? (
           <span className="rounded-md border border-destructive/40 bg-destructive/10 px-1.5 py-px font-mono text-[10px] uppercase text-destructive">
@@ -1224,56 +1288,6 @@ function renderFormCardNav(args: {
       selectedDisabled={isUnknown}
       onSelectedChange={args.onBatchSelectedChange}
     />
-  );
-}
-
-/** Person Org Summary outcome — orthogonal to roster/EID match (who this row is). */
-function renderEmploymentStatusBadge(v: Verification | undefined): ReactNode {
-  if (!v) return null;
-  if (v.state === "verified") {
-    return (
-      <span
-        className="font-mono text-[10px] font-semibold uppercase tracking-wide text-success"
-        title={`HR status: ${v.hrStatus}`}
-      >
-        Active
-      </span>
-    );
-  }
-  if (v.state === "inactive") {
-    return (
-      <span
-        className="font-mono text-[10px] font-semibold uppercase tracking-wide text-destructive"
-        title={`HR status: ${v.hrStatus}`}
-      >
-        Inactive
-      </span>
-    );
-  }
-  if (v.state === "non-hdh") {
-    return (
-      <span
-        className="font-mono text-[10px] font-semibold uppercase tracking-wide text-warning"
-        title={v.department ? `HR status: ${v.hrStatus}; non-HDH dept: ${v.department}` : `HR status: ${v.hrStatus}; non-HDH dept`}
-      >
-        Active
-      </span>
-    );
-  }
-  if (v.state === "lookup-failed") {
-    return (
-      <span
-        className="font-mono text-[10px] uppercase tracking-wide text-warning"
-        title={v.error ?? "Lookup did not classify active status"}
-      >
-        Unverified
-      </span>
-    );
-  }
-  return (
-    <span className="font-mono text-[10px] uppercase tracking-wide text-warning">
-      Pending
-    </span>
   );
 }
 
@@ -1294,7 +1308,9 @@ function deriveRecordWorkflowPhase(args: {
   const step = args.entryStep ?? "";
   if (
     args.entryStatus === "running" &&
-    (step === "matching" || step === "disambiguating" || step === "person-lookup" || step === "verification") &&
+    // `matching` + `disambiguating` are now reported under the merged `ocr`
+    // step; the legacy names stay for older persisted rows.
+    (step === "ocr" || step === "matching" || step === "disambiguating" || step === "person-lookup" || step === "verification") &&
     (lookupState === "extracted" || lookupState === "lookup-pending" || lookupState === "lookup-running")
   ) {
     return "running";
@@ -1318,26 +1334,23 @@ function renderMatchBadge(args: { record: AnyPreviewRecord }): ReactNode {
   );
 }
 
+// The footer chip expresses identity-match *confidence*, not the engine name.
+// Deterministic provenances (roster / EID on form / person lookup) are a
+// confirmed identity; an LLM guess is "likely" and worth an eyeball; manual /
+// pending are special. The raw `matchSource` VALUES are unchanged provenance —
+// only the operator-facing label maps to a confidence statement.
 function getMatchSourceDisplay(record: AnyPreviewRecord): { label: string; className: string } {
   const source = String(record.matchSource ?? "");
-  if (source === "roster") {
-    return { label: "Match: roster", className: "border-success/40 bg-success/10 text-success" };
-  }
-  if (source === "form-eid") {
-    return { label: "Match: EID on form", className: "border-success/40 bg-success/10 text-success" };
+  if (source === "roster" || source === "form-eid" || source === "eid-lookup") {
+    return { label: "Identity confirmed", className: "border-success/40 bg-success/10 text-success" };
   }
   if (source === "llm") {
-    return { label: "Match: LLM", className: "border-warning/40 bg-warning/10 text-warning" };
-  }
-  if (source === "eid-lookup") {
-    // Display label tracks the renamed "Person Lookup" step; the underlying
-    // `matchSource` VALUE stays "eid-lookup" (provenance, not a step).
-    return { label: "Match: person lookup", className: "border-primary/40 bg-primary/10 text-primary" };
+    return { label: "Likely match", className: "border-warning/40 bg-warning/10 text-warning" };
   }
   if (source === "manual") {
-    return { label: "Match: manual", className: "border-border bg-muted text-muted-foreground" };
+    return { label: "Manual match", className: "border-border bg-muted text-muted-foreground" };
   }
-  return { label: "Match: pending", className: "border-border bg-muted text-muted-foreground" };
+  return { label: "Unmatched", className: "border-border bg-muted text-muted-foreground" };
 }
 
 function isRunningChildStatus(status: string): boolean {
@@ -1348,21 +1361,30 @@ function isPendingChildStatus(status: string): boolean {
   return status === "queued" || status === "pending" || status === "ready";
 }
 
-function renderSignatureBadge(r: AnyPreviewRecord, hasSignature: boolean): ReactNode {
-  if (!hasSignature) return undefined;
-  if (r.formKind !== "oath") return null;
-  const oath = r;
-  if (oath.employeeSigned === false) {
+/**
+ * Document-kind chip (Oath / Emergency Contact) rendered at the head of the row
+ * title in place of the `#ordinal` badge. Returns undefined for an `unknown`
+ * page so the nav falls back to the ordinal — the destructive "unknown"
+ * `documentTypeBadge` already flags those pages, so a second "Unknown" chip
+ * would be redundant.
+ *
+ * (The former `renderSignatureBadge` header chip — "employee unsigned" /
+ * "officer unsigned" — was removed: the same state is conveyed by the body's
+ * signature banner (`renderOathSignatureBanner`) and the read-only checklist's
+ * "Employee Signed / Officer Signed" rows, so the header chip was redundant.)
+ */
+function renderDocumentKindChip(formKind: string): ReactNode {
+  if (formKind === "oath") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
-        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden /> employee unsigned
+      <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-primary">
+        Oath
       </span>
     );
   }
-  if (oath.officerSigned === false) {
+  if (formKind === "emergency-contact") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-1.5 py-px font-mono text-[10px] uppercase text-warning">
-        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden /> officer unsigned
+      <span className="rounded border border-border bg-muted px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        Emergency Contact
       </span>
     );
   }

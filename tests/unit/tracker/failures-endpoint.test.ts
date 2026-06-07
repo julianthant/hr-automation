@@ -59,6 +59,43 @@ describe("buildFailuresHandler", () => {
     assert.equal(rows[0].workflow, "onboarding");  // 11:00 newer
     assert.equal(rows[1].workflow, "separations"); // 10:00
     assert.equal(rows[1].error, "Kuali down");
+    // Row title resolves from the entry's subject data (legacy fallback path).
+    assert.equal(rows[0].title, "X Y");
+    assert.equal(rows[1].title, "Smith");
+  });
+
+  it("surfaces the kind-based row title + trace code, and omits an id-only title", () => {
+    const bucket = {
+      ocr: {
+        "2026-04-28": [
+          entry({
+            workflow: "ocr",
+            id: "DOC-9",
+            runId: "DOC-9#1",
+            status: "failed",
+            error: "Dashboard restarted",
+            timestamp: "2026-04-28T10:00:00Z",
+            data: { queueRowKind: "file", pdfOriginalName: "I9_Doe.pdf", __traceId: "oc-100000-doc9" },
+          }),
+          entry({
+            workflow: "ocr",
+            id: "DOC-bare",
+            runId: "DOC-bare#1",
+            status: "failed",
+            error: "boom",
+            timestamp: "2026-04-28T09:00:00Z",
+            data: {},
+          }),
+        ],
+      },
+    };
+    const rows = buildFailuresHandler(makeDeps(bucket))({ date: "2026-04-28" });
+    const doc9 = rows.find((r) => r.id === "DOC-9")!;
+    const bare = rows.find((r) => r.id === "DOC-bare")!;
+    assert.equal(doc9.title, "I9_Doe.pdf"); // file kind → PDF filename
+    assert.equal(doc9.traceId, "oc-100000-doc9");
+    assert.equal(bare.title, ""); // only the id is known → empty, never the UUID
+    assert.equal(bare.traceId, undefined); // no __traceId stamped
   });
 
   it("filters retries: latest run for an id wins", () => {

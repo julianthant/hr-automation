@@ -1,7 +1,29 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
-import { buildLogStreamItemKey, emptyStreamMessage } from "../../../src/dashboard/components/log-panel/LogStream.js";
+import { buildLogStreamItemKey, emptyStreamMessage, parseInitialTab } from "../../../src/dashboard/components/log-panel/LogStream.js";
+
+describe("parseInitialTab", () => {
+  it("defaults to the Logs surface with the All category", () => {
+    assert.deepEqual(parseInitialTab(undefined), { surface: "logs", category: "all" });
+  });
+
+  it("maps surface deep-links onto the surface axis", () => {
+    assert.deepEqual(parseInitialTab("preview"), { surface: "preview", category: "all" });
+    assert.deepEqual(parseInitialTab("screenshots"), { surface: "screenshots", category: "all" });
+    assert.deepEqual(parseInitialTab("edit-data"), { surface: "edit-data", category: "all" });
+  });
+
+  it("maps category deep-links (incl. Events) onto Logs + the category axis", () => {
+    assert.deepEqual(parseInitialTab("events"), { surface: "logs", category: "events" });
+    assert.deepEqual(parseInitialTab("errors"), { surface: "logs", category: "errors" });
+    assert.deepEqual(parseInitialTab("debug"), { surface: "logs", category: "debug" });
+  });
+
+  it("falls back to Logs + All for an unknown tab key", () => {
+    assert.deepEqual(parseInitialTab("nonsense"), { surface: "logs", category: "all" });
+  });
+});
 
 describe("emptyStreamMessage", () => {
   it("uses an events-specific empty state for the Events tab", () => {

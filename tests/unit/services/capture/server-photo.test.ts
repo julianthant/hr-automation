@@ -14,7 +14,6 @@ import {
   handleDeletePhoto,
   handleReplacePhoto,
   handleReorder,
-  handleExtend,
   handleValidate,
 } from "../../../../src/services/capture/server.js";
 import {
@@ -386,60 +385,6 @@ describe("handleReorder", () => {
       { token: s.token, fromIndex: 0, toIndex: 1 },
       { store },
     );
-    assert.equal(r.status, 409);
-  });
-});
-
-describe("handleExtend", () => {
-  it("bumps expiresAt by the explicit byMs", () => {
-    const store = createSessionStore();
-    const s = store.create({ workflow: "x", onFinalize });
-    const before = s.expiresAt;
-    const r = handleExtend(
-      { sessionId: s.sessionId, byMs: 60_000 },
-      { store },
-    );
-    assert.equal(r.status, 200);
-    const body = r.body as { newExpiresAt: number };
-    assert.equal(body.newExpiresAt, before + 60_000);
-  });
-
-  it("uses the 5-minute default when byMs is omitted (gap-5)", () => {
-    const store = createSessionStore();
-    const s = store.create({ workflow: "x", onFinalize });
-    const before = s.expiresAt;
-    const r = handleExtend({ sessionId: s.sessionId }, { store });
-    assert.equal(r.status, 200);
-    const body = r.body as { newExpiresAt: number };
-    assert.equal(body.newExpiresAt, before + 5 * 60_000);
-  });
-
-  it("returns 404 for unknown sessionId", () => {
-    const store = createSessionStore();
-    const r = handleExtend(
-      { sessionId: "no-such-id", byMs: 60_000 },
-      { store },
-    );
-    assert.equal(r.status, 404);
-  });
-
-  it("returns 409 for terminal state", () => {
-    const store = createSessionStore();
-    const s = store.create({ workflow: "x", onFinalize });
-    store.setState(s.sessionId, "finalized");
-    const r = handleExtend(
-      { sessionId: s.sessionId, byMs: 60_000 },
-      { store },
-    );
-    assert.equal(r.status, 409);
-  });
-
-  it("returns 409 after idle expiry", () => {
-    let now = 1_000_000;
-    const store = createSessionStore({ now: () => now });
-    const s = store.create({ workflow: "x", onFinalize });
-    now += 16 * 60_000;
-    const r = handleExtend({ sessionId: s.sessionId, byMs: 60_000 }, { store });
     assert.equal(r.status, 409);
   });
 });

@@ -13,6 +13,7 @@ export interface PersonLookupResult {
   startDate?: string;
   effectiveDate?: string;
   terminationDate?: string;
+  terminationReason?: string;
   expectedJobEndDate?: string;
   jobCodeDescription?: string;
 }
@@ -42,6 +43,7 @@ export interface ActiveCheckOutcome {
   startDate: string;
   effdt: string;
   terminationDate: string;
+  terminationReason: string;
   expectedJobEndDate: string;
   candidateEids: string[];
 }
@@ -145,6 +147,7 @@ export function deriveActiveCheckOutcome(
       startDate: "",
       effdt: "",
       terminationDate: "",
+      terminationReason: "",
       expectedJobEndDate: "",
       candidateEids: [],
     };
@@ -163,6 +166,7 @@ export function deriveActiveCheckOutcome(
       startDate: "",
       effdt: "",
       terminationDate: "",
+      terminationReason: "",
       expectedJobEndDate: "",
       candidateEids: selection.candidateEids,
     };
@@ -196,6 +200,9 @@ export function deriveActiveCheckOutcome(
     startDate: normalizeDate(result.startDate || result.effectiveDate),
     effdt: normalizeDate(result.effectiveDate),
     terminationDate,
+    // Reason only makes sense alongside a termination date; blank it otherwise
+    // so an active row never shows a stale action-reason.
+    terminationReason: terminationDate ? (result.terminationReason ?? "").trim() : "",
     expectedJobEndDate,
     candidateEids: selection.candidateEids.length > 0 ? selection.candidateEids : [result.emplId],
   };

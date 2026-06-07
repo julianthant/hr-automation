@@ -70,6 +70,13 @@ export const VerifyCheckSchema = z.object({
   source: z.enum(["paper", "crm", "ucpath", "i9"]).nullable(),
   /** present=on paper; found=blank but looked up; missing=blank+not found. */
   status: z.enum(["present", "found", "missing"]),
+  /**
+   * Set on a `missing` lookup-backed check when the lookup couldn't ACCESS the
+   * record (vs. genuinely not finding it) — currently the I-9 signer when the
+   * operator's account lacks permission. The UI renders "Unable to access"
+   * instead of "— not found". The retry stays available.
+   */
+  unavailable: z.boolean().optional(),
 });
 export type VerifyCheck = z.infer<typeof VerifyCheckSchema>;
 
@@ -88,6 +95,13 @@ export const VerifyPreviewRecordSchema = VerifyOcrRecordSchema.extend({
   oathDate: z.string().optional(),
   /** i9 Section 2 signer. */
   officialSigner: z.string().optional(),
+  /**
+   * i9-lookup outcome status (`signed` | `unsigned` | `historical` |
+   * `not-found` | `unable-to-access` | `error`). Drives the "Unable to
+   * access" rendering when the signer is blank because the operator's account
+   * can't view the I-9 record.
+   */
+  officialSignerStatus: z.string().optional(),
   matchState: MatchStateSchema,
   selected: z.boolean(),
   warnings: z.array(z.string()),
@@ -128,12 +142,18 @@ For EVERY record:
 - originallyMissing: array of expected field names that were genuinely BLANK on the paper. Use [] when nothing was missing.
 - notes: free-form observations, or [].
 
-For oath records ALSO capture:
+For oath records ALSO capture. IMPORTANT — the UC State Oath of Allegiance has
+TWO DISTINCT signature lines near the bottom; do NOT confuse them:
+  • "Signature of Officer or Employee" — signed by the person TAKING the oath
+    (the employee themself).
+  • "Signature of Authorized Official" — signed by the witness / authorized
+    official who administers the oath (usually a SEPARATE person, and this line
+    is often left BLANK on filed forms).
 - paperEmploymentDate: the employment / first-day-of-service date if printed on the form. Null if blank.
 - paperDateSigned: the "taken and subscribed before me" date (the oath signing date). Null if blank.
-- employeeSigned: true if the employee signature line has any writing/scribble; false for an empty box.
-- officerSigned: true if the authorized-official / witness signature is filled; false when empty. Null if the form has no such line.
-- paperOfficialName: the printed name of the authorized official / witness, if present. Null if blank.
+- employeeSigned: true if the "Signature of Officer or Employee" line has any writing/scribble; false for an empty box. This is the EMPLOYEE's own signature.
+- officerSigned: true if the "Signature of Authorized Official" line is filled; false when empty. Null if the form has no such line. This is the AUTHORIZED OFFICIAL's signature — NOT the employee's.
+- paperOfficialName: the printed/handwritten name on the "Signature of Authorized Official" line ONLY. Null if that line is blank. NEVER copy the value from the "Signature of Officer or Employee" line here — that is the employee, not the authorized official.
 
 For emergency-contact records, only printedName + employeeId are needed (plus the universal fields).
 
@@ -202,12 +222,25 @@ export function buildVerifyChecks(rec: VerifyPreviewRecord): VerifyCheck[] {
   );
 
   if (rec.formKind === "oath") {
+    const officialSignerCheck = mk(
+      "officialSigner",
+      "Authorized Official Signer",
+      paperOfficial,
+      foundOfficial,
+      "i9",
+    );
+    // The signer is blank not because no one signed, but because the operator's
+    // account can't view the I-9 record. Render "Unable to access" (the i9
+    // lookup runs after person-lookup resolves the EID; the retry re-runs it).
+    if (officialSignerCheck.status === "missing" && rec.officialSignerStatus === "unable-to-access") {
+      officialSignerCheck.unavailable = true;
+    }
     return [
       nameCheck,
       eidCheck,
       mk("employmentDate", "Employment Date", paperEmploymentDate, foundEmploymentDate, "crm"),
       mk("oathDate", "Oath Date", paperOathDate, foundOathDate, "crm"),
-      mk("officialSigner", "Authorized Official Signer", paperOfficial, foundOfficial, "i9"),
+      officialSignerCheck,
       activeStatusCheck,
     ];
   }
@@ -250,6 +283,11 @@ export function applyI9ToVerifyRecord(
 ): VerifyPreviewRecord {
   const signerName = nonEmpty(data?.signerName);
   if (signerName) rec.officialSigner = signerName;
+  // Carry the i9 status so `buildVerifyChecks` can render "Unable to access"
+  // (record exists but out of the operator's access scope) distinctly from a
+  // genuine "— not found".
+  const i9Status = nonEmpty(data?.i9Status);
+  if (i9Status) rec.officialSignerStatus = i9Status;
   return rec;
 }
 
@@ -330,7 +368,6 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
 
   // No approve fan-out — verify is read-only. No approveTo / approveDocumentTo.
 
-  recordRendererId: "VerifyRecordView",
   rosterMode: "optional",
   traceCode: "vf",
 

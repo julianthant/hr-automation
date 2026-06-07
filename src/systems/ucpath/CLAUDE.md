@@ -46,6 +46,7 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 - Person search: discriminates new hires (dialog) vs rehires (results table) by UI presence
 - Person Org Summary: detail pages with multiple Employment Instances must click `View All` when present and select the preferred assignment row (active first, HDH-active before non-HDH, then highest empl record). Do not derive active/inactive from the first visible assignment row.
 - Person Org Summary dates: `EidResult.startDate` is the ORG Instance Last Hire date (`PER_INST_EMP_VW_LAST_HIRE_DT$0`, first day of service). `EidResult.effectiveDate` is the selected assignment-row EFFDT. Do not use assignment EFFDT as the person-lookup dashboard start date.
+- Person Org Summary termination reason: `EidResult.terminationReason` is the PeopleSoft action-reason rendered next to the Termination Date in the ORG Instance section (`personOrgSummary.terminationReason` = `#PER_INST_EMP_VW_DESCR$0`, e.g. "Resign - Personal Reasons"). Extracted in both detail paths and blanked when there's no termination date. Same `PER_INST_EMP_VW_*$0` field family as Last Hire / Termination Date.
 - Modal dialogs dismissed via `frame.evaluate()` + `document.getElementById("#ICOK")` (Playwright can't click behind PeopleSoft overlay)
 - `parsePayRate("$17.75 per hour")` → `"17.75"`
 - Phone/email grid indices hardcoded: `$6` for phone type, `$7` for email type

@@ -38,6 +38,7 @@ import {
   searchCrmByName,
   searchCrmByEidOrName,
   pickCrmStartDate,
+  pickCrmPayrollTitle,
   datesWithinDays,
   type CrmRecord,
 } from "./crm-search.js";
@@ -217,7 +218,8 @@ async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
   resolvedEid?: string,
 ): Promise<void> {
   const startDate = pickCrmStartDate(crmRecords, resolvedEid);
-  ctx.updateData({ startDate });
+  const payrollTitle = pickCrmPayrollTitle(crmRecords, resolvedEid);
+  ctx.updateData({ startDate, payrollTitle });
   if (crmRecords.length === 0) {
     log.step("CRM start date: no CRM record — Start Date left blank");
     return;
@@ -271,7 +273,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     parsed = parseNameInput(searchName);
   } catch (err) {
     log.error(`CRM cross-verify: invalid name "${searchName}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "", startDate: "" });
+    ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
     return;
   }
 
@@ -280,13 +282,13 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {
     log.error(`CRM cross-verify: search failed for "${searchName}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "", startDate: "" });
+    ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
     return;
   }
 
   if (crmRecords.length === 0) {
     log.step(`CRM: no records for "${searchName}"`);
-    ctx.updateData({ crmMatch: "", startDate: "" });
+    ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
     return;
   }
 
@@ -340,6 +342,7 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
     ucpathStartDate: outcome.startDate,
     effdt: outcome.effdt,
     terminationDate: outcome.terminationDate,
+    terminationReason: outcome.terminationReason,
     expectedJobEndDate: outcome.expectedJobEndDate,
     isActive: String(outcome.isActive),
     isHdhAccepted: String(outcome.isHdhAccepted),
@@ -510,8 +513,10 @@ export const personLookupWorkflow = defineWorkflow({
     { key: "emplId", label: "EID" },
     { key: "department", label: "Dept" },
     { key: "hrStatus", label: "HR Status" },
+    { key: "payrollTitle", label: "Payroll Title" },
     { key: "startDate", label: "Start Date" },
     { key: "terminationDate", label: "End Date" },
+    { key: "terminationReason", label: "Term Reason" },
   ],
   getName: (d) => d.searchName ?? "",
   getId: (d) => d.searchName ?? "",

@@ -189,11 +189,12 @@ test(
     // 2. Enqueue the OCR verify run (registers the fixture PDF).
     const ocr = await rt.enqueueOcr({ fixturePath: FIXTURE_PDF, originalName: "detect-test.pdf" });
 
-    // 3. Wait for verify to finish enrichment + reach awaiting-approval. verify
-    //    BLOCKS on its children: the hook is awaited, so the OCR row stays
-    //    `running` until person-lookup + i9-lookup finish — proving the
-    //    enrichment fan-out resolved (NOT a hang).
-    await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId, timeoutMs: 75_000 });
+    // 3. Wait for verify to finish enrichment + COMPLETE. verify BLOCKS on its
+    //    children: the hook is awaited, so the OCR row stays `running` until
+    //    person-lookup + i9-lookup finish — proving the enrichment fan-out
+    //    resolved (NOT a hang) — then a STANDALONE verify run completes `done`
+    //    at person-lookup (no awaiting-approval gate; approval ≡ delegation).
+    await rt.waitForEvent("ocr:review-complete", { runId: ocr.runId, timeoutMs: 75_000 });
 
     // 4. All 4 enrichment children reached terminal `done` on their daemons.
     await waitForQueue("person-lookup", rt.trackerDir, (st) => st.done.length >= 3);
@@ -232,16 +233,17 @@ test(
 
     // ─── OCR verify parent row ───────────────────────────────────────────────
     // archetype `preview`; file-kind title (PDF filename); subtitle = trace id;
-    // `vf-…` trace id (verify brands `vf`). It sits at awaiting-approval
-    // (status `running`) — verify has NO approve fan-out, so the operator never
-    // approves and the row never goes terminal `done` on its own.
+    // `vf-…` trace id (verify brands `vf`). A STANDALONE verify run completes
+    // terminal `done` after person-lookup — no approve fan-out, no awaiting-
+    // approval gate (approval ≡ delegation); the operator reads the read-only
+    // completeness card on the done row.
     const ocrRow = dash.row("ocr", ocr.runId);
     assert.equal(ocrRow.archetype, "preview", "OCR verify parent row archetype is preview");
     assert.equal(ocrRow.title, "detect-test.pdf", "OCR (file kind) title is the PDF filename");
     assert.equal(ocrRow.subtitle, "<traceId>", "OCR (file kind) subtitle is the trace id");
     assert.equal(ocrRow.data.queueRowKind, "file", "OCR row is file-kind (pdf input)");
     assert.equal(ocrRow.data.__traceId, "<traceId>", "OCR row carries a (scrubbed) trace id");
-    assert.equal(ocrRow.status, "running", "OCR verify row is at awaiting-approval (running, NOT done)");
+    assert.equal(ocrRow.status, "done", "standalone OCR verify row completes done after person-lookup");
 
     // ─── person-lookup children (name → person kind) ─────────────────────────
     const plTitleByItemId: Record<string, string> = {

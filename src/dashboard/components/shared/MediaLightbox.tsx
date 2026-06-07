@@ -145,7 +145,7 @@ function ScreenshotOverlay({
 }) {
   return (
     <div
-      className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center"
+      className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       {children}
@@ -174,44 +174,50 @@ function ScreenshotLightboxShell({
 }) {
   return (
     <div
-      className="relative max-w-[90vw] max-h-[90vh]"
+      className="flex max-h-[92vh] max-w-[92vw] flex-col gap-3 rounded-lg border border-border bg-card p-3 shadow-2xl"
       onClick={(e) => e.stopPropagation()}
     >
-      {children}
-      {caption ? (
-        <div className="absolute bottom-2 left-2 bg-background/90 rounded px-2 py-1 text-[11px] font-mono text-foreground/80">
+      {/* Top chrome bar — caption + Close live on the panel, never over the image. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 truncate text-[11px] font-mono text-muted-foreground">
           {caption}
         </div>
-      ) : null}
-      {itemsLength > 1 && (
-        <>
+        <button
+          type="button"
+          className="shrink-0 rounded-md bg-secondary px-3 py-1 text-[11px] font-mono text-foreground hover:bg-accent transition-colors"
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
+      {/* Body — nav arrows sit in side gutters beside the image, not on it. */}
+      <div className="flex min-h-0 items-center justify-center gap-2">
+        {itemsLength > 1 && (
           <button
             type="button"
             disabled={!hasPrev}
             aria-label="Previous screenshot"
-            className="absolute left-2 top-1/2 -translate-y-1/2 bg-background/90 rounded px-2 py-1 text-xs font-mono text-foreground/80 disabled:opacity-30 hover:bg-background transition-colors"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
             onClick={onPrev}
           >
-            ‹
+            <ChevronLeft aria-hidden className="h-5 w-5" />
           </button>
+        )}
+        <div className="flex min-h-0 min-w-0 items-center justify-center">
+          {children}
+        </div>
+        {itemsLength > 1 && (
           <button
             type="button"
             disabled={!hasNext}
             aria-label="Next screenshot"
-            className="absolute right-2 top-1/2 -translate-y-1/2 bg-background/90 rounded px-2 py-1 text-xs font-mono text-foreground/80 disabled:opacity-30 hover:bg-background transition-colors"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
             onClick={onNext}
           >
-            ›
+            <ChevronRight aria-hidden className="h-5 w-5" />
           </button>
-        </>
-      )}
-      <button
-        type="button"
-        className="absolute top-2 right-2 bg-background/90 rounded px-2 py-1 text-[11px] font-mono text-foreground/80 hover:bg-background transition-colors"
-        onClick={onClose}
-      >
-        Close
-      </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -283,6 +283,5 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     },
   },
 
-  recordRendererId: "EcRecordView",
   rosterMode: "required",
 };

@@ -115,6 +115,8 @@ export interface EidResult {
   startDate?: string;
   effectiveDate?: string;
   terminationDate?: string;
+  /** PeopleSoft action-reason next to the Termination Date (e.g. "Resign - Personal Reasons"). Empty when active. */
+  terminationReason?: string;
   expectedJobEndDate?: string;
   fte?: string;
   emplClass?: string;
@@ -423,6 +425,8 @@ async function extractSingleResultDetail(
     .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
   const termDate = await personOrgSummary.terminationDate(frame)
     .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
+  const termReason = await personOrgSummary.terminationReason(frame)
+    .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
 
   const fullName = await readPersonNameFromDetail(frame);
 
@@ -430,6 +434,7 @@ async function extractSingleResultDetail(
   const assignment = await extractPreferredAssignmentFromBody(frame);
 
   const selectedTermDate = assignment && !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
+  const selectedTermReason = selectedTermDate ? termReason : "";
   const selectedStartDate = startDate || assignment?.effectiveDate || "";
   const endDate = selectedTermDate || "Active";
   const nameParts = fullName?.split(" ") ?? [];
@@ -455,6 +460,7 @@ async function extractSingleResultDetail(
     startDate: selectedStartDate,
     effectiveDate: assignment?.effectiveDate ?? "",
     terminationDate: selectedTermDate,
+    terminationReason: selectedTermReason,
     expectedJobEndDate: assignment?.expectedJobEndDate,
     fte: assignment?.fte,
     emplClass: assignment?.emplClass,
@@ -573,6 +579,7 @@ interface DrillInDetails {
   jobCodeDescription: string;
   startDate: string;
   terminationDate: string;
+  terminationReason: string;
   expectedJobEndDate: string;
   fte: string;
   emplClass: string;
@@ -612,6 +619,8 @@ async function drillInAndGetDetails(
     .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
   const termDate = await personOrgSummary.terminationDate(frame)
     .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
+  const termReason = await personOrgSummary.terminationReason(frame)
+    .textContent({ timeout: 5_000 }).then((t) => t?.trim() ?? "").catch(() => "");
 
   // Extract assignment details from the Assignments grid.
   // Scan all tables for rows with 10+ cells where cell[3] is a business unit code.
@@ -619,13 +628,15 @@ async function drillInAndGetDetails(
 
   if (assignment) {
     const selectedTermDate = !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
+    const selectedTermReason = selectedTermDate ? termReason : "";
     const selectedStartDate = startDate || assignment.effectiveDate;
     const endDate = selectedTermDate || "Active";
-    log.step(`  Department: ${assignment.department} | Start: ${selectedStartDate} | End: ${endDate}`);
+    log.step(`  Department: ${assignment.department} | Start: ${selectedStartDate} | End: ${endDate}${selectedTermReason ? ` (${selectedTermReason})` : ""}`);
     return {
       ...assignment,
       startDate: selectedStartDate,
       terminationDate: selectedTermDate,
+      terminationReason: selectedTermReason,
     };
   }
   log.step(`  Could not extract assignment details`);
@@ -696,6 +707,7 @@ async function populateDepartments(
       result.startDate = details.startDate;
       result.effectiveDate = details.effectiveDate;
       result.terminationDate = details.terminationDate;
+      result.terminationReason = details.terminationReason;
       result.expectedJobEndDate = details.expectedJobEndDate;
       result.fte = details.fte;
       result.emplClass = details.emplClass;

@@ -137,9 +137,6 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
     deriveItemId: (doc: OcrApproveDocument<TPreview>) => string;
   };
 
-  /** React component reference for per-record preview rendering. Looked up frontend-side. */
-  recordRendererId: "OathRecordView" | "EcRecordView" | (string & {});
-
   /** Whether to require a roster on disk before starting OCR. */
   rosterMode: "required" | "optional";
 

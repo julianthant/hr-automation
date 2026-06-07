@@ -22,7 +22,7 @@ function writeVerifyRow(dir: string, sessionId: string, runId: string, records: 
     runId,
     timestamp: new Date().toISOString(),
     status: "done",
-    step: "awaiting-approval",
+    step: "person-lookup",
     data: {
       formType: "verify",
       mode: "prepare",
@@ -206,7 +206,7 @@ describe("runVerifyRelookup — guards", () => {
         runId,
         timestamp: new Date().toISOString(),
         status: "done",
-        step: "awaiting-approval",
+        step: "person-lookup",
         data: { formType: "oath", records: "[]" },
       }) + "\n",
     );

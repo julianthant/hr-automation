@@ -25,7 +25,7 @@ export type SessionEventType =
   | "item_start" | "item_complete" | "item_cancelled"
   | "step_change"
   | "screenshot"
-  | "ucpath_idle_signal"
+  | "idle_signal"
   | "daemon_phase"
   | "daemon_log";
 
@@ -275,16 +275,21 @@ export function emitAuthFailed(instance: string, browserId: string, system: stri
   emitSessionEvent({ type: "auth_failed", workflowInstance: instance, browserId, system }, dir);
 }
 
-export type UcpathIdleSignalKind = "touch" | "refresh_start" | "refresh_end";
+export type IdleSignalKind = "touch" | "refresh_start" | "refresh_end";
 
-/** Dashboard UCPath idle-refresh ring — keep kinds aligned with `rebuildSessionState`. */
-export function emitUcpathIdleSignal(
+/**
+ * Dashboard idle-refresh ring — per-system touch/reload lifecycle. `system` is
+ * the idle-refresh system id (`ucpath`, `i9`, …); keep kinds aligned with
+ * `rebuildSessionState`. See `src/domain/idle-refresh.ts`.
+ */
+export function emitIdleSignal(
   instance: string,
   dir: string | undefined,
-  kind: UcpathIdleSignalKind,
+  system: string,
+  kind: IdleSignalKind,
 ): void {
   emitSessionEvent(
-    { type: "ucpath_idle_signal", workflowInstance: instance, data: { kind } },
+    { type: "idle_signal", workflowInstance: instance, system, data: { kind } },
     dir,
   );
 }

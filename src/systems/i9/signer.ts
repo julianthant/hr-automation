@@ -1,13 +1,8 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
-import {
-  openI9SearchResult,
-  pickI9SignerSearchResult,
-  searchI9Employee,
-} from "./search.js";
-import { summary as summarySelectors } from "./selectors.js";
-import type { I9SearchCriteria, I9SearchResult } from "./types.js";
-import { safeClick } from "../common/index.js";
+import { pickI9SignerSearchResult, searchI9Employee } from "./search.js";
+import { search as searchSelectors, summary as summarySelectors } from "./selectors.js";
+import type { I9SearchCriteria } from "./types.js";
 
 /**
  * Result of `lookupSection2Signer`.
@@ -15,11 +10,13 @@ import { safeClick } from "../common/index.js";
  * `status` classifies the outcome for the caller without forcing them to
  * peek at `signerName` — e.g. `"historical"` explicitly means "a paper I-9
  * was imported; no one electronically signed Section 2" rather than
- * conflating that with a modern I-9 that's genuinely unsigned.
+ * conflating that with a modern I-9 that's genuinely unsigned, and
+ * `"unable-to-access"` means the record EXISTS but the operator's account
+ * lacks permission to view it (distinct from a genuine `"not-found"`).
  */
 export interface Section2SignerResult {
-  /** "signed" | "unsigned" | "historical" | "not-found" | "error" */
-  status: "signed" | "unsigned" | "historical" | "not-found" | "error";
+  /** "signed" | "unsigned" | "historical" | "not-found" | "unable-to-access" | "error" */
+  status: "signed" | "unsigned" | "historical" | "not-found" | "unable-to-access" | "error";
   /** Signer name when status === "signed". Otherwise null. */
   signerName: string | null;
   /** The I-9 profile ID used (if we got far enough to navigate). */
@@ -31,7 +28,10 @@ export interface Section2SignerResult {
 }
 
 export function extractSignedSection2Signer(cells: readonly string[]): string | null {
-  const signerName = (cells[3] ?? "").trim();
+  // Audit-trail columns are [Section, Date, Event, Created By]; the signer is
+  // the LAST cell (Created By). Reading the last cell (rather than a fixed
+  // index 3) stays correct if a leading icon/checkbox column is ever added.
+  const signerName = (cells[cells.length - 1] ?? "").trim();
   return signerName || null;
 }
 
@@ -40,16 +40,21 @@ export function extractSignedSection2Signer(cells: readonly string[]): string | 
  *
  * Flow:
  *   1. Use the existing `searchI9Employee` helper (last/first name search)
- *      to find the employee's I-9 record(s).
+ *      to find the employee's I-9 record(s). A zero-result search may be a
+ *      genuine "not found" OR an access-restricted alert (record exists but
+ *      out of the operator's scope) — distinguished via `accessRestrictedAlert`.
  *   2. Pick the first row whose Next Action is not "Complete Section 1" or
  *      "Complete Section 2" (e.g. Purge/Rehire rows).
- *   3. Click that row's Last Name link, expand the matching I-9 summary row
- *      when I-9 Complete lands on the profile page, then open Summary.
- *   4. Wait for the summary view, then look for the audit-trail row
- *      whose event reads "Signed Section 2" and read its 4th cell.
+ *   3. Navigate STRAIGHT to `/form-I9/summary/{profileId}/{i9Id}` using the
+ *      hit's IDs (deterministic; paper imports redirect to
+ *      `/form-I9-historical/…`).
+ *   4. Wait for the summary heading + the audit-trail table, then read the
+ *      "Signed Section 2" audit row's Created By cell.
  *
- * Mapping verified live on 2026-04-22 against a completed remote I-9
- * (Profile ID 2082422). See `src/systems/i9/LESSONS.md`.
+ * Navigation rewritten + selectors re-verified live 2026-06-06 against
+ * profile 1670462 / i9 1602018 (Provenzano). The earlier click-through
+ * (last-name link → record-accordion expand → Summary tab) was fragile and
+ * surfaced as a spurious "not found". See `src/systems/i9/LESSONS.md`.
  *
  * @param page - Authenticated I9 Complete page (post `loginToI9`).
  * @param criteria - Search fields; typically `{ lastName, firstName }`.
@@ -73,6 +78,18 @@ export async function lookupSection2Signer(
   }
 
   if (results.length === 0) {
+    // A zero-result search shows an access-restricted alert when the record
+    // EXISTS but the operator's account can't view it. Detect it (the search
+    // dialog is still open — `closeDialog: false`) so the caller reports
+    // "unable to access" rather than a genuine "not found". verified 2026-06-06.
+    const restricted = await searchSelectors
+      .accessRestrictedAlert(page)
+      .count()
+      .catch(() => 0);
+    if (restricted > 0) {
+      log.step(`I9 ${label}: record exists but operator lacks access (restricted)`);
+      return { status: "unable-to-access", signerName: null };
+    }
     log.step(`No I9 record found for ${label}`);
     return { status: "not-found", signerName: null };
   }
@@ -98,20 +115,43 @@ export async function lookupSection2Signer(
     };
   }
 
+  // Navigate STRAIGHT to the record summary built from the search hit's IDs.
+  // The previous click-through (last-name link → `ensureSelectedRecordExpanded`
+  // broad-scan-click → Summary-tab click) was fragile: the last-name cell is a
+  // hrefless <a> (not a link role), the broad DOM scan could click the wrong
+  // element, and the Summary re-click raced the audit-table load — any of which
+  // surfaced as a spurious "not found". Direct navigation is deterministic.
   try {
-    await openI9SearchResult(page, hit);
-    await ensureSelectedRecordExpanded(page, hit);
-    await openSummaryTab(page);
+    const summaryUrl = new URL(
+      `/form-I9/summary/${profileId}/${i9Id}`,
+      page.url(),
+    ).toString();
+    await page.goto(summaryUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { status: "error", signerName: null, profileId, i9Id, detail };
   }
 
-  // Wait for the summary view to render. Both the modern `/form-I9/summary`
-  // route and the redirected `/form-I9-historical` route expose the same
-  // heading, so this works for both.
+  // Paper-imported records redirect to `/form-I9-historical/…` (no electronic
+  // Section 2 audit row). Observable in the final URL after navigation.
+  if (page.url().includes("/form-I9-historical/")) {
+    log.step(`I9 ${label}: paper/historical record — no electronic Section 2 audit row`);
+    return { status: "historical", signerName: null, profileId, i9Id };
+  }
+
+  // Wait for the summary view + the audit-trail TABLE to render. The heading
+  // appears before the audit rows populate, so anchoring only on the heading
+  // raced the `row.count()` below (count 0 → a signed record mis-read as
+  // unsigned). Both routes (`/form-I9/summary` + the historical redirect)
+  // expose the same heading.
   try {
     await waitForSummaryView(page);
+    await summarySelectors
+      .auditTrailHeaderRow(page)
+      .first()
+      .waitFor({ state: "visible", timeout: 10_000 })
+      .catch(() => {});
   } catch {
     return {
       status: "error",
@@ -122,20 +162,17 @@ export async function lookupSection2Signer(
     };
   }
 
-  // Find the "Signed Section 2" audit row. Missing on historical/paper
-  // imports and on modern I-9s where Section 2 hasn't been signed yet.
+  // Find the "Signed Section 2" audit row. Missing on modern I-9s where
+  // Section 2 hasn't been signed yet (historical was already returned above).
   const row = summarySelectors.signedSection2Row(page);
   const rowCount = await row.count();
   if (rowCount === 0) {
-    // Distinguish historical (paper) from genuinely unsigned. The
-    // historical redirect is observable in the final URL after navigation.
-    const landedHistorical = page.url().includes("/form-I9-historical/");
-    const status = landedHistorical ? "historical" : "unsigned";
-    log.step(`I9 ${label}: Section 2 ${status} (no signed-section-2 audit row)`);
-    return { status, signerName: null, profileId, i9Id };
+    log.step(`I9 ${label}: Section 2 unsigned (no signed-section-2 audit row)`);
+    return { status: "unsigned", signerName: null, profileId, i9Id };
   }
 
-  // Audit-trail columns: [Section, Date, Event, Created By] → signer is cell 3.
+  // Audit-trail columns: [Section, Date, Event, Created By] → signer is the
+  // last cell.
   const signerName = extractSignedSection2Signer(
     await row.getByRole("cell").allTextContents(), // allow-inline-selector -- row-scoped cell readback, rooted in registry row
   );
@@ -152,78 +189,6 @@ export async function lookupSection2Signer(
 
   log.success(`I9 ${label}: Section 2 signed by ${signerName}`);
   return { status: "signed", signerName, profileId, i9Id };
-}
-
-async function ensureSelectedRecordExpanded(page: Page, result: I9SearchResult): Promise<void> {
-  const name = `${result.firstName} ${result.lastName}`.trim();
-  const expanded = await page.evaluate(
-    ({ name, createdOn, nextAction }) => {
-      const normalize = (value: string | null | undefined) =>
-        (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-      const wantedName = normalize(name);
-      const wantedCreatedOn = normalize(createdOn);
-      const wantedAction = normalize(nextAction);
-      const candidates = Array.from(
-        document.querySelectorAll<HTMLElement>("button,a,div,span"),
-      );
-      const matching = candidates
-        .map((el) => ({ el, text: normalize(el.innerText || el.textContent) }))
-        .filter(({ text }) => {
-          if (!text || text.length > 500) return false;
-          if (wantedName && !text.includes(wantedName)) return false;
-          if (wantedCreatedOn && !text.includes(wantedCreatedOn)) return false;
-          return !wantedAction || text.includes(`next action: ${wantedAction}`);
-        });
-
-      const withArrow = matching.find(({ text }) => /[▼▾▲▴]/u.test(text));
-      const match = withArrow ?? matching[0];
-      if (!match) return { found: false, clicked: false, text: "" };
-
-      const rawText = match.el.innerText || match.el.textContent || "";
-      const isExpanded = /[▲▴]/u.test(rawText);
-      const isCollapsed = /[▼▾]/u.test(rawText);
-      if (!isExpanded && (isCollapsed || !/[▲▴]/u.test(rawText))) {
-        match.el.click();
-        return { found: true, clicked: true, text: rawText };
-      }
-      return { found: true, clicked: false, text: rawText };
-    },
-    {
-      name,
-      createdOn: result.createdOn,
-      nextAction: result.nextAction,
-    },
-  );
-
-  if (!expanded.found) {
-    log.warn(
-      `I9 ${result.profileId}/${result.i9Id}: could not find record accordion for Next Action "${result.nextAction}"`,
-    );
-    return;
-  }
-  if (expanded.clicked) {
-    log.step(`Expanded I9 record row for Next Action "${result.nextAction}"`);
-    await page.waitForTimeout(500);
-  }
-}
-
-async function openSummaryTab(page: Page): Promise<void> {
-  const summaryTab = page.getByRole("tab", { name: /^Summary$/i }) // allow-inline-selector -- I9 summary can render as a tab
-    .or(page.getByRole("link", { name: /^Summary$/i })) // allow-inline-selector -- I9 summary fallback when tabs render as anchors
-    .or(page.getByRole("button", { name: /^Summary$/i })); // allow-inline-selector -- I9 summary fallback when tabs render as buttons
-
-  const visible = await summaryTab.first().isVisible({ timeout: 3_000 }).catch(() => false);
-  if (!visible) {
-    log.step("I9 Summary tab not visible; assuming selected record already landed on summary");
-    return;
-  }
-
-  await safeClick(summaryTab.first(), {
-    timeout: 5_000,
-    label: "i9 summary tab",
-  });
-  await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
-  await page.waitForTimeout(500);
 }
 
 async function waitForSummaryView(page: Page): Promise<void> {

@@ -108,7 +108,7 @@ const EVENT_VISUAL: Record<RunEvent["type"], { icon: LucideIcon; colorClass: str
   item_complete:      { icon: Check,      colorClass: "text-muted-foreground" },
   step_change:        { icon: ArrowRight, colorClass: "text-muted-foreground" },
   screenshot:         { icon: Camera,     colorClass: "text-log-violet" },
-  ucpath_idle_signal: { icon: Hourglass,  colorClass: "text-success" },
+  idle_signal:        { icon: Hourglass,  colorClass: "text-success" },
   daemon_phase:       { icon: Activity,   colorClass: "text-log-slate" },
 };
 

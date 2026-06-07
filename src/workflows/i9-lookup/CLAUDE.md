@@ -8,7 +8,7 @@ Resolves **who signed Section 2 of an employee's I-9 form** — the "authorized 
 2. Authenticates to I9 Complete via `loginToI9` (email + password; no Duo MFA).
 3. Searches I9 Complete for the employee using `searchI9Employee` (invoked internally by `lookupSection2Signer`).
 4. Navigates to the I-9 record summary and reads the "Signed Section 2" audit row.
-5. Emits `signerName` (who signed, or empty string if unsigned/error) and `i9Status` ("signed" | "unsigned" | "historical" | "not-found" | "error").
+5. Emits `signerName` (who signed, or empty string if unsigned/error) and `i9Status` ("signed" | "unsigned" | "historical" | "not-found" | "unable-to-access" | "error").
 
 ## Data flow
 
@@ -16,7 +16,7 @@ Resolves **who signed Section 2 of an employee's I-9 form** — the "authorized 
 **Out (via `ctx.updateData`):** `{ signerName, i9Status, profileId? }`
 
 - `signerName` — the name of the authorized representative who signed Section 2, or `""` when the I-9 was not signed electronically.
-- `i9Status` — one of `"signed"`, `"unsigned"`, `"historical"` (paper import), `"not-found"`, or `"error"`.
+- `i9Status` — one of `"signed"`, `"unsigned"`, `"historical"` (paper import), `"not-found"`, `"unable-to-access"` (record exists but outside the operator's access scope — see the access-restricted lesson in `src/systems/i9/LESSONS.md`), or `"error"`.
 - `profileId` — the I-9 employee profile ID (only when the search reached the summary page).
 
 ## Kernel config
@@ -52,11 +52,11 @@ Resolves **who signed Section 2 of an employee's I-9 form** — the "authorized 
 ## Underlying primitive
 
 `lookupSection2Signer` in `src/systems/i9/signer.ts`:
-- Calls `searchI9Employee` to find the record.
-- Picks the first result (search returns newest first; multi-match is rare).
-- Navigates to `/form-I9/summary/{profileId}/{i9Id}`.
+- Calls `searchI9Employee` to find the record. A zero-result search showing the access-restricted alert → `status: "unable-to-access"` (record exists but out of scope); a true zero-result → `status: "not-found"`.
+- Picks the first result whose Next Action isn't "Complete Section 1/2".
+- Navigates DETERMINISTICALLY to `/form-I9/summary/{profileId}/{i9Id}` built from the hit's IDs (the old click-through was fragile — see `src/systems/i9/LESSONS.md`, 2026-06-06).
 - Paper imports redirect to `/form-I9-historical/…` → `status: "historical"`.
-- Reads the "Signed Section 2" audit-trail row (columns: Section, Date, Event, Created By — signer is cell index 3).
+- Waits on the audit-trail header row, then reads the "Signed Section 2" row (columns: Section, Date, Event, Created By — signer is the **last cell**).
 
 See `src/systems/i9/CLAUDE.md` and `src/systems/i9/LESSONS.md` for selector history and gotchas.
 

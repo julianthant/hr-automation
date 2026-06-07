@@ -6,7 +6,6 @@ import type { Hono } from "hono";
 import {
   handleDeletePhoto,
   handleDiscard,
-  handleExtend,
   handleFinalize,
   handleManifest,
   handleReorder,
@@ -185,18 +184,6 @@ export function registerCaptureRoutes(app: Hono, deps: DashboardHonoDeps): void 
         fromIndex: Number(parsed.body.fromIndex),
         toIndex: Number(parsed.body.toIndex),
       },
-      { store: captureStore },
-    );
-    return jsonResponse(result.body, result.status);
-  });
-
-  app.post("/api/capture/extend", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const byMsRaw = parsed.body.byMs;
-    const byMs = typeof byMsRaw === "number" && Number.isFinite(byMsRaw) ? byMsRaw : undefined;
-    const result = handleExtend(
-      { sessionId: String(parsed.body.sessionId ?? ""), ...(byMs !== undefined ? { byMs } : {}) },
       { store: captureStore },
     );
     return jsonResponse(result.body, result.status);

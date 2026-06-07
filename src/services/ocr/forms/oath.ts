@@ -451,7 +451,6 @@ export const oathOcrFormSpec: OcrFormSpec<
     },
   },
 
-  recordRendererId: "OathRecordView",
   rosterMode: "required",
 
   // Brand the whole oath operation `ou` (the oath-upload destination) for the

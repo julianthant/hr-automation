@@ -64,7 +64,23 @@ test("OCR trace-id branding: oath form spec sets traceCode 'ou'; emergency-conta
   assert.match(buildTraceId({ code: ecSpec!.traceCode ?? "oc", runId, at }), /^oc-\d{6}-1a57$/);
 });
 
-test("orchestrator emits pending → loading-roster → ocr → matching → done(awaiting-approval)", async () => {
+test("OCR trace-id branding: operation intent disambiguates oath-signature (os) from oath-upload (ou)", async () => {
+  // The shared oath form spec brands `ou`, which made an oath-SIGNATURE operation
+  // AND an oath-UPLOAD operation both read `ou-…` — the operator-confusing
+  // collision. The orchestrator now derives the trace code from the operation
+  // intent FIRST, so the prefix tells them apart. Each value matches that
+  // operation workflow's own `defineWorkflow` code (kept collision-free by the
+  // `workflow codes are unique` guard in queue-row-kind-coverage.test.ts).
+  const { operationTraceCode } = await import("../../../../src/workflows/ocr/orchestrator.js");
+  assert.strictEqual(operationTraceCode("oath-signature"), "os");
+  assert.strictEqual(operationTraceCode("oath-upload"), "ou");
+  assert.strictEqual(operationTraceCode("emergency-contact"), "ec");
+  // Standalone OCR-hub run (no operation) → caller falls back to spec.traceCode/oc.
+  assert.strictEqual(operationTraceCode(undefined), undefined);
+  assert.strictEqual(operationTraceCode("ocr"), undefined);
+});
+
+test("standalone oath orchestrator emits pending → loading-roster → ocr → matching → awaiting-approval (parks; has approve targets)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
 
@@ -113,8 +129,15 @@ test("orchestrator emits pending → loading-roster → ocr → matching → don
   assert.ok(steps.includes("pending/"), `steps: ${steps.join(", ")}`);
   assert.ok(steps.some((s) => s.includes("loading-roster")), `steps: ${steps.join(", ")}`);
   assert.ok(steps.some((s) => s.includes("ocr")), `steps: ${steps.join(", ")}`);
-  assert.ok(steps.some((s) => s.includes("matching")), `steps: ${steps.join(", ")}`);
+  // `matching` + `disambiguating` are merged into the single `ocr` step; the
+  // next distinct step is `person-lookup`.
+  assert.ok(steps.some((s) => s.includes("person-lookup")), `steps: ${steps.join(", ")}`);
+  assert.ok(!steps.some((s) => s.includes("matching")), `matching folds into ocr; steps: ${steps.join(", ")}`);
+  // A standalone oath run PARKS at awaiting-approval (it has approve targets);
+  // only a no-fan-out form (verify) completes `done` after person-lookup. The
+  // synthetic `verification` step is retired for all forms.
   assert.ok(steps.some((s) => s === "running/awaiting-approval" || s === "done/awaiting-approval"), `steps: ${steps.join(", ")}`);
+  assert.ok(!steps.some((s) => s.includes("verification")), `verification step is retired; steps: ${steps.join(", ")}`);
 
   const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
     (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
@@ -418,8 +441,15 @@ test("orchestrator drives the session timeline via onPhase for each running phas
 
   assert.ok(phases.includes("loading-roster"), `phases: ${phases.join(", ")}`);
   assert.ok(phases.includes("ocr"), `phases: ${phases.join(", ")}`);
-  assert.ok(phases.includes("matching"), `phases: ${phases.join(", ")}`);
+  // `matching` + `disambiguating` are merged into `ocr` — they no longer emit
+  // their own phase; `person-lookup` is the next distinct phase.
+  assert.ok(phases.includes("person-lookup"), `phases: ${phases.join(", ")}`);
+  assert.ok(!phases.includes("matching"), `matching folds into ocr; phases: ${phases.join(", ")}`);
+  assert.ok(!phases.includes("disambiguating"), `disambiguating folds into ocr; phases: ${phases.join(", ")}`);
+  // Standalone oath parks at awaiting-approval (has approve targets), so the
+  // bridge fires that phase; the synthetic `verification` step is retired.
   assert.ok(phases.includes("awaiting-approval"), `phases: ${phases.join(", ")}`);
+  assert.ok(!phases.includes("verification"), `phases: ${phases.join(", ")}`);
   // Bridge only fires on non-terminal (running) rows, never a bare terminal.
   assert.ok(phases.every((p) => p.length > 0), `phases: ${phases.join(", ")}`);
 
@@ -604,9 +634,8 @@ test("orchestrator waits for eid-lookup results before completing awaiting-appro
   );
 
   assert.equal(watcherCalled, true);
-  // New approval contract (2026-05-25): awaiting-approval row carries
-  // status="running" until the operator approves; it never reaches "done"
-  // from the orchestrator.
+  // Standalone oath parks at awaiting-approval (status running) once the child
+  // lookups return, carrying the enriched records.
   const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
     (entry) => entry.status === "running" && entry.step === "awaiting-approval",
   );
@@ -669,7 +698,7 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
     },
   );
 
-  // New approval contract (2026-05-25): awaiting-approval row is status="running".
+  // Standalone oath parks at awaiting-approval (status running) carrying records.
   const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
     (entry) => entry.status === "running" && entry.step === "awaiting-approval",
   );
@@ -734,7 +763,7 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
   const pending = entries.find((entry: any) => entry.status === "pending" && entry.id === "ocr-oath-run-preemit-eid-r0");
   assert.ok(pending, "expected pre-emitted pending person-lookup row");
   assert.equal(pending.data.searchName, "Barahona Martell, Carlos D");
-  // New approval contract (2026-05-25): awaiting-approval is status="running".
+  // Standalone oath parks at awaiting-approval (status running).
   assert.equal(writtenEntries.some((entry: any) => entry.status === "running" && entry.step === "awaiting-approval"), true);
   rmSync(dir, { recursive: true, force: true });
 });

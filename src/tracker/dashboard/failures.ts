@@ -1,16 +1,31 @@
 import { getRunIdOr, type TrackerEntry } from "../jsonl.js";
 import { isResolvedPrepEntry } from "./prep-rows.js";
 import { buildSearchSummary } from "./search.js";
+import { resolveQueueRowPresentation } from "../../domain/queue-row-presentation.js";
 
 /** One row in the failure-bell popover. Returned by GET /api/failures. */
 export interface FailureRow {
   workflow: string;
   id: string;
   runId: string;
-  summary: string;
+  /** Kind-based row title (person name / PDF filename / spec label). "" when only the id is known. */
+  title: string;
+  /** Greppable trace code (`data.__traceId`, e.g. `oc-044107-ea76`); absent on legacy rows. */
+  traceId?: string;
   error: string;
   ts: string;
   date: string;
+}
+
+/**
+ * The row's display title, kind-based (same resolver the queue uses), with a
+ * legacy fallback. Returns "" when nothing but the raw id is available, so the
+ * bell can omit the title rather than print a UUID.
+ */
+function failureRowTitle(e: TrackerEntry): string {
+  const presTitle = resolveQueueRowPresentation(e)?.title;
+  const candidate = presTitle && presTitle !== e.id ? presTitle : buildSearchSummary(e);
+  return candidate && candidate !== e.id ? candidate : "";
 }
 
 export interface FailuresDeps {
@@ -55,7 +70,8 @@ export function buildFailuresHandler(deps: FailuresDeps) {
           workflow: wf,
           id: e.id,
           runId: getRunIdOr(e),
-          summary: buildSearchSummary(e),
+          title: failureRowTitle(e),
+          traceId: (e.data?.__traceId ?? "").trim() || undefined,
           error: e.error || "Unknown error",
           ts: e.timestamp,
           date: opts.date,

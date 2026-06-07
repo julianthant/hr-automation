@@ -872,6 +872,15 @@ export const personOrgSummary = {
     f.locator("#PER_INST_EMP_VW_TERMINATION_DT\\$0"),
 
   /**
+   * Termination Reason (PeopleSoft action-reason description) on the detail
+   * page's ORG Instance section, rendered next to the Termination Date — e.g.
+   * "Resign - Personal Reasons". Empty for active employment. verified 2026-06-05
+   * @tags termination-reason, action-reason, end-date, detail, person-org-summary
+   */
+  terminationReason: (f: FrameLocator): Locator =>
+    f.locator("#PER_INST_EMP_VW_DESCR\\$0"),
+
+  /**
    * Empty-state copy shown before any search has run. verified 2026-04-24
    * @tags empty-state, text, person-org-summary
    */

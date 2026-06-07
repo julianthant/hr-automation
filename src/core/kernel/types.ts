@@ -70,9 +70,9 @@ export interface SessionObserver {
   onAuthComplete?: (systemId: string, browserId: string) => void
   /** Fires once when all retry attempts have failed. */
   onAuthFailed?: (systemId: string, browserId: string) => void
-  /** UCPath idle-refresh observability — wired to session JSONL for dashboard countdown. */
-  onUcpathIdleTouch?: () => void
-  onUcpathIdleRefresh?: (phase: 'start' | 'end') => void
+  /** Idle-refresh observability (per system) — wired to session JSONL for the dashboard countdown ring. */
+  onIdleTouch?: (systemId: string) => void
+  onIdleRefresh?: (systemId: string, phase: 'start' | 'end') => void
 }
 
 export interface BatchConfig {

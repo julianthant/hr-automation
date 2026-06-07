@@ -118,7 +118,10 @@ export interface FailureRow {
   workflow: string;
   id: string;
   runId: string;
-  summary: string;
+  /** Kind-based row title (person name / PDF filename / spec label). "" when only the id is known. */
+  title: string;
+  /** Greppable trace code (`data.__traceId`, e.g. `oc-044107-ea76`); absent on legacy rows. */
+  traceId?: string;
   error: string;
   ts: string;
   date: string;
@@ -295,8 +298,8 @@ export interface WorkflowInstanceState {
    * from the backend; not rendered on session cards (per-run Logs panel only).
    */
   recentDaemonLogs?: Array<{ ts: string; level: string; message: string }>;
-  /** UCPath idle refresh — from `ucpath_idle_signal` session events. */
-  ucpathIdle?: { lastTouchAt: string; refreshing: boolean };
+  /** Idle refresh — from `idle_signal` session events, keyed by system id (ucpath, i9). */
+  idleBySystem?: Record<string, { lastTouchAt: string; refreshing: boolean }>;
 }
 
 export interface DuoQueueEntry {
@@ -324,7 +327,7 @@ export type RunEventType =
   | "item_start" | "item_complete"
   | "step_change"
   | "screenshot"
-  | "ucpath_idle_signal"
+  | "idle_signal"
   | "daemon_phase";
 
 export interface RunEvent {

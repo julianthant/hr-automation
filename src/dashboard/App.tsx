@@ -54,7 +54,6 @@ import {
 } from "./components/queue-panel/queue-sort";
 import { AppErrorBoundary } from "./components/shared/AppErrorBoundary";
 import { UiGallery } from "./components/dev/UiGallery";
-import { OcrToolbarGallery } from "./components/dev/OcrToolbarGallery";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -689,14 +688,13 @@ export function App() {
               previewSlot={isPrepEntry ? renderOcrPrepBody : undefined}
               onPreviewVisibleChange={setOcrPreviewVisible}
               defaultTab={wantsPreview && reviewingPrepId ? "preview" : undefined}
-              runtimePolicies={runtimePolicies}
             />
           );
         })()}
       </div>
       </OcrReviewPrepProvider>
       <TerminalDrawer connected={connected} />
-      {/* Reupload RunModal — opened by OcrQueueRow's Reupload button */}
+      {/* Reupload RunModal — opened by the Reupload action in the OCR review toolbar */}
       <RunModal
         open={runModalOpen}
         onOpenChange={(open) => {
@@ -717,21 +715,10 @@ export function DashboardApp() {
   // TEMPORARY dev route — ?view=ui-gallery catalogs the dashboard's reusable
   // surfaces (queue rows, session cards, controls) with the real components.
   // Remove this gate + src/dashboard/components/dev/UiGallery.tsx when done.
-  const devView = new URLSearchParams(window.location.search).get("view");
-  if (devView === "ui-gallery") {
+  if (new URLSearchParams(window.location.search).get("view") === "ui-gallery") {
     return (
       <AppErrorBoundary>
         <UiGallery />
-      </AppErrorBoundary>
-    );
-  }
-  // TEMPORARY dev route — ?view=ocr-toolbar-gallery showcases OCR Review header
-  // toolbar action-cluster redesign candidates. Remove this gate +
-  // src/dashboard/components/dev/OcrToolbarGallery.tsx once a direction is picked.
-  if (devView === "ocr-toolbar-gallery") {
-    return (
-      <AppErrorBoundary>
-        <OcrToolbarGallery />
       </AppErrorBoundary>
     );
   }

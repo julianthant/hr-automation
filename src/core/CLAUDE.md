@@ -25,6 +25,29 @@ Dashboard input runs use daemon mode when the workflow is registered in `src/cor
 - Idle daemons keep sessions warm with periodic `session.healthCheck(system)`.
 - `npm run <workflow>:stop` drains in-flight work; `-- --force` marks it failed immediately.
 
+## Per-System Idle-Refresh
+
+Long-lived daemon sessions sit idle between queued items. Systems with server-side session timeouts (UCPath, I-9 Complete) need periodic page reloads to stay authenticated. The kernel handles this generically — opt a system in by listing it in `src/domain/idle-refresh.ts`; every workflow that declares that system inherits the behavior automatically.
+
+### `src/domain/idle-refresh.ts` — domain API (no Node/Playwright dependencies; safe in the client bundle)
+
+- **`IdleRefreshCadence`** — `{ thresholdMs: number; tickMs: number }`. `thresholdMs`: reload after this much automation inactivity; `tickMs`: how often the idle timer checks.
+- **`DEFAULT_IDLE_REFRESH_CADENCE`** — `{ thresholdMs: 5 * 60 * 1000, tickMs: 30 * 1000 }` (5-min threshold, 30-sec tick). Conservative for ≥15-min server timeouts.
+- **`IDLE_REFRESH_SYSTEMS`** — `Readonly<Record<string, IdleRefreshCadence>>`. Current entries: `ucpath` and `i9`, both using `DEFAULT_IDLE_REFRESH_CADENCE`. Presence here is the opt-in — add a system here to give it idle-refresh.
+- **`isIdleRefreshSystem(systemId)`** — returns `true` when the system is in `IDLE_REFRESH_SYSTEMS`.
+- **`idleRefreshCadence(systemId)`** — returns the `IdleRefreshCadence` for the system, or `undefined` if it doesn't opt in.
+
+### `src/core/kernel/idle-refresh-hooks.ts`
+
+- **`buildIdleRefreshHooks(instance, trackerDir?)`** — returns `Pick<SessionObserver, 'onIdleTouch' | 'onIdleRefresh'>`. Bridges the kernel `Session`'s idle touch/reload lifecycle into `idle_signal` session-JSONL events that drive the dashboard countdown ring. `onIdleTouch` emits a `touch` signal; `onIdleRefresh` emits `refresh_start` or `refresh_end`.
+
+### Consumer chain
+
+1. **`Session` (kernel)** — maintains a per-system `IdleRefreshState` map for every system in `IDLE_REFRESH_SYSTEMS ∩ launched systems`. A `setInterval` (period = `tickMs`) checks elapsed time since the last `ctx.page(<system>)` call; once inactivity exceeds `thresholdMs`, it reloads the page and fires `idleTouchCb` / `idleRefreshCb`. `Session.launch` wires those callbacks to the observer's `onIdleTouch` / `onIdleRefresh`.
+2. **`buildIdleRefreshHooks`** — plugs into the `SessionObserver` (`session-observer.ts` via `buildSessionObserver`, and `batch-lifecycle.ts` via `createBatchObserver` using spread `...buildIdleRefreshHooks(instance, trackerDir)`). Translates the callbacks into `idle_signal` JSONL events.
+3. **`daemon.ts`** — after each successful auth (`Session.launch`) and after each `item_complete`, emits a `touch` idle signal for every system in `wf.config.systems` that `isIdleRefreshSystem`, resetting the per-system countdown.
+4. **Dashboard `WorkflowBox`** — imports `idleRefreshCadence` / `isIdleRefreshSystem` / `DEFAULT_IDLE_REFRESH_CADENCE` from the domain to render a per-system SVG countdown ring (`IdleCountdownRing`) on each system tile in the session card. The ring drains from full (just touched) to empty (reload due) over `thresholdMs`, then turns amber; a `Loader2` spinner replaces it while a reload is in progress.
+
 ## Invariants
 
 - Every run mode constructs `Ctx` via `makeCtx`; never hand-roll a Ctx literal.

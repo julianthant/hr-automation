@@ -219,7 +219,12 @@ export function sweepStuckOathUploadRows(trackerDir: string): void {
           ...(e.runId ? { runId: e.runId } : {}),
           ...(e.parentRunId ? { parentRunId: e.parentRunId } : {}),
           status: "failed",
-          step: "swept",
+          // Preserve the reached step so the step pipeline marks the failure on
+          // the real phase instead of the "failed + unknown step → step 0"
+          // fallback. The old `step: "swept"` sentinel matched no registered step,
+          // so it triggered that fallback too (failure shown on `loading-roster`).
+          // A step-less swept row (e.g. `pending`) carries no step by design.
+          ...(e.step ? { step: e.step } : {}),
           error:
             "Dashboard restarted while oath-upload was in progress — please re-upload",
           data: { ...(e.data ?? {}), archetype: sweptArchetype },

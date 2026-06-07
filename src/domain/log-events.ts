@@ -44,6 +44,7 @@ export type LogEventName =
   | "step:start"
   | "step:done"
   | "ocr:awaiting-approval"
+  | "ocr:review-complete"
   | "cancel:requested"
   | "run:terminal";
 

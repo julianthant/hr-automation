@@ -45,7 +45,7 @@ function StatusCount({ spec, n }: { spec: CountSpec; n: number }) {
     >
       <Icon
         aria-hidden
-        className={cn("size-3", spec.spin && "animate-spin motion-reduce:animate-none")}
+        className={cn("size-3", spec.spin && n > 0 && "animate-spin motion-reduce:animate-none")}
       />
       {n}
     </span>

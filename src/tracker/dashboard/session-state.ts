@@ -4,6 +4,7 @@ import {
   type SessionEvent,
 } from "../session-events.js";
 import type { TrackerEntry } from "../jsonl.js";
+import { isIdleRefreshSystem } from "../../domain/idle-refresh.js";
 
 /**
  * Canonical sort key for a session event. Events emitted by
@@ -196,10 +197,10 @@ export interface WorkflowInstanceState {
    */
   recentDaemonLogs?: Array<{ ts: string; level: string; message: string }>;
   /**
-   * UCPath idle-refresh observability (`ucpath_idle_signal` events).
-   * Drives the countdown ring on the ucpath browser chip.
+   * Idle-refresh observability (`idle_signal` events), keyed by system id.
+   * Drives the countdown ring on each idle-refresh browser chip (ucpath, i9).
    */
-  ucpathIdle?: { lastTouchAt: string; refreshing: boolean };
+  idleBySystem?: Record<string, { lastTouchAt: string; refreshing: boolean }>;
 }
 
 export interface DuoQueueEntry {
@@ -278,16 +279,16 @@ export function rebuildSessionState(dir?: string): SessionState {
     if (e.type === "auth_complete" && e.browserId) {
       const b = findBrowser(wfMap, inst, e.browserId);
       if (b) b.authState = "authed";
-      const isUcpathAuth =
-        e.system === "ucpath" || b?.system === "ucpath";
-      if (isUcpathAuth) {
+      const sys = e.system ?? b?.system;
+      if (sys && isIdleRefreshSystem(sys)) {
         const wf = wfMap.get(inst);
         if (wf) {
           const ts = e.timestamp;
-          const cur = wf.ucpathIdle;
+          const map = (wf.idleBySystem ??= {});
+          const cur = map[sys];
           const refreshing = cur?.refreshing ?? false;
           if (!cur?.lastTouchAt || ts.localeCompare(cur.lastTouchAt) >= 0) {
-            wf.ucpathIdle = { lastTouchAt: ts, refreshing };
+            map[sys] = { lastTouchAt: ts, refreshing };
           }
         }
       }
@@ -334,15 +335,18 @@ export function rebuildSessionState(dir?: string): SessionState {
         }
       }
     }
-    if (e.type === "ucpath_idle_signal") {
+    if (e.type === "idle_signal") {
       const wf = wfMap.get(inst);
       if (!wf) continue;
+      const sys = e.system;
+      if (!sys) continue;
       const kind = e.data?.kind;
+      const map = (wf.idleBySystem ??= {});
       if (kind === "touch" || kind === "refresh_end") {
-        wf.ucpathIdle = { lastTouchAt: e.timestamp, refreshing: false };
+        map[sys] = { lastTouchAt: e.timestamp, refreshing: false };
       } else if (kind === "refresh_start") {
-        const prevTouch = wf.ucpathIdle?.lastTouchAt ?? e.timestamp;
-        wf.ucpathIdle = { lastTouchAt: prevTouch, refreshing: true };
+        const prevTouch = map[sys]?.lastTouchAt ?? e.timestamp;
+        map[sys] = { lastTouchAt: prevTouch, refreshing: true };
       }
     }
     // Intentionally do NOT clear currentItemId on item_complete - the dashboard

@@ -4,7 +4,7 @@
  * and emergency-contact/prepare.ts.
  *
  * Phases (each emits a tracker `running` event with `step` set):
- *   loading-roster → ocr → matching → disambiguating → person-lookup → verification → awaiting-approval
+ *   loading-roster → ocr (read + match + disambiguate) → person-lookup → awaiting-approval
  *
  * Returns when the row reaches `awaiting-approval`. The OCR row stays
  * `running step=awaiting-approval` (not `done`) — the row only becomes
@@ -163,11 +163,15 @@ export interface OcrOrchestratorOpts {
  * Outcome of `runOcrOrchestrator`. `"awaiting-approval"` means the row
  * is in `running step=awaiting-approval` and a downstream consumer (the
  * kernel handler or an HTTP poll) should wait on the approval signal.
+ * `"complete"` is a STANDALONE review run that finished after person-lookup —
+ * the orchestrator emitted its terminal `done` row and there is no approval
+ * gate to wait on; the handler just lets the kernel finalize.
  * `"discarded"` means the operator discarded mid-run; the orchestrator
  * already stopped emitting and the discard route owns the terminal row.
  */
 export type OcrOrchestratorOutcome =
   | { status: "awaiting-approval" }
+  | { status: "complete" }
   | { status: "discarded" };
 
 export async function runOcrOrchestrator(
@@ -188,13 +192,21 @@ export async function runOcrOrchestrator(
   // `resolveQueueRowPresentation` returns undefined and the footer subtitle
   // falls back to the literal workflow name ("OCR"). Built once from the
   // run-start clock + runId so it's frozen-identical across every re-emit.
-  // The trace-id code is the form spec's `traceCode` when set (oath → "ou",
-  // branding the whole operation by its destination), else "oc" (the ocr
-  // `defineWorkflow` code) for standalone OCR + emergency-contact. OCR is the
-  // physical root of the prep tree; root trace-id propagation then carries this
-  // exact id to every fan-out descendant (person-lookups, signer rows,
-  // oath-upload ticket) so they all DISPLAY the same `ou-...` id.
-  const traceId = buildTraceId({ code: spec.traceCode ?? "oc", runId, at: new Date() });
+  // The trace-id code is derived first from the target-workflow OPERATION intent
+  // (`operationTraceCode`: oath-signature → "os", oath-upload → "ou",
+  // emergency-contact → "ec") so the prefix tells the operations apart — an
+  // oath-signature run reads `os-…`, an oath-upload run `ou-…`, instead of both
+  // branding `ou-…` off the shared oath form spec. With no operation it falls
+  // back to the form spec's `traceCode` (oath standalone → "ou", verify → "vf")
+  // and finally "oc" (the ocr `defineWorkflow` code) for a bare OCR run. OCR is
+  // the physical root of the prep tree; root trace-id propagation then carries
+  // this exact id to every fan-out descendant (person-lookups, signer rows,
+  // oath-upload ticket) so they all DISPLAY the same operation prefix.
+  const traceId = buildTraceId({
+    code: operationTraceCode(input.operationWorkflow) ?? spec.traceCode ?? "oc",
+    runId,
+    at: new Date(),
+  });
   const baseEmit =
     opts._emitOverride ??
     ((entry: TrackerEntry) => emitTrackerRow(entry as TrackerRowEmission, trackerDir));
@@ -249,13 +261,16 @@ export async function runOcrOrchestrator(
   const lookupDaemonFlags = runOptionsToDaemonFlags(input.runOptions);
   const serializedWorkerData = serializeRunOptionsForData(input.runOptions);
 
-  // A STANDALONE OCR run (no `parentRunId`) has no downstream consumer to
-  // approve for — its terminal phase is a "review", not an "awaiting approval"
-  // gate. Mirrors the dashboard's StepPipeline label + OcrReviewPane Approve
-  // gate (approval ≡ delegation). DISPLAY-only: the tracker `step` key stays
-  // `awaiting-approval` (the real parked state); only operator-facing log
-  // wording changes.
-  const isStandaloneReview = !input.parentRunId;
+  // A run COMPLETES `done` right after person-lookup (no parked review) only when
+  // there is nothing a downstream step could ever consume: it is STANDALONE (no
+  // `parentRunId` — approval ≡ delegation) AND the form has no approve fan-out
+  // (`verify` and any future read-only form). A standalone form WITH approve
+  // targets (oath / emergency-contact) still parks at `awaiting-approval` — its
+  // approve route is the production fan-out path (driven via a delegated
+  // operation) and the Tier-1 projection tests exercise it; only DELEGATED runs
+  // expose Approve in the UI. See the terminal-phase branch near the end.
+  const hasApproveTargets = Boolean(spec.approveTo || spec.approveDocumentTo);
+  const completesAfterLookup = !input.parentRunId && !hasApproveTargets;
 
   let lastAnnouncedPhase: string | undefined;
   // Latest rich preview payload (records + page metadata) emitted via
@@ -274,9 +289,10 @@ export async function runOcrOrchestrator(
     }
     if (status === "running" && step && step !== lastAnnouncedPhase) {
       lastAnnouncedPhase = step;
-      const phaseLabel =
-        step === "awaiting-approval" && isStandaloneReview ? "review" : step;
-      log.step(`Phase: ${phaseLabel}`);
+      // The phase log mirrors the tracker step verbatim — the old standalone
+      // "review" relabel for `awaiting-approval` is gone (a parked run logs
+      // `Phase: awaiting-approval`; the pipeline hides that chip for standalone).
+      log.step(`Phase: ${step}`);
     }
     // Stamp __id so the dashboard's resolveEntryId surfaces a stable handle
     // on every row. Kernel runWorkflow computes this via getId; this
@@ -555,7 +571,7 @@ export async function runOcrOrchestrator(
 
     // Snapshot the OCR-extracted records → Preview shows extracted
     // names/dates BEFORE matching runs.
-    emitSnapshot(ocrResult.data as unknown[], "matching", "running", {
+    emitSnapshot(ocrResult.data as unknown[], "ocr", "running", {
       rosterPath: resolvedRosterPath,
       ocrProvider: ocrResult.provider,
       ocrAttempts: ocrResult.attempts,
@@ -586,7 +602,7 @@ export async function runOcrOrchestrator(
     });
     // Snapshot post-matching: badges + EIDs (where roster auto-accepted)
     // appear in the Preview tab.
-    emitSnapshot(records, "disambiguating", "running", {
+    emitSnapshot(records, "ocr", "running", {
       failedPages,
       emptyPages,
       pageStatusSummary,
@@ -617,7 +633,7 @@ export async function runOcrOrchestrator(
       log.step(`[ocr] disambiguating ${disambigTargets.length} ambiguous record(s) via LLM (others: ${records.length - disambigTargets.length} skipped — already matched, manual, or no candidates)`);
       // Snapshot WITH records so the Preview tab keeps showing them
       // while disambiguation runs in the background.
-      emitSnapshot(records, "disambiguating", "running", { failedPages, emptyPages, pageStatusSummary });
+      emitSnapshot(records, "ocr", "running", { failedPages, emptyPages, pageStatusSummary });
 
       const { disambiguateMatch } = await import("../../services/ocr/disambiguate.js");
       const concurrencyEnv = Number.parseInt(process.env.OCR_DISAMBIG_CONCURRENCY ?? "", 10);
@@ -651,7 +667,7 @@ export async function runOcrOrchestrator(
       });
     } else {
       log.step(`[ocr] disambiguating skipped — 0 ambiguous records (all ${records.length} either matched, manual, or no candidates above 0.40)`);
-      emitSnapshot(records, "disambiguating", "running", { failedPages, emptyPages, pageStatusSummary });
+      emitSnapshot(records, "ocr", "running", { failedPages, emptyPages, pageStatusSummary });
     }
 
     const suggestionTargets: Array<{ index: number; rec: unknown }> = [];
@@ -957,44 +973,47 @@ export async function runOcrOrchestrator(
       });
     }
 
-    // 5. Verification marker (synthetic — actual verification happens
-    // asynchronously inside the eid-lookup daemon). We emit the breakdown
-    // of currently-known verifications so the operator can see what state
-    // each record is in right now (more rows may verify in the background
-    // as eid-lookup outcomes arrive).
+    // 5. Terminal phase. There is no longer a synthetic `verification` marker
+    // step — person-lookup OWNS verification now (it runs the enrichment/lookups
+    // whose outcomes patch each record), so the pipeline ends at person-lookup.
     const verifiedCount = countVerified(records);
-    const verifiedBreakdown: Record<string, number> = {};
-    records.forEach((r) => {
-      const v = (r as { verification?: { state?: string } }).verification;
-      const state = v?.state ?? "unverified";
-      verifiedBreakdown[state] = (verifiedBreakdown[state] ?? 0) + 1;
-    });
-    const breakdownStr = Object.entries(verifiedBreakdown).map(([k, n]) => `${k}=${n}`).join(" ");
-    log.step(`[ocr] verification: ${verifiedCount}/${records.length} records verified now — breakdown: ${breakdownStr} (more may verify in background as eid-lookup completes)`);
-    emitSnapshot(records, "verification", "running", {
-      failedPages,
-      emptyPages,
-      pageStatusSummary,
-    });
 
-    // 6. Awaiting-approval — workflow returns here even if eid-lookup is
-    // still running in the background. The operator can start reviewing
-    // immediately; lookup outcomes will patch records into this row's
-    // tracker entries as they arrive.
+    // COMPLETES `done` after person-lookup — no parked review. A standalone run
+    // of a no-fan-out form (verify) has nothing to approve, so the run completes
+    // and the operator reads the read-only completeness card on a terminal `done`
+    // row. A failed lookup's per-record ↻ re-opens this done row (see
+    // verify-relookup.ts). The handler seeds this payload onto the kernel's
+    // terminal `done` so it stays a preview row.
+    if (completesAfterLookup) {
+      log.success({
+        message: `[ocr] review complete — ${records.length} record(s), ${verifiedCount} verified`,
+        event: "ocr:review-complete",
+        category: "ocr",
+        occasion: "completed",
+        step: "person-lookup",
+        count: records.length,
+      });
+      emitSnapshot(records, "person-lookup", "done", {
+        failedPages,
+        emptyPages,
+        pageStatusSummary,
+      });
+      return { status: "complete" };
+    }
+
+    // DELEGATED run → Awaiting-approval. The workflow returns here even if a
+    // background lookup is still running; the operator can start reviewing
+    // immediately and lookup outcomes patch records into this row as they arrive.
     //
-    // Status is `running` (not `done`) under the new approval contract:
-    // the OCR row becomes terminal ONLY when the operator approves
-    // (→ `done step=approved` via the approve route, or kernel-emitted
-    // `done` after the handler's approval-signal resolves) or discards
-    // (→ `failed step=discarded`). See `src/services/ocr/approval-signal.ts`.
+    // Status is `running` (not `done`): the OCR row becomes terminal ONLY when
+    // the operator approves (→ `done step=approved` via the approve route, or the
+    // kernel-emitted `done` after the handler's approval-signal resolves) or
+    // discards (→ `failed step=discarded`). See `src/services/ocr/approval-signal.ts`.
     // Annotated with the stable `ocr:awaiting-approval` event so the Tier-1
-    // harness can `waitForEvent("ocr:awaiting-approval", { runId })` to know the
-    // OCR prep parked at awaiting-approval (the operator-approval gate). Run-scope
+    // harness can `waitForEvent("ocr:awaiting-approval", { runId })`. Run-scope
     // log → logs/ocr-<date>.jsonl; see docs/engineering/structured-log-events.md.
     log.success({
-      message: isStandaloneReview
-        ? `[ocr] preparation complete — ready for review (${records.length} record(s), ${verifiedCount} verified now)`
-        : `[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`,
+      message: `[ocr] preparation complete — awaiting operator approval (${records.length} record(s), ${verifiedCount} verified now)`,
       event: "ocr:awaiting-approval",
       category: "ocr",
       occasion: "waiting",
@@ -1036,6 +1055,26 @@ export async function runOcrOrchestrator(
 }
 
 // ─── Helpers (private) ──────────────────────────────────────
+
+/**
+ * The trace-id code for an OCR run, derived from the target-workflow operation
+ * intent so the trace PREFIX disambiguates the operation that owns the run
+ * (oath-signature `os-…` vs oath-upload `ou-…` — previously both branded `ou-…`
+ * off the shared oath form spec, the operator-confusing collision). Each value
+ * MUST match that operation workflow's own `defineWorkflow` code; the
+ * `workflow codes are unique` architecture guard keeps those collision-free.
+ * Returns undefined for a standalone OCR-hub run (no `operationWorkflow`) so the
+ * caller falls back to the form spec's `traceCode` (oath → "ou", verify → "vf")
+ * or the OCR default "oc".
+ */
+export function operationTraceCode(operationWorkflow: string | undefined): string | undefined {
+  switch (operationWorkflow) {
+    case "oath-signature": return "os";
+    case "oath-upload": return "ou";
+    case "emergency-contact": return "ec";
+    default: return undefined;
+  }
+}
 
 interface FanOutChildSpec {
   workflow: "person-lookup";

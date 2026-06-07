@@ -2,7 +2,7 @@
 
 Resolves an employee by name or EID via UCPath Person Organizational Summary + CRM cross-verification, then derives active/HDH status. Merges the former **EID Lookup** and **Active Check** workflows into one operator-facing daemon workflow.
 
-**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (runs for **both** name and `{ emplId }` inputs) → `active-status` → `crm-dates` (skipped unless `input.includeCrmDates === true`). Output: resolved EID, active/HDH status, department, **CRM-sourced start date**, assignment EFFDT context, termination date, and optional CRM dates.
+**Kernel-based (daemon mode).** Registered in `WORKFLOW_LOADERS` and dashboard input runs. One `defineWorkflow`: `personLookupWorkflow`. Handler steps: `searching` → `cross-verification` (runs for **both** name and `{ emplId }` inputs) → `active-status` → `crm-dates` (skipped unless `input.includeCrmDates === true`). Output: resolved EID, active/HDH status, department, **CRM-sourced payroll title** (Title Code/Payroll Title, code prefix stripped), **CRM-sourced start date**, assignment EFFDT context, termination date, **UCPath termination reason** (action-reason, e.g. "Resign - Personal Reasons"), and optional CRM dates.
 
 Each dashboard input run enqueues N names/EIDs as N kernel items to an alive daemon (session reused — no re-Duo between items). A one-person input run is a `single` row. A multi-person input run is a batch surface: every person row is stamped `batch-member` under the shared input-run `parentRunId`.
 
@@ -14,7 +14,7 @@ Each dashboard input run enqueues N names/EIDs as N kernel items to an alive dae
 
 `outcome.ts` exports:
 
-- `deriveActiveCheckOutcome` — derives the operator-facing `ActiveCheckOutcome` (activeStatus: `active` | `inactive` | `not-found` | `non-hdh` | `ambiguous`; `isActive`; `isHdhAccepted`; `terminationDate`; `candidateEids`).
+- `deriveActiveCheckOutcome` — derives the operator-facing `ActiveCheckOutcome` (activeStatus: `active` | `inactive` | `not-found` | `non-hdh` | `ambiguous`; `isActive`; `isHdhAccepted`; `terminationDate`; `terminationReason` (blank unless terminated); `candidateEids`).
 - `derivePersonLookupSelection` — selects the preferred result row for multi-instance EID sets (active row wins over inactive for the same EID).
 - `resolvePersonLookupForEidLookup` — narrows a multi-result name search by CRM-matched EID.
 
@@ -91,6 +91,8 @@ The `ocr-active-check` task dependency kind and `createOcrActiveCheckDependencyB
 
 ## Lessons Learned
 
+- **2026-06-05: Termination Reason grid field is UCPath-sourced (Person Org Summary action-reason).** The log-panel grid shows `terminationReason` (label "Term Reason") after End Date. It comes from UCPath Person Org Summary's ORG Instance section, rendered next to the Termination Date — selector `personOrgSummary.terminationReason` = `#PER_INST_EMP_VW_DESCR$0` (same `PER_INST_EMP_VW_*$0` family as Last Hire / Termination Date). Extracted in **both** detail paths (`drillInAndGetDetails` + the single-result detail path) and carried `EidResult.terminationReason → PersonLookupResult → ActiveCheckOutcome.terminationReason`, then stamped in `stampActiveCheckFields`. **Gated on the termination date**: blanked at extraction (`selectedTermDate ? termReason : ""`) AND again in `deriveActiveCheckOutcome` (`terminationDate ? reason : ""`) so an active row never shows a stale action-reason. Unlike Start Date (CRM), this is the one operator-facing field sourced from UCPath, not CRM.
+- **2026-06-05: Payroll Title grid field is CRM-sourced and code-stripped.** The log-panel grid now shows `payrollTitle` (label "Payroll Title") immediately before Start Date. It comes from the CRM record's already-extracted `titleCode` ("Title Code/Payroll Title", e.g. `"4921 - STDT 2"`), stripped of the leading PeopleSoft job code via `payrollTitleFromTitleCode` → `"STDT 2"`. `pickCrmPayrollTitle` selects the same CRM record as `pickCrmStartDate` (both now share the private `pickCrmRecord`). Stamped in `stampCrmStartDateAndScreenshot` alongside `startDate`, and stamped `""` on every cross-verification early-return that already blanks `startDate` so the declared detailField never triggers the missing-field runtime warning. CRM-only/best-effort — blank when there is no CRM record (no UCPath fallback), exactly like Start Date.
 - **2026-05-28: Person Lookup merged from EID Lookup + Active Check.** Both former workflows are deleted. All callers import from `src/workflows/person-lookup/`. The workflow name is `"person-lookup"`, label `"Person Lookup"`.
 - **2026-05-28: Retired workflow ids are not dashboard surfaces.** Historical `eid-lookup` and `active-check` tracker rows stay readable for audit/debugging, but dashboard workflow lists/counts filter them out. Do not re-add either id to workflow metadata, input-run registries, or dashboard rail logic.
 - **Normalize and dedupe names before enqueue.** `normalizeName` title-cases and canonicalizes separator; `prepareNames` + `dedupeNames` prevent itemId collisions.

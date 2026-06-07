@@ -102,7 +102,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
 ): Ctx<TSteps, TData> {
   const { session, stepper, isBatch, runId, workflow, code, rootTracePrefix, itemId, parentRunId, emitScreenshotEvent, trackerDir, signal, instance } = opts
 
-  session.setUcpathIdleGuard(() => stepper.isInsideStep())
+  session.setIdleRefreshGuard(() => stepper.isInsideStep())
 
   // Session-timeline bridge for handlers that own their own queue-row emission
   // and so never call ctx.step (today: OCR). Emits session item_start (once)

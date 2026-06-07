@@ -110,8 +110,6 @@ export interface CaptureSessionStore {
   reorderPhotos(sessionId: string, fromIndex: number, toIndex: number): boolean;
   setState(sessionId: string, state: CaptureSessionState): void;
   setPdfPath(sessionId: string, path: string): void;
-  /** Bump expiresAt by `byMs`. Returns the new expiresAt. */
-  extend(sessionId: string, byMs: number): number | undefined;
   /** First manifest hit from the phone — idempotent. */
   markPhoneConnected(
     sessionId: string,
@@ -350,16 +348,6 @@ export function createSessionStore(opts: CreateStoreOptions = {}): CaptureSessio
       if (!s) return;
       s.pdfPath = p;
       emit(sessionId, "pdf_built", { pdfPath: p });
-    },
-
-    extend(sessionId, byMs): number | undefined {
-      const s = sessions.get(sessionId);
-      if (s) expireIfDue(s);
-      if (!s || TERMINAL_STATES.has(s.state)) return undefined;
-      if (!Number.isFinite(byMs) || byMs <= 0) return undefined;
-      s.expiresAt = s.expiresAt + byMs;
-      emit(sessionId, "extended", { byMs, newExpiresAt: s.expiresAt });
-      return s.expiresAt;
     },
 
     markPhoneConnected(sessionId, info): boolean {

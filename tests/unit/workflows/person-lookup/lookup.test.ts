@@ -74,8 +74,10 @@ describe("person-lookup workflow helper", () => {
         ["emplId", "EID"],
         ["department", "Dept"],
         ["hrStatus", "HR Status"],
+        ["payrollTitle", "Payroll Title"],
         ["startDate", "Start Date"],
         ["terminationDate", "End Date"],
+        ["terminationReason", "Term Reason"],
       ],
     );
   });

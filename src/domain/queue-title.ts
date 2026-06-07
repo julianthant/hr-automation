@@ -5,10 +5,6 @@ export interface QueueTitle {
   title: string;
 }
 
-export function batchQueueTitle(label: string, runId: string): string {
-  return `${label} · #${runId.slice(-4)}`;
-}
-
 export function queueTitleData(title: QueueTitle | null | undefined): Record<string, string> {
   if (!title?.title.trim()) return {};
   return {
