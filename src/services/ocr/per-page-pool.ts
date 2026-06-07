@@ -64,6 +64,53 @@ function readKeys(prefix: string, max = 8): string[] {
   return out;
 }
 
+// ─── Response summarization ──────────────────────────────────
+
+/**
+ * One-line, operator-readable summary of a model's parsed OCR response — the
+ * record count plus each record's form kind + person name. Replaces dumping the
+ * raw JSON array into the log line (unreadable, clipped at the panel edge). The
+ * full data still rides through to the OCR review pane; the log just summarizes.
+ */
+export function summarizeOcrResponse(json: unknown): string {
+  const records = Array.isArray(json) ? json : json == null ? [] : [json];
+  if (records.length === 0) return "0 records";
+  const SHOWN = 4;
+  const parts = records.slice(0, SHOWN).map(describeOcrRecord);
+  const extra = records.length - SHOWN;
+  const head = `${records.length} record${records.length === 1 ? "" : "s"}`;
+  const suffix = extra > 0 ? ` · +${extra} more` : "";
+  return `${head} · ${parts.join(" · ")}${suffix}`;
+}
+
+/** `formKind: name` for one OCR record, defensively narrowing unknown shapes. */
+function describeOcrRecord(rec: unknown): string {
+  if (!rec || typeof rec !== "object") return "—";
+  const r = rec as Record<string, unknown>;
+  const kind = typeof r.formKind === "string" && r.formKind.trim() ? r.formKind.trim() : null;
+  const name =
+    (typeof r.printedName === "string" && r.printedName.trim()) ||
+    (typeof r.employeeId === "string" && r.employeeId.trim()) ||
+    "—";
+  return kind ? `${kind}: ${name}` : name;
+}
+
+/**
+ * Parse a model's text response. On failure, surface a readable warn (with the
+ * truncated raw output for debugging) before rethrowing — so a malformed model
+ * reply is diagnosable without the raw JSON cluttering every successful run.
+ */
+function parseOcrResponse(provider: VisionProviderId, model: string, text: string): unknown {
+  try {
+    return parseJsonLoose(text);
+  } catch (err) {
+    log.warn(
+      `[ocr/${provider}] ${model} returned unparseable output (${text.length}c): ${text.slice(0, 200).replace(/\n/g, " ")}`,
+    );
+    throw err;
+  }
+}
+
 // ─── Provider call implementations ───────────────────────────
 
 async function callGemini(apiKey: string, imagePath: string, prompt: string, model: string): Promise<OcrCallOutcome> {
@@ -89,8 +136,9 @@ async function callGemini(apiKey: string, imagePath: string, prompt: string, mod
     usageMetadata?: { promptTokenCount?: number };
   };
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-  log.success(`[ocr/gemini] ${model} done (${text.length}c): ${text.slice(0, 200).replace(/\n/g, " ")}`);
-  return { json: parseJsonLoose(text), promptTokens: data.usageMetadata?.promptTokenCount };
+  const json = parseOcrResponse("gemini", model, text);
+  log.success(`[ocr/gemini] ${model} → ${summarizeOcrResponse(json)}`);
+  return { json, promptTokens: data.usageMetadata?.promptTokenCount };
 }
 
 async function callOpenAICompatVision(args: {
@@ -130,7 +178,9 @@ async function callOpenAICompatVision(args: {
     usage?: { prompt_tokens?: number };
   };
   const text = data.choices?.[0]?.message?.content ?? "";
-  return { json: parseJsonLoose(text), promptTokens: data.usage?.prompt_tokens };
+  const json = parseOcrResponse(args.provider, args.model, text);
+  log.success(`[ocr/${args.provider}] ${args.model} → ${summarizeOcrResponse(json)}`);
+  return { json, promptTokens: data.usage?.prompt_tokens };
 }
 
 // ─── Pool builder ────────────────────────────────────────────
