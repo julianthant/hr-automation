@@ -46,6 +46,12 @@ import { dateLocal, isEditableFocus } from "./lib/utils";
 import { HelpCircle } from "lucide-react";
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
 import { ColumnResizer } from "./components/shared/ColumnResizer";
+import { NotificationSettings } from "./components/navigation/NotificationSettings";
+import {
+  fireDesktopNotification,
+  readNotifySettings,
+  writeNotifySettings,
+} from "./lib/desktop-notifications";
 
 const QUEUE_WIDTH_STORAGE_KEY = "dashboard.queueWidth";
 
@@ -134,6 +140,14 @@ export function App() {
   // not fire a toast.
   const statusRef = useRef<Map<string, string>>(new Map());
   const lastToastKeyRef = useRef<string>("");
+
+  // Desktop notifications: settings (persisted) + a per-entry awaiting-review
+  // edge tracker + a stable ref to the row-select handler for click-to-focus.
+  const [notifySettings, setNotifySettings] = useState(readNotifySettings);
+  const notifySettingsRef = useRef(notifySettings);
+  notifySettingsRef.current = notifySettings;
+  const reviewNotifiedRef = useRef<Map<string, boolean>>(new Map());
+  const handleSelectEntryRef = useRef<(id: string) => void>(() => {});
 
   // Pre-flight check on mount
   usePreflight();
@@ -350,11 +364,31 @@ export function App() {
     if (entriesKey !== targetKey) return;
     if (lastToastKeyRef.current !== targetKey) {
       statusRef.current = new Map();
+      reviewNotifiedRef.current = new Map();
       lastToastKeyRef.current = targetKey;
     }
     for (const entry of dedupedEntries) {
       const prevStatus = statusRef.current.get(entry.id);
       statusRef.current.set(entry.id, entry.status);
+
+      // OCR awaiting-review rising edge — fire a desktop notification once when
+      // the row enters review (status stays "running", so the status-change
+      // path below never catches it).
+      const nowReview =
+        entry.workflow === "ocr" &&
+        entry.status === "running" &&
+        entry.step === "awaiting-approval";
+      const prevReview = reviewNotifiedRef.current.get(entry.id);
+      reviewNotifiedRef.current.set(entry.id, nowReview);
+      if (prevReview === false && nowReview && notifySettingsRef.current.awaitingReview) {
+        fireDesktopNotification({
+          title: `${wfLabel} — awaiting review`,
+          body: `${resolveEntryName(entry, displayNames)} is ready for approval`,
+          tag: `review-${entry.id}`,
+          onClick: () => handleSelectEntryRef.current(entry.id),
+        });
+      }
+
       if (prevStatus === undefined) continue;
       if (prevStatus === entry.status) continue;
       // Resolve any pending action toasts (cancel-running, cancel-queued)
@@ -385,6 +419,14 @@ export function App() {
           description: entry.error || "Unknown error",
           duration: 8000,
         });
+        if (notifySettingsRef.current.failure) {
+          fireDesktopNotification({
+            title: `${wfLabel} failed`,
+            body: `${name} — ${entry.error || "Unknown error"}`,
+            tag: `fail-${entry.id}`,
+            onClick: () => handleSelectEntryRef.current(entry.id),
+          });
+        }
       }
     }
   }, [dedupedEntries, entriesKey, wfLabel, workflow, date, displayNames]);
@@ -486,6 +528,9 @@ export function App() {
     setReviewingPrepId(null);
     setSelectedId(id);
   }, []);
+  // Keep the ref fresh so a notification click (fired from the status-transition
+  // effect's closure) always selects via the latest handler.
+  handleSelectEntryRef.current = handleSelectEntry;
   const handleOpenReview = useCallback((runId: string) => {
     setReviewingPrepId(runId);
   }, []);
@@ -643,15 +688,24 @@ export function App() {
         onFailureSelect={handleFailureSelect}
         failureCounts={failureCounts ?? {}}
         rightSlot={
-          <button
-            type="button"
-            onClick={() => setShortcutsOpen(true)}
-            aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts (?)"
-            className="ml-1 h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+          <>
+            <NotificationSettings
+              settings={notifySettings}
+              onChange={(s) => {
+                setNotifySettings(s);
+                writeNotifySettings(s);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts (?)"
+              className="ml-1 h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+          </>
         }
       />
       <OcrReviewPrepProvider
