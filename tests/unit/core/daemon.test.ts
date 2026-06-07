@@ -4,6 +4,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { clear } from '../../../src/core/kernel/registry.js'
@@ -91,6 +93,31 @@ async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 3000)
     await new Promise((r) => setTimeout(r, 25))
   }
   throw new Error(`waitFor timed out after ${timeoutMs}ms`)
+}
+
+/**
+ * Stand up a minimal `/whoami` HTTP server that positively identifies as the
+ * given (workflow, instanceId) — i.e. a RESPONSIVE peer daemon. The shutdown
+ * reassign path now health-checks peers before requeuing to one, so a fake
+ * lockfile alone (PID alive, port dead) no longer counts as a usable peer; the
+ * peer must actually answer `/whoami`.
+ */
+async function startWhoamiServer(
+  workflow: string,
+  instanceId: string,
+): Promise<{ server: Server; port: number }> {
+  const server = createServer((req, res) => {
+    if (req.url !== '/whoami') {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ workflow, instanceId }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as AddressInfo
+  return { server, port: address.port }
 }
 
 test('runWorkflowDaemon: /whoami handshake + graceful /stop removes lockfile', async () => {
@@ -592,12 +619,13 @@ test('runWorkflowDaemon: /stop force-cancels an in-flight handler parked in a si
   }
 })
 
-test('runWorkflowDaemon: per-instance /stop with a surviving peer RE-QUEUES the in-flight item (no fail)', async () => {
+test('runWorkflowDaemon: per-instance /stop with a RESPONSIVE surviving peer RE-QUEUES the in-flight item (no fail)', async () => {
   // Per-instance stop (dashboard session card) sends `/stop { reassign: true }`.
-  // When another daemon for the workflow is still alive, the daemon hands its
-  // in-flight item back to the queue (returnTaskToQueued) instead of failing it,
-  // so a surviving peer finishes the work. Asserts the task lands back in
-  // 'queued' (not terminal). (2026-06-07 reassign-or-fail.)
+  // When another daemon for the workflow is still alive AND responds to
+  // `/whoami`, the daemon hands its in-flight item back to the queue
+  // (returnTaskToQueued) instead of failing it, so a surviving peer finishes
+  // the work. Asserts the task lands back in 'queued' (not terminal).
+  // (2026-06-07 reassign-or-fail; 2026-06-07 F5 peer health-check.)
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-reassign-'))
   const control = openControlDb({ trackerDir: dir })
@@ -605,6 +633,7 @@ test('runWorkflowDaemon: per-instance /stop with a surviving peer RE-QUEUES the 
   let port: number | undefined
   let inFlight: { itemId: string; runId: string } | null = null
   let runPromise: Promise<void> | undefined
+  let peerServer: Server | undefined
   try {
     const started = deferred()
     const wf = defineWorkflow({
@@ -639,22 +668,24 @@ test('runWorkflowDaemon: per-instance /stop with a surviving peer RE-QUEUES the 
     ;({ port } = await waitForDaemon('dint-stop-reassign', dir))
     await started.promise
 
-    // A surviving PEER: a lockfile with a live pid (this process) and a port
-    // nothing listens on. `findAliveDaemons` keeps it ("unreachable probe +
-    // PID alive → trust the lockfile"), so the daemon under test sees a peer to
-    // hand its in-flight item to. Written AFTER waitForDaemon so the test's
-    // own /status + /stop fetches target the real daemon's port (not the
-    // peer's); the cache is invalidated so the daemon's reassign-time
-    // findAliveDaemons re-probes and includes the peer (the daemon runs
-    // in-process, sharing this module's alive-daemons cache).
+    // A surviving, RESPONSIVE peer: a lockfile with a live pid (this process)
+    // AND a real `/whoami` server that identity-matches. The shutdown reassign
+    // path health-checks peers (F5) before requeuing, so the peer must answer
+    // `/whoami` — a dead port would now fail-loud instead. Written AFTER
+    // waitForDaemon so the test's own /status + /stop fetches target the real
+    // daemon's port (not the peer's); the cache is invalidated so the daemon's
+    // reassign-time findAliveDaemons re-probes and includes the peer (the
+    // daemon runs in-process, sharing this module's alive-daemons cache).
     ensureDaemonsDir(dir)
     const peerInstanceId = randomInstanceId('dint-stop-reassign')
+    ;({ server: peerServer } = await startWhoamiServer('dint-stop-reassign', peerInstanceId))
+    const peerPort = (peerServer.address() as AddressInfo).port
     writeLockfile(
       {
         workflow: 'dint-stop-reassign',
         instanceId: peerInstanceId,
         pid: process.pid,
-        port: 59999,
+        port: peerPort,
         startedAt: new Date().toISOString(),
         hostname: 'test-peer',
         version: 1,
@@ -695,6 +726,98 @@ test('runWorkflowDaemon: per-instance /stop with a surviving peer RE-QUEUES the 
         body: JSON.stringify(inFlight),
       }).catch(() => {})
     }
+    if (runPromise) {
+      await Promise.race([runPromise.catch(() => {}), new Promise((r) => setTimeout(r, 2_000))])
+    }
+    if (peerServer) await new Promise<void>((resolve) => peerServer!.close(() => resolve()))
+    taskStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: per-instance /stop with an UNRESPONSIVE peer FAILS the in-flight item (fail-loud, F5)', async () => {
+  // Reassign was requested AND a peer lockfile looks alive (live PID), but the
+  // peer's port answers nothing — a wedged/zombie daemon. `findAliveDaemons`
+  // trusts it ("unreachable + PID alive"), so the old code would requeue the
+  // item to it and it would sit `queued` forever. F5: the shutdown path
+  // health-checks the peer with `/whoami`; when none respond it FAILS the
+  // in-flight item loudly (terminal `failed`) instead of parking it.
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-reassign-zombie-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  let port: number | undefined
+  let runPromise: Promise<void> | undefined
+  try {
+    const started = deferred()
+    const wf = defineWorkflow({
+      name: 'dint-stop-zombie-peer',
+      schema: z.object({ id: z.string() }),
+      steps: ['wait-approval'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('wait-approval', async () => {
+          started.resolve()
+          await new Promise<void>((_resolve, reject) => {
+            if (ctx.signal.aborted) {
+              reject(new Error('aborted before wait'))
+              return
+            }
+            ctx.signal.addEventListener('abort', () => reject(new Error('approval wait aborted')), {
+              once: true,
+            })
+          })
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-stop-zombie-peer', [{ id: 'held' }], (d) => d.id, dir)
+    runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    ;({ port } = await waitForDaemon('dint-stop-zombie-peer', dir))
+    await started.promise
+
+    // A WEDGED peer: live PID, but port 59999 answers nothing — `/whoami`
+    // times out → 'unreachable'. `findAliveDaemons` keeps it; F5's strict
+    // health-check rejects it.
+    ensureDaemonsDir(dir)
+    const peerInstanceId = randomInstanceId('dint-stop-zombie-peer')
+    writeLockfile(
+      {
+        workflow: 'dint-stop-zombie-peer',
+        instanceId: peerInstanceId,
+        pid: process.pid,
+        port: 59999,
+        startedAt: new Date().toISOString(),
+        hostname: 'test-peer',
+        version: 1,
+      },
+      lockfilePath('dint-stop-zombie-peer', peerInstanceId, dir),
+    )
+    invalidateAliveDaemonsCache('dint-stop-zombie-peer', dir)
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true, reassign: true }),
+    })
+
+    await Promise.race([
+      runPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('daemon did not stop on per-instance /stop')), 6_000),
+      ),
+    ])
+
+    const [task] = taskStore.listTasksForWorkflow('dint-stop-zombie-peer')
+    // Failed loud (terminal), NOT re-queued to a peer that will never claim it.
+    assert.equal(task.state, 'failed')
+  } finally {
     if (runPromise) {
       await Promise.race([runPromise.catch(() => {}), new Promise((r) => setTimeout(r, 2_000))])
     }

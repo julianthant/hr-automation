@@ -11,6 +11,7 @@ import {
   writeLockfile,
   ensureDaemonsDir,
   findAliveDaemons,
+  filterResponsiveDaemons,
 } from './registry.js'
 import { wakeDaemons } from './client.js'
 import {
@@ -572,10 +573,21 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                           (d) => d.instanceId !== instanceId,
                         )
                       : []
-                  const reassign =
+                  // Reassign is only SAFE if a peer will ACTUALLY claim the
+                  // item. `findAliveDaemons` deliberately trusts an
+                  // unreachable-but-PID-alive lockfile (a wedged/zombie daemon
+                  // whose event loop never wakes), so requeuing to one parks
+                  // the item `queued` forever. Probe `/whoami` and only reassign
+                  // to a peer that POSITIVELY responds; otherwise fail loud
+                  // below (F5). Only probe when reassign is actually requested.
+                  const responsivePeers =
                     state.reassignInFlight && peers.length > 0 && Boolean(item.taskId)
+                      ? await filterResponsiveDaemons(peers)
+                      : []
+                  const reassign =
+                    state.reassignInFlight && responsivePeers.length > 0 && Boolean(item.taskId)
                   if (reassign && item.taskId) {
-                    // Per-instance stop with a surviving peer → hand the item
+                    // Per-instance stop with a RESPONSIVE peer → hand the item
                     // back to the queue and wake the peers so an idle one
                     // finishes it. The attempt (and thus runId) is preserved by
                     // returnTaskToQueued, so the run continues under the same id
@@ -599,9 +611,43 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       },
                       trackerDir,
                     )
-                    await wakeDaemons(peers)
+                    await wakeDaemons(responsivePeers)
                     log.step(
-                      `[Daemon ${instanceId}] per-instance stop — reassigned in-flight item ${item.id} to ${peers.length} surviving daemon(s)`,
+                      `[Daemon ${instanceId}] per-instance stop — reassigned in-flight item ${item.id} to ${responsivePeers.length} responsive daemon(s)`,
+                    )
+                  } else if (state.reassignInFlight && peers.length > 0) {
+                    // Reassign requested, a peer LOOKS alive (PID + lockfile),
+                    // but none answered `/whoami` — wedged/zombie. Fail the item
+                    // loudly (red, retriable) rather than requeue it to a daemon
+                    // that will never claim it. Same fail shape as a no-peer
+                    // force-stop (F5 fail-loud).
+                    const failError =
+                      'Daemon stopped and no responsive peer daemon was available to finish this item.'
+                    log.warn(
+                      `[Daemon ${instanceId}] per-instance stop — ${peers.length} peer(s) appeared alive but none responded to /whoami; failing in-flight item ${item.id} instead of parking it`,
+                    )
+                    await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
+                    if (item.taskId) {
+                      taskStore.markDependencyFromChildTerminal({
+                        childTaskId: item.taskId,
+                        childState: 'failed',
+                      })
+                    }
+                    emitTrackerRow(
+                      {
+                        workflow: wf.config.name,
+                        timestamp: new Date().toISOString(),
+                        id: item.id,
+                        runId,
+                        status: 'failed',
+                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                          runId,
+                          trackerDir,
+                        }) as StampedData,
+                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                        error: failError,
+                      },
+                      trackerDir,
                     )
                   } else if (state.forceShutdown) {
                     // Force-stop with no spare to absorb the item (stop-all,
