@@ -4,7 +4,7 @@ Environment validation, error helpers, error classification, and colored logging
 
 **Logging vocabulary** (run log vs session log, log file vs database, log context): `docs/engineering/notes-and-logging-vocabulary.md`.
 
-**Stable structured log-event names** (`StructuredLogEvent.event`, a closed `LogEventName` set — `step:start`/`step:done`/`delegation:children-spawned`/`ocr:awaiting-approval`/`cancel:requested`/`run:terminal`): `docs/engineering/structured-log-events.md`. These persist to `logs/<workflow>-<date>.jsonl` and are the **Tier-1 harness sync primitive** (tailed by `waitForEvent`) — renaming one is a breaking change. Stamp via `log.*({ message, event, ... })` on the **run-scope** path only.
+**Stable structured log-event names** (`StructuredLogEvent.event`, a closed `LogEventName` set — `step:start`/`step:done`/`delegation:children-spawned`/`ocr:awaiting-approval`/`ocr:review-complete`/`cancel:requested`/`run:terminal`): `docs/engineering/structured-log-events.md`. These persist to `logs/<workflow>-<date>.jsonl` and are the **Tier-1 harness sync primitive** (tailed by `waitForEvent`) — renaming one is a breaking change. Stamp via `log.*({ message, event, ... })` on the **run-scope** path only.
 
 ## Lessons Learned
 

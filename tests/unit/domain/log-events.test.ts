@@ -61,11 +61,12 @@ describe("structured log events", () => {
       "step:start",
       "step:done",
       "ocr:awaiting-approval",
+      "ocr:review-complete",
       "cancel:requested",
       "run:terminal",
     ];
     // Type-level guard: every member is assignable to LogEventName (compile)
     // and the runtime set is the expected size.
-    assert.equal(new Set(names).size, 6, "expected 6 distinct stable event names");
+    assert.equal(new Set(names).size, 7, "expected 7 distinct stable event names");
   });
 });
