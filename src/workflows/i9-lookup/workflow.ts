@@ -68,7 +68,8 @@ export async function handleI9Lookup(
  * The kernel auto-prepends an `auth:i9` step from the `systems` declaration.
  *
  * Output data fields: `signerName` (who signed), `i9Status` (signed |
- * unsigned | historical | not-found | error), and optionally `profileId`.
+ * unsigned | historical | not-found | unable-to-access | error), and
+ * optionally `profileId`.
  *
  * This workflow has NO dashboard start surface. It is invoked only by
  * parent workflows via `ctx.delegateTo` / `ctx.delegateToAll`.

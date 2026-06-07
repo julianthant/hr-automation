@@ -146,7 +146,6 @@ test("Hono manifest covers the dashboard public route inventory", () => {
     ["GET", "/api/capture/photos/:sessionId/:index"],
     ["POST", "/api/capture/replace-photo"],
     ["POST", "/api/capture/reorder"],
-    ["POST", "/api/capture/extend"],
     ["POST", "/api/capture/validate"],
     ["GET", "/api/capture/registry"],
     ["GET", "/capture-assets/heic2any.min.js"],

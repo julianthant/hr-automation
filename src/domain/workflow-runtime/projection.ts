@@ -8,10 +8,7 @@ import {
 } from "../row-archetype.js";
 import { runIdFragment, tracePrefix } from "../queue-trace-id.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
-import {
-  buildTrackerQueueSurfaces,
-  classifyTrackerRow,
-} from "../../tracker/queue-surfaces.js";
+import { classifyTrackerRow } from "../../tracker/queue-surfaces.js";
 import type { TrackerQueueGroupSurface } from "../../tracker/queue-surfaces.js";
 import {
   getWorkflowRuntimePolicy,
@@ -293,41 +290,6 @@ export function buildWorkflowRunProjection(
     actions: overrides.actions ?? withRowTargets(policy.rowActions, targets),
     batchMembers: overrides.batchMembers ?? [],
   };
-}
-
-/**
- * Log-panel row-type chip label for one tracker entry. Reuses queue-surface
- * classification + runtime projection instead of duplicating surface rules in
- * the dashboard.
- */
-export function deriveRowTypeLabelForEntry(
-  entry: TrackerEntry,
-  childEntries: TrackerEntry[],
-  allEntries: TrackerEntry[],
-  previewAvailable: boolean,
-  runtimePolicies?: WorkflowRuntimePolicyLookup,
-): string {
-  const runId = entry.runId ?? entry.id;
-  const sourceEntries = allEntries.length > 0 ? allEntries : [entry, ...childEntries];
-  const surfaces = buildTrackerQueueSurfaces({
-    entries: sourceEntries,
-    delegationSourceEntries: sourceEntries,
-    runtimePolicies,
-  });
-  const surface = surfaces.groupRows.find((candidate) => {
-    if (candidate.parentRunId === runId) return true;
-    if (candidate.kind === "preview" && (candidate.parent.runId ?? candidate.parent.id) === runId) {
-      return true;
-    }
-    return candidate.members.some((member) => (member.runId ?? member.id) === runId);
-  });
-  const label = surface
-    ? buildProjectionFromQueueSurface(surface, { runtimePolicies }).rowTypeLabel
-    : buildWorkflowRunProjection(entry, { runtimePolicies }).rowTypeLabel;
-  if (previewAvailable && label !== "Preview" && !label.endsWith("· Preview")) {
-    return `${label} · Preview`;
-  }
-  return label;
 }
 
 /** Aggregate a batch/operation group's status from its member rows. */

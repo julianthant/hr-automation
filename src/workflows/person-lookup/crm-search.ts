@@ -253,19 +253,45 @@ export async function searchCrmByEidOrName(
 }
 
 /**
- * Pick the CRM First Day of Service to use as the operator-facing Start Date.
+ * Pick the single CRM record to read operator-facing fields from.
  *
  * Prefers the record whose UCPath Employee ID matches the resolved EID; falls
- * back to the first record. Returns "" when there are no records or the chosen
- * record has no First Day of Service (Start Date is CRM-only — no UCPath
- * fallback).
+ * back to the first record. Returns undefined when there are no records.
  */
-export function pickCrmStartDate(records: CrmRecord[], emplId?: string): string {
-  if (records.length === 0) return "";
+function pickCrmRecord(records: CrmRecord[], emplId?: string): CrmRecord | undefined {
+  if (records.length === 0) return undefined;
   const eid = emplId?.trim();
   const matched = eid ? records.find((r) => r.ucpathEmployeeId.trim() === eid) : undefined;
-  const chosen = matched ?? records[0]!;
-  return chosen.firstDayOfService?.trim() ?? "";
+  return matched ?? records[0];
+}
+
+/**
+ * Pick the CRM First Day of Service to use as the operator-facing Start Date.
+ *
+ * Returns "" when there are no records or the chosen record has no First Day of
+ * Service (Start Date is CRM-only — no UCPath fallback).
+ */
+export function pickCrmStartDate(records: CrmRecord[], emplId?: string): string {
+  return pickCrmRecord(records, emplId)?.firstDayOfService?.trim() ?? "";
+}
+
+/**
+ * Strip the leading PeopleSoft job code from a CRM "Title Code/Payroll Title"
+ * value so the operator sees the payroll title alone: "4921 - STDT 2" →
+ * "STDT 2". Returns the value unchanged (trimmed) when there's no "<code> - "
+ * prefix.
+ */
+export function payrollTitleFromTitleCode(titleCode: string): string {
+  return titleCode.replace(/^\s*\d+\s*-\s*/, "").trim();
+}
+
+/**
+ * Pick the operator-facing payroll title (sans leading code) from the chosen
+ * CRM record. Same record-selection rule as {@link pickCrmStartDate}; "" when
+ * there are no records or the chosen record has no Title Code/Payroll Title.
+ */
+export function pickCrmPayrollTitle(records: CrmRecord[], emplId?: string): string {
+  return payrollTitleFromTitleCode(pickCrmRecord(records, emplId)?.titleCode ?? "");
 }
 
 /**

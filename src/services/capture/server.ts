@@ -13,8 +13,6 @@ export interface RouteResult {
 }
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10 MB
-const DEFAULT_EXTEND_MS = 5 * 60 * 1_000;
-
 // Crockford-style alphabet (no 0/O/I/L confusables) so an operator can
 // read the shortcode aloud without ambiguity.
 const SHORTCODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -412,37 +410,6 @@ export function handleReorder(
     status: 200,
     body: { ok: true, order: session.photos.map((p) => p.index) },
   };
-}
-
-// ─── handleExtend ───────────────────────────────────────────
-
-export interface HandleExtendInput {
-  sessionId: string;
-  /** Optional bump in milliseconds. Defaults to 5 minutes. */
-  byMs?: number;
-}
-
-export function handleExtend(
-  input: HandleExtendInput,
-  ctx: { store: CaptureSessionStore },
-): RouteResult {
-  const session = ctx.store.getById(input.sessionId);
-  if (!session) {
-    return { status: 404, body: { ok: false, error: "session not found" } };
-  }
-  if (session.state !== "open") {
-    return {
-      status: 409,
-      body: { ok: false, error: `session is ${session.state}` },
-    };
-  }
-  const byMs =
-    typeof input.byMs === "number" && input.byMs > 0 ? input.byMs : DEFAULT_EXTEND_MS;
-  const newExpiresAt = ctx.store.extend(input.sessionId, byMs);
-  if (newExpiresAt === undefined) {
-    return { status: 400, body: { ok: false, error: "couldn't extend" } };
-  }
-  return { status: 200, body: { ok: true, newExpiresAt } };
 }
 
 // ─── handleValidate ─────────────────────────────────────────

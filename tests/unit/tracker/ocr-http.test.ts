@@ -383,7 +383,7 @@ test("POST /api/ocr/discard-prepare inherits parentRunId on parent-workflow row 
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("sweepStuckOcrRows marks running rows failed", () => {
+test("sweepStuckOcrRows marks running rows failed and preserves the reached step", () => {
   const dir = setup();
   const file = rowFilePath("ocr", todayLocal(), dir);
   appendFileSync(file,
@@ -398,6 +398,27 @@ test("sweepStuckOcrRows marks running rows failed", () => {
   const last = JSON.parse(lines[lines.length - 1]);
   assert.equal(last.status, "failed");
   assert.match(last.error, /Dashboard restarted/);
+  // The reached step rides onto the failed row so the step pipeline marks the
+  // failure on `ocr`, not its step-0 (`loading-roster`) fallback.
+  assert.equal(last.step, "ocr");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("sweepStuckOcrRows omits step for a step-less stuck row (keeps the step-0 fallback)", () => {
+  const dir = setup();
+  const file = rowFilePath("ocr", todayLocal(), dir);
+  appendFileSync(file,
+    JSON.stringify({
+      workflow: "ocr", id: "stuck-pending", runId: "rp",
+      status: "pending",
+      timestamp: new Date().toISOString(),
+    }) + "\n",
+  );
+  sweepStuckOcrRows(dir);
+  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const swept = lines.find((l) => l.id === "stuck-pending" && l.status === "failed");
+  assert.ok(swept, "expected a swept failed row for the pending session");
+  assert.equal("step" in swept, false, "a step-less row must not gain a step");
   rmSync(dir, { recursive: true, force: true });
 });
 

@@ -5,6 +5,8 @@ export interface PrepReviewPageLayoutProps {
   sticky?: boolean;
   formCards: ReactNode | ReactNode[];
   title?: ReactNode;
+  /** Full-width block (e.g. lookup screenshots) between the title and the columns. */
+  screenshotStrip?: ReactNode;
 }
 
 function normalizeFormCards(formCards: ReactNode | ReactNode[]): ReactNode[] {
@@ -21,6 +23,7 @@ export function PrepReviewPageLayout({
   sticky = false,
   formCards,
   title,
+  screenshotStrip,
 }: PrepReviewPageLayoutProps) {
   const cards = normalizeFormCards(formCards);
   const pdfColumnClass = sticky ? "sticky top-4 self-start" : "self-start";
@@ -31,6 +34,11 @@ export function PrepReviewPageLayout({
       {title ? (
         <div className="mb-3 rounded-lg border border-border bg-card px-4 py-3">
           {title}
+        </div>
+      ) : null}
+      {screenshotStrip ? (
+        <div className="mb-3 rounded-lg border border-border bg-card px-4 py-3">
+          {screenshotStrip}
         </div>
       ) : null}
       <div className="grid grid-cols-[minmax(420px,1.15fr)_minmax(360px,0.85fr)] gap-4">

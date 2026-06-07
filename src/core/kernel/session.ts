@@ -8,10 +8,25 @@ import { launchBrowser } from '../../infra/browser/launch.js'
 import { log } from '../../utils/log.js'
 import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
+import { idleRefreshCadence } from '../../domain/idle-refresh.js'
 
-const UCPATH_SYSTEM_ID = 'ucpath' as const
-const DEFAULT_UCPATH_IDLE_THRESHOLD_MS = 5 * 60 * 1000
-const DEFAULT_UCPATH_IDLE_TICK_MS = 30 * 1000
+/**
+ * Per-system idle-refresh runtime state. One entry per system in this
+ * Session's `idleStates` map (created for every system in
+ * `IDLE_REFRESH_SYSTEMS` ∩ launched systems). See `src/domain/idle-refresh.ts`.
+ */
+interface IdleRefreshState {
+  thresholdMs: number
+  tickMs: number
+  timer: ReturnType<typeof setInterval> | null
+  /** Last `ctx.page(systemId)` / reload — the "automation is active" mark. */
+  lastTouchMs: number
+  /** Debounce for the observability callback (≤1 emit/sec). */
+  lastTouchCbMs: number
+  /** Serializes reloads so two ticks never reload the same page concurrently. */
+  reloadChain: Promise<void>
+  reloadInFlight: boolean
+}
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -78,10 +93,11 @@ export interface LaunchOpts {
    */
   abortSignal?: AbortSignal
   /**
-   * UCPath idle reload cadence override (primarily for tests). When set,
-   * both values must be positive.
+   * Global idle-refresh cadence override (primarily for tests) — applies to
+   * every idle-refresh system this Session launches. When set, both values
+   * must be positive.
    */
-  ucpathIdleRefresh?: { thresholdMs: number; tickMs: number }
+  idleRefreshOverride?: { thresholdMs: number; tickMs: number }
   /**
    * Output directory for `screenshotAll` / `captureAll` PNGs. Stored on the
    * session state and honored over `PATHS.screenshotDir` (and inherited by
@@ -98,18 +114,15 @@ interface LaunchOneOpts {
 
 export class Session {
   private parent: Session | null = null
-  private ucpathIdleTimer: ReturnType<typeof setInterval> | null = null
-  private lastUcpathTouchMs = Date.now()
-  private lastUcpathTouchCbMs = 0
-  /** When true, skip idle reload (handler is inside `ctx.step` body). */
-  private ucpathIdleGuard: () => boolean = () => false
-  private ucpathIdleReloadChain: Promise<void> = Promise.resolve()
-  private ucpathIdleReloadInFlight = false
-  private ucpathIdleThresholdMs = DEFAULT_UCPATH_IDLE_THRESHOLD_MS
-  private ucpathIdleTickMs = DEFAULT_UCPATH_IDLE_TICK_MS
-  /** Set by `Session.launch` — observability for UCPath idle refresh UI. */
-  private ucpathIdleTouchCb?: () => void
-  private ucpathIdleRefreshCb?: (phase: 'start' | 'end') => void
+  /** Per-system idle-refresh state, keyed by system id. Empty until launch. */
+  private idleStates = new Map<string, IdleRefreshState>()
+  /** When true, skip idle reload (handler is inside a `ctx.step` body). Global across systems. */
+  private idleGuard: () => boolean = () => false
+  /** Global cadence override (tests). Applies to every idle-refresh system. */
+  private idleRefreshOverride?: { thresholdMs: number; tickMs: number }
+  /** Set by `Session.launch` — observability for the idle-refresh ring UI. */
+  private idleTouchCb?: (systemId: string) => void
+  private idleRefreshCb?: (systemId: string, phase: 'start' | 'end') => void
 
   private constructor(private state: SessionState) {}
 
@@ -136,11 +149,10 @@ export class Session {
       screenshotDir: parent.state.screenshotDir,
     })
     session.parent = parent
-    session.ucpathIdleThresholdMs = parent.ucpathIdleThresholdMs
-    session.ucpathIdleTickMs = parent.ucpathIdleTickMs
-    session.ucpathIdleTouchCb = parent.ucpathIdleTouchCb
-    session.ucpathIdleRefreshCb = parent.ucpathIdleRefreshCb
-    session.startUcpathIdleRefreshIfNeeded()
+    session.idleRefreshOverride = parent.idleRefreshOverride
+    session.idleTouchCb = parent.idleTouchCb
+    session.idleRefreshCb = parent.idleRefreshCb
+    session.startIdleRefreshIfNeeded()
     return session
   }
 
@@ -154,11 +166,11 @@ export class Session {
     const browsers = new Map<string, SystemSlot>()
     const readyPromises = new Map<string, Promise<void>>()
     const session = new Session({ systems, browsers, readyPromises, screenshotDir: opts.screenshotDir })
-    session.ucpathIdleTouchCb = (): void => {
-      opts.observer?.onUcpathIdleTouch?.()
+    session.idleTouchCb = (systemId: string): void => {
+      opts.observer?.onIdleTouch?.(systemId)
     }
-    session.ucpathIdleRefreshCb = (phase: 'start' | 'end'): void => {
-      opts.observer?.onUcpathIdleRefresh?.(phase)
+    session.idleRefreshCb = (systemId: string, phase: 'start' | 'end'): void => {
+      opts.observer?.onIdleRefresh?.(systemId, phase)
     }
     opts.onReady?.(session)
     throwIfAborted(abortSignal)
@@ -318,17 +330,18 @@ export class Session {
       void Promise.allSettled(submitPromises)
     }
 
-    session.applyUcpathIdleOpts(opts.ucpathIdleRefresh)
-    session.startUcpathIdleRefreshIfNeeded()
+    session.applyIdleRefreshOverride(opts.idleRefreshOverride)
+    session.startIdleRefreshIfNeeded()
     return session
   }
 
   /**
    * Called from `makeCtx` so idle reload never runs while a `ctx.step` body
-   * is executing (avoids reload mid-automation).
+   * is executing (avoids reload mid-automation). Global across all
+   * idle-refresh systems.
    */
-  setUcpathIdleGuard(guard: () => boolean): void {
-    this.ucpathIdleGuard = guard
+  setIdleRefreshGuard(guard: () => boolean): void {
+    this.idleGuard = guard
   }
 
   systemIds(): string[] {
@@ -405,12 +418,12 @@ export class Session {
       this.state.browsers.set(id, slot)
     }
     if (!slot) throw new Error(`no browser for system: ${id}`)
-    if (id === UCPATH_SYSTEM_ID) this.noteUcpathAutomationActivity()
+    if (this.idleStates.has(id)) this.noteIdleActivity(id)
     return slot.page
   }
 
   async close(): Promise<void> {
-    this.stopUcpathIdleRefreshTimer()
+    this.stopIdleRefreshTimers()
     for (const slot of this.state.browsers.values()) {
       await slot.context.close()
       if (slot.browser) await slot.browser.close()
@@ -423,7 +436,7 @@ export class Session {
    * Best-effort: a close failure on one page never blocks siblings.
    */
   async closeWorkerPages(): Promise<void> {
-    this.stopUcpathIdleRefreshTimer()
+    this.stopIdleRefreshTimers()
     for (const slot of this.state.browsers.values()) {
       try {
         if (!slot.page.isClosed()) await slot.page.close()
@@ -439,7 +452,7 @@ export class Session {
     const slot = this.state.browsers.get(id)
     if (!slot) return
     await slot.page.goto(sys.resetUrl)
-    if (id === UCPATH_SYSTEM_ID) this.noteUcpathAutomationActivity()
+    if (this.idleStates.has(id)) this.noteIdleActivity(id)
   }
 
   /**
@@ -752,83 +765,107 @@ export class Session {
     return results
   }
 
-  private applyUcpathIdleOpts(override?: { thresholdMs: number; tickMs: number }): void {
+  private applyIdleRefreshOverride(override?: { thresholdMs: number; tickMs: number }): void {
     if (override && override.thresholdMs > 0 && override.tickMs > 0) {
-      this.ucpathIdleThresholdMs = override.thresholdMs
-      this.ucpathIdleTickMs = override.tickMs
+      this.idleRefreshOverride = override
     }
   }
 
-  private noteUcpathAutomationActivity(): void {
+  private noteIdleActivity(systemId: string): void {
+    const st = this.idleStates.get(systemId)
+    if (!st) return
     const now = Date.now()
-    this.lastUcpathTouchMs = now
-    // Debounce the observability callback: UCPath-heavy workflows call
-    // `ctx.page("ucpath")` many times per item, and each call writes a session
-    // event to `sessions-*.jsonl` via `appendFileSync`. The dashboard idle
-    // countdown only needs ~1s granularity, so suppress sub-second emits.
-    if (now - this.lastUcpathTouchCbMs < 1000) return
-    this.lastUcpathTouchCbMs = now
+    st.lastTouchMs = now
+    // Debounce the observability callback: idle-refresh systems are page-heavy
+    // (UCPath calls `ctx.page("ucpath")` many times per item), and each call
+    // writes a session event via `appendFileSync`. The dashboard idle countdown
+    // only needs ~1s granularity, so suppress sub-second emits.
+    if (now - st.lastTouchCbMs < 1000) return
+    st.lastTouchCbMs = now
     try {
-      this.ucpathIdleTouchCb?.()
+      this.idleTouchCb?.(systemId)
     } catch {
       /* observability must not break automation */
     }
   }
 
-  private startUcpathIdleRefreshIfNeeded(): void {
-    if (!this.state.systems.some((s) => s.id === UCPATH_SYSTEM_ID)) return
-    if (this.ucpathIdleTimer) return
-    this.lastUcpathTouchMs = Date.now()
-    this.ucpathIdleTimer = setInterval(() => {
-      this.tickUcpathIdleRefresh()
-    }, this.ucpathIdleTickMs)
-    this.ucpathIdleTimer.unref()
-  }
-
-  private stopUcpathIdleRefreshTimer(): void {
-    if (this.ucpathIdleTimer) {
-      clearInterval(this.ucpathIdleTimer)
-      this.ucpathIdleTimer = null
+  /**
+   * Start a per-system idle-refresh timer for every launched system that opts
+   * in via `IDLE_REFRESH_SYSTEMS` (and isn't already running). Idempotent.
+   */
+  private startIdleRefreshIfNeeded(): void {
+    for (const sys of this.state.systems) {
+      const cadence = idleRefreshCadence(sys.id)
+      if (!cadence) continue
+      if (this.idleStates.has(sys.id)) continue
+      const thresholdMs = this.idleRefreshOverride?.thresholdMs ?? cadence.thresholdMs
+      const tickMs = this.idleRefreshOverride?.tickMs ?? cadence.tickMs
+      const st: IdleRefreshState = {
+        thresholdMs,
+        tickMs,
+        timer: null,
+        lastTouchMs: Date.now(),
+        lastTouchCbMs: 0,
+        reloadChain: Promise.resolve(),
+        reloadInFlight: false,
+      }
+      st.timer = setInterval(() => {
+        this.tickIdleRefresh(sys.id)
+      }, tickMs)
+      st.timer.unref()
+      this.idleStates.set(sys.id, st)
     }
   }
 
-  private tickUcpathIdleRefresh(): void {
+  private stopIdleRefreshTimers(): void {
+    for (const st of this.idleStates.values()) {
+      if (st.timer) {
+        clearInterval(st.timer)
+        st.timer = null
+      }
+    }
+  }
+
+  private tickIdleRefresh(systemId: string): void {
     try {
-      if (!this.state.systems.some((s) => s.id === UCPATH_SYSTEM_ID)) return
-      if (this.ucpathIdleGuard()) return
-      if (this.ucpathIdleReloadInFlight) return
-      const slot = this.state.browsers.get(UCPATH_SYSTEM_ID)
+      const st = this.idleStates.get(systemId)
+      if (!st) return
+      if (this.idleGuard()) return
+      if (st.reloadInFlight) return
+      const slot = this.state.browsers.get(systemId)
       if (!slot) return
       try {
         if (slot.page.isClosed()) return
       } catch {
         return
       }
-      if (Date.now() - this.lastUcpathTouchMs < this.ucpathIdleThresholdMs) return
-      this.ucpathIdleReloadInFlight = true
-      void this.scheduleUcpathIdleReload()
+      if (Date.now() - st.lastTouchMs < st.thresholdMs) return
+      st.reloadInFlight = true
+      void this.scheduleIdleReload(systemId)
     } catch {
       /* best-effort */
     }
   }
 
-  private scheduleUcpathIdleReload(): void {
-    this.ucpathIdleReloadChain = this.ucpathIdleReloadChain.then(async () => {
+  private scheduleIdleReload(systemId: string): void {
+    const st = this.idleStates.get(systemId)
+    if (!st) return
+    st.reloadChain = st.reloadChain.then(async () => {
       let recordActivity = false
       let refreshCbFired = false
       try {
-        const slot = this.state.browsers.get(UCPATH_SYSTEM_ID)
+        const slot = this.state.browsers.get(systemId)
         if (!slot) return
         try {
           if (slot.page.isClosed()) return
         } catch {
           return
         }
-        if (this.ucpathIdleGuard()) return
-        if (Date.now() - this.lastUcpathTouchMs < this.ucpathIdleThresholdMs) return
-        log.step('[Session: ucpath] Idle refresh — reloading page after automation idle')
+        if (this.idleGuard()) return
+        if (Date.now() - st.lastTouchMs < st.thresholdMs) return
+        log.step(`[Session: ${systemId}] Idle refresh — reloading page after automation idle`)
         try {
-          this.ucpathIdleRefreshCb?.('start')
+          this.idleRefreshCb?.(systemId, 'start')
           refreshCbFired = true
         } catch {
           /* ignore */
@@ -836,22 +873,22 @@ export class Session {
         try {
           await slot.page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 })
         } catch (err) {
-          log.warn(`[Session: ucpath] Idle refresh reload failed: ${errorMessage(err)}`)
+          log.warn(`[Session: ${systemId}] Idle refresh reload failed: ${errorMessage(err)}`)
         }
         recordActivity = true
       } finally {
-        this.ucpathIdleReloadInFlight = false
+        st.reloadInFlight = false
         if (refreshCbFired) {
           try {
-            this.ucpathIdleRefreshCb?.('end')
+            this.idleRefreshCb?.(systemId, 'end')
           } catch {
             /* ignore */
           }
         }
-        if (recordActivity) this.lastUcpathTouchMs = Date.now()
+        if (recordActivity) st.lastTouchMs = Date.now()
       }
     }).catch(() => {
-      this.ucpathIdleReloadInFlight = false
+      st.reloadInFlight = false
     })
   }
 }

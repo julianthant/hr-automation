@@ -197,6 +197,25 @@ export function makeStubOcrWorkflow(
             },
           })),
       });
+      if (result.status === "complete") {
+        // STANDALONE review run (verify / standalone oath-EC) — completed `done`
+        // after person-lookup, no approval gate. Seed the rich review payload so
+        // the kernel's terminal `done` row keeps the preview identity (mirrors
+        // the real ocrKernelHandler's `complete` branch).
+        const reviewData: Record<string, unknown> = { ...(lastReviewData ?? {}) };
+        delete reviewData.parentRunId;
+        const frozenTraceId = findFrozenTraceId({
+          workflow: "ocr",
+          runId: ctx.runId,
+          ...(ctx.trackerDir ? { trackerDir: ctx.trackerDir } : {}),
+        });
+        ctx.updateData({
+          ...reviewData,
+          ...(frozenTraceId ? { __traceId: frozenTraceId } : {}),
+          mode: "prepare",
+        } as Partial<OcrInput & Record<string, unknown>>);
+        return;
+      }
       if (result.status !== "awaiting-approval") return;
 
       // Park until the approve route (`rt.approveOcr`) fires `emitApproved`.

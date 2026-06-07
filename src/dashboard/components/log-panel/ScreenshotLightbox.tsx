@@ -1,5 +1,6 @@
 import type { ScreenshotEntry } from "@/components/hooks/useRunScreenshots";
 import { MediaLightbox } from "@/components/shared/MediaLightbox";
+import { SlicedScreenshot } from "@/components/shared/SlicedScreenshot";
 
 /** One flattened (entry, file-within-entry) pair in the lightbox queue. */
 export interface LightboxItem {
@@ -33,15 +34,7 @@ export function ScreenshotLightbox({
         const file = item.entry.files[item.fileIdx];
         if (!file) return null;
         return (
-          <img
-            src={file.url}
-            srcSet={file.url}
-            sizes="85vw"
-            alt={file.system}
-            loading="lazy"
-            decoding="async"
-            className="max-w-full max-h-[85vh] rounded object-contain"
-          />
+          <SlicedScreenshot key={file.url} src={file.url} alt={file.system} />
         );
       }}
       renderCaption={(item, itemIndex) => {

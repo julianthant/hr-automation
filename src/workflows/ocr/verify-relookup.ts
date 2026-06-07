@@ -12,9 +12,12 @@
  * This mirrors a single step of `verify.ts`'s `enrichRecords` (and the emit
  * shape of `force-research.ts`): load the OCR row → re-fan the one child →
  * `watchChildRuns` → patch the record with the verify pure helpers →
- * `buildVerifyChecks` → re-emit the awaiting-approval row. It is the verify
- * analogue of force-research, which is person-lookup-only and drops the EID;
- * here we keep the resolved identity and target either underlying lookup.
+ * `buildVerifyChecks` → re-emit the terminal `done`/person-lookup review row.
+ * (A standalone verify run completes `done` at person-lookup — there is no
+ * awaiting-approval gate — so the relookup re-OPENS that done row, runs the one
+ * lookup, and settles it back to `done`.) It is the verify analogue of
+ * force-research, which is person-lookup-only and drops the EID; here we keep
+ * the resolved identity and target either underlying lookup.
  */
 import { randomUUID } from "node:crypto";
 import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
@@ -149,9 +152,11 @@ export async function runVerifyRelookup(
   // Recompute the targeted record's checks from the freshly patched values.
   records[idx].checks = buildVerifyChecks(records[idx]);
 
-  // Final awaiting-approval re-emit (running + done), mirroring force-research.
-  emitRelookupRow(input, latest, records, trackerDir, "running", "awaiting-approval");
-  emitRelookupRow(input, latest, records, trackerDir, "done", "awaiting-approval");
+  // Final re-emit: a standalone verify run is terminal `done` at person-lookup
+  // (no awaiting-approval gate). Re-open as running then settle `done` so the ↻
+  // keeps spinning until the patched records land on the terminal row.
+  emitRelookupRow(input, latest, records, trackerDir, "running", "person-lookup");
+  emitRelookupRow(input, latest, records, trackerDir, "done", "person-lookup");
 }
 
 async function runPersonRelookup(ctx: {
@@ -298,7 +303,7 @@ function emitRelookupRow(
   records: VerifyPreviewRecord[],
   trackerDir: string | undefined,
   status: "running" | "done",
-  step: "verify-relookup" | "awaiting-approval" = "verify-relookup",
+  step: "verify-relookup" | "person-lookup" = "verify-relookup",
 ): void {
   const parentRunId =
     (latest.data?.parentRunId as unknown as string | undefined) ?? latest.parentRunId;

@@ -1,7 +1,12 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
-import { pickCrmStartDate, type CrmRecord } from "../../../../src/workflows/person-lookup/crm-search.js";
+import {
+  pickCrmStartDate,
+  pickCrmPayrollTitle,
+  payrollTitleFromTitleCode,
+  type CrmRecord,
+} from "../../../../src/workflows/person-lookup/crm-search.js";
 import { matchCrmEid, splitResolvedName } from "../../../../src/workflows/person-lookup/workflow.js";
 import type { EidResult } from "../../../../src/systems/ucpath/person-org-summary.js";
 
@@ -70,6 +75,54 @@ describe("pickCrmStartDate", () => {
   it("returns blank when the chosen record has no First Day of Service", () => {
     const records = [crmRecord({ ucpathEmployeeId: "10526678", firstDayOfService: "" })];
     assert.equal(pickCrmStartDate(records, "10526678"), "");
+  });
+});
+
+describe("payrollTitleFromTitleCode", () => {
+  it("strips the leading PeopleSoft job code", () => {
+    assert.equal(payrollTitleFromTitleCode("4921 - STDT 2"), "STDT 2");
+  });
+
+  it("tolerates irregular spacing around the dash", () => {
+    assert.equal(payrollTitleFromTitleCode("4921-STDT 2"), "STDT 2");
+    assert.equal(payrollTitleFromTitleCode("  4921  -  STDT 2  "), "STDT 2");
+  });
+
+  it("leaves a value without a numeric code prefix unchanged", () => {
+    assert.equal(payrollTitleFromTitleCode("STDT 2"), "STDT 2");
+  });
+
+  it("does not strip a trailing number that is part of the title", () => {
+    assert.equal(payrollTitleFromTitleCode("4921 - STDT 2"), "STDT 2");
+    assert.equal(payrollTitleFromTitleCode("BLANK AST 3"), "BLANK AST 3");
+  });
+
+  it("returns blank for an empty title code", () => {
+    assert.equal(payrollTitleFromTitleCode(""), "");
+  });
+});
+
+describe("pickCrmPayrollTitle", () => {
+  it("returns the stripped payroll title of the EID-matched record", () => {
+    const records = [
+      crmRecord({ ucpathEmployeeId: "10999999", titleCode: "0001 - WRONG" }),
+      crmRecord({ ucpathEmployeeId: "10526678", titleCode: "4921 - STDT 2" }),
+    ];
+    assert.equal(pickCrmPayrollTitle(records, "10526678"), "STDT 2");
+  });
+
+  it("falls back to the first record when no EID matches", () => {
+    const records = [crmRecord({ ucpathEmployeeId: "10999999", titleCode: "4921 - STDT 2" })];
+    assert.equal(pickCrmPayrollTitle(records, "10526678"), "STDT 2");
+  });
+
+  it("returns blank when there are no records", () => {
+    assert.equal(pickCrmPayrollTitle([], "10526678"), "");
+  });
+
+  it("returns blank when the chosen record has no title code", () => {
+    const records = [crmRecord({ ucpathEmployeeId: "10526678", titleCode: "" })];
+    assert.equal(pickCrmPayrollTitle(records, "10526678"), "");
   });
 });
 

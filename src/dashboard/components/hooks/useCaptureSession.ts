@@ -78,10 +78,6 @@ function reduceSession(s: CaptureSessionInfo, ev: CaptureSessionEvent): CaptureS
       });
       return { ...s, photos };
     }
-    case "extended": {
-      const newExpiresAt = (p as { newExpiresAt?: number }).newExpiresAt;
-      return typeof newExpiresAt === "number" ? { ...s, expiresAt: newExpiresAt } : s;
-    }
     case "finalize_requested":
       return { ...s, state: "finalizing" };
     case "pdf_built": {

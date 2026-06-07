@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import type { ReactNode } from "react";
-import { TerminalSquare } from "lucide-react";
-import { StepPipeline } from "./StepPipeline";
+import { TerminalSquare, TriangleAlert } from "lucide-react";
+import { StepPipeline, computeOcrPipelineView } from "./StepPipeline";
 import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
+import { RetryButton } from "@/components/shared/RetryButton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
@@ -14,13 +15,9 @@ import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
-import { useWorkflow } from "@/lib/workflows-context";
+import { useWorkflow, useWorkflows } from "@/lib/workflows-context";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
-import { hasDelegationRole, resolveRowArchetype } from "../../../domain/row-archetype.js";
-import {
-  deriveRowTypeLabelForEntry,
-} from "../../../domain/workflow-runtime/projection.js";
-import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
+import { hasDelegationRole } from "../../../domain/row-archetype.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
 
@@ -39,7 +36,7 @@ interface LogPanelProps {
    * true `itemId` so log fetching addresses the right JSONL key.
    */
   siblings?: TrackerEntry[];
-  /** Default-active LogStream tab (e.g. "preview" when opening from an OcrQueueRow click). */
+  /** Default-active LogStream tab (e.g. "preview" when opening from an OCR review row click). */
   defaultTab?: string;
   /** Optional preview content for the LogStream's Preview tab (e.g. OCR two-column body). */
   previewSlot?: LazySlot;
@@ -51,21 +48,29 @@ interface LogPanelProps {
   onPreviewVisibleChange?: (visible: boolean) => void;
   /** Called when the operator triggers a hard-delete from the RunSelector toolbar. */
   onDeleteEntry?: () => void;
-  /** Per-workflow runtime policies from workflow metadata. */
-  runtimePolicies?: WorkflowRuntimePolicyLookup;
 }
 
-export function deriveQueueRowTypeLabel(
+/**
+ * The log-panel footer chip describes the run's DELEGATION rather than its row
+ * shape: a delegated run (`parentRunId`) reads "from <Parent Workflow>" (resolved
+ * by finding the parent run in `allEntries` and labeling its workflow), and a
+ * root run (no `parentRunId`) reads "Standalone" — it was run directly by the
+ * workflow, not as a sub-step of another. Pure + exported for unit testing
+ * (`workflowLabel` is injected so the resolver stays out of the function).
+ */
+export function deriveDelegationLabel(
   entry: TrackerEntry,
-  childEntries: TrackerEntry[],
   allEntries: TrackerEntry[],
-  previewAvailable: boolean,
-  runtimePolicies?: WorkflowRuntimePolicyLookup,
+  workflowLabel: (workflow: string) => string,
 ): string {
-  return deriveRowTypeLabelForEntry(entry, childEntries, allEntries, previewAvailable, runtimePolicies);
+  if (entry.parentRunId) {
+    const parent = allEntries.find((e) => e.runId === entry.parentRunId);
+    return parent?.workflow ? `from ${workflowLabel(parent.workflow)}` : "Delegated";
+  }
+  return "Standalone";
 }
 
-export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry, runtimePolicies }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
   const effectiveWorkflow = entry?.workflow ?? workflow;
   const registered = useWorkflow(effectiveWorkflow);
   const [maximized, setMaximized] = useState(false);
@@ -149,26 +154,37 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     ? (entry?.step || activeRun?.step || null)
     : (activeRun?.step || null);
   const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
-  const steps = useMemo(() => {
-    const archetype = entry ? resolveRowArchetype(entry) : null;
-    // Batch OCR rows (no parentRunId, launched directly) don't surface
-    // awaiting-approval in the step timeline — they render the review pane instead.
-    return entry?.workflow === "ocr" && archetype === "batch"
-      ? registeredSteps.filter((step) => step !== "awaiting-approval")
-      : registeredSteps;
-  }, [entry, registeredSteps]);
+  // OCR rows drop the `verification` (always) and "Review"/`awaiting-approval`
+  // (standalone only) chips cosmetically — see `computeOcrPipelineView`. The
+  // helper also remaps currentStep/status so a run parked on a hidden step
+  // still renders the visible chips as complete. Non-OCR rows pass through.
+  const pipeline = useMemo(() => {
+    if (entry?.workflow === "ocr") {
+      return computeOcrPipelineView(
+        registeredSteps,
+        runStep,
+        runStatus,
+        Boolean(entry?.parentRunId),
+      );
+    }
+    return { steps: registeredSteps, currentStep: runStep, status: runStatus };
+  }, [entry, registeredSteps, runStep, runStatus]);
 
   const allDetailFields = useMemo(
     () => detailFields.filter((f) => f.displayInGrid !== false),
     [detailFields],
   );
 
-  const rowTypeLabel = useMemo(
-    () =>
-      entry
-        ? deriveQueueRowTypeLabel(entry, childEntries, allEntries ?? [], previewAvailable ?? false, runtimePolicies)
-        : "",
-    [entry, childEntries, allEntries, previewAvailable, runtimePolicies],
+  // Footer chip = delegation provenance ("from <Parent>" / "Standalone"), not the
+  // row shape. Resolve a parent run's workflow → its human label via the registry.
+  const allWorkflows = useWorkflows();
+  const workflowLabel = useCallback(
+    (name: string) => allWorkflows.find((w) => w.name === name)?.label ?? name,
+    [allWorkflows],
+  );
+  const delegationLabel = useMemo(
+    () => (entry ? deriveDelegationLabel(entry, allEntries ?? [], workflowLabel) : ""),
+    [entry, allEntries, workflowLabel],
   );
 
   if (!entry) {
@@ -209,6 +225,28 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   // Show skeleton while logs are loading and we have no data yet
   const showSkeleton = logsLoading && displayedLogs.length === 0;
   const hideDetailGrid = Boolean(previewAvailable) || hasDelegationRole(entry, "dispatch");
+
+  // Run-level failure banner — elevates `entry.error` above the log wall with a
+  // Retry. A cancelled run (failed + step="cancelled") is operator-stopped, not
+  // a failure, so it gets no banner.
+  const isCancelledRun = runStatus === "failed" && runStep === "cancelled";
+  const failureBanner =
+    runStatus === "failed" && !isCancelledRun && entry.error ? (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5">
+        <TriangleAlert aria-hidden className="h-4 w-4 shrink-0 text-destructive" />
+        <p className="min-w-0 flex-1 text-[12.5px] leading-snug">
+          <span className="font-semibold text-destructive">Run failed.</span>{" "}
+          <span className="text-foreground/80">{entry.error}</span>
+        </p>
+        <RetryButton
+          workflow={logSourceWorkflow}
+          id={activeItemId ?? entry.id}
+          runId={activeRunId ?? entry.runId ?? undefined}
+          date={date}
+          size="md"
+        />
+      </div>
+    ) : undefined;
 
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
@@ -262,9 +300,9 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         </div>
       ) : (
         <StepPipeline
-          steps={steps}
-          currentStep={runStep}
-          status={runStatus}
+          steps={pipeline.steps}
+          currentStep={pipeline.currentStep}
+          status={pipeline.status}
           stepDurations={runStepDurations}
           entry={entry ?? undefined}
         />
@@ -312,7 +350,8 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         logs={displayedLogs}
         events={events}
         loading={logsLoading}
-        rowTypeLabel={rowTypeLabel}
+        delegationLabel={delegationLabel}
+        failureBanner={failureBanner}
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={logSourceWorkflow}

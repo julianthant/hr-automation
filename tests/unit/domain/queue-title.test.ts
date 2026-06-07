@@ -1,16 +1,10 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
-  batchQueueTitle,
   queueTitleData,
   readQueueTitle,
   rootQueueTitleData,
 } from "../../../src/domain/queue-title.js";
-
-test("batchQueueTitle formats label plus last 4 run id characters", () => {
-  assert.equal(batchQueueTitle("Oath", "1234567890ab"), "Oath · #90ab");
-  assert.equal(batchQueueTitle("Emergency Contact", "run-3456"), "Emergency Contact · #3456");
-});
 
 test("queueTitleData stamps title and kind", () => {
   assert.deepEqual(queueTitleData({ kind: "single", title: "Doe, Jane" }), {

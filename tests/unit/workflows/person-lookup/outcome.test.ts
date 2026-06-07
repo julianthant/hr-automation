@@ -36,6 +36,28 @@ describe("deriveActiveCheckOutcome", () => {
     assert.equal(outcome.terminationDate, "04/30/2026");
   });
 
+  it("surfaces the termination reason alongside a termination date", () => {
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10706431" }, [
+      eidResult({
+        terminationDate: "06/13/2023",
+        terminationReason: "Resign - Personal Reasons",
+        hrStatus: "Inactive",
+      }),
+    ]);
+
+    assert.equal(outcome.terminationDate, "06/13/2023");
+    assert.equal(outcome.terminationReason, "Resign - Personal Reasons");
+  });
+
+  it("blanks the termination reason for an active employee even if one leaks through", () => {
+    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10706431" }, [
+      eidResult({ terminationDate: "", terminationReason: "Resign - Personal Reasons" }),
+    ]);
+
+    assert.equal(outcome.activeStatus, "active");
+    assert.equal(outcome.terminationReason, "");
+  });
+
   it("keeps expected job end date as context without making an employee inactive", () => {
     const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: "10706431" }, [
       eidResult({ expectedJobEndDate: "06/30/2026", terminationDate: "" }),

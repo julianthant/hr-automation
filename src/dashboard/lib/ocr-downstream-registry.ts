@@ -20,7 +20,7 @@ export interface ParsedOcrPrepareRow {
 /**
  * Per-workflow configuration for the OCR review pane and prep queue row.
  * Encodes everything that used to be scattered across `isOath` ternaries
- * and `as` casts in OcrReviewPane / OcrQueueRow / usePrepCursor.
+ * and `as` casts in OcrReviewPane / usePrepCursor.
  *
  * Three entries today: `ocr` (the OCR workflow's own prep rows), and the
  * two downstream targets `emergency-contact` + `oath-signature`. Adding a

@@ -10,6 +10,8 @@ export interface PrepReviewPairProps {
   fileId?: string;
   formCard: ReactNode;
   titleBar?: ReactNode;
+  /** Full-width block (lookup screenshots) between the title and the columns. */
+  screenshotStrip?: ReactNode;
   onPreviewStatusChange?: (page: number, status: "loading" | "ok" | "error") => void;
 }
 
@@ -24,11 +26,13 @@ export function PrepReviewPair({
   fileId,
   formCard,
   titleBar,
+  screenshotStrip,
   onPreviewStatusChange,
 }: PrepReviewPairProps) {
   return (
     <PrepReviewPageLayout
       title={titleBar}
+      screenshotStrip={screenshotStrip}
       pdfPreview={
         <PdfPagePreview
           workflow={workflow}

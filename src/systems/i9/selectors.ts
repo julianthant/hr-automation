@@ -280,6 +280,20 @@ export const search = {
     page.getByRole("button", { name: "Search" }),
 
   /**
+   * Access-restricted search alert. Appears in the Search Results panel when
+   * the searched employee EXISTS but the operator's account lacks permission
+   * to view them: a `<p>` reading "ALERT: Additional records matched your
+   * search criteria but your user account has not been granted access to view
+   * those employees…" (alongside "Employees Not Included in the Search
+   * Results: [N]" and a "No results found" heading). Lets the signer lookup
+   * distinguish "unable to access" from a genuine zero-result "not found".
+   * verified 2026-06-06
+   * @tags search, results, alert, access, restricted, no-access, i9
+   */
+  accessRestrictedAlert: (page: Page): Locator =>
+    page.getByText(/has not been granted access/i),
+
+  /**
    * Results grid rows. The last grid in the dialog is the results grid
    * (earlier grid contains headers). verified 2026-03-16
    * @tags results, grid, rows, search, i9
@@ -315,12 +329,25 @@ export const summary = {
     page.getByRole("heading", { name: "I-9 Record Summary Information" }),
 
   /**
+   * Electronic I-9 Audit Trail header row ("Section / Date / Audit History
+   * Event / Created By"). Anchor for "the audit table has populated" — the
+   * summary heading renders BEFORE the audit table's rows, so wait on this
+   * row before counting `signedSection2Row` (else a fast `count()` reads 0
+   * and a signed record is mis-classified as unsigned). verified 2026-06-06
+   * @tags audit-trail, header, row, summary, i9
+   */
+  auditTrailHeaderRow: (page: Page): Locator =>
+    page.getByRole("row", { name: /Audit History Event/ }),
+
+  /**
    * Electronic I-9 Audit Trail row whose event cell reads
    * "Signed Section 2". `.first()` guards against amended records with
    * multiple Section 2 signings — the most recent is always the top row.
-   * Absent on paper-imported (historical) records. The signer name is in
-   * the 4th cell of this row — read via a row-scoped `.getByRole("cell")`
-   * inline selector in the consumer (see `i9-signer.ts`). verified 2026-04-22
+   * Absent on paper-imported (historical) records. The signer name is the
+   * LAST cell (Created By) of this row — read via a row-scoped
+   * `.getByRole("cell")` inline selector in the consumer (see `signer.ts`).
+   * Row cells verified live 2026-06-06 (profile 1670462 / i9 1602018):
+   * `["2", "10/29/2021 7:53:31 PM", "Signed Section 2", "KENIA QUINONEZ"]`.
    * @tags audit-trail, signed, section2, row, i9
    */
   signedSection2Row: (page: Page): Locator =>

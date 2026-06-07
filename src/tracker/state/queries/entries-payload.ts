@@ -2,10 +2,16 @@ import type { Database } from "../../../infra/sqlite/index.js";
 import { computeFailureCounts } from "../../dashboard/failures.js";
 import { computeStepDurations, pickEarlier, pickLater } from "../../dashboard/run-timelines.js";
 import type { ProjectionEntriesPayload } from "../types.js";
-import type { TrackerEntry } from "../../jsonl-io.js";
+import { dateLocal, type TrackerEntry } from "../../jsonl-io.js";
 import { countSidebarRowsFromTrackerHistory } from "../../queue-row-count.js";
 import { log } from "../../../utils/log.js";
 import { isTrackerStatus, parseJsonObject, parseTypedDataJson, readStmts } from "./statements.js";
+import {
+  type CrossMidnightEventRow,
+  dateCanHaveContinuation,
+  openRunIdsFromEvents,
+  selectCrossMidnightEventRowsWithRuns,
+} from "./cross-midnight.js";
 import {
   filterRetiredDashboardWorkflowCounts,
   filterRetiredDashboardWorkflows,
@@ -57,6 +63,73 @@ function patchItemDataWithCarriedEmpl(
   }
   return data;
 }
+
+// ── cross-midnight forward merge ──────────────────────────────────────────────
+
+/**
+ * Forward-merge continuation events for runs that crossed local midnight, for
+ * the queue card. Delegates the open-run detection + bounded `(date, today]`
+ * fetch to the shared {@link selectCrossMidnightEventRowsWithRuns}; the only
+ * card-specific step here is making each continuation row inherit the run's TRUE
+ * start aggregates from `date`, so the collapsed card shows the whole-run
+ * elapsed span — not the near-zero span of the terminal-only later partition.
+ *
+ * The caller folds the returned rows into the event stream so the dashboard's
+ * latest-wins dedupe collapses the run to its real terminal row. No-op when
+ * viewing today (a run can only continue into a partition at/after its start
+ * day). See `cross-midnight.ts` for the full rationale.
+ */
+function forwardMergeCrossMidnightRows(
+  db: Database,
+  workflow: string,
+  date: string,
+  eventRows: CrossMidnightEventRow[],
+): CrossMidnightEventRow[] {
+  const today = dateLocal();
+  if (!dateCanHaveContinuation(date, today)) return [];
+
+  const openRunIds = openRunIdsFromEvents(eventRows);
+  if (openRunIds.length === 0) return [];
+
+  // eventRows are ordered event_ms ASC, so the first row per run carries the
+  // run's start aggregates (identical across the run's rows on this date — the
+  // partition's `runs` row).
+  const startAggByRun = new Map<string, {
+    first_any_ts: string;
+    first_work_ts: string | null;
+    first_log_ts: string | null;
+    run_ordinal: number;
+    screenshot_count: number;
+  }>();
+  for (const row of eventRows) {
+    if (!startAggByRun.has(row.run_id)) {
+      startAggByRun.set(row.run_id, {
+        first_any_ts: row.first_any_ts,
+        first_work_ts: row.first_work_ts,
+        first_log_ts: row.first_log_ts,
+        run_ordinal: row.run_ordinal,
+        screenshot_count: row.screenshot_count,
+      });
+    }
+  }
+
+  return selectCrossMidnightEventRowsWithRuns(db, { workflow, date, openRunIds, today }).map((raw) => {
+    const startAgg = startAggByRun.get(raw.run_id);
+    // Inherit the run's true start from `date` so elapsed/duration reflect the
+    // whole run, not just the terminal-only later partition.
+    return startAgg
+      ? {
+          ...raw,
+          first_any_ts: startAgg.first_any_ts,
+          first_work_ts: startAgg.first_work_ts,
+          first_log_ts: startAgg.first_log_ts,
+          run_ordinal: startAgg.run_ordinal,
+          screenshot_count: Math.max(startAgg.screenshot_count, raw.screenshot_count),
+        }
+      : raw;
+  });
+}
+
 export function queryEntriesPayload(
   db: Database,
   opts: { workflow: string; date: string },
@@ -83,28 +156,7 @@ export function queryEntriesPayload(
     first_work_ts: string | null;
     latest_tracker_ts: string;
   }>;
-  const eventRows: Array<{
-    id: number;
-    workflow: string;
-    event_ts: string;
-    item_id: string;
-    run_id: string;
-    parent_run_id: string | null;
-    status: TrackerEntry["status"];
-    step: string | null;
-    data_json: string | null;
-    typed_data_json: string | null;
-    input_json: string | null;
-    error: string | null;
-    first_log_ts: string | null;
-    last_log_ts: string | null;
-    last_log_message: string | null;
-    run_ordinal: number;
-    screenshot_count: number;
-    first_any_ts: string;
-    first_work_ts: string | null;
-    latest_tracker_ts: string;
-  }> = [];
+  const eventRows: CrossMidnightEventRow[] = [];
   for (const row of rawEventRows) {
     if (isTrackerStatus(row.status)) {
       eventRows.push({ ...row, status: row.status });
@@ -113,6 +165,13 @@ export function queryEntriesPayload(
         `[queries] queryEntriesPayload: dropping event row with unknown status workflow=${row.workflow} itemId=${row.item_id} runId=${row.run_id} status=${String(row.status)}`,
       );
     }
+  }
+
+  // Fold in terminal/continuation events for any run that crossed local
+  // midnight, so a run cancelled/approved/completed after midnight no longer
+  // shows stuck at its last pre-midnight status on its start-day view.
+  for (const row of forwardMergeCrossMidnightRows(db, opts.workflow, opts.date, eventRows)) {
+    eventRows.push(row);
   }
 
   const historyByRun = new Map<string, Array<{ timestamp: string; status: TrackerEntry["status"]; step?: string }>>();

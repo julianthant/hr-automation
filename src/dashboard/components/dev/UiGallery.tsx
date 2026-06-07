@@ -779,7 +779,7 @@ const sessIdleUcpath = session({
   startedAt: agoIso(240),
   daemonPhase: "idle",
   sessions: [{ sessionId: "s4", browsers: [browser("ucpath", "authed")] }],
-  ucpathIdle: { lastTouchAt: agoIso(120), refreshing: false },
+  idleBySystem: { ucpath: { lastTouchAt: agoIso(120), refreshing: false } },
 });
 
 const sessIdleLogs = session({
@@ -858,7 +858,7 @@ function SessionCardsTab() {
           <Variant width={290} label="duo waiting" axes="active · auth · duo_waiting tile" note="amber pulse tile + amber elapsed pill (≥1m)">
             <div className="px-2"><WorkflowBox workflow={sessDuo} /></div>
           </Variant>
-          <Variant width={290} label="idle + UCPath ring" axes="active · daemonPhase=idle · ucpathIdle set" note="idle-refresh countdown ring on the UCPath tile">
+          <Variant width={290} label="idle + UCPath ring" axes="active · daemonPhase=idle · idleBySystem set" note="idle-refresh countdown ring on the UCPath tile">
             <div className="px-2"><WorkflowBox workflow={sessIdleUcpath} /></div>
           </Variant>
           <Variant width={290} label="idle (had a run)" axes="active · daemonPhase=idle · currentTraceId set" note="trace id hidden once idle; subtitle falls back to phase">

@@ -3,6 +3,7 @@ import type { RunEventRow } from "../types.js";
 import type { TrackerEntry } from "../../jsonl-io.js";
 import { log } from "../../../utils/log.js";
 import { isTrackerStatus, parseJsonObject, parseTypedDataJson, readStmts } from "./statements.js";
+import { mergeAndCap, openRunIdsFromEvents, selectCrossMidnightRunEventRows } from "./cross-midnight.js";
 
 export function selectRunEventsForRun(
   db: Database,
@@ -12,7 +13,20 @@ export function selectRunEventsForRun(
   const stmt = params.itemId
     ? s.selectRunEventsForRunWithItem
     : s.selectRunEventsForRunNoItem;
-  return stmt.all({ ...params, limit: params.limit ?? 5_000 }) as RunEventRow[];
+  const limit = params.limit ?? 5_000;
+  const baseRows = stmt.all({ ...params, limit }) as RunEventRow[];
+
+  // Forward-merge after-midnight events when this run was still open on its
+  // start day, so the run-event timeline matches the queue card instead of
+  // ending at the last pre-midnight event (see cross-midnight.ts).
+  const openRunIds = openRunIdsFromEvents(baseRows.map((r) => ({ run_id: r.run_id, status: r.status })));
+  const continuation = selectCrossMidnightRunEventRows(db, {
+    workflow: params.workflow,
+    date: params.trackerDate,
+    openRunIds,
+  });
+  if (continuation.length === 0) return baseRows;
+  return mergeAndCap(baseRows, continuation, (row) => row.event_ms, limit);
 }
 
 export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry | null {

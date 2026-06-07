@@ -594,12 +594,12 @@ test('session: UCPath idle reload fires after idle threshold', async () => {
         browser: { close: async () => {} } as import('playwright').Browser,
       }),
       // Longer threshold vs. wait window so exactly one reload fits (timer keeps firing).
-      ucpathIdleRefresh: { thresholdMs: 200, tickMs: 40 },
+      idleRefreshOverride: { thresholdMs: 200, tickMs: 40 },
     },
   )
   try {
     await s.page('ucpath')
-    s.setUcpathIdleGuard(() => false)
+    s.setIdleRefreshGuard(() => false)
     await new Promise((r) => setTimeout(r, 280))
     assert.equal(reloads.length, 1)
   } finally {
@@ -633,12 +633,90 @@ test('session: UCPath idle reload suppressed when idle guard is busy', async () 
         context,
         browser: { close: async () => {} } as import('playwright').Browser,
       }),
-      ucpathIdleRefresh: { thresholdMs: 200, tickMs: 40 },
+      idleRefreshOverride: { thresholdMs: 200, tickMs: 40 },
     },
   )
   try {
     await s.page('ucpath')
-    s.setUcpathIdleGuard(() => true)
+    s.setIdleRefreshGuard(() => true)
+    await new Promise((r) => setTimeout(r, 280))
+    assert.equal(reloads.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: idle reload also fires for i9 (registry-driven, not ucpath-only)', async () => {
+  const reloads: number[] = []
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://wwwe.i9complete.com/dashboard',
+    reload: async () => {
+      reloads.push(1)
+    },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+
+  const s = await Session.launch(
+    [{ id: 'i9', login: async () => {} }],
+    {
+      launchFn: async () => ({
+        page,
+        context,
+        browser: { close: async () => {} } as import('playwright').Browser,
+      }),
+      idleRefreshOverride: { thresholdMs: 200, tickMs: 40 },
+    },
+  )
+  try {
+    await s.page('i9')
+    s.setIdleRefreshGuard(() => false)
+    await new Promise((r) => setTimeout(r, 280))
+    assert.equal(reloads.length, 1)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: idle reload does NOT fire for a non-registry system (crm)', async () => {
+  const reloads: number[] = []
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/crm',
+    reload: async () => {
+      reloads.push(1)
+    },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+
+  const s = await Session.launch(
+    [{ id: 'crm', login: async () => {} }],
+    {
+      launchFn: async () => ({
+        page,
+        context,
+        browser: { close: async () => {} } as import('playwright').Browser,
+      }),
+      idleRefreshOverride: { thresholdMs: 200, tickMs: 40 },
+    },
+  )
+  try {
+    await s.page('crm')
+    s.setIdleRefreshGuard(() => false)
     await new Promise((r) => setTimeout(r, 280))
     assert.equal(reloads.length, 0)
   } finally {

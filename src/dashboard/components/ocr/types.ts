@@ -211,7 +211,7 @@ export function isPrepBatchAnchor(e: {
 /**
  * A prep row the operator discarded. Filtered out of the QueuePanel entirely.
  * Distinct from a genuinely-failed prep row (e.g. OCR error), which stays
- * visible as an `OcrQueueRow` so the operator can retry.
+ * visible as an OCR review row so the operator can retry.
  */
 export function isDiscardedPrepRow(e: {
   workflow?: string;
@@ -322,6 +322,19 @@ export interface VerifyCheck {
   source: "paper" | "crm" | "ucpath" | "i9" | null;
   /** present=on paper; found=blank but looked up; missing=blank+not found. */
   status: "present" | "found" | "missing";
+  /**
+   * Set on a `missing` lookup-backed check when the lookup couldn't ACCESS the
+   * record (vs. genuinely not finding it) — the I-9 signer when the operator's
+   * account lacks permission. Renders "Unable to access" instead of
+   * "— not found"; the retry stays available.
+   */
+  unavailable?: boolean;
+  /**
+   * Literal text to show for a `missing` check instead of the default
+   * "— not found" — used for paper booleans whose blank state carries meaning
+   * (e.g. "Employee Signed?" → "No"). Not lookup-backed, so no retry button.
+   */
+  missingLabel?: string;
 }
 
 /**
@@ -370,6 +383,8 @@ export interface VerifyPreviewRecord {
   oathDate?: string;
   /** I-9 Section 2 signer. */
   officialSigner?: string;
+  /** i9-lookup status — `unable-to-access` drives the check's "Unable to access". */
+  officialSignerStatus?: string;
   matchState: MatchState;
   selected: boolean;
   warnings: string[];

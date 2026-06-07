@@ -87,6 +87,10 @@ interface CachedReadStatements {
   selectRunEventsForRunWithItem: ReturnType<Database["prepare"]>;
   selectRunEventsForRunNoItem: ReturnType<Database["prepare"]>;
   selectRunEventsWithRunsForDate: ReturnType<Database["prepare"]>;
+  selectRunEventsWithRunsAfterDateForRuns: ReturnType<Database["prepare"]>;
+  selectRunEventsAfterDateForRuns: ReturnType<Database["prepare"]>;
+  selectLogsAfterDateForRuns: ReturnType<Database["prepare"]>;
+  selectRunLatestStatusOnDate: ReturnType<Database["prepare"]>;
   selectDistinctWorkflowsForDate: ReturnType<Database["prepare"]>;
   selectWfCountRowsForDate: ReturnType<Database["prepare"]>;
   selectAllLatestRowsForDate: ReturnType<Database["prepare"]>;
@@ -159,6 +163,63 @@ export function readStmts(db: Database): CachedReadStatements {
        AND r.run_id = re.run_id
       WHERE re.workflow = @workflow AND re.tracker_date = @date
       ORDER BY re.event_ms ASC, re.id ASC
+    `),
+    // Continuation events for a set of runs in partitions LATER than @date
+    // (up to and including @today). Used to forward-merge a run that crossed
+    // local midnight: its terminal row lands in the next day's partition, so
+    // the start day's per-date query would otherwise miss it and show the run
+    // stuck at its last pre-midnight status. @runIds is a JSON string array.
+    selectRunEventsWithRunsAfterDateForRuns: db.prepare(`
+      SELECT re.*, r.first_log_ts, r.last_log_ts, r.last_log_message, r.run_ordinal, r.screenshot_count,
+             r.first_any_ts, r.first_work_ts, r.latest_tracker_ts
+      FROM run_events re
+      JOIN runs r
+        ON r.workflow = re.workflow
+       AND r.tracker_date = re.tracker_date
+       AND r.item_id = re.item_id
+       AND r.run_id = re.run_id
+      WHERE re.workflow = @workflow
+        AND re.tracker_date > @date
+        AND re.tracker_date <= @today
+        AND re.run_id IN (SELECT value FROM json_each(@runIds))
+      ORDER BY re.event_ms ASC, re.id ASC
+    `),
+    // Continuation run_events (NO runs join → a clean `RunEventRow`) for a set
+    // of runs in partitions LATER than @date (up to @today). Forward-merges the
+    // run-event timeline of a run that crossed local midnight. @runIds is a JSON
+    // string array.
+    selectRunEventsAfterDateForRuns: db.prepare(`
+      SELECT *
+      FROM run_events
+      WHERE workflow = @workflow
+        AND tracker_date > @date
+        AND tracker_date <= @today
+        AND run_id IN (SELECT value FROM json_each(@runIds))
+      ORDER BY event_ms ASC, id ASC
+    `),
+    // Continuation log lines for a set of runs in partitions LATER than @date
+    // (up to @today). Forward-merges the log panel of a run that crossed local
+    // midnight. @runIds is a JSON string array.
+    selectLogsAfterDateForRuns: db.prepare(`
+      SELECT *
+      FROM logs
+      WHERE workflow = @workflow
+        AND tracker_date > @date
+        AND tracker_date <= @today
+        AND run_id IN (SELECT value FROM json_each(@runIds))
+      ORDER BY ts_ms ASC, id ASC
+    `),
+    // Single-row probe: a run's latest projected status on a specific date. Used
+    // to gate the cross-midnight logs merge — logs carry no status of their own,
+    // so we ask the `runs` table whether the run was still open on @date before
+    // pulling its later-partition log lines.
+    selectRunLatestStatusOnDate: db.prepare(`
+      SELECT latest_status
+      FROM runs
+      WHERE workflow = @workflow
+        AND tracker_date = @date
+        AND item_id = @itemId
+        AND run_id = @runId
     `),
     selectDistinctWorkflowsForDate: db.prepare(
       "SELECT DISTINCT workflow FROM items WHERE tracker_date = @date ORDER BY workflow",

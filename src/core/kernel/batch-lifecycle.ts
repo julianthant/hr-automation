@@ -17,7 +17,7 @@ import {
   emitAuthComplete,
   emitAuthFailed,
 } from '../../tracker/session-events.js'
-import { buildUcpathIdleHooks } from './ucpath-idle-hooks.js'
+import { buildIdleRefreshHooks } from './idle-refresh-hooks.js'
 import { log } from '../../utils/log.js'
 
 /**
@@ -101,7 +101,7 @@ export function createBatchObserver(
       timings.push({ systemId, startTs, endTs: Date.now() })
       emitAuthFailed(instance, browserId, systemId, trackerDir)
     },
-    ...buildUcpathIdleHooks(instance, trackerDir),
+    ...buildIdleRefreshHooks(instance, trackerDir),
   }
 
   return {

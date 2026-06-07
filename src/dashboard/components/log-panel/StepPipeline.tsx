@@ -374,6 +374,100 @@ export function computeStepViews(
 }
 
 /**
+ * Canonical full ordering of OCR phases, INCLUDING the retired/merged step
+ * names that the live `ocrSteps` list no longer carries. Used ONLY to POSITION
+ * a parked legacy `currentStep` relative to the visible live steps when
+ * remapping — never rendered. (`matching` + `disambiguating` are now folded
+ * into the single `ocr` step; `verification` was absorbed by `person-lookup`.)
+ */
+const OCR_CANONICAL_STEP_ORDER = [
+  "loading-roster",
+  "ocr",
+  "matching",
+  "disambiguating",
+  "person-lookup",
+  "verification",
+  "awaiting-approval",
+];
+
+/**
+ * Retired sub-phases that fold ONTO a surviving live step (rather than
+ * advancing past it). `matching` + `disambiguating` are part of the merged
+ * `ocr` step, so a row reported at either lights up `ocr`. (`verification` is
+ * NOT here — it sat AFTER person-lookup, so it advances past it via the
+ * order-based remap below.)
+ */
+const OCR_RETIRED_STEP_FOLD: Record<string, string> = {
+  matching: "ocr",
+  disambiguating: "ocr",
+};
+
+/**
+ * Cosmetic OCR pipeline filter. The live OCR step list is
+ * `loading-roster → ocr → person-lookup → awaiting-approval` — `matching` +
+ * `disambiguating` were merged into `ocr` (operator-facing: one "OCR" step
+ * covers read → match → disambiguate). A STANDALONE run completes `done` at
+ * person-lookup (no approval gate — approval ≡ delegation), so its
+ * `awaiting-approval` chip is hidden; a DELEGATED ("approve") run keeps it
+ * ("Awaiting Approval").
+ *
+ * Two remap concerns:
+ *   1. A row reported at a folded sub-phase (`matching`/`disambiguating`, or a
+ *      legacy persisted row) lights up the merged `ocr` step — a failure there
+ *      surfaces on `ocr`.
+ *   2. A row PARKED on a hidden/retired step (a standalone run at
+ *      `awaiting-approval`, or any legacy `verification` row) would otherwise
+ *      leave `currentStep` unmatched → `computeStepViews` shows every chip
+ *      pending. We position it via {@link OCR_CANONICAL_STEP_ORDER} and remap:
+ *      no visible step after it → all visible complete (`done`); a visible step
+ *      still ahead → advance the highlight; a FAILURE → surface on the last
+ *      visible step before it. Non-OCR workflows pass through untouched.
+ *
+ * Pure + exported for unit testing.
+ */
+export function computeOcrPipelineView(
+  registeredSteps: string[],
+  currentStep: string | null,
+  status: string,
+  isDelegated: boolean,
+): { steps: string[]; currentStep: string | null; status: string } {
+  // Standalone runs hide the delegated-only `awaiting-approval` gate.
+  const hidden = new Set<string>();
+  if (!isDelegated) hidden.add("awaiting-approval");
+  const visible = registeredSteps.filter((s) => !hidden.has(s));
+
+  const normalized = currentStep ? normalizeStepName(currentStep) : null;
+  if (!normalized) return { steps: visible, currentStep, status };
+
+  // A retired sub-phase folds onto its surviving live step (matching/
+  // disambiguating → ocr). Keep `status` so a failure there surfaces on it.
+  const folded = OCR_RETIRED_STEP_FOLD[normalized];
+  if (folded && visible.includes(folded)) {
+    return { steps: visible, currentStep: folded, status };
+  }
+
+  // A live, visible step passes through unchanged (preserving any
+  // ":failed:<reason>" suffix for computeStepViews).
+  if (visible.includes(normalized)) {
+    return { steps: visible, currentStep, status };
+  }
+
+  // Otherwise the step is hidden (awaiting-approval on a standalone run) or a
+  // retired step that sat AFTER the live work (`verification`). Position it via
+  // the canonical order and remap to the nearest visible step.
+  const pos = OCR_CANONICAL_STEP_ORDER.indexOf(normalized);
+  if (status === "failed") {
+    const before = visible.filter((s) => OCR_CANONICAL_STEP_ORDER.indexOf(s) < pos);
+    return { steps: visible, currentStep: before[before.length - 1] ?? visible[0] ?? null, status };
+  }
+  const after = visible.filter((s) => OCR_CANONICAL_STEP_ORDER.indexOf(s) > pos);
+  if (after.length === 0) {
+    return { steps: visible, currentStep: null, status: "done" };
+  }
+  return { steps: visible, currentStep: after[0]!, status };
+}
+
+/**
  * Segmented progress rail — one flex-1 column per step, equal horizontal
  * space. Each column stacks (left-aligned, vertically centered in the
  * 69.5 px band):

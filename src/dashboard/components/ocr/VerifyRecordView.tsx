@@ -1,4 +1,4 @@
-import { Check, RotateCw, Search, X } from "lucide-react";
+import { Check, Lock, RotateCw, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   verifyCheckLookupKind,
@@ -18,28 +18,6 @@ export interface VerifyRecordViewProps {
   onRelookup?: (lookup: VerifyLookupKind) => void;
   /** Which lookups are currently re-running for this record. */
   relookupPending?: ReadonlySet<VerifyLookupKind>;
-}
-
-function FormKindChip({ formKind }: { formKind: VerifyPreviewRecord["formKind"] }) {
-  if (formKind === "oath") {
-    return (
-      <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-primary">
-        Oath
-      </span>
-    );
-  }
-  if (formKind === "emergency-contact") {
-    return (
-      <span className="rounded border border-border bg-muted px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Emergency Contact
-      </span>
-    );
-  }
-  return (
-    <span className="rounded border border-destructive/30 bg-destructive/10 px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-destructive">
-      Unknown
-    </span>
-  );
 }
 
 function SourceBadge({ source }: { source: VerifyCheck["source"] }) {
@@ -96,6 +74,14 @@ function RelookupButton({
   );
 }
 
+/** One-line tally beside the report caption: `N on paper · N looked up · N gaps`. */
+function summarizeChecks(checks: VerifyCheck[]): string {
+  const onPaper = checks.filter((c) => c.status === "present").length;
+  const looked = checks.filter((c) => c.status === "found").length;
+  const gaps = checks.filter((c) => c.status === "missing").length;
+  return `${onPaper} on paper · ${looked} looked up · ${gaps} ${gaps === 1 ? "gap" : "gaps"}`;
+}
+
 function CheckRow({
   check,
   onRelookup,
@@ -105,32 +91,69 @@ function CheckRow({
   onRelookup?: (lookup: VerifyLookupKind) => void;
   relookupPending?: ReadonlySet<VerifyLookupKind>;
 }) {
-  const isPresentOrFound = check.status === "present" || check.status === "found";
-  const value = check.status === "present" ? check.paperValue : check.foundValue;
+  // Record exists but the operator's account can't view it — render "Unable to
+  // access" (warning tone) instead of a hard "— not found".
+  const unavailable = check.status === "missing" && check.unavailable === true;
 
   // Option A: only FAILED (missing) lookup-backed checks get a retry button.
   const lookupKind = check.status === "missing" ? verifyCheckLookupKind(check.key) : null;
   const canRelookup = lookupKind !== null && onRelookup !== undefined;
   const pending = lookupKind !== null && (relookupPending?.has(lookupKind) ?? false);
 
+  // FOUND — the actionable rows the operator transcribes onto the paper form.
+  // Lift them into a small raised card (bg-card + ring + shadow) so the
+  // "copy these" data physically pops off the recessed report body.
+  if (check.status === "found") {
+    return (
+      <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2.5 shadow-sm ring-1 ring-border/60">
+        <Search className="h-3.5 w-3.5 shrink-0 text-info" aria-label="Looked up" />
+        <div className="min-w-0 flex-1">
+          <span className="block font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {check.label}
+          </span>
+          <span className="mt-0.5 block truncate text-sm font-semibold text-foreground">
+            {check.foundValue ?? "—"}
+          </span>
+        </div>
+        <SourceBadge source={check.source} />
+      </div>
+    );
+  }
+
+  // UNAVAILABLE — the record exists but the operator's account can't view it.
+  // Give it a bordered card like the looked-up rows (so it reads as a real,
+  // blocked value rather than a quiet gap), but warning-toned to distinguish
+  // "couldn't access" from a confident lookup.
+  if (unavailable) {
+    return (
+      <div className="flex items-center gap-3 rounded-md border border-warning/35 bg-warning/[0.07] px-3 py-2.5 ring-1 ring-warning/20">
+        <Lock className="h-3.5 w-3.5 shrink-0 text-warning" aria-label="Unable to access" />
+        <div className="min-w-0 flex-1">
+          <span className="block font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {check.label}
+          </span>
+          <span
+            className="mt-0.5 block truncate text-sm font-medium text-warning"
+            aria-live={pending ? "polite" : undefined}
+          >
+            {pending ? "Looking up…" : "Unable to access"}
+          </span>
+        </div>
+        {canRelookup && (
+          <RelookupButton label={check.label} pending={pending} onClick={() => onRelookup!(lookupKind)} />
+        )}
+      </div>
+    );
+  }
+
+  // PRESENT / MISSING — stay flat and quiet on the recessed body.
+  const presentValue = check.status === "present" ? check.paperValue : null;
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 rounded-md px-3 py-2.5",
-        check.status === "found"
-          ? "bg-info/5 ring-1 ring-info/20"
-          : check.status === "missing"
-            ? "bg-destructive/5"
-            : "bg-transparent",
-      )}
-    >
+    <div className="flex items-start gap-3 px-3 py-1.5">
       {/* Status icon */}
       <div className="mt-px shrink-0">
         {check.status === "present" && (
           <Check className="h-3.5 w-3.5 text-success" aria-label="Present on paper" />
-        )}
-        {check.status === "found" && (
-          <Search className="h-3.5 w-3.5 text-info" aria-label="Looked up" />
         )}
         {check.status === "missing" && (
           <X className="h-3.5 w-3.5 text-destructive" aria-label="Not found" />
@@ -143,27 +166,17 @@ function CheckRow({
           {check.label}
         </span>
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
-          {isPresentOrFound && value ? (
+          {check.status === "present" && presentValue ? (
             <>
-              <span
-                className={cn(
-                  "truncate text-sm font-medium",
-                  check.status === "found" ? "text-foreground" : "text-foreground/80",
-                )}
-              >
-                {value}
-              </span>
-              {check.status === "present" && (
-                <span className="shrink-0 text-xs text-muted-foreground">(on paper)</span>
-              )}
-              {check.status === "found" && <SourceBadge source={check.source} />}
+              <span className="truncate text-sm text-foreground/75">{presentValue}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">(on paper)</span>
             </>
           ) : (
             <span
               className="text-sm text-muted-foreground"
               aria-live={pending ? "polite" : undefined}
             >
-              {pending ? "Looking up…" : "— not found"}
+              {pending ? "Looking up…" : (check.missingLabel ?? "— not found")}
             </span>
           )}
           {canRelookup && (
@@ -184,29 +197,24 @@ function CheckRow({
  * from `record.checks` so the operator can copy "found" values onto the
  * physical form before filing. Failed (`missing`) lookup-backed checks carry a
  * ↻ retry that re-runs just that lookup for this record.
+ *
+ * Report "Option B" (Elevated actionable cards): the body is a recessed card
+ * (`bg-secondary/30`); the looked-up (`found`) rows the operator transcribes
+ * lift into small raised cards so the actionable data pops, while on-paper
+ * confirmations and gaps stay flat and quiet.
  */
 export function VerifyRecordView({ record, onRelookup, relookupPending }: VerifyRecordViewProps) {
   const checks = record.checks ?? [];
-  const resolvedName =
-    record.name || (typeof record.printedName === "string" ? record.printedName : null) || "(no name)";
   const hasWarnings =
     record.matchState === "unresolved" || (record.warnings?.length ?? 0) > 0;
 
+  // The record's document-type chip + name + EID are rendered by the card's
+  // shared nav header (`PrepReviewRecordNav`) — the name in the title, the
+  // document-type chip in place of the old ordinal, the EID in the "Employee
+  // ID" completeness check below. So this body renders only the warning line +
+  // the completeness report (no duplicated header).
   return (
     <div className="flex flex-col gap-3">
-      {/* Record header */}
-      <div className="flex flex-wrap items-center gap-2">
-        <FormKindChip formKind={record.formKind} />
-        <span className="min-w-0 truncate text-sm font-semibold text-foreground">
-          {resolvedName}
-        </span>
-        {record.employeeId ? (
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">
-            {record.employeeId}
-          </span>
-        ) : null}
-      </div>
-
       {/* Warning line */}
       {hasWarnings && (
         <div className="text-xs text-muted-foreground/80">
@@ -219,15 +227,20 @@ export function VerifyRecordView({ record, onRelookup, relookupPending }: Verify
         </div>
       )}
 
-      {/* Completeness checklist */}
+      {/* Completeness checklist — recessed body, raised found rows. */}
       {checks.length === 0 ? (
         <p className="text-xs text-muted-foreground/60">No completeness checks available.</p>
       ) : (
-        <div className="flex flex-col gap-1">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Completeness Report
-          </p>
-          <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2.5 rounded-lg border border-border bg-secondary/30 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <p className="font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Completeness Report
+            </p>
+            <p className="font-mono text-[10.5px] tabular-nums text-muted-foreground/80">
+              {summarizeChecks(checks)}
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
             {checks.map((check) => (
               <CheckRow
                 key={check.key}

@@ -32,10 +32,23 @@ export function workflowEqual(a: WorkflowInstanceState, b: WorkflowInstanceState
     a.finalStatus === b.finalStatus &&
     a.startedAt === b.startedAt &&
     a.daemonPhase === b.daemonPhase &&
-    a.ucpathIdle?.lastTouchAt === b.ucpathIdle?.lastTouchAt &&
-    a.ucpathIdle?.refreshing === b.ucpathIdle?.refreshing &&
+    idleBySystemEqual(a.idleBySystem, b.idleBySystem) &&
     sessionsEqual(a.sessions, b.sessions)
   );
+}
+
+function idleBySystemEqual(
+  a: WorkflowInstanceState["idleBySystem"],
+  b: WorkflowInstanceState["idleBySystem"],
+): boolean {
+  const aKeys = a ? Object.keys(a) : [];
+  const bKeys = b ? Object.keys(b) : [];
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if (a![k].lastTouchAt !== b?.[k]?.lastTouchAt) return false;
+    if (a![k].refreshing !== b?.[k]?.refreshing) return false;
+  }
+  return true;
 }
 
 export function sessionsEqual(a: SessionInfo[], b: SessionInfo[]): boolean {

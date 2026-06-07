@@ -74,7 +74,6 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "GET", path: "/api/capture/photos/:sessionId/:index" },
   { method: "POST", path: "/api/capture/replace-photo" },
   { method: "POST", path: "/api/capture/reorder" },
-  { method: "POST", path: "/api/capture/extend" },
   { method: "POST", path: "/api/capture/validate" },
   { method: "GET", path: "/api/capture/registry" },
   { method: "GET", path: "/capture-assets/heic2any.min.js" },

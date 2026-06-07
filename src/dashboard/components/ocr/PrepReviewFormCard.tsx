@@ -12,13 +12,20 @@ export interface PrepReviewFormCardProps {
   rowOrdinal?: number;
   workflowStatusPhase?: PrepRecordWorkflowPhase;
   matchStateBadge: ReactNode;
-  /** UCPath employment hint beside the match badge when Person Org data exists (Active / Inactive / Pending). */
-  employmentStatusBadge?: ReactNode;
   verificationBadge?: ReactNode;
   signatureBadge?: ReactNode;
   documentTypeBadge?: ReactNode;
+  /**
+   * Document-kind chip (Oath / Emergency Contact / Unknown) rendered at the
+   * head of the row title in place of the old `#ordinal` badge — the page count
+   * already lives in the `pageLocation` subline. Falls back to `#{rowOrdinal}`
+   * when not provided.
+   */
+  documentKindChip?: ReactNode;
   /** Icon control rendered beside the batch checkbox (e.g. force-research retry). */
   footerAction?: ReactNode;
+  /** Labeled screenshot row rendered between the header and the form body. */
+  screenshotStrip?: ReactNode;
   /** Remove this record from the prep batch (between retry and batch checkbox). */
   onDeleteRecord?: () => void;
   deleteDisabled?: boolean;
@@ -36,9 +43,9 @@ export interface PrepReviewFormCardProps {
 /**
  * Form-card chrome for the paired-scroll review pane. Owns the
  * page-location chip + name + trailing badges (verification / signature /
- * document), banners, form fields (`children`), and a footer with match +
- * employment status on the left plus optional `footerAction` and optional
- * delete. When row ordinal + workflow phase headers are shown, the approval
+ * document), banners, form fields (`children`), and a footer with the
+ * identity-match confidence chip on the left plus optional `footerAction` and
+ * optional delete. When row ordinal + workflow phase headers are shown, the approval
  * checkbox sits in that header beside the phase badge; otherwise it stays in
  * the footer.
  */
@@ -78,12 +85,15 @@ export function PrepReviewFormCard(props: PrepReviewFormCardProps) {
         </div>
       )}
 
+      {props.screenshotStrip ? (
+        <div className="mb-3 border-b border-border pb-3">{props.screenshotStrip}</div>
+      ) : null}
+
       <div className="space-y-3">{props.children}</div>
 
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {props.matchStateBadge}
-          {props.employmentStatusBadge}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {props.footerAction}
@@ -142,6 +152,7 @@ export function PrepReviewRecordNav(
     | "verificationBadge"
     | "signatureBadge"
     | "documentTypeBadge"
+    | "documentKindChip"
     | "selected"
     | "selectedDisabled"
     | "onSelectedChange"
@@ -152,9 +163,11 @@ export function PrepReviewRecordNav(
       {props.rowOrdinal != null && props.workflowStatusPhase ? (
         <>
           <div className="mb-2 flex min-w-0 items-center gap-2">
-            <span className="rounded bg-secondary px-2 py-0.5 text-[11px] font-mono text-muted-foreground">
-              #{props.rowOrdinal}
-            </span>
+            {props.documentKindChip ?? (
+              <span className="rounded bg-secondary px-2 py-0.5 text-[11px] font-mono text-muted-foreground">
+                #{props.rowOrdinal}
+              </span>
+            )}
             <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
               {props.recordName}
             </h3>

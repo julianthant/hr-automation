@@ -18,7 +18,7 @@ Full file-by-file reference for `src/core/`. Orientation, design invariants, and
 - `stepper.ts` — `Stepper` class. Owns `currentStep`, `data`, `step` (wraps `fn` with emit-start + catch-screenshot-emit-fail + rethrow), `markStep`, `parallel`/`parallelAll`, `updateData`.
 - `ctx.ts` — `makeCtx({ session, stepper, isBatch, runId })` — the only constructor for `Ctx`. Shared across all run modes.
 - `registry.ts` — In-memory `WorkflowMetadata` map. `defineWorkflow` auto-registers; `register` is the escape hatch for direct metadata injection (tests, future non-kernel callers).
-- `handler-runner.ts`, `screenshot.ts`, `ucpath-idle-hooks.ts` — handler lifecycle helpers.
+- `handler-runner.ts`, `screenshot.ts`, `idle-refresh-hooks.ts` — handler lifecycle helpers. (`idle-refresh-hooks.ts` exports `buildIdleRefreshHooks()`, the per-system idle-refresh observer bridge; replaces the deleted UCPath-only `ucpath-idle-hooks.ts`.)
 
 ## `daemon/` — daemon mode (persistent processes, SQLite queue)
 

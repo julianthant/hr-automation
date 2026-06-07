@@ -23,9 +23,10 @@ import {
   emitItemComplete,
   emitItemCancelled,
   emitDaemonPhase,
-  emitUcpathIdleSignal,
+  emitIdleSignal,
 } from '../../tracker/session-events.js'
 import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
+import { isIdleRefreshSystem } from '../../domain/idle-refresh.js'
 import { screenshotsDir } from '../../tracker/paths.js'
 import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { openControlDb } from '../control-db.js'
@@ -349,8 +350,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           for (const sys of wf.config.systems) {
             await session.page(sys.id)
           }
-          if (wf.config.systems.some((s) => s.id === 'ucpath')) {
-            emitUcpathIdleSignal(instance, trackerDir, 'touch')
+          for (const sys of wf.config.systems) {
+            if (isIdleRefreshSystem(sys.id)) emitIdleSignal(instance, trackerDir, sys.id, 'touch')
           }
         } catch (e) {
           if (state.shuttingDown && state.launchAbort.signal.aborted) {
@@ -530,8 +531,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   },
                 })
                 emitItemComplete(instance, item.id, trackerDir, runId)
-                if (wf.config.systems.some((s) => s.id === 'ucpath')) {
-                  emitUcpathIdleSignal(instance, trackerDir, 'touch')
+                for (const sys of wf.config.systems) {
+                  if (isIdleRefreshSystem(sys.id)) emitIdleSignal(instance, trackerDir, sys.id, 'touch')
                 }
                 markTerminated(runId)
                 const taskStateAfterRun = item.taskId ? taskStore.getTask(item.taskId)?.state : null

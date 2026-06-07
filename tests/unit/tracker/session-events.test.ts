@@ -193,7 +193,7 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(rebuildSessionState(dir).workflows[0].currentItemId, "DOC-1");
   });
 
-  it("bootstraps ucpathIdle.lastTouchAt from auth_complete for ucpath (with system field)", () => {
+  it("bootstraps idleBySystem.ucpath.lastTouchAt from auth_complete for ucpath (with system field)", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Person Lookup 1" }, dir);
     emitSessionEvent({
       type: "session_create",
@@ -214,12 +214,61 @@ describe("rebuildSessionState — workflows", () => {
       system: "ucpath",
     }, dir);
     const state = rebuildSessionState(dir);
-    assert.ok(state.workflows[0].ucpathIdle?.lastTouchAt);
-    assert.match(state.workflows[0].ucpathIdle!.lastTouchAt, /^\d{4}-\d{2}-\d{2}T/);
-    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+    assert.ok(state.workflows[0].idleBySystem?.ucpath?.lastTouchAt);
+    assert.match(state.workflows[0].idleBySystem!.ucpath.lastTouchAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(state.workflows[0].idleBySystem!.ucpath.refreshing, false);
   });
 
-  it("bootstraps ucpathIdle from auth_complete when system omitted but browser is ucpath", () => {
+  it("bootstraps idleBySystem from auth_complete for i9 (registry-driven, not ucpath-only)", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "I9 Lookup 1" }, dir);
+    emitSessionEvent({
+      type: "session_create",
+      workflowInstance: "I9 Lookup 1",
+      sessionId: "S1",
+    }, dir);
+    emitSessionEvent({
+      type: "browser_launch",
+      workflowInstance: "I9 Lookup 1",
+      sessionId: "S1",
+      browserId: "b-i9",
+      system: "i9",
+    }, dir);
+    emitSessionEvent({
+      type: "auth_complete",
+      workflowInstance: "I9 Lookup 1",
+      browserId: "b-i9",
+      system: "i9",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    assert.ok(state.workflows[0].idleBySystem?.i9?.lastTouchAt);
+    assert.equal(state.workflows[0].idleBySystem!.i9.refreshing, false);
+  });
+
+  it("does NOT bootstrap idleBySystem for a non-registry system (crm)", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Person Lookup 1" }, dir);
+    emitSessionEvent({
+      type: "session_create",
+      workflowInstance: "Person Lookup 1",
+      sessionId: "S1",
+    }, dir);
+    emitSessionEvent({
+      type: "browser_launch",
+      workflowInstance: "Person Lookup 1",
+      sessionId: "S1",
+      browserId: "b-crm",
+      system: "crm",
+    }, dir);
+    emitSessionEvent({
+      type: "auth_complete",
+      workflowInstance: "Person Lookup 1",
+      browserId: "b-crm",
+      system: "crm",
+    }, dir);
+    const state = rebuildSessionState(dir);
+    assert.equal(state.workflows[0].idleBySystem?.crm, undefined);
+  });
+
+  it("bootstraps idleBySystem from auth_complete when system omitted but browser is ucpath", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Oath Signature 1" }, dir);
     emitSessionEvent({
       type: "session_create",
@@ -239,33 +288,33 @@ describe("rebuildSessionState — workflows", () => {
       browserId: "b1",
     }, dir);
     const state = rebuildSessionState(dir);
-    assert.ok(state.workflows[0].ucpathIdle?.lastTouchAt);
-    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+    assert.ok(state.workflows[0].idleBySystem?.ucpath?.lastTouchAt);
+    assert.equal(state.workflows[0].idleBySystem!.ucpath.refreshing, false);
   });
 
-  it("records ucpath_idle_signal refresh lifecycle + daemon_phase on workflow state", () => {
+  it("records idle_signal refresh lifecycle + daemon_phase on workflow state", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Person Lookup 1" }, dir);
     emitSessionEvent(
-      { type: "ucpath_idle_signal", workflowInstance: "Person Lookup 1", data: { kind: "touch" } },
+      { type: "idle_signal", workflowInstance: "Person Lookup 1", system: "ucpath", data: { kind: "touch" } },
       dir,
     );
     let state = rebuildSessionState(dir);
-    assert.ok(state.workflows[0].ucpathIdle);
-    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+    assert.ok(state.workflows[0].idleBySystem?.ucpath);
+    assert.equal(state.workflows[0].idleBySystem!.ucpath.refreshing, false);
 
     emitSessionEvent(
-      { type: "ucpath_idle_signal", workflowInstance: "Person Lookup 1", data: { kind: "refresh_start" } },
+      { type: "idle_signal", workflowInstance: "Person Lookup 1", system: "ucpath", data: { kind: "refresh_start" } },
       dir,
     );
     state = rebuildSessionState(dir);
-    assert.equal(state.workflows[0].ucpathIdle!.refreshing, true);
+    assert.equal(state.workflows[0].idleBySystem!.ucpath.refreshing, true);
 
     emitSessionEvent(
-      { type: "ucpath_idle_signal", workflowInstance: "Person Lookup 1", data: { kind: "refresh_end" } },
+      { type: "idle_signal", workflowInstance: "Person Lookup 1", system: "ucpath", data: { kind: "refresh_end" } },
       dir,
     );
     state = rebuildSessionState(dir);
-    assert.equal(state.workflows[0].ucpathIdle!.refreshing, false);
+    assert.equal(state.workflows[0].idleBySystem!.ucpath.refreshing, false);
 
     emitSessionEvent(
       { type: "daemon_phase", workflowInstance: "Person Lookup 1", data: { phase: "keepalive" } },

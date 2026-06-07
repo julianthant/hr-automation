@@ -182,6 +182,34 @@ describe("buildVerifyChecks", () => {
     assert.equal(signer.paperValue, "signed");
   });
 
+  it("officialSigner missing + i9 status unable-to-access → check.unavailable", () => {
+    const rec = makePreview({
+      formKind: "oath",
+      printedName: null,
+      paperOfficialName: null,
+      officerSigned: false,
+      officialSigner: undefined,
+      officialSignerStatus: "unable-to-access",
+    });
+    const signer = findCheck(buildVerifyChecks(rec), "officialSigner");
+    assert.equal(signer.status, "missing");
+    assert.equal(signer.unavailable, true);
+  });
+
+  it("officialSigner missing + i9 status not-found → no unavailable flag", () => {
+    const rec = makePreview({
+      formKind: "oath",
+      printedName: null,
+      paperOfficialName: null,
+      officerSigned: false,
+      officialSigner: undefined,
+      officialSignerStatus: "not-found",
+    });
+    const signer = findCheck(buildVerifyChecks(rec), "officialSigner");
+    assert.equal(signer.status, "missing");
+    assert.equal(signer.unavailable, undefined);
+  });
+
   it("emergency-contact record → exactly 3 checks (name, eid, activeStatus)", () => {
     const rec = makePreview({
       formKind: "emergency-contact",
@@ -245,6 +273,13 @@ describe("applyI9ToVerifyRecord", () => {
     applyI9ToVerifyRecord(rec, { signerName: "", i9Status: "unsigned" });
     assert.equal(rec.officialSigner, undefined);
   });
+
+  it("stamps officialSignerStatus from i9Status (unable-to-access)", () => {
+    const rec = makePreview({ formKind: "oath" });
+    applyI9ToVerifyRecord(rec, { signerName: "", i9Status: "unable-to-access" });
+    assert.equal(rec.officialSigner, undefined);
+    assert.equal(rec.officialSignerStatus, "unable-to-access");
+  });
 });
 
 describe("verifyOcrFormSpec.matchRecord", () => {
@@ -298,6 +333,5 @@ describe("verifyOcrFormSpec spec fields", () => {
     assert.equal(verifyOcrFormSpec.formType, "verify");
     assert.equal(verifyOcrFormSpec.rosterMode, "optional");
     assert.equal(verifyOcrFormSpec.traceCode, "vf");
-    assert.equal(verifyOcrFormSpec.recordRendererId, "VerifyRecordView");
   });
 });

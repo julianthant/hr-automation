@@ -32,8 +32,9 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 - Grid parsing: last `.getByRole("grid")` in dialog is results, earlier grids are headers
 - Search button uses direct selector `#divSearchOptions` (not accessible role)
 - Returns `I9Result` error object on validation failure (doesn't throw)
-- Summary-page signer lookup: modern electronic I-9s resolve to `/form-I9/summary/{profileId}/{i9Id}`; paper-imported records redirect to `/form-I9-historical/…` and lack the "Signed Section 2" audit row. Detect with `page.url().includes("/form-I9-historical/")` to distinguish `historical` from genuinely `unsigned`.
-- Audit trail columns are `[Section, Date, Event, Created By]` — signer lives in cell index 3 (zero-based) of the row whose accessible name matches `/Signed Section 2/`. Use `.first()` on that locator so amended I-9s (multiple signings) always return the most recent.
+- Summary-page signer lookup is **deterministic navigation** (2026-06-06): `page.goto('/form-I9/summary/{profileId}/{i9Id}')` built from the search hit's IDs — NOT a click-through. The old last-name-link → record-expand → Summary-tab flow was fragile (last-name cells are hrefless `<a>`, not link roles) and surfaced as a spurious "not found". Paper-imported records redirect to `/form-I9-historical/…` and lack the "Signed Section 2" audit row; detect with `page.url().includes("/form-I9-historical/")` to distinguish `historical` from genuinely `unsigned`.
+- Audit trail columns are `[Section, Date, Event, Created By]` — signer is the **last cell** (Created By) of the row whose accessible name matches `/Signed Section 2/`. Use `.first()` so amended I-9s (multiple signings) return the most recent. **Wait on `summary.auditTrailHeaderRow` before counting `signedSection2Row`** — the summary heading renders before the audit table populates, so an early `count()` reads 0 and mis-classifies a signed record as unsigned.
+- Access-restricted search: a zero-result search whose dialog shows `search.accessRestrictedAlert` ("…your user account has not been granted access to view those employees…") means the record EXISTS but is out of the operator's scope. `lookupSection2Signer` returns `status: "unable-to-access"` (distinct from `not-found`); verify renders "Unable to access".
 
 ## Lessons Learned
 

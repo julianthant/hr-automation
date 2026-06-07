@@ -277,23 +277,6 @@ describe("CaptureSessionStore", () => {
     );
   });
 
-  it("extend bumps expiresAt by the requested delta", () => {
-    let now = 1_000_000;
-    const store = createSessionStore({ now: () => now });
-    const s = store.create({ workflow: "x", onFinalize });
-    const before = s.expiresAt;
-    const result = store.extend(s.sessionId, 5 * 60_000);
-    assert.equal(result, before + 5 * 60_000);
-    assert.equal(store.getById(s.sessionId)!.expiresAt, before + 5 * 60_000);
-  });
-
-  it("extend rejects non-positive byMs", () => {
-    const store = createSessionStore({ now: () => 0 });
-    const s = store.create({ workflow: "x", onFinalize });
-    assert.equal(store.extend(s.sessionId, 0), undefined);
-    assert.equal(store.extend(s.sessionId, -1), undefined);
-  });
-
   it("markPhoneConnected stamps phoneConnectedAt and is idempotent", () => {
     let now = 1_000_000;
     const store = createSessionStore({ now: () => now });

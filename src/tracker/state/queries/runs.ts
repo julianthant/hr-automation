@@ -3,6 +3,11 @@ import { computeStepDurations, pickEarlier, pickLater } from "../../dashboard/ru
 import type { TrackerEntry } from "../../jsonl-io.js";
 import { log } from "../../../utils/log.js";
 import { isTrackerStatus, parseJsonObject, readStmts } from "./statements.js";
+import {
+  type CrossMidnightEventRow,
+  TERMINAL_STATUSES,
+  selectCrossMidnightEventRowsWithRuns,
+} from "./cross-midnight.js";
 
 export function queryRunsForItem(
   db: Database,
@@ -55,16 +60,46 @@ export function queryRunsForItem(
     arr.push({ timestamp: row.timestamp, status: row.status, ...(row.step ? { step: row.step } : {}) });
     byRun.set(row.run_id, arr);
   }
+
+  // Forward-merge continuation events for any run still open on `opts.date` that
+  // kept emitting after crossing local midnight, so the RunSelector/run-detail
+  // summary matches the queue card instead of showing the run stuck at its last
+  // pre-midnight status (see cross-midnight.ts). Each continuation extends the
+  // step-duration history and (for the latest one) overrides the run's terminal
+  // status/step/timestamp/data while keeping the day-`date` start aggregates.
+  const openRunIds = rows
+    .filter((row) => !TERMINAL_STATUSES.has(row.latest_status as TrackerEntry["status"]))
+    .map((row) => row.run_id);
+  const continuationByRun = new Map<string, CrossMidnightEventRow[]>();
+  for (const cont of selectCrossMidnightEventRowsWithRuns(db, { workflow: opts.workflow, date: opts.date, openRunIds })) {
+    const arr = continuationByRun.get(cont.run_id) ?? [];
+    arr.push(cont);
+    continuationByRun.set(cont.run_id, arr);
+    const hist = byRun.get(cont.run_id) ?? [];
+    hist.push({ timestamp: cont.event_ts, status: cont.status, ...(cont.step ? { step: cont.step } : {}) });
+    byRun.set(cont.run_id, hist);
+  }
+
   return rows.map((row) => {
-    const data = parseJsonObject<Record<string, unknown>>(row.latest_data_json, {});
+    const continuation = continuationByRun.get(row.run_id);
+    // Continuation rows are event-ASC, so the last one is the run's real
+    // terminal state after midnight; fall back to the day-`date` runs row.
+    const terminal = continuation && continuation.length > 0 ? continuation[continuation.length - 1] : undefined;
+    const status = terminal ? terminal.status : row.latest_status;
+    const step = terminal ? terminal.step : row.latest_step;
+    const timestamp = terminal ? terminal.event_ts : row.latest_tracker_ts;
+    const data = parseJsonObject<Record<string, unknown>>(terminal?.data_json ?? row.latest_data_json, {});
     return {
       runId: row.run_id,
-      status: row.latest_status,
-      ...(row.latest_step ? { step: row.latest_step } : {}),
-      timestamp: row.latest_tracker_ts,
+      status,
+      ...(step ? { step } : {}),
+      timestamp,
       stepDurations: computeStepDurations(byRun.get(row.run_id) ?? []),
       firstLogTs: pickEarlier(row.first_log_ts ?? undefined, row.first_work_ts ?? row.first_any_ts),
-      lastLogTs: pickLater(row.last_log_ts ?? undefined, row.latest_tracker_ts),
+      lastLogTs: pickLater(
+        pickLater(row.last_log_ts ?? undefined, row.latest_tracker_ts),
+        terminal ? (terminal.last_log_ts ?? terminal.latest_tracker_ts) : undefined,
+      ),
       runOrdinal: row.run_ordinal,
       ...(Object.keys(data).length > 0 ? { data } : {}),
     };

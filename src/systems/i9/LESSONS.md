@@ -46,6 +46,18 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **References:** Mapped live against profile 2082422 on 2026-04-22 via Playwright CLI.
 **Tags:** summary, audit-trail, signer, section2, historical, unsigned, signed, row, createdby
 
+## 2026-06-06 — Signer "not found" was a fragile click-through, not extraction; plus access-restricted detection
+
+**Tried:** `lookupSection2Signer` reached the summary by CLICKING through the search result: `openI9SearchResult` clicked the row's last-name link (falling back to the first link), then `ensureSelectedRecordExpanded` broad-scanned the whole DOM (`button,a,div,span`) for an element matching name+createdOn+"next action: X" and clicked it, then `openSummaryTab` clicked a "Summary" tab. Provenzano (Vincent R, profile 1670462 / i9 1602018) reported `Authorized Official Signer — not found` even though "KENIA QUINONEZ" signed Section 2.
+
+**Failed because:** Mapped live 2026-06-06 — the search-result last-name cells are hrefless `<a>` (NOT a link role, so `getByRole("link", {name:/^Provenzano$/})` matched 0; only the "Next Action" cell, e.g. "Purge", is a real link), the broad-scan expand step can click the wrong element, and the Summary-tab re-click races the audit-table load. The EXTRACTION was always correct: the summary page renders a proper `TR→TBODY→TABLE` whose row accessible name contains "Signed Section 2" and whose `<td>` cells are exactly `["2", "<date>", "Signed Section 2", "KENIA QUINONEZ"]` — `getByRole("row",{name:/Signed Section 2/})` + the last cell give the signer. The fragile navigation, not the read, produced the spurious "not found".
+
+**Fix:** Navigate DETERMINISTICALLY — `page.goto(new URL('/form-I9/summary/{profileId}/{i9Id}', page.url()))` using the IDs already on the search hit (the "Purge"/next-action link's href is just this `navToNextAction` route). Detect the paper redirect via `page.url().includes("/form-I9-historical/")` → `historical`. Then wait on the new `summary.auditTrailHeaderRow` ("Section / Date / Audit History Event / Created By") so the audit table has POPULATED before `signedSection2Row.count()` (the heading renders first; counting too early read 0 → mis-classified signed as unsigned). `extractSignedSection2Signer` now reads the LAST cell (Created By), robust to a future leading icon column. Deleted `ensureSelectedRecordExpanded` + `openSummaryTab`. Also added access-restricted detection: a zero-result search whose dialog shows `search.accessRestrictedAlert` ("…your user account has not been granted access to view those employees…", seen live for Goiset, Nadia) now returns `status: "unable-to-access"` (distinct from genuine `not-found`) — the verify completeness report renders "Unable to access" instead of "— not found".
+
+**Selector:** `summary.auditTrailHeaderRow`, `summary.signedSection2Row`, `search.accessRestrictedAlert` in `selectors.ts`; consumed from `signer.ts::lookupSection2Signer`.
+**References:** Mapped live 2026-06-06 via Playwright CLI against profile 1670462 / i9 1602018 (Provenzano, signer present) and the Goiset, Nadia access-restricted search. Supersedes the click-through navigation in the 2026-04-22 entry; the summary-URL + audit-trail read itself is unchanged.
+**Tags:** summary, audit-trail, signer, section2, navigation, not-found, unable-to-access, access-restricted, row, createdby
+
 ## 2026-06-04 — I-9 credentials can differ from UCPath credentials
 
 **Tried:** Reusing `validateEnv()` inside `loginToI9`, which always pulls `UCPATH_USER_ID` and `UCPATH_PASSWORD`, then relying on OCR verify's delegated `i9-lookup` rows to authenticate with I-9 Complete.

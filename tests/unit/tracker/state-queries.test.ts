@@ -265,6 +265,262 @@ test("queryEntriesPayload wfCounts do not depend on the selected workflow", () =
   }
 });
 
+test("queryEntriesPayload forward-merges a run that was cancelled after crossing midnight", () => {
+  // Repro: an OCR review starts before local midnight (day D) and the operator
+  // cancels it after midnight (day D+1). Tracker rows are date-partitioned, so
+  // the terminal `failed/cancelled` row lands in D+1's file. The D view's
+  // per-date query would otherwise show the run stuck at `running /
+  // awaiting-approval` forever with a live timer. The forward merge folds the
+  // D+1 terminal row back into the D event stream.
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const sessionId = "8efa4d4f-cross-midnight";
+    const runId = "fd213bd9-cross-midnight";
+    // Day D — run starts and parks at awaiting-approval (noon UTC → same
+    // local calendar day in every realistic test-runner timezone).
+    trackEvent({
+      workflow: "ocr",
+      timestamp: "2026-05-04T12:00:00.000Z",
+      id: sessionId,
+      runId,
+      status: "running",
+      step: "awaiting-approval",
+      data: { mode: "prepare", formType: "verify", archetype: "preview", pdfOriginalName: "detect-test.pdf" },
+    }, dir);
+    // Day D+1 — operator cancels; terminal row lands in tomorrow's partition.
+    trackEvent({
+      workflow: "ocr",
+      timestamp: "2026-05-05T12:00:00.000Z",
+      id: sessionId,
+      runId,
+      status: "failed",
+      step: "cancelled",
+      data: { mode: "prepare", formType: "verify", archetype: "preview", pdfOriginalName: "detect-test.pdf" },
+      error: "cancelled by user from dashboard",
+    }, dir);
+    const db = openStateDb(dir);
+
+    // Sanity: the cancel row is genuinely in the NEXT day's partition.
+    const dayAfter = queryEntriesPayload(db, { workflow: "ocr", date: "2026-05-05" });
+    assert.equal(dayAfter.entries.length, 1);
+    assert.equal((dayAfter.entries[0] as { status: string }).status, "failed");
+
+    // The start-day view must now surface the cancel via the forward merge.
+    const startDay = queryEntriesPayload(db, { workflow: "ocr", date: "2026-05-04" });
+    const forRun = (startDay.entries as Array<{
+      id: string; runId: string; status: string; step?: string; firstLogTs?: string; lastLogTs?: string;
+    }>).filter((e) => e.id === sessionId && e.runId === runId);
+    const cancelled = forRun.find((e) => e.status === "failed" && e.step === "cancelled");
+    assert.ok(cancelled, "the after-midnight cancel row is merged into the start-day stream");
+    // Latest-wins dedupe on the frontend collapses to this terminal row, so the
+    // card flips from Running → Cancelled instead of ticking forever.
+    assert.equal(
+      cancelled.lastLogTs,
+      "2026-05-05T12:00:00.000Z",
+      "terminal entry carries the cancel timestamp",
+    );
+    assert.equal(
+      cancelled.firstLogTs,
+      "2026-05-04T12:00:00.000Z",
+      "elapsed span spans the whole run — inherits the day-D start, not the D+1 partition start",
+    );
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryEntriesPayload does not forward-merge a run that already terminated on its own day", () => {
+  // Guard: a run that completed the same day it started must not pull in any
+  // later-partition rows (no spurious duplication / cross-day bleed).
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const runId = "same-day-run";
+    trackEvent({
+      workflow: "ocr",
+      timestamp: "2026-05-04T12:00:00.000Z",
+      id: "same-day",
+      runId,
+      status: "running",
+      step: "ocr",
+      data: { mode: "prepare", archetype: "preview", pdfOriginalName: "a.pdf" },
+    }, dir);
+    trackEvent({
+      workflow: "ocr",
+      timestamp: "2026-05-04T12:05:00.000Z",
+      id: "same-day",
+      runId,
+      status: "done",
+      step: "approved",
+      data: { mode: "prepare", archetype: "preview", pdfOriginalName: "a.pdf" },
+    }, dir);
+    // A later-day row for a DIFFERENT run — must never be merged into this one.
+    trackEvent({
+      workflow: "ocr",
+      timestamp: "2026-05-06T12:00:00.000Z",
+      id: "other",
+      runId: "other-run",
+      status: "failed",
+      step: "cancelled",
+      data: { mode: "prepare", archetype: "preview", pdfOriginalName: "b.pdf" },
+    }, dir);
+    const db = openStateDb(dir);
+    const startDay = queryEntriesPayload(db, { workflow: "ocr", date: "2026-05-04" });
+    const ids = new Set((startDay.entries as Array<{ id: string }>).map((e) => e.id));
+    assert.equal(ids.has("other"), false, "an unrelated later-day run is not merged in");
+    assert.equal(
+      (startDay.entries as Array<{ runId: string }>).filter((e) => e.runId === runId).length,
+      2,
+      "the same-day run keeps exactly its two own events — no continuation pulled",
+    );
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── cross-midnight forward merge: per-run readers ─────────────────────────────
+// queryEntriesPayload (the queue card) already forward-merges. These pin the
+// SAME mechanism for the three OTHER date-scoped per-run readers a drill-down
+// hits: the RunSelector/run-detail summary (queryRunsForItem), the run-event
+// timeline (selectRunEventsForRun), and the log panel (selectLogsForRun). All
+// three must agree with the card — never show a cross-midnight run stuck at its
+// last pre-midnight state on its start-day view.
+
+test("queryRunsForItem forward-merges a run cancelled after crossing midnight", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const itemId = "10000042";
+    const runId = "run-cross-midnight";
+    // Day D — run parks at running/wait-signatures (noon UTC → same local day).
+    trackEvent({
+      workflow: "oath-upload",
+      timestamp: "2026-05-04T12:00:00.000Z",
+      id: itemId,
+      runId,
+      status: "running",
+      step: "wait-signatures",
+    }, dir);
+    // Day D+1 — operator cancels; terminal row lands in tomorrow's partition.
+    trackEvent({
+      workflow: "oath-upload",
+      timestamp: "2026-05-05T12:00:00.000Z",
+      id: itemId,
+      runId,
+      status: "failed",
+      step: "cancelled",
+      error: "cancelled by user from dashboard",
+    }, dir);
+    const db = openStateDb(dir);
+    const runs = queryRunsForItem(db, { workflow: "oath-upload", itemId, date: "2026-05-04" });
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].status, "failed", "RunSelector reflects the after-midnight cancel, not stuck running");
+    assert.equal(runs[0].step, "cancelled");
+    assert.equal(runs[0].timestamp, "2026-05-05T12:00:00.000Z", "summary timestamp advances to the terminal row");
+    assert.equal(runs[0].lastLogTs, "2026-05-05T12:00:00.000Z", "elapsed end spans into the next day");
+    assert.equal(runs[0].firstLogTs, "2026-05-04T12:00:00.000Z", "elapsed start stays day D — whole-run span");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("queryRunsForItem does not pull continuation for a run that terminated on its own day", () => {
+  // Guard: a run done the same day it started must not absorb a later-partition
+  // row even when the run_id is reused for a brand-new run days later.
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    const itemId = "10000043";
+    const runId = "run-reused";
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: itemId, runId, status: "running", step: "transaction" }, dir);
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:05:00.000Z", id: itemId, runId, status: "done" }, dir);
+    // Reused run_id, a genuinely different logical run two days later.
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-06T12:00:00.000Z", id: itemId, runId, status: "running", step: "transaction" }, dir);
+    const db = openStateDb(dir);
+    const runs = queryRunsForItem(db, { workflow: "work-study", itemId, date: "2026-05-04" });
+    assert.equal(runs.length, 1, "only the day-D run is summarized for the day-D view");
+    assert.equal(runs[0].status, "done", "the terminal day-D run is NOT dragged back to running by the reused-id later run");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectRunEventsForRun includes the after-midnight terminal event for a run open on its start day", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    trackEvent({ workflow: "onboarding", timestamp: "2026-05-04T12:00:00.000Z", id: "jane", runId: "run-x", status: "running", step: "extraction" }, dir);
+    trackEvent({ workflow: "onboarding", timestamp: "2026-05-05T12:00:00.000Z", id: "jane", runId: "run-x", status: "failed", step: "cancelled" }, dir);
+    const db = openStateDb(dir);
+    const rows = selectRunEventsForRun(db, { workflow: "onboarding", trackerDate: "2026-05-04", itemId: "jane", runId: "run-x" });
+    assert.deepEqual(rows.map((r) => r.status), ["running", "failed"], "the next-day terminal event is folded into the start-day timeline");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectRunEventsForRun does not pull later events for a run that ended on its start day", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    trackEvent({ workflow: "onboarding", timestamp: "2026-05-04T12:00:00.000Z", id: "jane", runId: "run-x", status: "running", step: "extraction" }, dir);
+    trackEvent({ workflow: "onboarding", timestamp: "2026-05-04T12:05:00.000Z", id: "jane", runId: "run-x", status: "done" }, dir);
+    // Reused run_id on a later day — must stay out of the day-D timeline.
+    trackEvent({ workflow: "onboarding", timestamp: "2026-05-06T12:00:00.000Z", id: "jane", runId: "run-x", status: "running", step: "extraction" }, dir);
+    const db = openStateDb(dir);
+    const rows = selectRunEventsForRun(db, { workflow: "onboarding", trackerDate: "2026-05-04", itemId: "jane", runId: "run-x" });
+    assert.deepEqual(rows.map((r) => r.status), ["running", "done"], "a same-day terminal run pulls no continuation");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectLogsForRun includes after-midnight log lines for a run still open on its start day", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    // A run_event on D establishes the run as OPEN on its start day (the logs
+    // continuation is gated on the run's day-D status, since logs carry none).
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: "10000001", runId: "run-a", status: "running", step: "transaction" }, dir);
+    // Noon-apart on consecutive days → guaranteed-distinct local partitions in
+    // any realistic runner timezone (the 23:59/00:01-UTC pair collapses to one
+    // local day in negative-UTC zones and would not exercise the merge).
+    appendLogEntry({ workflow: "work-study", itemId: "10000001", runId: "run-a", level: "step", message: "Before midnight", ts: "2026-05-04T12:30:00.000Z" }, dir);
+    appendLogEntry({ workflow: "work-study", itemId: "10000001", runId: "run-a", level: "success", message: "After midnight", ts: "2026-05-05T12:00:00.000Z" }, dir);
+    const db = openStateDb(dir);
+    const rows = selectLogsForRun(db, { workflow: "work-study", trackerDate: "2026-05-04", itemId: "10000001", runId: "run-a" });
+    assert.deepEqual(rows.map((r) => r.message), ["Before midnight", "After midnight"], "the start-day log panel shows the whole run, not just pre-midnight lines");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectLogsForRun does not pull later logs for a run that ended on its start day", () => {
+  const dir = tmpTracker();
+  try {
+    openStateDb(dir);
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:00:00.000Z", id: "10000001", runId: "run-a", status: "running", step: "transaction" }, dir);
+    trackEvent({ workflow: "work-study", timestamp: "2026-05-04T12:05:00.000Z", id: "10000001", runId: "run-a", status: "done" }, dir);
+    appendLogEntry({ workflow: "work-study", itemId: "10000001", runId: "run-a", level: "step", message: "On day D", ts: "2026-05-04T12:01:00.000Z" }, dir);
+    // A later log under the reused run_id — must NOT bleed into the day-D panel.
+    appendLogEntry({ workflow: "work-study", itemId: "10000001", runId: "run-a", level: "step", message: "Reused later", ts: "2026-05-06T12:00:00.000Z" }, dir);
+    const db = openStateDb(dir);
+    const rows = selectLogsForRun(db, { workflow: "work-study", trackerDate: "2026-05-04", itemId: "10000001", runId: "run-a" });
+    assert.deepEqual(rows.map((r) => r.message), ["On day D"], "a terminal day-D run pulls no later logs");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("mapRunEventRowToWire drops invalid typedData entries from projected rows", () => {
   const dir = tmpTracker();
   try {

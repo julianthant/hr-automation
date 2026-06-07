@@ -89,7 +89,7 @@ describe("validateEnv", () => {
 
     const validateI9Env = (env as { validateI9Env?: () => { userId: string; password: string } })
       .validateI9Env;
-    assert.equal(typeof validateI9Env, "function");
+    assert.ok(validateI9Env, "validateI9Env should be an exported function");
     const result = validateI9Env();
 
     assert.equal(result.userId, "i9-user@ucsd.edu");
@@ -104,7 +104,7 @@ describe("validateEnv", () => {
 
     const validateI9Env = (env as { validateI9Env?: () => { userId: string; password: string } })
       .validateI9Env;
-    assert.equal(typeof validateI9Env, "function");
+    assert.ok(validateI9Env, "validateI9Env should be an exported function");
     const result = validateI9Env();
 
     assert.equal(result.userId, "ucpath-user");
@@ -119,7 +119,7 @@ describe("validateEnv", () => {
 
     const validateI9Env = (env as { validateI9Env?: () => { userId: string; password: string } })
       .validateI9Env;
-    assert.equal(typeof validateI9Env, "function");
+    assert.ok(validateI9Env, "validateI9Env should be an exported function");
 
     assert.throws(
       () => validateI9Env(),
