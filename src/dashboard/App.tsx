@@ -42,7 +42,9 @@ import { TopBarRunButton } from "./components/navigation/TopBarRunButton";
 import { TopBarCaptureButton } from "./components/navigation/TopBarCaptureButton";
 import { parsePrepareRowData, isResolvedPrepRow, isDiscardedPrepRow } from "./components/ocr/types";
 import { RunModal } from "./components/run-modal/RunModal";
-import { dateLocal } from "./lib/utils";
+import { dateLocal, isEditableFocus } from "./lib/utils";
+import { HelpCircle } from "lucide-react";
+import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
 import type { TrackerEntry as TrackerEntryJsonl } from "../tracker/jsonl.js";
 import { isResolvedPrepEntry } from "../tracker/dashboard/prep-rows.js";
 import { isTerminalNotFoundEntry } from "../domain/tracker-terminal-display.js";
@@ -385,6 +387,47 @@ export function App() {
     setBatchQueueParentRunId(null);
   }, []);
 
+  // Global keyboard shortcuts (row-level ↑/↓/r/x live in QueuePanel). A "g t"
+  // sequence jumps to today; "?" toggles the reference guide.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const gPressedAtRef = useRef(0);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableFocus(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === "?") {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        (document.querySelector('input[aria-label="Search history"]') as HTMLInputElement | null)?.focus();
+      } else if (e.key === "[" || e.key === "]") {
+        if (workflows.length === 0) return;
+        const idx = workflows.indexOf(workflow);
+        if (idx === -1) return;
+        e.preventDefault();
+        const len = workflows.length;
+        const nextIdx = e.key === "]" ? (idx + 1) % len : (idx - 1 + len) % len;
+        handleWorkflowChange(workflows[nextIdx]!);
+      } else if (e.key === "g") {
+        gPressedAtRef.current = performance.now();
+      } else if (e.key === "t") {
+        if (performance.now() - gPressedAtRef.current < 700) {
+          e.preventDefault();
+          handleDateChange(dateLocal());
+        }
+        gPressedAtRef.current = 0;
+      } else if (e.key === "Escape") {
+        // Let any open dialog own Escape; otherwise close the guide.
+        if (document.querySelector('[role="dialog"][data-state="open"]')) return;
+        setShortcutsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [workflows, workflow, handleWorkflowChange, handleDateChange]);
+
   // Cross-date search → deep-link to the matching (workflow, date, id).
   // Each setter triggers the URL-sync effect; useEntries re-subscribes when
   // workflow/date change, and LogPanel picks up the new selectedId. No extra
@@ -569,6 +612,17 @@ export function App() {
         onSearchSelect={handleSearchSelect}
         onFailureSelect={handleFailureSelect}
         failureCounts={failureCounts ?? {}}
+        rightSlot={
+          <button
+            type="button"
+            onClick={() => setShortcutsOpen(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            className="ml-1 h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+        }
       />
       <OcrReviewPrepProvider
         active={Boolean(
@@ -694,6 +748,7 @@ export function App() {
       </div>
       </OcrReviewPrepProvider>
       <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} />
+      <ShortcutsGuide open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       {/* Reupload RunModal — opened by the Reupload action in the OCR review toolbar */}
       <RunModal
         open={runModalOpen}
