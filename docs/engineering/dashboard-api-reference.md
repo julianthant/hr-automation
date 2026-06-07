@@ -37,10 +37,11 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/worker/stop` | POST | Body: `{workerId}`. Queues `stop_worker`; worker shuts down and hard-kills its active browser only on this explicit stop path. | _no React consumer today_ |
 | `/api/queue/bump` | POST | Body: `{workflow, id, runId?}`. Bumps a queued SQLite task priority so it is claimed next; legacy JSONL rewrite only applies when no task row exists. 409 if claimed. | `BumpButton` via `useWorkflowActionDispatcher` |
 | `/api/queue-depth` | GET | `{workflow: depth}` map (count of queued SQLite tasks per workflow, legacy JSONL fallback when no task rows exist). | `useQueueDepth` → `TopBar` queue-depth pill |
-| `/api/daemons` | GET | `DaemonInfo[]` — SQLite workers plus lockfile fallback, heartbeat age, current item/run, and scoped browser processes. | `useDaemons` → `WorkflowBox` / `StopPill` context |
+| `/api/daemons` | GET | `DaemonInfo[]` — SQLite workers plus lockfile fallback, heartbeat age, current item/run, and scoped browser processes. | `useDaemons` (Overview / debug) |
 | `/api/daemons/spawn` | POST | Body: `{workflow, count?}`. Fire-and-forget spawn. | _no React consumer today_ |
 | `/api/daemons/stop` | POST | Body: `{workflow?, force?}`. Workflow-level multi-daemon stop / drain. | _no React consumer today_ |
-| `/api/daemon/stop` | POST | Workflow-scoped stop for the selected automation (used after operator confirm). | `WorkflowBox` `StopPill` |
+| `/api/daemon/stop` | POST | Body: `{workflow, force?}`. Workflow-scoped stop — tears down EVERY daemon for the workflow and fails its in-flight items. | queue toolbar `StopAllButton` |
+| `/api/daemon/stop-instance` | POST | Body: `{workflow, instance, force?}`. Per-instance stop — stops ONE daemon (resolved from the instance's `workflow_start.pid`); the daemon reassigns its in-flight item to a surviving peer (`reassign: true`) or fails it if it was the last. Returns `{ok, daemonStopped, browsersKilled, reassignable}`. | `WorkflowBox` `StopPill` |
 | `/api/selector-warnings?days=N` | GET | `SelectorWarningRow[]` grouped by label | `SelectorWarningsPanel` (right rail) |
 | `/api/failures` | GET | `FailureRow[]` — `failed` entries on the active date across all workflows, latest run per `(workflow,id)` | `FailureBell` (lazy-fetched on popover open) |
 | `/events/hub?subs=<encoded JSON>` | SSE | `{sub, data, event?}` envelopes per subscription | `lib/sse-hub.ts` — all real-time hooks use `sseHub.subscribe(topic, …)`; registry in `topics.ts`, emitters in `topics-emitters.ts` |
@@ -146,7 +147,7 @@ Current consumption:
 | `useLogs(...)` | `LogPanel` → `LogStream` | `useSseHistoryStream("logs", …)` — hub topic `logs`, full history on first tick + deltas; collapses consecutive duplicates |
 | `useRunEvents(...)` | `LogPanel` → `LogStream` (Events tab) | `useSseHistoryStream("runEvents", …)` — same delta semantics as logs |
 | `useSessions()` | `TerminalDrawer` | `sseHub.subscribe("sessions", {})` — live `SessionState` for workflow cards |
-| `useDaemons()` | `WorkflowBox` (`StopPill`) | Polls `GET /api/daemons` — blast-radius / worker counts for stop confirm |
+| `useDaemons()` | Overview / debug surfaces | Polls `GET /api/daemons` — live worker inventory. (No longer used by `WorkflowBox`/`StopPill` — per-instance stop sends the card's `instance` label directly.) |
 | `useClock()` | `TopBar` | Updates HH:MM:SS every second |
 | `useElapsed(startTime)` | `EntryItem`, `LogPanel` | Live "1m 22s" counter for running entries |
 | `usePreflight()` | `App.tsx` | Fetches `/api/preflight` on mount, fires sonner toast |
