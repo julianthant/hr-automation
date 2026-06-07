@@ -4,6 +4,7 @@ import { TerminalSquare, TriangleAlert } from "lucide-react";
 import { StepPipeline, computeOcrPipelineView } from "./StepPipeline";
 import { LogStream } from "./LogStream";
 import { RunSelector } from "./RunSelector";
+import { ExportMenu } from "./ExportMenu";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
@@ -374,6 +375,15 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         previewAvailable={previewAvailable}
         onPreviewVisibleChange={onPreviewVisibleChange}
         runControlsSlot={
+          <>
+          <ExportMenu
+            entry={entry}
+            logs={displayedLogs}
+            events={events}
+            workflow={logSourceWorkflow}
+            runId={activeRunId}
+            date={date}
+          />
           <RunSelector
             runs={runs}
             activeRunId={activeRunId}
@@ -393,6 +403,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
               onDeleted: handleRunDeleted,
             } : undefined}
           />
+          </>
         }
         initialTab={defaultTab}
         maximized={maximized}
