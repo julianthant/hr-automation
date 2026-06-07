@@ -61,6 +61,7 @@ import {
   isOcrPrepareAbortRequested,
   isOperatorDiscardAbortError,
   raceOcrPrepWithDiscard,
+  requestOcrPrepareAbort,
 } from "./prepare-abort.js";
 
 const WORKFLOW = "ocr";
@@ -196,6 +197,21 @@ export async function runOcrOrchestrator(
   const date = opts.date ?? dateLocal();
   const id = input.sessionId;
   const runId = opts.runId;
+  // A generic run cancel (dashboard per-row ×, daemon stop, browser disconnect)
+  // aborts the run's `ctx.signal` but does NOT set the in-process prepare-abort
+  // flag that EVERY prep-phase interruption polls (`raceOcrPrepWithDiscard`, the
+  // `shouldAbort` callbacks) — only the OCR discard route sets it. Bridge the two:
+  // when the signal aborts, trip the same flag so a RUNNING prep unwinds. This is
+  // load-bearing for a STANDALONE verify run, which blocks in `enrichRecords` →
+  // `watchChildRuns` and never reaches the signal-aware `subscribeToApproval` wait
+  // the delegated path relies on; without the bridge such a run ignored a cancel
+  // until `watchChildRuns`' multi-hour timeout. The catch below distinguishes a
+  // signal-cancel from a UI discard (the discard route leaves `ctx.signal`
+  // un-aborted) so each lands its correct terminal (cancelled vs discarded).
+  if (opts.signal) {
+    if (opts.signal.aborted) requestOcrPrepareAbort(id, runId);
+    else opts.signal.addEventListener("abort", () => requestOcrPrepareAbort(id, runId), { once: true });
+  }
   // OCR prep is emitted directly (not via the kernel pre-emit), so the trace id
   // + queue-row kind the kernel would normally stamp are stamped here instead.
   // Without them the row has no `data.__traceId`/`data.queueRowKind`, so
@@ -1039,6 +1055,14 @@ export async function runOcrOrchestrator(
     return { status: "awaiting-approval" };
   } catch (err) {
     if (isOperatorDiscardAbortError(err)) {
+      // The prepare-abort flag was tripped by a generic run cancel (`ctx.signal`)
+      // via the entry bridge, NOT by an operator discard. Let it propagate so the
+      // daemon's cancel machinery (`mapEscapedHandlerError`, on a cancel-requested
+      // run) maps it to a `CancelledError` + `step:"cancelled"` terminal row — the
+      // standalone-prep analogue of the delegated path's `subscribeToApproval`
+      // cancel. A real UI discard leaves `ctx.signal` un-aborted and still returns
+      // `discarded` (its own route owns the terminal `failed step=discarded` row).
+      if (opts.signal?.aborted) throw err;
       log.step(`[ocr] preparation stopped (${input.sessionId}) — operator discarded while prep was running`);
       return { status: "discarded" };
     }
