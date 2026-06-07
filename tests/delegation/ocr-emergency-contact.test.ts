@@ -151,7 +151,11 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
 
   // 2. Enqueue the OCR run (registers the fixture PDF) + wait for the prep gate.
   const ocr = await rt.enqueueOcr({ fixturePath: FIXTURE_PDF, originalName: "emergency-contacts.pdf" });
-  await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId });
+  // A STANDALONE OCR run now COMPLETES `done` after person-lookup (it never parks
+  // at awaiting-approval — only DELEGATED runs do). This test still drives the
+  // (production-preserved) standalone approve route directly via `approveOcr`, so
+  // sync on the completion event instead of the retired awaiting-approval one.
+  await rt.waitForEvent("ocr:review-complete", { runId: ocr.runId });
 
   // 3. Drive the REAL approve fan-out → 3 emergency-contact children, each a
   // controllable daemon run under the OCR run (childParentRunId = ocrRunId; EC

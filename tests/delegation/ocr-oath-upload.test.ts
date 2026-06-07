@@ -181,7 +181,11 @@ test(
     // The fixture is expected to render headlessly; the records come from the
     // override either way, so this is informational, not a hard failure.
     assert.equal(ocr.usedFixture, true, "single-oath.pdf rendered headlessly (no synthetic fallback)");
-    await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId });
+    // A STANDALONE OCR run now COMPLETES `done` after person-lookup (it never parks
+    // at awaiting-approval — only DELEGATED runs do). This test still drives the
+    // (production-preserved) standalone approve route directly via `approveOcr`, so
+    // sync on the completion event instead of the retired awaiting-approval one.
+    await rt.waitForEvent("ocr:review-complete", { runId: ocr.runId });
 
     // 3. Drive the REAL approve fan-out onto BOTH gated daemons via the new
     //    MULTI-TARGET `childWorkflows`. The real route fans out the per-record

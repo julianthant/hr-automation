@@ -80,7 +80,7 @@ test("OCR trace-id branding: operation intent disambiguates oath-signature (os) 
   assert.strictEqual(operationTraceCode("ocr"), undefined);
 });
 
-test("standalone oath orchestrator emits pending → loading-roster → ocr → matching → awaiting-approval (parks; has approve targets)", async () => {
+test("standalone oath orchestrator emits pending → loading-roster → ocr → person-lookup → done (completes; ALL standalone runs complete after lookup)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
 
@@ -133,16 +133,17 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
   // next distinct step is `person-lookup`.
   assert.ok(steps.some((s) => s.includes("person-lookup")), `steps: ${steps.join(", ")}`);
   assert.ok(!steps.some((s) => s.includes("matching")), `matching folds into ocr; steps: ${steps.join(", ")}`);
-  // A standalone oath run PARKS at awaiting-approval (it has approve targets);
-  // only a no-fan-out form (verify) completes `done` after person-lookup. The
-  // synthetic `verification` step is retired for all forms.
-  assert.ok(steps.some((s) => s === "running/awaiting-approval" || s === "done/awaiting-approval"), `steps: ${steps.join(", ")}`);
+  // ALL standalone runs (oath / EC / verify) now complete `done` at person-lookup
+  // — none park at awaiting-approval. Only DELEGATED runs (parentRunId set) park.
+  // The synthetic `verification` step is retired for all forms.
+  assert.ok(steps.some((s) => s === "done/person-lookup"), `standalone oath must complete done/person-lookup; steps: ${steps.join(", ")}`);
+  assert.ok(!steps.some((s) => s.includes("awaiting-approval")), `standalone oath must NOT emit awaiting-approval; steps: ${steps.join(", ")}`);
   assert.ok(!steps.some((s) => s.includes("verification")), `verification step is retired; steps: ${steps.join(", ")}`);
 
-  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
-    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  const terminalRow = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (e) => e.status === "done" && e.step === "person-lookup",
   );
-  assert.ok(approval);
+  assert.ok(terminalRow, "terminal done/person-lookup row must be emitted");
   // Regression (2026-06-02): OCR prep rows must carry the trace id + queue-row
   // kind the kernel would otherwise stamp, so the footer subtitle resolves to
   // the trace id (kind "file") instead of falling back to the literal "OCR".
@@ -160,9 +161,9 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
   }
   const traceIds = new Set((writtenEntries as Array<{ data?: Record<string, string> }>).map((e) => e.data?.__traceId));
   assert.equal(traceIds.size, 1, "the trace id is frozen-identical across every emitted row");
-  const summary = JSON.parse(approval!.data!.pageStatusSummary ?? "{}");
+  const summary = JSON.parse(terminalRow!.data!.pageStatusSummary ?? "{}");
   assert.deepEqual(summary, { total: 0, succeeded: 0, failed: 0 });
-  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]");
+  const failedPages = JSON.parse(terminalRow!.data!.failedPages ?? "[]");
   assert.deepEqual(failedPages, []);
 
   rmSync(dir, { recursive: true, force: true });
@@ -446,9 +447,10 @@ test("orchestrator drives the session timeline via onPhase for each running phas
   assert.ok(phases.includes("person-lookup"), `phases: ${phases.join(", ")}`);
   assert.ok(!phases.includes("matching"), `matching folds into ocr; phases: ${phases.join(", ")}`);
   assert.ok(!phases.includes("disambiguating"), `disambiguating folds into ocr; phases: ${phases.join(", ")}`);
-  // Standalone oath parks at awaiting-approval (has approve targets), so the
-  // bridge fires that phase; the synthetic `verification` step is retired.
-  assert.ok(phases.includes("awaiting-approval"), `phases: ${phases.join(", ")}`);
+  // ALL standalone runs (oath / EC / verify) complete `done` at person-lookup —
+  // none park at awaiting-approval. Only DELEGATED runs (parentRunId set) fire
+  // the awaiting-approval phase. The synthetic `verification` step is retired.
+  assert.ok(!phases.includes("awaiting-approval"), `standalone oath must NOT fire awaiting-approval phase; phases: ${phases.join(", ")}`);
   assert.ok(!phases.includes("verification"), `phases: ${phases.join(", ")}`);
   // Bridge only fires on non-terminal (running) rows, never a bare terminal.
   assert.ok(phases.every((p) => p.length > 0), `phases: ${phases.join(", ")}`);
@@ -576,7 +578,7 @@ test("orchestrator uses SQLite dependencies for initial eid-lookup fan-out", asy
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator waits for eid-lookup results before completing awaiting-approval", async () => {
+test("orchestrator waits for eid-lookup results before completing (standalone oath completes done/person-lookup with enriched records)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
   let watcherCalled = false;
@@ -634,13 +636,13 @@ test("orchestrator waits for eid-lookup results before completing awaiting-appro
   );
 
   assert.equal(watcherCalled, true);
-  // Standalone oath parks at awaiting-approval (status running) once the child
-  // lookups return, carrying the enriched records.
-  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
-    (entry) => entry.status === "running" && entry.step === "awaiting-approval",
+  // ALL standalone runs (oath / EC / verify) complete `done` at person-lookup —
+  // none park at awaiting-approval. The terminal row carries the enriched records.
+  const terminalRow = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (entry) => entry.status === "done" && entry.step === "person-lookup",
   );
-  assert.ok(approval, "awaiting-approval row should be emitted as running after child lookup returns");
-  const records = JSON.parse(approval.data?.records ?? "[]") as Array<Record<string, unknown>>;
+  assert.ok(terminalRow, "standalone oath must complete done/person-lookup after child lookups return");
+  const records = JSON.parse(terminalRow.data?.records ?? "[]") as Array<Record<string, unknown>>;
   assert.equal(records[0]?.employeeId, "10873698");
   assert.deepEqual((records[0]?.verification as Record<string, unknown>)?.state, "verified");
   rmSync(dir, { recursive: true, force: true });
@@ -698,12 +700,13 @@ test("orchestrator patches child outcomes once when progress and final outcomes 
     },
   );
 
-  // Standalone oath parks at awaiting-approval (status running) carrying records.
-  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
-    (entry) => entry.status === "running" && entry.step === "awaiting-approval",
+  // ALL standalone runs (oath / EC / verify) complete `done` at person-lookup.
+  // The terminal row carries the enriched (patched) records.
+  const terminalRow = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (entry) => entry.status === "done" && entry.step === "person-lookup",
   );
-  assert.ok(approval, "awaiting-approval row should be emitted as running after child lookup returns");
-  const records = JSON.parse(approval.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
+  assert.ok(terminalRow, "standalone oath must complete done/person-lookup after child lookup returns");
+  const records = JSON.parse(terminalRow.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
   assert.equal(records[0]?.warnings?.filter((warning) => warning === "eid-lookup failed").length, 1);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -763,8 +766,9 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
   const pending = entries.find((entry: any) => entry.status === "pending" && entry.id === "ocr-oath-run-preemit-eid-r0");
   assert.ok(pending, "expected pre-emitted pending person-lookup row");
   assert.equal(pending.data.searchName, "Barahona Martell, Carlos D");
-  // Standalone oath parks at awaiting-approval (status running).
-  assert.equal(writtenEntries.some((entry: any) => entry.status === "running" && entry.step === "awaiting-approval"), true);
+  // ALL standalone runs (oath / EC / verify) complete `done` at person-lookup —
+  // none park at awaiting-approval.
+  assert.equal(writtenEntries.some((entry: any) => entry.status === "done" && entry.step === "person-lookup"), true);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1215,7 +1219,7 @@ test("rosterMode=download delegates to sharepoint-download via watchChildRuns", 
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approval", async () => {
+test("orchestrator surfaces failedPages and pageStatusSummary on terminal done/person-lookup row (standalone oath)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
 
@@ -1265,15 +1269,17 @@ test("orchestrator surfaces failedPages and pageStatusSummary on awaiting-approv
     },
   );
 
-  const approval = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
-    (e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval",
+  // ALL standalone runs (oath / EC / verify) complete `done` at person-lookup.
+  // failedPages and pageStatusSummary are carried on this terminal row.
+  const terminalRow = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>).find(
+    (e) => e.status === "done" && e.step === "person-lookup",
   );
-  assert.ok(approval, "awaiting-approval entry written");
-  const failedPages = JSON.parse(approval!.data!.failedPages ?? "[]") as Array<{ page: number; attempts: number }>;
+  assert.ok(terminalRow, "standalone oath must complete done/person-lookup");
+  const failedPages = JSON.parse(terminalRow!.data!.failedPages ?? "[]") as Array<{ page: number; attempts: number }>;
   assert.equal(failedPages.length, 1, "one failed page");
   assert.equal(failedPages[0].page, 2);
   assert.equal(failedPages[0].attempts, 1);
-  const summary = JSON.parse(approval!.data!.pageStatusSummary ?? "{}") as {
+  const summary = JSON.parse(terminalRow!.data!.pageStatusSummary ?? "{}") as {
     total: number; succeeded: number; failed: number;
   };
   assert.deepEqual(summary, { total: 3, succeeded: 2, failed: 1 });

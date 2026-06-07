@@ -261,16 +261,15 @@ export async function runOcrOrchestrator(
   const lookupDaemonFlags = runOptionsToDaemonFlags(input.runOptions);
   const serializedWorkerData = serializeRunOptionsForData(input.runOptions);
 
-  // A run COMPLETES `done` right after person-lookup (no parked review) only when
-  // there is nothing a downstream step could ever consume: it is STANDALONE (no
-  // `parentRunId` — approval ≡ delegation) AND the form has no approve fan-out
-  // (`verify` and any future read-only form). A standalone form WITH approve
-  // targets (oath / emergency-contact) still parks at `awaiting-approval` — its
-  // approve route is the production fan-out path (driven via a delegated
-  // operation) and the Tier-1 projection tests exercise it; only DELEGATED runs
-  // expose Approve in the UI. See the terminal-phase branch near the end.
-  const hasApproveTargets = Boolean(spec.approveTo || spec.approveDocumentTo);
-  const completesAfterLookup = !input.parentRunId && !hasApproveTargets;
+  // ALL standalone runs (no `parentRunId`) complete terminal `done` right after
+  // person-lookup — this applies to oath, emergency-contact, and verify alike.
+  // A standalone run has no downstream consumer (approval ≡ delegation): the
+  // Approve button is only shown for DELEGATED runs in the UI, so a standalone
+  // oath/EC run can never be approved anyway. Only a DELEGATED run (`parentRunId`
+  // set, OCR-as-a-sub-step of a target workflow) parks at `awaiting-approval`
+  // until the operator approves/discards. See the terminal-phase branch near the
+  // end and the 2026-06-06 lesson in `src/workflows/ocr/CLAUDE.md`.
+  const completesAfterLookup = !input.parentRunId;
 
   let lastAnnouncedPhase: string | undefined;
   // Latest rich preview payload (records + page metadata) emitted via
@@ -978,12 +977,14 @@ export async function runOcrOrchestrator(
     // whose outcomes patch each record), so the pipeline ends at person-lookup.
     const verifiedCount = countVerified(records);
 
-    // COMPLETES `done` after person-lookup — no parked review. A standalone run
-    // of a no-fan-out form (verify) has nothing to approve, so the run completes
-    // and the operator reads the read-only completeness card on a terminal `done`
-    // row. A failed lookup's per-record ↻ re-opens this done row (see
-    // verify-relookup.ts). The handler seeds this payload onto the kernel's
-    // terminal `done` so it stays a preview row.
+    // COMPLETES `done` after person-lookup — no parked review. ALL standalone
+    // runs (oath / emergency-contact / verify) complete here; only DELEGATED
+    // runs (parentRunId set) reach the awaiting-approval branch below. The
+    // Approve button is UI-gated on parentRunId, so a standalone run can never
+    // be approved. The operator reads a read-only completeness card on the
+    // terminal `done` row. A failed lookup's per-record ↻ re-opens this done
+    // row (see verify-relookup.ts). The handler seeds this payload onto the
+    // kernel's terminal `done` so it stays a preview row.
     if (completesAfterLookup) {
       log.success({
         message: `[ocr] review complete — ${records.length} record(s), ${verifiedCount} verified`,

@@ -44,7 +44,11 @@ workflows, ocr: { formType } })`):
    PDF (prefers the real fixture e.g. `tests/data/multiple-oath.pdf`; falls back
    to a synthetic one-pager if it can't render headlessly — records come from the
    override regardless) and enqueue the OCR run. Returns `{ sessionId, runId,
-   usedFixture }`. Sync on `rt.waitForEvent("ocr:awaiting-approval", { runId })`.
+   usedFixture }`. Sync on `rt.waitForEvent("ocr:review-complete", { runId })` —
+   a STANDALONE OCR run completes `done` after person-lookup (it never parks at
+   `awaiting-approval`; only DELEGATED runs do). The approve-fan-out tests still
+   drive the production-preserved standalone approve route via `rt.approveOcr`
+   after the run completes.
 3. **`rt.approveOcr({ sessionId, runId, records, childWorkflows })`** — drive the
    REAL `buildOcrApproveHandler`: the real `approveTo.deriveInput/deriveItemId/
    canFanOut`, the once-per-document `approveDocumentTo` fan-out,
