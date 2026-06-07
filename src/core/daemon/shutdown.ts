@@ -3,7 +3,7 @@ import { unlinkSync } from 'node:fs'
 import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
 import { runRegistry } from '../run-registry.js'
-import { findAliveDaemons } from './registry.js'
+import { findAliveDaemons, filterResponsiveDaemons } from './registry.js'
 import { wakeDaemons } from './client.js'
 import {
   readQueueState,
@@ -304,10 +304,27 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
       // `cancelled` on top of an authoritative failure row).
       // Otherwise emit shutdown cleanup — including repair when SQLite is
       // terminal but JSONL still shows pending/running (crash window).
+      // Reassign is only SAFE if a peer will ACTUALLY finish the item.
+      // `otherAlive` (from findAliveDaemons) deliberately trusts an
+      // unreachable-but-PID-alive lockfile — a wedged/zombie daemon whose
+      // event loop never wakes to claim work. Requeuing to such a peer parks
+      // the item `queued` forever. Probe each peer's `/whoami` and only
+      // reassign to one that POSITIVELY responds; if none do, fall through to
+      // the fail-loud branch (the operator asked to SEE work fail, not have it
+      // silently stranded waiting for a dead-worker recovery sweep that may
+      // never come). Only probe when reassign was actually requested.
+      const responsivePeers =
+        state.reassignInFlight && otherAlive.length > 0 && inFlightSnapshot.taskId
+          ? await filterResponsiveDaemons(otherAlive)
+          : []
       if (skipShutdownEmit) {
         state.activeRun = null
-      } else if (state.reassignInFlight && otherAlive.length > 0 && inFlightSnapshot.taskId) {
-        // Per-instance stop with a surviving peer — hand the item back to the
+      } else if (
+        state.reassignInFlight &&
+        responsivePeers.length > 0 &&
+        inFlightSnapshot.taskId
+      ) {
+        // Per-instance stop with a RESPONSIVE peer — hand the item back to the
         // queue so a live daemon finishes it (same runId/attempt). Safety-net
         // mirror of the claim-loop reassign path for the rare case where the
         // item is still in-flight at cleanup time. Best-effort: if the
@@ -332,12 +349,55 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
             },
             trackerDir,
           )
-          await wakeDaemons(otherAlive)
+          await wakeDaemons(responsivePeers)
           log.step(
-            `[Daemon ${wf.config.name}/${instanceId}] per-instance stop — reassigned in-flight item ${inFlightSnapshot.itemId} to ${otherAlive.length} surviving daemon(s)`,
+            `[Daemon ${wf.config.name}/${instanceId}] per-instance stop — reassigned in-flight item ${inFlightSnapshot.itemId} to ${responsivePeers.length} responsive daemon(s)`,
           )
         } catch {
           /* best-effort — dead-worker recovery on a peer re-queues it */
+        }
+        state.activeRun = null
+      } else if (state.reassignInFlight && otherAlive.length > 0) {
+        // Reassign was requested and a peer LOOKS alive (PID + lockfile), but
+        // none answered `/whoami` — the peers are wedged/zombie. Fail the item
+        // loudly rather than requeue it to a daemon that will never claim it.
+        const nowIso = new Date().toISOString()
+        const failReason =
+          'Daemon stopped and no responsive peer daemon was available to finish this item.'
+        log.warn(
+          `[Daemon ${wf.config.name}/${instanceId}] per-instance stop — ${otherAlive.length} peer(s) appeared alive but none responded to /whoami; failing in-flight item ${inFlightSnapshot.itemId} instead of parking it`,
+        )
+        try {
+          await markItemFailed(
+            wf.config.name,
+            inFlightSnapshot.itemId,
+            failReason,
+            inFlightSnapshot.runId,
+            trackerDir,
+          )
+        } catch {
+          /* best-effort — tracker row below is the user-visible signal */
+        }
+        try {
+          const parentRunId = existingTask?.parentRunId
+          emitTrackerRow(
+            {
+              workflow: wf.config.name,
+              timestamp: nowIso,
+              id: inFlightSnapshot.itemId,
+              runId: inFlightSnapshot.runId,
+              status: 'failed',
+              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId, {
+                runId: inFlightSnapshot.runId,
+                trackerDir,
+              }) as StampedData,
+              ...(parentRunId ? { parentRunId } : {}),
+              error: failReason,
+            },
+            trackerDir,
+          )
+        } catch {
+          /* best-effort */
         }
         state.activeRun = null
       } else if (state.forceShutdown) {

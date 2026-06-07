@@ -151,6 +151,42 @@ async function probeWhoami(
   }
 }
 
+/**
+ * Strict liveness check for a SINGLE already-discovered peer daemon: hits its
+ * `/whoami` and returns true ONLY when the handshake positively MATCHES the
+ * daemon's identity. Unlike `findAliveDaemons` — which deliberately trusts an
+ * unreachable-but-PID-alive lockfile (to avoid orphaning a momentarily-busy
+ * daemon and spawning a duplicate) — this returns FALSE for `unreachable` /
+ * `mismatch`. Use it when a wrong answer is costly: at shutdown, "is there a
+ * peer that will ACTUALLY pick up a reassigned item?" must not be satisfied by
+ * a wedged/zombie daemon whose PID is alive but whose event loop never wakes
+ * to claim work — otherwise the reassigned item sits `queued` forever instead
+ * of failing loud.
+ */
+export async function isDaemonResponsive(daemon: Daemon, timeoutMs = 1500): Promise<boolean> {
+  const probe = await probeWhoami(
+    daemon.port,
+    { workflow: daemon.workflow, instanceId: daemon.instanceId },
+    timeoutMs,
+  )
+  return probe === 'match'
+}
+
+/**
+ * Filter a peer set down to daemons that POSITIVELY respond to `/whoami`
+ * right now (probed in parallel). Built for the shutdown reassign decision:
+ * the candidate must be reachable AND identity-matched, not merely PID-alive.
+ */
+export async function filterResponsiveDaemons(
+  daemons: Daemon[],
+  timeoutMs = 1500,
+): Promise<Daemon[]> {
+  const results = await Promise.all(
+    daemons.map(async (d) => ((await isDaemonResponsive(d, timeoutMs)) ? d : null)),
+  )
+  return results.filter((d): d is Daemon => d !== null)
+}
+
 function safeUnlink(path: string): void {
   try {
     unlinkSync(path)
