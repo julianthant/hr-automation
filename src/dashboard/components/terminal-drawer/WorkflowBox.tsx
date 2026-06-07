@@ -11,10 +11,8 @@ import {
 import type { AuthState, WorkflowInstanceState } from "@/components/shared/types";
 import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
-import { useConfirm } from "@/components/shared/useConfirm";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
-import { useDaemons } from "@/components/hooks/useDaemons";
 import { useNow } from "@/components/hooks/useNow";
 import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
@@ -240,98 +238,69 @@ function deriveSessionCardCopy(args: {
 }
 
 /**
- * Mono-pill stop button. Matches the elapsed-time pill family (same
- * height, mono font, same border radius) so the right-stack reads as one
- * visual unit. A click sends force-stop semantics immediately so stopped
- * daemons, browser processes, stale sessions, and queued rows clear in one
- * action.
+ * Mono-pill stop button. Matches the elapsed-time pill family (same height,
+ * mono font, same border radius) so the right-stack reads as one visual unit.
+ *
+ * A click stops THIS daemon only (per-instance) via `/api/daemon/stop-instance`
+ * — the workflow's other daemons keep running. The daemon hands its in-flight
+ * item to a surviving peer when one exists, or fails it when this is the last
+ * daemon. (The workflow-scoped "stop every daemon" action lives on the queue
+ * toolbar's StopAllButton, not here.)
  */
 function StopPill({
   workflow,
   instance,
-  totalDaemonCount,
 }: {
   workflow: string;
   instance: string;
-  /** Total alive daemons for this workflow (across all instance cards).
-   * When >1, the stop click tears down EVERY daemon — the label and confirm
-   * dialog reflect that blast radius truthfully so the operator can't
-   * accidentally over-stop. */
-  totalDaemonCount: number;
 }) {
   const [sending, setSending] = useState(false);
-  const { confirm, confirmDialog } = useConfirm();
 
   const postStop = async () => {
-    if (totalDaemonCount > 1) {
-      const ok = await confirm({
-        tone: "destructive",
-        title: `Stop all ${totalDaemonCount} ${workflow} daemons?`,
-        description:
-          `Stop is workflow-scoped, not per-card — this tears down every ${workflow} ` +
-          `daemon currently alive, including any in-flight items.`,
-        confirmLabel: `Stop all ${totalDaemonCount}`,
-      });
-      if (!ok) return;
-    }
     setSending(true);
-    const toastId = toast.loading(`Stopping ${workflow}…`);
+    const toastId = toast.loading(`Stopping ${displayInstance(instance)}…`);
     try {
-      const res = await fetch("/api/daemon/stop", {
+      const res = await fetch("/api/daemon/stop-instance", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workflow, force: true }),
+        body: JSON.stringify({ workflow, instance }),
       });
       const json = (await res.json()) as {
         ok: boolean;
-        stopped?: number;
-        daemonsStopped?: number;
-        processesKilled?: number;
+        daemonStopped?: boolean;
         browsersKilled?: number;
-        queuedCancelled?: number;
-        phantomsCleared?: number;
+        reassignable?: boolean;
         error?: string;
       };
       if (!res.ok || !json.ok) {
-        toast.error(`Couldn't stop ${workflow}`, { id: toastId, description: json.error ?? `HTTP ${res.status}` });
+        toast.error(`Couldn't stop this ${workflow} daemon`, {
+          id: toastId,
+          description: json.error ?? `HTTP ${res.status}`,
+        });
         return;
       }
-      const daemons = json.daemonsStopped ?? 0;
-      const procs = json.processesKilled ?? 0;
-      const browsers = json.browsersKilled ?? 0;
-      const queued = json.queuedCancelled ?? 0;
-      const phantoms = json.phantomsCleared ?? 0;
-      const total = json.stopped ?? daemons + procs;
-      const parts: string[] = [];
-      if (daemons > 0) parts.push(`${daemons} session${daemons === 1 ? "" : "s"}`);
-      if (procs > 0) parts.push(`${procs} process${procs === 1 ? "" : "es"}`);
-      if (browsers > 0) parts.push(`${browsers} browser${browsers === 1 ? "" : "s"}`);
-      if (queued > 0) parts.push(`${queued} queued item${queued === 1 ? "" : "s"}`);
-      if (phantoms > 0) parts.push(`${phantoms} stale session${phantoms === 1 ? "" : "s"}`);
-      const detail = parts.length > 0 ? parts.join(" + ") : "nothing alive";
-      if (total === 0 && queued === 0 && browsers === 0 && phantoms === 0) {
-        toast.warning(`Nothing to stop — no active ${workflow} sessions, processes, browsers, or queued items`, { id: toastId });
-      } else if (total === 0 && queued === 0 && browsers === 0 && phantoms > 0) {
-        toast.success(
-          `Cleared ${phantoms} stale ${workflow} session${phantoms === 1 ? "" : "s"} from the panel`,
-          { id: toastId },
-        );
+      if (!json.daemonStopped) {
+        toast.warning(`No live ${workflow} daemon found for this card`, { id: toastId });
+      } else if (json.reassignable) {
+        toast.success(`Stopped — any in-flight item moves to another ${workflow} daemon`, {
+          id: toastId,
+        });
       } else {
-        toast.success(`Stop sent — ${detail} cleared`, { id: toastId });
+        toast.success(`Stopped — this was the last ${workflow} daemon`, { id: toastId });
       }
     } catch (err) {
-      toast.error(`Couldn't stop ${workflow}`, { id: toastId, description: (err as Error).message });
+      toast.error(`Couldn't stop this ${workflow} daemon`, {
+        id: toastId,
+        description: (err as Error).message,
+      });
     } finally {
       setSending(false);
     }
   };
 
-  const title = totalDaemonCount > 1
-    ? `Stop ALL ${totalDaemonCount} ${workflow} daemons (workflow-scoped)`
-    : `Stop the ${workflow} daemon now`;
+  const title = `Stop this ${workflow} daemon (other ${workflow} daemons keep running)`;
 
   return (
-    <>
     <button
       type="button"
       disabled={sending}
@@ -357,10 +326,8 @@ function StopPill({
       ) : (
         <span aria-hidden className="text-[11px] leading-none opacity-90">×</span>
       )}
-      {totalDaemonCount > 1 ? `stop all ${totalDaemonCount}` : "stop"}
+      stop
     </button>
-    {confirmDialog}
-    </>
   );
 }
 
@@ -403,21 +370,8 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
   const { focusedInstance, setFocusedInstance } = useTerminalDrawer();
   const meta = useWorkflow(workflowName ?? "");
   const queueDepth = useQueueDepth();
-  const daemons = useDaemons();
   const elapsed = useElapsed(startedAt ?? null);
   const isFocused = focusedInstance === instance;
-  // Total daemons currently alive for this card's workflow. Driven by
-  // /api/daemons polling. Used by StopPill to make blast radius explicit
-  // when multiple daemons share the workflow — the stop button hits
-  // /api/daemon/stop which is workflow-scoped, not per-card. With a fresh
-  // daemon name allocator (generateInstanceName) and the lockfile
-  // self-heal in place, multi-daemon scenarios should each render as
-  // their own WorkflowBox via the SSE sessions topic; this count guards
-  // against the rare case where two daemons race the instance allocator
-  // and aggregate visually.
-  const totalDaemonsForWorkflow = workflowName
-    ? daemons.filter((d) => d.workflow === workflowName).length
-    : 0;
 
   const queued = workflowName ? queueDepth[workflowName] ?? 0 : 0;
 
@@ -546,7 +500,6 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
               <StopPill
                 workflow={workflowName}
                 instance={instance}
-                totalDaemonCount={totalDaemonsForWorkflow}
               />
             ) : (
               <span className="h-[20px]" aria-hidden />

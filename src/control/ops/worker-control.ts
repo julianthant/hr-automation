@@ -5,11 +5,20 @@ import {
   findAliveDaemons,
   spawnDaemon,
   daemonsDir,
+  invalidateAliveDaemonsCache,
 } from "../../core/daemon/registry.js";
 import { queueFilePath } from "../../core/daemon/queue.js";
-import { stopDaemons } from "../../core/daemon/client.js";
+import { stopDaemons, stopDaemon } from "../../core/daemon/client.js";
 import type { Daemon } from "../../core/daemon/types.js";
 import type { BrowserProcessRow, WorkerRow } from "../../core/daemon/worker-store.js";
+import {
+  readSessionEvents,
+  emitWorkflowEnd,
+  workflowNameFromInstance,
+  type SessionEvent,
+} from "../../tracker/session-events.js";
+import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import { openControlStores } from "./shared.js";
 
 export interface WorkerCommandRequest {
@@ -49,6 +58,26 @@ export interface SpawnDaemonRequest {
 export interface StopDaemonsRequest {
   workflow?: string;
   force?: boolean;
+}
+
+export interface StopDaemonInstanceRequest {
+  workflow: string;
+  /** Session-drawer instance label of the daemon to stop (e.g. "Person Lookup 2"). */
+  instance: string;
+  force?: boolean;
+}
+
+export interface StopDaemonInstanceResult {
+  ok: boolean;
+  workflow: string;
+  instance: string;
+  /** True if we sent /stop to a live daemon or killed its pid. */
+  daemonStopped: boolean;
+  /** Orphaned chromium PIDs SIGKILL'd for this instance. */
+  browsersKilled: number;
+  /** True if at least one OTHER daemon remains to absorb a reassigned item. */
+  reassignable: boolean;
+  error?: string;
 }
 
 async function requestDaemonStopWorker(worker: WorkerRow | null): Promise<boolean> {
@@ -388,5 +417,117 @@ export function buildDaemonsStopHandler(dir: string) {
       total += stopped;
     }
     return { ok: true, stopped: total };
+  };
+}
+
+/**
+ * Stop ONE daemon by its session-drawer instance label (e.g. "Person Lookup
+ * 2"), leaving the workflow's other daemons running. Sends the daemon a
+ * `/stop` with `reassign: true`, so the daemon's own shutdown cleanup hands
+ * its in-flight item to a surviving peer when one exists, or fails the item
+ * when it's the last daemon (see `runDaemonShutdownCleanup`). This is the
+ * dashboard session-card per-instance stop — distinct from the workflow-scoped
+ * `stopDaemons` (StopAllButton), which tears down every daemon and fails
+ * in-flight work.
+ *
+ * The instance → daemon mapping goes through session events: the instance's
+ * `workflow_start.pid` identifies the daemon process; we match it to a live
+ * lockfile to reach its port for a graceful `/stop`, falling back to a direct
+ * signal if the lockfile is already gone. The session card is closed
+ * immediately via a synthesized `workflow_end` (the daemon's own end event can
+ * lag behind its teardown).
+ */
+export function buildStopDaemonInstanceHandler(dir: string) {
+  return async (req: StopDaemonInstanceRequest): Promise<StopDaemonInstanceResult> => {
+    const workflow = req.workflow?.trim();
+    const instance = req.instance?.trim();
+    const force = req.force !== false; // default to force teardown
+    const fail = (error: string): StopDaemonInstanceResult => ({
+      ok: false,
+      workflow: workflow ?? "",
+      instance: instance ?? "",
+      daemonStopped: false,
+      browsersKilled: 0,
+      reassignable: false,
+      error,
+    });
+    if (!workflow) return fail("workflow is required");
+    if (!instance) return fail("instance is required");
+
+    // Resolve the instance's daemon pid + tracked browser pids from session
+    // events, and whether the card was already closed.
+    const events = readSessionEvents(dir);
+    let startEvent: SessionEvent | undefined;
+    let alreadyEnded = false;
+    const browserPids = new Set<number>();
+    for (const event of events) {
+      if (event.workflowInstance !== instance) continue;
+      if (workflowNameFromInstance(event.workflowInstance) !== workflow) continue;
+      if (event.type === "workflow_start") startEvent = event;
+      if (event.type === "workflow_end") alreadyEnded = true;
+      if (event.type === "browser_launch" && typeof event.chromiumPid === "number") {
+        browserPids.add(event.chromiumPid);
+      }
+    }
+    const pid = startEvent?.pid;
+
+    const alive = await findAliveDaemons(workflow, dir);
+    const target = pid ? alive.find((d) => d.pid === pid) : undefined;
+    // Whether another daemon will survive to absorb a reassigned item — best-
+    // effort hint for the operator toast; the daemon makes the real decision.
+    const reassignable = alive.some((d) => d.pid !== pid);
+
+    let daemonStopped = false;
+    if (target) {
+      // Graceful: the daemon's own cleanup reassigns or fails its in-flight
+      // item. `reassign: true` is what flips it from the fail-on-stop default.
+      await stopDaemon(target, force, true);
+      daemonStopped = true;
+    } else if (pid && pid !== process.pid) {
+      // No live lockfile match (race, or lockfile already unlinked) — fall back
+      // to a direct signal. This skips the daemon's reassignment cleanup, but
+      // a peer's dead-worker recovery sweep re-queues any orphaned claim.
+      try {
+        process.kill(pid, force ? "SIGKILL" : "SIGTERM");
+        daemonStopped = true;
+      } catch {
+        /* already dead */
+      }
+    }
+
+    // SIGKILL the instance's tracked chromium processes (best-effort).
+    let browsersKilled = 0;
+    if (force) {
+      for (const bpid of browserPids) {
+        try {
+          process.kill(bpid, 0);
+        } catch {
+          continue;
+        }
+        try {
+          process.kill(bpid, "SIGKILL");
+          browsersKilled += 1;
+        } catch (err) {
+          log.warn(
+            `[stop-instance] failed to SIGKILL chromium pid=${bpid} for '${instance}': ${errorMessage(err)}`,
+          );
+        }
+      }
+    }
+
+    // Close the session card now — the daemon's own workflow_end can lag its
+    // teardown, and a phantom card would otherwise linger.
+    if (!alreadyEnded) {
+      try {
+        emitWorkflowEnd(instance, "failed", dir);
+      } catch (err) {
+        log.warn(
+          `[stop-instance] failed to synthesize workflow_end for '${instance}': ${errorMessage(err)}`,
+        );
+      }
+    }
+
+    invalidateAliveDaemonsCache(workflow, dir);
+    return { ok: true, workflow, instance, daemonStopped, browsersKilled, reassignable };
   };
 }

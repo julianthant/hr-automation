@@ -7,6 +7,7 @@ import { jsonResponse, preflightResponse } from "./responses.js";
 import { registerBaseRoutes } from "./routes/base.js";
 import { registerCaptureRoutes } from "./routes/capture.js";
 import { registerDaemonStopRoute } from "./routes/daemon-stop.js";
+import { registerDaemonStopInstanceRoute } from "./routes/daemon-stop-instance.js";
 import { registerEnqueueRoute } from "./routes/enqueue.js";
 import { registerHubRoute } from "./routes/hub.js";
 import { registerFileRoutes } from "./routes/files.js";
@@ -51,6 +52,7 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   registerSharePointRoutes(app);
   registerEnqueueRoute(app, deps);
   registerDaemonStopRoute(app, deps);
+  registerDaemonStopInstanceRoute(app, deps);
   registerOpsRoutes(app, deps);
   registerOcrRoutes(app, deps);
   registerOathUploadRoutes(app, deps);

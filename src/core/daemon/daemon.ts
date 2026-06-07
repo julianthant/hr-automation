@@ -10,7 +10,9 @@ import {
   randomInstanceId,
   writeLockfile,
   ensureDaemonsDir,
+  findAliveDaemons,
 } from './registry.js'
+import { wakeDaemons } from './client.js'
 import {
   claimNextItem,
   markItemCancelled,
@@ -80,10 +82,13 @@ const DEFAULT_LOCK_HEAL_MS = 10_000
  *   - Session lifetime (one `Session.launch` on startup, `session.close`
  *     on shutdown)
  *   - Shared-queue claim loop with 15-min keepalive + orphan recovery
- *   - SIGINT/SIGTERM handlers — in-flight item always marked failed
- *     (no graceful re-queue path as of 2026-04-28; per Cluster A spec
- *     every shutdown is force semantics). Queued items also fail via
- *     the outer-finally cleanup.
+ *   - SIGINT/SIGTERM handlers fail the in-flight item (no peer to hand it
+ *     to on a signal). The dashboard PER-INSTANCE stop (`/stop` with
+ *     `reassign: true`) instead hands the in-flight item back to a surviving
+ *     daemon when one exists, and only fails it when this is the last daemon
+ *     (2026-06-07; supersedes the 2026-04-28 always-fail rule now that the
+ *     operator runs a pool). Queued items are left for surviving peers, or
+ *     failed by the last daemon's outer-finally cleanup.
  *
  * Does NOT install its own SIGINT handler via withBatchLifecycle —
  * we pass `ownSigint: false` so batch-lifecycle skips its
@@ -107,6 +112,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     forceShutdown: false,
     drainOnlyShutdown: false,
     shuttingDown: false,
+    reassignInFlight: false,
     // Contract 5 Phase 1 — `activeRun` collapses the legacy
     // `inFlight` / `cancelTarget` / `currentRunController` triple into a
     // single `RunHandle` reference. The daemon's claim loop sets this
@@ -203,6 +209,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     setForceShutdown: (value) => { state.forceShutdown = value },
     setDrainOnlyShutdown: (value) => { state.drainOnlyShutdown = value },
     setShuttingDown: (value) => { state.shuttingDown = value },
+    setReassignInFlight: (value) => { state.reassignInFlight = value },
     resolveWake: () => { state.wakeResolve?.() },
     resolveShutdown: () => { state.shutdownResolve?.() },
     abortLaunchAndKillSession,
@@ -553,42 +560,122 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 const isCancelOutcome = cancelRequestedForThisItem || (!r.ok && r.kind === 'cancelled')
 
                 if (isCancelOutcome) {
-                  const cancelError =
-                    !r.ok && r.kind === 'cancelled'
-                      ? r.error
-                      : 'cancelled by user from dashboard'
-                  await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
-                  if (item.taskId) {
-                    taskStore.markDependencyFromChildTerminal({
-                      childTaskId: item.taskId,
-                      childState: 'cancelled',
-                    })
-                  }
-                  // Always overwrite with a cancelled tracker row, even if
-                  // the handler returned r.ok=true (which would have written
-                  // a status:done row). The latest tracker entry wins on
-                  // dedup, so this row makes the badge show Cancelled.
-                  emitTrackerRow(
-                    {
-                      workflow: wf.config.name,
-                      timestamp: new Date().toISOString(),
-                      id: item.id,
-                      runId,
-                      status: 'failed',
-                      step: 'cancelled',
-                      // buildShutdownTrackerData always stamps `data.archetype`
-                      // (via buildHttpPendingData or its fallback path) so the
-                      // returned record satisfies StampedData at runtime.
-                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                  // An aborted controller surfaces three distinct stop intents.
+                  // Resolve the live peer set ONCE (only when a stop is in
+                  // play — a deliberate /cancel-current leaves the daemon alive
+                  // and never needs it). The lockfile is still on disk here
+                  // (unlinked later in runDaemonShutdownCleanup), so self is in
+                  // the alive set — filter it out to get true peers.
+                  const peers =
+                    state.reassignInFlight || state.forceShutdown
+                      ? (await findAliveDaemons(wf.config.name, trackerDir)).filter(
+                          (d) => d.instanceId !== instanceId,
+                        )
+                      : []
+                  const reassign =
+                    state.reassignInFlight && peers.length > 0 && Boolean(item.taskId)
+                  if (reassign && item.taskId) {
+                    // Per-instance stop with a surviving peer → hand the item
+                    // back to the queue and wake the peers so an idle one
+                    // finishes it. The attempt (and thus runId) is preserved by
+                    // returnTaskToQueued, so the run continues under the same id
+                    // on the new daemon. No terminal row, no dependency settle —
+                    // the work isn't done, just moving.
+                    taskStore.returnTaskToQueued({ taskId: item.taskId })
+                    // Re-emit a pending row so the dashboard shows the item back
+                    // in the queue instead of frozen on the dead session card.
+                    emitTrackerRow(
+                      {
+                        workflow: wf.config.name,
+                        timestamp: new Date().toISOString(),
+                        id: item.id,
                         runId,
-                        trackerDir,
-                      }) as StampedData,
-                      ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                      error: cancelError,
-                    },
-                    trackerDir,
-                  )
-                  emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
+                        status: 'pending',
+                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                          runId,
+                          trackerDir,
+                        }) as StampedData,
+                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                      },
+                      trackerDir,
+                    )
+                    await wakeDaemons(peers)
+                    log.step(
+                      `[Daemon ${instanceId}] per-instance stop — reassigned in-flight item ${item.id} to ${peers.length} surviving daemon(s)`,
+                    )
+                  } else if (state.forceShutdown) {
+                    // Force-stop with no spare to absorb the item (stop-all,
+                    // SIGINT/SIGTERM, or the last daemon stopped per-instance).
+                    // The operator asked to SEE these fail, so emit a real
+                    // failed row (NO step:"cancelled" sentinel → red Failed
+                    // badge, retriable), not the orange Cancelled used for a
+                    // deliberate per-item cancel.
+                    const failError =
+                      'Daemon stopped and no other daemon is available to finish this item.'
+                    await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
+                    if (item.taskId) {
+                      taskStore.markDependencyFromChildTerminal({
+                        childTaskId: item.taskId,
+                        childState: 'failed',
+                      })
+                    }
+                    emitTrackerRow(
+                      {
+                        workflow: wf.config.name,
+                        timestamp: new Date().toISOString(),
+                        id: item.id,
+                        runId,
+                        status: 'failed',
+                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                          runId,
+                          trackerDir,
+                        }) as StampedData,
+                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                        error: failError,
+                      },
+                      trackerDir,
+                    )
+                  } else {
+                    // Deliberate per-item cancel (/cancel-current); the daemon
+                    // stays alive and claims the next item. Renders Cancelled
+                    // (orange) via the step:"cancelled" sentinel.
+                    const cancelError =
+                      !r.ok && r.kind === 'cancelled'
+                        ? r.error
+                        : 'cancelled by user from dashboard'
+                    await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
+                    if (item.taskId) {
+                      taskStore.markDependencyFromChildTerminal({
+                        childTaskId: item.taskId,
+                        childState: 'cancelled',
+                      })
+                    }
+                    // Always overwrite with a cancelled tracker row, even if
+                    // the handler returned r.ok=true (which would have written
+                    // a status:done row). The latest tracker entry wins on
+                    // dedup, so this row makes the badge show Cancelled.
+                    emitTrackerRow(
+                      {
+                        workflow: wf.config.name,
+                        timestamp: new Date().toISOString(),
+                        id: item.id,
+                        runId,
+                        status: 'failed',
+                        step: 'cancelled',
+                        // buildShutdownTrackerData always stamps `data.archetype`
+                        // (via buildHttpPendingData or its fallback path) so the
+                        // returned record satisfies StampedData at runtime.
+                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                          runId,
+                          trackerDir,
+                        }) as StampedData,
+                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                        error: cancelError,
+                      },
+                      trackerDir,
+                    )
+                    emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
+                  }
                 } else if (r.ok) {
                   await markItemDone(wf.config.name, item.id, runId, trackerDir)
                   if (item.taskId) {
@@ -611,10 +698,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 // returns the workflow surface to a clean starting state
                 // for the next claim. Reset failures are best-effort: a
                 // failed reset won't block the next item from claiming.
-                // Fires for both cooperative + force-cancel paths (force
-                // navigates pages to about:blank, so reset is required to
-                // restore the resetUrl before the next claim).
-                if (isCancelOutcome) {
+                // Fires only for a per-item cancel where the daemon STAYS
+                // alive and will claim the next item. On a stop (reassign or
+                // fail), the daemon is tearing chromium down, so resetting
+                // pages is pointless and would just log best-effort warnings.
+                if (isCancelOutcome && !state.shuttingDown) {
                   for (const sys of wf.config.systems) {
                     try {
                       await session.reset(sys.id)
