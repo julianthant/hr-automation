@@ -58,6 +58,13 @@ export function labelVariants(label: string): string[] {
  * The label is stripped from any returned text (strategies 4/5 can capture the
  * label + value in one node) so the caller always gets just the value.
  *
+ * Perf (2026-06-07): timeout per attempt dropped from 2 000 ms to 500 ms.
+ * Present elements resolve near-instantly; only missing fields pay the full
+ * timeout. Worst case across both variants and all five strategies:
+ * 2 × 5 × 500 ms = 5 s per missing field (was up to 2 × 5 × 2 000 ms = 20 s).
+ * The short-timeout loop is kept (rather than a single `.or()` chain) so an
+ * empty-text strategy is still skipped and later strategies can fill the gap.
+ *
  * IMPORTANT (2026-06-07): strategies 3-5 are strictly-additive permissiveness
  * widenings that have NOT been verified against the live CRM record page (needs
  * auth + a real onboarding record). They only ever run as FALLBACKS after the
@@ -70,9 +77,6 @@ export async function extractField(
   label: string,
   selectors: CrmRecordFieldSelectors = record,
 ): Promise<string | null> {
-  // Visualforce layout: <th class="labelCol"><label>Field:</label></th>
-  //                     <td class="data2Col">value</td>
-
   const buildStrategy = (variant: string) => [
     selectors.thLabelFollowingTd(page, variant),
     selectors.tdLabelFollowingTd(page, variant),
@@ -84,7 +88,7 @@ export async function extractField(
   for (const variant of labelVariants(label)) {
     for (const locator of buildStrategy(variant)) {
       try {
-        const text = await locator.first().textContent({ timeout: 2_000 });
+        const text = await locator.first().textContent({ timeout: 500 });
         if (text && text.trim()) {
           const value = stripLabel(text.trim(), variant);
           if (value) return value;
