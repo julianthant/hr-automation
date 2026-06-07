@@ -14,6 +14,36 @@ describe("summarizeOcrResponse", () => {
     assert.equal(summarizeOcrResponse(json), "1 record · emergency-contact: Nadia Goiset");
   });
 
+  it("reads an EC record's name from the nested employee.name field (F9)", () => {
+    // Realistic EC shape: the employee name lives at employee.name, not at the
+    // top level. Previously this logged as `emergency-contact: —`.
+    const json = [
+      {
+        formKind: "emergency-contact",
+        employee: { name: "Nadia Goiset", employeeId: "10012345" },
+        emergencyContact: { name: "Robin Goiset", relationship: "Spouse" },
+      },
+    ];
+    assert.equal(summarizeOcrResponse(json), "1 record · emergency-contact: Nadia Goiset");
+  });
+
+  it("falls back to emergencyContact.name then employee.employeeId for a name-blank EC record", () => {
+    // No employee.name (blank on paper) → fall to the contact name.
+    assert.equal(
+      summarizeOcrResponse([
+        { formKind: "emergency-contact", employee: { name: null, employeeId: "10099887" }, emergencyContact: { name: "Robin Goiset" } },
+      ]),
+      "1 record · emergency-contact: Robin Goiset",
+    );
+    // Neither name present → fall to the nested EID.
+    assert.equal(
+      summarizeOcrResponse([
+        { formKind: "emergency-contact", employee: { name: null, employeeId: "10099887" }, emergencyContact: { name: null } },
+      ]),
+      "1 record · emergency-contact: 10099887",
+    );
+  });
+
   it("joins multiple records with a middle dot and pluralizes the count", () => {
     const json = [
       { formKind: "oath", printedName: "Nadia, K" },

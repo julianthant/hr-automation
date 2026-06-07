@@ -73,7 +73,14 @@ function readKeys(prefix: string, max = 8): string[] {
  * full data still rides through to the OCR review pane; the log just summarizes.
  */
 export function summarizeOcrResponse(json: unknown): string {
-  const records = Array.isArray(json) ? json : json == null ? [] : [json];
+  let records: unknown[];
+  if (Array.isArray(json)) {
+    records = json;
+  } else if (json == null) {
+    records = [];
+  } else {
+    records = [json];
+  }
   if (records.length === 0) return "0 records";
   const SHOWN = 4;
   const parts = records.slice(0, SHOWN).map(describeOcrRecord);
@@ -83,14 +90,28 @@ export function summarizeOcrResponse(json: unknown): string {
   return `${head} · ${parts.join(" · ")}${suffix}`;
 }
 
+/** Read `obj[key]` as a non-blank trimmed string, or null. Safe on unknown shapes. */
+function nestedString(obj: unknown, key: string): string | null {
+  if (!obj || typeof obj !== "object") return null;
+  const v = (obj as Record<string, unknown>)[key];
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
 /** `formKind: name` for one OCR record, defensively narrowing unknown shapes. */
 function describeOcrRecord(rec: unknown): string {
   if (!rec || typeof rec !== "object") return "—";
   const r = rec as Record<string, unknown>;
   const kind = typeof r.formKind === "string" && r.formKind.trim() ? r.formKind.trim() : null;
+  // Oath records carry the name at top level (printedName); EC records nest it
+  // under employee.name (or emergencyContact.name on a contact-only page). Fall
+  // back across all three + the EID (top-level for oath, employee.employeeId for
+  // EC) so an EC row doesn't log as `emergency-contact: —`.
   const name =
-    (typeof r.printedName === "string" && r.printedName.trim()) ||
-    (typeof r.employeeId === "string" && r.employeeId.trim()) ||
+    nestedString(r, "printedName") ||
+    nestedString(r.employee, "name") ||
+    nestedString(r.emergencyContact, "name") ||
+    nestedString(r, "employeeId") ||
+    nestedString(r.employee, "employeeId") ||
     "—";
   return kind ? `${kind}: ${name}` : name;
 }
