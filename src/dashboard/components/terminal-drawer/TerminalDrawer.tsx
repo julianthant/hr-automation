@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Terminal as TerminalIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { WorkflowInstanceState } from "@/components/shared/types";
 import { useClock } from "@/components/hooks/useClock";
 import { useSessions } from "@/components/hooks/useSessions";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
@@ -10,6 +11,33 @@ import { WorkflowBox } from "./WorkflowBox";
 const BAR_HEIGHT = 36;
 const MAX_DRAWER_HEIGHT = 320;
 const MIN_BODY_HEIGHT = 32;
+
+/**
+ * Best-effort "would another daemon absorb this card's in-flight item?" hint,
+ * computed from the live session list. A peer counts only when it is a SEPARATE
+ * instance of the SAME workflow that is currently alive (`pidAlive`) and active
+ * — i.e. a healthy daemon that could pick up a reassigned claim. Crashed-on-
+ * launch instances and the card's own instance are excluded.
+ *
+ * This is the same axis the backend re-derives authoritatively at stop time
+ * (`reassignable` in worker-control), but computing it client-side lets the
+ * StopPill decide whether to confirm BEFORE firing the request — so the
+ * destructive last-daemon confirm only appears when there really is no peer.
+ */
+function hasReassignablePeer(
+  instances: WorkflowInstanceState[],
+  self: WorkflowInstanceState,
+): boolean {
+  if (!self.workflow) return false;
+  return instances.some(
+    (w) =>
+      w.instance !== self.instance &&
+      w.workflow === self.workflow &&
+      w.pidAlive &&
+      w.active &&
+      !w.crashedOnLaunch,
+  );
+}
 
 interface TerminalDrawerProps {
   /** SSE-backend connection state, surfaced as the right-edge Live pill. */
@@ -154,7 +182,11 @@ export function TerminalDrawer({ connected, viewingHistory = false }: TerminalDr
               )}
             >
               {active.map((wf) => (
-                <WorkflowBox key={wf.instance} workflow={wf} />
+                <WorkflowBox
+                  key={wf.instance}
+                  workflow={wf}
+                  reassignable={hasReassignablePeer(active, wf)}
+                />
               ))}
             </div>
           )}

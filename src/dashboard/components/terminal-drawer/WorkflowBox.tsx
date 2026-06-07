@@ -9,6 +9,7 @@ import {
   Hourglass,
 } from "lucide-react";
 import type { AuthState, WorkflowInstanceState } from "@/components/shared/types";
+import { useConfirm } from "@/components/shared/useConfirm";
 import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
@@ -250,13 +251,29 @@ function deriveSessionCardCopy(args: {
 function StopPill({
   workflow,
   instance,
+  itemInFlight,
+  reassignable,
 }: {
   workflow: string;
   instance: string;
+  itemInFlight: boolean;
+  reassignable: boolean;
 }) {
   const [sending, setSending] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   const postStop = async () => {
+    if (itemInFlight && !reassignable) {
+      const ok = await confirm({
+        tone: "destructive",
+        title: `Stop last ${workflow} daemon?`,
+        description:
+          "This daemon is running an item. With no peer daemon available, stopping it will fail the live work.",
+        confirmLabel: "Stop and fail item",
+      });
+      if (!ok) return;
+    }
+
     setSending(true);
     const toastId = toast.loading(`Stopping ${displayInstance(instance)}…`);
     try {
@@ -301,38 +318,42 @@ function StopPill({
   const title = `Stop this ${workflow} daemon (other ${workflow} daemons keep running)`;
 
   return (
-    <button
-      type="button"
-      disabled={sending}
-      onClick={(e) => {
-        e.stopPropagation();
-        void postStop();
-      }}
-      title={title}
-      aria-label={title}
-      className={cn(
-        "font-mono text-[10px] leading-[1.3] px-[7px] py-[2px]",
-        "rounded-md border inline-flex items-center justify-center gap-[3px]",
-        "tracking-tight cursor-pointer select-none",
-        "transition-colors",
-        // Default: hairline destructive outline, no fill
-        "border-[hsl(0_84%_60%/0.30)] text-[hsl(0_84%_70%/0.85)] bg-transparent",
-        "hover:bg-[hsl(0_84%_60%/0.12)] hover:text-[hsl(0_84%_75%)] hover:border-[hsl(0_84%_60%/0.55)]",
-        sending && "opacity-60 cursor-wait",
-      )}
-    >
-      {sending ? (
-        <Loader2 className="w-2.5 h-2.5 animate-spin motion-reduce:animate-none" />
-      ) : (
-        <span aria-hidden className="text-[11px] leading-none opacity-90">×</span>
-      )}
-      stop
-    </button>
+    <>
+      <button
+        type="button"
+        disabled={sending}
+        onClick={(e) => {
+          e.stopPropagation();
+          void postStop();
+        }}
+        title={title}
+        aria-label={title}
+        className={cn(
+          "font-mono text-[10px] leading-[1.3] px-[7px] py-[2px]",
+          "rounded-md border inline-flex items-center justify-center gap-[3px]",
+          "tracking-tight cursor-pointer select-none",
+          "transition-colors",
+          // Default: hairline destructive outline, no fill
+          "border-[hsl(0_84%_60%/0.30)] text-[hsl(0_84%_70%/0.85)] bg-transparent",
+          "hover:bg-[hsl(0_84%_60%/0.12)] hover:text-[hsl(0_84%_75%)] hover:border-[hsl(0_84%_60%/0.55)]",
+          sending && "opacity-60 cursor-wait",
+        )}
+      >
+        {sending ? (
+          <Loader2 className="w-2.5 h-2.5 animate-spin motion-reduce:animate-none" />
+        ) : (
+          <span aria-hidden className="text-[11px] leading-none opacity-90">×</span>
+        )}
+        stop
+      </button>
+      {confirmDialog}
+    </>
   );
 }
 
 interface WorkflowBoxProps {
   workflow: WorkflowInstanceState;
+  reassignable?: boolean;
 }
 
 /**
@@ -352,7 +373,7 @@ interface WorkflowBoxProps {
  *   - Cyan border tint when an item is in-flight (distinct from the
  *     amber duo-glow on individual browser tiles).
  */
-export function WorkflowBox({ workflow }: WorkflowBoxProps) {
+export function WorkflowBox({ workflow, reassignable = false }: WorkflowBoxProps) {
   const {
     instance,
     workflow: workflowName,
@@ -500,6 +521,8 @@ export function WorkflowBox({ workflow }: WorkflowBoxProps) {
               <StopPill
                 workflow={workflowName}
                 instance={instance}
+                itemInFlight={!!itemInFlight}
+                reassignable={reassignable}
               />
             ) : (
               <span className="h-[20px]" aria-hidden />
