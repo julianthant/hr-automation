@@ -273,6 +273,85 @@ export function applyPersonLookupToVerifyRecord(
   return rec;
 }
 
+// ─── person-lookup child-input shape selection (pure, unit-tested) ──
+
+/** The name-input variant of a verify person-lookup child. */
+export type VerifyPlNameInput = {
+  name: string;
+  includeCrmDates: true;
+  keepNonHdh: true;
+  taskGroupId: string;
+  parentSubject?: string;
+};
+/** The EID-input variant of a verify person-lookup child. */
+export type VerifyPlEidInput = {
+  emplId: string;
+  name?: string;
+  includeCrmDates: true;
+  keepNonHdh: true;
+  taskGroupId: string;
+  parentSubject?: string;
+};
+export type VerifyPlChildInput = VerifyPlNameInput | VerifyPlEidInput;
+
+/** The lookup kind chosen for a verify record, drives the outcome patch kind. */
+export type VerifyPlKind = "eid" | "name";
+
+/**
+ * Decide how to drive the person-lookup child for one verify record.
+ *
+ * When the OCR record already carries a resolved/normalized EID
+ * (`normalizeUcpathEmployeeId(rec.employeeId)` non-empty), drive the child as an
+ * **EID input** so UCPath active status resolves by EID — a NAME search misses
+ * people whose name lookup comes up empty even though their printed EID is
+ * valid, leaving active status wrongly "— not found" (CRM has no active status,
+ * so the EID is the only reliable key). The OCR-printed name rides along as a
+ * CRM-search fallback. A record with no EID uses the **name input** path; a
+ * record with neither name nor EID yields `null` (nothing to look up).
+ *
+ * Pure — no IO. Returns the chosen `{ kind, input }` or `null`.
+ */
+export function buildVerifyPersonLookupInput(
+  rec: Pick<VerifyPreviewRecord, "name" | "employeeId" | "printedName">,
+  ctx: { taskGroupId: string; parentSubject?: string },
+): { kind: VerifyPlKind; input: VerifyPlChildInput } | null {
+  const name = nonEmpty(rec.name) ?? nonEmpty(rec.printedName);
+  const emplId = normalizeUcpathEmployeeId(rec.employeeId);
+  if (!name && !emplId) return null;
+  if (emplId) {
+    return {
+      kind: "eid",
+      input: {
+        emplId,
+        ...(name ? { name } : {}),
+        includeCrmDates: true,
+        keepNonHdh: true,
+        taskGroupId: ctx.taskGroupId,
+        ...(ctx.parentSubject ? { parentSubject: ctx.parentSubject } : {}),
+      },
+    };
+  }
+  return {
+    kind: "name",
+    input: {
+      name: name!,
+      includeCrmDates: true,
+      keepNonHdh: true,
+      taskGroupId: ctx.taskGroupId,
+      ...(ctx.parentSubject ? { parentSubject: ctx.parentSubject } : {}),
+    },
+  };
+}
+
+/** Map the chosen lookup kind to the `patchOcrRecordFromEidLookupOutcome` kind. */
+export function verifyPlPatchKind(kind: VerifyPlKind): "name" | "verify-only" {
+  // An EID-input record is already identified on the form, so patch it with the
+  // EID-known semantics ("verify-only") — it must NOT be marked unresolved just
+  // because the lookup returned a different/no EID; the form EID stands. A
+  // name-input record uses the name→EID resolution semantics.
+  return kind === "eid" ? "verify-only" : "name";
+}
+
 /**
  * Stamp the i9 Section-2 signer onto a verify record from an
  * `outcome.data`-shaped object. Pure — mutates + returns the record.
@@ -385,23 +464,33 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     const { delegateToAllImpl } = await import("../../../core/delegate.js");
     const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
 
-    // ── Step 1: person-lookup fan-out (name → EID + CRM dates + active) ──
-    type PersonLookupChildInput = {
-      name: string;
-      includeCrmDates: true;
-      keepNonHdh: true;
-      taskGroupId: string;
-      parentSubject?: string;
-    };
+    // ── Step 1: person-lookup fan-out (EID-or-name → CRM dates + active) ──
+    //
+    // Per-record input shape + outcome-patch kind are chosen by the pure
+    // `buildVerifyPersonLookupInput` / `verifyPlPatchKind` helpers (unit-tested):
+    // a record with a known/normalized EID is driven as an EID input (active
+    // status resolves by EID in UCPath — a NAME-only search misses people whose
+    // name lookup is empty even though their printed EID is valid; CRM has no
+    // active status, so the EID is the only reliable key). EID-less records keep
+    // the name path. The EID-input person-lookup path still runs `crm-dates`
+    // (gated on `includeCrmDates`) — it searches CRM by EID first, then by the
+    // UCPath-resolved name.
+    type PersonLookupChildInput = VerifyPlChildInput;
     const plInputs: PersonLookupChildInput[] = [];
     const plItemIds: string[] = [];
     const plItemIdToIdx = new Map<string, number>();
+    // The lookup KIND chosen per record, keyed by itemId, so the outcome patch
+    // picks the matching `patchOcrRecordFromEidLookupOutcome` kind.
+    const plKindByItemId = new Map<string, VerifyPlKind>();
 
     for (let idx = 0; idx < records.length; idx++) {
       const rec = records[idx];
-      const name = nonEmpty(rec.name);
-      if (!name) {
-        // Blank-name record — nothing to look up; mark unresolved.
+      const chosen = buildVerifyPersonLookupInput(rec, {
+        taskGroupId: sessionId,
+        ...(parentSubject ? { parentSubject } : {}),
+      });
+      if (!chosen) {
+        // No name AND no EID — nothing to look up; mark unresolved.
         const r = recs[idx] as Record<string, unknown>;
         r.matchState = "unresolved";
         const warnings = Array.isArray(r.warnings) ? (r.warnings as string[]) : [];
@@ -412,13 +501,8 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       const itemId = `ocr-verify-${runId}-r${idx}`;
       plItemIds.push(itemId);
       plItemIdToIdx.set(itemId, idx);
-      plInputs.push({
-        name,
-        includeCrmDates: true,
-        keepNonHdh: true,
-        taskGroupId: sessionId,
-        ...(parentSubject ? { parentSubject } : {}),
-      });
+      plKindByItemId.set(itemId, chosen.kind);
+      plInputs.push(chosen.input);
     }
 
     if (plInputs.length > 0) {
@@ -451,7 +535,8 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       for (const outcome of plOutcomes) {
         const idx = plItemIdToIdx.get(outcome.itemId);
         if (idx === undefined) continue;
-        patchOcrRecordFromEidLookupOutcome(recs, idx, outcome, "name");
+        const patchKind = verifyPlPatchKind(plKindByItemId.get(outcome.itemId) ?? "name");
+        patchOcrRecordFromEidLookupOutcome(recs, idx, outcome, patchKind);
         applyPersonLookupToVerifyRecord(records[idx], outcome.data);
       }
 
