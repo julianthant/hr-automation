@@ -13,13 +13,18 @@ import {
   findAliveDaemons,
   filterResponsiveDaemons,
 } from './registry.js'
-import { wakeDaemons } from './client.js'
 import {
   claimNextItem,
   markItemCancelled,
   markItemDone,
   markItemFailed,
 } from './queue.js'
+import {
+  reassignInFlightItem,
+  failInFlightItem,
+  SHUTDOWN_NO_DAEMON_FAIL_REASON,
+  SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
+} from './in-flight-shutdown.js'
 import type { DaemonLockfile } from './types.js'
 import {
   emitItemStart,
@@ -586,6 +591,14 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       : []
                   const reassign =
                     state.reassignInFlight && responsivePeers.length > 0 && Boolean(item.taskId)
+                  // Normalized identity for the shared reassign/fail helpers.
+                  const shutdownItem = {
+                    itemId: item.id,
+                    runId,
+                    ...(item.taskId ? { taskId: item.taskId } : {}),
+                    input: item.input,
+                    ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                  }
                   if (reassign && item.taskId) {
                     // Per-instance stop with a RESPONSIVE peer → hand the item
                     // back to the queue and wake the peers so an idle one
@@ -593,62 +606,30 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     // returnTaskToQueued, so the run continues under the same id
                     // on the new daemon. No terminal row, no dependency settle —
                     // the work isn't done, just moving.
-                    taskStore.returnTaskToQueued({ taskId: item.taskId })
-                    // Re-emit a pending row so the dashboard shows the item back
-                    // in the queue instead of frozen on the dead session card.
-                    emitTrackerRow(
-                      {
-                        workflow: wf.config.name,
-                        timestamp: new Date().toISOString(),
-                        id: item.id,
-                        runId,
-                        status: 'pending',
-                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
-                          runId,
-                          trackerDir,
-                        }) as StampedData,
-                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                      },
+                    await reassignInFlightItem({
+                      wf,
+                      item: { ...shutdownItem, taskId: item.taskId },
+                      responsivePeers,
+                      taskStore,
                       trackerDir,
-                    )
-                    await wakeDaemons(responsivePeers)
-                    log.step(
-                      `[Daemon ${instanceId}] per-instance stop — reassigned in-flight item ${item.id} to ${responsivePeers.length} responsive daemon(s)`,
-                    )
+                      logTag: `Daemon ${instanceId}`,
+                    })
                   } else if (state.reassignInFlight && peers.length > 0) {
                     // Reassign requested, a peer LOOKS alive (PID + lockfile),
                     // but none answered `/whoami` — wedged/zombie. Fail the item
                     // loudly (red, retriable) rather than requeue it to a daemon
                     // that will never claim it. Same fail shape as a no-peer
                     // force-stop (F5 fail-loud).
-                    const failError =
-                      'Daemon stopped and no responsive peer daemon was available to finish this item.'
                     log.warn(
                       `[Daemon ${instanceId}] per-instance stop — ${peers.length} peer(s) appeared alive but none responded to /whoami; failing in-flight item ${item.id} instead of parking it`,
                     )
-                    await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
-                    if (item.taskId) {
-                      taskStore.markDependencyFromChildTerminal({
-                        childTaskId: item.taskId,
-                        childState: 'failed',
-                      })
-                    }
-                    emitTrackerRow(
-                      {
-                        workflow: wf.config.name,
-                        timestamp: new Date().toISOString(),
-                        id: item.id,
-                        runId,
-                        status: 'failed',
-                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
-                          runId,
-                          trackerDir,
-                        }) as StampedData,
-                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                        error: failError,
-                      },
+                    await failInFlightItem({
+                      wf,
+                      item: shutdownItem,
+                      failReason: SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
+                      taskStore,
                       trackerDir,
-                    )
+                    })
                   } else if (state.forceShutdown) {
                     // Force-stop with no spare to absorb the item (stop-all,
                     // SIGINT/SIGTERM, or the last daemon stopped per-instance).
@@ -656,31 +637,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     // failed row (NO step:"cancelled" sentinel → red Failed
                     // badge, retriable), not the orange Cancelled used for a
                     // deliberate per-item cancel.
-                    const failError =
-                      'Daemon stopped and no other daemon is available to finish this item.'
-                    await markItemFailed(wf.config.name, item.id, failError, runId, trackerDir)
-                    if (item.taskId) {
-                      taskStore.markDependencyFromChildTerminal({
-                        childTaskId: item.taskId,
-                        childState: 'failed',
-                      })
-                    }
-                    emitTrackerRow(
-                      {
-                        workflow: wf.config.name,
-                        timestamp: new Date().toISOString(),
-                        id: item.id,
-                        runId,
-                        status: 'failed',
-                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
-                          runId,
-                          trackerDir,
-                        }) as StampedData,
-                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                        error: failError,
-                      },
+                    await failInFlightItem({
+                      wf,
+                      item: shutdownItem,
+                      failReason: SHUTDOWN_NO_DAEMON_FAIL_REASON,
+                      taskStore,
                       trackerDir,
-                    )
+                    })
                   } else {
                     // Deliberate per-item cancel (/cancel-current); the daemon
                     // stays alive and claims the next item. Renders Cancelled
