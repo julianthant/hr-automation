@@ -135,7 +135,7 @@ export function __resetDaemonSpawnLocksForTests(): void {
   daemonSpawnChains.clear()
 }
 
-async function wakeDaemons(daemons: Daemon[]): Promise<void> {
+export async function wakeDaemons(daemons: Daemon[]): Promise<void> {
   await Promise.all(
     daemons.map(async (d) => {
       const ctrl = new AbortController()
@@ -452,6 +452,35 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
 }
 
 /**
+ * Send a single daemon its `/stop`. Best-effort: the daemon may already be
+ * tearing down. The daemon's own shutdown cleanup decides what happens to its
+ * in-flight item (see `runDaemonShutdownCleanup`):
+ *   - `reassign: true` (per-instance card stop) → hand the item to a surviving
+ *     peer if one exists; fail it only when this is the last daemon.
+ *   - `reassign: false` (workflow-scoped "stop all") → fail the in-flight item.
+ * Caller is responsible for invalidating the alive-daemons cache afterward
+ * when stopping a known set.
+ */
+export async function stopDaemon(daemon: Daemon, force: boolean, reassign = false): Promise<void> {
+  // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
+  // timer can't fire after the response completes — see "abort race" lesson.
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 5_000)
+  try {
+    await fetch(`http://127.0.0.1:${daemon.port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force, reassign }),
+      signal: ctrl.signal,
+    })
+  } catch {
+    /* ignore — the daemon may already be tearing down (incl. AbortError) */
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * Soft-stop (or force-stop) every alive daemon for a workflow. Returns the
  * number of daemons we sent a /stop to. Callers can verify actual exit by
  * calling `findAliveDaemons` again — daemons may take seconds to drain.
@@ -462,26 +491,7 @@ export async function stopDaemons(
   trackerDir?: string,
 ): Promise<number> {
   const alive = await findAliveDaemons(workflow, trackerDir)
-  // Manual AbortController + clearTimeout (not AbortSignal.timeout) so the
-  // timer can't fire after the response completes — see "abort race" lesson.
-  await Promise.all(
-    alive.map(async (d) => {
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 5_000)
-      try {
-        await fetch(`http://127.0.0.1:${d.port}/stop`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force }),
-          signal: ctrl.signal,
-        })
-      } catch {
-        /* ignore — the daemon may already be tearing down (incl. AbortError) */
-      } finally {
-        clearTimeout(timer)
-      }
-    }),
-  )
+  await Promise.all(alive.map((d) => stopDaemon(d, force)))
   invalidateAliveDaemonsCache(workflow, trackerDir)
   return alive.length
 }

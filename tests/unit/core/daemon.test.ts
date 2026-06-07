@@ -10,7 +10,14 @@ import { clear } from '../../../src/core/kernel/registry.js'
 import { runWorkflowDaemon } from '../../../src/core/daemon/daemon.js'
 import { Session } from '../../../src/core/kernel/session.js'
 import { enqueueItems, readQueueStateIncludingTerminals } from '../../../src/core/daemon/queue.js'
-import { findAliveDaemons } from '../../../src/core/daemon/registry.js'
+import {
+  findAliveDaemons,
+  ensureDaemonsDir,
+  randomInstanceId,
+  writeLockfile,
+  lockfilePath,
+  invalidateAliveDaemonsCache,
+} from '../../../src/core/daemon/registry.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
@@ -559,7 +566,10 @@ test('runWorkflowDaemon: /stop force-cancels an in-flight handler parked in a si
     ])
 
     const [task] = taskStore.listTasksForWorkflow('dint-stop-signal-wait')
-    assert.equal(task.state, 'cancelled')
+    // Single daemon, force `/stop` with no `reassign` and no surviving peer →
+    // the in-flight item FAILS (red), per the 2026-06-07 reassign-or-fail
+    // model. (A per-instance stop with a live peer would re-queue it instead.)
+    assert.equal(task.state, 'failed')
   } finally {
     // Best-effort: if the daemon is still parked (fix absent → /stop
     // deadlocked), /cancel-current DOES abort ctx.signal and unblocks the
@@ -576,6 +586,117 @@ test('runWorkflowDaemon: /stop force-cancels an in-flight handler parked in a si
         runPromise.catch(() => {}),
         new Promise((r) => setTimeout(r, 2_000)),
       ])
+    }
+    taskStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: per-instance /stop with a surviving peer RE-QUEUES the in-flight item (no fail)', async () => {
+  // Per-instance stop (dashboard session card) sends `/stop { reassign: true }`.
+  // When another daemon for the workflow is still alive, the daemon hands its
+  // in-flight item back to the queue (returnTaskToQueued) instead of failing it,
+  // so a surviving peer finishes the work. Asserts the task lands back in
+  // 'queued' (not terminal). (2026-06-07 reassign-or-fail.)
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-reassign-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  let port: number | undefined
+  let inFlight: { itemId: string; runId: string } | null = null
+  let runPromise: Promise<void> | undefined
+  try {
+    const started = deferred()
+    const wf = defineWorkflow({
+      name: 'dint-stop-reassign',
+      schema: z.object({ id: z.string() }),
+      steps: ['wait-approval'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('wait-approval', async () => {
+          started.resolve()
+          await new Promise<void>((_resolve, reject) => {
+            if (ctx.signal.aborted) {
+              reject(new Error('aborted before wait'))
+              return
+            }
+            ctx.signal.addEventListener('abort', () => reject(new Error('approval wait aborted')), {
+              once: true,
+            })
+          })
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-stop-reassign', [{ id: 'held' }], (d) => d.id, dir)
+    runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    ;({ port } = await waitForDaemon('dint-stop-reassign', dir))
+    await started.promise
+
+    // A surviving PEER: a lockfile with a live pid (this process) and a port
+    // nothing listens on. `findAliveDaemons` keeps it ("unreachable probe +
+    // PID alive → trust the lockfile"), so the daemon under test sees a peer to
+    // hand its in-flight item to. Written AFTER waitForDaemon so the test's
+    // own /status + /stop fetches target the real daemon's port (not the
+    // peer's); the cache is invalidated so the daemon's reassign-time
+    // findAliveDaemons re-probes and includes the peer (the daemon runs
+    // in-process, sharing this module's alive-daemons cache).
+    ensureDaemonsDir(dir)
+    const peerInstanceId = randomInstanceId('dint-stop-reassign')
+    writeLockfile(
+      {
+        workflow: 'dint-stop-reassign',
+        instanceId: peerInstanceId,
+        pid: process.pid,
+        port: 59999,
+        startedAt: new Date().toISOString(),
+        hostname: 'test-peer',
+        version: 1,
+      },
+      lockfilePath('dint-stop-reassign', peerInstanceId, dir),
+    )
+    invalidateAliveDaemonsCache('dint-stop-reassign', dir)
+
+    const status = (await fetch(`http://127.0.0.1:${port}/status`).then((r) => r.json())) as {
+      inFlight: string | null
+      inFlightRunId: string | null
+    }
+    if (status.inFlight && status.inFlightRunId) {
+      inFlight = { itemId: status.inFlight, runId: status.inFlightRunId }
+    }
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true, reassign: true }),
+    })
+
+    await Promise.race([
+      runPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('daemon did not stop on per-instance /stop')), 4_000),
+      ),
+    ])
+
+    const [task] = taskStore.listTasksForWorkflow('dint-stop-reassign')
+    // Re-queued for the surviving peer — un-claimed, NOT terminal.
+    assert.equal(task.state, 'queued')
+  } finally {
+    if (port !== undefined && inFlight) {
+      await fetch(`http://127.0.0.1:${port}/cancel-current`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(inFlight),
+      }).catch(() => {})
+    }
+    if (runPromise) {
+      await Promise.race([runPromise.catch(() => {}), new Promise((r) => setTimeout(r, 2_000))])
     }
     taskStore.close()
     rmSync(dir, { recursive: true, force: true })

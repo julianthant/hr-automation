@@ -32,6 +32,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/sharepoint-download/run" },
   { method: "POST", path: "/api/enqueue" },
   { method: "POST", path: "/api/daemon/stop" },
+  { method: "POST", path: "/api/daemon/stop-instance" },
   { method: "POST", path: "/api/retry" },
   { method: "POST", path: "/api/retry-bulk" },
   { method: "POST", path: "/api/run-with-data" },

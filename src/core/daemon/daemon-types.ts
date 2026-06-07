@@ -33,6 +33,19 @@ export interface DaemonState {
   drainOnlyShutdown: boolean
   shuttingDown: boolean
   /**
+   * Per-instance stop with reassignment intent. Set true ONLY by the daemon
+   * `/stop` handler when the caller passes `{ reassign: true }` — i.e. the
+   * dashboard session-card per-instance stop. When true AND another daemon
+   * for this workflow is still alive at teardown, the in-flight item is
+   * un-claimed (`returnTaskToQueued`) and the peers are woken so an idle one
+   * finishes it, instead of being terminalized. Stays false for workflow-
+   * scoped "stop all", SIGINT/SIGTERM, and `/cancel-current` — those fail the
+   * in-flight item (no spare to hand off to, or the user cancelled that one
+   * item specifically). The fail-vs-reassign decision also requires a live
+   * peer; a per-instance stop of the LAST daemon still fails the item.
+   */
+  reassignInFlight: boolean
+  /**
    * The unified handle for the currently in-flight item — the daemon's
    * single source of truth for "what's running and how do I cancel it"
    * (Contract 5 Phase 1). Collapses three legacy fields:

@@ -18,6 +18,7 @@ export interface DaemonHttpOpts {
   setForceShutdown: (value: boolean) => void
   setDrainOnlyShutdown: (value: boolean) => void
   setShuttingDown: (value: boolean) => void
+  setReassignInFlight: (value: boolean) => void
   resolveWake: () => void
   resolveShutdown: () => void
   abortLaunchAndKillSession: (reason: string) => void
@@ -42,6 +43,7 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
     setForceShutdown,
     setDrainOnlyShutdown,
     setShuttingDown,
+    setReassignInFlight,
     resolveWake,
     resolveShutdown,
     abortLaunchAndKillSession,
@@ -150,19 +152,32 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
         body += c
       })
       req.on('end', () => {
-        // The `force` body field is parsed but IGNORED as of the 2026-04-28
-        // Cluster A spec. Every /stop is now force semantics: in-flight item
-        // marked failed (not re-queued), queued items marked failed, chrome
-        // SIGTERM → SIGKILL, daemon exits. Per user direction: "I don't want
-        // graceful. I don't want the requeue. I want to see it fail when
-        // daemon dies because I already have the retry buttons for that. I
-        // don't want unfinished business."
+        // Body: `{ force?: boolean, reassign?: boolean }`.
+        //
+        // `force` is parsed but the teardown is always force semantics
+        // (chrome SIGTERM → SIGKILL, daemon exits). What `reassign` controls
+        // is the IN-FLIGHT item's fate (2026-06-07 — supersedes the 2026-04-28
+        // "always fail, never requeue" direction now that the operator runs a
+        // POOL of daemons):
+        //   - `reassign: true` (dashboard session-card PER-INSTANCE stop) AND
+        //     another daemon for this workflow is still alive → the in-flight
+        //     item is un-claimed and a surviving daemon finishes it; nothing
+        //     fails. If this is the LAST daemon, it falls through to fail.
+        //   - omitted/false (workflow-scoped "stop all", SIGINT/SIGTERM) → the
+        //     in-flight + queued items fail (red), as before — no spare to hand
+        //     off to, or the operator is tearing everything down.
+        // `/cancel-current` is unaffected (it never sets reassign and leaves
+        // the daemon alive), so cancelling one item still renders Cancelled.
+        let reassign = false
         try {
-          // Tolerate malformed bodies — the field is no-op anyway.
-          if (body) JSON.parse(body)
+          if (body) {
+            const parsed = JSON.parse(body) as { reassign?: unknown }
+            reassign = parsed.reassign === true
+          }
         } catch {
-          /* ignore */
+          /* ignore malformed body — defaults to fail-on-stop */
         }
+        setReassignInFlight(reassign)
         setForceShutdown(true)
         setDrainOnlyShutdown(false)
         setShuttingDown(true)
