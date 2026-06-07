@@ -7,7 +7,7 @@ import {
   daemonsDir,
   invalidateAliveDaemonsCache,
 } from "../../core/daemon/registry.js";
-import { queueFilePath } from "../../core/daemon/queue.js";
+import { queueFilePath, markItemFailed } from "../../core/daemon/queue.js";
 import { stopDaemons, stopDaemon } from "../../core/daemon/client.js";
 import type { Daemon } from "../../core/daemon/types.js";
 import type { BrowserProcessRow, WorkerRow } from "../../core/daemon/worker-store.js";
@@ -20,6 +20,7 @@ import {
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { openControlStores } from "./shared.js";
+import { emitInheritedRow } from "./emit-inherited.js";
 
 export interface WorkerCommandRequest {
   workerId: string;
@@ -437,6 +438,94 @@ export function buildDaemonsStopHandler(dir: string) {
  * immediately via a synthesized `workflow_end` (the daemon's own end event can
  * lag behind its teardown).
  */
+/**
+ * Direct-kill fallback cleanup: when a per-instance stop can't reach the
+ * daemon through a live lockfile (`target` undefined) and falls back to a raw
+ * `process.kill`, the daemon never runs its graceful reassign/fail cleanup —
+ * so its in-flight claim would normally sit orphaned until a peer's dead-worker
+ * recovery sweep re-queues it (an unbounded wait the operator can't see).
+ *
+ * Mirroring the daemon's own fail-loud path (and the standing "fail loud over
+ * auto-correct" preference), this reads the killed daemon's in-flight claim
+ * from the worker store (matched by pid) and fails it immediately so the
+ * operator gets a terminal row right away instead of a silent wait.
+ *
+ * Best-effort throughout: if no claim is found, or the prior tracker row is
+ * missing, it no-ops (the direct kill already happened; nothing to fail).
+ * Returns the failed item id when it terminated a claim, else null.
+ */
+async function failDirectKilledInstanceClaim(
+  dir: string,
+  workflow: string,
+  pid: number,
+): Promise<string | null> {
+  let stores: ReturnType<typeof openControlStores> | undefined;
+  try {
+    stores = openControlStores(dir);
+    const { taskStore, workerStore } = stores;
+    const worker = workerStore
+      .listWorkers(workflow)
+      .find((w) => w.pid === pid && w.currentTaskId);
+    const taskId = worker?.currentTaskId;
+    if (!taskId) return null;
+    const task = taskStore.getTask(taskId);
+    if (!task || !task.currentRunId) return null;
+    // Only terminalize a claim that is still in-flight — never overwrite a row
+    // that already reached a terminal state in the kill→cleanup window.
+    if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
+      return null;
+    }
+    const runId = task.currentRunId;
+    const failReason =
+      "Daemon was stopped (direct kill — lockfile already gone); its in-flight item was failed.";
+    try {
+      await markItemFailed(workflow, task.itemId, failReason, runId, dir);
+    } catch {
+      /* best-effort — the tracker row below is the user-visible signal */
+    }
+    if (task.currentAttemptId) {
+      try {
+        taskStore.markTaskFailed({
+          taskId: task.taskId,
+          attemptId: task.currentAttemptId,
+          error: failReason,
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+    try {
+      emitInheritedRow({
+        workflow,
+        trackerDir: dir,
+        id: task.itemId,
+        runId,
+        status: "failed",
+        error: failReason,
+        ...(task.parentRunId ? { parentRunId: task.parentRunId } : {}),
+        db: taskStore.db,
+      });
+    } catch {
+      // PriorTrackerRowNotFoundError (no row to inherit from) — nothing to
+      // emit; the queue-audit fail above is still the authoritative signal.
+    }
+    return task.itemId;
+  } catch (err) {
+    log.warn(
+      `[stop-instance] failed to fail in-flight claim after direct kill of pid=${pid} for '${workflow}': ${errorMessage(err)}`,
+    );
+    return null;
+  } finally {
+    // taskStore + workerStore share one underlying control DB (openControlStores
+    // opens it once), so closing either closes both — close once.
+    try {
+      stores?.taskStore.close();
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 export function buildStopDaemonInstanceHandler(dir: string) {
   return async (req: StopDaemonInstanceRequest): Promise<StopDaemonInstanceResult> => {
     const workflow = req.workflow?.trim();
@@ -487,13 +576,22 @@ export function buildStopDaemonInstanceHandler(dir: string) {
       daemonStopped = true;
     } else if (pid && pid !== process.pid) {
       // No live lockfile match (race, or lockfile already unlinked) — fall back
-      // to a direct signal. This skips the daemon's reassignment cleanup, but
-      // a peer's dead-worker recovery sweep re-queues any orphaned claim.
+      // to a direct signal. This skips the daemon's graceful reassign/fail
+      // cleanup, so we explicitly fail the daemon's in-flight claim (read from
+      // the worker store) right here — otherwise it would sit orphaned until a
+      // peer's dead-worker recovery sweep re-queues it, an unbounded wait the
+      // operator can't see (fail-loud over eventual-recovery).
       try {
         process.kill(pid, force ? "SIGKILL" : "SIGTERM");
         daemonStopped = true;
       } catch {
         /* already dead */
+      }
+      const failedItemId = await failDirectKilledInstanceClaim(dir, workflow, pid);
+      if (failedItemId) {
+        log.step(
+          `[stop-instance] direct kill of '${instance}' (pid=${pid}) — failed orphaned in-flight item '${failedItemId}'`,
+        );
       }
     }
 

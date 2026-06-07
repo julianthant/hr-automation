@@ -1410,6 +1410,107 @@ describe("dashboard worker command helpers", () => {
     }
   });
 
+  it("per-instance stop direct-kill fallback fails the daemon's in-flight claim (F8b)", async () => {
+    // No live lockfile for the instance's pid → the handler can't reach the
+    // daemon gracefully and falls back to a direct process.kill. That bypasses
+    // the daemon's reassign/fail cleanup, so the handler must explicitly fail
+    // the daemon's in-flight claim (read from the worker store) instead of
+    // leaving it orphaned for a peer's recovery sweep.
+    const workflow = "separations";
+    const instance = "Separation 1";
+    // A pid that is real (process.kill won't throw ESRCH on the cleanup probe)
+    // but is NOT us and is not in the alive-daemon set (no lockfile written).
+    // Use a clearly-dead high pid so process.kill throws (caught) — the
+    // claim-fail path runs regardless.
+    const deadPid = 2147483646;
+
+    const control = openControlDb({ trackerDir: tmp });
+    const taskStore = createTaskStore(control);
+    const workerStore = createWorkerStore(control);
+
+    taskStore.enqueueTasks({
+      workflow,
+      inputs: [{ docId: "held-doc" }],
+      deriveItemId: (input) => input.docId,
+      runIds: ["run-direct-kill"],
+      now: new Date().toISOString(),
+    });
+    workerStore.registerWorker({
+      workerId: "sep-dead",
+      workflow,
+      kind: "daemon",
+      pid: deadPid,
+      hostname: "test-host",
+      phase: "processing",
+    });
+    // Move the task into a claimed/running in-flight state owned by the dead
+    // daemon (the worker store row carries currentTaskId, matched by pid).
+    const claimed = taskStore.claimNextTask({ workflow, workerId: "sep-dead" });
+    assert.ok(claimed, "expected to claim the enqueued task");
+    taskStore.markTaskRunning({
+      taskId: claimed.taskId,
+      attemptId: claimed.attemptId,
+      workerId: "sep-dead",
+    });
+    workerStore.heartbeatWorker({
+      workerId: "sep-dead",
+      phase: "processing",
+      currentTaskId: claimed.taskId,
+      currentAttemptId: claimed.attemptId,
+    });
+
+    // A prior running tracker row so emitInheritedRow has something to inherit.
+    emitTrackerRow(
+      {
+        workflow,
+        timestamp: new Date().toISOString(),
+        id: "held-doc",
+        runId: claimed.runId,
+        status: "running",
+        data: { archetype: "single", instance },
+      },
+      tmp,
+    );
+
+    // workflow_start carrying the dead daemon's pid (no lockfile → direct-kill).
+    writeFileSync(
+      sessionFilePath(dateLocal(), tmp),
+      JSON.stringify({
+        type: "workflow_start",
+        timestamp: new Date().toISOString(),
+        workflowInstance: instance,
+        pid: deadPid,
+      }) + "\n",
+    );
+
+    taskStore.close();
+
+    const result = await buildStopDaemonInstanceHandler(tmp)({
+      workflow,
+      instance,
+      force: true,
+    });
+
+    assert.equal(result.ok, true);
+
+    // The in-flight task is now terminal (failed), not left claimed/orphaned.
+    const control2 = openControlDb({ trackerDir: tmp });
+    const taskStore2 = createTaskStore(control2);
+    const failedTask = taskStore2.getTask(claimed.taskId);
+    assert.equal(failedTask?.state, "failed");
+    taskStore2.close();
+
+    // And a failed tracker row was emitted so the operator sees it immediately.
+    const rows = readFileSync(rowFilePath(workflow, dateLocal(), tmp), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { id: string; status: string; runId?: string });
+    const failedRow = rows.find(
+      (r) => r.id === "held-doc" && r.runId === claimed.runId && r.status === "failed",
+    );
+    assert.ok(failedRow, "expected a failed tracker row for the direct-killed in-flight item");
+  });
+
   it("daemon list omits terminal dead workers that no longer have a live lockfile", async () => {
     const control = openControlDb({ trackerDir: tmp });
     const workerStore = createWorkerStore(control);
