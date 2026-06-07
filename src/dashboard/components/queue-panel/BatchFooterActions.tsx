@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { IconActionButton } from "@/components/shared/IconActionButton";
+import { useConfirm } from "@/components/shared/useConfirm";
 import type {
   WorkflowActionDescriptor,
   WorkflowRunProjection,
@@ -54,6 +55,7 @@ export function BatchFooterActions({
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const { dispatchBulkWorkflowAction } = useWorkflowActionDispatcher();
+  const { confirm, confirmDialog } = useConfirm();
 
   const actionDescriptors = projection?.actions ?? actions;
   const retrySourceEntries = retryMemberEntries ?? memberEntries;
@@ -91,9 +93,15 @@ export function BatchFooterActions({
     if (deleting || deleteIds.length === 0 || !date) return;
     const n = deleteIds.length;
     if (
-      !window.confirm(
-        `Permanently delete all ${n} entr${n === 1 ? "y" : "ies"} in this batch? This cannot be undone.`,
-      )
+      !(await confirm({
+        tone: "destructive",
+        icon: <Trash2 aria-hidden className="h-4 w-4 text-destructive" />,
+        title: n === 1 ? "Delete 1 entry?" : `Delete ${n} entries?`,
+        description: `This permanently removes ${
+          n === 1 ? "this row" : `all ${n} rows`
+        } in this batch. This can’t be undone.`,
+        confirmLabel: n === 1 ? "Delete" : `Delete ${n}`,
+      }))
     ) {
       return;
     }
@@ -241,6 +249,7 @@ export function BatchFooterActions({
           )}
         />
       ) : null}
+      {confirmDialog}
     </>
   );
 }

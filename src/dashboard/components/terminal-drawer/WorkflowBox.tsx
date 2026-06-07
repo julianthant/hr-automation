@@ -11,6 +11,7 @@ import {
 import type { AuthState, WorkflowInstanceState } from "@/components/shared/types";
 import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
+import { useConfirm } from "@/components/shared/useConfirm";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
 import { useDaemons } from "@/components/hooks/useDaemons";
@@ -259,15 +260,18 @@ function StopPill({
   totalDaemonCount: number;
 }) {
   const [sending, setSending] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   const postStop = async () => {
     if (totalDaemonCount > 1) {
-      const ok = window.confirm(
-        `Stop ALL ${totalDaemonCount} ${workflow} daemons?\n\n` +
-          `The /api/daemon/stop endpoint is workflow-scoped, not per-card. ` +
-          `Clicking the stop button on this single card will tear down every ` +
-          `${workflow} daemon currently alive — including any in-flight items.`,
-      );
+      const ok = await confirm({
+        tone: "destructive",
+        title: `Stop all ${totalDaemonCount} ${workflow} daemons?`,
+        description:
+          `Stop is workflow-scoped, not per-card — this tears down every ${workflow} ` +
+          `daemon currently alive, including any in-flight items.`,
+        confirmLabel: `Stop all ${totalDaemonCount}`,
+      });
       if (!ok) return;
     }
     setSending(true);
@@ -327,6 +331,7 @@ function StopPill({
     : `Stop the ${workflow} daemon now`;
 
   return (
+    <>
     <button
       type="button"
       disabled={sending}
@@ -354,6 +359,8 @@ function StopPill({
       )}
       {totalDaemonCount > 1 ? `stop all ${totalDaemonCount}` : "stop"}
     </button>
+    {confirmDialog}
+    </>
   );
 }
 

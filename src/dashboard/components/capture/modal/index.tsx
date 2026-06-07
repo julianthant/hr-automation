@@ -11,12 +11,12 @@ import type {
   CaptureValidation,
 } from "../capture-types.js";
 import { ModalChrome } from "./ModalChrome.js";
+import { useConfirm } from "@/components/shared/useConfirm";
 import { LeftColumn } from "./LeftColumn.js";
 import { RightColumn } from "./RightColumn.js";
 import { ValidationBanner } from "./ValidationBanner.js";
 import { CaptureStatusBlock } from "./CaptureStatusBlock.js";
 import { CAPTURE_MODAL_GRID_COLS } from "./capture-modal-layout.js";
-import { isTerminal } from "./capture-state-terminal.js";
 
 /**
  * Operator-side capture modal — wider 2-column layout.
@@ -306,13 +306,18 @@ export function CaptureModal({
     }
   }, [started, retrying]);
 
+  const { confirm, confirmDialog } = useConfirm();
+
   const handleDiscard = useCallback(async () => {
     if (!started) return;
     const photoCount = info?.photos.length ?? 0;
     if (photoCount > 0) {
-      const ok = window.confirm(
-        `Discard ${photoCount} photo${photoCount === 1 ? "" : "s"}? They'll be deleted.`,
-      );
+      const ok = await confirm({
+        tone: "destructive",
+        title: `Discard ${photoCount} photo${photoCount === 1 ? "" : "s"}?`,
+        description: "They’ll be deleted.",
+        confirmLabel: "Discard",
+      });
       if (!ok) return;
     }
     try {
@@ -325,7 +330,7 @@ export function CaptureModal({
       /* best effort */
     }
     onOpenChange(false);
-  }, [started, info?.photos.length, onOpenChange]);
+  }, [started, info?.photos.length, onOpenChange, confirm]);
 
   const handleDeletePhoto = useCallback(
     async (index: number) => {
@@ -359,6 +364,7 @@ export function CaptureModal({
   }, [started, info, handleDiscard, onOpenChange]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : handleClose())}>
       <DialogContent
         hideClose
@@ -505,5 +511,7 @@ export function CaptureModal({
         />
       )}
     </Dialog>
+    {confirmDialog}
+    </>
   );
 }

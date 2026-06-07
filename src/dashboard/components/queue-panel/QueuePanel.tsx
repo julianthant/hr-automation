@@ -9,6 +9,7 @@ import { Inbox } from "lucide-react";
 import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { QueueEmptyCta } from "./QueueEmptyCta";
 import {
   BatchQueueBackButton,
   BatchQueueMemberList,
@@ -619,7 +620,8 @@ export function QueuePanel({
               <EmptyState
                 icon={Inbox}
                 title="No entries yet"
-                description="Data will appear here as workflows run"
+                description="Runs you start will appear here."
+                action={<QueueEmptyCta workflow={workflow} />}
               />
             ) : (
               sortedFiltered.map(({ entry, projection }) => (
