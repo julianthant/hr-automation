@@ -10,6 +10,10 @@ import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { QueueEmptyCta } from "./QueueEmptyCta";
+import { toast } from "sonner";
+import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
+import { findEnabledAction } from "@/lib/workflow-action-utils";
+import { buildRowCancelDispatchArgs } from "@/lib/row-cancel-request";
 import {
   BatchQueueBackButton,
   BatchQueueMemberList,
@@ -419,6 +423,23 @@ export function QueuePanel({
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
+  // Keyboard row actions (r = retry, x = cancel) reuse the exact dispatch +
+  // status-gating the footer buttons use — refs keep the [] keydown effect
+  // stable while still seeing the latest rows / date / dispatcher.
+  const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
+  const rowsById = useMemo(
+    () => new Map(sortedFiltered.map((row) => [row.entry.id, row])),
+    [sortedFiltered],
+  );
+  const rowsByIdRef = useRef(rowsById);
+  rowsByIdRef.current = rowsById;
+  const dateRef = useRef(date);
+  dateRef.current = date;
+  const dispatchRef = useRef(dispatchWorkflowAction);
+  dispatchRef.current = dispatchWorkflowAction;
+  const inBatchQueueRef = useRef(Boolean(batchQueueParentRunId));
+  inBatchQueueRef.current = Boolean(batchQueueParentRunId);
+
   useEffect(() => {
     const scrollEntryIntoView = (id: string) => {
       const root = scrollAreaRef.current;
@@ -430,9 +451,63 @@ export function QueuePanel({
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       if (e.defaultPrevented) return;
       if (isEditableFocus(e.target)) return;
+
+      // r = retry, x = cancel — act on the selected top-level row, reusing the
+      // footer buttons' dispatch + gating (no-op when the action isn't enabled).
+      if ((e.key === "r" || e.key === "x") && selectedIdRef.current && !inBatchQueueRef.current) {
+        const row = rowsByIdRef.current.get(selectedIdRef.current);
+        if (!row) return;
+        const actions = row.projection.actions;
+        if (e.key === "r") {
+          const retry = findEnabledAction(actions, "retry");
+          if (!retry) return;
+          e.preventDefault();
+          const t = toast.loading(`Retrying ${row.entry.id}…`);
+          void dispatchRef
+            .current<{ ok?: boolean; error?: string }>({
+              transport: "retry",
+              kind: "retry",
+              action: retry,
+              fallbackTarget: {
+                workflowId: row.entry.workflow,
+                id: row.entry.id,
+                runId: row.entry.runId,
+                date: dateRef.current,
+              },
+            })
+            .then((r) =>
+              r?.ok
+                ? toast.success("Retry scheduled", { id: t, description: row.entry.id })
+                : toast.error("Couldn't retry", { id: t, description: r?.error }),
+            );
+        } else {
+          const cancel = findEnabledAction(actions, "cancel");
+          if (!cancel) return;
+          e.preventDefault();
+          const t = toast.loading(`Cancelling ${row.entry.id}…`);
+          void dispatchRef
+            .current<{ ok?: boolean; error?: string }>(
+              buildRowCancelDispatchArgs({
+                workflow: row.entry.workflow,
+                id: row.entry.id,
+                runId: row.entry.runId,
+                date: dateRef.current,
+                entry: row.entry,
+                actions,
+              }),
+            )
+            .then((r) =>
+              r?.ok
+                ? toast.success("Cancelled", { id: t, description: row.entry.id })
+                : toast.error("Cancel failed", { id: t, description: r?.error }),
+            );
+        }
+        return;
+      }
+
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
 
       const ids = navigableIdsRef.current;
       if (ids.length === 0) return;
