@@ -111,6 +111,18 @@ async function searchingStep<TSteps extends readonly string[]>(
     if (!result) {
       log.step(`No detail page for EID ${input.emplId}`);
       ctx.updateData({ emplId: input.emplId, hrStatus: "Not found" });
+      // Capture the UCPath search-results grid so the operator has evidence of
+      // what the lookup saw (empty / ambiguous results). Best-effort: never
+      // masks the lookup outcome.
+      try {
+        await ctx.captureAndStampScreenshot(
+          "no UCPath detail",
+          "personOrgSearchScreenshot",
+          { systems: ["ucpath"] },
+        );
+      } catch {
+        // screenshot is best-effort — lookup outcome is unaffected
+      }
       return [];
     }
     log.success(
@@ -140,6 +152,18 @@ async function searchingStep<TSteps extends readonly string[]>(
   } catch (err) {
     log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
     ctx.updateData({ emplId: "Error" });
+    // Capture the UCPath page state BEFORE rethrowing so the operator has
+    // evidence of what the search saw. Best-effort: screenshot must never
+    // mask the original error (we always rethrow after this try/catch).
+    try {
+      await ctx.captureAndStampScreenshot(
+        "UCPath search failed",
+        "personOrgSearchScreenshot",
+        { systems: ["ucpath"] },
+      );
+    } catch {
+      // screenshot is best-effort — original error is still rethrown below
+    }
     throw err;
   }
   ctx.updateData({ searchName: lookup.selection.searchName });
@@ -222,6 +246,15 @@ async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
   ctx.updateData({ startDate, payrollTitle });
   if (crmRecords.length === 0) {
     log.step("CRM start date: no CRM record — Start Date left blank");
+    // Capture the empty CRM search result so the operator has evidence of what
+    // the lookup saw. Best-effort: never let it mask the lookup outcome.
+    try {
+      await ctx.captureAndStampScreenshot("no CRM record", "crmSearchScreenshot", {
+        systems: ["crm"],
+      });
+    } catch {
+      // screenshot is best-effort — lookup outcome is unaffected
+    }
     return;
   }
   log.step(`CRM start date: "${startDate || "(none)"}" (EID ${resolvedEid || "?"})`);
@@ -262,6 +295,15 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
       });
     } catch (err) {
       log.error(`CRM start date: search failed for EID ${input.emplId} — ${errorMessage(err)}`);
+      // Capture whatever the CRM page shows after the failure so the operator
+      // has evidence of what went wrong. Best-effort: never masks the error.
+      try {
+        await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
+          systems: ["crm"],
+        });
+      } catch {
+        // screenshot is best-effort — original lookup outcome is unaffected
+      }
     }
     await stampCrmStartDateAndScreenshot(ctx, crmRecords, input.emplId);
     return;
@@ -283,6 +325,15 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   } catch (err) {
     log.error(`CRM cross-verify: search failed for "${searchName}" — ${errorMessage(err)}`);
     ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
+    // Capture whatever the CRM page shows after the failure so the operator
+    // has evidence of what went wrong. Best-effort: never masks the error.
+    try {
+      await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
+        systems: ["crm"],
+      });
+    } catch {
+      // screenshot is best-effort — original lookup outcome is unaffected
+    }
     return;
   }
 
