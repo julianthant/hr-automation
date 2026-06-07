@@ -46,6 +46,7 @@ import { dateLocal, isEditableFocus } from "./lib/utils";
 import { HelpCircle } from "lucide-react";
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
 import { ColumnResizer } from "./components/shared/ColumnResizer";
+import { OverviewPanel } from "./components/overview/OverviewPanel";
 import { NotificationSettings } from "./components/navigation/NotificationSettings";
 import {
   fireDesktopNotification,
@@ -437,8 +438,13 @@ export function App() {
     document.title = running > 0 ? `${running} running \u2014 HR Dashboard` : "HR Dashboard";
   }, [dedupedEntries]);
 
+  // Cross-workflow Overview landing (rail "Overview" entry). Picking any
+  // workflow exits it.
+  const [showOverview, setShowOverview] = useState(false);
+
   // Clear selection when switching workflows
   const handleWorkflowChange = useCallback((wf: string) => {
+    setShowOverview(false);
     setWorkflow(wf);
     setSelectedId(null);
     setBatchQueueParentRunId(null);
@@ -728,7 +734,19 @@ export function App() {
           workflows={workflows}
           entryCounts={entryCounts}
           onWorkflowChange={handleWorkflowChange}
+          overviewActive={showOverview}
+          onShowOverview={() => setShowOverview(true)}
         />
+        {showOverview ? (
+          <OverviewPanel
+            workflows={workflows}
+            wfCounts={wfCounts}
+            failureCounts={failureCounts ?? {}}
+            date={date}
+            onPick={handleWorkflowChange}
+          />
+        ) : (
+        <>
         <QueuePanel
           entries={dedupedEntries}
           delegationSourceEntries={entries}
@@ -837,6 +855,8 @@ export function App() {
             />
           );
         })()}
+        </>
+        )}
       </div>
       </OcrReviewPrepProvider>
       <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} />
