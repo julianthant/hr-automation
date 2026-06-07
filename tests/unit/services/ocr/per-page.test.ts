@@ -210,6 +210,111 @@ test("runOcrPerPage still drops records that fail schema even with defaults", as
   }
 });
 
+// ─── Loud schema-drop tests ─────────────────────────────────────────────────
+//
+// Regression guard for the "zero records, silent empty page" pattern:
+// when ALL records on a page are dropped by schema validation, the page should
+// surface as a FAILED page (success:false + diagnostic error) rather than an
+// opaque empty page.  This ensures clearly-filled forms are never silently
+// hidden from the operator; the orchestrator's emptyPages vs failedPages
+// classification will show the page as a failure with a reason.
+
+test("runOcrPerPage: all records schema-invalid → page marked failed, not silently empty", async () => {
+  // Every record on page 1 fails schema (missing required `name`).
+  // The page API call succeeded (the test fn returns OK), but all records are
+  // dropped.  The page must become success:false with a schema-drop diagnostic.
+  __setPerPageCallForTests(async () => ({
+    json: [
+      { not_name: "invalid-a" },   // missing required `name`
+      { not_name: "invalid-b" },   // missing required `name`
+    ],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      name: z.string(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    // No records extracted — all were schema-invalid.
+    assert.equal(out.records.length, 0, "no valid records should survive");
+    // The page must be FAILED (not success:true with 0 records = silent empty).
+    assert.equal(out.pages[0].success, false, "page with all-schema-dropped records must be marked failed");
+    // The error message must be diagnostic, not a generic network/timeout error.
+    assert.ok(
+      out.pages[0].error?.includes("schema validation"),
+      `error should mention "schema validation", got: "${out.pages[0].error}"`,
+    );
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
+test("runOcrPerPage: mixed valid+invalid records → page stays successful (partial extraction OK)", async () => {
+  // Page has 2 records: one valid, one schema-invalid.
+  // The valid one survives; the page must NOT be marked failed because at least
+  // one record was extracted successfully.
+  __setPerPageCallForTests(async () => ({
+    json: [
+      { name: "valid-record" },    // passes schema
+      { not_name: "invalid" },     // fails schema
+    ],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      name: z.string(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    assert.equal(out.records.length, 1, "valid record survives");
+    assert.equal(out.records[0].name, "valid-record");
+    // Page is still a success: partial extraction is OK; only all-drop is a failure.
+    assert.equal(out.pages[0].success, true, "page with at least one valid record must stay successful");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
+test("runOcrPerPage: truly empty LLM response (zero records returned) → page stays successful/empty (not schema-drop)", async () => {
+  // The LLM returned no records at all (e.g. a blank page).
+  // This is NOT the same as schema-drop: the LLM saw nothing, so the page
+  // shows as a normal empty page (for the operator to see the page image
+  // and optionally add a row manually).
+  __setPerPageCallForTests(async () => ({
+    json: [],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const Schema = z.object({
+      sourcePage: z.number(),
+      name: z.string(),
+    });
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: Schema,
+    });
+    assert.equal(out.records.length, 0);
+    // No schema drops → page stays success:true (the orchestrator shows it as
+    // an empty page with the page image, not as a failure).
+    assert.equal(out.pages[0].success, true, "a genuinely empty LLM response is not a failure");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
 test("concurrent per-page Gemini runs share in-memory key throttle state", async () => {
   const dir = mkdtempSync(join(tmpdir(), "per-page-rotation-"));
   const firstCallRateLimited = Promise.withResolvers<void>();

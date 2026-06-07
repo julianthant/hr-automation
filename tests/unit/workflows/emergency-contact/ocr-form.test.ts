@@ -13,7 +13,7 @@ test("matchRecord: form-EID present → matched (form-eid first)", async () => {
     formKind: "emergency-contact" as const,
     sourcePage: 1,
     employee: { name: "Maria Garcia", employeeId: "10001234" },
-    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
@@ -28,7 +28,7 @@ test("matchRecord: no form-EID, high roster name match → matched (roster)", as
     formKind: "emergency-contact" as const,
     sourcePage: 2,
     employee: { name: "Maria Garcia", employeeId: "" },
-    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
@@ -43,7 +43,7 @@ test("matchRecord: no form-EID, one fuzzy roster candidate below ROSTER_AUTO_ACC
     formKind: "emergency-contact" as const,
     sourcePage: 2,
     employee: { name: "James Womg", employeeId: "" },
-    emergencyContact: { name: "Sara Wong", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
+    emergencyContact: { name: "Sara Wong", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
@@ -58,7 +58,7 @@ test("matchRecord: no form-EID, multiple fuzzy roster candidates → LLM disambi
     formKind: "emergency-contact" as const,
     sourcePage: 2,
     employee: { name: "Maria Garcia", employeeId: "" },
-    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({
@@ -86,7 +86,7 @@ test("matchRecord: no form-EID, no roster match → lookup-pending", async () =>
     formKind: "emergency-contact" as const,
     sourcePage: 3,
     employee: { name: "Unknown Person", employeeId: "" },
-    emergencyContact: { name: "Other Person", relationship: "Friend", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 999-0000" },
+    emergencyContact: { name: "Other Person", relationship: "Friend", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 999-0000" },
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
