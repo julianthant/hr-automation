@@ -65,7 +65,7 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
       }}
     >
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px] mt-[3px]">{ts}</span>
-      <Icon className={cn("w-[14px] h-[14px] shrink-0 mt-[3px]", color)} />
+      <Icon className={cn("w-[14px] h-[14px] shrink-0 mt-[3px]", color)} aria-hidden />
       <span className={cn(
         "flex-1 min-w-0 break-words",
         category === "success" && "text-[#4ade80]",
