@@ -45,6 +45,26 @@ import { RunModal } from "./components/run-modal/RunModal";
 import { dateLocal, isEditableFocus } from "./lib/utils";
 import { HelpCircle } from "lucide-react";
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
+import { ColumnResizer } from "./components/shared/ColumnResizer";
+
+const QUEUE_WIDTH_STORAGE_KEY = "dashboard.queueWidth";
+
+/** Responsive default width matching the old w-[300/380/460] breakpoints. */
+function defaultQueueWidth(): number {
+  const w = typeof window !== "undefined" ? window.innerWidth : 1440;
+  return w >= 1536 ? 460 : w >= 1440 ? 380 : 320;
+}
+
+function readInitialQueueWidth(): number {
+  if (typeof localStorage !== "undefined") {
+    const stored = localStorage.getItem(QUEUE_WIDTH_STORAGE_KEY);
+    if (stored) {
+      const n = parseInt(stored, 10);
+      if (Number.isFinite(n) && n >= 200 && n <= 900) return n;
+    }
+  }
+  return defaultQueueWidth();
+}
 import type { TrackerEntry as TrackerEntryJsonl } from "../tracker/jsonl.js";
 import { isResolvedPrepEntry } from "../tracker/dashboard/prep-rows.js";
 import { isTerminalNotFoundEntry } from "../domain/tracker-terminal-display.js";
@@ -391,6 +411,16 @@ export function App() {
   // sequence jumps to today; "?" toggles the reference guide.
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const gPressedAtRef = useRef(0);
+
+  // Resizable queue column (persisted; double-click the handle to reset).
+  const [queueWidth, setQueueWidth] = useState<number>(readInitialQueueWidth);
+  const resetQueueWidth = useCallback(() => {
+    if (typeof localStorage !== "undefined") localStorage.removeItem(QUEUE_WIDTH_STORAGE_KEY);
+    setQueueWidth(defaultQueueWidth());
+  }, []);
+  const commitQueueWidth = useCallback((w: number) => {
+    if (typeof localStorage !== "undefined") localStorage.setItem(QUEUE_WIDTH_STORAGE_KEY, String(w));
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableFocus(e.target)) return;
@@ -701,6 +731,14 @@ export function App() {
           runControlsSlot={
             getInputRunConfig(workflow) ? <InputRunPanel workflow={workflow} /> : undefined
           }
+          widthPx={queueWidth}
+        />
+        <ColumnResizer
+          width={queueWidth}
+          onWidthChange={setQueueWidth}
+          onCommit={commitQueueWidth}
+          onReset={resetQueueWidth}
+          ariaLabel="Resize queue panel"
         />
         {(() => {
           if (batchQueueParentRunId && !selectedEntry) {

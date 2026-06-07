@@ -38,7 +38,7 @@ import {
 } from "./queue-sort";
 import { QueueSortDropdown } from "./QueueSortDropdown";
 import { collapseEntriesForStatStrip } from "./stat-strip-collapse";
-import { isEditableFocus } from "@/lib/utils";
+import { cn, isEditableFocus } from "@/lib/utils";
 import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
 
 interface QueuePanelProps {
@@ -111,6 +111,8 @@ interface QueuePanelProps {
   /** Controlled sort mode (persisted at App level — matches batch screenshot preview). */
   queueSortMode: QueueSortMode;
   onQueueSortModeChange: (mode: QueueSortMode) => void;
+  /** Explicit panel width in px (operator-resized). Omit for the responsive default. */
+  widthPx?: number;
 }
 
 function pickProjectionRows<K extends QueueGroupSurface["kind"]>(
@@ -224,6 +226,7 @@ export function QueuePanel({
   runControlsSlot,
   queueSortMode,
   onQueueSortModeChange,
+  widthPx,
 }: QueuePanelProps) {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -614,7 +617,13 @@ export function QueuePanel({
   ];
 
   return (
-    <div className="w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px] shrink-0 flex flex-col bg-background">
+    <div
+      className={cn(
+        "shrink-0 flex flex-col bg-background",
+        widthPx == null && "w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px]",
+      )}
+      style={widthPx != null ? { width: widthPx } : undefined}
+    >
       {batchQueueParentRunId ? (
         // Batch-queue mode: one consolidated toolbar (the old title/"Started …"
         // header band is gone). Back sits before the sort dropdown; the
