@@ -32,6 +32,7 @@ import { toReadonlyVerifyRecord } from "./readonly-record";
 import { RecordScreenshotStrip } from "./RecordScreenshotStrip";
 import type { VerifyLookupKind, VerifyPreviewRecord } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
+import { useConfirm } from "@/components/shared/useConfirm";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
 import {
   useTaskDependencies,
@@ -388,7 +389,16 @@ function useOcrReviewPrepApi(
     setLocalEdits((prev) => ({ ...prev, [index]: next }));
   };
 
-  const removeRecord = useCallback((originalIndex: number) => {
+  const { confirm, confirmDialog } = useConfirm();
+
+  const removeRecord = useCallback(async (originalIndex: number) => {
+    const ok = await confirm({
+      tone: "destructive",
+      title: "Remove this record?",
+      description: "It will be dropped from this batch before approval.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
     setRemovedRecordIndices((prev) => new Set(prev).add(originalIndex));
     setLocalEdits((prev) => {
       if (!(originalIndex in prev)) return prev;
@@ -396,7 +406,7 @@ function useOcrReviewPrepApi(
       delete next[originalIndex];
       return next;
     });
-  }, []);
+  }, [confirm]);
 
   const cursorKey = cfg ? cfg.cursorKey({ sessionId, runId }) : "";
   const { containerRef, onPairVisible, clear: clearCursor } = usePrepCursor({
@@ -938,7 +948,16 @@ function useOcrReviewPrepApi(
       </div>
   );
 
-  return { active: true, toolbar, body };
+  return {
+    active: true,
+    toolbar,
+    body: (
+      <>
+        {body}
+        {confirmDialog}
+      </>
+    ),
+  };
 }
 
 function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sessionId: string; runId: string; storageKey: string; onSuccess: () => void }) {
@@ -1194,8 +1213,8 @@ function renderFormCard(args: {
       screenshotStrip={screenshotStripNode}
       onDeleteRecord={() => {
         if (args.removeBusy) return;
-        if (!window.confirm("Remove this record from the batch?")) return;
-        args.onRemoveRecord(args.originalIndex);
+        // Confirm happens inside onRemoveRecord (useConfirm dialog).
+        void args.onRemoveRecord(args.originalIndex);
       }}
       deleteDisabled={args.removeBusy}
       documentKindChip={renderDocumentKindChip(r.formKind)}
