@@ -418,9 +418,12 @@ export const oathOcrFormSpec: OcrFormSpec<
       return `ocr-oath-${parentRunId}-r${index}`;
     },
     canFanOut(record): boolean {
-      // Skip records classified as non-oath pages (EC or unknown) — they have
-      // no oath-shape signer data and must not be fanned out as oath signers.
-      if ((record.formKind as string) !== "oath") return false;
+      // Skip records EXPLICITLY classified as non-oath pages (EC or unknown) —
+      // they have no oath-shape signer data and must not be fanned out as oath
+      // signers. A record with no formKind (legacy/partial row) defaults to oath
+      // (mirrors applyCarryForward's legacy tolerance), so it still fans out.
+      const kind = record.formKind as string | undefined;
+      if (kind === "emergency-contact" || kind === "unknown") return false;
       return hasOathSignerInput(record);
     },
   },
