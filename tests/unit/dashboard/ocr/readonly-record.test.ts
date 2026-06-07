@@ -15,9 +15,10 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   buildReadonlyChecks,
+  isOathShapedRecord,
   toReadonlyVerifyRecord,
 } from "../../../../src/dashboard/components/ocr/readonly-record.js";
-import type { OathPreviewRecord } from "../../../../src/dashboard/components/ocr/types.js";
+import type { OathPreviewRecord, PreviewRecord } from "../../../../src/dashboard/components/ocr/types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,25 @@ function makeOathRecord(overrides: Partial<OathPreviewRecord> = {}): OathPreview
     employeeSigned: true,
     officerSigned: true,
     dateSigned: "04/23/2026",
+    notes: [],
+    matchState: "matched",
+    selected: true,
+    warnings: [],
+    ...overrides,
+  };
+}
+
+function makeEcRecord(overrides: Partial<PreviewRecord> = {}): PreviewRecord {
+  return {
+    formKind: "emergency-contact",
+    sourcePage: 1,
+    employee: { name: "Lee, Jordan", employeeId: "10000002" },
+    emergencyContact: {
+      name: "Lee, Robin",
+      relationship: "Parent",
+      primary: true,
+      sameAddressAsEmployee: true,
+    },
     notes: [],
     matchState: "matched",
     selected: true,
@@ -192,5 +212,77 @@ describe("toReadonlyVerifyRecord — genuine oath record (no regression)", () =>
     const vr = toReadonlyVerifyRecord(record);
     const hasHint = vr.warnings.some((w) => w.includes("re-run"));
     assert.ok(!hasHint, "no re-run hint for a genuine oath record");
+  });
+});
+
+// ─── isOathShapedRecord — shape (not classification) test ────────────────────
+
+describe("isOathShapedRecord", () => {
+  it("is true for an oath-shaped record regardless of formKind", () => {
+    assert.ok(isOathShapedRecord(makeOathRecord()));
+    assert.ok(isOathShapedRecord(makeOathRecord({ formKind: "emergency-contact" })));
+    assert.ok(isOathShapedRecord(makeOathRecord({ formKind: "unknown" })));
+  });
+
+  it("is false for an EC-shaped record regardless of formKind", () => {
+    assert.ok(!isOathShapedRecord(makeEcRecord()));
+    assert.ok(!isOathShapedRecord(makeEcRecord({ formKind: "oath" })));
+    assert.ok(!isOathShapedRecord(makeEcRecord({ formKind: "unknown" })));
+  });
+});
+
+// ─── F6: EC-RUN mis-classification (the previously-unhandled direction) ──────
+// An EC-shaped record (real EC run) re-classified by the model as "oath" or
+// "unknown" must now ALSO render an honest wrong-form hint — previously it fell
+// through to a plain EC card with no warning (or, for "oath", was never reached
+// here because the old code branched on shape-key presence).
+
+describe("buildReadonlyChecks — EC-shaped record re-classified as 'oath'", () => {
+  it("returns EC-shape checks (name/eid/ecName/ecRelationship/activeStatus), no oath signatures", () => {
+    const record = makeEcRecord({ formKind: "oath" });
+    const checks = buildReadonlyChecks(record);
+    const keys = checks.map((c) => c.key);
+    assert.deepEqual(keys, ["name", "eid", "ecName", "ecRelationship", "activeStatus"]);
+    assert.ok(!keys.includes("employeeSigned"), "must NOT show oath signature checks");
+  });
+});
+
+describe("toReadonlyVerifyRecord — EC-shaped record re-classified as 'oath'", () => {
+  it("projects formKind 'oath' and adds the wrong-form hint", () => {
+    const record = makeEcRecord({ formKind: "oath" });
+    const vr = toReadonlyVerifyRecord(record);
+    assert.equal(vr.formKind, "oath");
+    const hasHint = vr.warnings.some((w) => w.includes("oath form") && w.includes("re-run"));
+    assert.ok(hasHint, `EC-run oath mis-classification must include the hint — got: ${JSON.stringify(vr.warnings)}`);
+  });
+
+  it("still reads name/eid from the EC employee shape", () => {
+    const record = makeEcRecord({
+      formKind: "oath",
+      employee: { name: "Nguyen, Taylor", employeeId: "10567890" },
+    });
+    const vr = toReadonlyVerifyRecord(record);
+    assert.equal(vr.name, "Nguyen, Taylor");
+    assert.equal(vr.employeeId, "10567890");
+  });
+});
+
+describe("toReadonlyVerifyRecord — EC-shaped record re-classified as 'unknown'", () => {
+  it("projects formKind 'unknown' and adds a re-run hint (previously no warning)", () => {
+    const record = makeEcRecord({ formKind: "unknown" });
+    const vr = toReadonlyVerifyRecord(record);
+    assert.equal(vr.formKind, "unknown");
+    const hasHint = vr.warnings.some((w) => w.includes("re-run"));
+    assert.ok(hasHint, `EC-run unknown mis-classification must include a re-run hint — got: ${JSON.stringify(vr.warnings)}`);
+  });
+});
+
+describe("toReadonlyVerifyRecord — genuine EC record (no regression)", () => {
+  it("projects formKind 'emergency-contact' and adds NO hint", () => {
+    const record = makeEcRecord();
+    const vr = toReadonlyVerifyRecord(record);
+    assert.equal(vr.formKind, "emergency-contact");
+    const hasHint = vr.warnings.some((w) => w.includes("re-run"));
+    assert.ok(!hasHint, "no re-run hint for a genuine EC record");
   });
 });

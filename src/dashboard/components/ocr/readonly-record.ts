@@ -26,6 +26,20 @@ function nonEmpty(v: unknown): string | null {
   return t.length === 0 ? null : t;
 }
 
+/**
+ * SHAPE test (not classification): does this record carry the oath-shape fields
+ * (`printedName` / `employeeId` at top level)? An oath OCR run always produces
+ * oath-shaped records regardless of how the model classified the page's
+ * `formKind`; an EC run produces `employee`/`emergencyContact`-shaped records.
+ * Shape decides which fields we can READ; `formKind` decides whether to show a
+ * wrong-form hint — the two axes are orthogonal.
+ */
+export function isOathShapedRecord(
+  record: OathPreviewRecord | PreviewRecord,
+): record is OathPreviewRecord {
+  return "printedName" in record || "employeeId" in record;
+}
+
 /** The active-status value from a cross-verification, or null when unknown. */
 function activeStatusValue(verification: Verification | undefined): string | null {
   if (!verification) return null;
@@ -66,42 +80,46 @@ function boolCheck(key: string, label: string, yes: boolean): VerifyCheck {
 /**
  * Build the read-only completeness checklist for a standalone oath / EC record.
  *
- * Special case: an oath-run record whose `formKind` was classified as
- * "emergency-contact" or "unknown" by the model. The oath prompt does not
- * extract EC-specific fields (`employee`, `emergencyContact`), so we can only
- * show the fields that ARE present in the oath shape: `printedName`, `employeeId`,
- * and the active-status lookup result. Oath signature checks are skipped (the
- * `formKind === "oath"` guard handles that). An EC-shape record in an EC run is
- * unaffected — it goes through the `else` branch as before.
+ * We branch on SHAPE (which fields the record carries — set by the OCR run that
+ * produced it), then by `formKind` (the model's per-page classification). The
+ * two are orthogonal:
+ * - Oath-shaped + classified "oath": full oath card (name/EID/date + signatures).
+ * - Oath-shaped + classified "emergency-contact"/"unknown" (oath-run
+ *   mis-classification): the oath prompt did not extract EC fields, so we show
+ *   only the oath-shape fields we have (printedName, employeeId, active status).
+ * - EC-shaped + classified "emergency-contact": normal EC card.
+ * - EC-shaped + classified "oath"/"unknown" (EC-run mis-classification): the EC
+ *   prompt did not extract oath fields, so we show only the EC-shape fields.
+ *   `toReadonlyVerifyRecord` adds the wrong-form hint for both mis-classified
+ *   directions.
  */
 export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): VerifyCheck[] {
   const activeStatus = activeStatusValue(record.verification);
   const activeCheck = valueCheck("activeStatus", "Active Status", activeStatus, "ucpath");
 
-  if (record.formKind === "oath") {
+  if (isOathShapedRecord(record)) {
+    // Oath-shaped: a re-classified page (formKind != "oath") has no oath
+    // signature data worth showing, so drop the signature checks for it.
+    if (record.formKind === "oath") {
+      return [
+        valueCheck("name", "Printed Name", nonEmpty(record.printedName), "paper"),
+        valueCheck("eid", "Employee ID", nonEmpty(record.employeeId), "paper"),
+        valueCheck("dateSigned", "Date Signed", nonEmpty(record.dateSigned), "paper"),
+        boolCheck("employeeSigned", "Employee Signed", record.employeeSigned === true),
+        boolCheck("officerSigned", "Officer Signed", record.officerSigned === true),
+        activeCheck,
+      ];
+    }
     return [
       valueCheck("name", "Printed Name", nonEmpty(record.printedName), "paper"),
       valueCheck("eid", "Employee ID", nonEmpty(record.employeeId), "paper"),
-      valueCheck("dateSigned", "Date Signed", nonEmpty(record.dateSigned), "paper"),
-      boolCheck("employeeSigned", "Employee Signed", record.employeeSigned === true),
-      boolCheck("officerSigned", "Officer Signed", record.officerSigned === true),
       activeCheck,
     ];
   }
 
-  // An oath-SHAPED record re-classified as "emergency-contact" or "unknown"
-  // (i.e. from an oath OCR run, not a real EC run). The oath prompt does not
-  // extract EC-specific fields — show only what we have from the oath shape.
-  if ("printedName" in record || "employeeId" in record) {
-    const oathShaped = record as OathPreviewRecord;
-    return [
-      valueCheck("name", "Printed Name", nonEmpty(oathShaped.printedName), "paper"),
-      valueCheck("eid", "Employee ID", nonEmpty(oathShaped.employeeId), "paper"),
-      activeCheck,
-    ];
-  }
-
-  // emergency-contact record from a real EC run
+  // EC-shaped (a real EC run), whatever the model classified `formKind` as. The
+  // EC prompt extracts `employee`/`emergencyContact`; a mis-classified page
+  // simply has them blank — but they are still the only fields we have.
   return [
     valueCheck("name", "Name", nonEmpty(record.employee?.name), "paper"),
     valueCheck("eid", "Employee ID", nonEmpty(record.employee?.employeeId), "ucpath"),
@@ -112,52 +130,63 @@ export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): 
 }
 
 /**
- * Produce the hint text shown when a page inside an oath run was recognized as
- * a non-oath form. The hint tells the operator to re-run through the correct workflow.
+ * Produce the hint text shown when a page was classified as a form that does NOT
+ * match the run that produced it (a wrong-form page). `formKind` is the model's
+ * classification; the hint names the form it looks like and points the operator
+ * at the right workflow. Covers BOTH mis-classification directions (an EC/unknown
+ * page in an oath run, and an oath/unknown page in an EC run).
  */
 function wrongFormKindHint(formKind: string): string {
   if (formKind === "emergency-contact") {
     return "This page looks like an Emergency Contact form, not an oath — re-run it through the Emergency Contact or Verify workflow to extract its fields.";
   }
-  return "This page was not recognized as an oath form — re-run it through the Verify workflow to confirm its content.";
+  if (formKind === "oath") {
+    return "This page looks like an oath form, not an Emergency Contact form — re-run it through the Oath Signature or Verify workflow to extract its fields.";
+  }
+  return "This page was not recognized as the expected form — re-run it through the Verify workflow to confirm its content.";
 }
 
-/** Project a standalone oath / EC record onto a read-only `VerifyPreviewRecord`. */
+/**
+ * Append the wrong-form hint to a record's warnings when its `formKind`
+ * classification doesn't match the native form of the run that produced it
+ * (`nativeForm`). Dedups so a re-render doesn't stack the hint.
+ */
+function withWrongFormHint(warnings: string[], formKind: string, nativeForm: "oath" | "emergency-contact"): string[] {
+  if (formKind === nativeForm) return warnings;
+  const hint = wrongFormKindHint(formKind);
+  return warnings.includes(hint) ? warnings : [...warnings, hint];
+}
+
+/**
+ * Project a standalone oath / EC record onto a read-only `VerifyPreviewRecord`.
+ *
+ * Branches on SHAPE (`isOathShapedRecord`), then attaches a wrong-form hint
+ * whenever the model's `formKind` doesn't match the native form of the run —
+ * symmetric across BOTH directions (an oath run that classified a page
+ * EC/unknown, AND an EC run that classified a page oath/unknown). The `formKind`
+ * carried onto the projected record drives the doc-kind chip.
+ */
 export function toReadonlyVerifyRecord(
   record: OathPreviewRecord | PreviewRecord,
 ): VerifyPreviewRecord {
   const checks = buildReadonlyChecks(record);
-  if (record.formKind === "oath") {
+
+  if (isOathShapedRecord(record)) {
+    const warnings = withWrongFormHint(record.warnings, record.formKind, "oath");
     return {
-      formKind: "oath",
+      formKind: record.formKind,
       sourcePage: record.sourcePage,
       printedName: record.printedName,
       employeeId: record.employeeId ?? "",
       name: nonEmpty(record.printedName) ?? "",
-      employeeSigned: record.employeeSigned ?? null,
-      officerSigned: record.officerSigned ?? null,
+      // Signature checks are only meaningful for an actual oath page.
+      ...(record.formKind === "oath"
+        ? {
+            employeeSigned: record.employeeSigned ?? null,
+            officerSigned: record.officerSigned ?? null,
+          }
+        : {}),
       // OathMatchState shares the MatchState string union.
-      matchState: record.matchState as VerifyPreviewRecord["matchState"],
-      selected: record.selected,
-      warnings: record.warnings,
-      checks,
-    };
-  }
-
-  // Oath-SHAPED record re-classified as "emergency-contact" or "unknown" by the
-  // model (i.e. from an oath OCR run). Render with the correct doc-kind chip and
-  // an honest hint so the operator knows to use the right workflow. The oath prompt
-  // does not extract EC fields, so we can only surface what the oath shape carries.
-  if ("printedName" in record || "employeeId" in record) {
-    const oathShaped = record as OathPreviewRecord;
-    const hint = wrongFormKindHint(record.formKind as string);
-    const warnings = record.warnings.includes(hint) ? record.warnings : [...record.warnings, hint];
-    return {
-      formKind: record.formKind as VerifyPreviewRecord["formKind"],
-      sourcePage: record.sourcePage,
-      printedName: oathShaped.printedName,
-      employeeId: oathShaped.employeeId ?? "",
-      name: nonEmpty(oathShaped.printedName) ?? "",
       matchState: record.matchState as VerifyPreviewRecord["matchState"],
       selected: record.selected,
       warnings,
@@ -165,15 +194,18 @@ export function toReadonlyVerifyRecord(
     };
   }
 
+  // EC-shaped record (a real EC run). A page the model classified oath/unknown
+  // gets the same honest wrong-form hint as the oath-run direction.
+  const warnings = withWrongFormHint(record.warnings, record.formKind, "emergency-contact");
   return {
-    formKind: "emergency-contact",
+    formKind: record.formKind,
     sourcePage: record.sourcePage,
     printedName: record.employee?.name ?? null,
     employeeId: record.employee?.employeeId ?? "",
     name: nonEmpty(record.employee?.name) ?? "",
     matchState: record.matchState,
     selected: record.selected,
-    warnings: record.warnings,
+    warnings,
     checks,
   };
 }

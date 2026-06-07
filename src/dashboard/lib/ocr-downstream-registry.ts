@@ -196,7 +196,10 @@ registerOcrDownstream("oath-signature", {
   cursorKey: ({ runId }) => `oath-prep-cursor:${runId}`,
   hasSignature: true,
   supportsForceResearch: false,
-  recordName: (r) => (r.formKind === "oath" ? r.printedName : "") || "(no name)",
+  // Narrow by SHAPE (printedName presence), not formKind: the EC PreviewRecord's
+  // formKind is now the same 3-way union, so `=== "oath"` no longer discriminates
+  // the union member. An oath OCR run always produces oath-shaped records here.
+  recordName: (r) => ("printedName" in r ? (r as OathPreviewRecord).printedName : "") || "(no name)",
   renderEditor: noopRenderer,
 });
 

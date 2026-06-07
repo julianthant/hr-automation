@@ -74,7 +74,11 @@ export interface PreviewEmergencyContact {
 }
 
 export interface PreviewRecord {
-  formKind: "emergency-contact";
+  // The EC OCR pass can classify a page as a non-EC form (oath/unknown) — the
+  // backend Zod enum is the same three-way union, so the frontend mirror must
+  // match it or an EC-run mis-classification has no type forcing it to be
+  // handled (see readonly-record.ts wrong-form hint).
+  formKind: "oath" | "emergency-contact" | "unknown";
   sourcePage: number;
   employee: PreviewEmployee;
   emergencyContact: PreviewEmergencyContact;
