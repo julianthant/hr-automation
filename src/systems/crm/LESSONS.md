@@ -13,10 +13,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Skip the UI entirely. After the record page loads, find the PDF.js iframe via `page.frames().find(f => f.url().includes("crickportal-ext.bfs.ucsd.edu") && f.url().includes("/pdfjs/web/PDFjsViewer"))`, extract the `h=<hash>` query param, then fetch each PDF directly via `page.context().request.get("https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/iDocsForSalesforceDocumentServer?i=<idx>&h=<hash>")`. Browser-context cookies are reused. One HTTP round-trip per doc.
 **Tags:** idocs, pdf, pdfjs, iframe, salesforce, canvas, download, fetch
 
-## 2026-04-14 — Visualforce label selectors needed two strategies
+## 2026-04-14 — Visualforce label selectors needed two strategies (extended 2026-06-07)
 
 **Tried:** A single XPath like `//th[text()="Department"]/following-sibling::td[1]` for every Visualforce field extraction.
 **Failed because:** Some Visualforce sections render the label inside a `<th class="labelCol">`, but other sections render it inside a plain `<td>` with no `<th>`. A single strategy missed the `<td>`-only labels.
-**Fix:** Two strategies in `record`: `thLabelFollowingTd` (preferred — anchored on `<th>`) with a `tdLabelFollowingTd` fallback. `extractField(page, label)` in `extract.ts` tries each in order with a 2s timeout per attempt.
-**Selector:** `record.thLabelFollowingTd`, `record.tdLabelFollowingTd` in `selectors.ts`
-**Tags:** visualforce, label, extract, xpath, th, td, fallback
+**Fix:** Five strategies in `record`: `thLabelFollowingTd` (preferred — `<th>` anchor), `tdLabelFollowingTd` (plain `<td>` anchor), `cellLabelFollowingTd` (`.or()` of both for tag-variant rows — UNVERIFIED), `rowLabelLastCell` (row-scoped last-cell for non-adjacent value cells — UNVERIFIED), and `lightningFieldValue` (Salesforce Lightning `slds-form-element` layout — UNVERIFIED). `extractField(page, label)` in `extract.ts` tries each in order with a 500 ms timeout per attempt (reduced from 2 000 ms on 2026-06-07 — missing fields were costing up to 20 s; present elements resolve near-instantly). Strategies 3–5 are UNVERIFIED against the live CRM record page and need a live re-verify before bumping their `// verified` dates in `selectors.ts`.
+**Selector:** `record.thLabelFollowingTd`, `record.tdLabelFollowingTd`, `record.cellLabelFollowingTd`, `record.rowLabelLastCell`, `record.lightningFieldValue` in `selectors.ts`
+**Tags:** visualforce, label, extract, xpath, th, td, fallback, lightning, timeout, perf
