@@ -304,11 +304,13 @@ test(
  * row keeps its preview identity (file-kind title). Sync: hold person-lookup at
  * its `searching` stage so a child is parked mid-enrichment (the OCR worker is
  * blocked in `watchChildRuns`), then cancel the OCR parent via the REAL
- * control-layer cancel path. The cancel aborts the OCR run's `ctx.signal`, which
- * unblocks `watchChildRuns` (via `raceOcrPrepWithDiscard`) → the OCR run
- * terminates cancelled. The daemon-dispatched children are independent daemon
- * runs (NOT in-process), so a parent cancel does not propagate to them — they
- * continue on their own daemons; we assert only the PARENT invariant here.
+ * control-layer cancel path. The cancel aborts the OCR run's `ctx.signal`; the
+ * orchestrator's entry bridge trips the in-process prepare-abort flag, which
+ * `raceOcrPrepWithDiscard` polls → the enrich await unblocks and rethrows → the
+ * daemon maps it to a terminal `CancelledError` + `step:"cancelled"`. The
+ * daemon-dispatched children are independent daemon runs (NOT in-process), so a
+ * parent cancel does not propagate to them — the orphaned `enrichRecords`
+ * promise keeps watching its own children; we assert only the PARENT invariant.
  */
 test(
   "OCR verify → enrichment fan-out: cancelling the OCR parent mid-enrichment terminates cancelled (no hang)",
