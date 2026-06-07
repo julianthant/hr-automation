@@ -14,17 +14,76 @@ import {
 } from "../../matching/index.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
-import {
-  AddressSchema,
-  EmergencyContactSchema,
-  type EmergencyContactRecord,
-} from "../../../workflows/emergency-contact/schema.js";
+import type { EmergencyContactRecord } from "../../../workflows/emergency-contact/schema.js";
 import { DocumentTypeSchema, LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
 
-// ─── Permissive OCR-pass schema ────────────────────────────
+// ─── Permissive OCR-pass schemas ───────────────────────────
+//
+// These are intentionally LOOSER than the strict downstream schemas in
+// `src/workflows/emergency-contact/schema.ts`.  The vision LLM never sets
+// `sameAddressAsEmployee` (it is a computed field, not on the paper form) and
+// may leave `name` / `relationship` blank on a partially-filled form.  Using the
+// strict schema here caused per-page `finalize()` to drop every EC record with
+// the error "expected boolean, received undefined" → whole PDF appeared empty.
+//
+// The strict schemas still validate at the EC daemon boundary (when the approved
+// input is re-parsed); strictness belongs there, not during extraction.
+
+/**
+ * Permissive address shape for the OCR pass.  `street` is nullable/optional so
+ * a partially-extracted address does not drop the whole record.
+ */
+const PermissiveAddressOcrSchema = z.object({
+  street: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  zip: z.string().nullable().optional(),
+});
+
+/**
+ * Permissive emergency-contact shape for the OCR pass.
+ *
+ * Key differences from the strict `EmergencyContactSchema`:
+ * - `sameAddressAsEmployee`: optional (the LLM never sets it; we default it
+ *   using the same blank-address logic the strict schema's `.transform` uses).
+ * - `name` / `relationship`: nullable+optional so a partially-filled form still
+ *   extracts instead of being dropped.  The operator completes them in review.
+ * - `address`: uses the permissive address schema so partial address data
+ *   survives.
+ */
+const PermissiveEmergencyContactOcrSchema = z
+  .object({
+    name: z.string().nullable().optional(),
+    relationship: z.string().nullable().optional(),
+    primary: z.boolean().default(true),
+    /**
+     * Intentionally optional: `sameAddressAsEmployee` is a COMPUTED field never
+     * present on the paper form, so the vision LLM never emits it.  We default it
+     * here with the same logic as the strict schema's `.transform`: when the
+     * contact has no address, force same-as-employee = true so UCPath gets the
+     * employee's address rather than nothing.
+     */
+    sameAddressAsEmployee: z.boolean().optional(),
+    address: PermissiveAddressOcrSchema.nullable().optional(),
+    cellPhone: z.string().nullable().optional(),
+    homePhone: z.string().nullable().optional(),
+    workPhone: z.string().nullable().optional(),
+  })
+  .transform((c) => {
+    // Mirror the strict schema's blank-address rule so the downstream cast
+    // (`as EmergencyContactRecord`) is always safe: when there is no contact
+    // address, assume same-as-employee.
+    const hasAddress = c.address != null && c.address.street != null && c.address.street.trim().length > 0;
+    const sameAddress = c.sameAddressAsEmployee ?? !hasAddress;
+    return {
+      ...c,
+      sameAddressAsEmployee: sameAddress,
+      address: sameAddress ? null : c.address,
+    };
+  });
 
 const PermissiveEmployeeSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().nullable().optional(),
   employeeId: z
     .string()
     .nullable()
@@ -36,7 +95,7 @@ const PermissiveEmployeeSchema = z.object({
   supervisor: z.string().nullable().optional(),
   workEmail: z.string().nullable().optional(),
   personalEmail: z.string().nullable().optional(),
-  homeAddress: AddressSchema.nullable().optional(),
+  homeAddress: PermissiveAddressOcrSchema.nullable().optional(),
   homePhone: z.string().nullable().optional(),
   cellPhone: z.string().nullable().optional(),
 });
@@ -45,7 +104,7 @@ export const PermissiveRecordSchema = z.object({
   formKind: z.literal("emergency-contact").default("emergency-contact"),
   sourcePage: z.number().int().positive(),
   employee: PermissiveEmployeeSchema,
-  emergencyContact: EmergencyContactSchema,
+  emergencyContact: PermissiveEmergencyContactOcrSchema,
   notes: z.array(z.string()).default([]),
   documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
@@ -133,7 +192,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     // no UCPath ID for that person yet (column blank or absent), fall
     // through to the eid-lookup branch so the downstream daemon resolves
     // the EID instead of trusting an empty string.
-    const result = matchAgainstRoster(roster, record.employee.name);
+    const result = matchAgainstRoster(roster, record.employee.name ?? "");
     if (
       result.candidates.length === 1 &&
       result.candidates[0].eid &&
@@ -141,14 +200,14 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     ) {
       const top = result.candidates[0];
       const rosterRow = roster.find((r) => r.eid === top.eid);
+      // `compareUsAddresses` checks `!a.street` internally and returns "missing"
+      // when the street is blank — safe to cast the permissive address here.
       const addressMatch =
         rosterRow && rosterRow.street
-          ? compareUsAddresses(record.employee.homeAddress ?? null, {
-              street: rosterRow.street,
-              city: rosterRow.city,
-              state: rosterRow.state,
-              zip: rosterRow.zip,
-            })
+          ? compareUsAddresses(
+              record.employee.homeAddress as { street: string } | null | undefined,
+              { street: rosterRow.street, city: rosterRow.city, state: rosterRow.state, zip: rosterRow.zip },
+            )
           : undefined;
       return {
         ...record,

@@ -284,6 +284,14 @@ function finalize<T>(
   // runner-authoritative sourcePage before validation. Spread order: defaults
   // first, LLM record next, sourcePage last (always wins).
   const records: Array<T & { sourcePage: number }> = [];
+
+  // Track schema-drop errors per page: { pageNum → error messages[] }.
+  // Used below to surface "all records dropped" as a failed page instead of
+  // a silently-empty page (which gives the operator NO diagnostic and hides
+  // clearly-filled forms from review).
+  const schemaDropErrors = new Map<number, string[]>();
+  const parsedPageNums = new Set<number>();
+
   for (const r of results) {
     if (!r.success || !r.rawRecords) continue;
     for (const [idx, rec] of r.rawRecords.entries()) {
@@ -300,28 +308,52 @@ function finalize<T>(
             return String(rec);
           }
         })();
+        const reason = parsed.error.issues
+          .slice(0, 1)
+          .map((i) => `${i.path.length > 0 ? i.path.join(".") + ": " : ""}${i.message}`)
+          .join("; ");
         log.warn(
-          `runOcrPerPage page ${r.page} record dropped (schema): ${parsed.error.issues
-            .slice(0, 1)
-            .map((i) => i.message)
-            .join("; ")} — raw: ${rawJson.slice(0, 300)}`,
+          `runOcrPerPage page ${r.page} record dropped (schema): ${reason} — raw: ${rawJson.slice(0, 300)}`,
         );
+        const existing = schemaDropErrors.get(r.page) ?? [];
+        existing.push(reason);
+        schemaDropErrors.set(r.page, existing);
         continue;
       }
+      parsedPageNums.add(r.page);
       records.push({ ...(parsed.data as T), sourcePage: r.page });
     }
   }
 
+  // Build the pages array.  For a page that "succeeded" (API call returned
+  // data) but had ALL records dropped by schema validation, surface it as
+  // `success: false` with a diagnostic error rather than letting the
+  // orchestrator classify it as a silently-empty page (which gives the
+  // operator no signal that a clearly-filled form was seen but rejected).
+  // A page is only flipped to failed when it contributed NO valid records
+  // AND had at least one schema drop — this preserves pages where some
+  // records were valid and others were bad (partial extraction is OK).
+  const finalPages = results.map((r) => {
+    if (!r.success) {
+      return { page: r.page, success: false, error: r.error, poolKeyId: r.poolKeyId, attemptedKeys: r.attemptedKeys, attempts: r.attempts };
+    }
+    const drops = schemaDropErrors.get(r.page);
+    const hasValidRecord = parsedPageNums.has(r.page);
+    if (drops && drops.length > 0 && !hasValidRecord) {
+      // All records on this page were dropped by schema validation.  Surface
+      // as a failed page so the orchestrator counts it under `failedPages`
+      // (visible in the dashboard's page-status summary) rather than an
+      // opaque `emptyPage` with no diagnostic.
+      const error = `schema validation dropped all ${drops.length} record(s): ${drops.slice(0, 2).join("; ")}`;
+      log.warn(`runOcrPerPage page ${r.page} marked FAILED: ${error}`);
+      return { page: r.page, success: false, error, poolKeyId: r.poolKeyId, attemptedKeys: r.attemptedKeys, attempts: r.attempts };
+    }
+    return { page: r.page, success: true, error: r.error, poolKeyId: r.poolKeyId, attemptedKeys: r.attemptedKeys, attempts: r.attempts };
+  });
+
   return {
     records,
-    pages: results.map((r) => ({
-      page: r.page,
-      success: r.success,
-      error: r.error,
-      poolKeyId: r.poolKeyId,
-      attemptedKeys: r.attemptedKeys,
-      attempts: r.attempts,
-    })),
+    pages: finalPages,
     poolSummary,
   };
 }
