@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkflows, autoLabel, type WorkflowMetadata } from "@/lib/workflows-context";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
@@ -9,6 +10,10 @@ interface WorkflowRailProps {
   workflows: string[];
   entryCounts: Record<string, number>;
   onWorkflowChange: (wf: string) => void;
+  /** When true, the Overview entry is highlighted (queue panels are hidden). */
+  overviewActive?: boolean;
+  /** Opens the cross-workflow Overview landing. Omit to hide the entry. */
+  onShowOverview?: () => void;
 }
 
 interface Group {
@@ -49,6 +54,8 @@ export function WorkflowRail({
   workflows,
   entryCounts,
   onWorkflowChange,
+  overviewActive = false,
+  onShowOverview,
 }: WorkflowRailProps) {
   const registered = useWorkflows();
   const queueDepth = useQueueDepth();
@@ -66,6 +73,44 @@ export function WorkflowRail({
       className="w-[200px] shrink-0 bg-card flex flex-col"
     >
       <div className="flex-1 overflow-y-auto py-3">
+        {onShowOverview && (
+          <div className="mb-2 border-b border-border px-1.5 pb-3">
+            <button
+              type="button"
+              onClick={onShowOverview}
+              aria-current={overviewActive ? "page" : undefined}
+              className={cn(
+                "group flex h-10 w-full items-stretch gap-2 rounded-md pl-1 pr-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary cursor-pointer",
+                overviewActive ? "bg-accent/40" : "hover:bg-secondary",
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "my-1.5 w-[3px] rounded-r-full transition-colors",
+                  overviewActive ? "bg-primary" : "bg-transparent group-hover:bg-border",
+                )}
+              />
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <LayoutGrid
+                  aria-hidden
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0",
+                    overviewActive ? "text-foreground" : "text-muted-foreground",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "truncate text-[13px]",
+                    overviewActive ? "font-semibold text-foreground" : "font-medium text-foreground/90",
+                  )}
+                >
+                  Overview
+                </span>
+              </span>
+            </button>
+          </div>
+        )}
         {displayGroups.map((group, idx) => (
           <div
             key={group.label}
