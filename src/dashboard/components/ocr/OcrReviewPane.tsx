@@ -22,13 +22,18 @@ import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
 import {
   PrepReviewFormCard,
   PrepReviewRecordNav,
-  type PrepRecordWorkflowPhase,
 } from "./PrepReviewFormCard";
 import { EmptyPagePlaceholder } from "./EmptyPagePlaceholder";
 import { EcRecordView } from "./EcRecordView";
 import { OathRecordView } from "./OathRecordView";
 import { VerifyRecordView } from "./VerifyRecordView";
 import { toReadonlyVerifyRecord } from "./readonly-record";
+import {
+  deriveOcrRecordLookupTracker,
+  deriveRecordWorkflowPhase,
+  lookupTrackerClassName,
+  type OcrRecordLookupTracker,
+} from "./lookup-status";
 import { RecordScreenshotStrip } from "./RecordScreenshotStrip";
 import type { VerifyLookupKind, VerifyPreviewRecord } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
@@ -255,12 +260,13 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch,
     />
   );
 });
-setOcrDownstreamRenderer("verify", ({ record, onRelookup, relookupPending }) =>
+setOcrDownstreamRenderer("verify", ({ record, onRelookup, relookupPending, lookupTracker }) =>
   "checks" in record ? (
     <VerifyRecordView
       record={record as VerifyPreviewRecord}
       onRelookup={onRelookup}
       relookupPending={relookupPending}
+      lookupTracker={lookupTracker}
     />
   ) : null,
 );
@@ -1099,14 +1105,15 @@ function renderFormCard(args: {
     : `Page ${sourcePage} of ${args.totalPages} in pile`;
   const recordName = args.cfg.recordName(r);
 
-  const workflowStatusPhase = deriveRecordWorkflowPhase({
+  const lookupTracker = deriveOcrRecordLookupTracker({
     record: r,
     originalIndex: args.originalIndex,
     entryStatus: args.entryStatus,
     entryStep: args.entryStep,
     dependencyChildren: args.dependencyChildren,
   });
-  const matchStateBadge = renderMatchBadge({ record: r });
+  const workflowStatusPhase = deriveRecordWorkflowPhase(lookupTracker);
+  const matchStateBadge = renderLookupTrackerBadge(lookupTracker);
   const isUnknown = r.documentType === "unknown";
   const isResearching = args.researchingIndices.has(args.originalIndex);
   // verify: which lookups are re-running for THIS record (derived from the
@@ -1189,7 +1196,10 @@ function renderFormCard(args: {
   // renderer (which also wires the per-check relookup).
   const recordBody: ReactNode =
     args.readOnly && !isVerify ? (
-      <VerifyRecordView record={toReadonlyVerifyRecord(r as OathPreviewRecord | PreviewRecord)} />
+      <VerifyRecordView
+        record={toReadonlyVerifyRecord(r as OathPreviewRecord | PreviewRecord)}
+        lookupTracker={lookupTracker}
+      />
     ) : (
       args.cfg.renderEditor({
         record: r,
@@ -1199,6 +1209,7 @@ function renderFormCard(args: {
           ? (lookup) => args.onRelookup!(args.originalIndex, lookup)
           : undefined,
         relookupPending: recordRelookupPending,
+        lookupTracker,
       })
     );
 
@@ -1288,13 +1299,15 @@ function renderFormCardNav(args: {
       pageLocation={pageLocation}
       recordName={args.cfg.recordName(args.record)}
       rowOrdinal={args.rowOrdinal}
-      workflowStatusPhase={deriveRecordWorkflowPhase({
-        record: args.record,
-        originalIndex: args.originalIndex,
-        entryStatus: args.entryStatus,
-        entryStep: args.entryStep,
-        dependencyChildren: args.dependencyChildren,
-      })}
+      workflowStatusPhase={deriveRecordWorkflowPhase(
+        deriveOcrRecordLookupTracker({
+          record: args.record,
+          originalIndex: args.originalIndex,
+          entryStatus: args.entryStatus,
+          entryStep: args.entryStep,
+          dependencyChildren: args.dependencyChildren,
+        }),
+      )}
       documentKindChip={renderDocumentKindChip(args.record.formKind)}
       documentTypeBadge={
         isUnknown ? (
@@ -1310,74 +1323,20 @@ function renderFormCardNav(args: {
   );
 }
 
-function deriveRecordWorkflowPhase(args: {
-  record: AnyPreviewRecord;
-  originalIndex: number;
-  entryStatus: string;
-  entryStep?: string;
-  dependencyChildren: TaskDependencyChild[];
-}): PrepRecordWorkflowPhase {
-  const childStatuses = args.dependencyChildren
-    .filter((child) => child.metadata.recordIndex === args.originalIndex)
-    .map((child) => child.status);
-  if (childStatuses.some(isRunningChildStatus)) return "running";
-  if (childStatuses.some(isPendingChildStatus)) return "pending";
-
-  const lookupState = String(args.record.matchState ?? "");
-  const step = args.entryStep ?? "";
-  if (
-    args.entryStatus === "running" &&
-    // `matching` + `disambiguating` are now reported under the merged `ocr`
-    // step; the legacy names stay for older persisted rows.
-    (step === "ocr" || step === "matching" || step === "disambiguating" || step === "person-lookup" || step === "verification") &&
-    (lookupState === "extracted" || lookupState === "lookup-pending" || lookupState === "lookup-running")
-  ) {
-    return "running";
-  }
-  if (lookupState === "lookup-running") return "running";
-
-  return "done";
-}
-
-function renderMatchBadge(args: { record: AnyPreviewRecord }): ReactNode {
-  const display = getMatchSourceDisplay(args.record);
+function renderLookupTrackerBadge(tracker: OcrRecordLookupTracker): ReactNode {
   return (
     <span
       className={cn(
-        "rounded-md border px-1.5 py-px font-mono text-[10px] uppercase",
-        display.className,
+        "inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase",
+        lookupTrackerClassName(tracker.phase),
       )}
     >
-      {display.label}
+      <span className="truncate">{tracker.label}</span>
+      {tracker.traceId ? (
+        <span className="shrink-0 text-current/70">{tracker.traceId}</span>
+      ) : null}
     </span>
   );
-}
-
-// The footer chip expresses identity-match *confidence*, not the engine name.
-// Deterministic provenances (roster / EID on form / person lookup) are a
-// confirmed identity; an LLM guess is "likely" and worth an eyeball; manual /
-// pending are special. The raw `matchSource` VALUES are unchanged provenance —
-// only the operator-facing label maps to a confidence statement.
-function getMatchSourceDisplay(record: AnyPreviewRecord): { label: string; className: string } {
-  const source = String(record.matchSource ?? "");
-  if (source === "roster" || source === "form-eid" || source === "eid-lookup") {
-    return { label: "Identity confirmed", className: "border-success/40 bg-success/10 text-success" };
-  }
-  if (source === "llm") {
-    return { label: "Likely match", className: "border-warning/40 bg-warning/10 text-warning" };
-  }
-  if (source === "manual") {
-    return { label: "Manual match", className: "border-border bg-muted text-muted-foreground" };
-  }
-  return { label: "Unmatched", className: "border-border bg-muted text-muted-foreground" };
-}
-
-function isRunningChildStatus(status: string): boolean {
-  return status === "running" || status === "in_progress" || status === "processing";
-}
-
-function isPendingChildStatus(status: string): boolean {
-  return status === "queued" || status === "pending" || status === "ready";
 }
 
 /**

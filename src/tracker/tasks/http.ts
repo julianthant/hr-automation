@@ -20,6 +20,7 @@ export interface TaskDependenciesHttpOk {
     runId?: string;
     status: string;
     metadata: Record<string, unknown>;
+    traceId?: string;
   }>;
 }
 

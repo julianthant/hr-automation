@@ -13,9 +13,10 @@ interface TopBarProps {
   onDateChange: (date: string) => void;
   availableDates: string[];
   /**
-   * Optional slot rendered at the far right of the navbar, after the date
-   * navigator. Reserved for future top-level affordances; the topbar's
-   * primary purpose is brand + cross-workflow search + date navigation.
+   * Optional slot rendered at the far right of the right cluster, after the
+   * date navigator — the home for utility affordances (keyboard help,
+   * notification settings). The topbar's primary purpose is brand +
+   * cross-workflow search + date navigation.
    */
   rightSlot?: ReactNode;
   /**
@@ -27,6 +28,8 @@ interface TopBarProps {
   onFailureSelect?: (row: FailureRow) => void;
   /** Per-workflow failure counts for the navbar bell badge. */
   failureCounts?: Record<string, number>;
+  /** Control rendered in the failures popover header (e.g. notification settings gear). */
+  failureBellHeaderSlot?: ReactNode;
 }
 
 /**
@@ -53,6 +56,7 @@ export function TopBar({
   onSearchSelect,
   onFailureSelect,
   failureCounts,
+  failureBellHeaderSlot,
 }: TopBarProps) {
   void availableDates;
 
@@ -108,20 +112,21 @@ export function TopBar({
         <div />
       )}
 
-      {/* ── Date navigator + rightSlot — right edge ────────────── */}
+      {/* ── Failures + date navigator + utility slot — right edge ─ */}
       <div className="flex items-center gap-1 justify-self-end">
         {onFailureSelect && failureCounts && (
           <FailureBell
             failureCounts={failureCounts}
             date={date}
             onSelect={onFailureSelect}
+            headerSlot={failureBellHeaderSlot}
           />
         )}
         {/* Viewing-history cue — only when off today. The Live pill in the
             drawer is downgraded in parallel so "not live" is unmistakable. */}
         {!isToday && (
           <span
-            className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-md border border-warning/30 bg-warning/10 px-2.5 text-[11px] font-medium text-warning"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-warning/30 bg-warning/10 px-2.5 text-[11px] font-medium text-warning"
             role="status"
           >
             <History aria-hidden className="h-3.5 w-3.5" />
@@ -163,7 +168,7 @@ export function TopBar({
             onClick={() => onDateChange(today)}
             aria-label="Jump to today"
             title="Jump to today"
-            className="ml-1 h-8 rounded-md border border-info/40 bg-info/10 px-3 text-[12px] font-semibold text-info cursor-pointer hover:bg-info/20 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-info"
+            className="h-8 rounded-md border border-info/40 bg-info/10 px-3 text-[12px] font-semibold text-info cursor-pointer hover:bg-info/20 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-info"
           >
             Today
           </button>

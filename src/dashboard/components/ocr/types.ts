@@ -381,6 +381,10 @@ export interface VerifyPreviewRecord {
   officerSigned?: boolean | null;
   paperOfficialName?: string | null;
   activeStatus?: string;
+  /** State of the verify person-lookup child that enriched this record. */
+  personLookupStatus?: "pending" | "running" | "completed" | "failed";
+  /** Trace id of the verify person-lookup child that enriched this record. */
+  personLookupTraceId?: string;
   /** CRM First Day of Service. */
   employmentDate?: string;
   /** CRM Date Signed. */

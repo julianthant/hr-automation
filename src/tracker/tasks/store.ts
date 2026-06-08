@@ -421,6 +421,7 @@ export function getDependencySummaryByParentRunId(
     runId?: string;
     status: string;
     metadata: Record<string, unknown>;
+    traceId?: string;
   }>;
 } {
   const parent = store.db.prepare(`
@@ -439,7 +440,21 @@ export function getDependencySummaryByParentRunId(
   }
 
   const children = store.db.prepare(`
-    SELECT c.workflow, c.item_id, c.run_id, c.control_state, d.metadata_json
+    SELECT
+      c.workflow,
+      c.item_id,
+      c.run_id,
+      c.control_state,
+      d.metadata_json,
+      (
+        SELECT r.latest_data_json
+        FROM runs r
+        WHERE r.workflow = c.workflow
+          AND r.item_id = c.item_id
+          AND r.run_id = c.run_id
+        ORDER BY r.latest_tracker_ts DESC
+        LIMIT 1
+      ) AS latest_data_json
     FROM task_dependencies d
     JOIN tasks c ON c.id = d.child_task_id
     WHERE d.parent_task_id = @parentTaskId
@@ -450,6 +465,7 @@ export function getDependencySummaryByParentRunId(
     run_id: string | null;
     control_state: string | null;
     metadata_json: string;
+    latest_data_json: string | null;
   }>;
 
   return {
@@ -461,6 +477,7 @@ export function getDependencySummaryByParentRunId(
       ...(child.run_id ? { runId: child.run_id } : {}),
       status: taskStatusFromSqlControlState(child.control_state),
       metadata: parseJsonObject(child.metadata_json),
+      ...readTraceId(child.latest_data_json),
     })),
   };
 }
@@ -709,6 +726,14 @@ function parseJsonObject(raw: unknown): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function readTraceId(raw: unknown): { traceId: string } | Record<string, never> {
+  const data = parseJsonObject(raw);
+  const traceId = data.__traceId;
+  return typeof traceId === "string" && traceId.trim()
+    ? { traceId }
+    : {};
 }
 
 function isTerminalTaskStatus(status: TaskStatus): boolean {

@@ -4,7 +4,6 @@ import { errorMessage } from "../../../utils/errors.js";
 import { emitTrackerRow, dateLocal, type TrackerRowEmission } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
-import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
 import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
@@ -12,6 +11,10 @@ import { rowFilePath } from "../../paths.js";
 import { DEFAULT_DIR } from "../../jsonl.js";
 import type { OcrLookupKind } from "../../../services/ocr/eid-lookup-results.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../../services/ocr/eid-lookup-results.js";
+import { extractOcrRecordEid } from "../../../workflows/ocr/record-helpers.js";
+import { readQueueTitle } from "../../../domain/queue-title.js";
+import { tracePrefix } from "../../../domain/queue-trace-id.js";
+import { parseParallelWorkers, type RunOptions } from "../../../domain/run-options.js";
 
 const WORKFLOW = "ocr";
 
@@ -37,6 +40,7 @@ export interface ReocrWholePdfHandlerOpts {
   _watchChildRunsOverride?: (opts: WatchChildRunsOpts) => Promise<ChildOutcome[]>;
   _enqueueEidLookupOverride?: (
     items: Array<{ name?: string; emplId?: string; itemId: string }>,
+    context: { parentRunId: string },
   ) => Promise<void>;
 }
 
@@ -98,6 +102,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
         if (kind) lookupTargets.push({ rec, index, kind });
       });
 
+      const childParentRunId = row.parentRunId ?? input.runId;
       let enqueueItems: Array<{ record: unknown; index: number; kind: OcrLookupKind; itemId: string }> = [];
       if (lookupTargets.length > 0) {
         enqueueItems = lookupTargets.map((t) => ({
@@ -111,9 +116,10 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             enqueueItems.map((e) => ({
               ...(e.kind === "name"
                 ? { name: spec.carryForwardKey(e.record as never) }
-                : { emplId: extractRecordEid(e.record) }),
+                : { emplId: extractOcrRecordEid(e.record) }),
               itemId: e.itemId,
             })),
+            { parentRunId: childParentRunId },
           );
         } else {
           const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
@@ -121,16 +127,17 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
           const inputs = enqueueItems.map((e) =>
             e.kind === "name"
               ? { name: spec.carryForwardKey(e.record as never) }
-              : { emplId: extractRecordEid(e.record), keepNonHdh: true },
+              : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true },
           );
           await ensureDaemonsAndEnqueue(personLookupWorkflow, inputs as never, {}, {
             trackerDir,
+            parentRunId: childParentRunId,
             deriveItemId: (inp: { name?: string; emplId?: string }) => {
               const matched = enqueueItems.find((e) => {
                 if ("name" in inp && inp.name)
                   return spec.carryForwardKey(e.record as never) === inp.name;
                 if ("emplId" in inp && inp.emplId)
-                  return extractRecordEid(e.record) === inp.emplId;
+                  return extractOcrRecordEid(e.record) === inp.emplId;
                 return false;
               });
               return matched?.itemId ?? `ocr-whole-fallback-${input.runId}`;
@@ -147,6 +154,32 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       const emit = opts._emitOverride ?? ((e: TrackerEntry) => emitTrackerRow(e as TrackerRowEmission, trackerDir));
       const capturedRow = row;
       const capturedEnqueueItems = enqueueItems;
+      const parentSubject =
+        readQueueTitle(capturedRow.data) ??
+        (capturedRow.data?.parentSubject as unknown as string | undefined);
+      const rootTracePrefix = rootTracePrefixFromRow(capturedRow);
+      const runOptions = runOptionsFromRow(capturedRow);
+      const emitDataSnapshot = (
+        nextRecords: unknown[],
+        status: TrackerEntry["status"],
+      ) => {
+        emit({
+          workflow: WORKFLOW,
+          timestamp: new Date().toISOString(),
+          id: input.sessionId,
+          runId: input.runId,
+          ...(parentRunId ? { parentRunId } : {}),
+          status,
+          step: status === "running" ? "person-lookup" : "awaiting-approval",
+          data: buildReviewData({
+            row: capturedRow,
+            formType,
+            sessionId: input.sessionId,
+            parentRunId,
+            records: nextRecords,
+          }),
+        });
+      };
       backgroundStarted = true;
       void (async () => {
         try {
@@ -175,34 +208,24 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             }
           }
 
-          const verifiedCount = records.filter((r) => {
-            const v = (r as Record<string, unknown>).verification as { state?: string } | undefined;
-            return v?.state === "verified";
-          }).length;
+          if (spec.enrichRecords) {
+            const enriched = await spec.enrichRecords({
+              records: records as never[],
+              runId: input.runId,
+              sessionId: input.sessionId,
+              trackerDir,
+              date,
+              parentSubject,
+              rootTracePrefix,
+              runOptions,
+              emitProgress: (recs: unknown[]) => emitDataSnapshot(recs, "running"),
+            }) as unknown[];
+            enriched.forEach((rec, index) => {
+              records[index] = rec;
+            });
+          }
 
-          const data = {
-            formType,
-            pdfOriginalName: (capturedRow.data?.pdfOriginalName as unknown as string) ?? "",
-            sessionId: input.sessionId,
-            ...(parentRunId ? { parentRunId } : {}),
-            recordCount: String(records.length),
-            verifiedCount: String(verifiedCount),
-            records: JSON.stringify(records),
-            failedPages: JSON.stringify([]),
-            pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
-            // OCR prep parent rows are preview-shaped.
-            archetype: "preview" as const,
-          };
-          emit({
-            workflow: WORKFLOW,
-            timestamp: new Date().toISOString(),
-            id: input.sessionId,
-            runId: input.runId,
-            ...(parentRunId ? { parentRunId } : {}),
-            status: "done",
-            step: "awaiting-approval",
-            data,
-          });
+          emitDataSnapshot(records, "done");
         } catch (err) {
           log.warn(`[reocr-whole-pdf] watch failed for parent=${input.runId}: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
@@ -223,10 +246,58 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
   };
 }
 
-function extractRecordEid(record: unknown): string {
-  const r = record as Record<string, unknown>;
-  if (typeof r.employeeId === "string") return normalizeUcpathEmployeeId(r.employeeId);
-  const employee = r.employee as Record<string, unknown> | undefined;
-  if (employee && typeof employee.employeeId === "string") return normalizeUcpathEmployeeId(employee.employeeId);
-  return "";
+function buildReviewData(input: {
+  row: TrackerEntry;
+  formType: string;
+  sessionId: string;
+  parentRunId?: string;
+  records: unknown[];
+}): Record<string, string> & { archetype: "preview" } {
+  const { row, formType, sessionId, parentRunId, records } = input;
+  return {
+    ...stringData(row.data),
+    formType,
+    pdfOriginalName: (row.data?.pdfOriginalName as unknown as string | undefined) ?? "",
+    sessionId,
+    ...(parentRunId ? { parentRunId } : {}),
+    recordCount: String(records.length),
+    verifiedCount: String(countVerified(records)),
+    records: JSON.stringify(records),
+    failedPages: JSON.stringify([]),
+    pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
+    mode: "prepare",
+    // OCR prep parent rows are preview-shaped.
+    archetype: "preview" as const,
+  };
+}
+
+function countVerified(records: unknown[]): number {
+  return records.filter((r) => {
+    const v = (r as Record<string, unknown>).verification as { state?: string } | undefined;
+    return v?.state === "verified";
+  }).length;
+}
+
+function stringData(data: TrackerEntry["data"]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data ?? {})) {
+    if (typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
+function rootTracePrefixFromRow(row: TrackerEntry): string {
+  const traceId = row.data?.__traceId;
+  return typeof traceId === "string" && traceId ? tracePrefix(traceId) : "";
+}
+
+function runOptionsFromRow(row: TrackerEntry): RunOptions | undefined {
+  const raw = row.data?.parallelWorkers;
+  if (raw === undefined) return undefined;
+  try {
+    const parallelWorkers = parseParallelWorkers(raw);
+    return parallelWorkers === undefined ? {} : { parallelWorkers };
+  } catch {
+    return undefined;
+  }
 }

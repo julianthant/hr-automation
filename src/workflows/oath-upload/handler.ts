@@ -157,6 +157,13 @@ export async function oathUploadHandler(
     ctx.skipStep("wait-approval");
   }
 
+  if (needsApprovalWait && signerItemIds.length === 0) {
+    ctx.updateData({ status: "approval-empty", signerCount: "0" });
+    throw new Error(
+      "oath-upload: OCR prep was approved but produced zero signer row(s) — NOT filing the HR ticket",
+    );
+  }
+
   // ─── 1. Wait for the signer rows ────────────────────────────────────────
   if (input.mode === "upload-only" || signerItemIds.length === 0) {
     if (input.mode !== "upload-only" && signerItemIds.length === 0) {
