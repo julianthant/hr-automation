@@ -17,7 +17,7 @@
  * restart still respects a daily wall, and a single in-memory instance per
  * cacheDir lets concurrent runs share throttle state.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ModelLimit, VisionProviderId } from "./provider-limits.js";
 import { hashKeyValue } from "./rotation.js";
@@ -26,6 +26,7 @@ import type { RateLimitInfo } from "./rate-limit-headers.js";
 const WINDOW_MS = 60_000;
 const BACKOFF_BASE_MS = 2_000;
 const BACKOFF_CAP_MS = 60_000;
+const FLUSH_DEBOUNCE_MS = 250;
 
 export interface Candidate {
   provider: VisionProviderId;
@@ -87,6 +88,8 @@ function cellId(provider: string, keyHash: string, model: string): string {
 export class UsageTracker {
   private cells = new Map<string, CellState>();
   private readonly statePath: string;
+  private dirty = false;
+  private flushTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(cacheDir: string) {
     this.statePath = join(cacheDir, "ocr-usage-state.json");
@@ -94,38 +97,102 @@ export class UsageTracker {
   }
 
   private load(): void {
-    if (!existsSync(this.statePath)) return;
+    const persisted = this.readPersisted();
+    for (const [id, c] of Object.entries(persisted.cells ?? {})) {
+      this.cells.set(id, {
+        reqTimes: [],
+        tokTimes: [],
+        rpdCount: c.rpdCount ?? 0,
+        rpdEpochDay: c.rpdEpochDay ?? 0,
+        cooldownUntilMs: c.cooldownUntilMs ?? 0,
+        consecFails: 0,
+        dead: c.dead ?? false,
+      });
+    }
+  }
+
+  private readPersisted(): PersistedState {
+    if (!existsSync(this.statePath)) return { cells: {} };
     try {
-      const persisted = JSON.parse(readFileSync(this.statePath, "utf-8")) as PersistedState;
-      for (const [id, c] of Object.entries(persisted.cells ?? {})) {
-        this.cells.set(id, {
-          reqTimes: [],
-          tokTimes: [],
-          rpdCount: c.rpdCount ?? 0,
-          rpdEpochDay: c.rpdEpochDay ?? 0,
-          cooldownUntilMs: c.cooldownUntilMs ?? 0,
-          consecFails: 0,
-          dead: c.dead ?? false,
-        });
-      }
+      const parsed = JSON.parse(readFileSync(this.statePath, "utf-8")) as PersistedState;
+      return { cells: parsed.cells ?? {} };
     } catch {
       // Corrupt state — start fresh.
+      return { cells: {} };
     }
   }
 
   flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+    if (!this.dirty) return;
     const dir = dirname(this.statePath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const persisted: PersistedState = { cells: {} };
+    const persisted = this.mergePersisted(this.readPersisted());
+    this.applyPersisted(persisted);
+    const tmpPath = `${this.statePath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(persisted));
+    renameSync(tmpPath, this.statePath);
+    this.dirty = false;
+  }
+
+  private snapshot(): PersistedState {
+    const snapshot: PersistedState = { cells: {} };
     for (const [id, c] of this.cells) {
-      persisted.cells[id] = {
+      snapshot.cells[id] = {
         rpdCount: c.rpdCount,
         rpdEpochDay: c.rpdEpochDay,
         cooldownUntilMs: c.cooldownUntilMs,
         dead: c.dead,
       };
     }
-    writeFileSync(this.statePath, JSON.stringify(persisted, null, 2));
+    return snapshot;
+  }
+
+  private mergePersisted(onDisk: PersistedState): PersistedState {
+    const local = this.snapshot();
+    const merged: PersistedState = { cells: { ...onDisk.cells } };
+    for (const [id, localCell] of Object.entries(local.cells)) {
+      const diskCell = merged.cells[id];
+      merged.cells[id] = diskCell ? mergeCell(diskCell, localCell) : localCell;
+    }
+    return merged;
+  }
+
+  private applyPersisted(persisted: PersistedState): void {
+    const nowMs = Date.now();
+    for (const [id, c] of Object.entries(persisted.cells ?? {})) {
+      const cell = this.cells.get(id) ?? {
+        reqTimes: [],
+        tokTimes: [],
+        rpdCount: 0,
+        rpdEpochDay: dayUtc(nowMs),
+        cooldownUntilMs: 0,
+        consecFails: 0,
+        dead: false,
+      };
+      cell.rpdCount = c.rpdCount ?? 0;
+      cell.rpdEpochDay = c.rpdEpochDay ?? 0;
+      cell.cooldownUntilMs = c.cooldownUntilMs ?? 0;
+      cell.dead = c.dead ?? false;
+      this.cells.set(id, cell);
+    }
+  }
+
+  private markDirty(): void {
+    this.dirty = true;
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      try {
+        if (this.dirty) this.flush();
+      } catch {
+        // Admission control keeps working in-memory; the next explicit flush
+        // or process run can retry persistence.
+      }
+    }, FLUSH_DEBOUNCE_MS);
+    this.flushTimer.unref?.();
   }
 
   private cell(id: string, nowMs: number): CellState {
@@ -149,6 +216,7 @@ export class UsageTracker {
       c.rpdEpochDay = today;
       // A new day clears a daily-quota cooldown (reset is at midnight anyway).
       if (c.cooldownUntilMs > nowMs && c.cooldownUntilMs - nowMs > WINDOW_MS) c.cooldownUntilMs = 0;
+      this.markDirty();
     }
     // Prune minute windows.
     const cutoff = nowMs - WINDOW_MS;
@@ -212,6 +280,7 @@ export class UsageTracker {
       best.cell.reqTimes.push(nowMs);
       best.cell.tokTimes.push({ t: nowMs, tok: estTokens });
       best.cell.rpdCount += 1;
+      this.markDirty();
       return {
         kind: "ok",
         token: {
@@ -246,17 +315,21 @@ export class UsageTracker {
     switch (info.kind) {
       case "auth":
         c.dead = true;
+        this.markDirty();
         return;
       case "quota-exhausted":
         c.cooldownUntilMs = nowMs + (info.retryAfterMs ?? nextUtcMidnight(nowMs) - nowMs);
         // Treat the daily wall as hit so the proactive gate stops picking it.
         c.rpdCount = Math.max(c.rpdCount, Number.MAX_SAFE_INTEGER / 2);
+        this.markDirty();
         return;
       case "rate-limit":
         c.cooldownUntilMs = nowMs + (info.retryAfterMs ?? this.backoff(c.consecFails));
+        this.markDirty();
         return;
       case "transient":
         c.cooldownUntilMs = nowMs + (info.retryAfterMs ?? this.backoff(c.consecFails, 1_000));
+        this.markDirty();
         return;
       case "permanent":
         // Don't cool down — let the page try a different key/model immediately.
@@ -292,6 +365,21 @@ export class UsageTracker {
     }
     return out;
   }
+}
+
+function mergeCell(a: PersistedCell, b: PersistedCell): PersistedCell {
+  const newerDay = Math.max(a.rpdEpochDay ?? 0, b.rpdEpochDay ?? 0);
+  const sameDay = (a.rpdEpochDay ?? 0) === (b.rpdEpochDay ?? 0);
+  return {
+    rpdEpochDay: newerDay,
+    rpdCount: sameDay
+      ? Math.max(a.rpdCount ?? 0, b.rpdCount ?? 0)
+      : (a.rpdEpochDay ?? 0) > (b.rpdEpochDay ?? 0)
+        ? a.rpdCount ?? 0
+        : b.rpdCount ?? 0,
+    cooldownUntilMs: Math.max(a.cooldownUntilMs ?? 0, b.cooldownUntilMs ?? 0),
+    dead: Boolean(a.dead || b.dead),
+  };
 }
 
 const trackerCache = new Map<string, UsageTracker>();

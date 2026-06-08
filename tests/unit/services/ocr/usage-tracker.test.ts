@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UsageTracker, type Candidate } from "../../../../src/services/ocr/usage-tracker.js";
@@ -117,6 +117,22 @@ describe("UsageTracker", () => {
     assert.equal(t.reserve(cands, now + 6_000).kind, "ok");
   });
 
+  it("flush() no-ops when clean and does not create a state file", () => {
+    const t = fresh();
+    const statePath = join(tmp, "ocr-usage-state.json");
+    t.flush();
+    assert.equal(existsSync(statePath), false);
+  });
+
+  it("flush() writes compact JSON when dirty", () => {
+    const t = fresh();
+    t.reserve([cand("k1", "m", LIM())]);
+    t.flush();
+    const raw = readFileSync(join(tmp, "ocr-usage-state.json"), "utf-8");
+    assert.ok(!raw.includes("\n  "), "persisted state should be compact JSON");
+    assert.ok(raw.startsWith("{"));
+  });
+
   it("persists cooldown + dead state across instances", () => {
     const t1 = fresh();
     const cands = [cand("k1", "m1", LIM()), cand("k1", "m2", LIM())];
@@ -128,5 +144,49 @@ describe("UsageTracker", () => {
     // m1 is dead from the persisted state → t2 must pick m2.
     const r = t2.reserve(cands);
     assert.equal(r.kind === "ok" && r.token.model, "m2");
+  });
+
+  it("flush merges cells created by another instance after this instance loaded", () => {
+    tmp = mkdtempSync(join(tmpdir(), "ocr-usage-merge-"));
+    dirs.push(tmp);
+    const first = new UsageTracker(tmp);
+    const staleSecond = new UsageTracker(tmp);
+    const now = 1_000_000;
+
+    assert.equal(first.reserve([cand("k1", "m", LIM(), 1)], now).kind, "ok");
+    first.flush();
+
+    assert.equal(staleSecond.reserve([cand("k2", "m", LIM(), 2)], now + 1).kind, "ok");
+    staleSecond.flush();
+
+    const latest = new UsageTracker(tmp);
+    const cells = latest.inspect(now + 2);
+    assert.equal(cells.length, 2, "stale flush must preserve the other process's cell");
+    assert.deepEqual(cells.map((c) => c.rpdCount).sort((a, b) => a - b), [1, 1]);
+  });
+
+  it("flush merges same-cell counters, cooldowns, and dead flags conservatively", () => {
+    tmp = mkdtempSync(join(tmpdir(), "ocr-usage-merge-cell-"));
+    dirs.push(tmp);
+    const first = new UsageTracker(tmp);
+    const staleSecond = new UsageTracker(tmp);
+    const cands = [cand("k1", "m", LIM(), 1)];
+    const now = 2_000_000;
+
+    assert.equal(first.reserve(cands, now).kind, "ok");
+    assert.equal(first.reserve(cands, now + 1).kind, "ok");
+    first.flush();
+
+    const staleReserve = staleSecond.reserve(cands, now + 2);
+    assert.equal(staleReserve.kind, "ok");
+    if (staleReserve.kind === "ok") {
+      staleSecond.penalize(staleReserve.token, { kind: "auth" }, now + 3);
+    }
+    staleSecond.flush();
+
+    const latest = new UsageTracker(tmp);
+    const [cell] = latest.inspect(now + 4);
+    assert.equal(cell.rpdCount, 2, "daily count should keep the highest observed value");
+    assert.equal(cell.dead, true, "dead flag should survive from either process");
   });
 });

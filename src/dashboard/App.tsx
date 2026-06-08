@@ -693,25 +693,25 @@ export function App() {
         onSearchSelect={handleSearchSelect}
         onFailureSelect={handleFailureSelect}
         failureCounts={failureCounts ?? {}}
+        failureBellHeaderSlot={
+          <NotificationSettings
+            settings={notifySettings}
+            onChange={(s) => {
+              setNotifySettings(s);
+              writeNotifySettings(s);
+            }}
+          />
+        }
         rightSlot={
-          <>
-            <NotificationSettings
-              settings={notifySettings}
-              onChange={(s) => {
-                setNotifySettings(s);
-                writeNotifySettings(s);
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShortcutsOpen(true)}
-              aria-label="Keyboard shortcuts"
-              title="Keyboard shortcuts (?)"
-              className="ml-1 h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => setShortcutsOpen(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
         }
       />
       <OcrReviewPrepProvider

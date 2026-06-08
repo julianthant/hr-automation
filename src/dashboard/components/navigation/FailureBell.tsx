@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Bell, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -13,6 +13,12 @@ export interface FailureBellProps {
   /** Current navbar date (YYYY-MM-DD). */
   date: string;
   onSelect: (row: FailureRow) => void;
+  /**
+   * Optional control rendered at the right edge of the popover header,
+   * opposite the "Failures" title (e.g. the desktop-notification settings
+   * gear). Nested popovers stack correctly under Radix's dismiss layers.
+   */
+  headerSlot?: ReactNode;
 }
 
 const FAILURE_BELL_STORAGE_KEY = "failure-bell-read-count";
@@ -85,7 +91,7 @@ function RerunButton({
   );
 }
 
-export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps) {
+export function FailureBell({ failureCounts, date, onSelect, headerSlot }: FailureBellProps) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<FailureRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -174,9 +180,12 @@ export function FailureBell({ failureCounts, date, onSelect }: FailureBellProps)
       </PopoverTrigger>
       <PopoverContent align="end" className="p-0 w-[420px]">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-border/70 flex items-baseline justify-between">
+        <div className="px-4 py-3 border-b border-border/70 flex items-center justify-between gap-2">
           <span className="text-[13px] font-semibold text-foreground tracking-tight">Failures</span>
-          {total > 0 && <span className="text-[11px] text-muted-foreground">{total} unresolved</span>}
+          <div className="flex items-center gap-2">
+            {total > 0 && <span className="text-[11px] text-muted-foreground">{total} unresolved</span>}
+            {headerSlot}
+          </div>
         </div>
 
         {total === 0 ? (

@@ -304,6 +304,49 @@ test("oathUploadHandler born-at-upload: wait-approval learns the signer set, the
   }
 });
 
+test("oathUploadHandler born-at-upload: approval with zero signer rows THROWS and never files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-born-empty-"));
+  try {
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let watchCalled = false;
+    let submitCalled = false;
+
+    await assert.rejects(
+      oathUploadHandler(ctx as never, {
+        pdfFileId: "file-1",
+        pdfOriginalName: "oaths.pdf",
+        sessionId: "sess-empty",
+        mode: "full",
+        rosterMode: "download",
+      }, {
+        trackerDir: dir,
+        _resolvePdfOverride: RESOLVE_PDF,
+        _subscribeToApprovalOverride: async () => ({
+          records: [],
+          fannedOutItemIds: [],
+        }),
+        _watchChildRunsOverride: async () => {
+          watchCalled = true;
+          throw new Error("must not wait on an empty signer set");
+        },
+        _loginOverride: async () => true,
+        _submitOverride: async () => { submitCalled = true; return "HRC-NOPE"; },
+      }),
+      /zero signer row\(s\).*NOT filing/,
+    );
+
+    assert.equal(watchCalled, false, "empty approval should fail before wait-signatures");
+    assert.equal(submitCalled, false, "no ticket when approval produced no signer rows");
+    assert.ok(stepCalls.includes("wait-approval"));
+    assert.ok(!stepCalls.includes("wait-signatures"));
+    assert.ok(!stepCalls.includes("submit"));
+    assert.ok(updates.some((u) => u.status === "approval-empty"));
+    assert.equal([...updates].reverse().find((u) => u.signerCount !== undefined)?.signerCount, "0");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("oathUploadHandler born-at-upload: a discarded OCR prep THROWS and never files the ticket", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-born-discard-"));
   try {

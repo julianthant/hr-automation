@@ -138,16 +138,19 @@ export async function runOcrPerPage<T>(req: PerPageOcrRequest<T>): Promise<PerPa
   const results: PageOutcome[] = new Array(tasks.length);
 
   const limit = makeLimiter(concurrency);
-  await Promise.all(
-    tasks.map((t) =>
-      limit(async () => {
-        results[t.pageNum - 1] = tracker
-          ? await ocrPageViaPool(t.pageNum, t.imagePath, req.prompt, candidates, poolByKey, tracker)
-          : await ocrPageViaTestFn(t.pageNum, t.imagePath, req.prompt, pool);
-      }),
-    ),
-  );
-  tracker?.flush();
+  try {
+    await Promise.all(
+      tasks.map((t) =>
+        limit(async () => {
+          results[t.pageNum - 1] = tracker
+            ? await ocrPageViaPool(t.pageNum, t.imagePath, req.prompt, candidates, poolByKey, tracker)
+            : await ocrPageViaTestFn(t.pageNum, t.imagePath, req.prompt, pool);
+        }),
+      ),
+    );
+  } finally {
+    tracker?.flush();
+  }
 
   return finalize(results, req.schema, poolSummary);
 }

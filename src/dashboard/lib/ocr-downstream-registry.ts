@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { OcrRecordLookupTracker } from "../components/ocr/lookup-status";
 import {
   parseOathPrepareRowData,
   parsePrepareRowData,
@@ -61,6 +62,8 @@ export interface OcrDownstreamConfig {
     onRelookup?: (lookup: VerifyLookupKind) => void;
     /** Verify-only: which lookups are currently re-running for this record. */
     relookupPending?: ReadonlySet<VerifyLookupKind>;
+    /** Current row-level lookup state from the OCR preview wrapper. */
+    lookupTracker?: OcrRecordLookupTracker;
   }) => ReactNode;
 }
 

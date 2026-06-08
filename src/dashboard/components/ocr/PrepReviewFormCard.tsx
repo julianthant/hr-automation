@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { AlertTriangle, Camera, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PrepRecordWorkflowPhase = "running" | "pending" | "done";
+export type PrepRecordWorkflowPhase = "running" | "pending" | "done" | "failed";
 
 export interface PrepReviewFormCardProps {
   /** Page-location chip text — "Page 7 of 12 in pile" or "Page 7, Row 3 of 8 in pile" */
@@ -44,7 +44,7 @@ export interface PrepReviewFormCardProps {
  * Form-card chrome for the paired-scroll review pane. Owns the
  * page-location chip + name + trailing badges (verification / signature /
  * document), banners, form fields (`children`), and a footer with the
- * identity-match confidence chip on the left plus optional `footerAction` and
+ * lookup-state/status chip on the left plus optional `footerAction` and
  * optional delete. When row ordinal + workflow phase headers are shown, the approval
  * checkbox sits in that header beside the phase badge; otherwise it stays in
  * the footer.
@@ -224,7 +224,9 @@ export function PrepRecordWorkflowStatusBadge({ phase }: { phase: PrepRecordWork
       ? "border-primary/40 bg-primary/10 text-primary"
       : phase === "pending"
         ? "border-warning/40 bg-warning/10 text-warning"
-        : "border-success/40 bg-success/10 text-success";
+        : phase === "failed"
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "border-success/40 bg-success/10 text-success";
   return (
     <span
       className={cn(

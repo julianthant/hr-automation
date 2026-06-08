@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkflows, autoLabel, type WorkflowMetadata } from "@/lib/workflows-context";
 import { useQueueDepth } from "@/components/hooks/useQueueDepth";
@@ -74,41 +73,47 @@ export function WorkflowRail({
     >
       <div className="flex-1 overflow-y-auto py-3">
         {onShowOverview && (
-          <div className="mb-2 border-b border-border px-1.5 pb-3">
-            <button
-              type="button"
-              onClick={onShowOverview}
-              aria-current={overviewActive ? "page" : undefined}
-              className={cn(
-                "group flex h-10 w-full items-stretch gap-2 rounded-md pl-1 pr-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary cursor-pointer",
-                overviewActive ? "bg-accent/40" : "hover:bg-secondary",
-              )}
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  "my-1.5 w-[3px] rounded-r-full transition-colors",
-                  overviewActive ? "bg-primary" : "bg-transparent group-hover:bg-border",
-                )}
-              />
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                <LayoutGrid
-                  aria-hidden
+          <div className="mb-4">
+            <div className="px-3 mb-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Overview
+              </span>
+            </div>
+            <ul className="px-1.5 flex flex-col gap-px">
+              <li>
+                <button
+                  type="button"
+                  onClick={onShowOverview}
+                  aria-current={overviewActive ? "page" : undefined}
                   className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    overviewActive ? "text-foreground" : "text-muted-foreground",
-                  )}
-                />
-                <span
-                  className={cn(
-                    "truncate text-[13px]",
-                    overviewActive ? "font-semibold text-foreground" : "font-medium text-foreground/90",
+                    "group w-full h-10 pl-1 pr-2.5 flex items-stretch gap-2 rounded-md text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer",
+                    overviewActive ? "bg-accent/40" : "hover:bg-secondary",
                   )}
                 >
-                  Overview
-                </span>
-              </span>
-            </button>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "w-[3px] my-1.5 rounded-r-full transition-colors",
+                      overviewActive
+                        ? "bg-primary"
+                        : "bg-transparent group-hover:bg-border",
+                    )}
+                  />
+                  <span className="flex-1 min-w-0 flex items-center">
+                    <span
+                      className={cn(
+                        "text-[13px] truncate",
+                        overviewActive
+                          ? "font-semibold text-foreground"
+                          : "font-medium text-foreground/90",
+                      )}
+                    >
+                      Dashboard
+                    </span>
+                  </span>
+                </button>
+              </li>
+            </ul>
           </div>
         )}
         {displayGroups.map((group, idx) => (
@@ -123,7 +128,7 @@ export function WorkflowRail({
             </div>
             <ul className="px-1.5 flex flex-col gap-px">
               {group.members.map((wf) => {
-                const active = wf === workflow;
+                const active = wf === workflow && !overviewActive;
                 const count = entryCounts[wf] || 0;
                 const queued = queueDepth[wf] || 0;
                 return (

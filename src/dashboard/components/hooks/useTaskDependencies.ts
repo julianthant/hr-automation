@@ -14,6 +14,7 @@ export interface TaskDependencyChild {
   runId?: string;
   status: string;
   metadata: Record<string, unknown>;
+  traceId?: string;
 }
 
 export function useTaskDependencies(parentRunId: string | undefined): {
@@ -31,10 +32,11 @@ export function useTaskDependencies(parentRunId: string | undefined): {
     }
 
     let cancelled = false;
+    const checkedParentRunId = parentRunId;
 
     async function tick(): Promise<void> {
       try {
-        const res = await fetch(`/api/task-dependencies?parentRunId=${encodeURIComponent(parentRunId)}`);
+        const res = await fetch(`/api/task-dependencies?parentRunId=${encodeURIComponent(checkedParentRunId)}`);
         if (!res.ok) return;
         const body = await res.json() as {
           ok: boolean;

@@ -6,6 +6,11 @@ import {
   type VerifyLookupKind,
   type VerifyPreviewRecord,
 } from "./types";
+import {
+  deriveLookupInProgress,
+  deriveLookupProgressLabel,
+  type OcrRecordLookupTracker,
+} from "./lookup-status";
 
 export interface VerifyRecordViewProps {
   record: VerifyPreviewRecord;
@@ -18,6 +23,8 @@ export interface VerifyRecordViewProps {
   onRelookup?: (lookup: VerifyLookupKind) => void;
   /** Which lookups are currently re-running for this record. */
   relookupPending?: ReadonlySet<VerifyLookupKind>;
+  /** Current row-level lookup state from the OCR preview wrapper. */
+  lookupTracker?: OcrRecordLookupTracker;
 }
 
 function SourceBadge({ source }: { source: VerifyCheck["source"] }) {
@@ -86,10 +93,12 @@ function CheckRow({
   check,
   onRelookup,
   relookupPending,
+  lookupTracker,
 }: {
   check: VerifyCheck;
   onRelookup?: (lookup: VerifyLookupKind) => void;
   relookupPending?: ReadonlySet<VerifyLookupKind>;
+  lookupTracker?: OcrRecordLookupTracker;
 }) {
   // Record exists but the operator's account can't view it — render "Unable to
   // access" (warning tone) instead of a hard "— not found".
@@ -99,6 +108,16 @@ function CheckRow({
   const lookupKind = check.status === "missing" ? verifyCheckLookupKind(check.key) : null;
   const canRelookup = lookupKind !== null && onRelookup !== undefined;
   const pending = lookupKind !== null && (relookupPending?.has(lookupKind) ?? false);
+  const lookupInProgress =
+    check.status === "missing" &&
+    !pending &&
+    deriveLookupInProgress(lookupTracker, check.key);
+  const lookupProgressLabel = deriveLookupProgressLabel(lookupTracker, check.key);
+  const missingText = pending
+    ? "Looking up…"
+    : lookupInProgress
+      ? `${lookupProgressLabel}…`
+      : (check.missingLabel ?? "— not found");
 
   // FOUND — the actionable rows the operator transcribes onto the paper form.
   // Lift them into a small raised card (bg-card + ring + shadow) so the
@@ -134,9 +153,9 @@ function CheckRow({
           </span>
           <span
             className="mt-0.5 block truncate text-sm font-medium text-warning"
-            aria-live={pending ? "polite" : undefined}
+            aria-live={pending || lookupInProgress ? "polite" : undefined}
           >
-            {pending ? "Looking up…" : "Unable to access"}
+            {pending ? "Looking up…" : lookupInProgress ? `${lookupProgressLabel}…` : "Unable to access"}
           </span>
         </div>
         {canRelookup && (
@@ -156,7 +175,10 @@ function CheckRow({
           <Check className="h-3.5 w-3.5 text-success" aria-label="Present on paper" />
         )}
         {check.status === "missing" && (
-          <X className="h-3.5 w-3.5 text-destructive" aria-label="Not found" />
+          <X
+            className="h-3.5 w-3.5 text-destructive"
+            aria-label={pending || lookupInProgress ? "Lookup in progress" : "Not found"}
+          />
         )}
       </div>
 
@@ -174,9 +196,9 @@ function CheckRow({
           ) : (
             <span
               className="text-sm text-muted-foreground"
-              aria-live={pending ? "polite" : undefined}
+              aria-live={pending || lookupInProgress ? "polite" : undefined}
             >
-              {pending ? "Looking up…" : (check.missingLabel ?? "— not found")}
+              {missingText}
             </span>
           )}
           {canRelookup && (
@@ -203,7 +225,7 @@ function CheckRow({
  * lift into small raised cards so the actionable data pops, while on-paper
  * confirmations and gaps stay flat and quiet.
  */
-export function VerifyRecordView({ record, onRelookup, relookupPending }: VerifyRecordViewProps) {
+export function VerifyRecordView({ record, onRelookup, relookupPending, lookupTracker }: VerifyRecordViewProps) {
   const checks = record.checks ?? [];
   const hasWarnings =
     record.matchState === "unresolved" || (record.warnings?.length ?? 0) > 0;
@@ -247,6 +269,7 @@ export function VerifyRecordView({ record, onRelookup, relookupPending }: Verify
                 check={check}
                 onRelookup={onRelookup}
                 relookupPending={relookupPending}
+                lookupTracker={lookupTracker}
               />
             ))}
           </div>

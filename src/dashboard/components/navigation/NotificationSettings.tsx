@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, BellOff } from "lucide-react";
+import { Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
@@ -71,9 +71,9 @@ export function NotificationSettings({ settings, onChange }: NotificationSetting
           type="button"
           aria-label="Desktop notification settings"
           title="Desktop notifications"
-          className="ml-1 h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          {granted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+          <Settings className="h-4 w-4" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">

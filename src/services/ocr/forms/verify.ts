@@ -19,6 +19,7 @@ import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
+import { buildTraceId } from "../../../domain/queue-trace-id.js";
 import { parsePersonOrgNameInput } from "../../../systems/ucpath/person-org-summary.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -89,6 +90,10 @@ export const VerifyPreviewRecordSchema = VerifyOcrRecordSchema.extend({
   employeeId: z.string().default(""),
   /** person-lookup activeStatus. */
   activeStatus: z.string().optional(),
+  /** State of the person-lookup child that enriched this record. */
+  personLookupStatus: z.enum(["pending", "running", "completed", "failed"]).optional(),
+  /** Trace id of the person-lookup child that enriched this record. */
+  personLookupTraceId: z.string().optional(),
   /** CRM First Day of Service. */
   employmentDate: z.string().optional(),
   /** CRM Date Signed. */
@@ -509,7 +514,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       const plInputToItemId = new Map(
         plInputs.map((inp, i) => [JSON.stringify(inp), plItemIds[i] ?? ""]),
       );
-      await delegateToAllImpl<PersonLookupChildInput, readonly string[]>({
+      const plDispatchResults = await delegateToAllImpl<PersonLookupChildInput, readonly string[]>({
         parentRunId: runId,
         trackerDir,
         child: personLookupWorkflow as unknown as Parameters<
@@ -523,6 +528,19 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         deriveItemId: (inp: PersonLookupChildInput) =>
           plInputToItemId.get(JSON.stringify(inp)) ?? "",
       });
+
+      for (const result of plDispatchResults) {
+        const idx = plItemIdToIdx.get(result.itemId);
+        if (idx === undefined) continue;
+        records[idx].personLookupStatus = "pending";
+        records[idx].personLookupTraceId = buildTraceId({
+          code: "pl",
+          runId: result.runId,
+          at: new Date(),
+          rootPrefix: rootTracePrefix,
+        });
+      }
+      input.emitProgress(records);
 
       const plOutcomes = await watchChildRuns({
         workflow: "person-lookup",
@@ -538,6 +556,9 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         const patchKind = verifyPlPatchKind(plKindByItemId.get(outcome.itemId) ?? "name");
         patchOcrRecordFromEidLookupOutcome(recs, idx, outcome, patchKind);
         applyPersonLookupToVerifyRecord(records[idx], outcome.data);
+        records[idx].personLookupStatus = outcome.status === "done" ? "completed" : "failed";
+        const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
+        if (traceId) records[idx].personLookupTraceId = traceId;
       }
 
       const receivedPl = new Set(plOutcomes.map((o) => o.itemId));
@@ -546,6 +567,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         const idx = plItemIdToIdx.get(itemId);
         if (idx === undefined) continue;
         patchOcrRecordUnresolved(recs, idx, "person-lookup timed out without a result");
+        records[idx].personLookupStatus = "failed";
       }
     }
 

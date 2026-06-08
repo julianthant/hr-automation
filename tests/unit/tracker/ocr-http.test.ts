@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import assert from "node:assert";
 import { mkdirSync, rmSync, readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +18,7 @@ import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
+import { verifyOcrFormSpec } from "../../../src/services/ocr/forms/verify.js";
 
 function setup(): string {
   const dir = join(tmpdir(), `ocr-http-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -592,6 +593,157 @@ test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-ou
     const ids = captured.map((c) => c.itemId);
     assert.equal(new Set(ids).size, 2, "itemIds must be distinct");
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrReocrWholePdfHandler parents lookup children under the operation/OCR run", async () => {
+  const dir = join(tmpdir(), `ocr-http-reocr-parent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(rowsDir(dir), { recursive: true });
+  try {
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "s-parent",
+      runId: "r-parent",
+      parentRunId: "operation-parent",
+      status: "done",
+      step: "awaiting-approval",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "oath",
+        pdfPath: "/tmp/fake.pdf",
+        pdfOriginalName: "fake.pdf",
+        sessionId: "s-parent",
+        parentRunId: "operation-parent",
+        records: JSON.stringify([]),
+        failedPages: JSON.stringify([]),
+        pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
+      },
+    }) + "\n", "utf-8");
+
+    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
+    _resetSessionLockForTests();
+
+    let childParentRunId = "";
+    const handler = buildOcrReocrWholePdfHandler({
+      trackerDir: dir,
+      _emitOverride: () => {},
+      _wholePdfOverride: (async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0, printedName: "Alice One",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "whole-pdf-stub",
+        attempts: 1,
+        cached: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      })) as any,
+      _loadRosterOverride: async () => [],
+      _watchChildRunsOverride: async () => [],
+      _enqueueEidLookupOverride: async (_items, context) => {
+        childParentRunId = context.parentRunId;
+      },
+    });
+
+    await handler({ sessionId: "s-parent", runId: "r-parent" });
+    assert.equal(childParentRunId, "operation-parent");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("buildOcrReocrWholePdfHandler runs verify enrichRecords before final emit", async () => {
+  const dir = join(tmpdir(), `ocr-http-reocr-enrich-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const enrichSpy = vi.spyOn(verifyOcrFormSpec, "enrichRecords");
+  try {
+    const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
+    writeFileSync(ocrFile, JSON.stringify({
+      workflow: "ocr",
+      id: "s-verify",
+      runId: "r-verify",
+      status: "done",
+      step: "person-lookup",
+      timestamp: "2026-05-01T00:00:00Z",
+      data: {
+        formType: "verify",
+        pdfPath: "/tmp/verify.pdf",
+        pdfOriginalName: "verify.pdf",
+        sessionId: "s-verify",
+        __traceId: "vf-123456-rver",
+        parallelWorkers: "4",
+        parentSubject: "Verify PDF",
+        records: JSON.stringify([]),
+        failedPages: JSON.stringify([{ page: 1, error: "x" }]),
+        pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+      },
+    }) + "\n", "utf-8");
+
+    let observedRootPrefix = "";
+    let observedParallelWorkers: unknown;
+    enrichSpy.mockImplementation(async (input) => {
+      observedRootPrefix = input.rootTracePrefix;
+      observedParallelWorkers = input.runOptions?.parallelWorkers;
+      input.emitProgress(input.records);
+      return input.records.map((record) => ({
+        ...(record as Record<string, unknown>),
+        employeeId: "10000009",
+        verification: { state: "verified" },
+      })) as never;
+    });
+
+    const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import("../../../src/tracker/dashboard/ocr/index.js");
+    _resetSessionLockForTests();
+
+    const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+    const handler = buildOcrReocrWholePdfHandler({
+      trackerDir: dir,
+      _emitOverride: (e) => writtenEntries.push(e as typeof writtenEntries[number]),
+      _wholePdfOverride: (async () => ({
+        data: [{
+          formKind: "oath",
+          sourcePage: 1,
+          printedName: "Mira Test",
+          employeeId: "",
+          paperEmploymentDate: null,
+          paperDateSigned: null,
+          employeeSigned: true,
+          officerSigned: false,
+          documentType: "expected",
+          originallyMissing: [],
+          notes: [],
+        }],
+        provider: "whole-pdf-stub",
+        attempts: 1,
+        cached: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      })) as any,
+      _loadRosterOverride: async () => [],
+      _watchChildRunsOverride: async () => [],
+    });
+
+    const res = await handler({ sessionId: "s-verify", runId: "r-verify" });
+    assert.equal(res.status, 202);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(enrichSpy.mock.calls.length, 1);
+    assert.equal(observedRootPrefix, "vf-123456");
+    assert.equal(observedParallelWorkers, 4);
+    const progress = writtenEntries.find((entry) => entry.status === "running");
+    assert.ok(progress, "emitProgress writes a running snapshot");
+    assert.equal(progress!.step, "person-lookup", "enrichment progress mirrors orchestrator person-lookup step");
+    const final = writtenEntries.find((entry) => entry.status === "done");
+    assert.ok(final);
+    assert.equal(final!.step, "awaiting-approval", "final review snapshot stays awaiting-approval");
+    const records = JSON.parse(final!.data!.records) as Array<Record<string, unknown>>;
+    assert.equal(records[0].employeeId, "10000009");
+    assert.equal(final!.data!.verifiedCount, "1");
+    assert.equal(final!.data!.failedPages, "[]");
+    assert.equal(final!.data!.mode, "prepare");
+  } finally {
+    enrichSpy.mockRestore();
     rmSync(dir, { recursive: true, force: true });
   }
 });

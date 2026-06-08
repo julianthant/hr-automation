@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import {
   createOcrActiveCheckDependencyBatch,
   createTaskDependencyBatch,
+  getDependencySummaryByParentRunId,
   getDependencySummary,
   getTaskByTrackerIdentity,
   markDependencyTerminal,
@@ -74,6 +75,108 @@ test("task store creates parent, children, attempts, and dependency edges atomic
       failed: 0,
       cancelled: 0,
     });
+  } finally {
+    rmSync(join(dbPath, ".."), { recursive: true, force: true });
+  }
+});
+
+test("getDependencySummaryByParentRunId picks latest run projection across tracker dates", () => {
+  const dbPath = tempDbPath();
+  try {
+    const store = openTaskStoreForTests(dbPath);
+    createTaskDependencyBatch(store, {
+      parent: {
+        workflow: "ocr",
+        itemId: "session-1",
+        runId: "ocr-run-1",
+        taskKind: "ocr",
+        status: "waiting_on_children",
+        data: { formType: "oath" },
+      },
+      children: [
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-oath-ocr-run-1-r0",
+          runId: "child-run-0",
+          taskKind: "workflow_item",
+          status: "running",
+          dependencyKind: "ocr-eid-lookup",
+          failurePolicy: "record_unresolved",
+          metadata: { recordIndex: 0, lookupKind: "verify", formType: "oath" },
+        },
+      ],
+      now: "2026-05-04T12:00:00.000Z",
+    });
+    store.db.prepare(`
+      INSERT INTO runs (
+        workflow, tracker_date, item_id, run_id, parent_run_id,
+        first_any_ts, first_work_ts, latest_tracker_ts, latest_status,
+        latest_step, latest_data_json, updated_at
+      ) VALUES
+        (
+          'person-lookup', '2026-05-04', 'ocr-oath-ocr-run-1-r0', 'child-run-0', 'ocr-run-1',
+          '2026-05-04T12:00:01.000Z', '2026-05-04T12:00:01.000Z', '2026-05-04T12:00:01.000Z', 'running',
+          'person-org', '{"__traceId":"ou-120001-stale"}', '2026-05-04T12:00:01.000Z'
+        ),
+        (
+          'person-lookup', '2026-05-05', 'ocr-oath-ocr-run-1-r0', 'child-run-0', 'ocr-run-1',
+          '2026-05-04T12:00:01.000Z', '2026-05-04T12:00:01.000Z', '2026-05-05T08:00:01.000Z', 'running',
+          'person-org', '{"__traceId":"ou-080001-fresh"}', '2026-05-05T08:00:01.000Z'
+        )
+    `).run();
+
+    const result = getDependencySummaryByParentRunId(store, "ocr-run-1");
+
+    assert.equal(result.children.length, 1);
+    assert.equal(result.summary.total, 1);
+    assert.equal(result.children[0]?.traceId, "ou-080001-fresh");
+  } finally {
+    rmSync(join(dbPath, ".."), { recursive: true, force: true });
+  }
+});
+
+test("getDependencySummaryByParentRunId returns child trace ids from run projections", () => {
+  const dbPath = tempDbPath();
+  try {
+    const store = openTaskStoreForTests(dbPath);
+    createTaskDependencyBatch(store, {
+      parent: {
+        workflow: "ocr",
+        itemId: "session-1",
+        runId: "ocr-run-1",
+        taskKind: "ocr",
+        status: "waiting_on_children",
+        data: { formType: "oath" },
+      },
+      children: [
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-oath-ocr-run-1-r0",
+          runId: "child-run-0",
+          taskKind: "workflow_item",
+          status: "running",
+          dependencyKind: "ocr-eid-lookup",
+          failurePolicy: "record_unresolved",
+          metadata: { recordIndex: 0, lookupKind: "verify", formType: "oath" },
+        },
+      ],
+      now: "2026-05-04T12:00:00.000Z",
+    });
+    store.db.prepare(`
+      INSERT INTO runs (
+        workflow, tracker_date, item_id, run_id, parent_run_id,
+        first_any_ts, first_work_ts, latest_tracker_ts, latest_status,
+        latest_step, latest_data_json, updated_at
+      ) VALUES (
+        'person-lookup', '2026-05-04', 'ocr-oath-ocr-run-1-r0', 'child-run-0', 'ocr-run-1',
+        '2026-05-04T12:00:01.000Z', '2026-05-04T12:00:01.000Z', '2026-05-04T12:00:01.000Z', 'running',
+        'person-org', '{"__traceId":"ou-120001-abcd"}', '2026-05-04T12:00:01.000Z'
+      )
+    `).run();
+
+    const result = getDependencySummaryByParentRunId(store, "ocr-run-1");
+
+    assert.equal(result.children[0]?.traceId, "ou-120001-abcd");
   } finally {
     rmSync(join(dbPath, ".."), { recursive: true, force: true });
   }
