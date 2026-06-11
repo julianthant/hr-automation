@@ -6,7 +6,7 @@
  *
  * The `/run` handler fires the kernel workflow
  * (`sharepointDownloadWorkflow`) **fire-and-forget**: it returns 202
- * immediately with `{ok, id, label, status: "launched"}` and lets the
+ * immediately with `{ok, id, label, status: "launched"|"queued"}` and lets the
  * dashboard surface progress via the Session panel + LogPanel + Queue row.
  * The alternative (blocking until download completes) would hold the HTTP
  * socket open for 2-3 minutes including Duo tap, which is worse UX.
