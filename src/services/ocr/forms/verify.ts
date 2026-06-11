@@ -457,6 +457,15 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     return {
       ...v2,
       employeeId: resolved ? v1.employeeId : v2.employeeId,
+      // Carry `paperEmployeeId` from v1 alongside the resolved employeeId. The
+      // completeness report distinguishes the EID on PAPER (`paperEmployeeId`)
+      // from the looked-up/found EID (`employeeId`); spreading `...v2` alone kept
+      // v2's freshly-re-OCR'd paper value next to v1's carried resolved value,
+      // silently changing paper-vs-found semantics for a carried-forward record.
+      // Tolerate a v1 without the field (legacy rows) by falling back to v2's.
+      paperEmployeeId: resolved
+        ? (v1.paperEmployeeId ?? v2.paperEmployeeId)
+        : v2.paperEmployeeId,
       matchState: resolved ? v1.matchState : v2.matchState,
       verification: resolved ? (v1.verification ?? v2.verification) : v2.verification,
     };
@@ -715,7 +724,15 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         if (idx === undefined) return;
         processedI9ItemIds.add(outcome.itemId);
         applyI9ToVerifyRecord(records[idx], outcome.data);
-        records[idx].i9LookupStatus = outcome.status === "done" ? "completed" : "failed";
+        // A child can complete (`outcome.status === "done"`) yet report
+        // `i9Status: "error"` in its DATA — the lookup ran but errored out. That
+        // is a FAILURE, not a completion: counting it `completed` overstated the
+        // success count in the summary. `not-found` / `unable-to-access` are
+        // genuine completions (the report renders them), so only `"error"`
+        // downgrades. `applyI9ToVerifyRecord` already stamped officialSignerStatus.
+        const i9DataStatus = nonEmpty(outcome.data?.i9Status);
+        records[idx].i9LookupStatus =
+          outcome.status === "done" && i9DataStatus !== "error" ? "completed" : "failed";
         const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
         if (traceId) records[idx].i9LookupTraceId = traceId;
         records[idx].checks = buildVerifyChecks(records[idx]);
@@ -769,13 +786,16 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       rec.matchState = normalizeUcpathEmployeeId(rec.employeeId) ? "resolved" : "unresolved";
     }
 
+    // The summary fires AFTER both watch calls have fully resolved, so every
+    // record is terminal (completed/failed). The `i9Pending` count was therefore
+    // ALWAYS 0 (no "running" enum value is ever assigned either) — a dead field;
+    // dropped rather than implemented.
     const personCompleted = records.filter((rec) => rec.personLookupStatus === "completed").length;
     const personFailed = records.filter((rec) => rec.personLookupStatus === "failed").length;
     const i9Completed = records.filter((rec) => rec.i9LookupStatus === "completed").length;
     const i9Failed = records.filter((rec) => rec.i9LookupStatus === "failed").length;
-    const i9Pending = records.filter((rec) => rec.i9LookupStatus === "pending" || rec.i9LookupStatus === "running").length;
     log.success({
-      message: `[verify/enrich] complete records=${records.length} personCompleted=${personCompleted} personFailed=${personFailed} i9Completed=${i9Completed} i9Failed=${i9Failed} i9Pending=${i9Pending}`,
+      message: `[verify/enrich] complete records=${records.length} personCompleted=${personCompleted} personFailed=${personFailed} i9Completed=${i9Completed} i9Failed=${i9Failed}`,
       category: "ocr",
       occasion: "completed",
       subject: "verify-enrichment",
