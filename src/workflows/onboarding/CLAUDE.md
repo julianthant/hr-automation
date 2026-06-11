@@ -33,7 +33,7 @@ Until that probe lands, operators retrying onboarding are responsible for confir
 - SSN/DOB are optional (international students) but wage requires `$` prefix
 - Appointment field: extracts just the number from "Casual/Restricted 5" → `"5"`
 - Department number parsed from parenthesized text: `"Computer Science (000412)"` → `"000412"`
-- PDF downloads are now delegated to `crm-doc-download` under `parentRunId = onboarding runId`. Onboarding does not wait for completion; failed delegation is non-fatal and UCPath/I-9 continue.
+- PDF downloads run **in-process** against the already-authenticated CRM page (`pdf-download` step), not delegated to `crm-doc-download` — delegating would force a fresh CRM Duo + extra Chromium launch (~30–90 s) per item since the onboarding daemon's CRM session cannot be shared across daemons. The standalone `crm-doc-download` daemon exists for explicit CLI use only. Failed download is non-fatal; UCPath/I-9 continue.
 - I-9 creation requires SSN, DOB, and departmentNumber — the workflow throws a clear error if any is missing for non-rehires
 - Job end date defaults to `06/30/2026` in `src/config.ts` (`ANNUAL_DATES.jobEndDate`) — override via `ANNUAL_DATES_END` env var when the fiscal year rolls; onboarding `config.ts` re-exports it as `JOB_END_DATE`
 - Rehire short-circuit: if `searchPerson` returns a match, the workflow records `rehire: "Yes"` + existing EIDs and exits before I-9/transaction
