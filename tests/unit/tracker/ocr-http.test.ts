@@ -794,6 +794,7 @@ test("buildOcrApproveHandler fans out oath approvals to oath-signature + oath-up
       workflow: "ocr",
       id: "session-oath-fanout",
       runId: "run-oath-fanout",
+      parentRunId: "op-parent-oath-fanout",
       status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
@@ -906,6 +907,7 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
 
     assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
     assert.ok((resp.body as { ok: boolean }).ok);
+    await new Promise((r) => setTimeout(r, 250));
 
     // Assert spy was called with parentRunId plus the pre-auth child row emitter.
     assert.ok(capturedSpyArgs, "spy should have been called");
@@ -996,6 +998,7 @@ test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs
       workflow: "ocr",
       id: "session-approve-dry",
       runId: "run-approve-dry",
+      parentRunId: "op-parent-dry",
       status: "done",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
@@ -1024,6 +1027,7 @@ test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs
     });
 
     assert.equal(resp.status, 200);
+    await new Promise((r) => setTimeout(r, 250));
     assert.equal((capturedInputs[0] as { dryRun?: boolean }).dryRun, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1095,7 +1099,7 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
   }
 });
 
-test("buildOcrApproveHandler: standalone OCR run (no parentRunId) nests children under the OCR run, entry has no parentRunId but still has fannedOutItemIds", async () => {
+test("buildOcrApproveHandler: standalone OCR run (no parentRunId) is REJECTED with 400 (approval \u2261 delegation; legacy fan-out removed 2026-06-11)", async () => {
   const dir = join(tmpdir(), `ocr-approve-noparent-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(rowsDir(dir), { recursive: true });
   try {
@@ -1135,25 +1139,17 @@ test("buildOcrApproveHandler: standalone OCR run (no parentRunId) nests children
       records,
     });
 
-    assert.equal(resp.status, 200, `Expected 200 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
+    // Standalone approve is rejected loud: the UI never offers Approve for a
+    // standalone run (it completes as a read-only review), and the legacy
+    // both-targets fan-out was removed.
+    assert.equal(resp.status, 400, `Expected 400 but got ${resp.status}: ${JSON.stringify(resp.body)}`);
+    assert.match((resp.body as { error: string }).error, /[Ss]tandalone OCR runs have no approve flow/);
+    assert.equal(capturedSpyArgs, undefined, "no fan-out is dispatched for a rejected standalone approve");
 
-    // 4th arg carries the pre-auth child row emitter. With no delegating
-    // parent, the fan-out children nest under the OCR run itself
-    // (childParentRunId = parentRunId ?? ocrRunId), so the 4th arg's
-    // parentRunId is the OCR run id — keeping signer/ticket rows grouped under
-    // the OCR card instead of orphaning as top-level rows.
-    assert.ok(capturedSpyArgs, "spy should have been called");
-    assert.equal((capturedSpyArgs![3] as any).parentRunId, "run-approve-2");
-    assert.equal(typeof (capturedSpyArgs![3] as any).onPreEmitPending, "function");
-
-    // Read back the post-approve JSONL entry
+    // No post-approve entry is written either.
     const lines = readFileSync(ocrFile, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     const approvedEntry = lines.find((e: { step?: string }) => e.step === "approved");
-    assert.ok(approvedEntry, "post-approve entry should exist");
-    assert.equal(approvedEntry.parentRunId, undefined, "post-approve entry should NOT have parentRunId");
-    assert.ok(approvedEntry.data?.fannedOutItemIds, "post-approve entry should still have fannedOutItemIds");
-    const parsedIds = JSON.parse(approvedEntry.data.fannedOutItemIds as string) as string[];
-    assert.equal(parsedIds.length, 1, "fannedOutItemIds should have 1 element");
+    assert.equal(approvedEntry, undefined, "no post-approve entry for a rejected standalone approve");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1167,6 +1163,7 @@ test("buildOcrApproveHandler approves without preview readiness props", async ()
       workflow: "ocr",
       id: "session-preview-props-removed",
       runId: "run-preview-props-removed",
+      parentRunId: "op-parent-preview-props",
       status: "done",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
@@ -1194,6 +1191,7 @@ test("buildOcrApproveHandler approves without preview readiness props", async ()
     });
 
     assert.equal(resp.status, 200);
+    await new Promise((r) => setTimeout(r, 250));
     assert.ok(enqueueCalled);
   } finally {
     rmSync(dir, { recursive: true, force: true });

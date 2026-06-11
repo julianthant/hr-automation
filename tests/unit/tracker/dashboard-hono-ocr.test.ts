@@ -60,6 +60,7 @@ test("Hono /api/ocr/approve-batch forwards body without preview fields", async (
     workflow: "ocr",
     id: sessionId,
     runId,
+    parentRunId: "op-parent-preview-route",
     status: "done",
     step: "awaiting-approval",
     timestamp: "2026-05-05T00:00:00.000Z",
