@@ -40,6 +40,13 @@ const ALLOWED_CALLERS = new Set<string>([
   // `deriveItemId` for a fresh per-invocation item id its own `watchChildRuns`
   // correlates.
   "src/workflows/ocr/verify-relookup.ts",
+  // `reocr-whole-pdf` is the operator-driven whole-PDF re-OCR HTTP entrypoint.
+  // It re-fans person-lookup for the re-extracted records and must use the same
+  // escape hatch as its siblings so the re-fan shares the OCR root's trace
+  // prefix (`rootTracePrefix`) instead of minting fresh `pl-…` prefixes:
+  // `fireAndForget: true` (its background watchChildRuns drives the wait) +
+  // `deriveItemId` for stable per-record item ids.
+  "src/tracker/dashboard/ocr/reocr-whole-pdf.ts",
 ]);
 
 const IGNORED_FILES = new Set<string>([
