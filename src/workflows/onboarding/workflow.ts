@@ -9,6 +9,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import {
   searchByEmail,
   selectLatestResult,
@@ -62,26 +63,17 @@ export const onboardingWorkflow = defineWorkflow({
   systems: [
     {
       id: "crm",
-      login: async (page, instance, context) => {
-        const ok = await loginToACTCrm(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("ACT CRM authentication failed");
-      },
+      login: requireLogin(loginToACTCrm, "ACT CRM authentication failed"),
     },
     {
       id: "ucpath",
-      login: async (page, instance, context) => {
-        const ok = await loginToUCPath(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("UCPath authentication failed");
-      },
+      login: requireLogin(loginToUCPath, "UCPath authentication failed"),
     },
     {
       id: "i9",
-      // I9 has no Duo MFA so `instance` isn't used — accept it to keep the
-      // closure signature uniform with the other kernel-invoked logins.
-      login: async (_page, _instance) => {
-        const ok = await loginToI9(_page);
-        if (!ok) throw new Error("I-9 Complete authentication failed");
-      },
+      // I9 has no Duo MFA — `instance` and `abortSignal` are not used; the
+      // requireLogin wrapper passes them through and loginToI9 ignores them.
+      login: requireLogin(loginToI9, "I-9 Complete authentication failed"),
     },
   ],
   authSteps: false,
