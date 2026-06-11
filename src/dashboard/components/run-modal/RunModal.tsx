@@ -82,7 +82,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [formType, setFormType] = useState<string | null>(effectiveLockedFormType ?? null);
   const formOptionsCache = useFormTypes();
   const formOptions: FormTypeOption[] = formOptionsCache ?? [];
-  const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
+  // Per-file duplicate-check results. Each entry is a picked file whose hash
+  // matched at least one prior run; `fileName` lets the banner say WHICH file is
+  // a duplicate in a multi-file upload. Single-file uploads still produce a
+  // one-entry array (the banner omits the filename header for a lone file).
+  const [duplicateGroups, setDuplicateGroups] = useState<
+    Array<{ fileName: string; priorRuns: PriorRunSummary[] }>
+  >([]);
   const [dryRun, setDryRun] = useState(false);
   const [oathUploadMode, setOathUploadMode] = useState<"full" | "upload-only">("full");
   const [workerChoice, setWorkerChoice] = useState<WorkerChoice>(AUTO_WORKERS);
@@ -93,6 +99,12 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const effectiveShowWorkers = showWorkers && !(showOathUploadMode && oathUploadMode === "upload-only");
   const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType, oathUploadMode };
   const file = files[0] ?? null;
+  // Stable identity signature for the picked files — used as an effect dep so
+  // the duplicate check re-runs only when the actual selection changes (not on
+  // every render). File objects are referentially unstable across renders.
+  const filesSignature = files
+    .map((f) => `${f.name}:${f.size}:${f.lastModified}`)
+    .join("|");
 
   useEffect(() => {
     if (open && effectiveLockedFormType) setFormType(effectiveLockedFormType);
@@ -178,26 +190,35 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     }
   }, [rosters, rosterMode, sharePointWaitAvailable]);
 
-  // Duplicate-check effect — hash the PDF and ask the server whether
-  // we've seen it before. Best-effort: failures surface as an inline error
-  // but don't block submit (the operator may genuinely want to re-run).
+  // Duplicate-check effect — hash EACH picked PDF and ask the server whether
+  // we've seen it before. Runs per-file so a bulk (multi-file) upload doesn't
+  // silently skip the heads-up: oath-upload declares both `duplicateCheck` and
+  // `allowMultipleFiles`. Best-effort: failures surface as an inline error but
+  // don't block submit (the operator may genuinely want to re-run).
   useEffect(() => {
-    if (!showDuplicateCheck || !file || files.length !== 1) {
-      setPriorRuns([]);
+    if (!showDuplicateCheck || files.length === 0) {
+      setDuplicateGroups([]);
       return;
     }
     let cancelled = false;
+    const checkedFiles = files;
     (async () => {
       try {
-        const hash = await sha256OfFile(file);
-        const r = await fetch(
-          `/api/oath-upload/check-duplicate?hash=${encodeURIComponent(hash)}`,
+        const results = await Promise.all(
+          checkedFiles.map(async (candidate) => {
+            const hash = await sha256OfFile(candidate);
+            const r = await fetch(
+              `/api/oath-upload/check-duplicate?hash=${encodeURIComponent(hash)}`,
+            );
+            const j = (await r.json()) as
+              | { ok: true; priorRuns: PriorRunSummary[] }
+              | { ok: false; error: string };
+            return { fileName: candidate.name, priorRuns: j.ok ? j.priorRuns ?? [] : [] };
+          }),
         );
-        const j = (await r.json()) as
-          | { ok: true; priorRuns: PriorRunSummary[] }
-          | { ok: false; error: string };
         if (cancelled) return;
-        if (j.ok) setPriorRuns(j.priorRuns ?? []);
+        // Only files with at least one prior run make the banner.
+        setDuplicateGroups(results.filter((g) => g.priorRuns.length > 0));
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -209,7 +230,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     return () => {
       cancelled = true;
     };
-  }, [file, files.length, showDuplicateCheck]);
+    // `filesSignature` captures the selection identity; the `files` array read
+    // inside is referentially unstable across renders, so the signature is the
+    // real dependency that gates a re-check.
+  }, [filesSignature, showDuplicateCheck]);
 
   // Refresh form-types cache each time the modal opens so a backend update
   // (rare) is reflected. The hook (`useFormTypes`) already serves any
@@ -236,7 +260,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     setSubmitting(false);
     setProgress(null);
     setError(null);
-    setPriorRuns([]);
+    setDuplicateGroups([]);
     setRosterMode("existing");
     setDryRun(false);
     setOathUploadMode("full");
@@ -618,8 +642,18 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
             </section>
           )}
 
-          {showDuplicateCheck && priorRuns.length > 0 && (
-            <DuplicateBanner priorRuns={priorRuns} />
+          {showDuplicateCheck && duplicateGroups.length > 0 && (
+            <div className="space-y-2.5">
+              {duplicateGroups.map((group) => (
+                <DuplicateBanner
+                  key={group.fileName}
+                  priorRuns={group.priorRuns}
+                  // Show WHICH file is a duplicate only when more than one file
+                  // is in play; a lone file keeps the original header-less banner.
+                  fileLabel={duplicateGroups.length > 1 ? group.fileName : undefined}
+                />
+              ))}
+            </div>
           )}
 
           {showDryRun && (
