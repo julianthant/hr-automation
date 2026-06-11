@@ -60,15 +60,18 @@ export async function renderPdfPagesToPngs(
       // verify handwriting and small printed labels without opening the PDF
       // separately.
       const document = await pdf(pdfBuffer, { scale: 1.5 });
-      const filenames: string[] = [];
+      // Collect all rendered images first (iterator is serial — required by pdf-to-img),
+      // then flush all writes in parallel via Promise.all (saves ~4s on a 20-page PDF).
+      const pages: Array<{ name: string; data: Uint8Array }> = [];
       let i = 1;
       for await (const image of document) {
-        const name = `page-${String(i).padStart(pad, "0")}.png`;
-        await fs.writeFile(path.join(outDir, name), image);
-        filenames.push(name);
+        pages.push({ name: `page-${String(i).padStart(pad, "0")}.png`, data: image });
         i += 1;
       }
-      return filenames;
+      await Promise.all(
+        pages.map(({ name, data }) => fs.writeFile(path.join(outDir, name), data)),
+      );
+      return pages.map((p) => p.name);
     });
   } catch (err) {
     log.warn(
