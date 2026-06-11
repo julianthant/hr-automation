@@ -1325,3 +1325,84 @@ test("orchestrator surfaces failedPages and pageStatusSummary on terminal done/p
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("opts.signal abort mid-phase unwinds the prep — no person-lookup/done row emitted after cancel (Task A1)", async () => {
+  // Live-proven bug: `/api/ocr/prepare` ran the orchestrator with NO abort signal
+  // and NO runRegistry registration, so a queue-row Cancel × fell into cancel.ts's
+  // stale-tracker branch (write a cosmetic cancelled row, abort NOTHING) and the
+  // live orchestrator's next emit overwrote Cancelled with running/person-lookup.
+  // The fix threads `signal` into the orchestrator; its entry bridge trips the
+  // prepare-abort flag, which `raceOcrPrepWithDiscard` (around every phase) polls.
+  // This pins that a signal aborted DURING the OCR pipeline step unwinds the run
+  // before person-lookup — proving no later running/done row is emitted.
+  const { _resetOcrPrepareAbortRegistryForTests, isOperatorDiscardAbortError } = await import(
+    "../../../../src/workflows/ocr/prepare-abort.js"
+  );
+  _resetOcrPrepareAbortRegistryForTests();
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string }> = [];
+  const controller = new AbortController();
+
+  let threw: unknown;
+  try {
+    await runOcrOrchestrator(
+      {
+        pdfPath,
+        pdfOriginalName: "fake.pdf",
+        pdfFileId,
+        formType: "oath",
+        sessionId: "session-cancel-1",
+        rosterPath,
+        rosterMode: "existing",
+      },
+      {
+        runId: "run-cancel-1",
+        trackerDir: dir,
+        signal: controller.signal,
+        _emitOverride: (entry) => writtenEntries.push(entry as { status: string; step?: string }),
+        // Abort while the OCR pipeline step is in flight — mirrors an operator
+        // hitting Cancel × mid-OCR. `raceOcrPrepWithDiscard` wraps this promise
+        // and rejects with the discard-abort error within one poll (≤500ms).
+        _ocrPipelineOverride: async () => {
+          controller.abort(new Error("cancel requested (dashboard_in_process)"));
+          await new Promise((r) => setTimeout(r, 700));
+          return { data: [], provider: "stub", attempts: 1, cached: false };
+        },
+        _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+        _enqueueEidLookupOverride: async () => { /* must never be reached */ },
+        _watchChildRunsOverride: async () => {
+          throw new Error("person-lookup fan-out must not run after a mid-phase cancel");
+        },
+      },
+    );
+  } catch (err) {
+    threw = err;
+  }
+
+  // The orchestrator rethrows the discard-abort error on a signal-cancel so the
+  // caller (kernel handler / prepare.ts) maps it to a terminal cancelled row.
+  assert.ok(threw, "a signal-cancel mid-phase must throw, not return");
+  assert.ok(
+    isOperatorDiscardAbortError(threw),
+    `expected the operator-discard abort error, got: ${threw instanceof Error ? threw.message : String(threw)}`,
+  );
+
+  const steps = writtenEntries.map((e) => `${e.status}/${e.step ?? ""}`);
+  // No person-lookup running row, no terminal done row — the run unwound before
+  // the fan-out. (cancel.ts / prepare.ts own the terminal cancelled row.)
+  assert.ok(
+    !steps.some((s) => s === "running/person-lookup"),
+    `no person-lookup row after cancel; steps: ${steps.join(", ")}`,
+  );
+  assert.ok(
+    !steps.some((s) => s === "done/person-lookup"),
+    `no terminal done row after cancel; steps: ${steps.join(", ")}`,
+  );
+  assert.ok(
+    !steps.some((s) => s.includes("awaiting-approval")),
+    `no awaiting-approval row after cancel; steps: ${steps.join(", ")}`,
+  );
+
+  _resetOcrPrepareAbortRegistryForTests();
+  rmSync(dir, { recursive: true, force: true });
+});
+

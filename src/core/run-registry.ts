@@ -79,13 +79,21 @@ export interface RunControlAudit {
  * controller but the run doesn't unregister within `hardKillAfterMs`
  * (e.g. stuck on Duo before the handler starts, so nothing observes the
  * signal yet), `killChromeHard` is called to force teardown.
+ *
+ * `session` is **omitted for browserless runs** — the in-process OCR prep
+ * (`/api/ocr/prepare`) runs `runOcrOrchestrator` in the dashboard's Node
+ * process with no `Session` / chromium. Such a handle has nothing to hard-
+ * kill, so the chromium watchdog is skipped entirely and cancel relies on
+ * the AbortController alone (the orchestrator bridges the signal to its
+ * prepare-abort flag, which every prep-phase poll observes within ~500ms).
  */
 export interface RunHandle {
   runId: string
   itemId: string
   workflow: string
   controller: AbortController
-  session: Session
+  /** The run's browser session — omitted for browserless runs (OCR prep). */
+  session?: Session
   startedAt: number
   /** Debug/audit only — `cancel` does not branch on this. */
   source: 'daemon' | 'in-process'
@@ -184,6 +192,16 @@ export function createRunRegistry(): RunRegistry {
       return { ok: true, alreadyCancelled: false, hardKilled: false }
     }
 
+    // Browserless run (e.g. in-process OCR prep): there's no chromium to hard-
+    // kill, so the watchdog has nothing to do. Cancel is fully delivered by the
+    // controller abort above — the orchestrator's prepare-abort bridge unwinds
+    // the run on the next poll. Return immediately rather than spinning a 5s
+    // watchdog that would only ever no-op on the killChromeHard call.
+    const session = handle.session
+    if (!session) {
+      return { ok: true, alreadyCancelled: false, hardKilled: false }
+    }
+
     // Race: handle gets unregistered (graceful unwind via runOneItem's
     // finally) vs. watchdog timeout. Polling-based to avoid wiring an
     // EventTarget through every handle; 50ms granularity is plenty for a
@@ -196,7 +214,7 @@ export function createRunRegistry(): RunRegistry {
     // killChromeHard is best-effort (the session may have no chromium PIDs
     // if it's a worker session); failures never propagate.
     try {
-      await handle.session.killChromeHard(KILL_CHROME_GRACE_MS)
+      await session.killChromeHard(KILL_CHROME_GRACE_MS)
     } catch (err) {
       log.warn(
         `[run-registry] killChromeHard failed for ${handle.workflow}/${handle.itemId} runId=${runId}: ${errorMessage(err)}`,

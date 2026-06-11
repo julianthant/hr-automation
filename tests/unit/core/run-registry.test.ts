@@ -136,6 +136,36 @@ test('runRegistry: kill failure inside watchdog surfaces as ok=true (best-effort
   }
 })
 
+test('runRegistry: browserless handle (no session) aborts the controller but skips the watchdog (OCR prep)', async () => {
+  // The in-process OCR prep (`/api/ocr/prepare`) registers a handle with NO
+  // `session` — it runs the orchestrator in the dashboard's Node process with no
+  // chromium. Cancel must still abort the controller (the orchestrator bridges
+  // the signal to its prepare-abort flag), but there is nothing to hard-kill, so
+  // the watchdog is skipped: cancel returns immediately with hardKilled=false even
+  // though the run never unregisters within the window.
+  const r = createRunRegistry()
+  const handle: RunHandle = {
+    runId: 'ocr-prep-1',
+    itemId: 'session-1',
+    workflow: 'ocr',
+    controller: new AbortController(),
+    startedAt: Date.now(),
+    source: 'in-process',
+    // no session
+  }
+  r.register(handle)
+
+  // hardKillAfterMs is non-zero, yet the call returns at once (no 200ms wait)
+  // because the browserless branch short-circuits before the watchdog.
+  const started = Date.now()
+  const result = await r.cancel('ocr-prep-1', { reason: 'dashboard_in_process', hardKillAfterMs: 200 })
+  const elapsed = Date.now() - started
+
+  assert.deepEqual(result, { ok: true, alreadyCancelled: false, hardKilled: false })
+  assert.equal(handle.controller.signal.aborted, true, 'controller aborted so the orchestrator unwinds')
+  assert.ok(elapsed < 150, `browserless cancel returns immediately (no watchdog wait); took ${elapsed}ms`)
+})
+
 test('runRegistry: handle keying is by runId only — same workflow+itemId with different runIds register separately', () => {
   const r = createRunRegistry()
   r.register(makeHandle({ runId: 'r1', workflow: 'wf', itemId: 'x' }))
