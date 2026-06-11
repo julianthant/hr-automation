@@ -133,6 +133,19 @@ test("buildSharePointRosterDownloadHandler: queues a fresh concurrent run behind
   const queuedStatus = getSharePointDownloadStatus();
   assert.equal(queuedStatus.inFlight, true);
   assert.equal(queuedStatus.queued.length, 1);
+  // The shared status shape (domain/sharepoint-download-status.ts) carries the
+  // richer fields the client used to drop in its lossy re-declaration: the
+  // in-flight registry id, and per-job queueId + createdAt. Pin them so a future
+  // lossy narrowing fails here.
+  assert.equal(queuedStatus.inFlightId, "onboarding");
+  assert.ok(queuedStatus.current);
+  assert.equal(queuedStatus.current?.id, "onboarding");
+  assert.match(queuedStatus.current?.queueId ?? "", /^spq-\d+$/);
+  assert.match(queuedStatus.current?.createdAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  const queuedJob = queuedStatus.queued[0];
+  assert.ok(queuedJob);
+  assert.match(queuedJob?.queueId ?? "", /^spq-\d+$/);
+  assert.match(queuedJob?.createdAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
 
   // Drain both queued runs so the module lock clears for any subsequent tests.
   await first;
