@@ -79,7 +79,6 @@ export const oathSignatureWorkflow = defineWorkflow({
       // reaches UCPath. Mirrors oath-upload's ServiceNow deferral and
       // emergency-contact's UCPath deferral.
       deferAuth: true,
-      login: async () => {},
     },
   ],
   authSteps: false,
