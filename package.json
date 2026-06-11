@@ -19,6 +19,7 @@
     "oath-upload:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-upload",
     "person-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop person-lookup",
     "emergency-contact:stop": "tsx --env-file=.env src/cli.ts daemon-stop emergency-contact",
+    "i9-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop i9-lookup",
     "dashboard": "tsx --env-file=.env src/cli.ts dashboard",
     "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
     "dashboard:tunneled": "./scripts/dashboard-tunneled.sh",
