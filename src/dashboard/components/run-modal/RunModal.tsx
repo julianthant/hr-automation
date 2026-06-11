@@ -12,26 +12,18 @@ import {
 import { cn } from "@/lib/utils";
 import { DuplicateBanner } from "@/components/oath-upload";
 import type { PriorRunSummary } from "@/components/shared/types";
-import { getRunModalConfig, type RunModalSubmitResponse } from "@/lib/run-modal-registry";
+import {
+  getRunModalConfig,
+  resolveTargetWorkflow,
+  type RunModalSubmitResponse,
+} from "@/lib/run-modal-registry";
 import { useRosters, refreshRosters, type RosterListing } from "@/components/hooks/useRosters";
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
+import type { SharePointDownloadStatus } from "../../../domain/sharepoint-download-status.js";
 
 type RosterMode = "download" | "existing" | "wait";
-
-interface SharePointQueueItem {
-  id: string;
-  label: string;
-  state: "running" | "queued";
-}
-
-interface SharePointDownloadStatus {
-  inFlight: boolean;
-  current: SharePointQueueItem | null;
-  queued: SharePointQueueItem[];
-  lastCompletion: { id: string; ts: string; ok: boolean } | null;
-}
 
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
@@ -249,7 +241,15 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     setDryRun(false);
     setOathUploadMode("full");
     setWorkerChoice(AUTO_WORKERS);
-  }, [open]);
+    // Reset the form-type pick so the standalone-OCR modal re-defaults on the
+    // next open (the default-select effect is gated on `!formType`); a locked
+    // form-type re-injects via the `open && effectiveLockedFormType` effect.
+    setFormType(effectiveLockedFormType ?? null);
+    // Drop the seen-SharePoint-completion marker so reopening after a completed
+    // download re-fires the roster-refresh side-effect on the next poll instead
+    // of treating that completion as already handled.
+    seenSharePointCompletionTs.current = null;
+  }, [open, effectiveLockedFormType]);
 
   if (!config) {
     return null;
@@ -355,10 +355,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
           if (showFormType && formType) fd.append("formType", formType);
           // Target-workflow operation intent — lets the backend tell an
           // oath-signature PDF run from an oath-upload full run (both
-          // formType=oath). Only meaningful for /api/ocr/prepare.
+          // formType=oath). The registry decides when to send it (only on the
+          // shared OCR-prep submit path); no endpoint-string branching here.
           {
-            const target = config.targetWorkflow?.(ctx);
-            if (target && submitUrl.endsWith("/api/ocr/prepare")) {
+            const target = resolveTargetWorkflow(config, ctx);
+            if (target) {
               fd.append("targetWorkflow", target);
             }
           }
