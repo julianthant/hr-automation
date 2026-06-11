@@ -89,6 +89,50 @@ export async function runOcrPipeline<T>(
 }
 
 /**
+ * Second-opinion re-OCR for ONE page on accuracy-tier (tier-1) models only,
+ * excluding the model(s) that produced the suspect first reading. Used by the
+ * orchestrator when an extracted name matches NOTHING in the roster and the
+ * record has no usable EID — the signature of a weak-model misread (live
+ * 2026-06-11: ministral-8b read "Barahona Martell" as "Merrell"). Returns
+ * `null` when the re-read fails (caller keeps the original reading).
+ */
+export async function runOcrSecondOpinionPage<T>(input: {
+  pageImagesDir: string;
+  /** PNG filename of the page inside `pageImagesDir`. */
+  pageFilename: string;
+  recordSchema: ZodType<T>;
+  prompt: string;
+  excludeModels: string[];
+  _poolOverride?: PoolKey[];
+}): Promise<{ records: T[]; poolKeyId?: string } | null> {
+  const pool = input._poolOverride ?? buildVisionPool();
+  if (pool.length === 0) {
+    log.step(`[ocr/second-opinion] no vision keys configured — skipping re-read for ${input.pageFilename}`);
+    return null;
+  }
+  try {
+    const perPage = await runOcrPerPage({
+      pageImagesDir: input.pageImagesDir,
+      pagesAsImages: [input.pageFilename],
+      prompt: input.prompt,
+      schema: input.recordSchema,
+      pool,
+      candidateFilter: (c) =>
+        (c.tier ?? 1) === 1 && !input.excludeModels.includes(c.model),
+    });
+    const page = perPage.pages[0];
+    if (!page?.success) {
+      log.warn(`[ocr/second-opinion] re-read failed for ${input.pageFilename}: ${page?.error ?? "no page outcome"}`);
+      return null;
+    }
+    return { records: perPage.records as T[], poolKeyId: page.poolKeyId };
+  } catch (err) {
+    log.warn(`[ocr/second-opinion] re-read threw for ${input.pageFilename}: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/**
  * Operator-initiated whole-PDF escape hatch. Bypasses per-page entirely;
  * one cached Gemini call on the full PDF. Replaces records on the row.
  */

@@ -190,3 +190,48 @@ describe("UsageTracker", () => {
     assert.equal(cell.dead, true, "dead flag should survive from either process");
   });
 });
+
+describe("UsageTracker — accuracy tiers", () => {
+  let tmp: string;
+  const dirs: string[] = [];
+  const fresh = (): UsageTracker => {
+    tmp = mkdtempSync(join(tmpdir(), "ocr-usage-tier-"));
+    dirs.push(tmp);
+    return new UsageTracker(tmp);
+  };
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("prefers a tier-1 cell over tier-2 even when tier-2 has the lower daily count", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM()), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    // Charge the strong cell twice so naive load-spreading would pick weak.
+    assert.equal(t.reserve([strong]).kind, "ok");
+    assert.equal(t.reserve([strong]).kind, "ok");
+    const r = t.reserve([weak, strong]); // weak listed first AND lower rpdCount
+    assert.equal(r.kind, "ok");
+    if (r.kind === "ok") assert.equal(r.token.model, "strong-model");
+  });
+
+  it("falls back to a tier-2 cell only when every tier-1 cell is busy", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM({ rpm: 1 })), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    const first = t.reserve([strong, weak]);
+    if (first.kind === "ok") assert.equal(first.token.model, "strong-model");
+    const second = t.reserve([strong, weak]); // strong now rpm-exhausted
+    assert.equal(second.kind, "ok");
+    if (second.kind === "ok") assert.equal(second.token.model, "weak-model");
+  });
+
+  it("treats an absent tier as tier 1 (back-compat with untiered candidates)", () => {
+    const t = fresh();
+    const untiered = cand("k1", "untiered-model", LIM());
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    const r = t.reserve([weak, untiered]);
+    assert.equal(r.kind, "ok");
+    if (r.kind === "ok") assert.equal(r.token.model, "untiered-model");
+  });
+});

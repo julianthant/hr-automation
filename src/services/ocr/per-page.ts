@@ -24,6 +24,12 @@ export interface PerPageOcrRequest<T> {
   pool?: PoolKey[];
   /** Override the usage-tracker state directory for tests. */
   cacheDir?: string;
+  /**
+   * Restrict which (provider, key, model) cells may serve these pages —
+   * the second-opinion path passes tier-1-only minus the model that
+   * produced the suspect reading. All filtered out → pages fail loud.
+   */
+  candidateFilter?: (c: Candidate) => boolean;
 }
 
 export interface PerPageOcrResult<T> {
@@ -88,6 +94,7 @@ function buildCandidates(pool: PoolKey[]): Candidate[] {
       model: m.id,
       limit: m.limit,
       priority: k.priority,
+      tier: m.tier ?? 1,
     })),
   );
 }
@@ -128,7 +135,9 @@ export async function runOcrPerPage<T>(req: PerPageOcrRequest<T>): Promise<PerPa
   // (and flush an empty state file for) the tracker in that case.
   const usingTestFn = Boolean(_callSinglePageForTests);
   const tracker = usingTestFn ? null : getUsageTracker(req.cacheDir ?? DEFAULT_CACHE_DIR);
-  const candidates = usingTestFn ? [] : buildCandidates(pool);
+  const candidates = (usingTestFn ? [] : buildCandidates(pool)).filter(
+    req.candidateFilter ?? (() => true),
+  );
   const poolByKey = new Map(pool.map((k) => [`${k.providerId}-${k.keyIndex}`, k]));
 
   const tasks = req.pagesAsImages.map((filename, idx) => ({

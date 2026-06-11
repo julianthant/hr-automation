@@ -1406,3 +1406,139 @@ test("opts.signal abort mid-phase unwinds the prep — no person-lookup/done row
   rmSync(dir, { recursive: true, force: true });
 });
 
+
+test("second opinion: a 0-candidate, no-EID name is re-read on tier-1 and ADOPTED when it roster-matches", async () => {
+  // Live repro 2026-06-11: ministral-8b read "Barahona Martell, Carlos D" as
+  // "Merrell, Carlos D" — 0 roster candidates + invalid EID, yet the pipeline
+  // proceeded with the misread name. The second-opinion phase re-reads the
+  // page on a tier-1 model (excluding the model that produced the first
+  // read) and adopts the reading that anchors to the roster.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ data?: Record<string, unknown> }> = [];
+  const calls: Array<{ pageNum: number; excludeModels: string[] }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-so-adopt",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-so-adopt",
+      trackerDir: dir,
+      _emitOverride: (entry: unknown) => writtenEntries.push(entry as never),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Merrell, Carlos D",
+          employeeId: "000412",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+        pages: [{ page: 1, success: true, attemptedKeys: ["mistral-0:ministral-8b-latest"], poolKeyId: "mistral-0:ministral-8b-latest", attempts: 1 }],
+      }),
+      _secondOpinionOverride: async (args: { pageNum: number; excludeModels: string[] }) => {
+        calls.push(args);
+        return {
+          records: [{
+            sourcePage: 1, rowIndex: 0,
+            printedName: "Barahona Martell, Carlos D",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [],
+          }],
+          poolKeyId: "gemini-0:gemini-3.5-flash",
+        };
+      },
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Barahona Martell, Carlos D" }],
+      _lookupSuggestionOverride: async () => [],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-so-adopt-r0",
+        runId: "verify-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", emplId: "10000001" },
+      }],
+    } as never,
+  );
+
+  assert.equal(calls.length, 1, "exactly one suspect page re-read");
+  assert.equal(calls[0].pageNum, 1);
+  assert.deepEqual(calls[0].excludeModels, ["ministral-8b-latest"], "the first-read model is excluded from the re-read");
+  const last = [...writtenEntries].reverse().find((e) => typeof (e.data as { records?: unknown })?.records === "string");
+  assert.ok(last, "a snapshot with records was emitted");
+  const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{ printedName?: string }>;
+  const name = String(parsed[0]?.printedName ?? "");
+  assert.ok(name.includes("Barahona"), `adopted name should be the tier-1 reading, got "${name}"`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("second opinion: a re-read that ranks no better KEEPS the original reading (and parses ':'-bearing model ids)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ data?: Record<string, unknown> }> = [];
+  const calls: Array<{ pageNum: number; excludeModels: string[] }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-so-keep",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-so-keep",
+      trackerDir: dir,
+      _emitOverride: (entry: unknown) => writtenEntries.push(entry as never),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Merrell, Carlos D",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+        pages: [{ page: 1, success: true, attemptedKeys: ["openrouter-2:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"], poolKeyId: "openrouter-2:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", attempts: 1 }],
+      }),
+      _secondOpinionOverride: async (args: { pageNum: number; excludeModels: string[] }) => {
+        calls.push(args);
+        // Another non-roster name, still no EID — ranks no better.
+        return {
+          records: [{
+            sourcePage: 1, rowIndex: 0,
+            printedName: "Morrell, Charles",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [],
+          }],
+          poolKeyId: "gemini-0:gemini-3.5-flash",
+        };
+      },
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Unrelated Person" }],
+      _lookupSuggestionOverride: async () => [],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [],
+    } as never,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    calls[0].excludeModels,
+    ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"],
+    "model id is everything after the FIRST ':' in the poolKeyId combo",
+  );
+  const last = [...writtenEntries].reverse().find((e) => typeof (e.data as { records?: unknown })?.records === "string");
+  assert.ok(last, "a snapshot with records was emitted");
+  const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{ printedName?: string }>;
+  const name = String(parsed[0]?.printedName ?? "");
+  assert.ok(name.includes("Merrell"), `original reading must be kept, got "${name}"`);
+  rmSync(dir, { recursive: true, force: true });
+});

@@ -37,6 +37,12 @@ export interface Candidate {
   limit: ModelLimit;
   /** Provider priority (lower preferred); used only for stable ordering. */
   priority: number;
+  /**
+   * Model accuracy tier (1 = name-trusted, 2 = throughput overflow; see
+   * `ModelSpec.tier`). Absent = 1. `reserve()` prefers tier-1 cells among
+   * those free now, so weak models only run when the strong ones are busy.
+   */
+  tier?: number;
 }
 
 /** Handle returned by reserve(); pass back to commit()/penalize(). */
@@ -251,10 +257,12 @@ export class UsageTracker {
   /**
    * Pick the best available (key, model) cell for the next page. Candidates
    * should be supplied in preference order (provider priority → model chain →
-   * key index). Among those with headroom *now*, picks the one with the lowest
-   * daily count to spread load, tie-broken by supplied order. Charges the cell
-   * optimistically. If nothing is free, returns the minimal wait; if every cell
-   * is dead, returns "exhausted".
+   * key index). Among those with headroom *now*, picks the best accuracy tier
+   * first (tier 1 before tier 2 — load-spreading must not drift pages onto
+   * name-mangling overflow models while trusted ones are free), then the
+   * lowest daily count to spread load within the tier, tie-broken by supplied
+   * order. Charges the cell optimistically. If nothing is free, returns the
+   * minimal wait; if every cell is dead, returns "exhausted".
    */
   reserve(candidates: Candidate[], nowMs = Date.now()): ReserveResult {
     if (candidates.length === 0) return { kind: "exhausted" };
@@ -269,7 +277,11 @@ export class UsageTracker {
       if (!cell.dead) anyAlive = true;
       const wait = this.msUntilFree(cell, cand.limit, cand.limit.imgTokens, nowMs);
       if (wait === 0) {
-        if (!best || cell.rpdCount < best.cell.rpdCount) best = { idx: i, cell, c: cand };
+        const tier = cand.tier ?? 1;
+        const bestTier = best ? (best.c.tier ?? 1) : Number.POSITIVE_INFINITY;
+        if (!best || tier < bestTier || (tier === bestTier && cell.rpdCount < best.cell.rpdCount)) {
+          best = { idx: i, cell, c: cand };
+        }
       } else if (Number.isFinite(wait)) {
         minWait = Math.min(minWait, wait);
       }

@@ -37,6 +37,15 @@ export interface ModelLimit {
 export interface ModelSpec {
   id: string;
   limit: ModelLimit;
+  /**
+   * Accuracy tier for handwritten-name extraction. 1 (default) = trusted on
+   * hard handwriting; 2 = throughput overflow — observed mangling names
+   * (live 2026-06-11: ministral-8b read "Barahona Martell" as "Merrell",
+   * llama-4-scout produced "Marbell"/"Mian", nemotron "Barbhane Martelli",
+   * gemini-2.5-flash-lite "Juun"). Tier 2 cells are only picked when no
+   * tier-1 cell has headroom, and are excluded from second-opinion re-OCR.
+   */
+  tier?: 1 | 2;
 }
 
 export interface ProviderConfig {
@@ -67,36 +76,36 @@ const GEMINI_MODELS: ModelSpec[] = [
   // Newer, strong vision — but preview RPD is the same ~250.
   { id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 } },
   // Overflow: cheaper tokens + higher daily cap; weaker on hard handwriting.
-  { id: "gemini-2.5-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 300 } },
-  { id: "gemini-3.1-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 1125 } },
+  { id: "gemini-2.5-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 300 }, tier: 2 },
+  { id: "gemini-3.1-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 1125 }, tier: 2 },
   { id: "gemini-3.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 } },
 ];
 
 // Groq: org-level limits, single vision model. ~30 RPM / 30k TPM / 1000 RPD free.
 const GROQ_MODELS: ModelSpec[] = [
-  { id: "meta-llama/llama-4-scout-17b-16e-instruct", limit: { rpm: 30, tpm: 30_000, rpd: 1000, imgTokens: 2400 } },
+  { id: "meta-llama/llama-4-scout-17b-16e-instruct", limit: { rpm: 30, tpm: 30_000, rpd: 1000, imgTokens: 2400 }, tier: 2 },
 ];
 
 // Mistral: free tier not published (≈1 RPS, 1B tok/month). Conservative caps.
 const MISTRAL_MODELS: ModelSpec[] = [
   { id: "mistral-medium-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 } },
-  { id: "ministral-8b-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 } },
-  { id: "mistral-small-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 } },
+  { id: "ministral-8b-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
+  { id: "mistral-small-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
 ];
 
 // SambaNova: free RPD is brutally low (~20/day) — last-resort overflow only.
 const SAMBANOVA_MODELS: ModelSpec[] = [
   { id: "Llama-4-Maverick-17B-128E-Instruct", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 2400 } },
   { id: "gemma-4-31B-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 355 } },
-  { id: "gemma-3-12b-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 1100 } },
+  { id: "gemma-3-12b-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 1100 }, tier: 2 },
 ];
 
 // OpenRouter: per-account global ~20 RPM / 50 RPD free (1000 RPD after $10 credit).
 // Free vision models (`:free`) confirmed working via probe-vision.ts.
 const OPENROUTER_MODELS: ModelSpec[] = [
   { id: "google/gemma-4-31b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 } },
-  { id: "google/gemma-4-26b-a4b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 } },
-  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 1214 } },
+  { id: "google/gemma-4-26b-a4b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 }, tier: 2 },
+  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 1214 }, tier: 2 },
 ];
 
 const PROVIDERS: ProviderConfig[] = [

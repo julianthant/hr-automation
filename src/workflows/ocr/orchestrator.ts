@@ -53,7 +53,7 @@ import type {
   SharePointDownloadRequest,
   SharePointDownloadResult,
 } from "../sharepoint-download/handler.js";
-import { runOcrPipeline } from "../../services/ocr/pipeline.js";
+import { runOcrPipeline, runOcrSecondOpinionPage } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import { buildTraceId, tracePrefix } from "../../domain/queue-trace-id.js";
@@ -85,6 +85,52 @@ interface OcrPipelineResult {
     poolKeyId?: string;
     attempts?: number;
   }>;
+}
+
+// ─── Second-opinion helpers (suspect-name re-OCR) ─────────────────────────
+// A record whose extracted name matches NOTHING in the roster AND that has no
+// usable EID is the signature of a weak-vision-model misread (one random pool
+// cell reads each page). The roster is the oracle: re-read the page on a
+// tier-1 model and adopt the new reading only when it ranks strictly better.
+
+const SECOND_OPINION_MAX_DEFAULT = 5;
+
+function secondOpinionCap(): number {
+  const env = Number.parseInt(process.env.OCR_SECOND_OPINION_MAX ?? "", 10);
+  return Number.isFinite(env) && env >= 0 ? env : SECOND_OPINION_MAX_DEFAULT;
+}
+
+/** Extracted name across form shapes (oath/verify flat, EC nested). */
+function readOcrRecordName(rec: unknown): string {
+  const r = rec as { printedName?: unknown; employee?: { name?: unknown } };
+  const flat = typeof r.printedName === "string" ? r.printedName.trim() : "";
+  if (flat) return flat;
+  return typeof r.employee?.name === "string" ? r.employee.name.trim() : "";
+}
+
+/** EID across form shapes; usable = ≥5 digits after stripping separators. */
+function readUsableEid(rec: unknown): string | null {
+  const r = rec as { employeeId?: unknown; employee?: { employeeId?: unknown } };
+  const raw =
+    typeof r.employeeId === "string"
+      ? r.employeeId
+      : typeof r.employee?.employeeId === "string"
+        ? r.employee.employeeId
+        : "";
+  const digits = raw.replace(/\D/g, "");
+  return /^\d{5,}$/.test(digits) ? digits : null;
+}
+
+/**
+ * Rank a POST-match record: 3 = match resolved, 2 = roster candidates or a
+ * usable EID to look up, 1 = nothing to anchor the identity (suspect).
+ */
+function matchOutcomeRank(rec: unknown): number {
+  const r = rec as { matchState?: string; rosterCandidates?: unknown[] };
+  if (r.matchState && r.matchState !== "lookup-pending") return 3;
+  if ((r.rosterCandidates?.length ?? 0) > 0) return 2;
+  if (readUsableEid(rec)) return 2;
+  return 1;
 }
 
 export interface OcrOrchestratorOpts {
@@ -141,6 +187,15 @@ export interface OcrOrchestratorOpts {
     spec: AnyOcrFormSpec;
     sessionId: string;
   }) => Promise<OcrPipelineResult>;
+  /**
+   * Test escape: override the second-opinion tier-1 re-read of a suspect
+   * page (production default: `runOcrSecondOpinionPage`). Return `null` to
+   * simulate a failed re-read (original record kept).
+   */
+  _secondOpinionOverride?: (args: {
+    pageNum: number;
+    excludeModels: string[];
+  }) => Promise<{ records: unknown[]; poolKeyId?: string } | null>;
   _loadRosterOverride?: (path: string) => Promise<MatchRosterRow[]>;
   _watchChildRunsOverride?: (opts: WatchChildRunsOpts) => Promise<ChildOutcome[]>;
   _enqueueEidLookupOverride?: (
@@ -622,6 +677,60 @@ export async function runOcrOrchestrator(
       const candCount = rec.rosterCandidates?.length ?? 0;
       log.step(`[ocr] match ${i + 1}/${records.length}: state=${rec.matchState} source=${rec.matchSource ?? "(none)"} eid=${rec.employeeId || "(none)"}${conf} candidates=${candCount}`);
     });
+
+    // 3a. Second opinion: re-read suspect pages on accuracy-tier models.
+    // Suspect = matched nothing in the roster AND no usable EID (see the
+    // module helpers above). Roster is the oracle — skipped when none loaded.
+    const secondOpinionFn =
+      opts._secondOpinionOverride ??
+      (async (args: { pageNum: number; excludeModels: string[] }) =>
+        runOcrSecondOpinionPage({
+          pageImagesDir,
+          pageFilename: `page-${String(args.pageNum).padStart(3, "0")}.png`,
+          recordSchema: spec.ocrRecordSchema as ZodType<unknown>,
+          prompt: spec.prompt,
+          excludeModels: args.excludeModels,
+        }));
+    if (roster.length > 0) {
+      const suspects = records
+        .map((rec, index) => ({ rec, index }))
+        .filter(({ rec }) => matchOutcomeRank(rec) === 1 && readOcrRecordName(rec) !== "");
+      const cap = secondOpinionCap();
+      if (suspects.length > cap) {
+        log.warn(`[ocr/second-opinion] ${suspects.length} suspect record(s); re-reading only the first ${cap} (OCR_SECOND_OPINION_MAX)`);
+      }
+      for (const { rec, index } of suspects.slice(0, cap)) {
+        const r = rec as { sourcePage?: number; rowIndex?: number };
+        const pageNum = r.sourcePage;
+        if (typeof pageNum !== "number") continue;
+        const pageInfo = pages.find((p) => p.page === pageNum);
+        // poolKeyId is `<provider>-<keyIndex>:<model>`; model ids may contain ":".
+        const firstModel = pageInfo?.poolKeyId?.split(":").slice(1).join(":") ?? "";
+        const oldName = readOcrRecordName(rec);
+        log.step(`[ocr/second-opinion] page ${pageNum}: "${oldName}" matched 0 roster rows and has no EID — re-reading on a tier-1 model${firstModel ? ` (first read: ${firstModel})` : ""}`);
+        const second = await raceOcrPrepWithDiscard(
+          id,
+          runId,
+          secondOpinionFn({ pageNum, excludeModels: firstModel ? [firstModel] : [] }),
+        );
+        if (!second) continue;
+        // Re-anchor the re-read record to this one: same rowIndex when
+        // stamped, else only an unambiguous single-record page qualifies.
+        const pageRecords = second.records as Array<Record<string, unknown>>;
+        const sameRow = pageRecords.filter((c) => (c.rowIndex ?? 0) === (r.rowIndex ?? 0));
+        const candidate = sameRow.length === 1 ? sameRow[0] : pageRecords.length === 1 ? pageRecords[0] : undefined;
+        if (!candidate) continue;
+        const rematched = await spec.matchRecord({ record: { ...candidate, sourcePage: pageNum }, roster });
+        const newName = readOcrRecordName(rematched);
+        if (matchOutcomeRank(rematched) > matchOutcomeRank(records[index])) {
+          log.success(`[ocr/second-opinion] page ${pageNum}: "${oldName}" → "${newName}" (${second.poolKeyId ?? "tier-1"}) — adopted (roster-anchored)`);
+          records[index] = rematched;
+        } else {
+          log.step(`[ocr/second-opinion] page ${pageNum}: re-read "${newName}" ranks no better than "${oldName}" — keeping the original`);
+        }
+      }
+    }
+
     // Snapshot post-matching: badges + EIDs (where roster auto-accepted)
     // appear in the Preview tab.
     emitSnapshot(records, "ocr", "running", {
