@@ -22,7 +22,10 @@ export interface PrepareInput {
   pdfOriginalName: string;
   pdfFileId?: string;
   formType: string;
-  rosterMode: "existing" | "download";
+  // "wait" joins the newest queued/running SharePoint job instead of starting a
+  // fresh download; the Zod schema + orchestrator already handle it (the run
+  // modal offers it only while a SharePoint job is current/queued).
+  rosterMode: "existing" | "download" | "wait";
   rosterPath?: string;
   sessionId?: string;
   previousRunId?: string;
