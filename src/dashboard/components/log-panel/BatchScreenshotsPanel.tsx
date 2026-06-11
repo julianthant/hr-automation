@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Images } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { resolveEntryName } from "@/components/shared/entry-display";
 import type { TrackerEntry } from "@/components/shared/types";
 import { useRunScreenshots } from "@/components/hooks/useRunScreenshots";
+import { useInterval } from "@/components/hooks/resource-factory";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
 
 export function BatchScreenshotsPanel({
@@ -20,11 +21,9 @@ export function BatchScreenshotsPanel({
     (member) => member.status === "pending" || member.status === "running",
   );
 
-  useEffect(() => {
-    if (!hasLiveMembers) return;
-    const id = window.setInterval(() => setRefreshTick((v) => v + 1), 3_000);
-    return () => window.clearInterval(id);
-  }, [hasLiveMembers]);
+  // Re-fetch screenshots every 3s while any member is still in flight.
+  const bumpTick = useCallback(() => setRefreshTick((v) => v + 1), []);
+  useInterval(bumpTick, hasLiveMembers ? 3_000 : null);
 
   if (members.length === 0) {
     return (
