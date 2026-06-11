@@ -369,7 +369,13 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       // prior "every selected EC record fans out" behavior).
       const kind = record.formKind as string | undefined;
       if (kind === "oath" || kind === "unknown") return false;
-      return true;
+      // EID-completeness gate (F12, mirrors oath's `hasOathSignerInput`): an EC
+      // child is enqueued by EID — the daemon navigates UCPath to that person.
+      // A blank/invalid EID would fan out a child guaranteed to fail at
+      // navigation, so skip it (the approve route keeps per-record itemIds in
+      // sync with what actually enqueues).
+      const emplId = normalizeUcpathEmployeeId(record.employee?.employeeId ?? "");
+      return /^\d{5,}$/.test(emplId);
     },
   },
 
