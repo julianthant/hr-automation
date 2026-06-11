@@ -39,10 +39,7 @@ import type { VerifyLookupKind, VerifyPreviewRecord } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 import { useConfirm } from "@/components/shared/useConfirm";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
-import {
-  useTaskDependencies,
-  type TaskDependencyChild,
-} from "@/components/hooks/useTaskDependencies";
+import { useTaskDependencies } from "@/components/hooks/useTaskDependencies";
 import {
   resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
@@ -357,6 +354,30 @@ function useOcrReviewPrepApi(
     () => recordRows.map((e) => e.record),
     [recordRows],
   );
+
+  // Derive the per-record lookup tracker ONCE per record. The pane re-renders on
+  // every SSE event during enrichment, and the tracker was being computed twice
+  // per record per render (renderFormCard + renderFormCardNav, the hottest path).
+  // Keyed on the records + dependency children + parent status/step — the only
+  // inputs `deriveOcrRecordLookupTracker` reads.
+  const entryStatusForLookup = entry?.status ?? "";
+  const entryStepForLookup = entry?.step;
+  const lookupTrackerByIndex = useMemo(() => {
+    const map = new Map<number, OcrRecordLookupTracker>();
+    for (const { record, originalIndex } of recordRows) {
+      map.set(
+        originalIndex,
+        deriveOcrRecordLookupTracker({
+          record,
+          originalIndex,
+          entryStatus: entryStatusForLookup,
+          entryStep: entryStepForLookup,
+          dependencyChildren,
+        }),
+      );
+    }
+    return map;
+  }, [recordRows, dependencyChildren, entryStatusForLookup, entryStepForLookup]);
 
   const setRecord = (index: number, next: AnyPreviewRecord): void => {
     setLocalEdits((prev) => ({ ...prev, [index]: next }));
@@ -830,11 +851,8 @@ function useOcrReviewPrepApi(
                         record,
                         cfg,
                         totalPages,
-                        originalIndex,
                         rowOrdinal,
-                        entryStatus: entry.status,
-                        entryStep: entry.step,
-                        dependencyChildren,
+                        lookupTracker: lookupTrackerByIndex.get(originalIndex)!,
                         onBatchSelectedChange: (selected) =>
                           setRecord(originalIndex, { ...record, selected } as AnyPreviewRecord),
                       })}
@@ -856,9 +874,7 @@ function useOcrReviewPrepApi(
                         originalIndex,
                         rowOrdinal,
                         ocrRunId: runId,
-                        entryStatus: entry.status,
-                        entryStep: entry.step,
-                        dependencyChildren,
+                        lookupTracker: lookupTrackerByIndex.get(originalIndex)!,
                         researchingIndices,
                         onForceResearchSingle: cfg.supportsForceResearch ? triggerForceResearchForIndex : undefined,
                         onRelookup: handleRelookup,
@@ -885,9 +901,7 @@ function useOcrReviewPrepApi(
                   originalIndex,
                   rowOrdinal: ordinals[rowIdx],
                   ocrRunId: runId,
-                  entryStatus: entry.status,
-                  entryStep: entry.step,
-                  dependencyChildren,
+                  lookupTracker: lookupTrackerByIndex.get(originalIndex)!,
                   researchingIndices,
                   onForceResearchSingle: cfg.supportsForceResearch ? triggerForceResearchForIndex : undefined,
                   onRelookup: handleRelookup,
@@ -1045,9 +1059,8 @@ function renderFormCard(args: {
   rowOrdinal: number;
   /** OCR prep run id — addresses the per-record lookup screenshots (verify). */
   ocrRunId: string;
-  entryStatus: string;
-  entryStep?: string;
-  dependencyChildren: TaskDependencyChild[];
+  /** Pre-derived once per record by the pane (see `lookupTrackerByIndex`). */
+  lookupTracker: OcrRecordLookupTracker;
   researchingIndices: ReadonlySet<number>;
   onForceResearchSingle?: (index: number) => void;
   /** verify: re-run ONE lookup for this record. */
@@ -1072,13 +1085,7 @@ function renderFormCard(args: {
     : `Page ${sourcePage} of ${args.totalPages} in pile`;
   const recordName = args.cfg.recordName(r);
 
-  const lookupTracker = deriveOcrRecordLookupTracker({
-    record: r,
-    originalIndex: args.originalIndex,
-    entryStatus: args.entryStatus,
-    entryStep: args.entryStep,
-    dependencyChildren: args.dependencyChildren,
-  });
+  const lookupTracker = args.lookupTracker;
   const workflowStatusPhase = deriveRecordWorkflowPhase(lookupTracker);
   const matchStateBadge = renderLookupTrackerBadge(lookupTracker);
   const isUnknown = r.documentType === "unknown";
@@ -1247,11 +1254,9 @@ function renderFormCardNav(args: {
   record: AnyPreviewRecord;
   cfg: OcrDownstreamConfigType;
   totalPages: number;
-  originalIndex: number;
   rowOrdinal: number;
-  entryStatus: string;
-  entryStep?: string;
-  dependencyChildren: TaskDependencyChild[];
+  /** Pre-derived once per record by the pane (see `lookupTrackerByIndex`). */
+  lookupTracker: OcrRecordLookupTracker;
   rowOnPage?: number;
   totalRowsOnPage?: number;
   onBatchSelectedChange: (selected: boolean) => void;
@@ -1266,15 +1271,7 @@ function renderFormCardNav(args: {
       pageLocation={pageLocation}
       recordName={args.cfg.recordName(args.record)}
       rowOrdinal={args.rowOrdinal}
-      workflowStatusPhase={deriveRecordWorkflowPhase(
-        deriveOcrRecordLookupTracker({
-          record: args.record,
-          originalIndex: args.originalIndex,
-          entryStatus: args.entryStatus,
-          entryStep: args.entryStep,
-          dependencyChildren: args.dependencyChildren,
-        }),
-      )}
+      workflowStatusPhase={deriveRecordWorkflowPhase(args.lookupTracker)}
       documentKindChip={renderDocumentKindChip(args.record.formKind)}
       documentTypeBadge={
         isUnknown ? (

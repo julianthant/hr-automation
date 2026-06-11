@@ -26,6 +26,8 @@ import {
   resolveQueueRowLiveMessage,
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
+import { aggregateBatchCounts } from "@/components/ocr/delegation-row-helpers";
+import { statusKeyForEntry } from "@/components/shared/status-styles";
 import { cn } from "@/lib/utils";
 
 /**
@@ -122,32 +124,13 @@ const HEADER_STATUS: Record<string, HeaderStatus> = {
 
 function headerStatus(entry: TrackerEntry, ocr?: OperationOcrLink): HeaderStatus {
   if (ocr?.status === "awaiting-review") return HEADER_STATUS.needsReview;
-  if (entry.status === "failed" && entry.step === "cancelled") return HEADER_STATUS.cancelled;
-  return HEADER_STATUS[entry.status] ?? HEADER_STATUS.pending;
+  // `statusKeyForEntry` applies the shared failed+cancelled override so the
+  // coordinator header amber-renders a cancelled run like every other surface.
+  return HEADER_STATUS[statusKeyForEntry(entry)] ?? HEADER_STATUS.pending;
 }
 
 function isAwaitingOcrReview(ocr?: OperationOcrLink): boolean {
   return ocr?.status === "awaiting-review";
-}
-
-// ---------------------------------------------------------------------------
-// Member-count helper.
-// ---------------------------------------------------------------------------
-
-function aggregateMemberCounts(members: TrackerEntry[]) {
-  let done = 0;
-  let running = 0;
-  let queued = 0;
-  let failed = 0;
-  for (const m of members) {
-    // A cancelled member (failed + step "cancelled") is intentional, not a
-    // failure — it lands in no bucket (still counted in total).
-    if (m.status === "failed" && m.step !== "cancelled") failed += 1;
-    else if (m.status === "done") done += 1;
-    else if (m.status === "running") running += 1;
-    else if (m.status === "pending" || m.status === "skipped") queued += 1;
-  }
-  return { done, running, queued, failed, total: members.length };
 }
 
 function statusForDisplay(
@@ -188,7 +171,7 @@ export function OperationRowUnified({
   const cfg = headerStatus(displayParent, ocr);
   const StatusIcon = cfg.icon;
 
-  const counts = useMemo(() => aggregateMemberCounts(members), [members]);
+  const counts = useMemo(() => aggregateBatchCounts(members), [members]);
   const memberProjectionById = useMemo(
     () => new Map((projection?.batchMembers ?? []).map((m) => [m.itemId, m])),
     [projection?.batchMembers],

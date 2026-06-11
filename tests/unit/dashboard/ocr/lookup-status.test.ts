@@ -138,6 +138,52 @@ describe("deriveOcrRecordLookupTracker", () => {
     assert.equal(tracker.inProgress, false);
     assert.equal(deriveRecordWorkflowPhase(tracker), "failed");
   });
+
+  it("does NOT leak 'Person lookup running' onto a resolved record with no child", () => {
+    // A paper-resolved record (matchState resolved, no child, no stamp) must not
+    // inherit the parent OCR row's person-lookup step. Per-record evidence only.
+    const tracker = deriveOcrRecordLookupTracker({
+      record: record({ matchState: "resolved" }),
+      originalIndex: 0,
+      entryStatus: "running",
+      entryStep: "person-lookup",
+      dependencyChildren: [],
+    });
+
+    assert.notEqual(tracker.label, "Person lookup running");
+    assert.equal(tracker.person, undefined);
+  });
+
+  it("does NOT leak 'I-9 lookup running' onto an oath record with no person-lookup involvement", () => {
+    // An unsigned-by-officer oath record (i9 would be needed) but with no child,
+    // no stamped lookup, and a resolved matchState must not show i9 running just
+    // because the parent is enriching.
+    const tracker = deriveOcrRecordLookupTracker({
+      record: record({ formKind: "oath", officerSigned: false, matchState: "resolved" }),
+      originalIndex: 0,
+      entryStatus: "running",
+      entryStep: "verification",
+      dependencyChildren: [],
+    });
+
+    assert.notEqual(tracker.label, "I-9 lookup running");
+    assert.equal(tracker.i9, undefined);
+  });
+
+  it("still shows 'Person lookup running' for a lookup-candidate record mid person-lookup step", () => {
+    // A record actively in lookup (matchState lookup-running) DOES get the
+    // running label while the parent is at the person-lookup step.
+    const tracker = deriveOcrRecordLookupTracker({
+      record: record({ matchState: "lookup-running" }),
+      originalIndex: 0,
+      entryStatus: "running",
+      entryStep: "person-lookup",
+      dependencyChildren: [],
+    });
+
+    assert.equal(tracker.phase, "running");
+    assert.equal(tracker.label, "Person lookup running");
+  });
 });
 
 describe("deriveRecordWorkflowPhase", () => {

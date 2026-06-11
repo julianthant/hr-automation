@@ -2,14 +2,27 @@ import type { PriorRunSummary } from "@/components/shared/types";
 
 interface DuplicateBannerProps {
   priorRuns: PriorRunSummary[];
+  /**
+   * When set (multi-file uploads), names the specific duplicate file so the
+   * operator can tell which of several picked PDFs was seen before. Omitted for
+   * a single-file upload — the banner is unambiguous there.
+   */
+  fileLabel?: string;
 }
 
-export function DuplicateBanner({ priorRuns }: DuplicateBannerProps) {
+export function DuplicateBanner({ priorRuns, fileLabel }: DuplicateBannerProps) {
   if (priorRuns.length === 0) return null;
   return (
     <div className="rounded border border-warning/40 bg-warning/10 p-3 text-sm">
       <div className="font-medium text-foreground mb-1">
-        This PDF was uploaded before
+        {fileLabel ? (
+          <>
+            <span className="font-mono break-all">{fileLabel}</span> was uploaded
+            before
+          </>
+        ) : (
+          "This PDF was uploaded before"
+        )}
       </div>
       <ul className="space-y-1 text-muted-foreground">
         {priorRuns.map((r) => (

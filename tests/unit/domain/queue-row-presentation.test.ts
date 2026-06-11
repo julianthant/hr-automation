@@ -113,6 +113,48 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
     assert.ok(result);
     assert.equal(result.subtitle, "88888");
   });
+
+  it("ignores a prose 'Not found' sentinel in emplId, falling through to trace id", () => {
+    const result = resolveQueueRowPresentation({
+      id: "item-1",
+      data: {
+        queueRowKind: "person",
+        name: "Jane Doe",
+        emplId: "Not found",
+        __traceId: "pl-160000-ab12",
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.subtitle, "pl-160000-ab12");
+  });
+
+  it("ignores a prose 'Error' sentinel in emplId, falling through to trace id", () => {
+    const result = resolveQueueRowPresentation({
+      id: "item-1",
+      data: {
+        queueRowKind: "person",
+        name: "Jane Doe",
+        emplId: "Error",
+        __traceId: "pl-170000-cd34",
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.subtitle, "pl-170000-cd34");
+  });
+
+  it("ignores a non-numeric eid value (defense in depth)", () => {
+    const result = resolveQueueRowPresentation({
+      id: "item-1",
+      data: {
+        queueRowKind: "person",
+        name: "Jane Doe",
+        eid: "pending",
+        __traceId: "pl-180000-ef56",
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.subtitle, "pl-180000-ef56");
+  });
 });
 
 describe("resolveQueueRowPresentation — person kind, preferTraceIdSubtitle flag", () => {

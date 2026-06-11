@@ -22,6 +22,14 @@ import { DASHBOARD_UPLOAD_RUN_WORKFLOWS } from "../../domain/dashboard-run-surfa
 
 type DashboardUploadRunWorkflow = (typeof DASHBOARD_UPLOAD_RUN_WORKFLOWS)[number];
 
+/**
+ * Shared OCR-prep endpoint. The `targetWorkflow` operation intent only rides
+ * this submit path — `resolveTargetWorkflow` checks the resolved `submitUrl`
+ * against this constant so the endpoint-string knowledge stays in the registry
+ * (its owner) and never leaks into the `RunModal` component.
+ */
+export const OCR_PREPARE_SUBMIT_URL = "/api/ocr/prepare";
+
 export interface RunModalContext {
   reuploadFor?: { sessionId: string; previousRunId: string };
   lockedFormType?: string;
@@ -179,6 +187,23 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
 
 export function getRunModalConfig(workflow: string): RunModalConfig | undefined {
   return RUN_MODAL_REGISTRY[workflow as DashboardUploadRunWorkflow];
+}
+
+/**
+ * The `targetWorkflow` operation intent to append to the upload `FormData`, or
+ * `undefined` when none should be sent. Declarative replacement for the old
+ * `submitUrl.endsWith("/api/ocr/prepare")` string-sniff that lived inside the
+ * `RunModal` component: a target is sent only when the entry declares one for
+ * this ctx AND the resolved submit goes to the shared OCR-prep endpoint
+ * ({@link OCR_PREPARE_SUBMIT_URL}). Keeps endpoint-string branching in the
+ * registry (the owner of `submitUrl`).
+ */
+export function resolveTargetWorkflow(
+  config: RunModalConfig,
+  ctx: RunModalContext,
+): string | undefined {
+  if (config.submitUrl(ctx) !== OCR_PREPARE_SUBMIT_URL) return undefined;
+  return config.targetWorkflow?.(ctx);
 }
 
 export function isRunModalEnabled(workflow: string): boolean {

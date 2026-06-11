@@ -32,6 +32,7 @@ import {
   type SharePointDownloadSpec,
 } from "./registry.js";
 import type { SharePointDownloadInput } from "./schema.js";
+import type { SharePointDownloadStatus } from "../../domain/sharepoint-download-status.js";
 
 /**
  * HTTP response shape for the dashboard's roster-download endpoint.
@@ -161,34 +162,7 @@ export function isDownloadInFlight(): boolean {
  * specific id can match `lastCompletion.id === <my id>` to detect their
  * own run finishing.
  */
-export function getSharePointDownloadStatus(): {
-  inFlight: boolean;
-  inFlightId: string | null;
-  current:
-    | {
-        queueId: string;
-        id: string;
-        label: string;
-        state: "running";
-        createdAt: string;
-      }
-    | null;
-  queued: Array<{
-    queueId: string;
-    id: string;
-    label: string;
-    state: "queued";
-    createdAt: string;
-  }>;
-  lastCompletion: {
-    id: string;
-    ts: string;
-    ok: boolean;
-    path?: string;
-    filename?: string;
-    error?: string;
-  } | null;
-} {
+export function getSharePointDownloadStatus(): SharePointDownloadStatus {
   return {
     inFlight: rosterDownloadInFlight,
     inFlightId,

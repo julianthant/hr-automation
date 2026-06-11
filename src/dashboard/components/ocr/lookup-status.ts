@@ -70,6 +70,18 @@ export function deriveOcrRecordLookupTracker(args: {
     args.record.personLookupTraceId,
   );
 
+  // Per-record evidence that THIS record participates in person lookup — its
+  // own child, a stamped status/traceId, or a lookup matchState. Without it, a
+  // record must NOT inherit "Person lookup running" from the parent OCR row's
+  // step (the parent step describes the run, not every record: paper-only /
+  // already-resolved records get no child and stay quiet).
+  const recordIsLookupCandidate =
+    children.length > 0 ||
+    Boolean(args.record.personLookupStatus) ||
+    Boolean(args.record.personLookupTraceId) ||
+    args.record.matchState === "lookup-running" ||
+    args.record.matchState === "lookup-pending";
+
   let person: LookupPhaseTracker | undefined;
   if (allowInProgress && children.some((child) => isRunningChildStatus(child.status))) {
     person = lookupTracker("running", "Person lookup", personTraceId);
@@ -83,15 +95,18 @@ export function deriveOcrRecordLookupTracker(args: {
     const stampedPersonStatus = normalizeLookupStatus(args.record.personLookupStatus, allowInProgress);
     if (stampedPersonStatus) {
       person = lookupTracker(stampedPersonStatus, "Person lookup", personTraceId);
-    } else if (args.entryStatus === "running") {
-      const step = args.entryStep ?? "";
-      if (step === "person-lookup" || step === "verification") {
-        person = lookupTracker("running", "Person lookup", personTraceId);
-      }
     } else if (args.record.matchState === "lookup-running") {
       person = lookupTracker("running", "Person lookup", personTraceId);
     } else if (args.record.matchState === "lookup-pending" && args.entryStatus === "running") {
       person = lookupTracker("pending", "Person lookup", personTraceId);
+    } else if (
+      recordIsLookupCandidate &&
+      args.entryStatus === "running" &&
+      (args.entryStep === "person-lookup" || args.entryStep === "verification")
+    ) {
+      // The parent is mid person-lookup/verification AND this record is a lookup
+      // candidate but hasn't stamped a status yet — show running.
+      person = lookupTracker("running", "Person lookup", personTraceId);
     }
   }
 
@@ -105,7 +120,17 @@ export function deriveOcrRecordLookupTracker(args: {
     const active = i9.inProgress || person.phase === "completed" ? i9 : person;
     return recordTracker(active, enrichmentInProgress, person, i9);
   }
-  if (person?.phase === "completed" && enrichmentInProgress && i9Needed) {
+  // Optimistic "I-9 lookup running" only when THIS record actually went through
+  // person lookup (real child / stamped status — `recordIsLookupCandidate`) and
+  // its person lookup completed while the parent is still enriching. A record
+  // with no person-lookup involvement never reaches here (person is undefined),
+  // so i9 never leaks onto paper-only records before any i9 dispatch.
+  if (
+    person?.phase === "completed" &&
+    recordIsLookupCandidate &&
+    enrichmentInProgress &&
+    i9Needed
+  ) {
     const pendingI9 = lookupTracker("running", "I-9 lookup", args.record.i9LookupTraceId);
     return recordTracker(pendingI9, enrichmentInProgress, person, pendingI9);
   }
