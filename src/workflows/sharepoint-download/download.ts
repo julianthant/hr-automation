@@ -72,7 +72,9 @@ async function handleMicrosoftEmailStep(page: Page): Promise<void> {
     label: "sharepoint microsoft next button",
     timeout: 5_000,
   });
-  await page.waitForTimeout(3_000);
+  // Wait for the Microsoft AAD redirect chain to advance (to ADFS / Shibboleth / Duo).
+  // A 3s fixed sleep was here; use a short URL-settle wait instead.
+  await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
 }
 
 async function dismissStaySignedIn(page: Page): Promise<void> {
@@ -87,7 +89,8 @@ async function dismissStaySignedIn(page: Page): Promise<void> {
     } catch {
       /* kmsi prompt may have already dismissed — safe to ignore */
     }
-    await page.waitForTimeout(2_000);
+    // Wait for the KMSI → SharePoint redirect to land.
+    await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
   }
 }
 
@@ -244,7 +247,8 @@ export async function loginToSharePoint(
     log.step("Already on success URL — skipping Duo poll");
   }
 
-  await page.waitForTimeout(3_000);
+  // Wait for the KMSI prompt (if any) to render before probing dismissStaySignedIn.
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await dismissStaySignedIn(page);
 
   // Final guard — fail loud if anything bounced us off the success path
@@ -342,7 +346,10 @@ export async function captureExcelDownload(
 
   log.step("Waiting for Excel Online viewer to settle...");
   await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
-  await page.waitForTimeout(5_000);
+  // The WAC iframe hydrates JS after networkidle; give it a moment before clicking.
+  // Reduced from 5s — clickExcelDownloadMenu probes for the File button and returns
+  // false if not ready, so the operator's manual-click fallback catches it.
+  await page.waitForTimeout(2_000);
 
   const clicked = await clickExcelDownloadMenu(page);
   if (clicked) {
