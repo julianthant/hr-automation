@@ -21,7 +21,7 @@ import { useRosters, refreshRosters, type RosterListing } from "@/components/hoo
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
-import type { SharePointDownloadStatus } from "../../../domain/sharepoint-download-status.js";
+import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
 
 type RosterMode = "download" | "existing" | "wait";
 
@@ -74,7 +74,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<RosterMode>("existing");
   const rosters = useRosters();
-  const [sharePointStatus, setSharePointStatus] = useState<SharePointDownloadStatus | null>(null);
   const seenSharePointCompletionTs = useRef<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -98,6 +97,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   // self-hides there (it stays hidden, not just disabled).
   const effectiveShowWorkers = showWorkers && !(showOathUploadMode && oathUploadMode === "upload-only");
   const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType, oathUploadMode };
+  // Poll SharePoint download status only while the roster picker is showing.
+  // The hook gates its shared 2.5s poll on `enabled` and shallow-compares
+  // payloads so an unchanged status doesn't re-render the modal every tick.
+  const sharePointStatus = useSharePointStatus(open && effectiveShowRoster);
   const file = files[0] ?? null;
   // Stable identity signature for the picked files — used as an effect dep so
   // the duplicate check re-runs only when the actual selection changes (not on
@@ -145,35 +148,17 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     refreshRosters();
   }, [open, effectiveShowRoster]);
 
+  // When the polled status reports a NEW completion (a download finished while
+  // the modal was open), refresh the rosters cache so the freshly-downloaded
+  // file appears as "Use latest roster." The seen-completion ref dedupes so we
+  // refresh once per completion, not every poll tick.
   useEffect(() => {
-    if (!open || !effectiveShowRoster) {
-      setSharePointStatus(null);
-      return;
+    const completionTs = sharePointStatus?.lastCompletion?.ts ?? null;
+    if (completionTs && completionTs !== seenSharePointCompletionTs.current) {
+      seenSharePointCompletionTs.current = completionTs;
+      refreshRosters();
     }
-    let cancelled = false;
-    async function pollStatus() {
-      try {
-        const resp = await fetch("/api/sharepoint-download/status");
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const status = (await resp.json()) as SharePointDownloadStatus;
-        if (cancelled) return;
-        setSharePointStatus(status);
-        const completionTs = status.lastCompletion?.ts ?? null;
-        if (completionTs && completionTs !== seenSharePointCompletionTs.current) {
-          seenSharePointCompletionTs.current = completionTs;
-          refreshRosters();
-        }
-      } catch {
-        if (!cancelled) setSharePointStatus(null);
-      }
-    }
-    void pollStatus();
-    const timer = window.setInterval(() => void pollStatus(), 2500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [open, effectiveShowRoster]);
+  }, [sharePointStatus]);
 
   const sharePointWaitAvailable =
     Boolean(sharePointStatus?.inFlight) || Boolean(sharePointStatus?.queued.length);
