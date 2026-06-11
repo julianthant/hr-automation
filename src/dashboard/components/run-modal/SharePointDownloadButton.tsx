@@ -60,20 +60,22 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
       });
       const body = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
-        status?: "launched";
+        status?: "launched" | "queued";
         error?: string;
       };
       if (res.status === 202 && body.ok) {
-        toast.success(`${option.label} download started`, {
+        toast.success(
+          body.status === "queued"
+            ? `${option.label} download queued`
+            : `${option.label} download started`,
+          {
           description:
-            "Approve Duo on your phone. Watch progress in the Sessions panel.",
+            body.status === "queued"
+              ? "It will start after the current SharePoint download finishes."
+              : "Approve Duo on your phone. Watch progress in the Sessions panel.",
           duration: 6000,
-        });
-      } else if (res.status === 409) {
-        toast.warning("Download already in progress", {
-          description:
-            body.error ?? "A download is already running. Wait for it to finish.",
-        });
+          },
+        );
       } else {
         toast.error(`${option.label} couldn't start`, {
           description: body.error ?? `HTTP ${res.status}`,

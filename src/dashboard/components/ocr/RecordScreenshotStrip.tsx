@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import { Camera } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useRunScreenshots } from "@/components/hooks/useRunScreenshots";
+import {
+  useRunScreenshots,
+  type ScreenshotEntry,
+} from "@/components/hooks/useRunScreenshots";
+import { ScreenshotCard } from "@/components/log-panel/ScreenshotCard";
 import { ScreenshotLightbox, type LightboxItem } from "@/components/log-panel/ScreenshotLightbox";
 
 /**
@@ -32,16 +34,6 @@ export interface RecordScreenshotStripProps {
   refreshKey: number;
 }
 
-const SYSTEM_LABELS: Record<string, string> = {
-  ucpath: "UCPath",
-  crm: "CRM",
-  i9: "I-9",
-};
-
-function systemLabel(system: string): string {
-  return SYSTEM_LABELS[system.toLowerCase()] ?? system.toUpperCase();
-}
-
 export function RecordScreenshotStrip({
   ocrRunId,
   recordIndex,
@@ -69,66 +61,39 @@ export function RecordScreenshotStrip({
 
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
-  // One arrow-keyable queue: person-lookup shots first, then i9, each in
-  // capture order. Errors and forms interleave by ts within a source.
+  const entries = useMemo(
+    () => [...personEntries, ...i9Entries].sort((a, b) => a.ts - b.ts),
+    [personEntries, i9Entries],
+  );
+
   const flat = useMemo<LightboxItem[]>(() => {
     const out: LightboxItem[] = [];
-    for (const entry of [...personEntries, ...i9Entries].sort((a, b) => a.ts - b.ts)) {
+    for (const entry of entries) {
       for (let i = 0; i < entry.files.length; i++) out.push({ entry, fileIdx: i });
     }
     return out;
-  }, [personEntries, i9Entries]);
+  }, [entries]);
 
-  if (flat.length === 0) return null;
+  if (entries.length === 0) return null;
+
+  const openFlat = (entry: ScreenshotEntry, fileIdx: number) => {
+    const idx = flat.findIndex((item) => item.entry === entry && item.fileIdx === fileIdx);
+    if (idx >= 0) setLightboxIdx(idx);
+  };
 
   // Chrome-less: the call site provides the block wrapper (a full-width card
   // block in the single-record pair; an inline border-separated row in a
   // multi-record card).
   return (
     <div>
-      <div
-        className="flex items-stretch gap-2 overflow-x-auto"
-        role="list"
-        aria-label="Lookup screenshots by source system"
-      >
-        {flat.map((item, idx) => {
-          const file = item.entry.files[item.fileIdx];
-          if (!file) return null;
-          const label = systemLabel(file.system);
-          return (
-            <button
-              key={`${item.entry.ts}-${item.fileIdx}-${idx}`}
-              type="button"
-              role="listitem"
-              onClick={() => setLightboxIdx(idx)}
-              title={`${label} — ${item.entry.label} (click to enlarge)`}
-              className={cn(
-                "group relative shrink-0 overflow-hidden rounded-md border border-border bg-secondary",
-                "cursor-pointer outline-none transition-colors hover:border-primary/50",
-                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card",
-              )}
-            >
-              <img
-                src={file.url}
-                srcSet={file.url}
-                sizes="120px"
-                alt={`${label} screenshot`}
-                loading="lazy"
-                decoding="async"
-                className="h-16 w-28 object-cover object-top"
-              />
-              <span
-                className={cn(
-                  "absolute inset-x-0 bottom-0 flex items-center gap-1 bg-background/80 px-1.5 py-0.5",
-                  "font-mono text-[9px] font-medium uppercase tracking-wider text-foreground",
-                )}
-              >
-                <Camera className="h-2.5 w-2.5 shrink-0 text-muted-foreground" aria-hidden />
-                {label}
-              </span>
-            </button>
-          );
-        })}
+      <div className="space-y-2" aria-label="Lookup screenshots by source system">
+        {entries.map((entry) => (
+          <ScreenshotCard
+            key={`${entry.ts}-${entry.label}`}
+            entry={entry}
+            onOpen={openFlat}
+          />
+        ))}
       </div>
 
       {lightboxIdx !== null && (

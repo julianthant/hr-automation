@@ -9,7 +9,12 @@ import {
 import type { TaskDependencyChild } from "../../../../src/dashboard/components/hooks/useTaskDependencies.js";
 import type { OathPreviewRecord } from "../../../../src/dashboard/components/ocr/types.js";
 
-function record(overrides: Partial<OathPreviewRecord> = {}): OathPreviewRecord {
+type TestLookupRecord = OathPreviewRecord & {
+  i9LookupStatus?: string;
+  i9LookupTraceId?: string;
+};
+
+function record(overrides: Partial<TestLookupRecord> = {}): TestLookupRecord {
   return {
     formKind: "oath",
     sourcePage: 1,
@@ -177,17 +182,80 @@ describe("deriveLookupInProgress", () => {
 
   it("marks officialSigner in progress during verify enrichment after person lookup completes", () => {
     const tracker = deriveOcrRecordLookupTracker({
-      record: record(),
+      record: record({ formKind: "oath", officerSigned: false }),
       originalIndex: 0,
       entryStatus: "running",
       entryStep: "person-lookup",
       dependencyChildren: [child("done")],
     });
 
+    assert.equal(tracker.phase, "running");
+    assert.equal(tracker.label, "I-9 lookup running");
     assert.equal(tracker.enrichmentInProgress, true);
-    assert.equal(tracker.inProgress, false);
+    assert.equal(tracker.inProgress, true);
     assert.equal(deriveLookupInProgress(tracker, "officialSigner"), true);
     assert.equal(deriveLookupInProgress(tracker, "activeStatus"), false);
+  });
+
+  it("uses per-record i9 status for officialSigner progress once i9 lookup is dispatched", () => {
+    const tracker = deriveOcrRecordLookupTracker({
+      record: record({
+        formKind: "oath",
+        officerSigned: false,
+        i9LookupStatus: "pending",
+        i9LookupTraceId: "vf-101010-i9aa",
+      }),
+      originalIndex: 0,
+      entryStatus: "running",
+      entryStep: "person-lookup",
+      dependencyChildren: [child("done")],
+    });
+
+    assert.equal(tracker.phase, "pending");
+    assert.equal(tracker.label, "I-9 lookup pending");
+    assert.equal(tracker.traceId, "vf-101010-i9aa");
+    assert.equal(tracker.i9?.phase, "pending");
+    assert.equal(deriveLookupInProgress(tracker, "officialSigner"), true);
+    assert.equal(deriveLookupInProgress(tracker, "activeStatus"), false);
+  });
+
+  it("stops showing officialSigner progress as soon as that record's i9 lookup completes", () => {
+    const tracker = deriveOcrRecordLookupTracker({
+      record: record({
+        formKind: "oath",
+        officerSigned: false,
+        i9LookupStatus: "completed",
+        i9LookupTraceId: "vf-101010-i9aa",
+      }),
+      originalIndex: 0,
+      entryStatus: "running",
+      entryStep: "person-lookup",
+      dependencyChildren: [child("done")],
+    });
+
+    assert.equal(tracker.phase, "completed");
+    assert.equal(tracker.label, "I-9 lookup completed");
+    assert.equal(deriveLookupInProgress(tracker, "officialSigner"), false);
+  });
+
+  it("ignores stale in-progress i9 stamps once the OCR row is terminal", () => {
+    const tracker = deriveOcrRecordLookupTracker({
+      record: record({
+        formKind: "oath",
+        officerSigned: false,
+        i9LookupStatus: "pending",
+        i9LookupTraceId: "vf-101010-i9aa",
+      }),
+      originalIndex: 0,
+      entryStatus: "done",
+      entryStep: "person-lookup",
+      dependencyChildren: [],
+    });
+
+    assert.equal(tracker.phase, "completed");
+    assert.equal(tracker.label, "Lookup completed");
+    assert.equal(tracker.i9, undefined);
+    assert.equal(deriveLookupInProgress(tracker, "officialSigner"), false);
   });
 
   it("does not mark officialSigner in progress after enrichment completes", () => {

@@ -35,6 +35,7 @@ import {
   type TypedValue,
 } from "./jsonl-io.js";
 import type { RowArchetype } from "../domain/row-archetype.js";
+import { buildTraceId } from "../domain/queue-trace-id.js";
 
 /** Session context passed to workflow callbacks for registering sessions/browsers. */
 export interface SessionContext {
@@ -120,6 +121,14 @@ export interface WithTrackedWorkflowOpts {
    * single field instead of the legacy seven-discriminator sprawl.
    */
   archetype?: import("../domain/row-archetype.js").RowArchetype;
+  /**
+   * Trace-id code for non-preassigned in-process runs. The run id is minted
+   * inside `withTrackedWorkflow`, so callers pass the code and this wrapper
+   * freezes `data.__traceId` before the first pending emit.
+   */
+  traceCode?: string;
+  /** Optional root prefix for trace/span composition on non-preassigned runs. */
+  rootTracePrefix?: string;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -177,6 +186,15 @@ export async function withTrackedWorkflow<T>(
     runId = preAssignedRunId;
   } else {
     runId = `${id}#${randomUUID().slice(0, 8)}`;
+  }
+  if (!data.__traceId && opts.traceCode) {
+    const traceRunId = runId.includes("#") ? runId.slice(runId.lastIndexOf("#") + 1) : runId;
+    data.__traceId = buildTraceId({
+      code: opts.traceCode,
+      runId: traceRunId,
+      at: new Date(),
+      ...(opts.rootTracePrefix ? { rootPrefix: opts.rootTracePrefix } : {}),
+    });
   }
   setLogRunId(runId);
 

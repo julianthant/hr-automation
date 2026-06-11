@@ -2,12 +2,23 @@ import type { TaskDependencyChild } from "../hooks/useTaskDependencies";
 import type { PrepRecordWorkflowPhase } from "./PrepReviewFormCard";
 
 type LookupRecord = {
+  formKind?: string;
+  officerSigned?: boolean | null;
   matchState?: string;
   personLookupStatus?: string;
   personLookupTraceId?: string;
+  i9LookupStatus?: string;
+  i9LookupTraceId?: string;
 };
 
 export type OcrRecordLookupPhase = "pending" | "running" | "completed" | "failed";
+
+export interface LookupPhaseTracker {
+  phase: OcrRecordLookupPhase;
+  label: string;
+  traceId?: string;
+  inProgress: boolean;
+}
 
 export interface OcrRecordLookupTracker {
   phase: OcrRecordLookupPhase;
@@ -16,6 +27,8 @@ export interface OcrRecordLookupTracker {
   inProgress: boolean;
   /** True while the OCR row is still at the verify enrichment step (person-lookup / i9). */
   enrichmentInProgress: boolean;
+  person?: LookupPhaseTracker;
+  i9?: LookupPhaseTracker;
 }
 
 const PERSON_LOOKUP_CHECK_KEYS = new Set([
@@ -43,12 +56,13 @@ export function deriveOcrRecordLookupTracker(args: {
   dependencyChildren: readonly TaskDependencyChild[];
 }): OcrRecordLookupTracker {
   const enrichmentInProgress = isVerifyEnrichmentRunning(args.entryStatus, args.entryStep);
+  const allowInProgress = args.entryStatus === "running";
   const children = args.dependencyChildren.filter(
     (child) =>
       child.workflow === "person-lookup" &&
       child.metadata.recordIndex === args.originalIndex,
   );
-  const traceId = firstNonEmpty(
+  const personTraceId = firstNonEmpty(
     children.find((child) => isRunningChildStatus(child.status))?.traceId,
     children.find((child) => isPendingChildStatus(child.status))?.traceId,
     children.find((child) => child.status === "done")?.traceId,
@@ -56,29 +70,54 @@ export function deriveOcrRecordLookupTracker(args: {
     args.record.personLookupTraceId,
   );
 
-  if (children.some((child) => isRunningChildStatus(child.status))) {
-    return personTracker("running", traceId, enrichmentInProgress);
-  }
-  if (children.some((child) => isPendingChildStatus(child.status))) {
-    return personTracker("pending", traceId, enrichmentInProgress);
-  }
-  if (children.some((child) => child.status === "failed" || child.status === "cancelled")) {
-    return personTracker("failed", traceId, enrichmentInProgress);
-  }
-  if (children.length > 0) {
-    return personTracker("completed", traceId, enrichmentInProgress);
+  let person: LookupPhaseTracker | undefined;
+  if (allowInProgress && children.some((child) => isRunningChildStatus(child.status))) {
+    person = lookupTracker("running", "Person lookup", personTraceId);
+  } else if (allowInProgress && children.some((child) => isPendingChildStatus(child.status))) {
+    person = lookupTracker("pending", "Person lookup", personTraceId);
+  } else if (children.some((child) => child.status === "failed" || child.status === "cancelled")) {
+    person = lookupTracker("failed", "Person lookup", personTraceId);
+  } else if (children.length > 0) {
+    person = lookupTracker("completed", "Person lookup", personTraceId);
+  } else {
+    const stampedPersonStatus = normalizeLookupStatus(args.record.personLookupStatus, allowInProgress);
+    if (stampedPersonStatus) {
+      person = lookupTracker(stampedPersonStatus, "Person lookup", personTraceId);
+    } else if (args.entryStatus === "running") {
+      const step = args.entryStep ?? "";
+      if (step === "person-lookup" || step === "verification") {
+        person = lookupTracker("running", "Person lookup", personTraceId);
+      }
+    } else if (args.record.matchState === "lookup-running") {
+      person = lookupTracker("running", "Person lookup", personTraceId);
+    } else if (args.record.matchState === "lookup-pending" && args.entryStatus === "running") {
+      person = lookupTracker("pending", "Person lookup", personTraceId);
+    }
   }
 
-  const stampedPersonStatus = normalizePersonLookupStatus(args.record.personLookupStatus);
-  if (stampedPersonStatus) {
-    return personTracker(stampedPersonStatus, traceId, enrichmentInProgress);
+  const i9Status = normalizeLookupStatus(args.record.i9LookupStatus, allowInProgress);
+  const i9 = i9Status
+    ? lookupTracker(i9Status, "I-9 lookup", args.record.i9LookupTraceId)
+    : undefined;
+  const i9Needed = needsI9Lookup(args.record);
+
+  if (person && i9) {
+    const active = i9.inProgress || person.phase === "completed" ? i9 : person;
+    return recordTracker(active, enrichmentInProgress, person, i9);
+  }
+  if (person?.phase === "completed" && enrichmentInProgress && i9Needed) {
+    const pendingI9 = lookupTracker("running", "I-9 lookup", args.record.i9LookupTraceId);
+    return recordTracker(pendingI9, enrichmentInProgress, person, pendingI9);
+  }
+  if (person) {
+    return recordTracker(person, enrichmentInProgress, person, i9);
+  }
+  if (i9) {
+    return recordTracker(i9, enrichmentInProgress, person, i9);
   }
 
   if (args.entryStatus === "running") {
     const step = args.entryStep ?? "";
-    if (step === "person-lookup" || step === "verification") {
-      return personTracker("running", traceId, enrichmentInProgress);
-    }
     if (step === "loading-roster") {
       return {
         phase: "running",
@@ -97,13 +136,6 @@ export function deriveOcrRecordLookupTracker(args: {
     }
   }
 
-  if (args.record.matchState === "lookup-running") {
-    return personTracker("running", traceId, enrichmentInProgress);
-  }
-  if (args.record.matchState === "lookup-pending" && args.entryStatus === "running") {
-    return personTracker("pending", traceId, enrichmentInProgress);
-  }
-
   return {
     phase: "completed",
     label: "Lookup completed",
@@ -118,9 +150,11 @@ export function deriveLookupInProgress(
 ): boolean {
   if (!tracker) return false;
   if (checkKey === "officialSigner") {
+    if (tracker.i9) return tracker.i9.inProgress;
     return tracker.enrichmentInProgress;
   }
-  if (!tracker.inProgress) return false;
+  if (tracker.person && !tracker.person.inProgress) return false;
+  if (!tracker.person && !tracker.inProgress) return false;
   return PERSON_LOOKUP_CHECK_KEYS.has(checkKey);
 }
 
@@ -129,6 +163,9 @@ export function deriveLookupProgressLabel(
   tracker: OcrRecordLookupTracker | undefined,
   checkKey: string,
 ): string {
+  if (checkKey === "officialSigner" && tracker?.i9?.inProgress) {
+    return tracker.i9.label;
+  }
   if (checkKey === "officialSigner" && tracker?.enrichmentInProgress) {
     return "I-9 lookup running";
   }
@@ -148,25 +185,38 @@ export function lookupTrackerClassName(phase: OcrRecordLookupPhase): string {
   }
 }
 
-function personTracker(
+function lookupTracker(
   phase: OcrRecordLookupPhase,
+  prefix: "Person lookup" | "I-9 lookup",
   traceId: string | undefined,
-  enrichmentInProgress: boolean,
-): OcrRecordLookupTracker {
+): LookupPhaseTracker {
   const label =
     phase === "pending"
-      ? "Person lookup pending"
+      ? `${prefix} pending`
       : phase === "running"
-        ? "Person lookup running"
+        ? `${prefix} running`
         : phase === "failed"
-          ? "Person lookup failed"
-          : "Person lookup completed";
+          ? `${prefix} failed`
+          : `${prefix} completed`;
   return {
     phase,
     label,
     ...(traceId ? { traceId } : {}),
     inProgress: phase === "pending" || phase === "running",
+  };
+}
+
+function recordTracker(
+  active: LookupPhaseTracker,
+  enrichmentInProgress: boolean,
+  person: LookupPhaseTracker | undefined,
+  i9: LookupPhaseTracker | undefined,
+): OcrRecordLookupTracker {
+  return {
+    ...active,
     enrichmentInProgress,
+    ...(person ? { person } : {}),
+    ...(i9 ? { i9 } : {}),
   };
 }
 
@@ -176,7 +226,17 @@ function isVerifyEnrichmentRunning(entryStatus: string, entryStep?: string): boo
   return step === "person-lookup" || step === "verification";
 }
 
-function normalizePersonLookupStatus(value: string | undefined): OcrRecordLookupPhase | null {
+function needsI9Lookup(record: LookupRecord): boolean {
+  return record.formKind === "oath" && record.officerSigned !== true;
+}
+
+function normalizeLookupStatus(
+  value: string | undefined,
+  allowInProgress: boolean,
+): OcrRecordLookupPhase | null {
+  if ((value === "pending" || value === "running" || value === "queued") && !allowInProgress) {
+    return null;
+  }
   if (value === "pending" || value === "running" || value === "completed" || value === "failed") {
     return value;
   }

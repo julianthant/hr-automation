@@ -11,10 +11,9 @@
  * The alternative (blocking until download completes) would hold the HTTP
  * socket open for 2-3 minutes including Duo tap, which is worse UX.
  *
- * A module-level boolean `rosterDownloadInFlight` prevents concurrent runs
- * across ALL ids — two different spreadsheets still compete for the same
- * phone-tap resource, so 409 is returned rather than stacking headed
- * browsers.
+ * A module-level serial queue prevents concurrent browser/Duo runs across ALL
+ * ids while still letting callers choose either "wait for the current/queued
+ * download" or "queue a fresh download after it".
  */
 import { resolve } from "node:path";
 import { sharepointDir } from "../../tracker/paths.js";
@@ -32,6 +31,7 @@ import {
   listDownloadIds,
   type SharePointDownloadSpec,
 } from "./registry.js";
+import type { SharePointDownloadInput } from "./schema.js";
 
 /**
  * HTTP response shape for the dashboard's roster-download endpoint.
@@ -41,9 +41,9 @@ import {
  * for the finished record).
  */
 export interface RosterDownloadResponse {
-  status: 202 | 400 | 404 | 409 | 500;
+  status: 202 | 400 | 404 | 500;
   body:
-    | { ok: true; id: string; label: string; status: "launched" }
+    | { ok: true; id: string; label: string; status: "launched" | "queued" }
     | { ok: false; error: string };
 }
 
@@ -59,6 +59,25 @@ export interface RosterDownloadHandlerOptions {
   runWorkflowFn?: typeof runWorkflow;
   /** Injected for tests. Defaults to `(name) => process.env[name]`. */
   getEnv?: (name: string) => string | undefined;
+  /** Tracker root used by non-HTTP callers. Defaults to `.tracker`. */
+  trackerDir?: string;
+}
+
+export interface SharePointDownloadResult {
+  id: string;
+  label: string;
+  path?: string;
+  filename?: string;
+}
+
+export interface SharePointDownloadRequest {
+  id: string;
+  /** `fresh` queues a new browser run; `wait` joins the current/last queued one if present. */
+  mode: "fresh" | "wait";
+  parentRunId?: string;
+  rootTracePrefix?: string;
+  trackerDir?: string;
+  itemId?: string;
 }
 
 /**
@@ -76,15 +95,33 @@ export interface SharePointDownloadListItem {
   configured: boolean;
 }
 
+interface SharePointDownloadJob {
+  queueId: string;
+  spec: SharePointDownloadSpec;
+  url: string;
+  outDir: string;
+  parentRunId?: string;
+  rootTracePrefix?: string;
+  trackerDir?: string;
+  itemId?: string;
+  runWorkflowImpl: typeof runWorkflow;
+  state: "queued" | "running";
+  createdAt: string;
+  promise: Promise<SharePointDownloadResult>;
+  resolve: (result: SharePointDownloadResult) => void;
+  reject: (error: unknown) => void;
+}
+
 /**
- * Module-level in-flight lock. The full download flow is single-threaded
- * anyway (one browser, Duo approval on a phone), so concurrent clicks on
- * ANY dropdown option get a 409 instead of stacking up headed browsers.
- * Intentionally not keyed by id — two different spreadsheets still compete
- * for the same phone-tap resource.
+ * Module-level serial queue. The full download flow is single-threaded anyway
+ * (one browser, Duo approval on a phone), so every fresh request is queued and
+ * waiters can join the newest queued/current job.
  */
 let rosterDownloadInFlight = false;
 let inFlightId: string | null = null;
+let currentJob: SharePointDownloadJob | null = null;
+const queuedJobs: SharePointDownloadJob[] = [];
+let queueSeq = 0;
 let lastCompletion:
   | {
       id: string;
@@ -100,6 +137,9 @@ let lastCompletion:
 export function _resetInFlightForTests(): void {
   rosterDownloadInFlight = false;
   inFlightId = null;
+  currentJob = null;
+  queuedJobs.splice(0, queuedJobs.length);
+  queueSeq = 0;
   lastCompletion = null;
   _setPendingLandingUrl(null);
   // Drain any stale download result the workflow may have left behind.
@@ -124,6 +164,22 @@ export function isDownloadInFlight(): boolean {
 export function getSharePointDownloadStatus(): {
   inFlight: boolean;
   inFlightId: string | null;
+  current:
+    | {
+        queueId: string;
+        id: string;
+        label: string;
+        state: "running";
+        createdAt: string;
+      }
+    | null;
+  queued: Array<{
+    queueId: string;
+    id: string;
+    label: string;
+    state: "queued";
+    createdAt: string;
+  }>;
   lastCompletion: {
     id: string;
     ts: string;
@@ -133,7 +189,27 @@ export function getSharePointDownloadStatus(): {
     error?: string;
   } | null;
 } {
-  return { inFlight: rosterDownloadInFlight, inFlightId, lastCompletion };
+  return {
+    inFlight: rosterDownloadInFlight,
+    inFlightId,
+    current: currentJob
+      ? {
+          queueId: currentJob.queueId,
+          id: currentJob.spec.id,
+          label: currentJob.spec.label,
+          state: "running",
+          createdAt: currentJob.createdAt,
+        }
+      : null,
+    queued: queuedJobs.map((job) => ({
+      queueId: job.queueId,
+      id: job.spec.id,
+      label: job.spec.label,
+      state: "queued",
+      createdAt: job.createdAt,
+    })),
+    lastCompletion,
+  };
 }
 
 /**
@@ -171,6 +247,148 @@ function resolveOutDir(
   return handlerDefaultOutDir;
 }
 
+function newestQueuedOrCurrentJob(): SharePointDownloadJob | null {
+  return queuedJobs[queuedJobs.length - 1] ?? currentJob;
+}
+
+function startNextQueuedJob(): void {
+  if (currentJob || queuedJobs.length === 0) return;
+  const next = queuedJobs.shift();
+  if (!next) return;
+  void startSharePointDownloadJob(next);
+}
+
+async function startSharePointDownloadJob(job: SharePointDownloadJob): Promise<void> {
+  currentJob = job;
+  job.state = "running";
+  rosterDownloadInFlight = true;
+  inFlightId = job.spec.id;
+  _setPendingLandingUrl(job.url);
+
+  try {
+    const workflowInput: SharePointDownloadInput & {
+      __runtimeOptions?: { rootTracePrefix: string };
+    } = {
+      id: job.spec.id,
+      label: job.spec.label,
+      url: job.url,
+      outDir: job.outDir,
+      ...(job.spec.filenameBase ? { filenameBase: job.spec.filenameBase } : {}),
+      ...(job.parentRunId ? { parentRunId: job.parentRunId } : {}),
+      ...(job.rootTracePrefix
+        ? { __runtimeOptions: { rootTracePrefix: job.rootTracePrefix } }
+        : {}),
+    };
+    await job.runWorkflowImpl(
+      sharepointDownloadWorkflow,
+      workflowInput,
+      {
+        ...(job.itemId ? { itemId: job.itemId } : {}),
+        ...(job.parentRunId ? { parentRunId: job.parentRunId } : {}),
+        ...(job.trackerDir ? { trackerDir: job.trackerDir } : {}),
+      },
+    );
+    log.success(`SharePoint download complete (${job.spec.id})`);
+    const downloadResult = _takeLastDownloadResult();
+    const result = {
+      id: job.spec.id,
+      label: job.spec.label,
+      path: downloadResult?.path,
+      filename: downloadResult?.filename,
+    };
+    lastCompletion = {
+      ...result,
+      ts: new Date().toISOString(),
+      ok: true,
+    };
+    job.resolve(result);
+  } catch (e) {
+    const err = errorMessage(e);
+    log.error(`SharePoint download failed (${job.spec.id}): ${err}`);
+    _takeLastDownloadResult();
+    lastCompletion = {
+      id: job.spec.id,
+      ts: new Date().toISOString(),
+      ok: false,
+      error: err,
+    };
+    job.reject(e);
+  } finally {
+    if (currentJob === job) {
+      currentJob = null;
+    }
+    _setPendingLandingUrl(null);
+    rosterDownloadInFlight = false;
+    inFlightId = null;
+    startNextQueuedJob();
+  }
+}
+
+function queueSharePointDownloadJob(
+  request: Omit<SharePointDownloadRequest, "mode">,
+  options: RosterDownloadHandlerOptions,
+): SharePointDownloadJob {
+  const spec = getDownloadSpec(request.id);
+  if (!spec) {
+    throw new Error(`Unknown download id "${request.id}". Known ids: ${listDownloadIds().join(", ")}`);
+  }
+  const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
+  const url = (getEnv(spec.envVar) ?? "").trim();
+  if (!url) {
+    throw new Error(`${spec.envVar} env var not set. Add it to .env (see .env.example) and restart the dashboard.`);
+  }
+
+  const defaultOutDir = options.outDir ?? resolve(process.cwd(), sharepointDir(".tracker"));
+  let resolveJob!: (result: SharePointDownloadResult) => void;
+  let rejectJob!: (error: unknown) => void;
+  const promise = new Promise<SharePointDownloadResult>((resolveJobPromise, rejectJobPromise) => {
+    resolveJob = resolveJobPromise;
+    rejectJob = rejectJobPromise;
+  });
+  const job: SharePointDownloadJob = {
+    queueId: `spq-${++queueSeq}`,
+    spec,
+    url,
+    outDir: resolveOutDir(spec, defaultOutDir),
+    parentRunId: request.parentRunId,
+    rootTracePrefix: request.rootTracePrefix,
+    trackerDir: request.trackerDir ?? options.trackerDir,
+    itemId: request.itemId,
+    runWorkflowImpl: options.runWorkflowFn ?? runWorkflow,
+    state: currentJob ? "queued" : "running",
+    createdAt: new Date().toISOString(),
+    promise,
+    resolve: resolveJob,
+    reject: rejectJob,
+  };
+
+  if (currentJob) {
+    queuedJobs.push(job);
+  } else {
+    void startSharePointDownloadJob(job);
+  }
+  return job;
+}
+
+export async function requestSharePointDownload(
+  request: SharePointDownloadRequest,
+  options: RosterDownloadHandlerOptions = {},
+): Promise<SharePointDownloadResult> {
+  if (request.mode === "wait") {
+    const existing = newestQueuedOrCurrentJob();
+    if (existing) return existing.promise;
+    if (lastCompletion?.ok && lastCompletion.id === request.id) {
+      return {
+        id: lastCompletion.id,
+        label: getDownloadSpec(lastCompletion.id)?.label ?? lastCompletion.id,
+        path: lastCompletion.path,
+        filename: lastCompletion.filename,
+      };
+    }
+  }
+  return queueSharePointDownloadJob(request, options).promise;
+}
+
 /**
  * Factory for `POST /api/sharepoint-download/run`.
  *
@@ -182,10 +400,9 @@ function resolveOutDir(
  * kernel writes its tracker entries.
  *
  * Response status codes:
- *   202 — workflow launched (download still in progress)
+ *   202 — workflow launched or queued (download still in progress)
  *   400 — body missing `id`, or env var unset for a known id
  *   404 — unknown id (lists known ids in error)
- *   409 — another download is already in progress
  *   500 — synchronous pre-launch failure (validation / env lookup)
  *
  * Post-launch failures (auth timeout, Duo timeout, Excel click failure)
@@ -195,10 +412,6 @@ function resolveOutDir(
 export function buildSharePointRosterDownloadHandler(
   options: RosterDownloadHandlerOptions = {},
 ): (input: { id?: string; parentRunId?: string }) => Promise<RosterDownloadResponse> {
-  const defaultOutDir = options.outDir ?? resolve(process.cwd(), sharepointDir(".tracker"));
-  const runWorkflowImpl = options.runWorkflowFn ?? runWorkflow;
-  const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
-
   return async (input) => {
     const id = input?.id?.trim();
     if (!id) {
@@ -222,6 +435,7 @@ export function buildSharePointRosterDownloadHandler(
       };
     }
 
+    const getEnv = options.getEnv ?? ((name: string) => process.env[name]);
     const url = (getEnv(spec.envVar) ?? "").trim();
     if (!url) {
       return {
@@ -233,69 +447,16 @@ export function buildSharePointRosterDownloadHandler(
       };
     }
 
-    if (rosterDownloadInFlight) {
-      return {
-        status: 409,
-        body: { ok: false, error: "A SharePoint download is already in progress" },
-      };
-    }
-
-    // Commit: we're launching. Flip the lock + seed the landing URL that
-    // `systems[].login` will read. Both cleared in the fire-and-forget
-    // promise's `.finally()` regardless of outcome.
-    rosterDownloadInFlight = true;
-    inFlightId = spec.id;
-    const outDir = resolveOutDir(spec, defaultOutDir);
-    _setPendingLandingUrl(url);
-
-    const runPromise = (async () => {
-      try {
-        await runWorkflowImpl(sharepointDownloadWorkflow, {
-          id: spec.id,
-          label: spec.label,
-          url,
-          outDir,
-          ...(spec.filenameBase ? { filenameBase: spec.filenameBase } : {}),
-          ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
-        });
-        log.success(`SharePoint download complete (${spec.id})`);
-        // Pick up the saved path/filename the workflow stashed in its
-        // module-level slot (see workflow.ts `_takeLastDownloadResult`).
-        // `take` clears the slot so a future failed run can't surface a
-        // stale path.
-        const downloadResult = _takeLastDownloadResult();
-        lastCompletion = {
-          id: spec.id,
-          ts: new Date().toISOString(),
-          ok: true,
-          path: downloadResult?.path,
-          filename: downloadResult?.filename,
-        };
-      } catch (e) {
-        const err = errorMessage(e);
-        log.error(`SharePoint download failed (${spec.id}): ${err}`);
-        // Drain the slot even on failure — a partial run might still have
-        // written a path before throwing.
-        _takeLastDownloadResult();
-        lastCompletion = {
-          id: spec.id,
-          ts: new Date().toISOString(),
-          ok: false,
-          error: err,
-        };
-      } finally {
-        _setPendingLandingUrl(null);
-        rosterDownloadInFlight = false;
-        inFlightId = null;
-      }
-    })();
-    // Detach — fire-and-forget. The catch above should handle all errors,
-    // but this guard defends against any async throw that escapes it.
-    runPromise.catch(() => {});
+    const wasBusy = Boolean(currentJob);
+    const job = queueSharePointDownloadJob(
+      { id: spec.id, parentRunId: input.parentRunId },
+      { ...options, getEnv },
+    );
+    job.promise.catch(() => {});
 
     return {
       status: 202,
-      body: { ok: true, id: spec.id, label: spec.label, status: "launched" },
+      body: { ok: true, id: spec.id, label: spec.label, status: wasBusy ? "queued" : "launched" },
     };
   };
 }

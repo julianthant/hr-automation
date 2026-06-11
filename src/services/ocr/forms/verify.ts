@@ -86,6 +86,8 @@ export type VerifyCheck = z.infer<typeof VerifyCheckSchema>;
 export const VerifyPreviewRecordSchema = VerifyOcrRecordSchema.extend({
   /** Resolved name (falls back to printedName). */
   name: z.string().default(""),
+  /** EID as read directly from the paper before person-lookup may overwrite employeeId. */
+  paperEmployeeId: z.string().optional(),
   /** Resolved EID. */
   employeeId: z.string().default(""),
   /** person-lookup activeStatus. */
@@ -94,6 +96,10 @@ export const VerifyPreviewRecordSchema = VerifyOcrRecordSchema.extend({
   personLookupStatus: z.enum(["pending", "running", "completed", "failed"]).optional(),
   /** Trace id of the person-lookup child that enriched this record. */
   personLookupTraceId: z.string().optional(),
+  /** State of the i9-lookup child that enriched the official signer. */
+  i9LookupStatus: z.enum(["pending", "running", "completed", "failed"]).optional(),
+  /** Trace id of the i9-lookup child that enriched the official signer. */
+  i9LookupTraceId: z.string().optional(),
   /** CRM First Day of Service. */
   employmentDate: z.string().optional(),
   /** CRM Date Signed. */
@@ -187,7 +193,7 @@ function nonEmpty(v: unknown): string | null {
  */
 export function buildVerifyChecks(rec: VerifyPreviewRecord): VerifyCheck[] {
   const paperName = nonEmpty(rec.printedName);
-  const paperEid = nonEmpty(rec.employeeId);
+  const paperEid = paperEmployeeIdForCheck(rec);
   const paperEmploymentDate = nonEmpty(rec.paperEmploymentDate);
   const paperOathDate = nonEmpty(rec.paperDateSigned);
   const paperOfficial =
@@ -252,6 +258,14 @@ export function buildVerifyChecks(rec: VerifyPreviewRecord): VerifyCheck[] {
 
   // emergency-contact (and unknown) — name, eid, activeStatus.
   return [nameCheck, eidCheck, activeStatusCheck];
+}
+
+function paperEmployeeIdForCheck(rec: VerifyPreviewRecord): string | null {
+  if (Object.hasOwn(rec, "paperEmployeeId")) {
+    return nonEmpty(rec.paperEmployeeId);
+  }
+  if (rec.personLookupStatus) return null;
+  return nonEmpty(rec.employeeId);
 }
 
 /**
@@ -394,6 +408,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       ...record,
       formKind: record.formKind ?? "unknown",
       name,
+      paperEmployeeId: normalizeUcpathEmployeeId(record.employeeId),
       employeeId: normalizeUcpathEmployeeId(record.employeeId),
       documentType: record.documentType ?? "expected",
       originallyMissing: record.originallyMissing ?? [],
@@ -539,8 +554,37 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
           at: new Date(),
           rootPrefix: rootTracePrefix,
         });
+        log.step({
+          message: `[verify/person-lookup] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].personLookupTraceId ?? ""}`,
+          category: "ocr",
+          occasion: "started",
+          childWorkflow: "person-lookup",
+          subject: `record:${idx}`,
+        });
       }
       input.emitProgress(records);
+
+      const processedPlItemIds = new Set<string>();
+      const applyPersonLookupOutcome = (outcome: Awaited<ReturnType<typeof watchChildRuns>>[number]): void => {
+        const idx = plItemIdToIdx.get(outcome.itemId);
+        if (idx === undefined) return;
+        processedPlItemIds.add(outcome.itemId);
+        const patchKind = verifyPlPatchKind(plKindByItemId.get(outcome.itemId) ?? "name");
+        patchOcrRecordFromEidLookupOutcome(recs, idx, outcome, patchKind);
+        applyPersonLookupToVerifyRecord(records[idx], outcome.data);
+        records[idx].personLookupStatus = outcome.status === "done" ? "completed" : "failed";
+        const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
+        if (traceId) records[idx].personLookupTraceId = traceId;
+        records[idx].checks = buildVerifyChecks(records[idx]);
+        log.step({
+          message: `[verify/person-lookup] record ${idx} status=${records[idx].personLookupStatus ?? "unknown"} childStatus=${outcome.status} itemId=${outcome.itemId} traceId=${records[idx].personLookupTraceId ?? ""}`,
+          category: "ocr",
+          occasion: outcome.status === "done" ? "completed" : "failed",
+          childWorkflow: "person-lookup",
+          subject: `record:${idx}`,
+        });
+        input.emitProgress(records);
+      };
 
       const plOutcomes = await watchChildRuns({
         workflow: "person-lookup",
@@ -548,17 +592,12 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         trackerDir,
         date,
         timeoutMs: 30 * 60_000,
+        onProgress: (outcome) => applyPersonLookupOutcome(outcome),
       });
 
       for (const outcome of plOutcomes) {
-        const idx = plItemIdToIdx.get(outcome.itemId);
-        if (idx === undefined) continue;
-        const patchKind = verifyPlPatchKind(plKindByItemId.get(outcome.itemId) ?? "name");
-        patchOcrRecordFromEidLookupOutcome(recs, idx, outcome, patchKind);
-        applyPersonLookupToVerifyRecord(records[idx], outcome.data);
-        records[idx].personLookupStatus = outcome.status === "done" ? "completed" : "failed";
-        const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
-        if (traceId) records[idx].personLookupTraceId = traceId;
+        if (processedPlItemIds.has(outcome.itemId)) continue;
+        applyPersonLookupOutcome(outcome);
       }
 
       const receivedPl = new Set(plOutcomes.map((o) => o.itemId));
@@ -568,6 +607,13 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         if (idx === undefined) continue;
         patchOcrRecordUnresolved(recs, idx, "person-lookup timed out without a result");
         records[idx].personLookupStatus = "failed";
+        log.warn({
+          message: `[verify/person-lookup] record ${idx} status=failed reason=timeout itemId=${itemId} traceId=${records[idx].personLookupTraceId ?? ""}`,
+          category: "ocr",
+          occasion: "failed",
+          childWorkflow: "person-lookup",
+          subject: `record:${idx}`,
+        });
       }
     }
 
@@ -616,7 +662,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       const i9InputToItemId = new Map(
         i9Inputs.map((inp, i) => [JSON.stringify(inp), i9ItemIds[i] ?? ""]),
       );
-      await delegateToAllImpl<I9ChildInput, readonly string[]>({
+      const i9DispatchResults = await delegateToAllImpl<I9ChildInput, readonly string[]>({
         parentRunId: runId,
         trackerDir,
         child: i9LookupWorkflow as unknown as Parameters<
@@ -630,18 +676,73 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         deriveItemId: (inp: I9ChildInput) => i9InputToItemId.get(JSON.stringify(inp)) ?? "",
       });
 
+      for (const result of i9DispatchResults) {
+        const idx = i9ItemIdToIdx.get(result.itemId);
+        if (idx === undefined) continue;
+        records[idx].i9LookupStatus = "pending";
+        records[idx].i9LookupTraceId = buildTraceId({
+          code: "i9",
+          runId: result.runId,
+          at: new Date(),
+          rootPrefix: rootTracePrefix,
+        });
+        log.step({
+          message: `[verify/i9] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].i9LookupTraceId ?? ""}`,
+          category: "ocr",
+          occasion: "started",
+          childWorkflow: "i9-lookup",
+          subject: `record:${idx}`,
+        });
+      }
+      input.emitProgress(records);
+
+      const processedI9ItemIds = new Set<string>();
+      const applyI9Outcome = (outcome: Awaited<ReturnType<typeof watchChildRuns>>[number]): void => {
+        const idx = i9ItemIdToIdx.get(outcome.itemId);
+        if (idx === undefined) return;
+        processedI9ItemIds.add(outcome.itemId);
+        applyI9ToVerifyRecord(records[idx], outcome.data);
+        records[idx].i9LookupStatus = outcome.status === "done" ? "completed" : "failed";
+        const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
+        if (traceId) records[idx].i9LookupTraceId = traceId;
+        records[idx].checks = buildVerifyChecks(records[idx]);
+        log.step({
+          message: `[verify/i9] record ${idx} status=${records[idx].i9LookupStatus ?? "unknown"} childStatus=${outcome.status} i9Status=${records[idx].officialSignerStatus ?? ""} itemId=${outcome.itemId} traceId=${records[idx].i9LookupTraceId ?? ""}`,
+          category: "ocr",
+          occasion: outcome.status === "done" ? "completed" : "failed",
+          childWorkflow: "i9-lookup",
+          subject: `record:${idx}`,
+        });
+        input.emitProgress(records);
+      };
+
       const i9Outcomes = await watchChildRuns({
         workflow: "i9-lookup",
         expectedItemIds: i9ItemIds,
         trackerDir,
         date,
         timeoutMs: 30 * 60_000,
+        onProgress: (outcome) => applyI9Outcome(outcome),
       });
 
       for (const outcome of i9Outcomes) {
-        const idx = i9ItemIdToIdx.get(outcome.itemId);
+        if (processedI9ItemIds.has(outcome.itemId)) continue;
+        applyI9Outcome(outcome);
+      }
+
+      const receivedI9 = new Set(i9Outcomes.map((o) => o.itemId));
+      for (const itemId of i9ItemIds) {
+        if (receivedI9.has(itemId)) continue;
+        const idx = i9ItemIdToIdx.get(itemId);
         if (idx === undefined) continue;
-        applyI9ToVerifyRecord(records[idx], outcome.data);
+        records[idx].i9LookupStatus = "failed";
+        log.warn({
+          message: `[verify/i9] record ${idx} status=failed reason=timeout itemId=${itemId} traceId=${records[idx].i9LookupTraceId ?? ""}`,
+          category: "ocr",
+          occasion: "failed",
+          childWorkflow: "i9-lookup",
+          subject: `record:${idx}`,
+        });
       }
     }
 
@@ -653,6 +754,18 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       rec.checks = buildVerifyChecks(rec);
       rec.matchState = normalizeUcpathEmployeeId(rec.employeeId) ? "resolved" : "unresolved";
     }
+
+    const personCompleted = records.filter((rec) => rec.personLookupStatus === "completed").length;
+    const personFailed = records.filter((rec) => rec.personLookupStatus === "failed").length;
+    const i9Completed = records.filter((rec) => rec.i9LookupStatus === "completed").length;
+    const i9Failed = records.filter((rec) => rec.i9LookupStatus === "failed").length;
+    const i9Pending = records.filter((rec) => rec.i9LookupStatus === "pending" || rec.i9LookupStatus === "running").length;
+    log.success({
+      message: `[verify/enrich] complete records=${records.length} personCompleted=${personCompleted} personFailed=${personFailed} i9Completed=${i9Completed} i9Failed=${i9Failed} i9Pending=${i9Pending}`,
+      category: "ocr",
+      occasion: "completed",
+      subject: "verify-enrichment",
+    });
 
     return records;
   },

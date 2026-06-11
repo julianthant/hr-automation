@@ -174,12 +174,11 @@ function CheckRow({
         {check.status === "present" && (
           <Check className="h-3.5 w-3.5 text-success" aria-label="Present on paper" />
         )}
-        {check.status === "missing" && (
-          <X
-            className="h-3.5 w-3.5 text-destructive"
-            aria-label={pending || lookupInProgress ? "Lookup in progress" : "Not found"}
-          />
-        )}
+        {check.status === "missing" && (pending || lookupInProgress) ? (
+          <Search className="h-3.5 w-3.5 text-info" aria-label="Lookup in progress" />
+        ) : check.status === "missing" ? (
+          <X className="h-3.5 w-3.5 text-destructive" aria-label="Not found" />
+        ) : null}
       </div>
 
       {/* Label + value */}
@@ -195,7 +194,10 @@ function CheckRow({
             </>
           ) : (
             <span
-              className="text-sm text-muted-foreground"
+              className={cn(
+                "text-sm",
+                pending || lookupInProgress ? "text-info" : "text-muted-foreground",
+              )}
               aria-live={pending || lookupInProgress ? "polite" : undefined}
             >
               {missingText}

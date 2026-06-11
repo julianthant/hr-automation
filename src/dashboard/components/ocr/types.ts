@@ -371,6 +371,8 @@ export interface VerifyPreviewRecord {
   formKind: "oath" | "emergency-contact" | "unknown";
   sourcePage: number;
   printedName?: string | null;
+  /** EID as read directly from the paper before person-lookup may overwrite employeeId. */
+  paperEmployeeId?: string;
   /** Resolved EID. */
   employeeId: string;
   /** Resolved name (falls back to printedName). */
@@ -385,6 +387,10 @@ export interface VerifyPreviewRecord {
   personLookupStatus?: "pending" | "running" | "completed" | "failed";
   /** Trace id of the verify person-lookup child that enriched this record. */
   personLookupTraceId?: string;
+  /** State of the verify i9-lookup child that enriched the official signer. */
+  i9LookupStatus?: "pending" | "running" | "completed" | "failed";
+  /** Trace id of the verify i9-lookup child that enriched the official signer. */
+  i9LookupTraceId?: string;
   /** CRM First Day of Service. */
   employmentDate?: string;
   /** CRM Date Signed. */

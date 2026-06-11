@@ -48,6 +48,10 @@ import { countVerified } from "../../services/ocr/records-stats.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
 import type { OcrInput } from "./schema.js";
+import type {
+  SharePointDownloadRequest,
+  SharePointDownloadResult,
+} from "../sharepoint-download/handler.js";
 import { runOcrPipeline } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
@@ -166,6 +170,9 @@ export interface OcrOrchestratorOpts {
   }) => Promise<void>;
   _scheduleDependencyTickOverride?: () => Promise<{ ok: true } | { ok: false; error: string }>;
   _disableSqliteDependencies?: boolean;
+  _requestSharePointDownloadOverride?: (
+    request: SharePointDownloadRequest,
+  ) => Promise<SharePointDownloadResult>;
   /** Skip the actual runWorkflow(sharepointDownload...) call (tests only). */
   _skipSharepointDispatch?: boolean;
 }
@@ -380,54 +387,30 @@ export async function runOcrOrchestrator(
 
     let resolvedRosterPath = input.rosterPath;
 
-    if (input.rosterMode === "download") {
-      const { runWorkflow } = await import("../../core/index.js");
-      const { sharepointDownloadWorkflow, _setPendingLandingUrl } = await import("../sharepoint-download/index.js");
+    if (input.rosterMode === "download" || input.rosterMode === "wait") {
+      const { requestSharePointDownload } = await import("../sharepoint-download/index.js");
       const { SHAREPOINT_DOWNLOADS } = await import("../sharepoint-download/registry.js");
       const spec0 = SHAREPOINT_DOWNLOADS[0];
       if (!spec0) throw new Error("OCR: no SharePoint download spec registered");
-      const url = (process.env[spec0.envVar] ?? "").trim();
-      if (!url && !opts._skipSharepointDispatch) {
-        throw new Error(`OCR rosterMode=download but ${spec0.envVar} env var is unset`);
-      }
-      // Unique itemId per OCR run so watchChildren doesn't pick up a stale
-      // sharepoint-download `done` row from earlier in the day, and so the
-      // dashboard nests this child run cleanly under the parent OCR row.
       const childItemId = `ocr-sp-${runId}`;
-      if (!opts._skipSharepointDispatch) {
-        log.step(`[ocr] delegating sharepoint-download for "${spec0.label}" (childItemId=${childItemId})`);
-        // sharepoint-download's kernel `systems[].login` reads the URL from a
-        // module-level mutable because the kernel's SystemConfig.login signature
-        // can't pass `input` through. Seed it before firing runWorkflow.
-        _setPendingLandingUrl(url);
-        void runWorkflow(
-          sharepointDownloadWorkflow,
-          {
-            id: spec0.id,
-            label: spec0.label,
-            url,
-            ...(spec0.filenameBase ? { filenameBase: spec0.filenameBase } : {}),
-            parentRunId: runId,
-          },
-          { itemId: childItemId, trackerDir },
-        )
-          .catch((err) => log.warn(`[ocr] sharepoint download crashed: ${errorMessage(err)}`))
-          .finally(() => _setPendingLandingUrl(null));
+
+      if (opts._skipSharepointDispatch) {
+        throw new Error("OCR SharePoint dispatch was skipped before a roster path could be resolved");
       }
 
-      const outcomes = await watchChildren({
-        workflow: "sharepoint-download",
-        expectedItemIds: [childItemId],
+      log.step(
+        `[ocr] ${input.rosterMode === "wait" ? "waiting for queued" : "queueing"} sharepoint-download for "${spec0.label}" (childItemId=${childItemId})`,
+      );
+      const runSharePoint = opts._requestSharePointDownloadOverride ?? requestSharePointDownload;
+      const result = await runSharePoint({
+        id: spec0.id,
+        mode: input.rosterMode === "wait" ? "wait" : "fresh",
+        parentRunId: runId,
+        rootTracePrefix: tracePrefix(traceId),
         trackerDir,
-        date,
-        timeoutMs: 5 * 60_000,
-        shouldAbort: () => isOcrPrepareAbortRequested(id, runId),
+        itemId: childItemId,
       });
-      const result = outcomes[0];
-      if (!result || result.status !== "done") {
-        throw new Error(`SharePoint download failed: ${result?.error ?? "unknown error"}`);
-      }
-      resolvedRosterPath = (result.data?.path ?? "").trim();
+      resolvedRosterPath = (result.path ?? "").trim();
       if (!resolvedRosterPath) throw new Error("SharePoint download finished without saving a path");
       log.success(`[ocr] roster downloaded: ${resolvedRosterPath}`);
     }

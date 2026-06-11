@@ -1174,9 +1174,16 @@ test("orchestrator uses watcher fallback when OCR_SQLITE_DEPENDENCIES is disable
   }
 });
 
-test("rosterMode=download delegates to sharepoint-download via watchChildRuns", async () => {
-  const { dir, uploadsDir, pdfPath, pdfFileId } = await setup();
-  let watchWorkflow = "";
+test("rosterMode=download queues a fresh SharePoint child with OCR trace lineage", async () => {
+  const { dir, pdfPath, pdfFileId } = await setup();
+  const requests: Array<{
+    id: string;
+    mode: string;
+    parentRunId?: string;
+    rootTracePrefix?: string;
+    trackerDir?: string;
+    itemId?: string;
+  }> = [];
 
   await runOcrOrchestrator(
     {
@@ -1186,6 +1193,7 @@ test("rosterMode=download delegates to sharepoint-download via watchChildRuns", 
       formType: "oath",
       sessionId: "session-sp",
       rosterMode: "download",
+      operationWorkflow: "oath-signature",
       // no rosterPath — should be resolved from SharePoint
     },
     {
@@ -1197,25 +1205,55 @@ test("rosterMode=download delegates to sharepoint-download via watchChildRuns", 
         provider: "stub", attempts: 1, cached: false,
       }),
       _loadRosterOverride: async () => [],
-      _skipSharepointDispatch: true,
-      _watchChildRunsOverride: async (opts) => {
-        watchWorkflow = opts.workflow;
-        if (opts.workflow === "sharepoint-download") {
-          return [{
-            workflow: "sharepoint-download",
-            itemId: opts.expectedItemIds[0] ?? "onboarding",
-            runId: "sp-run",
-            status: "done" as const,
-            data: { path: "/tmp/roster.xlsx" },
-          }];
-        }
-        return [];
+      _requestSharePointDownloadOverride: async (request) => {
+        requests.push(request);
+        return { id: request.id, label: "Onboarding Roster", path: "/tmp/roster.xlsx" };
       },
       _enqueueEidLookupOverride: async () => {},
     },
   );
 
-  assert.equal(watchWorkflow, "sharepoint-download", "should have watched sharepoint-download");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.id, "onboarding");
+  assert.equal(requests[0]!.mode, "fresh");
+  assert.equal(requests[0]!.parentRunId, "run-sp");
+  assert.equal(requests[0]!.trackerDir, dir);
+  assert.equal(requests[0]!.itemId, "ocr-sp-run-sp");
+  assert.match(requests[0]!.rootTracePrefix ?? "", /^os-\d{6}$/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("rosterMode=wait waits for the current SharePoint queue result without requesting a fresh download", async () => {
+  const { dir, pdfPath, pdfFileId } = await setup();
+  const requests: Array<{ id: string; mode: string }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-sp-wait",
+      rosterMode: "wait",
+    },
+    {
+      runId: "run-sp-wait",
+      trackerDir: dir,
+      _emitOverride: () => {},
+      _ocrPipelineOverride: async () => ({
+        data: [],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [],
+      _requestSharePointDownloadOverride: async (request) => {
+        requests.push(request);
+        return { id: request.id, label: "Onboarding Roster", path: "/tmp/queued-roster.xlsx" };
+      },
+      _enqueueEidLookupOverride: async () => {},
+    },
+  );
+
+  assert.deepEqual(requests.map((request) => request.mode), ["wait"]);
   rmSync(dir, { recursive: true, force: true });
 });
 

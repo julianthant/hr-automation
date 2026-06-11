@@ -18,6 +18,21 @@ import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/component
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 
+type RosterMode = "download" | "existing" | "wait";
+
+interface SharePointQueueItem {
+  id: string;
+  label: string;
+  state: "running" | "queued";
+}
+
+interface SharePointDownloadStatus {
+  inFlight: boolean;
+  current: SharePointQueueItem | null;
+  queued: SharePointQueueItem[];
+  lastCompletion: { id: string; ts: string; ok: boolean } | null;
+}
+
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
   const hashBuf = await crypto.subtle.digest("SHA-256", buf);
@@ -65,8 +80,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
   const [files, setFiles] = useState<File[]>([]);
   const [pageCount, setPageCount] = useState<number | null>(null);
-  const [rosterMode, setRosterMode] = useState<"download" | "existing">("existing");
+  const [rosterMode, setRosterMode] = useState<RosterMode>("existing");
   const rosters = useRosters();
+  const [sharePointStatus, setSharePointStatus] = useState<SharePointDownloadStatus | null>(null);
+  const seenSharePointCompletionTs = useRef<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,10 +141,50 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     refreshRosters();
   }, [open, effectiveShowRoster]);
 
-  // Auto-flip to "download" mode when the listing comes back empty.
   useEffect(() => {
-    if (rosters && rosters.length === 0) setRosterMode("download");
-  }, [rosters]);
+    if (!open || !effectiveShowRoster) {
+      setSharePointStatus(null);
+      return;
+    }
+    let cancelled = false;
+    async function pollStatus() {
+      try {
+        const resp = await fetch("/api/sharepoint-download/status");
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const status = (await resp.json()) as SharePointDownloadStatus;
+        if (cancelled) return;
+        setSharePointStatus(status);
+        const completionTs = status.lastCompletion?.ts ?? null;
+        if (completionTs && completionTs !== seenSharePointCompletionTs.current) {
+          seenSharePointCompletionTs.current = completionTs;
+          refreshRosters();
+        }
+      } catch {
+        if (!cancelled) setSharePointStatus(null);
+      }
+    }
+    void pollStatus();
+    const timer = window.setInterval(() => void pollStatus(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [open, effectiveShowRoster]);
+
+  const sharePointWaitAvailable =
+    Boolean(sharePointStatus?.inFlight) || Boolean(sharePointStatus?.queued.length);
+
+  // Auto-flip away from invalid roster choices as local files/queue state changes.
+  useEffect(() => {
+    if (!rosters) return;
+    if (rosters.length === 0 && rosterMode === "existing") {
+      setRosterMode(sharePointWaitAvailable ? "wait" : "download");
+      return;
+    }
+    if (rosterMode === "wait" && !sharePointWaitAvailable) {
+      setRosterMode(rosters.length > 0 ? "existing" : "download");
+    }
+  }, [rosters, rosterMode, sharePointWaitAvailable]);
 
   // Duplicate-check effect — hash the PDF and ask the server whether
   // we've seen it before. Best-effort: failures surface as an inline error
@@ -373,6 +430,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
   const latestRoster = rosters?.[0];
   const hasRoster = (rosters?.length ?? 0) > 0;
+  const sharePointQueueHint = sharePointStatus?.queued.length
+    ? `${sharePointStatus.queued.length} download${sharePointStatus.queued.length === 1 ? "" : "s"} queued. This run will use the newest queued result.`
+    : sharePointStatus?.current
+      ? `${sharePointStatus.current.label} is running. This run will use it when it finishes.`
+      : "Use the currently queued SharePoint download when it finishes.";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -530,12 +592,25 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
                         : "No roster on disk — pick the other option to fetch one."
                   }
                 />
+                {sharePointWaitAvailable ? (
+                  <RosterRow
+                    checked={rosterMode === "wait"}
+                    disabled={submitting}
+                    onSelect={() => setRosterMode("wait")}
+                    label="Wait for queued SharePoint"
+                    hint={sharePointQueueHint}
+                  />
+                ) : null}
                 <RosterRow
                   checked={rosterMode === "download"}
                   disabled={submitting}
                   onSelect={() => setRosterMode("download")}
                   label="Download fresh from SharePoint"
-                  hint="The OCR orchestrator will handle the download automatically."
+                  hint={
+                    sharePointWaitAvailable
+                      ? "Queues a new SharePoint download after the current queue."
+                      : "The OCR orchestrator will handle the download automatically."
+                  }
                   last
                 />
               </div>
