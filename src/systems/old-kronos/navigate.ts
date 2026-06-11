@@ -25,20 +25,23 @@ import {
  * UKG often pops up modals that block interaction.
  */
 export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
-  await page.waitForTimeout(1_000);
+  // Short wait for any pending modal to appear before probing.
+  // Reduced from 1s — clickIfPresent already polls for up to 3s.
+  await page.waitForTimeout(300);
 
   // Try OK button
   const okBtn = modalDismiss.okButton(iframe);
   if (await clickIfPresent(okBtn, { timeout: 3_000, label: "old kronos modal ok button" })) {
     log.step("Dismissed modal (OK)");
-    await page.waitForTimeout(2_000);
+    // Short settle — modal dismissal is near-instant on click.
+    await page.waitForTimeout(500);
   }
 
   // Try Close button
   const closeBtn = modalDismiss.closeButton(iframe);
   if (await clickIfPresent(closeBtn, { timeout: 3_000, label: "old kronos modal close button" })) {
     log.step("Dismissed modal (Close)");
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(500);
   }
 }
 
@@ -51,7 +54,9 @@ async function reloadOnNetworkError(page: Page, frame: Frame, label: string): Pr
   if (hasNetworkError === 0) return false;
   log.step(`Network change detected in ${label} — reloading page...`);
   await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.waitForTimeout(10_000);
+  // Let UKG finish re-initializing its SPA. The outer getGeniesIframe retry loop
+  // provides additional tolerance if the frame isn't ready yet after this wait.
+  await page.waitForTimeout(5_000);
   return true;
 }
 
@@ -92,12 +97,14 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
     if (attempt === 0) {
       log.step("Waiting for Genies iframe to load...");
     }
-    await page.waitForTimeout(2_000);
+    // Reduced from 2s — 15 attempts × 1s = 15s max before the last-resort reload.
+    await page.waitForTimeout(1_000);
   }
 
   // Last resort: reload and retry
   log.step("Reloading page and retrying (final attempt)...");
   await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+  // Keep 15s — UKG's SPA fully re-initializes on reload; too short risks missing the frame.
   await page.waitForTimeout(15_000);
 
   const iframe = page.frame({ name: "widgetFrame804" });
@@ -125,7 +132,8 @@ export async function setDateRange(
   // Click calendar icon (2-way .or() fallback)
   const calBtn = dateRange.calendarButton(iframe);
   await safeClick(calBtn.first(), { label: "old kronos date range calendar button" });
-  await page.waitForTimeout(3_000);
+  // Wait for the date-picker dialog to render (reduced from 3s).
+  await page.waitForTimeout(1_500);
   await debugScreenshot(page, "ukg-date-01-popup");
 
   // Date inputs in the timeframeSelection dialog
@@ -163,16 +171,19 @@ export async function setDateRange(
   for (const { index, digits } of dates) {
     const inp = dateInputs.nth(index);
     await inp.click({ clickCount: 3, force: true });
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await inp.press("Delete");
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await inp.press("Home");
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
+    // Per LESSONS.md 2026-03-16: JQX date widget requires digit-by-digit typing
+    // (fill() is rejected). Keep per-char dispatch; 80ms is the minimum that
+    // reliably commits mid-type without the widget dropping digits.
     for (const char of digits) {
       await inp.press(char);
-      await page.waitForTimeout(100);
+      await page.waitForTimeout(80);
     }
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
   }
 
   const startVal = await dateInputs.nth(0).inputValue();
@@ -183,7 +194,8 @@ export async function setDateRange(
   await safeClick(dateRange.applyButton(iframe).first(), {
     label: "old kronos date range apply button",
   });
-  await page.waitForTimeout(5_000);
+  // Wait for UKG to apply the filter and re-render the grid (reduced from 5s).
+  await page.waitForTimeout(2_500);
   log.step("Date range applied");
   await dismissModal(page, iframe);
 }
@@ -202,11 +214,14 @@ export async function searchEmployee(
   const searchInput = employeeGrid.quickFindInput(iframe);
   await safeClick(searchInput, { label: "old kronos quick find input" });
   await safeFill(searchInput, employeeId, { label: "old kronos quick find input" });
-  await page.waitForTimeout(1_000);
+  // Brief pause to let the input value commit before submitting.
+  await page.waitForTimeout(300);
   await safeClick(employeeGrid.quickFindSubmitButton(iframe), {
     label: "old kronos quick find submit button",
   });
-  await page.waitForTimeout(5_000);
+  // Wait for jqxGrid search results to render. No stable readiness selector
+  // exists for this custom JQX widget — conservative fixed wait retained.
+  await page.waitForTimeout(3_000);
   await dismissModal(page, iframe);
 }
 
@@ -290,10 +305,12 @@ export async function clickGoToReports(
   // Strategy 1: Direct text match
   const gotoEl = goToMenu.goToTrigger(iframe);
   if (await clickIfPresent(gotoEl, { label: "old kronos go to trigger" })) {
-    await page.waitForTimeout(3_000);
+    // Wait for the dropdown menu to render (reduced from 3s — menu appears quickly).
+    await page.waitForTimeout(1_500);
     const reportsItem = goToMenu.reportsItem(iframe);
     if (await clickIfPresent(reportsItem, { label: "old kronos reports menu item" })) {
-      await page.waitForTimeout(5_000);
+      // Wait for the Reports page to load (reduced from 5s — frame navigation is fast).
+      await page.waitForTimeout(2_000);
       log.step("Navigated to Reports");
       return true;
     }
@@ -309,11 +326,11 @@ export async function clickGoToReports(
       );
       if (parentText.toLowerCase().includes("go to")) {
         await safeClick(dropdowns.nth(i), { label: "old kronos go to dropdown toggle" });
-        await page.waitForTimeout(3_000);
+        await page.waitForTimeout(1_500);
         await safeClick(goToMenu.reportsItem(iframe), {
           label: "old kronos reports menu item fallback",
         });
-        await page.waitForTimeout(5_000);
+        await page.waitForTimeout(2_000);
         return true;
       }
     } catch {
@@ -324,7 +341,7 @@ export async function clickGoToReports(
   // Strategy 3: Sidebar Reports link
   const sidebarReports = goToMenu.sidebarReports(page);
   if (await clickIfPresent(sidebarReports, { label: "old kronos sidebar reports link" })) {
-    await page.waitForTimeout(5_000);
+    await page.waitForTimeout(2_000);
     return true;
   }
 
@@ -343,12 +360,13 @@ export async function clickGoToTimecard(
 
   const gotoEl = goToMenu.goToTrigger(iframe);
   if (await clickIfPresent(gotoEl, { label: "old kronos go to timecard trigger" })) {
-    await page.waitForTimeout(3_000);
+    // Wait for dropdown to render (reduced from 3s).
+    await page.waitForTimeout(1_500);
 
     // Menu item is "Timecards" (plural) — must use exact match to avoid "Approve Timecards"
     const timecardItem = goToMenu.timecardsItem(iframe);
     if (await clickIfPresent(timecardItem, { label: "old kronos timecards menu item" })) {
-      await page.waitForTimeout(5_000);
+      await page.waitForTimeout(2_000);
       log.success("[Old Kronos] Navigated to Timecards");
       return true;
     }
@@ -488,18 +506,19 @@ export async function goBackToMain(page: Page): Promise<void> {
   // Try tab first
   const tab = workspace.manageDeptTab(page);
   if (await clickIfPresent(tab, { label: "old kronos manage department tab" })) {
-    await page.waitForTimeout(3_000);
+    await page.waitForTimeout(1_500);
     return;
   }
 
   // Fallback: li tab
   const liTab = workspace.manageDeptLi(page);
   if (await clickIfPresent(liTab, { label: "old kronos manage department li tab" })) {
-    await page.waitForTimeout(3_000);
+    await page.waitForTimeout(1_500);
     return;
   }
 
   // Last resort: navigate directly
   await page.goto(UKG_URL, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.waitForTimeout(5_000);
+  // Allow UKG SPA to re-initialize after full navigation.
+  await page.waitForTimeout(3_000);
 }
