@@ -5,6 +5,8 @@
 import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -124,13 +126,27 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   }
 
   const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  const outcomes = await watchFn({
-    workflow: "person-lookup",
-    expectedItemIds: itemIds,
-    trackerDir,
-    date,
-    timeoutMs: 30 * 60_000,
-  });
+  let outcomes: ChildOutcome[];
+  try {
+    outcomes = await watchFn({
+      workflow: "person-lookup",
+      expectedItemIds: itemIds,
+      trackerDir,
+      date,
+      timeoutMs: 30 * 60_000,
+      // Operator-cancel bridge: the orchestrator trips the prepare-abort flag on
+      // `ctx.signal`; this watch throws a discard-abort error when it's set.
+      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
+    });
+  } catch (err) {
+    if (isOperatorDiscardAbortError(err)) {
+      // Cancel mid-research: cascade-cancel the still-queued person-lookup
+      // children so a daemon doesn't run them after the operator gave up.
+      // Fail-loud — a cascade error propagates.
+      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
+    }
+    throw err;
+  }
 
   // Patch records from lookup outcomes before emitting the final state.
   for (const outcome of outcomes) {

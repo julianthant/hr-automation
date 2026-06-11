@@ -375,6 +375,75 @@ export function updateTaskStatus(
   `).run({ taskId: input.taskId, controlState, now });
 }
 
+/**
+ * Cascade-cancel the still-in-flight child tasks of a parent run.
+ *
+ * The OCR enrichment paths (verify `enrichRecords`, force-research, retry-page,
+ * whole-PDF re-OCR, verify-relookup) fan out person-lookup / i9-lookup children
+ * parented to the prep run, then await them via `watchChildRuns`. When the
+ * operator cancels the prep, the watch aborts — but the un-claimed child tasks
+ * stay `queued` in SQLite, so a daemon would still claim and run them after the
+ * operator gave up. This marks every NON-TERMINAL child task whose
+ * `parent_run_id` matches `cancelled`, cancels its pending dependency edges, and
+ * cancels its attempts — in ONE transaction so a partial cascade can't leak a
+ * runnable child.
+ *
+ * Fail-loud: a SQLite error propagates (the transaction rolls back); the caller's
+ * abort path surfaces it rather than silently leaking a child.
+ *
+ * @returns the number of child tasks cancelled.
+ */
+export function cancelQueuedChildTasksForParentRun(
+  store: TaskStore,
+  input: { parentRunId: string; reason?: string; now?: string },
+): number {
+  if (!input.parentRunId) return 0;
+  const now = input.now ?? new Date().toISOString();
+  const reason = input.reason ?? "Cancelled by user";
+  let cancelled = 0;
+  transaction(store.db, () => {
+    // A child that has not reached a terminal state is still cancellable. Include
+    // claimed/running: a child a daemon already picked up is exactly the one whose
+    // work the operator no longer wants.
+    const rows = store.db.prepare(`
+      SELECT id
+      FROM tasks
+      WHERE parent_run_id = @parentRunId
+        AND control_state IN (
+          'queued', 'waiting_dependencies', 'blocked',
+          'claimed', 'running', 'cancel_requested', 'cancelling'
+        )
+    `).all({ parentRunId: input.parentRunId }) as Array<{ id: string }>;
+    for (const { id: taskId } of rows) {
+      store.db.prepare(`
+        UPDATE tasks
+        SET control_state = 'cancelled',
+            terminal_error = @reason,
+            terminal_at = COALESCE(terminal_at, @now),
+            updated_at = @now
+        WHERE id = @taskId
+      `).run({ taskId, reason, now });
+      store.db.prepare(`
+        UPDATE task_attempts
+        SET control_state = 'cancelled',
+            terminal_at = COALESCE(terminal_at, @now),
+            updated_at = @now
+        WHERE task_id = @taskId
+          AND control_state NOT IN ('done', 'failed', 'cancelled')
+      `).run({ taskId, now });
+      store.db.prepare(`
+        UPDATE task_dependencies
+        SET status = 'cancelled',
+            updated_at = @now,
+            terminal_at = COALESCE(terminal_at, @now)
+        WHERE child_task_id = @taskId AND status = 'pending'
+      `).run({ taskId, now });
+      cancelled++;
+    }
+  });
+  return cancelled;
+}
+
 export function updateAttemptStatus(
   store: TaskStore,
   input: { attemptId?: string; taskId?: string; runId?: string; status: TaskAttemptStatus; now?: string },

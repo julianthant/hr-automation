@@ -26,6 +26,8 @@ import {
   patchOcrRecordUnresolved,
 } from "../eid-lookup-results.js";
 import { watchChildRuns } from "../../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../../tracker/ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../../tracker/tasks/store.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import { DocumentTypeSchema, MatchStateSchema, VerificationSchema } from "./shared.js";
 
@@ -480,10 +482,23 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     // Auto → {} (default reuse-or-spawn-one); explicit N>1 → { parallel: N }.
     const enrichDaemonFlags = runOptionsToDaemonFlags(runOptions);
 
+    // Operator-cancel bridge. The orchestrator trips the in-process prepare-abort
+    // flag when `ctx.signal` aborts (queue-row Cancel ×, daemon stop), and the
+    // `watchChildRuns` calls below poll `shouldAbort` and throw a discard-abort
+    // error when it's set. On that abort we cascade-cancel the still-queued
+    // person-lookup / i9-lookup children so a daemon doesn't claim and run them
+    // after the operator gave up on the prep. Fail-loud — a cascade error rethrows.
+    const shouldAbort = (): boolean => isOcrPrepareAbortRequested(sessionId, runId);
+    const cascadeCancelOnAbort = (): void => {
+      const store = openTaskStore(trackerDir);
+      cancelQueuedChildTasksForParentRun(store, { parentRunId: runId });
+    };
+
     // Dynamic imports avoid an import cycle (mirrors force-research.ts).
     const { delegateToAllImpl } = await import("../../../core/delegate.js");
     const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
 
+    try {
     // ── Step 1: person-lookup fan-out (EID-or-name → CRM dates + active) ──
     //
     // Per-record input shape + outcome-patch kind are chosen by the pure
@@ -592,6 +607,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         trackerDir,
         date,
         timeoutMs: 30 * 60_000,
+        shouldAbort,
         onProgress: (outcome) => applyPersonLookupOutcome(outcome),
       });
 
@@ -722,6 +738,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         trackerDir,
         date,
         timeoutMs: 30 * 60_000,
+        shouldAbort,
         onProgress: (outcome) => applyI9Outcome(outcome),
       });
 
@@ -768,5 +785,13 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     });
 
     return records;
+    } catch (err) {
+      // Operator cancel mid-enrichment: cascade-cancel the still-queued
+      // person-lookup / i9-lookup children so a daemon doesn't run them after the
+      // operator gave up, then rethrow so the orchestrator unwinds to terminal
+      // cancelled. Fail-loud — a cascade error propagates.
+      if (isOperatorDiscardAbortError(err)) cascadeCancelOnAbort();
+      throw err;
+    }
   },
 };
