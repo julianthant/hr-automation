@@ -50,13 +50,14 @@ describe("workflow runtime policies", () => {
     assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 
-  it("registers Oath Upload subtitle template and inherits default row cancel", () => {
+  it("registers Oath Upload row cancel and inherits default policy", () => {
     const policy = oathUploadWorkflow.metadata.runtimePolicy;
     // No children nest under oath-upload — the OCR + signature batch lives in
     // the oath-signature tab. oath-upload just polls.
     assert.equal(policy?.delegation?.rootRowPersistsThroughChildren, undefined);
     assert.equal(policy?.delegation?.failedChildBlocksParent, undefined);
-    assert.equal(policy?.subtitleTemplate, "Oath · <last4 run id>");
+    // subtitleTemplate was removed — oath-upload uses the standard trace-id subtitle.
+    assert.equal(policy?.subtitleTemplate, undefined);
     assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "row");
   });
 

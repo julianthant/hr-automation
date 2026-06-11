@@ -440,8 +440,8 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.runId, "oath-upload-run-1");
     assert.equal(projection.itemId, "upload-session-1");
     assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
-    // Subtitle interpolates `Oath · <last4 run id>` from the workflow policy.
-    assert.equal(projection.subtitle, "Oath · un-1");
+    // No subtitleTemplate on oath-upload — falls back to the item id.
+    assert.equal(projection.subtitle, "upload-session-1");
     // No batch members — single archetype row.
     assert.equal(projection.batchMembers.length, 0);
   });
