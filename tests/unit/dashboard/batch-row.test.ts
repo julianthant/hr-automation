@@ -105,6 +105,32 @@ test("orderBatchPreviewMembers prioritizes running, then queued, then done", () 
   );
 });
 
+test("batch member counts treat skipped as done (terminal success), not queued", () => {
+  // BM-4: the member count tally now uses the canonical aggregateBatchCounts,
+  // which folds skipped → done. A skipped member is terminal (it will never
+  // run), so counting it as pending work would spin a forever-incomplete header.
+  const html = renderToStaticMarkup(
+    React.createElement(DaemonBatchRow, {
+      workflow: "oath-signature",
+      date: DATE,
+      batchParentRunId: "batch-run-skip",
+      workflowLabel: "Oath Signature",
+      projection: projection("Skip_Batch.pdf", "os-090500-7711"),
+      memberEntries: [
+        member("s1", "done", "Grace Liu"),
+        member("s2", "skipped", "Ian Wong"),
+      ],
+      isBatchQueueFocused: false,
+      onEnterBatchQueue: () => {},
+      onDeletedIds: () => {},
+    }),
+  );
+
+  // 2 done (1 real done + 1 skipped folded in), 0 queued.
+  assert.match(html, /aria-label="2 done"/);
+  assert.match(html, /aria-label="0 queued"/);
+});
+
 test("person batch anchor omits the identity header and opens from the whole row", () => {
   const html = renderToStaticMarkup(
     React.createElement(DaemonBatchRow, {

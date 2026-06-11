@@ -1,12 +1,4 @@
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  FileText,
-  GripVertical,
-  Loader2,
-  type LucideIcon,
-} from "lucide-react";
+import { Clock, FileText, GripVertical } from "lucide-react";
 import { useMemo, type KeyboardEvent, type ReactNode } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
@@ -18,9 +10,13 @@ import {
   resolveEntryId,
   resolveEntryName,
 } from "@/components/shared/entry-display";
-import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { cn } from "@/lib/utils";
-import { computeBatchElapsed } from "@/components/ocr/delegation-row-helpers";
+import {
+  aggregateBatchCounts,
+  computeBatchElapsed,
+  useBatchElapsedLabel,
+} from "@/components/ocr/delegation-row-helpers";
+import { memberStatusSpec } from "@/components/shared/status-styles";
 
 /**
  * Batch queue row (`?view=ui-gallery` plus production `DaemonBatchRow`).
@@ -56,43 +52,6 @@ export interface BatchRowUnifiedProps {
   footerActions?: ReactNode;
 }
 
-function aggregateMemberCounts(members: TrackerEntry[]) {
-  let done = 0;
-  let running = 0;
-  let queued = 0;
-  let failed = 0;
-  for (const m of members) {
-    if (m.status === "failed" && m.step !== "cancelled") failed += 1;
-    else if (m.status === "done") done += 1;
-    else if (m.status === "running") running += 1;
-    else if (m.status === "pending" || m.status === "skipped") queued += 1;
-  }
-  return { done, running, queued, failed, total: members.length };
-}
-
-interface MemberStatusSpec {
-  Icon: LucideIcon;
-  label: string;
-  tone: string;
-  spin?: boolean;
-}
-
-const MEMBER_STATUS: Record<string, MemberStatusSpec> = {
-  done: { Icon: CheckCircle2, label: "done", tone: "text-success" },
-  running: { Icon: Loader2, label: "running", tone: "text-primary", spin: true },
-  pending: { Icon: Clock, label: "queued", tone: "text-warning" },
-  skipped: { Icon: Clock, label: "queued", tone: "text-warning" },
-  failed: { Icon: AlertTriangle, label: "failed", tone: "text-destructive" },
-  cancelled: { Icon: Clock, label: "cancelled", tone: "text-warning" },
-};
-
-function memberStatus(member: TrackerEntry): MemberStatusSpec {
-  if (member.status === "failed" && member.step === "cancelled") {
-    return MEMBER_STATUS.cancelled;
-  }
-  return MEMBER_STATUS[member.status] ?? MEMBER_STATUS.pending;
-}
-
 const PREVIEW_LIMIT = 4;
 
 /** Running first, then queued in source order, then done to fill remaining slots. */
@@ -112,20 +71,6 @@ export function orderBatchPreviewMembers(members: TrackerEntry[], limit = PREVIE
   return [...running, ...queued, ...failed, ...done].slice(0, limit);
 }
 
-function useBatchElapsedLabel(elapsed: ReturnType<typeof computeBatchElapsed>): string {
-  const liveTick = useElapsed(
-    elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
-  );
-  if (!elapsed) return "";
-  if (elapsed.frozen) {
-    return formatDuration(
-      new Date(elapsed.startMs).toISOString(),
-      new Date(elapsed.endMs).toISOString(),
-    );
-  }
-  return liveTick;
-}
-
 export function BatchRowUnified({
   date,
   parentRunId,
@@ -143,7 +88,7 @@ export function BatchRowUnified({
   onEnterBatchQueue,
   footerActions,
 }: BatchRowUnifiedProps) {
-  const counts = useMemo(() => aggregateMemberCounts(members), [members]);
+  const counts = useMemo(() => aggregateBatchCounts(members), [members]);
   const fileTitle = title?.trim() ?? "";
   const footerEntry = members[0] ?? anchorEntry;
   const footerEntries = useMemo(
@@ -244,7 +189,7 @@ export function BatchRowUnified({
           <div className="border-t border-border/60 bg-card">
             <div className="divide-y divide-border/45">
               {previewMembers.map((member, index) => {
-                const status = memberStatus(member);
+                const status = memberStatusSpec(member);
                 const StatusIcon = status.Icon;
                 return (
                   <div

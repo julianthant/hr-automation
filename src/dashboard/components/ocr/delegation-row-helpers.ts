@@ -1,4 +1,5 @@
 import type { TrackerEntry } from "@/components/shared/types.js";
+import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 
 export interface BatchCounts {
   done: number;
@@ -137,4 +138,25 @@ export function resolveBatchAccent(counts: BatchCounts): BatchAccent {
   if (counts.total > 0 && counts.running === 0 && counts.queued === 0)
     return "success";
   return "warning";
+}
+
+/**
+ * The batch elapsed/duration label for a `computeBatchElapsed` result: a live
+ * ticking elapsed while any child is in flight, frozen to a fixed duration once
+ * every child is terminal, and empty when there's no usable timestamp. Shared by
+ * the batch row (`batch-row-variants`) and the delegation group row
+ * (`group-row-base`) — previously byte-identical copies in each.
+ */
+export function useBatchElapsedLabel(elapsed: BatchElapsed | null): string {
+  const liveTick = useElapsed(
+    elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
+  );
+  if (!elapsed) return "";
+  if (elapsed.frozen) {
+    return formatDuration(
+      new Date(elapsed.startMs).toISOString(),
+      new Date(elapsed.endMs).toISOString(),
+    );
+  }
+  return liveTick;
 }
