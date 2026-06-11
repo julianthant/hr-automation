@@ -30,7 +30,7 @@ export {
   parsePayRate,
   buildCommentsText,
 } from "./transaction.js";
-export type { PersonalDataInput, JobDataInput } from "./transaction.js";
+export type { PersonalDataInput, JobDataInput, ExistingTerminationResult } from "./transaction.js";
 export {
   navigateToWorkforceJobSummary,
   searchJobSummary,

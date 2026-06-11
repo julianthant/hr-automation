@@ -231,7 +231,7 @@ export const emergencyContactWorkflow = defineWorkflow({
         .getByRole("button", { name: "Save", exact: true })
         .first()
         .click({ timeout: 10_000 });
-      await page.waitForTimeout(3_000);
+      // networkidle guards the PeopleSoft save roundtrip; sleep was redundant.
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
       log.success(`Saved emergency contact for ${record.employee.name}`);
