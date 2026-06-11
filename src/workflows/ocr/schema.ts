@@ -8,7 +8,7 @@ export const OcrInputSchema = z.object({
   formType:         z.string(),
   sessionId:        z.string(),
   rosterPath:       z.string().optional(),
-  rosterMode:       z.enum(["existing", "download"]).default("existing"),
+  rosterMode:       z.enum(["existing", "download", "wait"]).default("existing"),
   parentRunId:      z.string().optional(),
   parentSubject:    z.string().optional(),
   /**

@@ -158,4 +158,40 @@ describe("VerifyRecordView lookup loading text", () => {
     assert.match(html, /not found/i);
     assert.doesNotMatch(html, /Person lookup/);
   });
+
+  it("uses lookup styling instead of failure styling while a missing check is still looking up", () => {
+    const lookupTracker: OcrRecordLookupTracker = {
+      phase: "pending",
+      label: "Person lookup pending",
+      traceId: "vf-101010-abcd",
+      inProgress: true,
+      enrichmentInProgress: true,
+      person: {
+        phase: "pending",
+        label: "Person lookup pending",
+        traceId: "vf-101010-abcd",
+        inProgress: true,
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      React.createElement(VerifyRecordView, {
+        record: verifyRecord([
+          {
+            key: "activeStatus",
+            label: "Active Status",
+            onPaper: false,
+            paperValue: null,
+            foundValue: null,
+            source: "ucpath",
+            status: "missing",
+          },
+        ]),
+        lookupTracker,
+      }),
+    );
+
+    assert.match(html, /text-info/);
+    assert.doesNotMatch(html, /text-destructive/);
+  });
 });

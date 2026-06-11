@@ -20,9 +20,9 @@ The **emergency-contact preflight + standalone CLI** deliberately bypass the ker
 
 ## URL injection
 
-`SystemConfig.login` is `(page, instance?) => Promise<void>` — the kernel does not pass `input` to the login function. To thread the per-run URL in, `workflow.ts` keeps a module-level `pendingLandingUrl` that the HTTP handler sets via `_setPendingLandingUrl(url)` before calling `runWorkflow`, and clears in `.finally()`.
+`SystemConfig.login` is `(page, instance?) => Promise<void>` — the kernel does not pass `input` to the login function. To thread the per-run URL in, `workflow.ts` keeps a module-level `pendingLandingUrl` that the shared queue sets via `_setPendingLandingUrl(url)` immediately before starting a queued job, and clears in `.finally()`.
 
-**Safety:** the module-level `rosterDownloadInFlight` lock in `handler.ts` serializes all runs across ids, so `pendingLandingUrl` can never be overwritten mid-run. If that lock is ever dropped (e.g. enabling multi-browser concurrency), this pattern breaks — thread the URL via a per-runId `WeakMap` instead. This is the ONLY place in the repo using module-level state to pass data into `systems[].login`; other workflows have hardcoded auth URLs (UKG_URL, UCPath URL, etc.).
+**Safety:** the module-level SharePoint queue in `handler.ts` serializes all runs across ids, so `pendingLandingUrl` can never be overwritten mid-run. If that queue is ever dropped (e.g. enabling multi-browser concurrency), this pattern breaks — thread the URL via a per-runId `WeakMap` instead. This is the ONLY place in the repo using module-level state to pass data into `systems[].login`; other workflows have hardcoded auth URLs (UKG_URL, UCPath URL, etc.).
 
 ## Auth reuse
 
@@ -38,7 +38,7 @@ The dashboard path saves to `.tracker/sharepoint/<YYYY-MM-DDTHH-MM-SS>-<suggeste
 
 ## HTTP behavior — fire-and-forget
 
-Clicking a dropdown item returns 202 immediately with `{ok, id, label, status: "launched"}`. The frontend toasts "Started — approve Duo on your phone. Watch progress in the Sessions panel." Operator observes:
+Clicking a dropdown item returns 202 immediately with `{ok, id, label, status: "launched" | "queued"}`. The frontend toasts "Started" for the current job and "Queued" when it will run after an already active SharePoint job. Operator observes:
 
 - **Sessions panel:** live workflow box with the browser chip, Duo chip glowing during phone tap, DONE/FAILED pill on exit.
 - **LogPanel:** pick "SharePoint Download" in the TopBar dropdown — per-step log lines stream in via the kernel's log-context wrapper.
@@ -48,7 +48,7 @@ Post-launch failures (auth timeout, Duo timeout, Excel click miss) mark the trac
 
 ## Concurrency
 
-Module-level `rosterDownloadInFlight` flag. Concurrent invocations **across ids** return HTTP 409 with an actionable error — the dashboard renders this as a warning toast. Duo approval requires a phone in hand, so stacking browsers is both wasteful and confusing. Intentionally not keyed by `id` — downloading onboarding and a future separations roster in parallel would still compete for the same phone tap.
+Module-level serial queue in `handler.ts`. Concurrent fresh invocations **across ids** enqueue behind the current job instead of launching parallel browsers. `requestSharePointDownload({ mode: "wait" })` joins the newest current/queued job so OCR-backed run modals can wait for an already-requested roster; `mode: "fresh"` always queues a new job. Intentionally not keyed by `id` — downloading onboarding and a future separations roster in parallel would still compete for the same phone tap.
 
 ## Adding a new spreadsheet
 
@@ -62,7 +62,7 @@ If the registry grows past ~6 entries consider switching the dropdown to grouped
 
 - **Endpoints matter.** The dashboard fetches `GET /api/sharepoint-download/list` on mount and `POST /api/sharepoint-download/run` with `{ id }` on click. POST returns 202 (not 200) — frontend must treat 202 as success. The pre-kernel shape returned 200 with `{path, filename}`; that was dropped 2026-04-22 when the run became fire-and-forget.
 - **Missing env var is OK.** The dropdown still renders the item; it's just disabled with an "unset" hint and a tooltip pointing at the env var name. Only clicking a configured item launches a browser. Unknown `id` in the POST returns 404 with the list of valid ids — that can only happen if the frontend and backend registry go out of sync (stale bundle).
-- **Don't remove the in-flight lock** without also rewiring the `pendingLandingUrl` closure in `workflow.ts` — they're coupled by "only one run at a time" semantics. Runs queued behind the lock would otherwise race for the same `pendingLandingUrl`.
+- **Don't remove the serial queue** without also rewiring the `pendingLandingUrl` closure in `workflow.ts` — they're coupled by "only one run at a time" semantics. Parallel runs would otherwise race for the same `pendingLandingUrl`.
 
 ## Lessons Learned
 

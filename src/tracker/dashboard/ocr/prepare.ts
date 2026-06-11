@@ -6,7 +6,7 @@ import { buildTraceId } from "../../../domain/queue-trace-id.js";
 import { serializeRunOptionsForData, type RunOptions } from "../../../domain/run-options.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
-import { runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
+import { operationTraceCode, runOcrOrchestrator, type OcrOrchestratorOpts } from "../../../workflows/ocr/orchestrator.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
 import { OPERATION_COORDINATOR_WORKFLOWS } from "./shared.js";
@@ -134,7 +134,7 @@ export function buildOcrPrepareHandler(
       operationRunId = randomUUID();
       const operationItemId = `ocr-prep-${sessionId}`;
       const operationTraceId = buildTraceId({
-        code: spec.traceCode ?? "oc",
+        code: operationTraceCode(input.targetWorkflow) ?? spec.traceCode ?? "oc",
         runId: operationRunId,
         at: new Date(),
       });

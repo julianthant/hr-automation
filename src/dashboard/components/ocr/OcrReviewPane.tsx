@@ -50,6 +50,7 @@ import {
   type OcrDownstreamConfig as OcrDownstreamConfigType,
 } from "@/lib/ocr-downstream-registry";
 import { cn } from "@/lib/utils";
+import { overlayServerOwnedPrepFields } from "./prep-record-overlay";
 
 export interface OcrReviewPaneProps {
   entry: TrackerEntry;
@@ -117,40 +118,6 @@ type MergedPrepRecordRow = {
   originalIndex: number;
   record: AnyPreviewRecord;
 };
-
-/** Continuation/server patches win over stale localStorage prep snapshots — operator edits keep form fields only. */
-function overlayServerOwnedPrepFields(
-  baseRecord: AnyPreviewRecord | undefined,
-  local: AnyPreviewRecord,
-): AnyPreviewRecord {
-  if (!baseRecord) return local;
-  if (baseRecord.formKind !== local.formKind) {
-    console.warn(
-      "[OcrReviewPane] overlayServerOwnedPrepFields: variant mismatch",
-      { baseKind: baseRecord.formKind, localKind: local.formKind },
-    );
-    return local;
-  }
-  if (local.formKind === "oath" && baseRecord.formKind === "oath") {
-    return {
-      ...local,
-      verification: baseRecord.verification,
-      matchState: baseRecord.matchState,
-      matchSource: baseRecord.matchSource,
-      warnings: baseRecord.warnings,
-    };
-  }
-  if (local.formKind === "emergency-contact" && baseRecord.formKind === "emergency-contact") {
-    return {
-      ...local,
-      verification: baseRecord.verification,
-      matchState: baseRecord.matchState,
-      matchSource: baseRecord.matchSource,
-      warnings: baseRecord.warnings,
-    };
-  }
-  return local;
-}
 
 function loadPrepStorage(rawKey: string): { edits: Record<number, AnyPreviewRecord>; removed: Set<number> } {
   if (!rawKey) return { edits: {}, removed: new Set() };
@@ -1324,16 +1291,28 @@ function renderFormCardNav(args: {
 }
 
 function renderLookupTrackerBadge(tracker: OcrRecordLookupTracker): ReactNode {
+  const statusLabel =
+    tracker.phase === "pending"
+      ? "pending"
+      : tracker.phase === "running"
+        ? "running"
+        : tracker.phase === "failed"
+          ? "failed"
+          : "completed";
   return (
-    <span
-      className={cn(
-        "inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase",
-        lookupTrackerClassName(tracker.phase),
-      )}
-    >
-      <span className="truncate">{tracker.label}</span>
+    <span className="inline-flex max-w-full items-center gap-1.5">
+      <span
+        className={cn(
+          "shrink-0 rounded-md border px-1.5 py-px font-mono text-[10px] uppercase tracking-wide",
+          lookupTrackerClassName(tracker.phase),
+        )}
+      >
+        {statusLabel}
+      </span>
       {tracker.traceId ? (
-        <span className="shrink-0 text-current/70">{tracker.traceId}</span>
+        <span className="min-w-0 truncate font-mono text-[11px] lowercase tabular-nums text-muted-foreground">
+          {tracker.traceId}
+        </span>
       ) : null}
     </span>
   );

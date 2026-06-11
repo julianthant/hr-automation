@@ -102,18 +102,20 @@ test("buildSharePointRosterDownloadHandler: 404 on unknown id", async () => {
   assert.equal(res.status, 404);
 });
 
-test("buildSharePointRosterDownloadHandler: 409 when concurrent run in flight", async (t) => {
-  const tmp = mkdtempSync(join(tmpdir(), "sp-409-"));
+test("buildSharePointRosterDownloadHandler: queues a fresh concurrent run behind the current one", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "sp-queue-"));
   t.onTestFinished(() => rmSync(tmp, { recursive: true, force: true }));
 
-  const { buildSharePointRosterDownloadHandler, _resetInFlightForTests } =
+  const { buildSharePointRosterDownloadHandler, getSharePointDownloadStatus, _resetInFlightForTests } =
     await import("../../../src/workflows/sharepoint-download/handler.js");
   _resetInFlightForTests();
 
+  const started: string[] = [];
   const handler = buildSharePointRosterDownloadHandler({
     outDir: tmp,
     getEnv: () => "https://example.com/file.xlsx",
-    runWorkflowFn: (async () => {
+    runWorkflowFn: (async (_wf, input) => {
+      started.push((input as { id: string }).id);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }) as typeof import("../../../src/core/kernel/workflow.js").runWorkflow,
   });
@@ -122,12 +124,58 @@ test("buildSharePointRosterDownloadHandler: 409 when concurrent run in flight", 
   // Wait one tick so the first handler flips the lock before the second call.
   await new Promise((resolve) => setImmediate(resolve));
   const second = await handler({ id: "onboarding" });
-  assert.equal(second.status, 409);
+  assert.equal(second.status, 202);
+  assert.ok("ok" in second.body && second.body.ok);
+  if ("ok" in second.body && second.body.ok) {
+    assert.equal(second.body.status, "queued");
+  }
 
-  // Drain the first (and its background run) so the module lock clears for
-  // any subsequent tests.
+  const queuedStatus = getSharePointDownloadStatus();
+  assert.equal(queuedStatus.inFlight, true);
+  assert.equal(queuedStatus.queued.length, 1);
+
+  // Drain both queued runs so the module lock clears for any subsequent tests.
   await first;
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.deepEqual(started, ["onboarding", "onboarding"]);
+  assert.equal(getSharePointDownloadStatus().inFlight, false);
+});
+
+test("requestSharePointDownload: wait mode joins the current queued/running job", async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), "sp-wait-"));
+  t.onTestFinished(() => rmSync(tmp, { recursive: true, force: true }));
+
+  const { requestSharePointDownload, getSharePointDownloadStatus, _resetInFlightForTests } =
+    await import("../../../src/workflows/sharepoint-download/handler.js");
+  _resetInFlightForTests();
+
+  const started: string[] = [];
+  const runner = (async (_wf, input) => {
+    started.push((input as { id: string }).id);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }) as typeof import("../../../src/core/kernel/workflow.js").runWorkflow;
+
+  const first = requestSharePointDownload(
+    { id: "onboarding", mode: "fresh" },
+    {
+      outDir: tmp,
+      getEnv: () => "https://example.com/file.xlsx",
+      runWorkflowFn: runner,
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  const waiter = requestSharePointDownload(
+    { id: "onboarding", mode: "wait" },
+    {
+      outDir: tmp,
+      getEnv: () => "https://example.com/file.xlsx",
+      runWorkflowFn: runner,
+    },
+  );
+
+  assert.equal(getSharePointDownloadStatus().inFlight, true);
+  await Promise.all([first, waiter]);
+  assert.deepEqual(started, ["onboarding"]);
 });
 
 test("buildSharePointListHandler: maps registry + configured flag", async () => {

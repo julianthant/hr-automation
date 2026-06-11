@@ -167,6 +167,7 @@ test("prepare with targetWorkflow=oath-signature creates an operation row and de
     assert.equal(op!.data?.ocrSessionId, "sess-op");
     assert.equal(op!.data?.operationWorkflow, "oath-signature");
     assert.equal(op!.data?.ocrStatus, "running");
+    assert.match(op!.data?.__traceId ?? "", /^os-\d{6}-[a-z0-9]{4}$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -195,6 +196,7 @@ test("prepare with targetWorkflow=emergency-contact creates an emergency-contact
     assert.equal(op!.data?.archetype, "operation");
     assert.equal(op!.data?.operationWorkflow, "emergency-contact");
     assert.equal(op!.data?.pdfOriginalName, "contacts.pdf");
+    assert.match(op!.data?.__traceId ?? "", /^ec-\d{6}-[a-z0-9]{4}$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -432,6 +434,7 @@ test("prepare fails loud (aborts the OCR run) when the oath-upload task cannot b
     assert.ok(failed, "failed oath-upload row emitted");
     assert.equal(failed!.step, "ocr-prep-failed");
     assert.equal(failed!.data?.archetype, "single");
+    assert.match(failed!.data?.__traceId ?? "", /^ou-\d{6}-[a-z0-9]{4}$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

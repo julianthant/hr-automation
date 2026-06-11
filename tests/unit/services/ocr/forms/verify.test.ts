@@ -131,6 +131,7 @@ describe("buildVerifyChecks", () => {
     const rec = makePreview({
       formKind: "oath",
       printedName: null,
+      paperEmployeeId: "",
       employeeId: "10000002",
       name: "Jane Doe",
       paperEmploymentDate: null,
@@ -146,8 +147,9 @@ describe("buildVerifyChecks", () => {
     // name is blank on paper but resolved via lookup → found
     assert.equal(findCheck(checks, "name").status, "found");
     assert.equal(findCheck(checks, "name").source, "ucpath");
-    // eid present on paper (carried into employeeId) → present
-    assert.equal(findCheck(checks, "eid").status, "present");
+    assert.equal(findCheck(checks, "eid").status, "found");
+    assert.equal(findCheck(checks, "eid").paperValue, null);
+    assert.equal(findCheck(checks, "eid").foundValue, "10000002");
     assert.equal(findCheck(checks, "employmentDate").status, "found");
     assert.equal(findCheck(checks, "employmentDate").source, "crm");
     assert.equal(findCheck(checks, "oathDate").status, "found");
@@ -172,6 +174,34 @@ describe("buildVerifyChecks", () => {
     for (const key of ["name", "eid", "employmentDate", "oathDate", "officialSigner", "activeStatus"]) {
       assert.equal(findCheck(checks, key).status, "missing", `${key} should be missing`);
     }
+  });
+
+  it("keeps paper EID present when paperEmployeeId was captured before enrichment", () => {
+    const rec = makePreview({
+      formKind: "oath",
+      paperEmployeeId: "10000002",
+      employeeId: "10000002",
+      personLookupStatus: "completed",
+    });
+
+    const eid = findCheck(buildVerifyChecks(rec), "eid");
+
+    assert.equal(eid.status, "present");
+    assert.equal(eid.paperValue, "10000002");
+  });
+
+  it("treats legacy post-lookup EIDs as looked up when no paperEmployeeId exists", () => {
+    const rec = makePreview({
+      formKind: "oath",
+      employeeId: "10535890",
+      personLookupStatus: "completed",
+    });
+
+    const eid = findCheck(buildVerifyChecks(rec), "eid");
+
+    assert.equal(eid.status, "found");
+    assert.equal(eid.paperValue, null);
+    assert.equal(eid.foundValue, "10535890");
   });
 
   it("officerSigned===true with no printed name still counts the signer as present", () => {
@@ -385,6 +415,7 @@ describe("verifyOcrFormSpec.matchRecord", () => {
       roster: [],
     });
     assert.equal(preview.name, "Doe, Jane A");
+    assert.equal(preview.paperEmployeeId, "10000001");
     assert.equal(preview.employeeId, "10000001");
     assert.equal(preview.matchState, "extracted");
     assert.equal(preview.selected, true);

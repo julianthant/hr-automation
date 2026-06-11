@@ -69,6 +69,21 @@ test('runWorkflow seeds queueRowKind + __traceId onto every row (not just pendin
   }
 })
 
+test('runWorkflow stamps a trace id on bare in-process runs before the pending row', async () => {
+  const dir = TMP()
+  await runWorkflow(wf, { doc: 'scan.pdf' }, {
+    launchFn: fakeLaunch,
+    trackerDir: dir,
+  })
+
+  const rows = readRows(dir)
+  const traceIds = new Set(rows.map((row) => row.data?.__traceId).filter(Boolean))
+  assert.equal(traceIds.size, 1, 'pending/running/done rows should share one frozen trace id')
+  const [traceId] = traceIds
+  assert.match(traceId ?? '', /^kt-\d{6}-[a-z0-9]{4}$/)
+  assert.notEqual(traceId, undefined)
+})
+
 test('runWorkflow reuses the trace id frozen on the run\'s pending row (delegation case)', async () => {
   const dir = TMP()
   const runId = 'ccccdddd-1111-2222-3333-444455556666'

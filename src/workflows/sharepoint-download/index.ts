@@ -24,12 +24,15 @@ export {
   buildSharePointListHandler,
   isDownloadInFlight,
   getSharePointDownloadStatus,
+  requestSharePointDownload,
   _resetInFlightForTests,
 } from "./handler.js";
 export type {
   RosterDownloadResponse,
   RosterDownloadHandlerOptions,
   SharePointDownloadListItem,
+  SharePointDownloadRequest,
+  SharePointDownloadResult,
 } from "./handler.js";
 export { SharePointDownloadInputSchema } from "./schema.js";
 export type { SharePointDownloadInput } from "./schema.js";

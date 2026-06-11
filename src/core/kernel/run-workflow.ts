@@ -317,6 +317,8 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         ...(inputForRow ? { input: inputForRow } : {}),
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
         archetype: rowArchetype,
+        traceCode: runtimeOptions?.rootCode ?? wf.code,
+        ...(runtimeOptions?.rootTracePrefix ? { rootTracePrefix: runtimeOptions.rootTracePrefix } : {}),
       },
     )
   }, opts.trackerDir)
