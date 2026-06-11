@@ -11,6 +11,7 @@ import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
 import { OPERATION_COORDINATOR_WORKFLOWS } from "./shared.js";
 import { clearOcrPrepareAbort, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
+import { runRegistry, type RunHandle } from "../../../core/run-registry.js";
 
 const WORKFLOW = "ocr";
 
@@ -21,7 +22,10 @@ export interface PrepareInput {
   pdfOriginalName: string;
   pdfFileId?: string;
   formType: string;
-  rosterMode: "existing" | "download";
+  // "wait" joins the newest queued/running SharePoint job instead of starting a
+  // fresh download; the Zod schema + orchestrator already handle it (the run
+  // modal offers it only while a SharePoint job is current/queued).
+  rosterMode: "existing" | "download" | "wait";
   rosterPath?: string;
   sessionId?: string;
   previousRunId?: string;
@@ -211,6 +215,28 @@ export function buildOcrPrepareHandler(
       );
     }
 
+    // Register the prep run on the unified run registry (Contract 5) so the
+    // queue-row Cancel × reaches it. `/api/ocr/prepare` runs the orchestrator in
+    // this process with NO daemon and NO browser Session, so without a registered
+    // handle `buildCancelRunningHandler` finds neither a SQLite worker nor an
+    // in-process run and falls into its stale-tracker branch — which writes a
+    // cosmetic cancelled row but aborts NOTHING, so the live orchestrator's next
+    // emit overwrites it and prep keeps running. A browserless handle (no
+    // `session`) skips the chromium watchdog; cancel is delivered by aborting the
+    // controller, which the orchestrator bridges to its prepare-abort flag (every
+    // prep-phase poll observes it within ~500ms). Keyed by the OCR run's
+    // (workflow=ocr, itemId=sessionId, runId) so it matches the cancel request.
+    const controller = new AbortController();
+    const runHandle: RunHandle = {
+      runId,
+      itemId: sessionId,
+      workflow: WORKFLOW,
+      controller,
+      startedAt: Date.now(),
+      source: "in-process",
+    };
+    runRegistry.register(runHandle);
+
     void (async () => {
       // The OCR run is delegated under the operation coordinator row (display
       // targets) or under the oath-upload daemon task (born here). For
@@ -291,6 +317,10 @@ export function buildOcrPrepareHandler(
             {
               runId,
               trackerDir,
+              // The orchestrator bridges this signal to its in-process
+              // prepare-abort flag, so a queue-row Cancel (which aborts the
+              // controller via runRegistry.cancel) unwinds a RUNNING prep.
+              signal: controller.signal,
               // Mirror the OCR's awaiting-approval transition onto the operation
               // row's denormalized status so it reads "awaiting review" before
               // the operator approves.
@@ -308,17 +338,32 @@ export function buildOcrPrepareHandler(
         }, trackerDir);
       } catch (err) {
         log.error(`[ocr-http] orchestrator threw: ${errorMessage(err)}`);
-        // Orchestrator emits the OCR-side `failed` row before rethrow;
-        // discard-prepare owns operator-discard terminal rows (including the
-        // operation row, mirrored via the discard parent path).
         if (isOperatorDiscardAbortError(err)) {
-          /* discard handler already emitted */
+          // The orchestrator's prepare-abort flag was tripped. Two triggers
+          // share this error: a real operator discard (`/api/ocr/discard-prepare`,
+          // which leaves `controller.signal` un-aborted) and a queue-row Cancel ×
+          // (which routes through `runRegistry.cancel` → aborts the controller →
+          // the orchestrator's entry bridge sets the flag). They diverge on who
+          // owns the terminal row:
+          if (controller.signal.aborted) {
+            // Queue-row Cancel: nothing else writes the terminal row in this
+            // process (cancel.ts returns early on the in-process registry hit and
+            // does NOT touch the tracker). The orchestrator rethrew BEFORE writing
+            // its `failed` row, so write the terminal cancelled row here — inherit
+            // the preview shape so the row keeps its Preview tab + PDF title.
+            emitOcrCancelledRow(sessionId, runId, trackerDir);
+            emitOperationRow("cancelled", "cancelled", "failed", "ocr-cancelled");
+          }
+          // Real operator discard: discard-prepare owns the OCR terminal row AND
+          // mirrors the operation row, so emit nothing here.
         } else {
-          // Non-discard failure: drive the operation row terminal too, so it
+          // Non-discard failure: orchestrator already emitted the OCR-side `failed`
+          // row before rethrow. Drive the operation row terminal too, so it
           // doesn't sit "running" forever after the OCR run failed.
           emitOperationRow("failed", "failed", "failed", "ocr-failed");
         }
       } finally {
+        runRegistry.unregister(runId);
         clearOcrPrepareAbort(sessionId, runId);
         releaseSessionLock(sessionId);
       }
@@ -334,6 +379,36 @@ export function buildOcrPrepareHandler(
       },
     };
   };
+}
+
+/**
+ * Write the terminal `failed step=cancelled` OCR row after a queue-row Cancel ×
+ * unwound a RUNNING prep. Inherits the latest OCR row's data so the cancelled row
+ * keeps its preview shape (Preview tab, PDF-filename title, records). The unified
+ * cancel route (`runRegistry.cancel`) only aborts the controller — it deliberately
+ * does NOT touch the tracker for an in-process run, so this is the row's owner.
+ */
+function emitOcrCancelledRow(sessionId: string, runId: string, trackerDir: string | undefined): void {
+  const prior = findLatestEntryForPredicate({
+    workflow: WORKFLOW,
+    trackerDir,
+    lookbackDays: 7,
+    predicate: (e) => e.id === sessionId && e.runId === runId,
+  });
+  emitTrackerRow(
+    {
+      workflow: WORKFLOW,
+      timestamp: new Date().toISOString(),
+      id: sessionId,
+      runId,
+      ...(prior?.parentRunId ? { parentRunId: prior.parentRunId } : {}),
+      status: "failed",
+      step: "cancelled",
+      data: { ...(prior?.data ?? {}), archetype: prior ? resolveRowArchetype(prior) : "preview" },
+      error: "Cancelled by user",
+    },
+    trackerDir,
+  );
 }
 
 /**

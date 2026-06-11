@@ -5,6 +5,8 @@
 import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -44,6 +46,19 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   if (!latest) throw new Error("OCR row not found in JSONL");
   const formType = latest.data?.formType as unknown as string | undefined;
   if (!formType) throw new Error("formType missing on OCR row");
+  // Hard-reject verify rows (N4). force-research is the oath/EC re-research path:
+  // it CLEARS employeeId, re-fans person-lookup by NAME, and patches via
+  // `patchOcrRecordFromEidLookupOutcome` only — it never calls
+  // `applyPersonLookupToVerifyRecord`, never rebuilds `checks[]`, and drops
+  // `paperEmployeeId`. Running it on a verify record corrupts the completeness
+  // report. The verify analogue is `verify-relookup` (re-runs ONE lookup per
+  // record + rebuilds checks); the dashboard routes verify rows there. Mirror
+  // verify-relookup's inverse guard (`formType !== "verify"`).
+  if (formType === "verify") {
+    throw new Error(
+      'force-research does not apply to verify rows — use verify-relookup (per-check ↻) instead',
+    );
+  }
   const spec = getFormSpec(formType);
   if (!spec) throw new Error(`Unknown formType "${formType}"`);
 
@@ -124,13 +139,27 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   }
 
   const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  const outcomes = await watchFn({
-    workflow: "person-lookup",
-    expectedItemIds: itemIds,
-    trackerDir,
-    date,
-    timeoutMs: 30 * 60_000,
-  });
+  let outcomes: ChildOutcome[];
+  try {
+    outcomes = await watchFn({
+      workflow: "person-lookup",
+      expectedItemIds: itemIds,
+      trackerDir,
+      date,
+      timeoutMs: 30 * 60_000,
+      // Operator-cancel bridge: the orchestrator trips the prepare-abort flag on
+      // `ctx.signal`; this watch throws a discard-abort error when it's set.
+      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
+    });
+  } catch (err) {
+    if (isOperatorDiscardAbortError(err)) {
+      // Cancel mid-research: cascade-cancel the still-queued person-lookup
+      // children so a daemon doesn't run them after the operator gave up.
+      // Fail-loud — a cascade error propagates.
+      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
+    }
+    throw err;
+  }
 
   // Patch records from lookup outcomes before emitting the final state.
   for (const outcome of outcomes) {

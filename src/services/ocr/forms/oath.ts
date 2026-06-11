@@ -19,7 +19,15 @@ import type {
 } from "../../../workflows/ocr/types.js";
 import type { OathSignerInput } from "../../../workflows/oath-signature/schema.js";
 import type { OathUploadInput } from "../../../workflows/oath-upload/schema.js";
-import { DocumentTypeSchema, LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
+import {
+  DocumentTypeSchema,
+  LLM_HIGH_CONFIDENCE,
+  MatchStateSchema,
+  VerificationSchema,
+  assertCarryForwardKindCompatible,
+  isForceResearchFlagRecord,
+  ocrChildItemIdPrefix,
+} from "./shared.js";
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
 
@@ -166,7 +174,7 @@ export const oathOcrFormSpec: OcrFormSpec<
         ...record,
         employeeId: normalizeUcpathEmployeeId(record.employeeId),
         matchState: "extracted",
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: false,
         warnings: [],
@@ -190,7 +198,7 @@ export const oathOcrFormSpec: OcrFormSpec<
           employeeId: formEid,
           matchState: "matched",
           matchSource: "form-eid",
-          documentType: "expected",
+          documentType: record.documentType ?? "expected",
           originallyMissing: [],
           selected: true,
           warnings: [],
@@ -202,7 +210,7 @@ export const oathOcrFormSpec: OcrFormSpec<
         employeeId: formEid,
         matchState: "lookup-pending",
         matchSource: "form-eid",
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
         warnings: [`EID ${formEid} extracted from form but not in roster — verifying`],
@@ -232,7 +240,7 @@ export const oathOcrFormSpec: OcrFormSpec<
         matchState: "lookup-pending",
         matchSource: "manual",
         rosterCandidates: topCandidates,
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
         warnings:
@@ -251,7 +259,7 @@ export const oathOcrFormSpec: OcrFormSpec<
         matchSource: "roster",
         matchConfidence: top.score,
         rosterCandidates: topCandidates,
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
         warnings: top.score < 1.0
@@ -269,7 +277,7 @@ export const oathOcrFormSpec: OcrFormSpec<
         matchSource: "manual",
         matchConfidence: ocrConfidence,
         rosterCandidates: topCandidates,
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
         warnings: [
@@ -289,7 +297,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       employeeId: "",
       matchState: "lookup-pending",
       rosterCandidates: topCandidates,
-      documentType: "expected",
+      documentType: record.documentType ?? "expected",
       originallyMissing: [],
       selected: true,
       warnings: closeSecond
@@ -375,17 +383,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     // kinds (mirrors `verify.applyCarryForward`). Tolerate undefined (legacy)
     // and tolerate "emergency-contact"/"unknown" (a re-run that re-classified
     // the same page) by carrying the v2 formKind forward.
-    const v1Kind = v1.formKind as string | undefined;
-    const v2Kind = v2.formKind as string | undefined;
-    if (
-      v1Kind !== undefined &&
-      v2Kind !== undefined &&
-      v1Kind !== v2Kind
-    ) {
-      throw new Error(
-        `oath.applyCarryForward: cross-form-kind carry-forward not supported (v1=${v1Kind}, v2=${v2Kind})`,
-      );
-    }
+    assertCarryForwardKindCompatible("oath", v1.formKind, v2.formKind);
     return {
       ...v2,
       employeeId: v1.employeeId || v2.employeeId,
@@ -399,9 +397,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     };
   },
 
-  isForceResearchFlag(record): boolean {
-    return record.forceResearch === true;
-  },
+  isForceResearchFlag: isForceResearchFlagRecord,
 
   // ─── Approve fan-out: per-record → oath-signature signer rows ─────────
   // Each approved record (a signed row with a valid 5+-digit EID) becomes one
@@ -422,7 +418,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       return built;
     },
     deriveItemId(_record, parentRunId, index): string {
-      return `ocr-oath-${parentRunId}-r${index}`;
+      return `${ocrChildItemIdPrefix("oath")}-${parentRunId}-r${index}`;
     },
     canFanOut(record): boolean {
       // Skip records EXPLICITLY classified as non-oath pages (EC or unknown) —
