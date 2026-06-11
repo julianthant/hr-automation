@@ -1,6 +1,11 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { VerificationSchema } from "../../../../src/services/ocr/forms/shared.js";
+import {
+  VerificationSchema,
+  ocrChildItemIdPrefix,
+  isForceResearchFlagRecord,
+  assertCarryForwardKindCompatible,
+} from "../../../../src/services/ocr/forms/shared.js";
 import { getFormSpec, listFormTypes } from "../../../../src/services/ocr/forms/registry.js";
 
 describe("shared OCR forms", () => {
@@ -30,5 +35,38 @@ describe("shared OCR forms", () => {
     assert.ok(verify);
     assert.equal(verify.rosterMode, "optional");
     assert.equal(verify.hasApproveFanOut, false);
+  });
+
+  it("ocrChildItemIdPrefix maps each form to a distinct prefix; non-oath forms are NOT mislabeled ec (F8)", () => {
+    assert.equal(ocrChildItemIdPrefix("oath"), "ocr-oath");
+    assert.equal(ocrChildItemIdPrefix("emergency-contact"), "ocr-ec");
+    // The bug: the old ternary `formType === "oath" ? "oath" : "ec"` made verify
+    // (and any future form) read `ocr-ec`. The helper keeps them distinct.
+    assert.equal(ocrChildItemIdPrefix("verify"), "ocr-verify");
+    assert.equal(ocrChildItemIdPrefix("new-form"), "ocr-new-form");
+  });
+
+  it("isForceResearchFlagRecord is the shared forceResearch===true predicate (F8e)", () => {
+    assert.equal(isForceResearchFlagRecord({ forceResearch: true }), true);
+    assert.equal(isForceResearchFlagRecord({ forceResearch: false }), false);
+    assert.equal(isForceResearchFlagRecord({}), false);
+    assert.equal(isForceResearchFlagRecord(null), false);
+  });
+
+  it("assertCarryForwardKindCompatible rejects two different KNOWN kinds, tolerates undefined (F8e)", () => {
+    assert.doesNotThrow(() => assertCarryForwardKindCompatible("oath", "oath", "oath"));
+    assert.doesNotThrow(() => assertCarryForwardKindCompatible("oath", undefined, "oath"));
+    assert.doesNotThrow(() => assertCarryForwardKindCompatible("oath", "oath", undefined));
+    assert.throws(
+      () => assertCarryForwardKindCompatible("oath", "oath", "emergency-contact"),
+      /cross-form-kind/,
+    );
+  });
+
+  it("EC form spec brands standalone runs 'ec' (F5)", () => {
+    assert.equal(getFormSpec("emergency-contact")?.traceCode, "ec");
+    // oath brands 'ou', verify 'vf' — kept distinct per the trace lessons.
+    assert.equal(getFormSpec("oath")?.traceCode, "ou");
+    assert.equal(getFormSpec("verify")?.traceCode, "vf");
   });
 });

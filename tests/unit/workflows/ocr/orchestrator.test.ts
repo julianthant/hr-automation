@@ -42,12 +42,12 @@ async function setup(): Promise<{
   return { dir, uploadsDir, rosterPath, pdfPath, pdfFileId };
 }
 
-test("OCR trace-id branding: oath form spec sets traceCode 'ou'; emergency-contact has none (keeps 'oc')", async () => {
-  // Root trace-id propagation brands the WHOLE oath operation by its
-  // destination (oath-upload → "ou"). The oath OCR root run computes its trace
-  // id off `spec.traceCode ?? "oc"`, so the oath form yields `ou-…` while
-  // standalone/EC forms (no traceCode) keep `oc-…`. Pins the form-spec contract
-  // that drives the orchestrator's branding at orchestrator.ts:185.
+test("OCR trace-id branding: oath spec brands 'ou', EC brands 'ec' (F5), verify 'vf'", async () => {
+  // Root trace-id propagation brands a STANDALONE OCR run by its form spec's
+  // `traceCode` (`spec.traceCode ?? "oc"`): oath → `ou-…`, emergency-contact →
+  // `ec-…` (F5 — previously fell back to the OCR default `oc-…`), verify →
+  // `vf-…`. An OCR run started as an operation derives the code from the
+  // operation intent FIRST (`operationTraceCode`), tested separately below.
   const { getFormSpec } = await import("../../../../src/services/ocr/forms/registry.js");
   const { buildTraceId } = await import("../../../../src/domain/queue-trace-id.js");
   const at = new Date("2026-06-02T09:05:53.000Z");
@@ -60,8 +60,8 @@ test("OCR trace-id branding: oath form spec sets traceCode 'ou'; emergency-conta
 
   const ecSpec = getFormSpec("emergency-contact");
   assert.ok(ecSpec, "emergency-contact form spec must resolve");
-  assert.strictEqual(ecSpec!.traceCode, undefined, "EC spec has no traceCode → keeps default");
-  assert.match(buildTraceId({ code: ecSpec!.traceCode ?? "oc", runId, at }), /^oc-\d{6}-1a57$/);
+  assert.strictEqual(ecSpec!.traceCode, "ec", "EC spec brands standalone runs 'ec' (F5)");
+  assert.match(buildTraceId({ code: ecSpec!.traceCode ?? "oc", runId, at }), /^ec-\d{6}-1a57$/);
 });
 
 test("OCR trace-id branding: operation intent disambiguates oath-signature (os) from oath-upload (ou)", async () => {

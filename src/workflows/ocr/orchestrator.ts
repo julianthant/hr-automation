@@ -37,6 +37,7 @@ import { log } from "../../utils/log.js";
 import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
 import { runDependencySchedulerTickForTrackerDir } from "../../tracker/tasks/scheduler.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
+import { ocrChildItemIdPrefix } from "../../services/ocr/forms/shared.js";
 import { applyCarryForward } from "./carry-forward.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -778,7 +779,7 @@ export async function runOcrOrchestrator(
 
       const lookupTargetsByRecord = countTargetsByRecord(lookupTargets);
       const eidLookupEnqueueItems = lookupTargets.map((t, ordinal) => {
-        const baseItemId = `ocr-${spec.formType === "oath" ? "oath" : "ec"}-${runId}-r${t.index}`;
+        const baseItemId = `${ocrChildItemIdPrefix(spec.formType)}-${runId}-r${t.index}`;
         const itemId = lookupTargetsByRecord.get(t.index)! > 1 ? `${baseItemId}-n${ordinal}` : baseItemId;
         return { record: t.rec, index: t.index, kind: t.kind, name: t.name, eid: t.eid, itemId };
       });
