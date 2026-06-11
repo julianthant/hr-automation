@@ -37,6 +37,7 @@ import { log } from "../../utils/log.js";
 import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
 import { runDependencySchedulerTickForTrackerDir } from "../../tracker/tasks/scheduler.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
+import { ocrChildItemIdPrefix } from "../../services/ocr/forms/shared.js";
 import { applyCarryForward } from "./carry-forward.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -173,8 +174,17 @@ export interface OcrOrchestratorOpts {
   _requestSharePointDownloadOverride?: (
     request: SharePointDownloadRequest,
   ) => Promise<SharePointDownloadResult>;
-  /** Skip the actual runWorkflow(sharepointDownload...) call (tests only). */
-  _skipSharepointDispatch?: boolean;
+  /**
+   * Test-only tripwire for the `rosterMode: "download" | "wait"` path: when set,
+   * reaching the SharePoint dispatch site THROWS instead of dispatching. The
+   * name reflects the THROW semantics — this is NOT a silent skip. It is used by
+   * the discard-cleanup tests, which trip the prepare-abort flag BEFORE roster
+   * resolution and assert the run unwound before it ever reached the SharePoint
+   * dispatch (if the abort failed to short-circuit, the throw makes the test
+   * fail loudly instead of silently downloading). A non-download run never
+   * reaches the guarded site, so the flag is inert for those.
+   */
+  _assertSharepointDispatchUnreached?: boolean;
 }
 
 /**
@@ -394,8 +404,12 @@ export async function runOcrOrchestrator(
       if (!spec0) throw new Error("OCR: no SharePoint download spec registered");
       const childItemId = `ocr-sp-${runId}`;
 
-      if (opts._skipSharepointDispatch) {
-        throw new Error("OCR SharePoint dispatch was skipped before a roster path could be resolved");
+      if (opts._assertSharepointDispatchUnreached) {
+        // Tripwire (tests only): a discard/cancel was supposed to unwind the run
+        // BEFORE roster resolution. Reaching here means it didn't — fail loud.
+        throw new Error(
+          "OCR SharePoint dispatch reached while _assertSharepointDispatchUnreached was set — the run should have unwound before roster resolution",
+        );
       }
 
       log.step(
@@ -778,7 +792,7 @@ export async function runOcrOrchestrator(
 
       const lookupTargetsByRecord = countTargetsByRecord(lookupTargets);
       const eidLookupEnqueueItems = lookupTargets.map((t, ordinal) => {
-        const baseItemId = `ocr-${spec.formType === "oath" ? "oath" : "ec"}-${runId}-r${t.index}`;
+        const baseItemId = `${ocrChildItemIdPrefix(spec.formType)}-${runId}-r${t.index}`;
         const itemId = lookupTargetsByRecord.get(t.index)! > 1 ? `${baseItemId}-n${ordinal}` : baseItemId;
         return { record: t.rec, index: t.index, kind: t.kind, name: t.name, eid: t.eid, itemId };
       });

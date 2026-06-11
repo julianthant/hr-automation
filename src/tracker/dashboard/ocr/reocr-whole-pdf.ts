@@ -5,6 +5,8 @@ import { emitTrackerRow, dateLocal, type TrackerRowEmission } from "../../jsonl.
 import type { TrackerEntry } from "../../jsonl.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tasks/store.js";
 import type { OcrRequest, OcrResult } from "../../../services/ocr/index.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
 import { rowFilePath } from "../../paths.js";
@@ -103,6 +105,10 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       });
 
       const childParentRunId = row.parentRunId ?? input.runId;
+      // Root trace propagation: re-fanned person-lookups must SHARE the OCR root's
+      // operation prefix instead of minting fresh `pl-…` ids. Computed off the
+      // OCR row's frozen `__traceId` (see `rootTracePrefixFromRow`).
+      const childRootTracePrefix = rootTracePrefixFromRow(row);
       let enqueueItems: Array<{ record: unknown; index: number; kind: OcrLookupKind; itemId: string }> = [];
       if (lookupTargets.length > 0) {
         enqueueItems = lookupTargets.map((t) => ({
@@ -122,26 +128,40 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
             { parentRunId: childParentRunId },
           );
         } else {
-          const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
+          // Contract 3: route the re-fan through delegateToAllImpl like its
+          // siblings (force-research / retry-page / verify-relookup) — so
+          // parentRunId stamping, canonical archetype derivation, child pending
+          // pre-emit, AND root-trace propagation (`rootTracePrefix`) all share
+          // one code path. The prior raw `ensureDaemonsAndEnqueue` passed no
+          // rootTracePrefix, so re-fanned lookups minted fresh standalone `pl-…`
+          // prefixes instead of the OCR operation prefix. `fireAndForget: true`
+          // because the background `watchChildRuns` below drives the wait.
+          const { delegateToAllImpl } = await import("../../../core/delegate.js");
           const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
           const inputs = enqueueItems.map((e) =>
             e.kind === "name"
               ? { name: spec.carryForwardKey(e.record as never) }
               : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true },
           );
-          await ensureDaemonsAndEnqueue(personLookupWorkflow, inputs as never, {}, {
-            trackerDir,
+          const inputToItemId = new Map(
+            enqueueItems.map((e) => [
+              e.kind === "name" ? spec.carryForwardKey(e.record as never) : extractOcrRecordEid(e.record),
+              e.itemId,
+            ]),
+          );
+          type PersonLookupChildInput = { name?: string; emplId?: string; keepNonHdh?: boolean };
+          await delegateToAllImpl<PersonLookupChildInput, readonly string[]>({
             parentRunId: childParentRunId,
-            deriveItemId: (inp: { name?: string; emplId?: string }) => {
-              const matched = enqueueItems.find((e) => {
-                if ("name" in inp && inp.name)
-                  return spec.carryForwardKey(e.record as never) === inp.name;
-                if ("emplId" in inp && inp.emplId)
-                  return extractOcrRecordEid(e.record) === inp.emplId;
-                return false;
-              });
-              return matched?.itemId ?? `ocr-whole-fallback-${input.runId}`;
-            },
+            trackerDir,
+            child: personLookupWorkflow as unknown as Parameters<
+              typeof delegateToAllImpl<PersonLookupChildInput, readonly string[]>
+            >[0]["child"],
+            inputs,
+            renderAs: "flat",
+            fireAndForget: true,
+            ...(childRootTracePrefix ? { rootTracePrefix: childRootTracePrefix } : {}),
+            deriveItemId: (inp: PersonLookupChildInput) =>
+              inputToItemId.get(inp.name ?? inp.emplId ?? "") ?? `ocr-whole-fallback-${input.runId}`,
           });
         }
       }
@@ -187,13 +207,20 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
           if (capturedEnqueueItems.length > 0) {
             const { watchChildRuns: realWatchChildRuns } = await import("../../delegation/watch-child-runs.js");
             const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
+            // Fail-loud: the prior `.catch(() => [])` silently swallowed every
+            // watch failure (timeout, abort, fs error) → records stayed
+            // lookup-pending with no diagnostic. The watch failures now propagate
+            // to the catch below (which logs + cascade-cancels on cancel).
             outcomes = await watchChildren({
               workflow: "person-lookup",
               expectedItemIds: capturedEnqueueItems.map((e) => e.itemId),
               trackerDir,
               date,
               timeoutMs: 60 * 60_000,
-            }).catch(() => [] as ChildOutcome[]);
+              // Operator-cancel bridge: throws a discard-abort error when the
+              // prepare-abort flag is set (orchestrator trips it on ctx.signal).
+              shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
+            });
 
             const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
             for (const enq of capturedEnqueueItems) {
@@ -227,7 +254,44 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
 
           emitDataSnapshot(records, "done");
         } catch (err) {
-          log.warn(`[reocr-whole-pdf] watch failed for parent=${input.runId}: ${err instanceof Error ? err.message : String(err)}`);
+          if (isOperatorDiscardAbortError(err)) {
+            // Operator cancel mid-re-OCR: cascade-cancel the still-queued
+            // person-lookup children so a daemon doesn't run them after the
+            // operator gave up, then emit a terminal failed/cancelled row.
+            // Fail-loud — a cascade error is logged but never re-swallowed.
+            try {
+              cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: childParentRunId });
+            } catch (cascadeErr) {
+              log.error(`[reocr-whole-pdf] cascade-cancel failed for parent=${input.runId}: ${errorMessage(cascadeErr)}`);
+            }
+            emit({
+              workflow: WORKFLOW,
+              timestamp: new Date().toISOString(),
+              id: input.sessionId,
+              runId: input.runId,
+              ...(parentRunId ? { parentRunId } : {}),
+              status: "failed",
+              step: "cancelled",
+              data: buildReviewData({ row: capturedRow, formType, sessionId: input.sessionId, parentRunId, records }),
+              error: "Cancelled by user",
+            });
+          } else {
+            // Genuine failure (timeout, fs error): surface it on the row instead
+            // of leaving records stuck lookup-pending with no diagnostic (the old
+            // `.catch(() => [])` swallow). emitDataSnapshot writes a failed row.
+            log.error(`[reocr-whole-pdf] watch failed for parent=${input.runId}: ${errorMessage(err)}`);
+            emit({
+              workflow: WORKFLOW,
+              timestamp: new Date().toISOString(),
+              id: input.sessionId,
+              runId: input.runId,
+              ...(parentRunId ? { parentRunId } : {}),
+              status: "failed",
+              step: "person-lookup",
+              data: buildReviewData({ row: capturedRow, formType, sessionId: input.sessionId, parentRunId, records }),
+              error: errorMessage(err),
+            });
+          }
         } finally {
           releaseRowLock(key);
         }

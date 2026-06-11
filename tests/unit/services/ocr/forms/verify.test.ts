@@ -456,3 +456,38 @@ describe("verifyOcrFormSpec spec fields", () => {
     assert.equal(verifyOcrFormSpec.traceCode, "vf");
   });
 });
+
+describe("verifyOcrFormSpec.applyCarryForward", () => {
+  it("carries v1 paperEmployeeId alongside the resolved employeeId (A5)", () => {
+    // v1 (prior run) resolved the person to EID 10000001 and saw paper EID
+    // 10000777. v2 (fresh re-OCR of the same page) re-read a BLANK paper EID.
+    // Carrying v1's resolved employeeId but keeping v2's blank paperEmployeeId
+    // would show "found 10000001 / on paper (none)" — a paper-vs-found mismatch.
+    const v1 = makePreview({
+      matchState: "resolved",
+      employeeId: "10000001",
+      paperEmployeeId: "10000777",
+    });
+    const v2 = makePreview({
+      matchState: "lookup-pending",
+      employeeId: "",
+      paperEmployeeId: "",
+    });
+    const merged = verifyOcrFormSpec.applyCarryForward({ v2, v1 });
+    assert.equal(merged.employeeId, "10000001", "resolved EID carried from v1");
+    assert.equal(merged.paperEmployeeId, "10000777", "paper EID carried from v1, not v2's blank");
+  });
+
+  it("keeps v2 paperEmployeeId when not carrying a resolved record forward", () => {
+    const v1 = makePreview({ matchState: "lookup-pending", employeeId: "", paperEmployeeId: "10000111" });
+    const v2 = makePreview({ matchState: "extracted", employeeId: "", paperEmployeeId: "10000222" });
+    const merged = verifyOcrFormSpec.applyCarryForward({ v2, v1 });
+    assert.equal(merged.paperEmployeeId, "10000222", "unresolved carry keeps v2's fresh paper value");
+  });
+
+  it("rejects merging two different known form kinds", () => {
+    const v1 = makePreview({ formKind: "oath" });
+    const v2 = makePreview({ formKind: "emergency-contact" });
+    assert.throws(() => verifyOcrFormSpec.applyCarryForward({ v2, v1 }), /cross-form-kind/);
+  });
+});

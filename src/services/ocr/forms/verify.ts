@@ -26,8 +26,17 @@ import {
   patchOcrRecordUnresolved,
 } from "../eid-lookup-results.js";
 import { watchChildRuns } from "../../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../../tracker/ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../../tracker/tasks/store.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
-import { DocumentTypeSchema, MatchStateSchema, VerificationSchema } from "./shared.js";
+import {
+  DocumentTypeSchema,
+  MatchStateSchema,
+  VerificationSchema,
+  assertCarryForwardKindCompatible,
+  isForceResearchFlagRecord,
+  ocrChildItemIdPrefix,
+} from "./shared.js";
 
 // ─── OCR-pass record (one page / record of a mixed PDF) ─────
 
@@ -442,28 +451,27 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     // emergency-contact + unknown mixed in one PDF), so we only reject a
     // carry-forward that would merge two DIFFERENT known kinds. Legacy JSONL
     // rows (parsed without Zod defaults) may carry undefined — tolerate them.
-    if (
-      v1.formKind !== undefined &&
-      v2.formKind !== undefined &&
-      v1.formKind !== v2.formKind
-    ) {
-      throw new Error(
-        `verify.applyCarryForward: cross-form-kind carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
-      );
-    }
+    assertCarryForwardKindCompatible("verify", v1.formKind, v2.formKind);
     const resolved =
       v1.matchState === "resolved" && normalizeUcpathEmployeeId(v1.employeeId);
     return {
       ...v2,
       employeeId: resolved ? v1.employeeId : v2.employeeId,
+      // Carry `paperEmployeeId` from v1 alongside the resolved employeeId. The
+      // completeness report distinguishes the EID on PAPER (`paperEmployeeId`)
+      // from the looked-up/found EID (`employeeId`); spreading `...v2` alone kept
+      // v2's freshly-re-OCR'd paper value next to v1's carried resolved value,
+      // silently changing paper-vs-found semantics for a carried-forward record.
+      // Tolerate a v1 without the field (legacy rows) by falling back to v2's.
+      paperEmployeeId: resolved
+        ? (v1.paperEmployeeId ?? v2.paperEmployeeId)
+        : v2.paperEmployeeId,
       matchState: resolved ? v1.matchState : v2.matchState,
       verification: resolved ? (v1.verification ?? v2.verification) : v2.verification,
     };
   },
 
-  isForceResearchFlag(record): boolean {
-    return record.forceResearch === true;
-  },
+  isForceResearchFlag: isForceResearchFlagRecord,
 
   // No approve fan-out — verify is read-only. No approveTo / approveDocumentTo.
 
@@ -480,10 +488,23 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     // Auto → {} (default reuse-or-spawn-one); explicit N>1 → { parallel: N }.
     const enrichDaemonFlags = runOptionsToDaemonFlags(runOptions);
 
+    // Operator-cancel bridge. The orchestrator trips the in-process prepare-abort
+    // flag when `ctx.signal` aborts (queue-row Cancel ×, daemon stop), and the
+    // `watchChildRuns` calls below poll `shouldAbort` and throw a discard-abort
+    // error when it's set. On that abort we cascade-cancel the still-queued
+    // person-lookup / i9-lookup children so a daemon doesn't claim and run them
+    // after the operator gave up on the prep. Fail-loud — a cascade error rethrows.
+    const shouldAbort = (): boolean => isOcrPrepareAbortRequested(sessionId, runId);
+    const cascadeCancelOnAbort = (): void => {
+      const store = openTaskStore(trackerDir);
+      cancelQueuedChildTasksForParentRun(store, { parentRunId: runId });
+    };
+
     // Dynamic imports avoid an import cycle (mirrors force-research.ts).
     const { delegateToAllImpl } = await import("../../../core/delegate.js");
     const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
 
+    try {
     // ── Step 1: person-lookup fan-out (EID-or-name → CRM dates + active) ──
     //
     // Per-record input shape + outcome-patch kind are chosen by the pure
@@ -518,7 +539,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         r.warnings = warnings;
         continue;
       }
-      const itemId = `ocr-verify-${runId}-r${idx}`;
+      const itemId = `${ocrChildItemIdPrefix("verify")}-${runId}-r${idx}`;
       plItemIds.push(itemId);
       plItemIdToIdx.set(itemId, idx);
       plKindByItemId.set(itemId, chosen.kind);
@@ -592,6 +613,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         trackerDir,
         date,
         timeoutMs: 30 * 60_000,
+        shouldAbort,
         onProgress: (outcome) => applyPersonLookupOutcome(outcome),
       });
 
@@ -648,7 +670,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         continue;
       }
       if (!parsed.lastName || !parsed.first) continue;
-      const itemId = `ocr-verify-i9-${runId}-r${idx}`;
+      const itemId = `${ocrChildItemIdPrefix("verify")}-i9-${runId}-r${idx}`;
       i9ItemIds.push(itemId);
       i9ItemIdToIdx.set(itemId, idx);
       i9Inputs.push({
@@ -702,7 +724,15 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         if (idx === undefined) return;
         processedI9ItemIds.add(outcome.itemId);
         applyI9ToVerifyRecord(records[idx], outcome.data);
-        records[idx].i9LookupStatus = outcome.status === "done" ? "completed" : "failed";
+        // A child can complete (`outcome.status === "done"`) yet report
+        // `i9Status: "error"` in its DATA — the lookup ran but errored out. That
+        // is a FAILURE, not a completion: counting it `completed` overstated the
+        // success count in the summary. `not-found` / `unable-to-access` are
+        // genuine completions (the report renders them), so only `"error"`
+        // downgrades. `applyI9ToVerifyRecord` already stamped officialSignerStatus.
+        const i9DataStatus = nonEmpty(outcome.data?.i9Status);
+        records[idx].i9LookupStatus =
+          outcome.status === "done" && i9DataStatus !== "error" ? "completed" : "failed";
         const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
         if (traceId) records[idx].i9LookupTraceId = traceId;
         records[idx].checks = buildVerifyChecks(records[idx]);
@@ -722,6 +752,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         trackerDir,
         date,
         timeoutMs: 30 * 60_000,
+        shouldAbort,
         onProgress: (outcome) => applyI9Outcome(outcome),
       });
 
@@ -755,18 +786,29 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       rec.matchState = normalizeUcpathEmployeeId(rec.employeeId) ? "resolved" : "unresolved";
     }
 
+    // The summary fires AFTER both watch calls have fully resolved, so every
+    // record is terminal (completed/failed). The `i9Pending` count was therefore
+    // ALWAYS 0 (no "running" enum value is ever assigned either) — a dead field;
+    // dropped rather than implemented.
     const personCompleted = records.filter((rec) => rec.personLookupStatus === "completed").length;
     const personFailed = records.filter((rec) => rec.personLookupStatus === "failed").length;
     const i9Completed = records.filter((rec) => rec.i9LookupStatus === "completed").length;
     const i9Failed = records.filter((rec) => rec.i9LookupStatus === "failed").length;
-    const i9Pending = records.filter((rec) => rec.i9LookupStatus === "pending" || rec.i9LookupStatus === "running").length;
     log.success({
-      message: `[verify/enrich] complete records=${records.length} personCompleted=${personCompleted} personFailed=${personFailed} i9Completed=${i9Completed} i9Failed=${i9Failed} i9Pending=${i9Pending}`,
+      message: `[verify/enrich] complete records=${records.length} personCompleted=${personCompleted} personFailed=${personFailed} i9Completed=${i9Completed} i9Failed=${i9Failed}`,
       category: "ocr",
       occasion: "completed",
       subject: "verify-enrichment",
     });
 
     return records;
+    } catch (err) {
+      // Operator cancel mid-enrichment: cascade-cancel the still-queued
+      // person-lookup / i9-lookup children so a daemon doesn't run them after the
+      // operator gave up, then rethrow so the orchestrator unwinds to terminal
+      // cancelled. Fail-loud — a cascade error propagates.
+      if (isOperatorDiscardAbortError(err)) cascadeCancelOnAbort();
+      throw err;
+    }
   },
 };

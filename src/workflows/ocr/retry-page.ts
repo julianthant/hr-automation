@@ -19,6 +19,8 @@ import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
@@ -228,13 +230,26 @@ export async function runOcrRetryPage(
       });
     }
 
-    const outcomes = await watchChildren({
-      workflow: "person-lookup",
-      expectedItemIds: enqueueItems.map((e) => e.itemId),
-      trackerDir,
-      date,
-      timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
-    });
+    let outcomes: ChildOutcome[];
+    try {
+      outcomes = await watchChildren({
+        workflow: "person-lookup",
+        expectedItemIds: enqueueItems.map((e) => e.itemId),
+        trackerDir,
+        date,
+        timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
+        // Operator-cancel bridge: throws a discard-abort error when the prepare-
+        // abort flag is set (orchestrator trips it on `ctx.signal`).
+        shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
+      });
+    } catch (err) {
+      if (isOperatorDiscardAbortError(err)) {
+        // Cancel mid-retry: cascade-cancel the still-queued person-lookup children
+        // so a daemon doesn't run them after the operator gave up. Fail-loud.
+        cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
+      }
+      throw err;
+    }
 
     const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
     for (const enq of enqueueItems) {

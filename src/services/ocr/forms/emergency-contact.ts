@@ -15,7 +15,15 @@ import {
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import type { EmergencyContactRecord } from "../../../workflows/emergency-contact/schema.js";
-import { DocumentTypeSchema, LLM_HIGH_CONFIDENCE, MatchStateSchema, VerificationSchema } from "./shared.js";
+import {
+  DocumentTypeSchema,
+  LLM_HIGH_CONFIDENCE,
+  MatchStateSchema,
+  VerificationSchema,
+  assertCarryForwardKindCompatible,
+  isForceResearchFlagRecord,
+  ocrChildItemIdPrefix,
+} from "./shared.js";
 
 // ─── Permissive OCR-pass schemas ───────────────────────────
 //
@@ -158,6 +166,16 @@ For each page also:
 2. After extracting fields, list which expected EC fields were BLANK or ILLEGIBLE on the paper (for non-EC pages use []).
    The expected EC fields: employee.name, employee.employeeId, emergencyContact.name, emergencyContact.relationship, emergencyContact.address, emergencyContact.cellPhone/homePhone/workPhone (any one suffices).
 
+OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
+
+\`\`\`json
+[
+  { "formKind": "emergency-contact", "sourcePage": 1, "employee": { "name": "Doe, Jane", "employeeId": "10000001" }, "emergencyContact": { "name": "Doe, John", "relationship": "Spouse" }, "documentType": "expected", "originallyMissing": [], "notes": [] }
+]
+\`\`\`
+
+Do NOT wrap records in a page object. Do NOT nest under "records" or "data" keys. The top-level value MUST be a JSON array. Each element is exactly one record (one per page).
+
 Field-level rules:
 - Extract every record visible; one per page.
 - For handwritten text use your best transcription; if illegible set null and add to originallyMissing.
@@ -195,7 +213,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         matchState: "matched",
         matchSource: "form",
         matchConfidence: 1.0,
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
         warnings: [],
@@ -231,7 +249,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         matchConfidence: top.score,
         rosterCandidates: result.candidates.slice(0, 3),
         addressMatch,
-        documentType: "expected",
+        documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
         warnings:
@@ -245,7 +263,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       employee: { ...record.employee, employeeId: "" },
       matchState: "lookup-pending",
       rosterCandidates: result.candidates.slice(0, 3),
-      documentType: "expected",
+      documentType: record.documentType ?? "expected",
       originallyMissing: [],
       selected: true,
       warnings:
@@ -310,17 +328,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     // Legacy JSONL rows (parsed without Zod defaults) may have formKind undefined —
     // tolerate them. Also tolerate "oath"/"unknown" classifications (a re-run that
     // re-classified the same page); carry v2 formKind forward.
-    const v1Kind = v1.formKind as string | undefined;
-    const v2Kind = v2.formKind as string | undefined;
-    if (
-      v1Kind !== undefined &&
-      v2Kind !== undefined &&
-      v1Kind !== v2Kind
-    ) {
-      throw new Error(
-        `emergency-contact.applyCarryForward: cross-form-kind carry-forward not supported (v1=${v1Kind}, v2=${v2Kind})`,
-      );
-    }
+    assertCarryForwardKindCompatible("emergency-contact", v1.formKind, v2.formKind);
     return {
       // Spread v2 WITHOUT pinning formKind: the v2 record reflects this run's
       // re-classification, so its kind (which may differ from v1's "emergency-
@@ -342,9 +350,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     };
   },
 
-  isForceResearchFlag(record): boolean {
-    return record.forceResearch === true;
-  },
+  isForceResearchFlag: isForceResearchFlagRecord,
 
   approveTo: {
     workflow: "emergency-contact",
@@ -360,7 +366,7 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       } as EmergencyContactRecord;
     },
     deriveItemId(_record, parentRunId, index): string {
-      return `ocr-ec-${parentRunId}-r${index}`;
+      return `${ocrChildItemIdPrefix("emergency-contact")}-${parentRunId}-r${index}`;
     },
     canFanOut(record): boolean {
       // Skip records EXPLICITLY classified as non-EC pages (oath or unknown) —
@@ -369,9 +375,21 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
       // prior "every selected EC record fans out" behavior).
       const kind = record.formKind as string | undefined;
       if (kind === "oath" || kind === "unknown") return false;
-      return true;
+      // EID-completeness gate (F12, mirrors oath's `hasOathSignerInput`): an EC
+      // child is enqueued by EID — the daemon navigates UCPath to that person.
+      // A blank/invalid EID would fan out a child guaranteed to fail at
+      // navigation, so skip it (the approve route keeps per-record itemIds in
+      // sync with what actually enqueues).
+      const emplId = normalizeUcpathEmployeeId(record.employee?.employeeId ?? "");
+      return /^\d{5,}$/.test(emplId);
     },
   },
 
   rosterMode: "required",
+  // F5: brand a STANDALONE EC OCR run `ec-…` (matches EC's own approve-target
+  // workflow code). Without this, a standalone EC run fell back to the OCR
+  // default `oc-…`. An EC PDF run started as an operation still derives `ec`
+  // from `operationTraceCode("emergency-contact")` first; this covers the bare
+  // OCR-hub EC upload (no operation intent).
+  traceCode: "ec",
 };
