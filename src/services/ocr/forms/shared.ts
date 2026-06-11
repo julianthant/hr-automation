@@ -64,3 +64,57 @@ export const MatchStateSchema = z.enum([
 ]);
 
 export type MatchState = z.infer<typeof MatchStateSchema>;
+
+/**
+ * The per-record child-row itemId PREFIX for an OCR form's lookup fan-out
+ * (`<prefix>-<runId>-r<index>`). Oath → `ocr-oath`, emergency-contact →
+ * `ocr-ec`, verify → `ocr-verify`; any other form type falls back to the
+ * `ocr-<formType>` shape so a new form gets a unique, debuggable prefix rather
+ * than colliding with EC.
+ *
+ * (F8) Replaces three hand-spelled prefixes (oath/EC `approveTo.deriveItemId`,
+ * verify `enrichRecords`) AND the buggy orchestrator ternary
+ * `formType === "oath" ? "oath" : "ec"` — which mislabeled EVERY non-oath form
+ * (verify, future forms) as `ec`, so a verify fan-out child's itemId read
+ * `ocr-ec-…` and a stale EC outcome could in principle match it.
+ */
+export function ocrChildItemIdPrefix(formType: string): string {
+  switch (formType) {
+    case "oath": return "ocr-oath";
+    case "emergency-contact": return "ocr-ec";
+    case "verify": return "ocr-verify";
+    default: return `ocr-${formType}`;
+  }
+}
+
+/**
+ * Shared `OcrFormSpec.isForceResearchFlag` — every form's implementation is the
+ * byte-identical `record.forceResearch === true` (F8e). One predicate, used by
+ * all three specs, so the contract can't drift.
+ */
+export function isForceResearchFlagRecord(record: unknown): boolean {
+  return (record as { forceResearch?: unknown } | null)?.forceResearch === true;
+}
+
+/**
+ * Shared cross-form-kind carry-forward guard (F8e). verify rows are
+ * heterogeneous (oath + EC + unknown in one PDF) and a re-run may re-classify a
+ * page, so a carry-forward only rejects merging two DIFFERENT *known* kinds.
+ * Legacy JSONL rows (parsed without Zod defaults) may carry `undefined` — those
+ * are tolerated. Normalizes the prior `as string` casts oath/EC hand-rolled.
+ *
+ * @throws when both kinds are known and differ.
+ */
+export function assertCarryForwardKindCompatible(
+  specName: string,
+  v1Kind: unknown,
+  v2Kind: unknown,
+): void {
+  const k1 = typeof v1Kind === "string" ? v1Kind : undefined;
+  const k2 = typeof v2Kind === "string" ? v2Kind : undefined;
+  if (k1 !== undefined && k2 !== undefined && k1 !== k2) {
+    throw new Error(
+      `${specName}.applyCarryForward: cross-form-kind carry-forward not supported (v1=${k1}, v2=${k2})`,
+    );
+  }
+}

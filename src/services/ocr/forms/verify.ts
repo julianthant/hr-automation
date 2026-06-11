@@ -29,7 +29,14 @@ import { watchChildRuns } from "../../../tracker/delegation/watch-child-runs.js"
 import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../../tracker/ocr-prepare-abort.js";
 import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../../tracker/tasks/store.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
-import { DocumentTypeSchema, MatchStateSchema, VerificationSchema } from "./shared.js";
+import {
+  DocumentTypeSchema,
+  MatchStateSchema,
+  VerificationSchema,
+  assertCarryForwardKindCompatible,
+  isForceResearchFlagRecord,
+  ocrChildItemIdPrefix,
+} from "./shared.js";
 
 // ─── OCR-pass record (one page / record of a mixed PDF) ─────
 
@@ -444,15 +451,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     // emergency-contact + unknown mixed in one PDF), so we only reject a
     // carry-forward that would merge two DIFFERENT known kinds. Legacy JSONL
     // rows (parsed without Zod defaults) may carry undefined — tolerate them.
-    if (
-      v1.formKind !== undefined &&
-      v2.formKind !== undefined &&
-      v1.formKind !== v2.formKind
-    ) {
-      throw new Error(
-        `verify.applyCarryForward: cross-form-kind carry-forward not supported (v1=${v1.formKind}, v2=${v2.formKind})`,
-      );
-    }
+    assertCarryForwardKindCompatible("verify", v1.formKind, v2.formKind);
     const resolved =
       v1.matchState === "resolved" && normalizeUcpathEmployeeId(v1.employeeId);
     return {
@@ -463,9 +462,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     };
   },
 
-  isForceResearchFlag(record): boolean {
-    return record.forceResearch === true;
-  },
+  isForceResearchFlag: isForceResearchFlagRecord,
 
   // No approve fan-out — verify is read-only. No approveTo / approveDocumentTo.
 
@@ -533,7 +530,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         r.warnings = warnings;
         continue;
       }
-      const itemId = `ocr-verify-${runId}-r${idx}`;
+      const itemId = `${ocrChildItemIdPrefix("verify")}-${runId}-r${idx}`;
       plItemIds.push(itemId);
       plItemIdToIdx.set(itemId, idx);
       plKindByItemId.set(itemId, chosen.kind);
@@ -664,7 +661,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         continue;
       }
       if (!parsed.lastName || !parsed.first) continue;
-      const itemId = `ocr-verify-i9-${runId}-r${idx}`;
+      const itemId = `${ocrChildItemIdPrefix("verify")}-i9-${runId}-r${idx}`;
       i9ItemIds.push(itemId);
       i9ItemIdToIdx.set(itemId, idx);
       i9Inputs.push({
