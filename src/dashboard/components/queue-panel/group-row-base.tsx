@@ -3,7 +3,6 @@ import type { LucideIcon } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
-import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { formatEntryTime, getRunNumber } from "@/components/shared/entry-display";
 import { QueueRowCard } from "./QueueRowCard";
 import { StatusCounts } from "./StatusCounts";
@@ -12,6 +11,7 @@ import {
   pickPreviewChildren,
   computeBatchElapsed,
   resolveBatchAccent,
+  useBatchElapsedLabel,
 } from "@/components/ocr/delegation-row-helpers";
 
 const PREVIEW_KIDS = 3;
@@ -211,16 +211,3 @@ function computeProgressSegments(counts: ReturnType<typeof aggregateBatchCounts>
   return segs;
 }
 
-function useBatchElapsedLabel(elapsed: ReturnType<typeof computeBatchElapsed>): string {
-  const liveTick = useElapsed(
-    elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
-  );
-  if (!elapsed) return "";
-  if (elapsed.frozen) {
-    return formatDuration(
-      new Date(elapsed.startMs).toISOString(),
-      new Date(elapsed.endMs).toISOString(),
-    );
-  }
-  return liveTick;
-}

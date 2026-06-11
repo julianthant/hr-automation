@@ -30,7 +30,82 @@
  * promoting more variants is one entry away if needed.
  */
 
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  type LucideIcon,
+} from "lucide-react";
+
 export type StatusKey = "running" | "done" | "failed" | "pending" | "skipped" | "not found";
+
+/**
+ * A tracker entry/member as seen by status resolution. A cancelled row is the
+ * tracker shape `status: "failed"` + `step: "cancelled"` — there is no separate
+ * `cancelled` enum value, so `step` is the discriminator.
+ */
+interface StatusBearer {
+  status: string;
+  step?: string | null;
+}
+
+/**
+ * The status key for a row, applying the ONE shared override every status map
+ * needs: a cancelled row (`failed` + `step === "cancelled"`) is reported as
+ * `"cancelled"`, not `"failed"`, so it renders amber (intentional) instead of
+ * red (a bug). EntryItem's `STATUS_CONFIG`, the operation coordinator's
+ * `HEADER_STATUS`, and the batch member status map all route their lookup
+ * through this so the special-case can't drift between them. Each component
+ * keeps its own status→class map keyed on the returned string.
+ */
+export function statusKeyForEntry(entry: StatusBearer): string {
+  if (entry.status === "failed" && entry.step === "cancelled") return "cancelled";
+  return entry.status;
+}
+
+/** Shared status → lucide icon (shape carries meaning across every status surface). */
+const STATUS_ICON: Record<string, { Icon: LucideIcon; spin?: boolean }> = {
+  running: { Icon: Loader2, spin: true },
+  done: { Icon: CheckCircle2 },
+  failed: { Icon: AlertTriangle },
+  cancelled: { Icon: Clock },
+  pending: { Icon: Clock },
+  skipped: { Icon: Clock },
+};
+
+export interface MemberStatusSpec {
+  Icon: LucideIcon;
+  label: string;
+  tone: string;
+  spin?: boolean;
+}
+
+const MEMBER_STATUS_LABEL_TONE: Record<string, { label: string; tone: string }> = {
+  done: { label: "done", tone: "text-success" },
+  running: { label: "running", tone: "text-primary" },
+  pending: { label: "queued", tone: "text-warning" },
+  skipped: { label: "queued", tone: "text-warning" },
+  failed: { label: "failed", tone: "text-destructive" },
+  cancelled: { label: "cancelled", tone: "text-warning" },
+};
+
+/**
+ * Member-row status spec (icon + label + tone) for the batch member preview.
+ * Routes the cancelled special-case through {@link statusKeyForEntry} and reuses
+ * the shared {@link STATUS_ICON} so it can't drift from the other status maps.
+ */
+export function memberStatusSpec(member: StatusBearer): MemberStatusSpec {
+  const key = statusKeyForEntry(member);
+  const labelTone = MEMBER_STATUS_LABEL_TONE[key] ?? MEMBER_STATUS_LABEL_TONE.pending;
+  const icon = STATUS_ICON[key] ?? STATUS_ICON.pending;
+  return {
+    Icon: icon.Icon,
+    label: labelTone.label,
+    tone: labelTone.tone,
+    ...(icon.spin ? { spin: true } : {}),
+  };
+}
 
 /**
  * Tailwind class string for a tinted status badge — bg/12 + text.
