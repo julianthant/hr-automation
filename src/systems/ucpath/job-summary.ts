@@ -49,7 +49,8 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
-  await page.waitForTimeout(3_000);
+  // networkidle guards the page load; sleep was redundant.
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // Handle campus discovery redirect
   if (page.url().includes("ucpathdiscovery")) {
@@ -58,10 +59,9 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
       timeout: 10_000,
       label: "ucpath job summary campus discovery ucsd link",
     });
-    await page.waitForTimeout(5_000);
+    // networkidle guards the redirect after campus selection.
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   }
-
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   log.success("[Job Summary] Page loaded");
 }
 
@@ -95,7 +95,10 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<bool
     label: "ucpath job summary search button",
   });
 
-  await page.waitForTimeout(5_000);
+  // Wait for PeopleSoft to process the search and render results (or no-results).
+  const psFrame = page.frameLocator("#main_target_win0"); // allow-inline-selector -- iframe FrameLocator for PS processing probe
+  await waitForPeopleSoftProcessing(psFrame, 15_000);
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
   // Detect the "no results" state. PeopleSoft shows literal text:
   //   "No matching values were found."
@@ -218,7 +221,8 @@ export async function extractWorkLocation(
     await waitForPeopleSoftProcessing(psFrame, 15_000).catch(() => {});
     await clickOnce();
   }
-  await page.waitForTimeout(3_000);
+  // Wait for the tab panel to load after click.
+  await waitForPeopleSoftProcessing(psFrame, 15_000);
 
   // Extract first data row using PeopleSoft grid IDs
   // Work Location grid columns: Position Number(0), Description(1), Company(2),
@@ -265,7 +269,9 @@ export async function extractJobInfo(
     timeout: 10_000,
     label: "ucpath job summary job information tab",
   });
-  await page.waitForTimeout(3_000);
+  // Wait for the Job Information tab panel to load.
+  const psFrame2 = page.frameLocator("#main_target_win0"); // allow-inline-selector -- iframe FrameLocator for PS processing probe
+  await waitForPeopleSoftProcessing(psFrame2, 15_000);
 
   // Job Information grid columns: Job Code(0), Description(1), Classified Ind(2),
   // Empl Status(3), Full/Part Time(4), Standard Hours(5), FTE(6), ...
