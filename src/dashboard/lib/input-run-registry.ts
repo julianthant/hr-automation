@@ -1,6 +1,10 @@
-import { DASHBOARD_INPUT_RUN_WORKFLOWS } from "../../domain/dashboard-run-surfaces.js";
+import {
+  DASHBOARD_INPUT_RUN_WORKFLOWS,
+  DASHBOARD_UPLOAD_RUN_WORKFLOWS,
+} from "../../domain/dashboard-run-surfaces.js";
 
 type DashboardInputRunWorkflow = (typeof DASHBOARD_INPUT_RUN_WORKFLOWS)[number];
+type DashboardUploadRunWorkflow = (typeof DASHBOARD_UPLOAD_RUN_WORKFLOWS)[number];
 
 /**
  * Input-run registry — maps a workflow name to a text-box parser + UI
@@ -57,7 +61,7 @@ export interface InputRunConfig {
      * Pass-through to RunModal's `workflow` prop — must be an upload-run
      * workflow. The modal's own registry entry owns any locked formType.
      */
-    modalWorkflow: string;
+    modalWorkflow: DashboardUploadRunWorkflow;
   };
 }
 
