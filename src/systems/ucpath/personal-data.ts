@@ -33,7 +33,7 @@ export async function navigateToEmergencyContact(
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
-  await page.waitForTimeout(3_000);
+  // networkidle guards the initial page load; sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   await dismissPeopleSoftModalMask(page);
@@ -67,7 +67,7 @@ export async function navigateToEmergencyContact(
     label: "ucpath emergency contact drill in link",
   })) {
     log.step("Clicked Drill in...");
-    await page.waitForTimeout(3_000);
+    // networkidle guards the drill-in navigation; sleep was redundant.
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   }
 
