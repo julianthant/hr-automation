@@ -149,17 +149,21 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   rt.stubOcr(STUB_RECORDS.map(rawEcRecordFromStub));
   rt.holdAll("emergency-contact", "transaction");
 
-  // 2. Enqueue the OCR run (registers the fixture PDF) + wait for the prep gate.
-  const ocr = await rt.enqueueOcr({ fixturePath: FIXTURE_PDF, originalName: "emergency-contacts.pdf" });
-  // A STANDALONE OCR run now COMPLETES `done` after person-lookup (it never parks
-  // at awaiting-approval — only DELEGATED runs do). This test still drives the
-  // (production-preserved) standalone approve route directly via `approveOcr`, so
-  // sync on the completion event instead of the retired awaiting-approval one.
-  await rt.waitForEvent("ocr:review-complete", { runId: ocr.runId });
+  // 2. Enqueue the OCR run DELEGATED (registers the fixture PDF) + wait for the
+  // awaiting-approval park. Approve REQUIRES a delegated run since 2026-06-11
+  // (standalone approve is rejected 400 — approval ≡ delegation).
+  const PARENT_RUN = "op-parent-star-ec";
+  const ocr = await rt.enqueueOcr({
+    fixturePath: FIXTURE_PDF,
+    originalName: "emergency-contacts.pdf",
+    parentRunId: PARENT_RUN,
+  });
+  await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId });
 
   // 3. Drive the REAL approve fan-out → 3 emergency-contact children, each a
-  // controllable daemon run under the OCR run (childParentRunId = ocrRunId; EC
-  // has no `canFanOut`, so every selected record fans out).
+  // controllable daemon run under the delegating run (childParentRunId =
+  // parentRunId; EC's `canFanOut` EID gate passes — all stub records carry
+  // valid 10###### EIDs).
   const children = await rt.approveOcr({
     sessionId: ocr.sessionId,
     runId: ocr.runId,
@@ -217,7 +221,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   const dash = rt.dashboard();
 
   // children() finds exactly the 3 EC runs under the OCR parent.
-  const kids = await rt.children(ocr.runId);
+  const kids = await rt.children(PARENT_RUN);
   const ecKids = kids.filter((k) => k.workflow === "emergency-contact");
   assert.equal(ecKids.length, 3, "exactly 3 emergency-contact children under the OCR run");
   assert.deepEqual(
@@ -244,7 +248,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
     "OCR root trace id uses the EC form spec's `ec-` trace code",
   );
 
-  // Every EC child: batch-member archetype, parentRunId === ocrRunId, person
+  // Every EC child: batch-member archetype, parentRunId === the delegating run, person
   // title (resolved employee name), EID subtitle (name→person, flat-row footer).
   const byEid: Record<string, { name: string }> = {
     "10000001": { name: "Jane Doe" },
@@ -253,7 +257,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   };
   for (const c of [c1!, c2!, c3!]) {
     const row = dash.row("emergency-contact", c.runId);
-    assert.equal(row.parentRunId, ocr.runId, `EC child ${c.itemId} parentRunId === OCR runId`);
+    assert.equal(row.parentRunId, PARENT_RUN, `EC child ${c.itemId} parentRunId === the delegating run`);
     assert.equal(row.archetype, "batch-member", `EC child ${c.itemId} is a batch-member`);
     const emplId = row.data.emplId;
     assert.ok(emplId && byEid[emplId], `EC child ${c.itemId} carries a known EID (got ${emplId})`);
@@ -284,7 +288,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   // but 3 delegated members under one parentRunId still form a batch surface
   // (the count-≥2 path in buildTrackerQueueSurfaces). Subtitle = trace id (the
   // anchor path uses preferTraceIdSubtitle).
-  const anchor = dash.groupAnchor("emergency-contact", ocr.runId);
+  const anchor = dash.groupAnchor("emergency-contact", PARENT_RUN);
   assert.equal(anchor.memberCount, 3, "emergency-contact group anchor has 3 members");
   assert.equal(anchor.kind, "batch", "delegated EC members render as a batch surface");
   assert.equal(anchor.subtitle, "<traceId>", "group anchor subtitle is the trace id");

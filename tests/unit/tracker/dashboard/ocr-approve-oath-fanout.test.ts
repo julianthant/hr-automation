@@ -51,6 +51,9 @@ function seedOathOcrRow(
       timestamp: new Date().toISOString(),
       id: sessionId,
       runId,
+      // Approve requires a DELEGATED run (standalone approve was removed
+      // 2026-06-11); these tests pin the fan-out MECHANICS on a delegated row.
+      parentRunId: "op-parent-run",
       status: "done",
       step: "awaiting-approval",
       data: {

@@ -176,16 +176,21 @@ test(
     rt.holdAll("oath-signature", "transaction");
     rt.holdAll("oath-upload", "wait-signatures");
 
-    // 2. Enqueue the OCR run (registers the fixture PDF) + wait for the prep gate.
-    const ocr = await rt.enqueueOcr({ fixturePath: FIXTURE_PDF, originalName: PDF_NAME });
+    // 2. Enqueue the OCR run DELEGATED (registers the fixture PDF) + wait for
+    // the awaiting-approval park. Approve REQUIRES a delegated run since
+    // 2026-06-11 (standalone approve is rejected 400 — approval ≡ delegation).
+    // No operationWorkflow is stamped, so the spec's `approveDocumentTo`
+    // branch (the P2.12 subject) still fires on approve.
+    const PARENT_RUN = "op-parent-star-oathup";
+    const ocr = await rt.enqueueOcr({
+      fixturePath: FIXTURE_PDF,
+      originalName: PDF_NAME,
+      parentRunId: PARENT_RUN,
+    });
     // The fixture is expected to render headlessly; the records come from the
     // override either way, so this is informational, not a hard failure.
     assert.equal(ocr.usedFixture, true, "single-oath.pdf rendered headlessly (no synthetic fallback)");
-    // A STANDALONE OCR run now COMPLETES `done` after person-lookup (it never parks
-    // at awaiting-approval — only DELEGATED runs do). This test still drives the
-    // (production-preserved) standalone approve route directly via `approveOcr`, so
-    // sync on the completion event instead of the retired awaiting-approval one.
-    await rt.waitForEvent("ocr:review-complete", { runId: ocr.runId });
+    await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId });
 
     // 3. Drive the REAL approve fan-out onto BOTH gated daemons via the new
     //    MULTI-TARGET `childWorkflows`. The real route fans out the per-record
@@ -234,7 +239,7 @@ test(
     // orchestrator's eid-lookup pipeline also nests a synthetic `person-lookup`
     // outcome row under the run (harness noise, same as P2.9/P2.10) — scope the
     // doc-fan-out assertions to the two approve targets.
-    const kids = await rt.children(ocr.runId);
+    const kids = await rt.children(PARENT_RUN);
     const signerKids = kids.filter((k) => k.workflow === "oath-signature");
     const ticketKids = kids.filter((k) => k.workflow === "oath-upload");
     assert.equal(signerKids.length, 1, "exactly 1 oath-signature signer child under the OCR run");
@@ -262,7 +267,7 @@ test(
     //    1-member batch surface), parentRunId === ocrRunId, person/eid
     //    title+subtitle, `ou-` prefix. ──
     const signerRow = dash.row("oath-signature", signer.runId);
-    assert.equal(signerRow.parentRunId, ocr.runId, "signer parentRunId === OCR runId");
+    assert.equal(signerRow.parentRunId, PARENT_RUN, "signer parentRunId === the delegating run");
     assert.equal(signerRow.archetype, "batch-member", "signer row is a batch-member");
     assert.equal(signerRow.data.emplId, "10000001", "signer carries the synthetic EID");
     assert.equal(signerRow.title, "Jane Doe", "signer title is the resolved name");
@@ -274,7 +279,7 @@ test(
     //    `ou-` prefix, deterministic itemId, and its input carries
     //    signerItemIds = [the signer itemId]. ──
     const ticketRow = dash.row("oath-upload", ticket.runId);
-    assert.equal(ticketRow.parentRunId, ocr.runId, "ticket parentRunId === OCR runId");
+    assert.equal(ticketRow.parentRunId, PARENT_RUN, "ticket parentRunId === the delegating run");
     assert.equal(ticketRow.data.queueRowKind, "file", "ticket row is file-kind (pdf input)");
     assert.equal(ticketRow.title, PDF_NAME, "ticket (file kind) title is the PDF filename");
     assert.equal(ticketRow.subtitle, "<traceId>", "ticket (file kind) subtitle is the trace id");
@@ -307,7 +312,7 @@ test(
 
     // ── Surface/grouping: both children project sensibly under the OCR card.
     //    The signer is a lone delegated member → a 1-member batch anchor.
-    const signerAnchor = dash.groupAnchor("oath-signature", ocr.runId);
+    const signerAnchor = dash.groupAnchor("oath-signature", PARENT_RUN);
     assert.equal(signerAnchor.memberCount, 1, "oath-signature anchor has 1 signer member");
     assert.equal(
       signerAnchor.kind,

@@ -93,10 +93,11 @@ test("approve-batch threads OCR parentSubject into kernel inputs", async () => {
   }
 });
 
-test("approve-batch omits parentSubject when no parent row found", async () => {
+test("approve-batch omits parentSubject when the review data carries none", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-no-parent-"));
   try {
-    // Seed only the OCR session row, with NO parentRunId.
+    // Delegated row (approve requires parentRunId since 2026-06-11) whose
+    // review data carries NO parentSubject — the omission must propagate.
     mkdirSync(rowsDir(dir), { recursive: true });
     appendFileSync(
       rowFilePath("ocr", todayLocal(), dir),
@@ -105,6 +106,7 @@ test("approve-batch omits parentSubject when no parent row found", async () => {
         timestamp: new Date().toISOString(),
         id: "sess-y",
         runId: "ocr-run-y",
+        parentRunId: "op-run-y",
         status: "done",
         step: "awaiting-approval",
         data: { formType: "emergency-contact", sessionId: "sess-y" },

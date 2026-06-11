@@ -83,12 +83,26 @@ export function buildOcrApproveHandler(
     const approveTo = spec.approveTo;
     const operationWorkflow = readOperationWorkflow(input.sessionId, trackerDir);
     const parentRunId = readParentRunId(input.sessionId, trackerDir);
-    // Fanned-out children nest under the run that owns approval: the delegating
-    // parent run when OCR was delegated (oath-upload legacy / EC delegation),
-    // else the OCR run itself (standalone OCR-hub upload). This keeps the
-    // oath-signature signer rows and the oath-upload ticket row grouped under
-    // the OCR card instead of appearing as orphaned top-level rows.
-    const childParentRunId = parentRunId ?? input.runId;
+    // Approval ≡ delegation: only a DELEGATED OCR run (parentRunId set — OCR
+    // as a sub-step of oath-signature / oath-upload / emergency-contact) has a
+    // downstream consumer for the approved data. A standalone run completes
+    // `done` as a read-only completeness card and the UI never offers Approve.
+    // The legacy standalone both-targets fan-out was REMOVED 2026-06-11 (user
+    // policy: no legacy support) — a direct route call now fails loud instead
+    // of silently fanning out rows nobody asked for.
+    if (!parentRunId) {
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error:
+            "Standalone OCR runs have no approve flow (approval ≡ delegation; the run already completed as a read-only review)",
+        },
+      };
+    }
+    // Fanned-out children nest under the run that owns approval: the
+    // delegating parent run (operation coordinator / oath-upload born task).
+    const childParentRunId = parentRunId;
     // Root trace-id propagation (DISPLAY-only, trace/span model): the OCR root
     // row carries the operation's frozen trace id (`ou-...` after the oath form
     // branded it via `traceCode`, else `oc-...`). This fan-out runs OUTSIDE any
@@ -134,8 +148,10 @@ export function buildOcrApproveHandler(
     //     upload, option A) and files the ticket itself; do NOT create a second
     //     ticket row — it learns its signer set from this approval's
     //     `fannedOutItemIds` via subscribeToApproval.
-    //   - standalone OCR oath run (no operationWorkflow) → legacy behavior: the
-    //     once-per-document fan-out creates the oath-upload ticket row here.
+    //   - delegated run with NO operation intent (no live producer today —
+    //     every delegating parent stamps `operationWorkflow`) → the spec's
+    //     `approveDocumentTo` contract stands as declared. The standalone
+    //     reach of this branch was removed 2026-06-11 (guard above).
     const approveDocumentTo =
       operationWorkflow === "oath-signature" || operationWorkflow === "oath-upload"
         ? undefined
@@ -213,6 +229,17 @@ export function buildOcrApproveHandler(
       try {
         let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> } = undefined;
         if (approveTo) {
+          // Loaded on BOTH paths so the test-seam fallback derives its row
+          // archetype the same way the prod path does (F-A) — hand-stamped
+          // literals drifted from `deriveRowArchetype` once already.
+          const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
+          const childWfForArchetype = await loadWorkflow(approveTo.workflow);
+          if (!childWfForArchetype) {
+            log.error(
+              `[ocr-http] approve-batch: unknown approveTo workflow "${approveTo.workflow}" — items not enqueued`,
+            );
+            return;
+          }
           const emitFallbackChildPending = (
             item: unknown,
             childRunId: string,
@@ -233,7 +260,11 @@ export function buildOcrApproveHandler(
                 data: {
                   ...buildFallbackPendingData(item),
                   ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                  archetype: fanMemberShape ?? "single",
+                  archetype: deriveRowArchetype(
+                    resolveArchetype(childWfForArchetype.config, item),
+                    passedParentRunId ?? childParentRunId,
+                    fanMemberShape ? { memberShape: fanMemberShape } : undefined,
+                  ),
                 },
                 ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
                 ...(childInput ? { input: childInput } : {}),
@@ -254,14 +285,7 @@ export function buildOcrApproveHandler(
             );
           } else {
             const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
-            const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
-            const childWf = await loadWorkflow(approveTo.workflow);
-            if (!childWf) {
-              log.error(
-                `[ocr-http] approve-batch: unknown approveTo workflow "${approveTo.workflow}" — items not enqueued`,
-              );
-              return;
-            }
+            const childWf = childWfForArchetype;
             const inputToItemId = new Map(
               enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
             );
@@ -464,6 +488,16 @@ async function enqueueDocFanOut(args: {
   ocrRunId: string;
 }): Promise<void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> }> {
   const { workflow, input, itemId, childParentRunId, trackerDir } = args;
+  // Loaded for BOTH paths so the test-seam fallback derives its archetype the
+  // same way the prod path does (F-A) instead of hand-stamping "single".
+  const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
+  const childWf = await loadWorkflow(workflow);
+  if (!childWf) {
+    log.error(
+      `[ocr-http] approve-batch: unknown approveDocumentTo workflow "${workflow}" — doc row not enqueued`,
+    );
+    return undefined;
+  }
   if (args.ensureDaemonsAndEnqueueOverride) {
     return args.ensureDaemonsAndEnqueueOverride(
       workflow,
@@ -486,7 +520,10 @@ async function enqueueDocFanOut(args: {
               data: {
                 ...buildFallbackPendingData(item),
                 ...rootQueueTitleData(readParentSubjectFromInput(item)),
-                archetype: "single",
+                archetype: deriveRowArchetype(
+                  resolveArchetype(childWf.config, item),
+                  passedParentRunId ?? childParentRunId,
+                ),
               },
               ...(passedParentRunId ? { parentRunId: passedParentRunId } : {}),
               ...(childInput ? { input: childInput } : {}),
@@ -498,14 +535,6 @@ async function enqueueDocFanOut(args: {
     );
   }
   const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
-  const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
-  const childWf = await loadWorkflow(workflow);
-  if (!childWf) {
-    log.error(
-      `[ocr-http] approve-batch: unknown approveDocumentTo workflow "${workflow}" — doc row not enqueued`,
-    );
-    return undefined;
-  }
   return ensureDaemonsAndEnqueue(
     childWf,
     [input] as never,

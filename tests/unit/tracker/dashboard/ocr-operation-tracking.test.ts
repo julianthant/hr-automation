@@ -477,10 +477,12 @@ test("approve for an oath-upload operation fans out signers only (its existing t
   }
 });
 
-test("approve for a standalone oath OCR run still fans out the oath-upload ticket (unchanged)", async () => {
+test("approve for a standalone oath OCR run is REJECTED (approval ≡ delegation; legacy fan-out removed 2026-06-11)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-op-standalone-"));
   try {
-    // No operationWorkflow / no parentRunId → standalone OCR-hub upload.
+    // No operationWorkflow / no parentRunId → standalone OCR-hub upload. The
+    // UI never offers Approve for standalone runs; the route now fails loud
+    // instead of silently fanning out the legacy both-targets rows.
     seedOathOcrRow(dir, "sess-std", "ocr-run-std");
 
     const calls: Array<{ workflow: string }> = [];
@@ -498,11 +500,11 @@ test("approve for a standalone oath OCR run still fans out the oath-upload ticke
       runId: "ocr-run-std",
       records: [oathRecord("10000001")],
     });
-    assert.equal(res.status, 200);
-    const body = res.body as { ok: true; fannedOut: Array<{ workflow: string }> };
-    const workflows = body.fannedOut.map((f) => f.workflow);
-    assert.ok(workflows.includes("oath-signature"));
-    assert.ok(workflows.includes("oath-upload"), "standalone oath run still files the ticket");
+    assert.equal(res.status, 400);
+    const body = res.body as { ok: false; error: string };
+    assert.equal(body.ok, false);
+    assert.match(body.error, /[Ss]tandalone OCR runs have no approve flow/);
+    assert.equal(calls.length, 0, "nothing is enqueued for a rejected standalone approve");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

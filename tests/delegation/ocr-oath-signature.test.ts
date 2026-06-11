@@ -104,16 +104,20 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   rt.stubOcr(STUB_RECORDS.map(rawOathRecordFromStub));
   rt.holdAll("oath-signature", "transaction");
 
-  // 2. Enqueue the OCR run (registers the fixture PDF) + wait for the prep gate.
-  const ocr = await rt.enqueueOcr({ fixturePath: FIXTURE_PDF, originalName: "multiple-oath.pdf" });
-  // A STANDALONE OCR run now COMPLETES `done` after person-lookup (it never parks
-  // at awaiting-approval — only DELEGATED runs do). This test still drives the
-  // (production-preserved) standalone approve route directly via `approveOcr`, so
-  // sync on the completion event instead of the retired awaiting-approval one.
-  await rt.waitForEvent("ocr:review-complete", { runId: ocr.runId });
+  // 2. Enqueue the OCR run DELEGATED (registers the fixture PDF) + wait for the
+  // awaiting-approval park. Approve REQUIRES a delegated run since 2026-06-11
+  // (standalone approve is rejected 400 — approval ≡ delegation), so the run
+  // parks on `subscribeToApproval` like every production approve flow.
+  const PARENT_RUN = "op-parent-star-oathsig";
+  const ocr = await rt.enqueueOcr({
+    fixturePath: FIXTURE_PDF,
+    originalName: "multiple-oath.pdf",
+    parentRunId: PARENT_RUN,
+  });
+  await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId });
 
   // 3. Drive the REAL approve fan-out → 3 oath-signature signer children, each a
-  // controllable daemon run under the OCR run (childParentRunId = ocrRunId).
+  // controllable daemon run under the delegating run (childParentRunId = parentRunId).
   const children = await rt.approveOcr({
     sessionId: ocr.sessionId,
     runId: ocr.runId,
@@ -161,8 +165,8 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   // ─── Dashboard projection asserts (the invariant checklist) ───────────────
   const dash = rt.dashboard();
 
-  // children() finds exactly the 3 signer runs under the OCR parent.
-  const kids = await rt.children(ocr.runId);
+  // children() finds exactly the 3 signer runs under the delegating parent.
+  const kids = await rt.children(PARENT_RUN);
   const sigKids = kids.filter((k) => k.workflow === "oath-signature");
   assert.equal(sigKids.length, 3, "exactly 3 oath-signature children under the OCR run");
   assert.deepEqual(
@@ -181,7 +185,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   assert.equal(ocrRow.data.__traceId, "<traceId>", "OCR row carries a (scrubbed) trace id");
   assert.equal(ocrRow.status, "done", "OCR row is terminal done after approval");
 
-  // Every signer child: batch-member archetype, parentRunId === ocrRunId,
+  // Every signer child: batch-member archetype, parentRunId === the delegating run,
   // person title (resolved name), EID subtitle (eid→person, flat-row footer).
   const byEid: Record<string, { name: string }> = {
     "10000001": { name: "Jane Doe" },
@@ -190,7 +194,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   };
   for (const c of [c1!, c2!, c3!]) {
     const row = dash.row("oath-signature", c.runId);
-    assert.equal(row.parentRunId, ocr.runId, `signer ${c.itemId} parentRunId === OCR runId`);
+    assert.equal(row.parentRunId, PARENT_RUN, `signer ${c.itemId} parentRunId === the delegating run`);
     assert.equal(row.archetype, "batch-member", `signer ${c.itemId} is a batch-member`);
     const emplId = row.data.emplId;
     assert.ok(emplId && byEid[emplId], `signer ${c.itemId} carries a known EID (got ${emplId})`);
@@ -212,7 +216,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   // Surface / grouping: the oath-signature group anchor over the 3 signer
   // members (alwaysBatchDelegatedMembers → batch surface even for delegated
   // members), subtitle = trace id (anchor uses preferTraceIdSubtitle).
-  const anchor = dash.groupAnchor("oath-signature", ocr.runId);
+  const anchor = dash.groupAnchor("oath-signature", PARENT_RUN);
   assert.equal(anchor.memberCount, 3, "oath-signature group anchor has 3 members");
   assert.equal(anchor.kind, "batch", "delegated signer members render as a batch surface");
   assert.equal(anchor.subtitle, "<traceId>", "group anchor subtitle is the trace id");
