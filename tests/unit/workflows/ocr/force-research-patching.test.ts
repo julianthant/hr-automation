@@ -92,6 +92,41 @@ describe("force-research patches records from eid-lookup outcomes", () => {
     assert.equal(rec["matchSource"], "eid-lookup");
   });
 
+  it("hard-rejects a verify row (N4) — force-research must not corrupt the completeness report", async () => {
+    const dir = makeDir();
+    const sessionId = "session-fr-verify";
+    const runId = "run-fr-verify";
+    const date = dateLocal();
+    mkdirSync(rowsDir(dir), { recursive: true });
+    // A verify-formType OCR row. force-research would clear employeeId + drop
+    // paperEmployeeId + never rebuild checks[] → corrupt the report. It must
+    // refuse before touching anything.
+    writeFileSync(
+      rowFilePath("ocr", date, dir),
+      JSON.stringify({
+        workflow: "ocr",
+        id: sessionId,
+        runId,
+        timestamp: new Date().toISOString(),
+        status: "done",
+        step: "person-lookup",
+        data: { formType: "verify", records: JSON.stringify([{ name: "Doe, Jane", employeeId: "10000001", paperEmployeeId: "10000001", checks: [] }]) },
+      }) + "\n",
+    );
+
+    let threw: unknown;
+    try {
+      await runForceResearch(
+        { sessionId, runId, recordIndices: [0] },
+        { trackerDir: dir, _enqueueOverride: async () => { throw new Error("must not enqueue a verify row"); }, _watchChildRunsOverride: async () => { throw new Error("must not watch a verify row"); } },
+      );
+    } catch (err) {
+      threw = err;
+    }
+    assert.ok(threw, "force-research must reject a verify row");
+    assert.match((threw as Error).message, /verify/i, "error explains verify rows use verify-relookup");
+  });
+
   it("emitted row has blank employeeId when lookup fails", async () => {
     const dir = makeDir();
     const sessionId = "session-fr-2";
