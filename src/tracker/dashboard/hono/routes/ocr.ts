@@ -160,7 +160,7 @@ async function handlePrepare(
       400,
     );
   }
-  const rosterMode = (fields.rosterMode?.trim() ?? "existing") as "existing" | "download";
+  const rosterMode = (fields.rosterMode?.trim() ?? "existing") as "existing" | "download" | "wait";
   const rosterPath = fields.rosterPath?.trim() || undefined;
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
   const previousRunId = fields.previousRunId?.trim() || undefined;
