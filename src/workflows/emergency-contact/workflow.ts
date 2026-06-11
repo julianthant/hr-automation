@@ -1,6 +1,7 @@
 import { log } from "../../utils/log.js";
 import { defineWorkflow } from "../../core/index.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
@@ -86,10 +87,7 @@ export const emergencyContactWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page, instance, context) => {
-        const ok = await loginToUCPath(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("UCPath authentication failed");
-      },
+      login: requireLogin(loginToUCPath, "UCPath authentication failed"),
     },
   ],
   authSteps: false,

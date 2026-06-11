@@ -247,16 +247,21 @@ export class Session {
     if (systems.length === 1) {
       const sys = systems[0]
       const slot = browsers.get(sys.id)!
-      throwIfAborted(abortSignal)
-      await slot.page.bringToFront()
-      opts.observer?.onAuthStart?.(sys.id, sys.id)
-      await loginWithRetry(
-        sys, slot.page, opts.observer?.instance,
-        () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
-        abortSignal,
-      )
-      opts.observer?.onAuthComplete?.(sys.id, sys.id)
-      readyPromises.set(sys.id, Promise.resolve())
+      if (sys.deferAuth) {
+        log.step(`[Auth: ${sys.id}] auth deferred — login handled by workflow step`)
+        readyPromises.set(sys.id, Promise.resolve())
+      } else {
+        throwIfAborted(abortSignal)
+        await slot.page.bringToFront()
+        opts.observer?.onAuthStart?.(sys.id, sys.id)
+        await loginWithRetry(
+          sys, slot.page, opts.observer?.instance,
+          () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+          abortSignal,
+        )
+        opts.observer?.onAuthComplete?.(sys.id, sys.id)
+        readyPromises.set(sys.id, Promise.resolve())
+      }
     } else if (systems.length > 1) {
       const STAGGER_MS = opts.staggerMs ?? 5_000
       const SETTLE_MS = opts.settleMs ?? 2_000
@@ -285,6 +290,13 @@ export class Session {
       for (let i = 0; i < systems.length; i++) {
         const sys = systems[i]
         const slot = browsers.get(sys.id)!
+        // A deferred system skips the Duo chain entirely — its ready
+        // promise resolves immediately without any auth observer events.
+        if (sys.deferAuth) {
+          log.step(`[Auth: ${sys.id}] auth deferred — login handled by workflow step`)
+          readyPromises.set(sys.id, Promise.resolve())
+          continue
+        }
         const p = (async () => {
           throwIfAborted(abortSignal)
           await acquireSlot()

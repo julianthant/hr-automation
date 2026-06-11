@@ -10,6 +10,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToUKG } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import {
   getGeniesIframe,
   searchEmployee,
@@ -172,10 +173,7 @@ export const kronosReportsWorkflow = defineWorkflow({
   systems: [
     {
       id: "old-kronos",
-      login: async (page, instance, context) => {
-        const ok = await loginToUKG(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("UKG authentication failed");
-      },
+      login: requireLogin(loginToUKG, "UKG authentication failed"),
       // sessionDir intentionally omitted here. A future dashboard-owned runner
       // should inject a per-worker sessionDir via opts.launchFn so each worker
       // gets its own Playwright persistent context (workers sharing one dir

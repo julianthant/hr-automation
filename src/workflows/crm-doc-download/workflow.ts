@@ -6,6 +6,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToACTCrm } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
@@ -35,10 +36,7 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   systems: [
     {
       id: "crm",
-      login: async (page, instance, context) => {
-        const ok = await loginToACTCrm(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("ACT CRM authentication failed");
-      },
+      login: requireLogin(loginToACTCrm, "ACT CRM authentication failed"),
     },
   ],
   authSteps: true,
