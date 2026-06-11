@@ -55,7 +55,7 @@ test("orchestrator clears OcrPrepareAbort flag after operator discard", async ()
   await assert.doesNotReject(
     runOcrOrchestrator(
       { pdfPath, pdfOriginalName: "test.pdf", pdfFileId, formType: "oath", sessionId, rosterPath, rosterMode: "existing" },
-      { runId, trackerDir: dir, _emitOverride: emitOverride as never, _skipSharepointDispatch: true },
+      { runId, trackerDir: dir, _emitOverride: emitOverride as never, _assertSharepointDispatchUnreached: true },
     ),
   );
 
@@ -88,7 +88,7 @@ test("orchestrator clears flag even when failure tracker-write itself would re-t
   await assert.doesNotReject(
     runOcrOrchestrator(
       { pdfPath, pdfOriginalName: "test.pdf", pdfFileId, formType: "oath", sessionId, rosterPath, rosterMode: "existing" },
-      { runId, trackerDir: dir, _emitOverride: emitOverride as never, _skipSharepointDispatch: true },
+      { runId, trackerDir: dir, _emitOverride: emitOverride as never, _assertSharepointDispatchUnreached: true },
     ),
   );
 
