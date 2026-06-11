@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  cancelQueuedChildTasksForParentRun,
   createOcrActiveCheckDependencyBatch,
   createTaskDependencyBatch,
   getDependencySummaryByParentRunId,
@@ -12,6 +13,7 @@ import {
   markDependencyTerminal,
   openTaskStore,
   openTaskStoreForTests,
+  type TaskStore,
 } from "../../../../src/tracker/tasks/store.js";
 
 function tempDbPath(): string {
@@ -220,6 +222,79 @@ test("markDependencyTerminal records result JSON and updates summary", () => {
     const summary = getDependencySummary(store, batch.parentTaskId);
     assert.equal(summary.pending, 0);
     assert.equal(summary.satisfied, 1);
+  } finally {
+    rmSync(join(dbPath, ".."), { recursive: true, force: true });
+  }
+});
+
+function seedChildTask(
+  store: TaskStore,
+  args: { taskId: string; workflow: string; itemId: string; runId: string; parentRunId: string; state: string },
+): void {
+  const now = "2026-06-11T12:00:00.000Z";
+  store.db.prepare(`
+    INSERT INTO tasks (
+      id, workflow, item_id, run_id, task_kind, data_json, input_json, original_input_json,
+      control_state, priority, available_at, enqueued_at, parent_run_id, source,
+      created_at, updated_at, terminal_at
+    ) VALUES (
+      @taskId, @workflow, @itemId, @runId, 'workflow_item', '{}', '{}', '{}',
+      @state, 0, @now, @now, @parentRunId, 'daemon',
+      @now, @now, @terminalAt
+    )
+  `).run({
+    taskId: args.taskId,
+    workflow: args.workflow,
+    itemId: args.itemId,
+    runId: args.runId,
+    parentRunId: args.parentRunId,
+    state: args.state,
+    now,
+    terminalAt: ["done", "failed", "cancelled"].includes(args.state) ? now : null,
+  });
+  store.db.prepare(`
+    INSERT INTO task_attempts (
+      id, task_id, attempt_no, run_id, control_state,
+      tracker_workflow, tracker_item_id, data_json, created_at, updated_at
+    ) VALUES (
+      @attemptId, @taskId, 1, @runId, @attemptState,
+      @workflow, @itemId, '{}', @now, @now
+    )
+  `).run({
+    attemptId: `att-${args.taskId}`,
+    taskId: args.taskId,
+    runId: args.runId,
+    workflow: args.workflow,
+    itemId: args.itemId,
+    attemptState: args.state === "queued" ? "pending" : args.state === "running" ? "running" : "done",
+    now,
+  });
+}
+
+test("cancelQueuedChildTasksForParentRun cancels non-terminal children of a parent run, leaves others", () => {
+  const dbPath = tempDbPath();
+  try {
+    const store = openTaskStoreForTests(dbPath);
+    // Two non-terminal children of our prep run (queued + running) — both cancellable.
+    seedChildTask(store, { taskId: "t-queued", workflow: "person-lookup", itemId: "ocr-verify-run-1-r0", runId: "c0", parentRunId: "ocr-run-1", state: "queued" });
+    seedChildTask(store, { taskId: "t-running", workflow: "i9-lookup", itemId: "ocr-verify-i9-run-1-r1", runId: "c1", parentRunId: "ocr-run-1", state: "running" });
+    // An already-done child of the same parent — must NOT be re-cancelled.
+    seedChildTask(store, { taskId: "t-done", workflow: "person-lookup", itemId: "ocr-verify-run-1-r2", runId: "c2", parentRunId: "ocr-run-1", state: "done" });
+    // A queued child of a DIFFERENT parent run — must be untouched.
+    seedChildTask(store, { taskId: "t-other", workflow: "person-lookup", itemId: "ocr-verify-run-9-r0", runId: "c9", parentRunId: "ocr-run-OTHER", state: "queued" });
+
+    const cancelled = cancelQueuedChildTasksForParentRun(store, { parentRunId: "ocr-run-1" });
+    assert.equal(cancelled, 2, "queued + running children of the prep run are cancelled");
+
+    const stateOf = (taskId: string): string =>
+      (store.db.prepare("SELECT control_state AS s FROM tasks WHERE id = ?").get(taskId) as { s: string }).s;
+    assert.equal(stateOf("t-queued"), "cancelled");
+    assert.equal(stateOf("t-running"), "cancelled");
+    assert.equal(stateOf("t-done"), "done", "terminal child is not re-cancelled");
+    assert.equal(stateOf("t-other"), "queued", "a different parent run's child is untouched");
+
+    // Cancelling again is a no-op (the children are now terminal).
+    assert.equal(cancelQueuedChildTasksForParentRun(store, { parentRunId: "ocr-run-1" }), 0);
   } finally {
     rmSync(join(dbPath, ".."), { recursive: true, force: true });
   }

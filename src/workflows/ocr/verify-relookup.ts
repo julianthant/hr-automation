@@ -23,6 +23,8 @@ import { randomUUID } from "node:crypto";
 import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
@@ -208,13 +210,26 @@ async function runPersonRelookup(ctx: {
   }
 
   const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  const outcomes = await watchFn({
-    workflow: "person-lookup",
-    expectedItemIds: [itemId],
-    trackerDir,
-    date,
-    timeoutMs: 30 * 60_000,
-  });
+  let outcomes: ChildOutcome[];
+  try {
+    outcomes = await watchFn({
+      workflow: "person-lookup",
+      expectedItemIds: [itemId],
+      trackerDir,
+      date,
+      timeoutMs: 30 * 60_000,
+      // Operator-cancel bridge: throws a discard-abort error when the prepare-
+      // abort flag is set (orchestrator trips it on `ctx.signal`).
+      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
+    });
+  } catch (err) {
+    if (isOperatorDiscardAbortError(err)) {
+      // Cancel mid-relookup: cascade-cancel the still-queued person-lookup child.
+      // Fail-loud — a cascade error propagates.
+      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
+    }
+    throw err;
+  }
 
   const outcome = outcomes.find((o) => o.itemId === itemId);
   if (outcome) {
@@ -275,13 +290,26 @@ async function runI9Relookup(ctx: {
   }
 
   const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  const outcomes = await watchFn({
-    workflow: "i9-lookup",
-    expectedItemIds: [itemId],
-    trackerDir,
-    date,
-    timeoutMs: 30 * 60_000,
-  });
+  let outcomes: ChildOutcome[];
+  try {
+    outcomes = await watchFn({
+      workflow: "i9-lookup",
+      expectedItemIds: [itemId],
+      trackerDir,
+      date,
+      timeoutMs: 30 * 60_000,
+      // Operator-cancel bridge: throws a discard-abort error when the prepare-
+      // abort flag is set (orchestrator trips it on `ctx.signal`).
+      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
+    });
+  } catch (err) {
+    if (isOperatorDiscardAbortError(err)) {
+      // Cancel mid-relookup: cascade-cancel the still-queued i9-lookup child.
+      // Fail-loud — a cascade error propagates.
+      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
+    }
+    throw err;
+  }
 
   const outcome = outcomes.find((o) => o.itemId === itemId);
   if (outcome) {
