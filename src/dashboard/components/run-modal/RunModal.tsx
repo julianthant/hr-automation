@@ -12,26 +12,18 @@ import {
 import { cn } from "@/lib/utils";
 import { DuplicateBanner } from "@/components/oath-upload";
 import type { PriorRunSummary } from "@/components/shared/types";
-import { getRunModalConfig, type RunModalSubmitResponse } from "@/lib/run-modal-registry";
+import {
+  getRunModalConfig,
+  resolveTargetWorkflow,
+  type RunModalSubmitResponse,
+} from "@/lib/run-modal-registry";
 import { useRosters, refreshRosters, type RosterListing } from "@/components/hooks/useRosters";
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
+import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
 
 type RosterMode = "download" | "existing" | "wait";
-
-interface SharePointQueueItem {
-  id: string;
-  label: string;
-  state: "running" | "queued";
-}
-
-interface SharePointDownloadStatus {
-  inFlight: boolean;
-  current: SharePointQueueItem | null;
-  queued: SharePointQueueItem[];
-  lastCompletion: { id: string; ts: string; ok: boolean } | null;
-}
 
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
@@ -82,7 +74,6 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<RosterMode>("existing");
   const rosters = useRosters();
-  const [sharePointStatus, setSharePointStatus] = useState<SharePointDownloadStatus | null>(null);
   const seenSharePointCompletionTs = useRef<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -90,7 +81,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [formType, setFormType] = useState<string | null>(effectiveLockedFormType ?? null);
   const formOptionsCache = useFormTypes();
   const formOptions: FormTypeOption[] = formOptionsCache ?? [];
-  const [priorRuns, setPriorRuns] = useState<PriorRunSummary[]>([]);
+  // Per-file duplicate-check results. Each entry is a picked file whose hash
+  // matched at least one prior run; `fileName` lets the banner say WHICH file is
+  // a duplicate in a multi-file upload. Single-file uploads still produce a
+  // one-entry array (the banner omits the filename header for a lone file).
+  const [duplicateGroups, setDuplicateGroups] = useState<
+    Array<{ fileName: string; priorRuns: PriorRunSummary[] }>
+  >([]);
   const [dryRun, setDryRun] = useState(false);
   const [oathUploadMode, setOathUploadMode] = useState<"full" | "upload-only">("full");
   const [workerChoice, setWorkerChoice] = useState<WorkerChoice>(AUTO_WORKERS);
@@ -100,7 +97,17 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   // self-hides there (it stays hidden, not just disabled).
   const effectiveShowWorkers = showWorkers && !(showOathUploadMode && oathUploadMode === "upload-only");
   const ctx = { reuploadFor, lockedFormType: effectiveLockedFormType, oathUploadMode };
+  // Poll SharePoint download status only while the roster picker is showing.
+  // The hook gates its shared 2.5s poll on `enabled` and shallow-compares
+  // payloads so an unchanged status doesn't re-render the modal every tick.
+  const sharePointStatus = useSharePointStatus(open && effectiveShowRoster);
   const file = files[0] ?? null;
+  // Stable identity signature for the picked files — used as an effect dep so
+  // the duplicate check re-runs only when the actual selection changes (not on
+  // every render). File objects are referentially unstable across renders.
+  const filesSignature = files
+    .map((f) => `${f.name}:${f.size}:${f.lastModified}`)
+    .join("|");
 
   useEffect(() => {
     if (open && effectiveLockedFormType) setFormType(effectiveLockedFormType);
@@ -141,35 +148,17 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     refreshRosters();
   }, [open, effectiveShowRoster]);
 
+  // When the polled status reports a NEW completion (a download finished while
+  // the modal was open), refresh the rosters cache so the freshly-downloaded
+  // file appears as "Use latest roster." The seen-completion ref dedupes so we
+  // refresh once per completion, not every poll tick.
   useEffect(() => {
-    if (!open || !effectiveShowRoster) {
-      setSharePointStatus(null);
-      return;
+    const completionTs = sharePointStatus?.lastCompletion?.ts ?? null;
+    if (completionTs && completionTs !== seenSharePointCompletionTs.current) {
+      seenSharePointCompletionTs.current = completionTs;
+      refreshRosters();
     }
-    let cancelled = false;
-    async function pollStatus() {
-      try {
-        const resp = await fetch("/api/sharepoint-download/status");
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const status = (await resp.json()) as SharePointDownloadStatus;
-        if (cancelled) return;
-        setSharePointStatus(status);
-        const completionTs = status.lastCompletion?.ts ?? null;
-        if (completionTs && completionTs !== seenSharePointCompletionTs.current) {
-          seenSharePointCompletionTs.current = completionTs;
-          refreshRosters();
-        }
-      } catch {
-        if (!cancelled) setSharePointStatus(null);
-      }
-    }
-    void pollStatus();
-    const timer = window.setInterval(() => void pollStatus(), 2500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [open, effectiveShowRoster]);
+  }, [sharePointStatus]);
 
   const sharePointWaitAvailable =
     Boolean(sharePointStatus?.inFlight) || Boolean(sharePointStatus?.queued.length);
@@ -186,26 +175,35 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     }
   }, [rosters, rosterMode, sharePointWaitAvailable]);
 
-  // Duplicate-check effect — hash the PDF and ask the server whether
-  // we've seen it before. Best-effort: failures surface as an inline error
-  // but don't block submit (the operator may genuinely want to re-run).
+  // Duplicate-check effect — hash EACH picked PDF and ask the server whether
+  // we've seen it before. Runs per-file so a bulk (multi-file) upload doesn't
+  // silently skip the heads-up: oath-upload declares both `duplicateCheck` and
+  // `allowMultipleFiles`. Best-effort: failures surface as an inline error but
+  // don't block submit (the operator may genuinely want to re-run).
   useEffect(() => {
-    if (!showDuplicateCheck || !file || files.length !== 1) {
-      setPriorRuns([]);
+    if (!showDuplicateCheck || files.length === 0) {
+      setDuplicateGroups([]);
       return;
     }
     let cancelled = false;
+    const checkedFiles = files;
     (async () => {
       try {
-        const hash = await sha256OfFile(file);
-        const r = await fetch(
-          `/api/oath-upload/check-duplicate?hash=${encodeURIComponent(hash)}`,
+        const results = await Promise.all(
+          checkedFiles.map(async (candidate) => {
+            const hash = await sha256OfFile(candidate);
+            const r = await fetch(
+              `/api/oath-upload/check-duplicate?hash=${encodeURIComponent(hash)}`,
+            );
+            const j = (await r.json()) as
+              | { ok: true; priorRuns: PriorRunSummary[] }
+              | { ok: false; error: string };
+            return { fileName: candidate.name, priorRuns: j.ok ? j.priorRuns ?? [] : [] };
+          }),
         );
-        const j = (await r.json()) as
-          | { ok: true; priorRuns: PriorRunSummary[] }
-          | { ok: false; error: string };
         if (cancelled) return;
-        if (j.ok) setPriorRuns(j.priorRuns ?? []);
+        // Only files with at least one prior run make the banner.
+        setDuplicateGroups(results.filter((g) => g.priorRuns.length > 0));
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -217,7 +215,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     return () => {
       cancelled = true;
     };
-  }, [file, files.length, showDuplicateCheck]);
+    // `filesSignature` captures the selection identity; the `files` array read
+    // inside is referentially unstable across renders, so the signature is the
+    // real dependency that gates a re-check.
+  }, [filesSignature, showDuplicateCheck]);
 
   // Refresh form-types cache each time the modal opens so a backend update
   // (rare) is reflected. The hook (`useFormTypes`) already serves any
@@ -244,12 +245,20 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     setSubmitting(false);
     setProgress(null);
     setError(null);
-    setPriorRuns([]);
+    setDuplicateGroups([]);
     setRosterMode("existing");
     setDryRun(false);
     setOathUploadMode("full");
     setWorkerChoice(AUTO_WORKERS);
-  }, [open]);
+    // Reset the form-type pick so the standalone-OCR modal re-defaults on the
+    // next open (the default-select effect is gated on `!formType`); a locked
+    // form-type re-injects via the `open && effectiveLockedFormType` effect.
+    setFormType(effectiveLockedFormType ?? null);
+    // Drop the seen-SharePoint-completion marker so reopening after a completed
+    // download re-fires the roster-refresh side-effect on the next poll instead
+    // of treating that completion as already handled.
+    seenSharePointCompletionTs.current = null;
+  }, [open, effectiveLockedFormType]);
 
   if (!config) {
     return null;
@@ -355,10 +364,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
           if (showFormType && formType) fd.append("formType", formType);
           // Target-workflow operation intent — lets the backend tell an
           // oath-signature PDF run from an oath-upload full run (both
-          // formType=oath). Only meaningful for /api/ocr/prepare.
+          // formType=oath). The registry decides when to send it (only on the
+          // shared OCR-prep submit path); no endpoint-string branching here.
           {
-            const target = config.targetWorkflow?.(ctx);
-            if (target && submitUrl.endsWith("/api/ocr/prepare")) {
+            const target = resolveTargetWorkflow(config, ctx);
+            if (target) {
               fd.append("targetWorkflow", target);
             }
           }
@@ -617,8 +627,18 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
             </section>
           )}
 
-          {showDuplicateCheck && priorRuns.length > 0 && (
-            <DuplicateBanner priorRuns={priorRuns} />
+          {showDuplicateCheck && duplicateGroups.length > 0 && (
+            <div className="space-y-2.5">
+              {duplicateGroups.map((group) => (
+                <DuplicateBanner
+                  key={group.fileName}
+                  priorRuns={group.priorRuns}
+                  // Show WHICH file is a duplicate only when more than one file
+                  // is in play; a lone file keeps the original header-less banner.
+                  fileLabel={duplicateGroups.length > 1 ? group.fileName : undefined}
+                />
+              ))}
+            </div>
           )}
 
           {showDryRun && (

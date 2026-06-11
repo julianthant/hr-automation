@@ -21,6 +21,7 @@ import {
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { QueueRowCard } from "./QueueRowCard";
+import { statusKeyForEntry } from "@/components/shared/status-styles";
 import { resolveQueueRowStatus } from "../../../domain/queue-row-status.js";
 // Side-effect import: registers each workflow's status extensions into the
 // queue-row-status registry for the client bundle (defineWorkflow doesn't run
@@ -118,13 +119,17 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
  * `resolveQueueRowStatus` — this component never names a workflow.
  */
 function resolveStatusConfig(entry: TrackerEntry, derivedStatus: string | null): StatusConfig {
-  if (entry.status === "failed" && entry.step === "cancelled") {
+  // `statusKeyForEntry` applies the shared failed+cancelled override (→ amber
+  // Cancelled) used by every status surface. A derived status (notFound /
+  // needsReview) still wins over a non-cancelled base status.
+  const baseKey = statusKeyForEntry(entry);
+  if (baseKey === "cancelled") {
     return STATUS_CONFIG.cancelled;
   }
   if (derivedStatus && STATUS_CONFIG[derivedStatus]) {
     return STATUS_CONFIG[derivedStatus];
   }
-  return STATUS_CONFIG[entry.status] ?? STATUS_CONFIG.pending;
+  return STATUS_CONFIG[baseKey] ?? STATUS_CONFIG.pending;
 }
 
 interface EntryItemProps {

@@ -50,9 +50,17 @@ function firstNonBlank(...values: Array<string | undefined>): string {
   return "";
 }
 
-/** The employee's EID, under whichever field the workflow stamps it. */
+/**
+ * The employee's EID, under whichever field the workflow stamps it. Defense in
+ * depth against prose leaking into the identity field (e.g. a stale
+ * `emplId: "Not found"` / `"Error"`): an EID is numeric, so anything containing
+ * a non-digit is rejected and the caller falls through to the trace id. The
+ * fix-at-source lives in the workflows that stamp these fields; this guard
+ * keeps a regression from reaching the subtitle.
+ */
 function resolveEid(data: Record<string, string>): string {
-  return firstNonBlank(data.emplId, data.eid, data.employeeId);
+  const candidate = firstNonBlank(data.emplId, data.eid, data.employeeId);
+  return /^\d+$/.test(candidate) ? candidate : "";
 }
 
 /**

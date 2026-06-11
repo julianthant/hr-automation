@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createCachedResource } from "./resource-factory";
 
 export interface FormTypeOption {
   formType: string;
@@ -10,75 +10,46 @@ export interface FormTypeOption {
 }
 
 /**
- * Synchronous lookup against the module-level form-types cache: does this
- * form type fan out downstream rows on approve? Returns false when the cache
- * isn't primed yet (the pane re-renders when it loads). Used by the OCR review
- * pane to show the Approve button for fan-out forms on standalone runs.
- */
-export function formTypeHasApproveFanOut(formType: string | undefined): boolean {
-  if (!formType || cache === null) return false;
-  return cache.some((f) => f.formType === formType && f.hasApproveFanOut === true);
-}
-
-/**
  * Module-level form-type cache shared across every consumer of `useFormTypes`.
  * Primed once at App mount via `prefetchFormTypes()` so RunModal's first paint
  * already has the picker — no "missing form type chooser" frame.
  *
  * Mirror of `useRosters` — same lifecycle, same staleness contract.
  */
-let cache: FormTypeOption[] | null = null;
-let inflight: Promise<FormTypeOption[]> | null = null;
-const subscribers = new Set<(forms: FormTypeOption[] | null) => void>();
+const resource = createCachedResource<FormTypeOption[]>({
+  fetcher: async () => {
+    const resp = await fetch("/api/ocr/forms");
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return (await resp.json()) as FormTypeOption[];
+  },
+  fallback: [],
+});
 
-function notify(): void {
-  for (const cb of subscribers) cb(cache);
-}
-
-async function fetchOnce(): Promise<FormTypeOption[]> {
-  if (inflight) return inflight;
-  inflight = (async () => {
-    try {
-      const resp = await fetch("/api/ocr/forms");
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = (await resp.json()) as FormTypeOption[];
-      cache = data;
-      return data;
-    } catch {
-      cache = [];
-      return [];
-    } finally {
-      inflight = null;
-      notify();
-    }
-  })();
-  return inflight;
+/**
+ * Synchronous lookup against the module-level form-types cache: does this
+ * form type fan out downstream rows on approve? Returns false when the cache
+ * isn't primed yet (the pane re-renders when it loads). Used by the OCR review
+ * pane to show the Approve button for fan-out forms on standalone runs.
+ */
+export function formTypeHasApproveFanOut(formType: string | undefined): boolean {
+  if (!formType) return false;
+  const cache = resource.peek();
+  if (cache === null) return false;
+  return cache.some((f) => f.formType === formType && f.hasApproveFanOut === true);
 }
 
 /** Kick off the form-types fetch eagerly. Call from App mount. Idempotent. */
 export function prefetchFormTypes(): void {
-  if (cache !== null || inflight) return;
-  void fetchOnce();
+  resource.prefetch();
 }
 
 /** Force a refetch. */
 export function refreshFormTypes(): void {
-  inflight = null;
-  void fetchOnce();
+  resource.refresh();
 }
 
 /** Subscribe to the form-types cache. Triggers a fetch if nothing is cached
  *  or in flight. Returns the current value (or `null` if not yet loaded). */
 export function useFormTypes(): FormTypeOption[] | null {
-  const [forms, setForms] = useState<FormTypeOption[] | null>(cache);
-
-  useEffect(() => {
-    subscribers.add(setForms);
-    if (cache === null && !inflight) void fetchOnce();
-    return () => {
-      subscribers.delete(setForms);
-    };
-  }, []);
-
-  return forms;
+  return resource.useResource();
 }
