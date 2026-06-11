@@ -316,6 +316,44 @@ describe("emergencyContactOcrFormSpec.approveTo.canFanOut", () => {
       "unknown-classified record must not fan out as an EC row",
     );
   });
+
+  it("returns false for an EC record with a BLANK EID (F12 — guaranteed nav failure)", () => {
+    assert.equal(
+      canFanOut({
+        formKind: "emergency-contact",
+        sourcePage: 4,
+        employee: { name: "Alex Johnson", employeeId: "" },
+        emergencyContact: { name: "Pat Johnson", relationship: "Spouse", primary: true, sameAddressAsEmployee: true, address: null },
+        notes: [],
+        documentType: "expected",
+        originallyMissing: [],
+        matchState: "unresolved",
+        selected: true,
+        warnings: [],
+      }),
+      false,
+      "an EC record with no employee EID must not fan out — the daemon navigates by EID",
+    );
+  });
+
+  it("returns false for an EC record with a too-short EID", () => {
+    assert.equal(
+      canFanOut({
+        formKind: "emergency-contact",
+        sourcePage: 5,
+        employee: { name: "Alex Johnson", employeeId: "123" },
+        emergencyContact: { name: "Pat Johnson", relationship: "Spouse", primary: true, sameAddressAsEmployee: true, address: null },
+        notes: [],
+        documentType: "expected",
+        originallyMissing: [],
+        matchState: "matched",
+        selected: true,
+        warnings: [],
+      }),
+      false,
+      "a sub-5-digit EID is not a valid UCPath nav key",
+    );
+  });
 });
 
 describe("emergencyContactOcrFormSpec.matchRecord auto-accept floor", () => {
