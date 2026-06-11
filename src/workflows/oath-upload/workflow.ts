@@ -39,7 +39,6 @@ export const oathUploadWorkflow = defineWorkflow({
       // multi-day) operator-approval + per-signer wait, and authentication
       // failures don't kill the workflow before delegation even starts.
       deferAuth: true,
-      login: async () => {},
     },
   ],
   authSteps: false,

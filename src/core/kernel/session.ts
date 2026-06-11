@@ -1016,6 +1016,12 @@ async function loginWithRetry(
       log.step(`[Auth: ${system.id}] Starting login (attempt ${attempt}/${AUTH_MAX_ATTEMPTS})`)
     }
     try {
+      if (!system.login) {
+        // loginWithRetry should never be called for a deferAuth system — the
+        // caller (Session.launch) skips this function when sys.deferAuth is set.
+        // A missing login on a non-deferred system is a programming error.
+        throw new Error(`[Auth: ${system.id}] login function is undefined (programming error — system must declare login or set deferAuth)`)
+      }
       await raceAbort(system.login(page, instance, { abortSignal }), abortSignal)
       if (attempt > 1) {
         log.success(`[Auth: ${system.id}] Recovered on attempt ${attempt}`)

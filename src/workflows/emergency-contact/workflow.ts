@@ -1,7 +1,6 @@
 import { log } from "../../utils/log.js";
 import { defineWorkflow } from "../../core/index.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
-import { requireLogin } from "../../infra/auth/require-login.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
@@ -87,7 +86,12 @@ export const emergencyContactWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: requireLogin(loginToUCPath, "UCPath authentication failed"),
+      // deferAuth: UCPath auth is deferred to the `navigation` step so a
+      // fan-out contact child only Duos AFTER OCR approval, when it actually
+      // reaches UCPath. Mirrors oath-signature's deferral: all three OCR fan-out
+      // targets (oath-signature / oath-upload / emergency-contact) defer auth
+      // so the operator is not prompted for Duo before reviewing the OCR results.
+      deferAuth: true,
     },
   ],
   authSteps: false,
@@ -148,6 +152,12 @@ export const emergencyContactWorkflow = defineWorkflow({
     }
 
     const skipped = await ctx.step("navigation", async () => {
+      // Auth is deferred from session-launch to here so Duo fires AFTER OCR
+      // approval, not before. `loginToUCPath` is idempotent: on a daemon only
+      // the first item shows Duo; subsequent items reuse the warm session.
+      const authOk = await loginToUCPath(page, ctx.workflowInstance, ctx.signal);
+      if (!authOk) throw new Error("UCPath authentication failed");
+
       await navigateToEmergencyContact(page, record.employee.employeeId);
 
       const discoveredCtx: EmergencyContactContext = { employeeName: record.employee.name };

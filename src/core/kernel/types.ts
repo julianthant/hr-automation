@@ -9,7 +9,12 @@ import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.
 
 export interface SystemConfig {
   id: string
-  login: (
+  /**
+   * Authenticate this system. Required for every system where `deferAuth` is
+   * NOT set. When `deferAuth: true`, the kernel never calls this function and
+   * it may be omitted — the workflow handler is responsible for authentication.
+   */
+  login?: (
     page: Page,
     instance?: string,
     context?: { abortSignal?: AbortSignal },

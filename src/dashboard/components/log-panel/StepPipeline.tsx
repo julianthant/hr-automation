@@ -1,6 +1,10 @@
 import { cn } from "@/lib/utils";
 import { formatStepName, formatStepDuration, type TrackerEntry } from "@/components/shared/types";
 import {
+  OCR_CANONICAL_STEP_ORDER as _OCR_CANONICAL_STEP_ORDER,
+  OCR_RETIRED_STEP_FOLD as _OCR_RETIRED_STEP_FOLD,
+} from "../../../domain/ocr-steps.js";
+import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
@@ -379,16 +383,11 @@ export function computeStepViews(
  * a parked legacy `currentStep` relative to the visible live steps when
  * remapping — never rendered. (`matching` + `disambiguating` are now folded
  * into the single `ocr` step; `verification` was absorbed by `person-lookup`.)
+ *
+ * Sourced from `src/domain/ocr-steps.ts` — the single source of truth shared
+ * with the orchestrator-contract guard test.
  */
-const OCR_CANONICAL_STEP_ORDER = [
-  "loading-roster",
-  "ocr",
-  "matching",
-  "disambiguating",
-  "person-lookup",
-  "verification",
-  "awaiting-approval",
-];
+const OCR_CANONICAL_STEP_ORDER: string[] = [..._OCR_CANONICAL_STEP_ORDER];
 
 /**
  * Retired sub-phases that fold ONTO a surviving live step (rather than
@@ -396,11 +395,11 @@ const OCR_CANONICAL_STEP_ORDER = [
  * `ocr` step, so a row reported at either lights up `ocr`. (`verification` is
  * NOT here — it sat AFTER person-lookup, so it advances past it via the
  * order-based remap below.)
+ *
+ * Sourced from `src/domain/ocr-steps.ts` — the single source of truth shared
+ * with the orchestrator-contract guard test.
  */
-const OCR_RETIRED_STEP_FOLD: Record<string, string> = {
-  matching: "ocr",
-  disambiguating: "ocr",
-};
+const OCR_RETIRED_STEP_FOLD: Record<string, string> = { ..._OCR_RETIRED_STEP_FOLD };
 
 /**
  * Cosmetic OCR pipeline filter. The live OCR step list is
