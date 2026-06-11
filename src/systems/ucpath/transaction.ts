@@ -648,7 +648,7 @@ export async function readLatestTransactionNumber(
   log.step("Re-navigating to Smart HR Transactions...");
   await navigateToSmartHR(page);
   await clickSmartHRTransactions(page);
-  await page.waitForTimeout(3_000);
+  // clickSmartHRTransactions already awaits networkidle — no extra sleep needed.
   const txnFrame = getContentFrame(page);
 
   if (!employeeId) {
@@ -676,7 +676,9 @@ export async function readLatestTransactionNumber(
     log.warn(`[Txn Readback] Row matched but link '${linkText}' disappeared before click`);
     return "";
   }
-  await page.waitForTimeout(5_000);
+  // Wait for PeopleSoft to render the transaction detail page.
+  await waitForPeopleSoftProcessing(txnFrame, 15_000);
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
   // Click Continue on transaction details page
   const continueBtn = smartHR.continueButton(txnFrame);
@@ -684,7 +686,9 @@ export async function readLatestTransactionNumber(
     timeout: 5_000,
     label: "ucpath transaction detail continue button",
   }))) return "";
-  await page.waitForTimeout(8_000);
+  // Wait for PeopleSoft to load the Enter Transaction Information page.
+  await waitForPeopleSoftProcessing(txnFrame, 15_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // Extract "Transaction ID: T002XXXXXX" from the re-opened form.
   // The ID is below the comments/save area on the readback page, so
@@ -699,10 +703,24 @@ export async function readLatestTransactionNumber(
   return "";
 }
 
+/** Result returned by `findExistingTerminationTransaction`. */
+export interface ExistingTerminationResult {
+  /** Transaction number if a matching row was found; `null` otherwise. */
+  txnNumber: string | null;
+  /**
+   * `true` when the function left the page positioned at the Smart HR
+   * Transactions list — i.e. it successfully navigated there but found no
+   * matching row. The caller can skip a redundant
+   * navigateToSmartHR + clickSmartHRTransactions when this is `true`.
+   */
+  alreadyAtSmartHR: boolean;
+}
+
 /**
  * Look up an existing Smart HR termination transaction for a given
- * employee. Returns the transaction number (e.g. "T002126379") if found,
- * or `null` if no matching row exists on the Smart HR Transactions list.
+ * employee. Returns an `ExistingTerminationResult` whose `txnNumber` is
+ * the existing transaction number (e.g. "T002126379") if a row was found,
+ * or `null` if no matching row exists.
  *
  * Used as a pre-submit idempotence check: before creating a new
  * termination transaction, callers check whether one already exists for
@@ -710,6 +728,10 @@ export async function readLatestTransactionNumber(
  * (possibly without capturing the txn# locally) — return the number,
  * skip the resubmit, propagate it to downstream steps (e.g. Kuali
  * finalization).
+ *
+ * `alreadyAtSmartHR` is set to `true` when no row was found but the
+ * function successfully navigated to Smart HR Transactions. The caller can
+ * use this to skip a redundant double navigation (~12s saving per doc).
  *
  * Match semantics: row's Person ID column equals `employeeId`, row text
  * contains the effective date (MM/DD/YYYY), and row text contains
@@ -722,26 +744,25 @@ export async function readLatestTransactionNumber(
  * missed duplicates and produced real dupes (EID 10794813 Aki Uchida,
  * 2026-04-24).
  *
- * Best-effort: returns `null` on any navigation / parse failure rather
- * than throwing, because a failed pre-check should degrade to "no
- * existing transaction found — proceed with submit" rather than halting
- * the workflow. Real submit failures surface through the subsequent
- * `clickSaveAndSubmit` call.
+ * Best-effort: `txnNumber` is `null` on any navigation / parse failure
+ * rather than throwing, because a failed pre-check should degrade to "no
+ * existing transaction found — proceed with submit". Real submit failures
+ * surface through the subsequent `clickSaveAndSubmit` call.
  */
 export async function findExistingTerminationTransaction(
   page: Page,
   employeeId: string,
   effectiveDate: string,
-): Promise<string | null> {
+): Promise<ExistingTerminationResult> {
   try {
     log.step(`[Txn Lookup] Checking for existing termination: eid='${employeeId}' effDate='${effectiveDate}'`);
     if (!employeeId) {
       log.warn(`[Txn Lookup] Empty EID — skipping pre-submit existence check`);
-      return null;
+      return { txnNumber: null, alreadyAtSmartHR: false };
     }
     await navigateToSmartHR(page);
     await clickSmartHRTransactions(page);
-    await page.waitForTimeout(3_000);
+    // clickSmartHRTransactions already awaits networkidle — no extra sleep needed.
     const frame = getContentFrame(page);
 
     const linkText = await findTransactionRowLinkByEid(frame, employeeId, {
@@ -750,7 +771,8 @@ export async function findExistingTerminationTransaction(
     });
     if (!linkText) {
       log.step(`[Txn Lookup] No existing termination found for eid=${employeeId} date=${effectiveDate}`);
-      return null;
+      // Caller can skip re-navigation — page is already at Smart HR Transactions.
+      return { txnNumber: null, alreadyAtSmartHR: true };
     }
     log.step(`[Txn Lookup] Matching row found (link='${linkText}') — reading txn #`);
 
@@ -760,28 +782,32 @@ export async function findExistingTerminationTransaction(
       label: "ucpath existing transaction row link",
     }))) {
       log.warn(`[Txn Lookup] Row matched but link '${linkText}' disappeared before click — treating as no match`);
-      return null;
+      return { txnNumber: null, alreadyAtSmartHR: true };
     }
-    await page.waitForTimeout(4_000);
+    // Wait for PeopleSoft to render the transaction detail page.
+    await waitForPeopleSoftProcessing(frame, 15_000);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
     const continueBtn = smartHR.continueButton(frame);
     if (await clickIfPresent(continueBtn, {
       timeout: 5_000,
       label: "ucpath existing transaction continue button",
     })) {
-      await page.waitForTimeout(6_000);
+      // Wait for PeopleSoft to load the transaction form after Continue.
+      await waitForPeopleSoftProcessing(frame, 15_000);
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     }
 
     const txnNumber = await readTxnNumberFromDetailPage(frame);
     if (txnNumber) {
       log.success(`[Txn Lookup] Existing transaction #${txnNumber} found for eid=${employeeId}`);
-      return txnNumber;
+      return { txnNumber, alreadyAtSmartHR: false };
     }
     log.warn(`[Txn Lookup] Matched row but couldn't extract Transaction ID from detail page — treating as no match`);
-    return null;
+    return { txnNumber: null, alreadyAtSmartHR: false };
   } catch (e) {
     log.warn(`[Txn Lookup] Lookup threw (treating as no match): ${e instanceof Error ? e.message : String(e)}`);
-    return null;
+    return { txnNumber: null, alreadyAtSmartHR: false };
   }
 }
 
