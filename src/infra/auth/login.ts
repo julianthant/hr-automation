@@ -147,9 +147,9 @@ export async function ucpathSubmitAndWaitForDuo(
     return false;
   }
 
-  // After Duo, wait for redirects to settle.
+  // After Duo, wait for redirects to settle. networkidle alone is sufficient —
+  // the preceding sleep was redundant.
   log.step("Waiting for post-Duo redirects to settle...");
-  await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   log.step(`Post-Duo URL: ${page.url()}`);
 
@@ -159,7 +159,7 @@ export async function ucpathSubmitAndWaitForDuo(
     if (page.url().includes("ucpathdiscovery/disco")) {
       log.step(`Campus discovery page detected (attempt ${attempt + 1}) -- re-selecting UC San Diego...`);
       await selectUcSanDiegoCampus(page, "UCPath rediscovery");
-      await page.waitForTimeout(5_000);
+      // networkidle guards the redirect after campus re-selection.
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       log.step(`After re-selection settle | URL: ${page.url()}`);
     } else {
@@ -317,7 +317,9 @@ export async function ukgNavigateAndFill(page: Page): Promise<boolean | "already
 
   // Retry navigation on transient network errors via gotoWithRetry
   await gotoWithRetry(page, UKG_URL, undefined, 3, 60_000);
-  await page.waitForTimeout(5_000);
+  // Short settle to let UKG's SPA initialize before probing the session state
+  // (reduced from 5s — "Manage My Department" appears quickly on warm sessions).
+  await page.waitForTimeout(2_000);
 
   // Check if already logged in (persistent session)
   if (await page.locator("text=Manage My Department").count() > 0) {
@@ -399,8 +401,8 @@ export async function kualiNavigateAndFill(
 ): Promise<boolean | "already_logged_in"> {
   log.step("Navigating to Kuali Build...");
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  // networkidle guards the initial load; sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  await page.waitForTimeout(3_000);
 
   if (page.url().includes("kualibuild")) {
     log.success("Kuali Build already authenticated");
@@ -465,7 +467,8 @@ export async function kualiSubmitAndWaitForDuo(
       if (currentUrl.includes("SAML") || currentUrl.includes("saml")) {
         log.step("SAML error detected — re-navigating to Kuali...");
         await p.goto(url, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
-        await p.waitForTimeout(3_000);
+        // Short settle after SAML recovery re-navigation (Shibboleth redirect takes ~1s).
+        await p.waitForTimeout(1_500);
       }
     },
     systemLabel: "Kuali",
@@ -516,7 +519,10 @@ export async function newKronosNavigateAndFill(
 ): Promise<boolean | "already_logged_in"> {
   log.step("Navigating to new Kronos (WFD)...");
   await page.goto(NEW_KRONOS_WFD_URL, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await page.waitForTimeout(5_000);
+  // Short settle for SSO redirect chain to land. Use waitForURL for the
+  // already-logged-in fast path; otherwise fall through to credential fill.
+  // Reduced from 5s — SSO redirects settle within ~1s on warm sessions.
+  await page.waitForTimeout(2_000);
 
   if (page.url().includes("mykronos.com/wfd")) {
     log.success("New Kronos (WFD) already authenticated");
@@ -562,7 +568,8 @@ export async function newKronosSubmitAndWaitForDuo(
       if (p.url().includes("#failedLogin")) {
         log.step("Session timeout detected — re-navigating...");
         await p.goto(NEW_KRONOS_WFD_URL, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
-        await p.waitForTimeout(3_000);
+        // Short settle after session-timeout recovery re-navigation.
+        await p.waitForTimeout(1_500);
       }
     },
     systemLabel: "NewKronos",
