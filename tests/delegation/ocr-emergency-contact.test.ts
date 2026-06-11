@@ -125,7 +125,7 @@ const STUB_RECORDS: StubEcOcrRecord[] = [
  * P2.10 — OCR → emergency-contact `approveTo` fan-out through the REAL daemon
  * (no browser, temp tracker root, no `.tracker/` pollution). Same shape as the
  * P2.9 oath-signature star test, for a DIFFERENT form type (nested
- * `EmergencyContactRecord` input, default delegation policy, `oc-` trace code).
+ * `EmergencyContactRecord` input, default delegation policy, `ec-` trace code).
  *
  * Flow: stub OCR run (real `runOcrOrchestrator`, stubbed LLM/roster/eid-lookup)
  * → `ocr:awaiting-approval` → REAL `buildOcrApproveHandler` fan-out → 3 gated
@@ -227,7 +227,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   );
 
   // Parent OCR row archetype is `preview`; the file kind → PDF filename title +
-  // trace-id subtitle; `__traceId` is the default `oc-…` (EC has no traceCode).
+  // trace-id subtitle; `__traceId` uses the EC form spec's `ec-` trace code.
   const ocrRow = dash.row("ocr", ocr.runId);
   assert.equal(ocrRow.archetype, "preview", "OCR parent row archetype is preview");
   assert.equal(ocrRow.title, "emergency-contacts.pdf", "OCR (file kind) title is the PDF filename");
@@ -235,12 +235,13 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   assert.equal(ocrRow.data.queueRowKind, "file", "OCR row is file-kind (pdf input)");
   assert.equal(ocrRow.data.__traceId, "<traceId>", "OCR row carries a (scrubbed) trace id");
   assert.equal(ocrRow.status, "done", "OCR row is terminal done after approval");
-  // EC keeps the default `oc-` trace code (NOT `ou-` — that's oath-only).
+  // EC brands `ec-` (form-spec traceCode, F5 fix) — standalone and operation
+  // EC runs now share the same prefix instead of drifting `oc-` vs `ec-`.
   const rawOcrTraceId = dash.timeline("ocr", ocr.runId).at(-1)?.data?.__traceId;
   assert.match(
     String(rawOcrTraceId),
-    /^oc-\d{6}-[a-z0-9]{4}$/,
-    "OCR root trace id uses the default `oc-` code (EC has no traceCode)",
+    /^ec-\d{6}-[a-z0-9]{4}$/,
+    "OCR root trace id uses the EC form spec's `ec-` trace code",
   );
 
   // Every EC child: batch-member archetype, parentRunId === ocrRunId, person
@@ -260,14 +261,14 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
     assert.equal(row.title, byEid[emplId!]!.name, `EC child ${c.itemId} title is the resolved name`);
     // Subtitle rule: person row with an EID → the EID (NOT scrubbed — real EID).
     assert.equal(row.subtitle, emplId, `EC child ${c.itemId} subtitle is the EID`);
-    // Trace-id prefix propagation: child shares the OCR root's `oc-<HHMMSS>` prefix.
+    // Trace-id prefix propagation: child shares the OCR root's `ec-<HHMMSS>` prefix.
     assert.equal(row.data.__traceId, "<traceId>", `EC child ${c.itemId} carries a (scrubbed) trace id`);
-    // Child trace id keeps the operation's `oc-` prefix (root trace-id propagation).
+    // Child trace id keeps the operation's `ec-` prefix (root trace-id propagation).
     const childTraceId = dash.timeline("emergency-contact", c.runId).at(-1)?.data?.__traceId;
     assert.match(
       String(childTraceId),
-      /^oc-\d{6}-[a-z0-9]{4}$/,
-      `EC child ${c.itemId} trace id shares the operation's oc- prefix`,
+      /^ec-\d{6}-[a-z0-9]{4}$/,
+      `EC child ${c.itemId} trace id shares the operation's ec- prefix`,
     );
   }
 
