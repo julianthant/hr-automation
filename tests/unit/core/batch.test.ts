@@ -31,7 +31,9 @@ function cleanupDir(dir: string) {
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
-test('runWorkflowBatch (sequential): processes items in order, browsers reused', async () => {
+test('runWorkflowBatch (sequential): processes items in order, browsers reused', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'batch-seq-'))
+  t.onTestFinished(() => cleanupDir(tmp))
   const processed: string[] = []
   let launchCalls = 0
 
@@ -52,7 +54,7 @@ test('runWorkflowBatch (sequential): processes items in order, browsers reused',
     [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
     {
       launchFn: () => { launchCalls++; return Promise.resolve(fakeSlot()) },
-      trackerStub: true,
+      trackerDir: tmp,
     },
   )
 
@@ -63,7 +65,9 @@ test('runWorkflowBatch (sequential): processes items in order, browsers reused',
   assert.equal(result.failed, 0)
 })
 
-test('runWorkflowBatch (sequential): continues after one item fails', async () => {
+test('runWorkflowBatch (sequential): continues after one item fails', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'batch-fail-'))
+  t.onTestFinished(() => cleanupDir(tmp))
   const wf = defineWorkflow({
     name: 'batch-fail',
     systems: [],
@@ -77,14 +81,16 @@ test('runWorkflowBatch (sequential): continues after one item fails', async () =
   const result = await runWorkflowBatch(
     wf,
     [{ ok: true }, { ok: false }, { ok: true }],
-    { launchFn: () => Promise.resolve(fakeSlot()), trackerStub: true },
+    { launchFn: () => Promise.resolve(fakeSlot()), trackerDir: tmp },
   )
   assert.equal(result.succeeded, 2)
   assert.equal(result.failed, 1)
   assert.equal(result.errors[0].error, 'deliberate')
 })
 
-test('runWorkflowBatch (preEmitPending): emits pending for all items with a pre-assigned runId', async () => {
+test('runWorkflowBatch (preEmitPending): emits pending for all items with a pre-assigned runId', async (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'batch-pre-'))
+  t.onTestFinished(() => cleanupDir(tmp))
   const pendingEmissions: Array<{ id: string; runId: string }> = []
   const wf = defineWorkflow({
     name: 'batch-pre',
@@ -99,7 +105,7 @@ test('runWorkflowBatch (preEmitPending): emits pending for all items with a pre-
     [{ id: '1' }, { id: '2' }, { id: '3' }],
     {
       launchFn: () => Promise.resolve(fakeSlot()),
-      trackerStub: true,
+      trackerDir: tmp,
       onPreEmitPending: (item, runId) =>
         pendingEmissions.push({ id: (item as { id: string }).id, runId }),
     },

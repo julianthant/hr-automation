@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { DELEGATION_CONTEXT_FRAGMENT } from "../../domain/delegation-input-fragments.js";
 
 export const CrmDocDownloadInputSchema = z.object({
   email: z.string().email().optional(),
@@ -8,9 +9,7 @@ export const CrmDocDownloadInputSchema = z.object({
   middleName: z.string().optional(),
   folderPath: z.string().min(1).optional(),
   docIndices: z.array(z.number().int().min(0)).nonempty().optional(),
-  parentSubject: z.string().min(1).optional(),
-  parentRunId: z.string().min(1).optional(),
-  taskGroupId: z.string().min(1).optional(),
+  ...DELEGATION_CONTEXT_FRAGMENT,
 }).refine((input) => input.email || input.emplId, {
   message: "email or emplId is required",
 });

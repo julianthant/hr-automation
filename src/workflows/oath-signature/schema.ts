@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { PARENT_SUBJECT_FRAGMENT } from "../../domain/delegation-input-fragments.js";
 
 /**
  * Input schema for the Oath Signature workflow — **EID-only**.
@@ -28,7 +29,7 @@ export const OathSignatureInputSchema = z.object({
     .regex(/^\d{2}\/\d{2}\/\d{4}$/, "Date must be in MM/DD/YYYY format")
     .optional(),
   dryRun: z.boolean().optional(),
-  parentSubject: z.string().optional(),
+  ...PARENT_SUBJECT_FRAGMENT,
 });
 
 export type OathSignatureInput = z.infer<typeof OathSignatureInputSchema>;

@@ -1,10 +1,10 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { defineWorkflow, runWorkflowBatch } from "../../../../src/core/index.js";
-import { DEFAULT_DIR, dateLocal } from "../../../../src/tracker/jsonl.js";
 
 /**
  * Tests covering the kronos-reports pool-mode contract:
@@ -25,17 +25,18 @@ function fakeSlot() {
   };
 }
 
-function cleanupWorkflow(workflow: string) {
-  const today = dateLocal();
-  for (const suffix of [".jsonl", "-logs.jsonl"]) {
-    const path = join(DEFAULT_DIR, `${workflow}-${today}${suffix}`);
-    if (existsSync(path)) rmSync(path);
-  }
+function makeTmp(): string {
+  return mkdtempSync(join(tmpdir(), "kronos-test-"));
+}
+
+function cleanupDir(dir: string): void {
+  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 }
 
 test("runWorkflowBatch (pool): onPreEmitPending paired with runId per employeeId", async (t) => {
   const wfName = `kronos-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  t.onTestFinished(() => cleanupWorkflow(wfName));
+  const tmp = makeTmp();
+  t.onTestFinished(() => cleanupDir(tmp));
 
   const pendingEmissions: Array<{ employeeId: string; runId: string }> = [];
 
@@ -61,7 +62,7 @@ test("runWorkflowBatch (pool): onPreEmitPending paired with runId per employeeId
     ],
     {
       launchFn: () => Promise.resolve(fakeSlot()),
-      trackerStub: true,
+      trackerDir: tmp,
       deriveItemId: (item) => (item as { employeeId: string }).employeeId,
       onPreEmitPending: (item, runId) => {
         pendingEmissions.push({
@@ -90,7 +91,9 @@ test("runWorkflowBatch (pool): onPreEmitPending paired with runId per employeeId
   );
 });
 
-test("runWorkflowBatch (pool): opts.poolSize overrides wf.config.batch.poolSize", async () => {
+test("runWorkflowBatch (pool): opts.poolSize overrides wf.config.batch.poolSize", async (t) => {
+  const tmp = makeTmp();
+  t.onTestFinished(() => cleanupDir(tmp));
   let launchCalls = 0;
 
   const wf = defineWorkflow({
@@ -116,7 +119,7 @@ test("runWorkflowBatch (pool): opts.poolSize overrides wf.config.batch.poolSize"
       launchCalls++;
       return Promise.resolve(fakeSlot());
     },
-    trackerStub: true,
+    trackerDir: tmp,
     poolSize: 2,
   });
 

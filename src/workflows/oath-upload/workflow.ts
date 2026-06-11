@@ -15,10 +15,8 @@ import { oathUploadHandler, oathUploadSteps } from "./handler.js";
  * OCR now fans out signer rows separately; oath-upload waits for those
  * cross-daemon child rows, then files the HR ticket after every signer finishes.
  */
-export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
-  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
-  subtitleTemplate: "Oath · <last4 run id>",
-};
+export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
+  DEFAULT_WORKFLOW_RUNTIME_POLICY;
 
 const WORKFLOW = "oath-upload";
 
@@ -35,13 +33,12 @@ export const oathUploadWorkflow = defineWorkflow({
   systems: [
     {
       id: "servicenow",
-      // No-op at session-launch time. We defer real ServiceNow authentication
-      // until the handler's `servicenow-auth` step, AFTER signature delegation
-      // completes — so we don't hold an authenticated SAML
-      // session open across the (potentially multi-day) operator-approval +
-      // per-signer wait, and so authentication failures don't kill the
-      // workflow before the delegation can even start.
-      login: async () => {},
+      // deferAuth: real ServiceNow authentication is deferred to the handler's
+      // `servicenow-auth` step, AFTER signature delegation completes — so we
+      // don't hold an authenticated SAML session open across the (potentially
+      // multi-day) operator-approval + per-signer wait, and authentication
+      // failures don't kill the workflow before delegation even starts.
+      deferAuth: true,
     },
   ],
   authSteps: false,

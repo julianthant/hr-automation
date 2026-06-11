@@ -6,6 +6,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToACTCrm } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import {
   buildCrmDocumentDownloadPath,
   downloadCrmIdocsDocuments,
@@ -35,10 +36,7 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   systems: [
     {
       id: "crm",
-      login: async (page, instance, context) => {
-        const ok = await loginToACTCrm(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("ACT CRM authentication failed");
-      },
+      login: requireLogin(loginToACTCrm, "ACT CRM authentication failed"),
     },
   ],
   authSteps: true,
@@ -46,9 +44,12 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   schema: CrmDocDownloadInputSchema,
   runtimePolicy: CRM_DOC_DOWNLOAD_WORKFLOW_RUNTIME_POLICY,
   batch: { mode: "pool", poolSize: 4, preEmitPending: true },
+  // `emplId` and `email` are mutually exclusive per run (only one is populated
+  // based on whether the input supplied an EID or email). Including both in
+  // detailFields causes a "declared but never populated" warning for whichever
+  // one is absent on each run. Both are surfaced via `getId` (dashboard row
+  // subtitle) so they don't need to be in detailFields too.
   detailFields: [
-    { key: "emplId", label: "EID" },
-    { key: "email", label: "Email" },
     { key: "pdfDownload", label: "PDFs" },
     { key: "pdfFolder", label: "Folder" },
   ],

@@ -9,7 +9,12 @@ import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.
 
 export interface SystemConfig {
   id: string
-  login: (
+  /**
+   * Authenticate this system. Required for every system where `deferAuth` is
+   * NOT set. When `deferAuth: true`, the kernel never calls this function and
+   * it may be omitted — the workflow handler is responsible for authentication.
+   */
+  login?: (
     page: Page,
     instance?: string,
     context?: { abortSignal?: AbortSignal },
@@ -39,6 +44,20 @@ export interface SystemConfig {
    * your browser context`. Default `false`.
    */
   acceptDownloads?: boolean
+  /**
+   * When `true`, `Session.launch` skips the auth phase for this system
+   * entirely — no `loginWithRetry`, no `onAuthStart`/`onAuthComplete`
+   * observer hooks. The browser is still launched so `ctx.page(id)` can
+   * return a ready page, but authentication is the workflow handler's
+   * responsibility (typically deferred to a later step via a real login
+   * call).
+   *
+   * Use for workflows whose auth cannot happen at session-launch time
+   * (e.g. oath-signature/oath-upload/emergency-contact: UCPath/ServiceNow
+   * auth is deferred until after OCR approval so a Duo prompt does not
+   * fire before the operator has even reviewed anything).
+   */
+  deferAuth?: boolean
 }
 
 /**

@@ -21,6 +21,7 @@ import type { Ctx } from "../../core/kernel/types.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import { buildOperatorSubject, operatorSubjectData } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { personLookupStatusExtensions } from "../../domain/person-lookup-status.js";
@@ -534,17 +535,11 @@ export const personLookupWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      login: async (page, instance, context) => {
-        const ok = await loginToUCPath(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("UCPath authentication failed");
-      },
+      login: requireLogin(loginToUCPath, "UCPath authentication failed"),
     },
     {
       id: "crm",
-      login: async (page, instance, context) => {
-        const ok = await loginToACTCrm(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("CRM authentication failed");
-      },
+      login: requireLogin(loginToACTCrm, "CRM authentication failed"),
     },
   ],
   authSteps: true,
