@@ -46,6 +46,19 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   if (!latest) throw new Error("OCR row not found in JSONL");
   const formType = latest.data?.formType as unknown as string | undefined;
   if (!formType) throw new Error("formType missing on OCR row");
+  // Hard-reject verify rows (N4). force-research is the oath/EC re-research path:
+  // it CLEARS employeeId, re-fans person-lookup by NAME, and patches via
+  // `patchOcrRecordFromEidLookupOutcome` only — it never calls
+  // `applyPersonLookupToVerifyRecord`, never rebuilds `checks[]`, and drops
+  // `paperEmployeeId`. Running it on a verify record corrupts the completeness
+  // report. The verify analogue is `verify-relookup` (re-runs ONE lookup per
+  // record + rebuilds checks); the dashboard routes verify rows there. Mirror
+  // verify-relookup's inverse guard (`formType !== "verify"`).
+  if (formType === "verify") {
+    throw new Error(
+      'force-research does not apply to verify rows — use verify-relookup (per-check ↻) instead',
+    );
+  }
   const spec = getFormSpec(formType);
   if (!spec) throw new Error(`Unknown formType "${formType}"`);
 
