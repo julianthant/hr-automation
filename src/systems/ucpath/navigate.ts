@@ -87,7 +87,7 @@ export async function searchPerson(
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
-  await page.waitForTimeout(5_000);
+  // networkidle alone guards the transition; the preceding sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
   const frame = page.frameLocator("#main_target_win0"); // allow-inline-selector -- see selectors.ts getContentFrame
@@ -95,7 +95,7 @@ export async function searchPerson(
   // PAGE 1: Search Type = Person, Parameter = PERSON_SEARCH
   log.step("Setting search type to Person...");
   await personSearch.searchTypeSelect(frame).selectOption("P", { timeout: 10_000 });
-  await page.waitForTimeout(5_000);
+  // networkidle guards the PeopleSoft roundtrip after selectOption.
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
   await safeFill(personSearch.parameterCodeInput(frame), "PERSON_SEARCH", {
@@ -106,7 +106,7 @@ export async function searchPerson(
     timeout: 10_000,
     label: "ucpath load person search form button",
   });
-  await page.waitForTimeout(5_000);
+  // networkidle guards the form reload after Load Form; sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   log.step("Person search form loaded");
 
@@ -139,7 +139,9 @@ export async function searchPerson(
     timeout: 10_000,
     label: "ucpath national id lookup button",
   });
-  await page.waitForTimeout(5_000);
+  // The magnify button triggers a PeopleSoft dialog (or networkidle roundtrip).
+  // Guard with networkidle so we don't read a mid-flight DOM.
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   await debugScreenshot(page, "debug-ps-after-magnify", { fullPage: true });
 
   // Helper: dismiss PeopleSoft modal dialog (#ICOK button) via JS.
@@ -163,8 +165,9 @@ export async function searchPerson(
   const magnifyDialogDismissed = await dismissDialog();
   if (magnifyDialogDismissed) {
     log.step("Dismissed National Id dialog");
+    // Short settle after JS dialog dismiss — no networkidle signal available.
+    await page.waitForTimeout(1_000);
   }
-  await page.waitForTimeout(3_000);
   await debugScreenshot(page, "debug-ps-after-magnify-ok", { fullPage: true });
 
   // Click Search
@@ -173,12 +176,16 @@ export async function searchPerson(
     timeout: 10_000,
     label: "ucpath person search submit button",
   });
-  await page.waitForTimeout(5_000);
+  // networkidle guards the search-results load.
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   await debugScreenshot(page, "debug-ps-after-search", { fullPage: true });
 
   // Determination: dialog after Search = new hire, results table = rehire.
   const searchDialogDismissed = await dismissDialog();
-  await page.waitForTimeout(3_000);
+  if (searchDialogDismissed) {
+    // Short settle after JS dialog dismiss; no networkidle signal available.
+    await page.waitForTimeout(1_000);
+  }
   await debugScreenshot(page, "debug-ps-search-result", { fullPage: true });
 
   if (searchDialogDismissed) {
