@@ -147,7 +147,8 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
   const timecardItem = goToMenu.timecardItem(page);
 
   if (await clickIfPresent(timecardItem, { timeout: 5_000, label: "new kronos timecard menu item" })) {
-    await page.waitForTimeout(5_000);
+    // Wait for the Timecard view to render (reduced from 5s).
+    await page.waitForTimeout(2_500);
     log.success("[New Kronos] Navigated to Timecard");
     return true;
   }
@@ -369,7 +370,8 @@ export async function setDateRange(
     timeout: 5_000,
     label: "new kronos date range apply button",
   });
-  await page.waitForTimeout(5_000);
+  // Wait for WFD to reload the timecard grid with the new range (reduced from 5s).
+  await page.waitForTimeout(2_500);
   log.step("[New Kronos] Date range applied");
 }
 
