@@ -10,6 +10,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToUKG } from "../../infra/auth/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import {
   getGeniesIframe,
   searchEmployee,
@@ -172,10 +173,7 @@ export const kronosReportsWorkflow = defineWorkflow({
   systems: [
     {
       id: "old-kronos",
-      login: async (page, instance, context) => {
-        const ok = await loginToUKG(page, instance, context?.abortSignal);
-        if (!ok) throw new Error("UKG authentication failed");
-      },
+      login: requireLogin(loginToUKG, "UKG authentication failed"),
       // sessionDir intentionally omitted here. A future dashboard-owned runner
       // should inject a per-worker sessionDir via opts.launchFn so each worker
       // gets its own Playwright persistent context (workers sharing one dir
@@ -224,7 +222,7 @@ export const kronosReportsWorkflow = defineWorkflow({
       const rowExists = await firstRow.count() > 0;
       const rowText = rowExists ? (await firstRow.innerText()).trim() : "";
       if (!rowExists || !rowText || !rowText.includes(employeeId)) {
-        log.step(`${employeeId} -> No matches were found on Kronos`);
+        log.step(`[kronos-reports] ${employeeId} -> No matches were found on Kronos`);
         await rt.writeTracker(buildTrackerRow(
           employeeId, "", "Done", "No matches were found on Kronos",
         ));
@@ -236,7 +234,7 @@ export const kronosReportsWorkflow = defineWorkflow({
     await ctx.step("extracting", async () => {
       const empName = await clickEmployeeRow(page, iframe, employeeId);
       if (empName === false) {
-        log.step(`${employeeId} -> Could not find row`);
+        log.step(`[kronos-reports] ${employeeId} -> Could not find row`);
         await rt.writeTracker(buildTrackerRow(
           employeeId, "", "Done", "Could not find row",
         ));
@@ -245,7 +243,7 @@ export const kronosReportsWorkflow = defineWorkflow({
       }
       employeeName = empName ?? "";
       ctx.updateData({ name: employeeName });
-      log.step(`Employee name: ${employeeName}`);
+      log.step(`[kronos-reports] Employee name: ${employeeName}`);
     });
     if (earlyReturn) return;
 
@@ -256,7 +254,7 @@ export const kronosReportsWorkflow = defineWorkflow({
       // server-side, so workers must not interleave).
       const doReportFlow = async (): Promise<boolean> => {
         if (!(await clickGoToReports(page, iframe))) {
-          log.step(`${employeeId} -> Could not navigate to Reports`);
+          log.step(`[kronos-reports] ${employeeId} -> Could not navigate to Reports`);
           await rt.writeTracker(buildTrackerRow(
             employeeId, employeeName, "Failed", "Could not navigate to Reports",
           ));
@@ -285,7 +283,7 @@ export const kronosReportsWorkflow = defineWorkflow({
             attempts: 2,
             backoffMs: 3_000,
             onAttempt: (attempt) => {
-              log.step(`${employeeId} -> Retrying Reports navigation (attempt ${attempt + 1})...`);
+              log.step(`[kronos-reports] ${employeeId} -> Retrying Reports navigation (attempt ${attempt + 1})...`);
             },
           },
         );
@@ -299,11 +297,11 @@ export const kronosReportsWorkflow = defineWorkflow({
           employeeId,
           employeeName,
           rt.reportsDir,
-          undefined,
+          "[kronos-reports]",
           (_filePath, data) => rt.writeTracker(data),
         );
       } else {
-        log.error(`${employeeId} -> Report failed`);
+        log.error(`[kronos-reports] ${employeeId} -> Report failed`);
         await rt.writeTracker(buildTrackerRow(
           employeeId, employeeName, "Failed", "Report failed",
         ));

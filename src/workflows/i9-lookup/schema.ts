@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { PARENT_SUBJECT_FRAGMENT } from "../../domain/delegation-input-fragments.js";
 
 /**
  * Input schema for the I9 Lookup workflow — **name-based**.
@@ -15,7 +16,7 @@ export const I9LookupInputSchema = z.object({
   lastName: z.string().min(1, "Last name is required"),
   firstName: z.string().min(1, "First name is required"),
   ssn: z.string().optional(),
-  parentSubject: z.string().optional(),
+  ...PARENT_SUBJECT_FRAGMENT,
 });
 
 export type I9LookupInput = z.infer<typeof I9LookupInputSchema>;

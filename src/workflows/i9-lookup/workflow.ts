@@ -4,6 +4,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { loginToI9 } from "../../systems/i9/login.js";
+import { requireLogin } from "../../infra/auth/require-login.js";
 import { lookupSection2Signer } from "../../systems/i9/signer.js";
 import { I9LookupInputSchema, type I9LookupInput } from "./schema.js";
 
@@ -88,10 +89,7 @@ export const i9LookupWorkflow = defineWorkflow({
       // I9 Complete uses email + password auth (no Duo). Login is fast enough
       // that deferring it to a handler step is not needed — let the kernel
       // authenticate eagerly at session launch.
-      login: async (page) => {
-        const ok = await loginToI9(page);
-        if (!ok) throw new Error("I9 authentication failed");
-      },
+      login: requireLogin(loginToI9, "I9 authentication failed"),
     },
   ],
   steps: i9LookupSteps,

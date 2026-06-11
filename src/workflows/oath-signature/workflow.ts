@@ -74,12 +74,11 @@ export const oathSignatureWorkflow = defineWorkflow({
   systems: [
     {
       id: "ucpath",
-      // No-op at session launch. UCPath auth is deferred to the `ucpath-auth`
-      // step so a fan-out signer child only Duos AFTER OCR approval, when it
-      // actually reaches UCPath. The kernel authenticates every declared system
-      // eagerly at launch, so a real `login` here would fire Duo before the
-      // item is claimed. Mirrors oath-upload's ServiceNow deferral.
-      login: async () => {},
+      // deferAuth: UCPath auth is deferred to the `ucpath-auth` step so a
+      // fan-out signer child only Duos AFTER OCR approval, when it actually
+      // reaches UCPath. Mirrors oath-upload's ServiceNow deferral and
+      // emergency-contact's UCPath deferral.
+      deferAuth: true,
     },
   ],
   authSteps: false,
