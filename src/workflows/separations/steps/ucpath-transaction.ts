@@ -51,14 +51,14 @@ export async function runUcpathTransaction(
     // real dupes — EID 10794813 Aki Uchida, 2026-04-24); EID is
     // deterministic. If a row already exists, reuse its txn# and skip
     // the submit.
-    const existingTxn = await findExistingTerminationTransaction(
+    const lookupResult = await findExistingTerminationTransaction(
       ucpathPage,
       kualiData.eid,
       finalTermEffDate,
     );
-    if (existingTxn) {
-      log.warn(`[UCPath Txn] Existing termination transaction #${existingTxn} found on Smart HR list — skipping submit.`);
-      transactionNumber = existingTxn;
+    if (lookupResult.txnNumber) {
+      log.warn(`[UCPath Txn] Existing termination transaction #${lookupResult.txnNumber} found on Smart HR list — skipping submit.`);
+      transactionNumber = lookupResult.txnNumber;
       // Persist the txn # immediately. If kuali-finalization throws
       // later, the handler exits before the final updateData at the end
       // of the body — without this inline call the dashboard detail
@@ -69,8 +69,15 @@ export async function runUcpathTransaction(
     }
 
     try {
-      await navigateToSmartHR(ucpathPage);
-      await clickSmartHRTransactions(ucpathPage);
+      // When findExistingTerminationTransaction left the page at Smart HR
+      // Transactions (alreadyAtSmartHR=true), skip the double navigation
+      // (~12s saving per doc). Otherwise navigate from scratch.
+      if (!lookupResult.alreadyAtSmartHR) {
+        await navigateToSmartHR(ucpathPage);
+        await clickSmartHRTransactions(ucpathPage);
+      } else {
+        log.step("[UCPath Txn] Already at Smart HR Transactions — skipping re-navigation");
+      }
 
       const frame = getContentFrame(ucpathPage);
       await selectTemplate(frame, template);

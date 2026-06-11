@@ -26,7 +26,8 @@ export function shouldCommitOathSignature(
 // --- Helpers ---
 
 async function waitForPageReady(page: Page): Promise<void> {
-  await page.waitForTimeout(3_000);
+  // networkidle guards the PeopleSoft roundtrip; the preceding fixed sleep
+  // was redundant (3s × 3+ calls/signer = ≥9s/signer wasted on a 20-signer batch).
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 }
 
@@ -99,7 +100,7 @@ async function searchByEmplId(
   await input.fill(emplId, { timeout: 10_000 });
   await oathSignature.searchButton(frame).click({ timeout: 10_000 });
   // PeopleSoft reload — EID is unique so this lands directly on the profile.
-  await page.waitForTimeout(4_000);
+  // networkidle guards the navigation; fixed sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 }
 
@@ -174,8 +175,7 @@ async function clickOk(page: Page, frame: FrameLocator): Promise<void> {
 async function clickSave(page: Page, frame: FrameLocator): Promise<void> {
   log.step("Clicking Save to commit...");
   await oathSignature.saveButton(frame).click({ timeout: 10_000 });
-  // Save writes to DB — longer wait than a tab switch.
-  await page.waitForTimeout(4_000);
+  // Save writes to DB — networkidle guards completion; fixed sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   log.success("Save clicked");
 }
