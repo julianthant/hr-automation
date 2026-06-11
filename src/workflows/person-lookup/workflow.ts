@@ -153,7 +153,11 @@ async function searchingStep<TSteps extends readonly string[]>(
     });
   } catch (err) {
     log.error(`Search failed for "${input.name}": ${errorMessage(err)}`);
-    ctx.updateData({ emplId: "Error" });
+    // Prose belongs in the HR-status DETAIL field, never in `emplId` — a prose
+    // value in the EID identity field leaks into the queue-row subtitle and gets
+    // carried forward as a "resolved" EID. The thrown error already lands the row
+    // as `failed` (the structured failure signal).
+    ctx.updateData({ hrStatus: "Error" });
     // Capture the UCPath page state before rethrowing so the operator has
     // evidence of what the search saw. Best-effort: never masks the original error.
     await ctx.captureAndStampScreenshot(
@@ -166,7 +170,11 @@ async function searchingStep<TSteps extends readonly string[]>(
   ctx.updateData({ searchName: lookup.selection.searchName });
   if (lookup.results.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
-    ctx.updateData({ emplId: "Not found" });
+    // No EID resolved — leave `emplId` unset so the subtitle falls through to the
+    // trace id. The not-found state is structured via `activeStatus: "not-found"`
+    // (stamped by the active-status step) which drives the `notFound` badge;
+    // `hrStatus` carries the operator-facing detail label.
+    ctx.updateData({ hrStatus: "Not found" });
     await ctx.captureAndStampScreenshot(
       "person-org-summary-search-results",
       "personOrgSearchScreenshot",
