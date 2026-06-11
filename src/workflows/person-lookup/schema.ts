@@ -8,6 +8,7 @@ import {
   isUcpathEmployeeId,
   normalizeEid,
 } from "../../domain/identity/eid.js";
+import { PARENT_SUBJECT_FRAGMENT } from "../../domain/delegation-input-fragments.js";
 
 export { normalizeName };
 
@@ -30,7 +31,7 @@ export { normalizeName };
 export const PersonLookupNameInputSchema = z.object({
   name: z.string().min(1),
   keepNonHdh: z.boolean().optional(),
-  parentSubject: z.string().optional(),
+  ...PARENT_SUBJECT_FRAGMENT,
   /**
    * When true, person-lookup runs an extra CRM-date step that stamps
    * `employmentDate` (CRM First Day of Service) and `oathDate` (CRM Date
@@ -46,7 +47,7 @@ export const PersonLookupEidInputSchema = z.object({
     .pipe(z.string().regex(/^10\d{6}$/, "Empl ID must be 8 digits starting with 10")),
   name: z.string().min(1).optional(),
   keepNonHdh: z.boolean().optional(),
-  parentSubject: z.string().optional(),
+  ...PARENT_SUBJECT_FRAGMENT,
   /**
    * When true, person-lookup runs an extra CRM-date step that stamps
    * `employmentDate` (CRM First Day of Service) and `oathDate` (CRM Date
