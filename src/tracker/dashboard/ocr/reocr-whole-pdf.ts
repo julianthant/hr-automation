@@ -158,7 +158,6 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
               typeof delegateToAllImpl<PersonLookupChildInput, readonly string[]>
             >[0]["child"],
             inputs,
-            renderAs: "flat",
             fireAndForget: true,
             ...(childRootTracePrefix ? { rootTracePrefix: childRootTracePrefix } : {}),
             deriveItemId: (inp: PersonLookupChildInput) =>
