@@ -23,7 +23,7 @@ import { fanOutAndWatch } from "../../services/ocr/fan-out.js";
 import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
-import { flattenForData } from "../../services/ocr/tracker-data.js";
+import { emitOcrReviewSnapshot } from "../../services/ocr/review-snapshot.js";
 import { countVerified } from "../../services/ocr/records-stats.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
@@ -424,49 +424,40 @@ function emitRow(args: {
 }): void {
   const verifiedCount = countVerified(args.records);
   // Inherit display fields from the prior row so dashboard preview-tab
-  // affordance and batch label are preserved after a page retry.
+  // affordance and batch label are preserved after a page retry. The prior
+  // `__name` is passed as the displayName override (retry-page keeps the row's
+  // own label rather than re-deriving from parentSubject).
   const priorName = (args.row.data?.__name as string | undefined) ?? "OCR";
   const priorParentSubject = args.row.data?.parentSubject as string | undefined;
-  const data = flattenForData({
-    formType: args.formType,
-    pdfOriginalName: args.pdfOriginalName,
-    ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
+  // Re-emit via the shared OCR preview-row envelope (BM-5). Running → done pair.
+  // Pass the explicit base fields retry-page rebuilds (it does NOT spread the
+  // latest row's data); the envelope adds mode/archetype/__id/__name/parentSubject.
+  const snapshotArgs = {
+    base: {
+      formType: args.formType,
+      pdfOriginalName: args.pdfOriginalName,
+      ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
+      sessionId: args.sessionId,
+      rosterPath: args.rosterPath,
+      ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
+      recordCount: args.records.length,
+      verifiedCount,
+      failedPages: args.failedPages,
+      pageStatusSummary: args.summary,
+    },
     sessionId: args.sessionId,
-    rosterPath: args.rosterPath,
-    ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-    recordCount: args.records.length,
-    verifiedCount,
+    runId: args.runId,
     records: args.records,
-    failedPages: args.failedPages,
-    pageStatusSummary: args.summary,
-    // Mirror the orchestrator's awaiting-approval stamp so dashboard
-    // surfaces the preview-tab affordance on retried rows.
-    archetype: "preview",
-    mode: "prepare",
-    __id: args.sessionId,
-    __name: priorName,
-    ...(priorParentSubject ? { parentSubject: priorParentSubject } : {}),
-  });
-  args.emit({
-    workflow: WORKFLOW,
-    timestamp: new Date().toISOString(),
-    id: args.sessionId,
-    runId: args.runId,
-    ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-    status: "running",
     step: "awaiting-approval",
-    data,
-  });
-  args.emit({
-    workflow: WORKFLOW,
-    timestamp: new Date().toISOString(),
-    id: args.sessionId,
-    runId: args.runId,
-    ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-    status: "done",
-    step: "awaiting-approval",
-    data,
-  });
+    displayName: priorName,
+    parent: {
+      ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
+      ...(priorParentSubject ? { parentSubject: priorParentSubject } : {}),
+    },
+    emit: (e: TrackerRowEmission) => args.emit(e as TrackerEntry),
+  } as const;
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "running" });
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "done" });
 }
 
 function patchUnresolved(records: unknown[], idx: number): void {
