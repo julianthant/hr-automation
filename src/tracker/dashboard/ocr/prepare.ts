@@ -452,14 +452,19 @@ async function defaultEnqueueOathUploadAtPrepare(
         emittedItemId: string,
       ) => {
         capturedRunId = childRunId;
+        // The born task is merely ENQUEUED here — pre-emit `pending` like every
+        // other pre-emit so the row reads "Queued" until a daemon claims it.
+        // Stamping `running`/`ocr-prep` made queued runs lie ("Running / Ocr
+        // Prep…") and broke the row × (cancel forwarded the stale running
+        // status → 409 on the queued task). The daemon's claim emits the real
+        // running rows.
         emitTrackerRow(
           {
             workflow: "oath-upload",
             timestamp: new Date().toISOString(),
             id: emittedItemId,
             runId: childRunId,
-            status: "running",
-            step: "ocr-prep",
+            status: "pending",
             data: {
               archetype: "single",
               queueRowKind: "file",
