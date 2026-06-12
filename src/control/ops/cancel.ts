@@ -56,7 +56,7 @@ export type CancelRunningResult =
   | { ok: true; accepted: true; mode: "worker-command"; commandId: string }
   | { ok: true; accepted: true; mode: "in-process"; alreadyCancelled?: boolean }
   | { ok: true; accepted: true; mode: "stale-tracker" }
-  | { ok: false; error: string; status?: number };
+  | { ok: false; error: string; status?: number; code?: "wrong-state" };
 
 export interface KillBrowserRequest {
   browserProcessId?: string;
@@ -87,16 +87,22 @@ export function enqueueKillBrowserCommand(workerStore: ControlWorkerStore, brows
 export function buildCancelQueuedHandler(dir: string) {
   return async (
     req: CancelQueuedRequest,
-  ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> => {
+  ): Promise<{ ok: true } | { ok: false; error: string; status?: number; code?: "wrong-state" }> => {
     if (!req.workflow || !req.id) return { ok: false, error: "workflow and id are required" };
     const stores = openControlStores(dir);
     const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
     if (task) {
       if (task.state === "claimed" || task.state === "running" || task.state === "cancel_requested" || task.state === "cancelling") {
+        // `code: "wrong-state"` marks the REDIRECTABLE 409 — the task exists
+        // and is cancellable, just via the other handler. The "cannot cancel
+        // item in state X" 409 below (waiting_dependencies/blocked) is NOT
+        // redirectable: the running handler would bounce it back with
+        // "item is queued", a circular instruction (E2E-008 review finding).
         return {
           ok: false as const,
           error: "item already claimed by a daemon — use cancel running",
           status: 409,
+          code: "wrong-state" as const,
         };
       }
       if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
@@ -164,8 +170,13 @@ export function buildCancelRunningHandler(dir: string) {
     const stores = openControlStores(dir);
     const task = resolveControlTask(stores.taskStore, req.workflow, req.id, req.runId);
     if (task) {
-      if (task.state === "queued" || task.state === "waiting_dependencies" || task.state === "blocked") {
-        return { ok: false, error: "item is queued — use cancel queued", status: 409 };
+      if (task.state === "queued") {
+        return { ok: false, error: "item is queued — use cancel queued", status: 409, code: "wrong-state" };
+      }
+      if (task.state === "waiting_dependencies" || task.state === "blocked") {
+        // Not redirectable: the queued handler would 409 right back with
+        // "cannot cancel item in state X" — surface the accurate state here.
+        return { ok: false, error: `cannot cancel item in state ${task.state}`, status: 409 };
       }
       if (task.state === "done" || task.state === "failed" || task.state === "cancelled") {
         return { ok: false, error: `item is already ${task.state}`, status: 410 };

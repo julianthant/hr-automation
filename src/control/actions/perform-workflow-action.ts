@@ -92,9 +92,11 @@ async function cancelTarget(
   //
   // The caller's `status` is advisory, not load-bearing: the row's rendered
   // status can lag the SQLite truth (a queued task claimed between render
-  // and click, or vice versa). Each handler 409s with the precise "wrong
-  // state" signal, so cancel falls through to the other handler instead of
-  // surfacing the race to the operator (E2E-008).
+  // and click, or vice versa). Each handler marks its REDIRECTABLE 409 with
+  // `code: "wrong-state"`, so cancel falls through to the other handler
+  // instead of surfacing the race to the operator (E2E-008) — while a
+  // non-redirectable 409 ("cannot cancel item in state waiting_dependencies")
+  // keeps its accurate error instead of bouncing into a circular one.
   const cancelRunning = async (runId: string) =>
     buildCancelRunningHandler(deps.dir)({ workflow: t.workflow, id: t.id, runId });
   const cancelQueued = async () =>
@@ -110,7 +112,7 @@ async function cancelTarget(
     }
     const r = await cancelRunning(t.runId);
     if (r.ok) return okTarget(t);
-    if (r.status === 409) {
+    if (!r.ok && r.code === "wrong-state") {
       const fallback = await cancelQueued();
       return fallback.ok ? okTarget(t) : failTarget(t, fallback.error, fallback.status);
     }
@@ -118,7 +120,7 @@ async function cancelTarget(
   }
   const r = await cancelQueued();
   if (r.ok) return okTarget(t);
-  if (r.status === 409 && t.runId) {
+  if (r.code === "wrong-state" && t.runId) {
     const fallback = await cancelRunning(t.runId);
     return fallback.ok ? okTarget(t) : failTarget(t, fallback.error, fallback.status);
   }

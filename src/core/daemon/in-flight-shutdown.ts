@@ -19,7 +19,7 @@
  */
 import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
-import { wakeDaemons } from './client.js'
+import { wakeDaemons, wakeDaemonsForReleasedParents } from './client.js'
 import { markItemFailed } from './queue.js'
 import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
 import { buildHttpPendingData, buildTrackerDataForInput } from './enqueue-dispatch.js'
@@ -227,10 +227,14 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
   const markAndSettle = async (): Promise<void> => {
     await markItemFailed(wf.config.name, item.itemId, failReason, item.runId, trackerDir)
     if (settleDependency && item.taskId) {
-      taskStore.markDependencyFromChildTerminal({
+      const released = taskStore.markDependencyFromChildTerminal({
         childTaskId: item.taskId,
         childState: 'failed',
       })
+      // A failed child can be a released cross-workflow parent's LAST pending
+      // dependency — wake that parent's daemons like every other settle site
+      // (E2E-017), or it sits queued until its 15-min keepalive tick.
+      void wakeDaemonsForReleasedParents(released, trackerDir)
     }
   }
   if (bestEffort) {

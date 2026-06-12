@@ -87,3 +87,25 @@ test("entryMatchesStatusFilter maps OCR awaiting-approval to Active pill, not Do
   assert.equal(entryMatchesStatusFilter(ocrAwaiting, "running"), true);
   assert.equal(entryMatchesStatusFilter(ocrAwaiting, "done"), false);
 });
+
+test("cancelled and discarded rows bucket under 'cancelled', never 'failed' (E2E-009)", () => {
+  const rows = [
+    entry("failed", "cancelled"),
+    entry("failed", "discarded"),
+    entry("failed", "submit"),
+    entry("done"),
+  ];
+  const counts = countEntriesByQueueStatus(rows);
+  assert.equal(counts.cancelled, 2);
+  assert.equal(counts.failed, 1);
+  assert.equal(counts.done, 1);
+
+  // Filtering "Failed" excludes deliberate operator actions; "cancelled"
+  // matches both the row × and the discard mirror.
+  assert.equal(entryMatchesStatusFilter(entry("failed", "cancelled"), "failed"), false);
+  assert.equal(entryMatchesStatusFilter(entry("failed", "discarded"), "failed"), false);
+  assert.equal(entryMatchesStatusFilter(entry("failed", "submit"), "failed"), true);
+  assert.equal(entryMatchesStatusFilter(entry("failed", "cancelled"), "cancelled"), true);
+  assert.equal(entryMatchesStatusFilter(entry("failed", "discarded"), "cancelled"), true);
+  assert.equal(entryMatchesStatusFilter(entry("failed", "submit"), "cancelled"), false);
+});

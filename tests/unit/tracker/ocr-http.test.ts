@@ -1197,3 +1197,37 @@ test("buildOcrApproveHandler approves without preview readiness props", async ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("discard cascade-cancels still-queued delegated child tasks AND the dependency anchor (E2E-010)", async () => {
+  const dir = setup();
+  seedOcrPriorRow(dir, "s-cascade", "r-cascade");
+
+  // Seed SQLite: two queued person-lookup children parented to the OCR run,
+  // plus the task_kind=ocr dependency anchor (workflow=ocr, item=session).
+  const control = openControlDb({ trackerDir: dir });
+  const taskStore = createTaskStore(control);
+  const children = taskStore.enqueueTasks({
+    workflow: "person-lookup",
+    inputs: [{ name: "Doe, Jane" }, { name: "Roe, Sam" }],
+    deriveItemId: (_inp, idx) => `ocr-oath-r-cascade-r${idx}`,
+    parentRunId: "r-cascade",
+  });
+  const [anchor] = taskStore.enqueueTasks({
+    workflow: "ocr",
+    inputs: [{ sessionId: "s-cascade" }],
+    deriveItemId: () => "s-cascade",
+    runIds: ["r-cascade"],
+  });
+  taskStore.db.prepare(`UPDATE tasks SET task_kind = 'ocr' WHERE id = ?`).run(anchor.taskId);
+
+  const handler = buildOcrDiscardHandler({ trackerDir: dir });
+  const resp = await handler({ sessionId: "s-cascade", runId: "r-cascade", reason: "operator discarded" });
+  assert.equal(resp.status, 200);
+
+  // Children: cancelled, never claimable for a discarded prep.
+  for (const child of children) {
+    assert.equal(taskStore.getTask(child.taskId)?.state, "cancelled", `child ${child.id} cancelled`);
+  }
+  // Anchor: terminal (cancelled), not a lingering queued/waiting zombie.
+  assert.equal(taskStore.getTask(anchor.taskId)?.state, "cancelled", "anchor terminalized");
+});

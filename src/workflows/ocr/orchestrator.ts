@@ -1229,8 +1229,8 @@ export async function runOcrOrchestrator(
  * MUST match that operation workflow's own `defineWorkflow` code; the
  * `workflow codes are unique` architecture guard keeps those collision-free.
  * Returns undefined for a standalone OCR-hub run (no `operationWorkflow`) so the
- * caller falls back to the form spec's `traceCode` (oath → "ou", verify → "vf")
- * or the OCR default "oc".
+ * caller falls back to the form spec's `traceCode` (only verify sets one, "vf")
+ * or the OCR default "oc" — standalone oath/EC brand `oc-…` (E2E-007).
  */
 export function operationTraceCode(operationWorkflow: string | undefined): string | undefined {
   switch (operationWorkflow) {

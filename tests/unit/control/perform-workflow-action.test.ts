@@ -190,6 +190,7 @@ describe("performWorkflowAction — cancel action routing", () => {
       ok: false,
       error: "item already claimed by a daemon — use cancel running",
       status: 409,
+      code: "wrong-state",
     });
 
     const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
@@ -210,6 +211,7 @@ describe("performWorkflowAction — cancel action routing", () => {
       ok: false,
       error: "item is queued — use cancel queued",
       status: 409,
+      code: "wrong-state",
     });
 
     const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
@@ -235,6 +237,27 @@ describe("performWorkflowAction — cancel action routing", () => {
     assert.equal(result.ok, false);
     assert.equal(mockCancelRunningFn.mock.calls.length, 0);
     assert.match(result.errors[0]?.error ?? "", /already done/);
+  });
+
+  it("keeps a non-redirectable 409 (waiting_dependencies) instead of bouncing into a circular fallback", async () => {
+    mockedResolveTargets.mockReturnValueOnce({
+      ok: true,
+      targets: [{ workflow: "oath-upload", id: "sess-1", runId: "run-a", date: "2026-06-11", status: "running" }],
+    });
+    // The running handler reports the ACCURATE state without code: "wrong-state"
+    // — falling back to the queued handler would produce a circular
+    // "item is queued — use cancel queued" for a dependency-parked task.
+    mockCancelRunningFn.mockResolvedValueOnce({
+      ok: false,
+      error: "cannot cancel item in state waiting_dependencies",
+      status: 409,
+    });
+
+    const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
+
+    assert.equal(result.ok, false);
+    assert.equal(mockCancelQueuedFn.mock.calls.length, 0);
+    assert.match(result.errors[0]?.error ?? "", /waiting_dependencies/);
   });
 });
 
