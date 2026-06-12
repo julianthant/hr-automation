@@ -73,3 +73,5 @@ Thumbs.db
 
 # Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.
 tests/data/*.pdf
+# AI e2e test run artifacts (manifests, issue ledgers, reports)
+.e2e/
