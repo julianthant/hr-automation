@@ -148,6 +148,10 @@ program
     startDashboard("all", port, {
       noClean: opts.clean === false,
       serveStatic: Boolean(opts.prod),
+      // Honor the isolated-tracker env on the dashboard itself, not just spawned
+      // daemons — otherwise HRAUTO_E2E_STUBS runs write rows/state.db into the
+      // real `.tracker/` while daemons write the isolated root (split-brain).
+      dir: process.env.HRAUTO_TRACKER_DIR,
     });
 
     log.step(
