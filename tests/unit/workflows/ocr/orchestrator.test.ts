@@ -169,6 +169,104 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
   const failedPages = JSON.parse(terminalRow!.data!.failedPages ?? "[]");
   assert.deepEqual(failedPages, []);
 
+  // The oath spec declares no placeholderFields, so the loading-phase
+  // placeholder keeps the oath-shaped default (printedName/employeeId
+  // top-level) — the run's own record shape.
+  const oathPlaceholderRow = (writtenEntries as Array<{ data?: Record<string, string> }>).find((e) => {
+    const recs = JSON.parse(e.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
+    return recs.some((r) => (r.warnings ?? []).includes("Loading… OCR running"));
+  });
+  assert.ok(oathPlaceholderRow, "oath run emits a loading placeholder snapshot");
+  const oathPlaceholder = (JSON.parse(oathPlaceholderRow!.data!.records) as Array<Record<string, unknown>>)[0];
+  assert.ok("printedName" in oathPlaceholder && "employeeId" in oathPlaceholder, "oath placeholder keeps the oath shape");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("EC run seeds EC-shaped placeholders; no emission carries top-level oath identity keys (E2E-004)", async () => {
+  // E2E-004 root cause: the shared placeholder skeleton was oath-shaped for
+  // EVERY form type, so an EC run's record shape flipped mid-run (placeholder
+  // printedName:""/employeeId:"" → extracted employee.*). Reading the EC-shaped
+  // records through oath keys then rendered null — the "identity loss" was a
+  // projection artifact, but the shape flip was real (and the oath-shaped
+  // placeholder crashes EcRecordView's unguarded record.emergencyContact.X
+  // reads). The EC spec now provides EC-shaped placeholderFields; this pins
+  // that NO emission in an EC run ever carries top-level printedName/employeeId
+  // on a record, and that identity survives under employee.* end to end.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "ec.pdf",
+      pdfFileId,
+      formType: "emergency-contact",
+      sessionId: "session-ec-1",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-ec-1",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          formKind: "emergency-contact",
+          sourcePage: 1,
+          employee: { name: "Coleman, Renee", employeeId: "10706431" },
+          emergencyContact: { name: "Coleman, Rod", relationship: "Parent", primary: true },
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => [
+        { eid: "10706431", name: "Coleman, Renee" },
+      ],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-ec-run-ec-1-r0",
+          runId: "verify-ec-1",
+          status: "done" as const,
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10706431" },
+        },
+      ],
+    },
+  );
+
+  // The loading placeholder is EC-shaped: identity nested under employee.*,
+  // contact fields present for EcRecordView, no oath-shaped top-level keys.
+  const placeholderRow = writtenEntries.find((e) => {
+    const recs = JSON.parse(e.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
+    return recs.some((r) => (r.warnings ?? []).includes("Loading… OCR running"));
+  });
+  assert.ok(placeholderRow, "EC run emits a loading placeholder snapshot");
+  const placeholder = (JSON.parse(placeholderRow!.data!.records) as Array<Record<string, unknown>>)[0];
+  assert.deepEqual(placeholder.employee, { name: "", employeeId: "" });
+  assert.ok(placeholder.emergencyContact, "placeholder carries the emergencyContact block");
+  assert.equal(placeholder.formKind, "emergency-contact");
+
+  // The E2E-004 pin: across EVERY emission of the run, no EC record carries
+  // top-level printedName/employeeId (oath-shaped) keys.
+  for (const entry of writtenEntries) {
+    const recs = JSON.parse(entry.data?.records ?? "[]") as Array<Record<string, unknown>>;
+    for (const rec of recs) {
+      assert.ok(!("printedName" in rec), `no EC record carries top-level printedName (step ${entry.step})`);
+      assert.ok(!("employeeId" in rec), `no EC record carries top-level employeeId (step ${entry.step})`);
+    }
+  }
+
+  // Identity survives under employee.* through the terminal row.
+  const terminalRow = writtenEntries.find((e) => e.status === "done" && e.step === "person-lookup");
+  assert.ok(terminalRow, "standalone EC run completes done/person-lookup");
+  const terminalRecord = (JSON.parse(terminalRow!.data!.records) as Array<{ employee?: { name?: string; employeeId?: string } }>)[0];
+  assert.equal(terminalRecord.employee?.name, "Coleman, Renee");
+  assert.equal(terminalRecord.employee?.employeeId, "10706431");
+
   rmSync(dir, { recursive: true, force: true });
 });
 

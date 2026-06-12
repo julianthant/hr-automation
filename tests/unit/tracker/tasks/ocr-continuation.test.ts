@@ -81,6 +81,127 @@ test("applyOcrEidLookupContinuation emits patched awaiting-approval OCR tracker 
   }
 });
 
+test("applyOcrEidLookupContinuation patches EC-shaped records under employee.* and never stamps top-level oath keys (E2E-004)", async () => {
+  // EC records nest identity under employee.* — the continuation re-stamp must
+  // write the looked-up EID there (never as a top-level oath-shaped
+  // printedName/employeeId), and an EID-keyed ("verify") lookup must never
+  // clobber a present employee.employeeId with the lookup's echo (E2E-014).
+  const dir = mkdtempSync(join(tmpdir(), "ocr-continuation-ec-"));
+  try {
+    const store = openTaskStoreForTests(join(dir, "tracker.sqlite"));
+    createTaskDependencyBatch(store, {
+      parent: {
+        workflow: "ocr",
+        itemId: "session-ec",
+        runId: "ocr-run-ec",
+        taskKind: "ocr",
+        status: "waiting_on_children",
+        data: {},
+      },
+      children: [
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-ec-ocr-run-ec-r0",
+          runId: "child-run-ec-0",
+          taskKind: "workflow_item",
+          status: "queued",
+          dependencyKind: "ocr-eid-lookup",
+          failurePolicy: "record_unresolved",
+          metadata: { recordIndex: 0, lookupKind: "verify", formType: "emergency-contact" },
+        },
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-ec-ocr-run-ec-r1",
+          runId: "child-run-ec-1",
+          taskKind: "workflow_item",
+          status: "queued",
+          dependencyKind: "ocr-eid-lookup",
+          failurePolicy: "record_unresolved",
+          metadata: { recordIndex: 1, lookupKind: "verify", formType: "emergency-contact" },
+        },
+      ],
+      now: "2026-06-12T12:00:00.000Z",
+    });
+
+    const parentData = {
+      pdfOriginalName: "emergency-contacts.pdf",
+      records: JSON.stringify([
+        {
+          formKind: "emergency-contact",
+          employee: { name: "Coleman, Renee", employeeId: "" },
+          emergencyContact: { name: "Coleman, Rod", relationship: "Parent" },
+          matchState: "lookup-pending",
+          selected: true,
+        },
+        {
+          formKind: "emergency-contact",
+          employee: { name: "Wu, Mandy", employeeId: "10873316" },
+          emergencyContact: { name: "Wu, Lee", relationship: "Spouse" },
+          matchState: "resolved",
+          selected: true,
+        },
+      ]),
+    };
+
+    const dependencies = listPendingDependencies(store);
+    const emitted: Array<{ data?: Record<string, string> }> = [];
+
+    // Record 0: blank employee.employeeId — the lookup fills it (nested).
+    await applyOcrEidLookupContinuation({
+      store,
+      dependency: dependencies.find((d) => d.child.itemId.endsWith("-r0"))!,
+      now: "2026-06-12T12:01:00.000Z",
+      parentRun: {
+        workflow: "ocr", id: "session-ec", runId: "ocr-run-ec",
+        status: "running", step: "person-lookup",
+        data: parentData,
+        timestamp: "2026-06-12T12:00:00.000Z",
+      },
+      childRun: {
+        workflow: "person-lookup", id: "ocr-ec-ocr-run-ec-r0", runId: "child-run-ec-0",
+        status: "done",
+        data: { emplId: "10706431", hrStatus: "Active", department: "Housing Dining Hospitality" },
+        timestamp: "2026-06-12T12:00:30.000Z",
+      },
+      emitTracker: (entry) => emitted.push(entry),
+    });
+
+    // Record 1: PRESENT employee.employeeId — a divergent lookup echo must not
+    // clobber it.
+    await applyOcrEidLookupContinuation({
+      store,
+      dependency: dependencies.find((d) => d.child.itemId.endsWith("-r1"))!,
+      now: "2026-06-12T12:02:00.000Z",
+      parentRun: {
+        workflow: "ocr", id: "session-ec", runId: "ocr-run-ec",
+        status: "running", step: "person-lookup",
+        data: emitted.at(-1)?.data ?? parentData,
+        timestamp: "2026-06-12T12:01:00.000Z",
+      },
+      childRun: {
+        workflow: "person-lookup", id: "ocr-ec-ocr-run-ec-r1", runId: "child-run-ec-1",
+        status: "done",
+        data: { emplId: "10000001", hrStatus: "Active", department: "Housing Dining Hospitality" },
+        timestamp: "2026-06-12T12:01:30.000Z",
+      },
+      emitTracker: (entry) => emitted.push(entry),
+    });
+
+    const records = JSON.parse(emitted.at(-1)?.data?.records ?? "[]") as Array<Record<string, unknown>>;
+    assert.equal(records.length, 2);
+    const employees = records.map((r) => r.employee as { name?: string; employeeId?: string });
+    assert.equal(employees[0].employeeId, "10706431", "blank nested EID is filled from the lookup");
+    assert.equal(employees[0].name, "Coleman, Renee");
+    assert.equal(employees[1].employeeId, "10873316", "present nested EID survives a divergent lookup echo");
+    for (const rec of records) {
+      assert.ok(!("printedName" in rec), "no top-level printedName stamped on EC records");
+      assert.ok(!("employeeId" in rec), "no top-level employeeId stamped on EC records");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("applyOcrEidLookupContinuation does not emit duplicate row for already resolved EID", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ocr-continuation-idempotent-"));
   try {

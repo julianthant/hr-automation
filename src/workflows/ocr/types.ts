@@ -141,6 +141,21 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
   rosterMode: "required" | "optional";
 
   /**
+   * Form-specific fields for the loading-phase placeholder records the
+   * orchestrator seeds (one per rendered page) before extraction completes.
+   * Record SHAPE is set by the RUN (see the F6 lesson), so the placeholder
+   * must match the form's own record shape: the shared default is the
+   * oath-shaped skeleton (`printedName`/`employeeId` top-level), which on an
+   * EC run both crashes the editable `EcRecordView` (unguarded
+   * `record.emergencyContact.X` reads) and flips the run's record shape
+   * mid-flight — the shape flip behind the E2E-004 "identity loss" misread.
+   * Return only the form-specific fields; the orchestrator owns the shared
+   * meta (formKind, sourcePage, documentType, matchState, warnings, …).
+   * Omit to keep the oath-shaped default.
+   */
+  placeholderFields?(): Record<string, unknown>;
+
+  /**
    * Optional 2-char trace-id code branding the OCR root run (and, via root
    * trace-id propagation, every descendant of the operation). OCR's physical
    * root is the OCR prep run, but the operator's mental model brands the whole
