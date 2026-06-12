@@ -42,12 +42,12 @@ async function setup(): Promise<{
   return { dir, uploadsDir, rosterPath, pdfPath, pdfFileId };
 }
 
-test("OCR trace-id branding: oath spec brands 'ou', EC brands 'ec' (F5), verify 'vf'", async () => {
-  // Root trace-id propagation brands a STANDALONE OCR run by its form spec's
-  // `traceCode` (`spec.traceCode ?? "oc"`): oath → `ou-…`, emergency-contact →
-  // `ec-…` (F5 — previously fell back to the OCR default `oc-…`), verify →
-  // `vf-…`. An OCR run started as an operation derives the code from the
-  // operation intent FIRST (`operationTraceCode`), tested separately below.
+test("OCR trace-id branding: standalone oath/EC brand the OCR default 'oc'; verify keeps 'vf' (E2E-007)", async () => {
+  // A STANDALONE upload to the OCR panel is OCR-owned, so it brands `oc-…`
+  // (or a NON-colliding spec code like verify's `vf`). The old spec-level
+  // `"ou"`/`"ec"` made standalone preps grep-collide with real oath-upload
+  // tickets / EC operations — operation branding belongs to the operation
+  // intent only (`operationTraceCode`, tested below).
   const { getFormSpec } = await import("../../../../src/services/ocr/forms/registry.js");
   const { buildTraceId } = await import("../../../../src/domain/queue-trace-id.js");
   const at = new Date("2026-06-02T09:05:53.000Z");
@@ -55,13 +55,17 @@ test("OCR trace-id branding: oath spec brands 'ou', EC brands 'ec' (F5), verify 
 
   const oathSpec = getFormSpec("oath");
   assert.ok(oathSpec, "oath form spec must resolve");
-  assert.strictEqual(oathSpec!.traceCode, "ou", "oath spec brands the operation 'ou'");
-  assert.match(buildTraceId({ code: oathSpec!.traceCode ?? "oc", runId, at }), /^ou-\d{6}-1a57$/);
+  assert.strictEqual(oathSpec!.traceCode, undefined, "oath spec no longer brands an operation code");
+  assert.match(buildTraceId({ code: oathSpec!.traceCode ?? "oc", runId, at }), /^oc-\d{6}-1a57$/);
 
   const ecSpec = getFormSpec("emergency-contact");
   assert.ok(ecSpec, "emergency-contact form spec must resolve");
-  assert.strictEqual(ecSpec!.traceCode, "ec", "EC spec brands standalone runs 'ec' (F5)");
-  assert.match(buildTraceId({ code: ecSpec!.traceCode ?? "oc", runId, at }), /^ec-\d{6}-1a57$/);
+  assert.strictEqual(ecSpec!.traceCode, undefined, "EC spec no longer brands an operation code");
+  assert.match(buildTraceId({ code: ecSpec!.traceCode ?? "oc", runId, at }), /^oc-\d{6}-1a57$/);
+
+  const verifySpec = getFormSpec("verify");
+  assert.ok(verifySpec, "verify form spec must resolve");
+  assert.strictEqual(verifySpec!.traceCode, "vf", "verify keeps its non-colliding vf code");
 });
 
 test("OCR trace-id branding: operation intent disambiguates oath-signature (os) from oath-upload (ou)", async () => {
@@ -147,16 +151,15 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
   // Regression (2026-06-02): OCR prep rows must carry the trace id + queue-row
   // kind the kernel would otherwise stamp, so the footer subtitle resolves to
   // the trace id (kind "file") instead of falling back to the literal "OCR".
-  // Trace-id branding (root trace-id propagation): the OATH form spec sets
-  // `traceCode: "ou"`, so an oath-form OCR root brands the whole operation
-  // `ou-…` (not the default `oc-…`). Standalone/EC forms keep `oc-…` — see the
-  // emergency-contact branding test below.
+  // Trace-id branding (E2E-007): a STANDALONE oath upload brands the OCR
+  // default `oc-…` — operation codes (os/ou/ec) come only from the operation
+  // intent, so a standalone prep never grep-collides with a real ticket.
   for (const entry of writtenEntries as Array<{ data?: Record<string, string> }>) {
     assert.equal(entry.data?.queueRowKind, "file", "every OCR row stamps queueRowKind=file");
     assert.match(
       entry.data?.__traceId ?? "",
-      /^ou-\d{6}-[a-z0-9]{4}$/,
-      `every oath-form OCR row stamps a frozen ou-… trace id (got "${entry.data?.__traceId}")`,
+      /^oc-\d{6}-[a-z0-9]{4}$/,
+      `every standalone oath-form OCR row stamps a frozen oc-… trace id (got "${entry.data?.__traceId}")`,
     );
   }
   const traceIds = new Set((writtenEntries as Array<{ data?: Record<string, string> }>).map((e) => e.data?.__traceId));
@@ -1594,6 +1597,70 @@ test("orchestrator stamps data.dryRun on EVERY OCR row when the input is a dry r
       "true",
       `every emitted row must carry data.dryRun (offender: ${entry.status}/${entry.step ?? ""})`,
     );
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("delegated orchestrator composes the coordinator's trace prefix and stamps its own ocr identity (VQ-1, E2E-012)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ data?: Record<string, string> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-prefix",
+      rosterPath,
+      rosterMode: "existing",
+      parentRunId: "ticket-run-1",
+      operationWorkflow: "oath-upload",
+    },
+    {
+      runId: "run-prefix-1a57",
+      trackerDir: dir,
+      // The born oath-upload ticket's prefix — the delegated OCR run must
+      // COMPOSE it (`<prefix>-<ownRunId4>`) instead of minting its own
+      // HHMMSS, which drifted +2s off the ticket and broke grep-by-prefix
+      // lineage (VQ-1).
+      rootTracePrefix: "ou-215457",
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-prefix-1a57-r0",
+        runId: "verify-prefix-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+      }],
+    },
+  );
+
+  assert.ok(writtenEntries.length >= 3, "expected multiple emitted rows");
+  for (const entry of writtenEntries) {
+    assert.equal(
+      entry.data?.__traceId,
+      "ou-215457-runp",
+      "every delegated OCR row composes <coordinator prefix>-<ownRunId4>",
+    );
+    // E2E-012: the review row mirrors its own identity into the ocr* fields so
+    // the dashboard's row-cancel proxy routes the × through the DISCARD
+    // handler (which mirrors the parent operation row) instead of a generic
+    // running-cancel that left the coordinator stale.
+    assert.equal(entry.data?.ocrSessionId, "session-prefix");
+    assert.equal(entry.data?.ocrRunId, "run-prefix-1a57");
   }
 
   rmSync(dir, { recursive: true, force: true });

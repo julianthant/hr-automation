@@ -435,11 +435,11 @@ export const oathOcrFormSpec: OcrFormSpec<
 
   rosterMode: "required",
 
-  // Brand the whole oath operation `ou` (the oath-upload destination) for the
-  // OCR root run + every fan-out descendant via root trace-id propagation. The
-  // operator uploads "to Oath Upload", so the trace id reads `ou-...` even
-  // though OCR is the physical root. DISPLAY-only — execution graph unchanged.
-  traceCode: "ou",
+  // No `traceCode` (E2E-007): a STANDALONE oath upload to the OCR panel brands
+  // the OCR default `oc-…`. Operation runs are branded by their intent
+  // (`operationTraceCode`: oath-signature → os, oath-upload → ou) — the old
+  // spec-level `"ou"` made a standalone OCR oath prep indistinguishable from a
+  // real oath-upload ticket when grepping `ou-…`.
 };
 
 /**

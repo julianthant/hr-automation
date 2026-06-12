@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { emitTrackerRow } from "../../jsonl.js";
 import { findLatestEntryForPredicate } from "../../find-latest-entry.js";
 import { resolveRowArchetype } from "../../../domain/row-archetype.js";
-import { buildTraceId } from "../../../domain/queue-trace-id.js";
+import { buildTraceId, tracePrefix } from "../../../domain/queue-trace-id.js";
 import { serializeRunOptionsForData, type RunOptions } from "../../../domain/run-options.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -61,10 +61,13 @@ export interface PrepareHandlerOpts {
   /**
    * Test seam for the oath-upload (full mode) born-at-upload enqueue. The real
    * implementation enqueues the oath-upload daemon task and pre-emits its
-   * `single` row; it returns the task's runId so the OCR run can be delegated
-   * under it. Tests stub this to capture the call and return a fixed runId.
+   * `single` row; it returns the task's runId (and the born row's trace id so
+   * the delegated OCR run can inherit the ticket's trace PREFIX — VQ-1). Tests
+   * stub this to capture the call and return a fixed identity.
    */
-  enqueueOathUploadAtPrepare?: (args: OathUploadPrepareEnqueueArgs) => Promise<string | undefined>;
+  enqueueOathUploadAtPrepare?: (
+    args: OathUploadPrepareEnqueueArgs,
+  ) => Promise<{ runId: string; traceId?: string } | undefined>;
 }
 
 export interface OathUploadPrepareEnqueueArgs {
@@ -243,11 +246,17 @@ export function buildOcrPrepareHandler(
       // oath-upload, enqueue the task FIRST (in the background, off the 202 path)
       // so we can capture its runId and delegate the OCR run under it.
       let delegationParentRunId = operationRunId;
+      // The coordinator's trace PREFIX — operation row or born oath-upload
+      // ticket — threaded into the orchestrator so the delegated OCR run
+      // COMPOSES it instead of minting its own HHMMSS (VQ-1).
+      let delegationRootTracePrefix = operationRef
+        ? tracePrefix(operationRef.baseData.__traceId!) ?? undefined
+        : undefined;
       try {
         if (isOathUploadTarget) {
           const enqueueOathUpload =
             opts.enqueueOathUploadAtPrepare ?? defaultEnqueueOathUploadAtPrepare;
-          delegationParentRunId = await enqueueOathUpload({
+          const born = await enqueueOathUpload({
             sessionId,
             pdfOriginalName: input.pdfOriginalName,
             ...(input.pdfFileId ? { pdfFileId: input.pdfFileId } : {}),
@@ -255,6 +264,8 @@ export function buildOcrPrepareHandler(
             ...(trackerDir !== undefined ? { trackerDir } : {}),
             ...(input.runOptions ? { runOptions: input.runOptions } : {}),
           });
+          delegationParentRunId = born?.runId;
+          delegationRootTracePrefix = born?.traceId ? tracePrefix(born.traceId) ?? undefined : undefined;
           if (!delegationParentRunId) {
             // Fail loud, don't run orphaned. The oath-upload approve path SKIPS
             // the ServiceNow ticket fan-out for an oath-upload operation (the
@@ -317,6 +328,7 @@ export function buildOcrPrepareHandler(
             {
               runId,
               trackerDir,
+              ...(delegationRootTracePrefix ? { rootTracePrefix: delegationRootTracePrefix } : {}),
               // The orchestrator bridges this signal to its in-process
               // prepare-abort flag, so a queue-row Cancel (which aborts the
               // controller via runRegistry.cancel) unwinds a RUNNING prep.
@@ -420,7 +432,7 @@ function emitOcrCancelledRow(sessionId: string, runId: string, trackerDir: strin
  */
 async function defaultEnqueueOathUploadAtPrepare(
   args: OathUploadPrepareEnqueueArgs,
-): Promise<string | undefined> {
+): Promise<{ runId: string; traceId?: string } | undefined> {
   const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
   const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
   const wf = await loadWorkflow("oath-upload");
@@ -437,6 +449,7 @@ async function defaultEnqueueOathUploadAtPrepare(
     ...(args.dryRun ? { dryRun: true } : {}),
   };
   let capturedRunId: string | undefined;
+  let capturedTraceId: string | undefined;
   await ensureDaemonsAndEnqueue(
     wf,
     [oathUploadInput] as never,
@@ -451,6 +464,7 @@ async function defaultEnqueueOathUploadAtPrepare(
         emittedItemId: string,
       ) => {
         capturedRunId = childRunId;
+        capturedTraceId = buildTraceId({ code: "ou", runId: childRunId, at: new Date() });
         // The born task is merely ENQUEUED here — pre-emit `pending` like every
         // other pre-emit so the row reads "Queued" until a daemon claims it.
         // Stamping `running`/`ocr-prep` made queued runs lie ("Running / Ocr
@@ -474,7 +488,7 @@ async function defaultEnqueueOathUploadAtPrepare(
               uploadMode: "full",
               status: "ocr-prep",
               __id: emittedItemId,
-              __traceId: buildTraceId({ code: "ou", runId: childRunId, at: new Date() }),
+              __traceId: capturedTraceId!,
               ...serializeRunOptionsForData(args.runOptions),
               ...(args.dryRun ? { dryRun: "true" } : {}),
             },
@@ -485,5 +499,5 @@ async function defaultEnqueueOathUploadAtPrepare(
       },
     },
   );
-  return capturedRunId;
+  return capturedRunId ? { runId: capturedRunId, traceId: capturedTraceId } : undefined;
 }

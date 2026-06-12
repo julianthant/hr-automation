@@ -156,6 +156,16 @@ export interface OcrOrchestratorOpts {
    * its own polling); the field is reserved for future cancel paths.
    */
   signal?: AbortSignal;
+  /**
+   * Root trace PREFIX (`<code>-<HHMMSS>`) of the delegating coordinator —
+   * the operation row or the oath-upload born-at-upload task. When set, the
+   * OCR run COMPOSES `<prefix>-<ownRunId4>` instead of minting its own
+   * `HHMMSS`, so the delegated prep EXACTLY shares the coordinator's prefix
+   * (VQ-1: the oath-upload child previously stamped its own start second,
+   * +2s off the ticket's, breaking grep-by-prefix lineage; operation rows
+   * only matched by same-second luck). Absent for standalone runs.
+   */
+  rootTracePrefix?: string;
 
   /**
    * Phase callback. Invoked with the row's `step` on every non-terminal
@@ -292,18 +302,20 @@ export async function runOcrOrchestrator(
   // run-start clock + runId so it's frozen-identical across every re-emit.
   // The trace-id code is derived first from the target-workflow OPERATION intent
   // (`operationTraceCode`: oath-signature → "os", oath-upload → "ou",
-  // emergency-contact → "ec") so the prefix tells the operations apart — an
-  // oath-signature run reads `os-…`, an oath-upload run `ou-…`, instead of both
-  // branding `ou-…` off the shared oath form spec. With no operation it falls
-  // back to the form spec's `traceCode` (oath standalone → "ou", verify → "vf")
-  // and finally "oc" (the ocr `defineWorkflow` code) for a bare OCR run. OCR is
-  // the physical root of the prep tree; root trace-id propagation then carries
-  // this exact id to every fan-out descendant (person-lookups, signer rows,
-  // oath-upload ticket) so they all DISPLAY the same operation prefix.
+  // emergency-contact → "ec") so the prefix tells the operations apart. With no
+  // operation it falls back to the form spec's `traceCode` (only verify sets
+  // one, "vf") and finally "oc" (the ocr `defineWorkflow` code) — standalone
+  // oath/EC uploads brand `oc-…`, never an operation/workflow code (E2E-007).
+  // A DELEGATED run composes the coordinator's prefix instead of minting its
+  // own HHMMSS (`opts.rootTracePrefix`, VQ-1). OCR is the physical root of the
+  // prep tree; root trace-id propagation then carries this exact id to every
+  // fan-out descendant (person-lookups, signer rows, oath-upload ticket) so
+  // they all DISPLAY the same operation prefix.
   const traceId = buildTraceId({
     code: operationTraceCode(input.operationWorkflow) ?? spec.traceCode ?? "oc",
     runId,
     at: new Date(),
+    ...(opts.rootTracePrefix ? { rootPrefix: opts.rootTracePrefix } : {}),
   });
   const baseEmit =
     opts._emitOverride ??
@@ -410,6 +422,13 @@ export async function runOcrOrchestrator(
     flat.__id = input.sessionId ?? "";
     flat.__name = cachedParentSubject ?? "OCR";
     flat.archetype = "preview";
+    // Mirror the row's own identity into the `ocrSessionId`/`ocrRunId` fields
+    // the dashboard's row-cancel proxy reads: the queue-row × on an OCR review
+    // row then routes through the DISCARD handler (which unwinds the prep AND
+    // mirrors the parent operation row) instead of a generic running-cancel
+    // that left the coordinator parked at "awaiting review" forever (E2E-012).
+    flat.ocrSessionId = id;
+    flat.ocrRunId = runId;
     // OCR inputSubject is "pdf" → queue-row kind "file": title resolves to the
     // PDF filename, subtitle to the trace id (not the literal "OCR").
     flat.queueRowKind = "file";
