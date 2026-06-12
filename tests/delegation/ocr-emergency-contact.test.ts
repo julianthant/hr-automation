@@ -239,13 +239,15 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   assert.equal(ocrRow.data.queueRowKind, "file", "OCR row is file-kind (pdf input)");
   assert.equal(ocrRow.data.__traceId, "<traceId>", "OCR row carries a (scrubbed) trace id");
   assert.equal(ocrRow.status, "done", "OCR row is terminal done after approval");
-  // EC brands `ec-` (form-spec traceCode, F5 fix) — standalone and operation
-  // EC runs now share the same prefix instead of drifting `oc-` vs `ec-`.
+  // With NO operation intent this run brands the OCR default `oc-` (E2E-007:
+  // the spec-level `ec` code was removed — only a real emergency-contact
+  // OPERATION derives `ec` via operationTraceCode, so standalone preps never
+  // grep-collide with operations).
   const rawOcrTraceId = dash.timeline("ocr", ocr.runId).at(-1)?.data?.__traceId;
   assert.match(
     String(rawOcrTraceId),
-    /^ec-\d{6}-[a-z0-9]{4}$/,
-    "OCR root trace id uses the EC form spec's `ec-` trace code",
+    /^oc-\d{6}-[a-z0-9]{4}$/,
+    "OCR root (no operation intent) brands the default `oc-` code",
   );
 
   // Every EC child: batch-member archetype, parentRunId === the delegating run, person
@@ -267,12 +269,12 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
     assert.equal(row.subtitle, emplId, `EC child ${c.itemId} subtitle is the EID`);
     // Trace-id prefix propagation: child shares the OCR root's `ec-<HHMMSS>` prefix.
     assert.equal(row.data.__traceId, "<traceId>", `EC child ${c.itemId} carries a (scrubbed) trace id`);
-    // Child trace id keeps the operation's `ec-` prefix (root trace-id propagation).
+    // Child trace id keeps the ROOT's `oc-` prefix (root trace-id propagation).
     const childTraceId = dash.timeline("emergency-contact", c.runId).at(-1)?.data?.__traceId;
     assert.match(
       String(childTraceId),
-      /^ec-\d{6}-[a-z0-9]{4}$/,
-      `EC child ${c.itemId} trace id shares the operation's ec- prefix`,
+      /^oc-\d{6}-[a-z0-9]{4}$/,
+      `EC child ${c.itemId} trace id shares the OCR root's oc- prefix`,
     );
   }
 

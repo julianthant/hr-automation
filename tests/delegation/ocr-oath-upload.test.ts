@@ -292,7 +292,11 @@ test(
     );
 
     // ── Trace-id propagation: OCR root + signer + ticket all share the
-    //    `ou-<HHMMSS>` operation prefix (oath brands `ou` via spec.traceCode). ──
+    //    root's `oc-<HHMMSS>` prefix. With NO operation intent (this test
+    //    seeds no operationWorkflow) the root brands the OCR default `oc-`
+    //    (E2E-007: spec-level ou/ec codes were removed — operation codes come
+    //    only from operationTraceCode); descendants still compose the root's
+    //    prefix with their own runId4 tails. ──
     const ocrTraceId = String(dash.timeline("ocr", ocr.runId).at(-1)?.data?.__traceId ?? "");
     const signerTraceId = String(
       dash.timeline("oath-signature", signer.runId).at(-1)?.data?.__traceId ?? "",
@@ -300,14 +304,14 @@ test(
     const ticketTraceId = String(
       dash.timeline("oath-upload", ticket.runId).at(-1)?.data?.__traceId ?? "",
     );
-    const ouPrefix = /^ou-\d{6}-[a-z0-9]{4}$/;
-    assert.match(ocrTraceId, ouPrefix, "OCR root trace id uses the oath `ou-` code");
-    assert.match(signerTraceId, ouPrefix, "signer trace id shares the operation's `ou-` prefix");
-    assert.match(ticketTraceId, ouPrefix, "ticket trace id shares the operation's `ou-` prefix");
-    const sharedPrefix = ocrTraceId.slice(0, "ou-HHMMSS".length);
+    const ocPrefix = /^oc-\d{6}-[a-z0-9]{4}$/;
+    assert.match(ocrTraceId, ocPrefix, "OCR root (no operation intent) brands the default `oc-` code");
+    assert.match(signerTraceId, ocPrefix, "signer trace id shares the root's `oc-` prefix");
+    assert.match(ticketTraceId, ocPrefix, "ticket trace id shares the root's `oc-` prefix");
+    const sharedPrefix = ocrTraceId.slice(0, "oc-HHMMSS".length);
     assert.ok(
       signerTraceId.startsWith(sharedPrefix) && ticketTraceId.startsWith(sharedPrefix),
-      `signer + ticket share the OCR root's ou-<HHMMSS> prefix (${sharedPrefix})`,
+      `signer + ticket share the OCR root's oc-<HHMMSS> prefix (${sharedPrefix})`,
     );
 
     // ── Surface/grouping: both children project sensibly under the OCR card.
