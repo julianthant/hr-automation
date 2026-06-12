@@ -1,5 +1,5 @@
-import { errorMessage } from "../../../utils/errors.js";
 import type { VerifyRelookupKind } from "../../../workflows/ocr/verify-relookup.js";
+import { buildOcrTriggerHandler } from "./trigger-handler.js";
 
 // ─── POST /api/ocr/verify-relookup ───────────────────────────
 
@@ -18,30 +18,23 @@ export interface VerifyRelookupHandlerOpts {
   triggerVerifyRelookup?: (input: VerifyRelookupInput) => Promise<void>;
 }
 export function buildOcrVerifyRelookupHandler(opts: VerifyRelookupHandlerOpts = {}) {
-  return async (input: VerifyRelookupInput): Promise<VerifyRelookupResponse> => {
-    if (
+  const handler = buildOcrTriggerHandler<VerifyRelookupInput, void, VerifyRelookupResponse["body"]>({
+    validate: (input) =>
       !input.sessionId ||
       !input.runId ||
       !Number.isInteger(input.recordIndex) ||
       input.recordIndex < 0 ||
       (input.lookup !== "person" && input.lookup !== "i9")
-    ) {
-      return { status: 400, body: { ok: false, error: "Missing or invalid fields" } };
-    }
-    if (opts.triggerVerifyRelookup) {
-      try {
-        await opts.triggerVerifyRelookup(input);
-      } catch (err) {
-        return { status: 400, body: { ok: false, error: errorMessage(err) } };
-      }
-    } else {
+        ? "Missing or invalid fields"
+        : null,
+    ...(opts.triggerVerifyRelookup ? { override: (input) => opts.triggerVerifyRelookup!(input) } : {}),
+    run: async (input) => {
       const { runVerifyRelookup } = await import("../../../workflows/ocr/verify-relookup.js");
-      try {
-        await runVerifyRelookup(input, opts.trackerDir);
-      } catch (err) {
-        return { status: 400, body: { ok: false, error: errorMessage(err) } };
-      }
-    }
-    return { status: 200, body: { ok: true } };
-  };
+      await runVerifyRelookup(input, opts.trackerDir);
+    },
+    onSuccess: () => ({ ok: true }),
+    onError: (error) => ({ ok: false, error }),
+  });
+  return (input: VerifyRelookupInput): Promise<VerifyRelookupResponse> =>
+    handler(input) as Promise<VerifyRelookupResponse>;
 }

@@ -14,7 +14,7 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 - `ctx.page(id)` returns a Playwright Page proxy that injects per-run `ctx.signal` into Playwright methods with `signal?: AbortSignal`. Do not add handler-side cancel polling for ordinary browser calls.
 - For non-Playwright awaits that accept an `AbortSignal`, pass `ctx.signal`.
 - Compose workflows with `ctx.delegateTo` and `ctx.delegateToAll`. Do not call `runWorkflow(child, ..., { parentRunId })` or `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` directly inside handlers; architecture guards block this.
-- `renderAs: "flat"` and `"preview"` are presentation hints. `renderAs: "batch"` means the parent represents a grouped person set, so children are stamped `batch-member` under the parent run.
+- Omitting `renderAs` is a delegated single row (the default — the legacy `renderAs:"flat"` hint was an identical no-op and was removed). `renderAs: "preview"` is a presentation hint; `renderAs: "batch"` means the parent represents a grouped person set, so children are stamped `batch-member` under the parent run (the only value that changes the derived archetype).
 
 ## Dashboard Integration
 

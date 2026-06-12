@@ -117,9 +117,11 @@ UCPath-shaped `10######` EIDs, so every selected record fans out).
 `verify` is a **read-only** OCR form — NO `approveTo`/`approveDocumentTo`, so
 there is **no approve fan-out** (unlike P2.9/P2.10). Its delegation lives in the
 form spec's **`enrichRecords` hook**, which the orchestrator awaits ONCE before
-the awaiting-approval snapshot. The hook `delegateToAllImpl({ child:
-personLookupWorkflow / i9LookupWorkflow, fireAndForget: true, renderAs: "flat",
-rootTracePrefix })` to:
+the awaiting-approval snapshot. The hook routes through the shared
+`fanOutAndWatch` (`src/services/ocr/fan-out.ts`, BM-1), which dispatches
+`delegateToAllImpl({ child: personLookupWorkflow / i9LookupWorkflow,
+fireAndForget: true, rootTracePrefix })` (a delegated single row — no `renderAs`)
+to:
 
 1. **person-lookup** — every record with a `name` (itemId `ocr-verify-<runId>-r<idx>`).
 2. **i9-lookup** — oath records with `officerSigned !== true` and a parseable name

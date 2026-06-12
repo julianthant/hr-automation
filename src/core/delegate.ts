@@ -36,12 +36,14 @@
  *     from the per-run resolved/rejected promise.
  *
  * `renderAs` controls how delegated child rows relate to the parent:
- *   - "flat"    → child renders as a flat single row.
+ *   - (omitted) → delegated single row (the default; no separate "flat" hint).
  *   - "preview" → child renders as a preview card row.
  *   - "batch"   → child is stamped as a batch-member under the parent row.
  *
  * The kernel always derives the row archetype via
- * `deriveRowArchetype(child.archetype, parentRunId, opts)`.
+ * `deriveRowArchetype(child.archetype, parentRunId, opts)`. Only `"batch"`
+ * changes the derivation (→ `batch-member`); an omitted `renderAs` and the
+ * legacy `"flat"` were identical no-ops, so `"flat"` was removed.
  */
 import type {
   RegisteredWorkflow,

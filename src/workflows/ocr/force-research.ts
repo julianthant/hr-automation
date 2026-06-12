@@ -2,11 +2,11 @@
  * Drops resolved fields on selected records, re-fans-out eid-lookup, watches
  * for completions, patches the OCR row's records progressively.
  */
-import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
-import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
-import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
+import { type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
+import { fanOutAndWatch } from "../../services/ocr/fan-out.js";
+import { emitOcrReviewSnapshot } from "../../services/ocr/review-snapshot.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -26,7 +26,7 @@ export interface ForceResearchOpts {
   /** Tracker directory override. Default: `.tracker`. */
   trackerDir?: string;
   // ─── Test escape hatches ──────────────────────────────
-  _watchChildRunsOverride?: (opts: Parameters<typeof watchChildRuns>[0]) => Promise<ChildOutcome[]>;
+  _watchChildRunsOverride?: (opts: WatchChildRunsOpts) => Promise<ChildOutcome[]>;
   _enqueueOverride?: (itemIds: string[], inputs: unknown[]) => Promise<void>;
 }
 
@@ -102,68 +102,31 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     trackerDir,
   );
 
-  if (opts._enqueueOverride) {
-    await opts._enqueueOverride(itemIds, enqueueInputs);
-  } else {
-    // Contract 3 (Finding #23): route through delegateToAllImpl so parentRunId
-    // stamping, canonical archetype derivation, and child pending pre-emit share one
-    // code path with the OCR orchestrator's eid-lookup fan-out. Mirrors the
-    // orchestrator's shape:
-    //   - `renderAs: "flat"` remains a projection hint; eid-lookup rows
-    //     stamp `single`, parentRunId marks delegated scope, and one vs
-    //     many children controls single vs batch grouping.
-    //   - `fireAndForget: true` because the `watchChildRuns` call below still
-    //     drives the wait — wrapping a second wait inside delegateToAllImpl
-    //     would double-count.
-    //   - `parentRunId: input.runId` so the OCR session row is the parent of
-    //     each eid-lookup child row.
-    const { delegateToAllImpl } = await import("../../core/delegate.js");
-    const { personLookupWorkflow } = await import("../person-lookup/index.js");
-    const inputToItemId = new Map(
-      enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? ""])
-    );
-    type EidLookupChildInput = { name: string };
-    await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
-      parentRunId: input.runId,
-      trackerDir,
-      // personLookupWorkflow's exact generic param doesn't line up with the
-      // narrowed `{ name }` shape used here (it accepts a union of name-only /
-      // emplId-only variants), so cast through unknown — the runtime schema
-      // validates the actual shape.
-      child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
-      inputs: enqueueInputs,
-      renderAs: "flat",
-      fireAndForget: true,
-      deriveItemId: (inp: EidLookupChildInput) => inputToItemId.get(JSON.stringify(inp)) ?? "",
-    });
-  }
-
-  const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  let outcomes: ChildOutcome[];
-  try {
-    outcomes = await watchFn({
-      workflow: "person-lookup",
-      expectedItemIds: itemIds,
-      trackerDir,
-      date,
-      timeoutMs: 30 * 60_000,
-      // Operator-cancel bridge: the orchestrator trips the prepare-abort flag on
-      // `ctx.signal`; this watch throws a discard-abort error when it's set.
-      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
-    });
-  } catch (err) {
-    if (isOperatorDiscardAbortError(err)) {
-      // Cancel mid-research: cascade-cancel the still-queued person-lookup
-      // children so a daemon doesn't run them after the operator gave up.
-      // Fail-loud — a cascade error propagates.
-      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
-    }
-    throw err;
-  }
+  // Shared dispatch→watch→cascade-cancel pipeline (BM-1). force-research re-fans
+  // person-lookup by NAME (it cleared employeeId above) and patches each outcome
+  // with the name-resolution semantics. The `_enqueueOverride(itemIds, inputs)`
+  // HTTP test seam maps to fanOutAndWatch's dispatch override; the cascade-cancel
+  // on operator discard-abort lives in fanOutAndWatch.
+  type EidLookupChildInput = { name: string };
+  const { personLookupWorkflow } = await import("../person-lookup/index.js");
+  const { byItemId, missingItemIds } = await fanOutAndWatch<EidLookupChildInput>({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    parentRunId: input.runId,
+    trackerDir,
+    date,
+    child: personLookupWorkflow as never,
+    children: enqueueInputs.map((inp, idx) => ({ input: inp, itemId: itemIds[idx] ?? "" })),
+    timeoutMs: 30 * 60_000,
+    ...(opts._enqueueOverride
+      ? { dispatch: async (children) => opts._enqueueOverride!(children.map((c) => c.itemId), children.map((c) => c.input)) }
+      : {}),
+    ...(opts._watchChildRunsOverride ? { watch: opts._watchChildRunsOverride } : {}),
+  });
 
   // Patch records from lookup outcomes before emitting the final state.
-  for (const outcome of outcomes) {
-    const idx = itemIdToRecordIdx.get(outcome.itemId);
+  for (const [itemId, outcome] of byItemId) {
+    const idx = itemIdToRecordIdx.get(itemId);
     if (idx === undefined) continue;
     patchOcrRecordFromEidLookupOutcome(records, idx, outcome, "name");
   }
@@ -171,9 +134,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   // Any expected itemId that did not produce an outcome (timeout or skipped)
   // must be marked unresolved so the dashboard does not leave the record
   // stuck in `lookup-pending`. Mirrors the orchestrator's safety net.
-  const receivedItemIds = new Set(outcomes.map((o) => o.itemId));
-  for (const itemId of itemIds) {
-    if (receivedItemIds.has(itemId)) continue;
+  for (const itemId of missingItemIds) {
     const idx = itemIdToRecordIdx.get(itemId);
     if (idx === undefined) continue;
     patchOcrRecordUnresolved(
@@ -183,49 +144,24 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     );
   }
 
-  // Mirror the orchestrator's emit shape so the dashboard can resolve the row
-  // by archetype/__id/__name/parentSubject — re-stamp on every emit rather
-  // than relying on whatever the latest row happened to carry.
+  // Re-emit via the shared OCR preview-row envelope (BM-5) so the dashboard
+  // resolves the row by archetype/__id/__name/parentSubject. Running → done pair.
   const parentRunId = (latest.data?.parentRunId as unknown as string | undefined) ?? latest.parentRunId;
   const parentSubject =
     readQueueTitle(latest.data) ??
     (latest.data?.parentSubject as unknown as string | undefined);
-  const baseData: Record<string, string> = {
-    ...(latest.data ?? {}),
-    records: JSON.stringify(records),
-    mode: "prepare",
-    archetype: "preview",
-    __id: input.sessionId,
-    __name: parentSubject ?? "OCR",
-    ...(parentSubject ? { parentSubject } : {}),
-  };
-  // baseData already carries `archetype: "preview"` (line above) so
-  // emitTrackerRow's StampedData contract is satisfied at compile time.
-  const stampedBase = baseData as StampedData;
-  emitTrackerRow(
-    {
-      workflow: WORKFLOW,
-      timestamp: new Date().toISOString(),
-      id: input.sessionId,
-      runId: input.runId,
+  const snapshotArgs = {
+    base: { ...(latest.data ?? {}) },
+    sessionId: input.sessionId,
+    runId: input.runId,
+    records,
+    step: "awaiting-approval",
+    parent: {
       ...(parentRunId ? { parentRunId } : {}),
-      status: "running",
-      step: "awaiting-approval",
-      data: stampedBase,
+      ...(parentSubject ? { parentSubject } : {}),
     },
     trackerDir,
-  );
-  emitTrackerRow(
-    {
-      workflow: WORKFLOW,
-      timestamp: new Date().toISOString(),
-      id: input.sessionId,
-      runId: input.runId,
-      ...(parentRunId ? { parentRunId } : {}),
-      status: "done",
-      step: "awaiting-approval",
-      data: stampedBase,
-    },
-    trackerDir,
-  );
+  } as const;
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "running" });
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "done" });
 }
