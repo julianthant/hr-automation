@@ -122,10 +122,25 @@ const emergencyContactScript: StepDataFn = (input) => {
   };
 };
 
+/**
+ * Deterministic fake EID for a name-keyed stub lookup. A CONSTANT default
+ * (the old "10000001") collided across records — every name-keyed lookup in a
+ * batch "resolved" to the same person, masking identity bugs and clobbering
+ * distinct paper EIDs through the verify patch (E2E-014). Hash the name into
+ * a stable 1xxxxxxx EID instead so each identity stays distinct across runs.
+ */
+function stubEidForName(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return `1${String(hash % 10_000_000).padStart(7, "0")}`;
+}
+
 /** person-lookup: steps ["searching", "cross-verification", "active-status", "crm-dates"]. */
 const personLookupScript: StepDataFn = (input) => {
   const r = rec(input);
-  const emplId = str(r.emplId) ?? "10000001";
+  const emplId = str(r.emplId) ?? stubEidForName(str(r.name) ?? "unknown");
   return {
     searching: compact({
       searchName: str(r.name) ?? emplId,

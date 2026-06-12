@@ -98,12 +98,18 @@ export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): 
   const activeCheck = valueCheck("activeStatus", "Active Status", activeStatus, "ucpath");
 
   if (isOathShapedRecord(record)) {
+    // EID provenance: a record whose EID came from a person-lookup
+    // (`matchSource === "eid-lookup"`) shows it as LOOKED UP ("ucpath"), not
+    // "(on paper)" — the form had no EID and labeling the resolved value as
+    // paper miscounts the "N on paper · N looked up" tally (E2E-005). The EC
+    // branch below already labels its lookup-backed EID "ucpath".
+    const eidSource = record.matchSource === "eid-lookup" ? "ucpath" : "paper";
     // Oath-shaped: a re-classified page (formKind != "oath") has no oath
     // signature data worth showing, so drop the signature checks for it.
     if (record.formKind === "oath") {
       return [
         valueCheck("name", "Printed Name", nonEmpty(record.printedName), "paper"),
-        valueCheck("eid", "Employee ID", nonEmpty(record.employeeId), "paper"),
+        valueCheck("eid", "Employee ID", nonEmpty(record.employeeId), eidSource),
         valueCheck("dateSigned", "Date Signed", nonEmpty(record.dateSigned), "paper"),
         boolCheck("employeeSigned", "Employee Signed", record.employeeSigned === true),
         boolCheck("officerSigned", "Officer Signed", record.officerSigned === true),
@@ -112,7 +118,7 @@ export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): 
     }
     return [
       valueCheck("name", "Printed Name", nonEmpty(record.printedName), "paper"),
-      valueCheck("eid", "Employee ID", nonEmpty(record.employeeId), "paper"),
+      valueCheck("eid", "Employee ID", nonEmpty(record.employeeId), eidSource),
       activeCheck,
     ];
   }

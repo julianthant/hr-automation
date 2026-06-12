@@ -179,9 +179,16 @@ export async function runDependencySchedulerTick(
           now,
         });
         if (allDependenciesTerminal(opts.store, dep.parent.id)) {
+          // The task_kind=ocr parent is a dependency ANCHOR, not daemon work —
+          // no daemon ever claims an "ocr" task. Terminalize it once the last
+          // dependency settles: re-stamping waiting_on_children left it in
+          // waiting_dependencies, from where the control-dep release
+          // (releaseParentsForChildren has no kind filter) flipped it to
+          // queued — a zombie task lingering for every prep, done or failed
+          // (E2E-003).
           updateTaskStatus(opts.store, {
             taskId: dep.parent.id,
-            status: "waiting_on_children",
+            status: "done",
             now,
           });
         }
