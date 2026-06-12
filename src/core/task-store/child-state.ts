@@ -74,13 +74,25 @@ export function createDependency(
   })
 }
 
+/**
+ * A parent task flipped `waiting_dependencies → queued` by a dependency
+ * release. The CALLER must wake the parent workflow's daemons: the flip is
+ * pure SQLite, and an idle daemon's claim loop only re-polls on a /wake or
+ * its 15-min keepalive tick — without the wake a released task sat queued
+ * for up to that whole window (E2E-017).
+ */
+export interface ReleasedParentTask {
+  taskId: string
+  workflow: string
+}
+
 export function markDependencyFromChildTerminal(
   db: Database,
   control: ControlDb,
   request: { childTaskId: string; childState: 'done' | 'failed' | 'cancelled'; now?: string },
-): void {
+): ReleasedParentTask[] {
   const now = request.now ?? new Date().toISOString()
-  control.transaction(() => {
+  return control.transaction(() => {
     const deps = db.prepare(`
       SELECT id, parent_task_id, on_child_failed
       FROM task_dependencies
@@ -115,7 +127,7 @@ export function markDependencyFromChildTerminal(
         `).run({ parentTaskId: dep.parent_task_id, now })
       }
     }
-    releaseParentsForChildren(db, [request.childTaskId], now)
+    return releaseParentsForChildren(db, [request.childTaskId], now)
   })
 }
 
@@ -123,9 +135,9 @@ export function releaseParentsIfDependenciesSatisfied(
   db: Database,
   control: ControlDb,
   request: { childTaskId: string; now?: string },
-): void {
+): ReleasedParentTask[] {
   const now = request.now ?? new Date().toISOString()
-  control.transaction(() => releaseParentsForChildren(db, [request.childTaskId], now))
+  return control.transaction(() => releaseParentsForChildren(db, [request.childTaskId], now))
 }
 
 export async function waitForDependencies(
@@ -199,7 +211,12 @@ function setDependencyStatus(
   `).run({ dependencyId, status, now })
 }
 
-function releaseParentsForChildren(db: Database, childTaskIds: string[], now: string): void {
+function releaseParentsForChildren(
+  db: Database,
+  childTaskIds: string[],
+  now: string,
+): ReleasedParentTask[] {
+  const released: ReleasedParentTask[] = []
   for (const childTaskId of childTaskIds) {
     const parents = db.prepare(`
       SELECT DISTINCT parent_task_id
@@ -214,13 +231,18 @@ function releaseParentsForChildren(db: Database, childTaskIds: string[], now: st
           AND status NOT IN ('satisfied', 'cancelled')
       `).get(parent.parent_task_id) as { n: number }
       if (pending.n !== 0) continue
-      db.prepare(`
+      const result = db.prepare(`
         UPDATE tasks
         SET control_state = 'queued',
             updated_at = @now
         WHERE id = @parentTaskId
           AND control_state = 'waiting_dependencies'
       `).run({ parentTaskId: parent.parent_task_id, now })
+      if (result.changes === 0) continue
+      const row = db.prepare(`SELECT workflow FROM tasks WHERE id = ?`)
+        .get(parent.parent_task_id) as { workflow: string } | undefined
+      if (row) released.push({ taskId: parent.parent_task_id, workflow: row.workflow })
     }
   }
+  return released
 }

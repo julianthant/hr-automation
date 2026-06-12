@@ -19,6 +19,7 @@ import {
   markItemDone,
   markItemFailed,
 } from './queue.js'
+import { wakeDaemonsForReleasedParents } from './client.js'
 import {
   reassignInFlightItem,
   failInFlightItem,
@@ -658,10 +659,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                         : 'cancelled by user from dashboard'
                     await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
                     if (item.taskId) {
-                      taskStore.markDependencyFromChildTerminal({
+                      const released = taskStore.markDependencyFromChildTerminal({
                         childTaskId: item.taskId,
                         childState: 'cancelled',
                       })
+                      void wakeDaemonsForReleasedParents(released, trackerDir)
                     }
                     // Always overwrite with a cancelled tracker row, even if
                     // the handler returned r.ok=true (which would have written
@@ -692,18 +694,24 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 } else if (r.ok) {
                   await markItemDone(wf.config.name, item.id, runId, trackerDir)
                   if (item.taskId) {
-                    taskStore.markDependencyFromChildTerminal({
+                    const released = taskStore.markDependencyFromChildTerminal({
                       childTaskId: item.taskId,
                       childState: 'done',
                     })
+                    // Wake the released parents' daemons NOW — a parent on
+                    // another workflow's daemon (oath-upload waiting on this
+                    // signer) would otherwise sit queued until that daemon's
+                    // 15-min keepalive tick (E2E-017).
+                    void wakeDaemonsForReleasedParents(released, trackerDir)
                   }
                 } else {
                   await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
                   if (item.taskId) {
-                    taskStore.markDependencyFromChildTerminal({
+                    const released = taskStore.markDependencyFromChildTerminal({
                       childTaskId: item.taskId,
                       childState: 'failed',
                     })
+                    void wakeDaemonsForReleasedParents(released, trackerDir)
                   }
                 }
                 // Reset every system's page to its `resetUrl` after a

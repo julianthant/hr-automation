@@ -249,3 +249,32 @@ test('parseJson throws a clear error for malformed JSON', () => {
     /parseJson: malformed JSON .*not-json/,
   )
 })
+
+test('markDependencyFromChildTerminal returns the released parents with their workflow (E2E-017)', () => {
+  // The release flips the parent waiting_dependencies→queued in SQLite only;
+  // the CALLER wakes the parent workflow's daemons off this return value —
+  // an idle daemon otherwise re-polls only on its 15-min keepalive tick.
+  const { dir, store } = openTempStore()
+  try {
+    const [parent] = store.enqueueTasks({ workflow: 'oath-upload', inputs: [{ id: 'ticket' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const [childA] = store.enqueueTasks({ workflow: 'oath-signature', inputs: [{ id: 'signer-a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const [childB] = store.enqueueTasks({ workflow: 'oath-signature', inputs: [{ id: 'signer-b' }], deriveItemId: (x) => x.id, now: iso(0) })
+    store.createDependency({ parentTaskId: parent.taskId, childTaskId: childA.taskId, onChildFailed: 'block_parent' })
+    store.createDependency({ parentTaskId: parent.taskId, childTaskId: childB.taskId, onChildFailed: 'block_parent' })
+
+    // First child settles — parent still has a pending dependency: no release.
+    const first = store.markDependencyFromChildTerminal({ childTaskId: childA.taskId, childState: 'done', now: iso(1) })
+    assert.deepEqual(first, [])
+
+    // Last child settles — the parent is released and identified by workflow.
+    const second = store.markDependencyFromChildTerminal({ childTaskId: childB.taskId, childState: 'done', now: iso(2) })
+    assert.deepEqual(second, [{ taskId: parent.taskId, workflow: 'oath-upload' }])
+
+    // Settling an already-settled child releases nothing again.
+    const third = store.markDependencyFromChildTerminal({ childTaskId: childB.taskId, childState: 'done', now: iso(3) })
+    assert.deepEqual(third, [])
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

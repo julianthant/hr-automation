@@ -155,6 +155,33 @@ export async function wakeDaemons(daemons: Daemon[]): Promise<void> {
 }
 
 /**
+ * Wake the daemons of every workflow whose parent task a dependency release
+ * just flipped `waiting_dependencies → queued` (E2E-017). The flip is pure
+ * SQLite; an idle daemon's claim loop only re-polls on /wake or its 15-min
+ * keepalive tick, so without this an oath-upload ticket whose signers
+ * finished sat queued for up to that whole window. Best-effort and
+ * fire-and-forget — never throws, wakes only already-alive daemons (a
+ * released task with no daemon is the orphan sweep's concern, not a reason
+ * to spawn here).
+ */
+export async function wakeDaemonsForReleasedParents(
+  released: ReadonlyArray<{ taskId: string; workflow: string }>,
+  trackerDir?: string,
+): Promise<void> {
+  const workflows = [...new Set(released.map((r) => r.workflow))]
+  await Promise.all(
+    workflows.map(async (workflow) => {
+      try {
+        const alive = await findAliveDaemons(workflow, trackerDir)
+        await wakeDaemons(alive)
+      } catch {
+        /* best-effort */
+      }
+    }),
+  )
+}
+
+/**
  * Ensure at least one daemon is alive for a workflow, then wake every alive
  * daemon. Used by enqueue paths and by retry paths that requeue an existing
  * SQLite task instead of inserting a new one through ensureDaemonsAndEnqueue.

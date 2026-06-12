@@ -21,6 +21,7 @@
  * falls back to `killChromeHard` only when nothing observes the signal.
  */
 import { runRegistry } from "../../core/run-registry.js";
+import { wakeDaemonsForReleasedParents } from "../../core/daemon/client.js";
 import type { BrowserProcessRow, ControlWorkerStore } from "../../core/daemon/worker-store.js";
 import {
   DASHBOARD_CANCEL_ERROR,
@@ -133,10 +134,14 @@ export function buildCancelQueuedHandler(dir: string) {
         ...(task.currentAttemptId ? { attemptId: task.currentAttemptId } : {}),
         reason: DASHBOARD_CANCEL_ERROR,
       });
-      stores.taskStore.markDependencyFromChildTerminal({
+      const released = stores.taskStore.markDependencyFromChildTerminal({
         childTaskId: task.taskId,
         childState: "cancelled",
       });
+      // Wake the released parents' daemons now — without it a parent whose
+      // last pending dependency this cancel just settled sits queued until
+      // that daemon's 15-min keepalive tick (E2E-017).
+      void wakeDaemonsForReleasedParents(released, dir);
       appendQueueFailedAudit(req.workflow, req.id, auditRunId, DASHBOARD_CANCEL_ERROR, dir);
       // SQLite fast-path hint: bulk cancel goes O(K*D*L) on the prior-row
       // lookup without it (Finding #13). Single-row callers still benefit.
