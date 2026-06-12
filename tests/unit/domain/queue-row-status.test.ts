@@ -166,7 +166,19 @@ describe("resolveQueueRowStatus — secondaryTag (person-lookup A/IA)", () => {
     assert.equal(r.derivedStatus, "notFound");
   });
 
-  it("ocr workflow declares no secondaryTag", () => {
-    assert.equal(getWorkflowStatusExtensions("ocr")?.secondaryTag, undefined);
+  it("ocr verify rows tag an under-verified done run; other ocr rows get no tag (E2E-011)", () => {
+    const tagFor = getWorkflowStatusExtensions("ocr")?.secondaryTag;
+    assert.ok(tagFor, "ocr declares a secondaryTag rule");
+    const verifyEntry = entry({
+      workflow: "ocr",
+      status: "done",
+      data: { formType: "verify", verifiedCount: "0", recordCount: "1" },
+    });
+    const tag = tagFor!(verifyEntry, { isDone: true });
+    assert.equal(tag?.text, "0/1 verified");
+    // Fully verified, non-verify, and non-done rows stay untagged.
+    assert.equal(tagFor!(entry({ workflow: "ocr", status: "done", data: { formType: "verify", verifiedCount: "2", recordCount: "2" } }), { isDone: true }), null);
+    assert.equal(tagFor!(entry({ workflow: "ocr", status: "done", data: { formType: "oath", verifiedCount: "0", recordCount: "1" } }), { isDone: true }), null);
+    assert.equal(tagFor!(verifyEntry, { isDone: false }), null);
   });
 });

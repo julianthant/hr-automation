@@ -54,10 +54,18 @@ export function patchOcrRecordFromEidLookupOutcome(
     }
   } else {
     if (outcome.status === "done" && looksLikeEid) {
-      if ("employee" in rec) {
-        (rec.employee as Record<string, unknown>).employeeId = eid;
-      } else {
-        rec.employeeId = eid;
+      // verify/verify-only lookups are EID-KEYED — the record's identity is
+      // already established (paper EID / match pipeline). Never let the
+      // lookup's echo replace a present EID: a divergent result would
+      // silently clobber the on-paper identity (E2E-014 — the e2e stub's
+      // constant EID overwrote three distinct paper EIDs). Only fill a
+      // genuinely blank employeeId.
+      if (!existingEid) {
+        if ("employee" in rec) {
+          (rec.employee as Record<string, unknown>).employeeId = eid;
+        } else {
+          rec.employeeId = eid;
+        }
       }
       rec.matchState = "resolved";
       rec.matchSource = "eid-lookup";

@@ -10,6 +10,7 @@ import {
   PriorTrackerRowNotFoundError,
 } from "../ops/emit-inherited.js";
 import { openControlStores } from "../ops/shared.js";
+import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import { readFormType, readParentRunId, readOperationWorkflow } from "../../tracker/dashboard/ocr/shared.js";
 import { emitDiscarded } from "../../services/ocr/approval-signal.js";
 
@@ -106,6 +107,26 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       { workflow: WORKFLOW, sessionId: input.sessionId },
       input.reason ?? "operator discarded OCR prep",
     );
+    // Cancel the prep's still-queued delegated child TASKS (person-lookup
+    // verifies) and its dependency anchor — `deleteDelegatedChildrenForRun`
+    // below only removes the display ROWS, so without this a daemon claimed
+    // and ran orphan lookups for a discarded prep, and the anchor task sat
+    // waiting forever (E2E-010).
+    cancelQueuedChildTasksForParentRun(openTaskStore(opts.trackerDir), {
+      parentRunId: input.runId,
+      reason: input.reason ?? "OCR prep discarded",
+    });
+    const anchorTask = stores.taskStore.findTaskByIdentity({
+      workflow: WORKFLOW,
+      itemId: input.sessionId,
+      runId: input.runId,
+    });
+    if (anchorTask && anchorTask.state !== "done" && anchorTask.state !== "failed" && anchorTask.state !== "cancelled") {
+      stores.taskStore.markTaskCancelled({
+        taskId: anchorTask.taskId,
+        reason: input.reason ?? "OCR prep discarded",
+      });
+    }
     deleteDelegatedChildrenForRun(opts.trackerDir ?? ".tracker", input.runId);
     // OCR prep parent is batch-shaped. We still resolve from the
     // prior row so this code never has to know about per-workflow archetype

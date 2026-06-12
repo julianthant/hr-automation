@@ -66,6 +66,10 @@ export function buildFailuresHandler(deps: FailuresDeps) {
         // failures - they're audit-only at that point. Mirrors the
         // QueuePanel's `isResolvedPrepRow` predicate.
         if (isResolvedPrepEntry(e)) continue;
+        // Deliberate operator cancellations (failed + step=cancelled) are not
+        // failures — surfacing them in the triage popover buries real ones
+        // (E2E-009).
+        if (e.step === "cancelled") continue;
         failures.push({
           workflow: wf,
           id: e.id,
@@ -109,6 +113,9 @@ export function computeFailureCounts(entries: TrackerEntry[]): number {
     // Discarded prep rows (`failed`+`discarded`) are operator-resolved and
     // shouldn't inflate the navbar failure-bell badge.
     if (isResolvedPrepEntry(e)) continue;
+    // Deliberate operator cancellations (failed + step=cancelled) are not
+    // failures and don't ring the bell (E2E-009).
+    if (e.step === "cancelled") continue;
     count++;
   }
   return count;

@@ -307,11 +307,15 @@ test("scheduler marks dependency terminal after already-applied OCR continuation
     assert.equal(result.errors.length, 0);
     assert.equal(emitted.length, 0);
     assert.equal(getDependencySummary(store, parentTaskId).satisfied, 1);
+    // The anchor task terminalizes once its last dependency settles (E2E-003):
+    // no daemon ever claims a task_kind=ocr task, so leaving it
+    // waiting_on_children let the control-dep release flip it to queued where
+    // it lingered forever.
     assert.equal(getTaskByTrackerIdentity(store, {
       workflow: "ocr",
       itemId: "session-1",
       runId: "ocr-run-1",
-    })?.status, "waiting_on_children");
+    })?.status, "done");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

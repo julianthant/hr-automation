@@ -1,4 +1,5 @@
 import type { TrackerEntry } from "@/components/shared/types";
+import { statusKeyForEntry } from "@/components/shared/status-styles";
 import { isOcrAwaitingApprovalEntry } from "../../../tracker/dashboard/prep-rows.js";
 
 export type QueueStatusCounts = Record<string, number>;
@@ -29,6 +30,12 @@ export function entryMatchesStatusFilter(entry: TrackerEntry, statusFilter: stri
   if (statusFilter === "done") {
     return entry.status === "done" && !isOcrAwaitingApprovalEntry(entry);
   }
+  // Cancelled is failed + step=cancelled (statusKeyForEntry's override) — it
+  // gets its own bucket so an operator filtering "Failed" sees genuine
+  // failures, not deliberate cancellations (E2E-009).
+  if (statusFilter === "failed" || statusFilter === "cancelled") {
+    return statusKeyForEntry(entry) === statusFilter;
+  }
   return entry.status === statusFilter;
 }
 
@@ -55,7 +62,10 @@ export function countEntriesByQueueStatus(entries: TrackerEntry[]): QueueStatusC
       counts.running = (counts.running || 0) + 1;
       continue;
     }
-    counts[entry.status] = (counts[entry.status] || 0) + 1;
+    // Bucket by the canonical status key so a cancelled row (failed +
+    // step=cancelled) counts under "cancelled", not "failed" (E2E-009).
+    const key = statusKeyForEntry(entry);
+    counts[key] = (counts[key] || 0) + 1;
     if (entry.status !== "pending" && isQueueLikeEntry(entry)) {
       counts.pending = (counts.pending || 0) + 1;
     }

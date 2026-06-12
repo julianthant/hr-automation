@@ -63,10 +63,12 @@ describe("shared OCR forms", () => {
     );
   });
 
-  it("EC form spec brands standalone runs 'ec' (F5)", () => {
-    assert.equal(getFormSpec("emergency-contact")?.traceCode, "ec");
-    // oath brands 'ou', verify 'vf' — kept distinct per the trace lessons.
-    assert.equal(getFormSpec("oath")?.traceCode, "ou");
+  it("standalone oath/EC brand the OCR default (no spec traceCode); verify keeps 'vf' (E2E-007)", () => {
+    // Operation codes (os/ou/ec) come only from the operation intent — a
+    // spec-level code made standalone OCR-panel preps grep-collide with real
+    // tickets/operations.
+    assert.equal(getFormSpec("emergency-contact")?.traceCode, undefined);
+    assert.equal(getFormSpec("oath")?.traceCode, undefined);
     assert.equal(getFormSpec("verify")?.traceCode, "vf");
   });
 });
