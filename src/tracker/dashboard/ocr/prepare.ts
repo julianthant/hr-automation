@@ -434,7 +434,6 @@ async function defaultEnqueueOathUploadAtPrepare(
     pdfOriginalName: args.pdfOriginalName,
     ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
     mode: "full",
-    rosterMode: "download",
     ...(args.dryRun ? { dryRun: true } : {}),
   };
   let capturedRunId: string | undefined;

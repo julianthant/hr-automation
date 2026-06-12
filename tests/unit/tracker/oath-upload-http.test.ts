@@ -93,7 +93,6 @@ test("buildOathUploadStartHandler: defaults to upload-only and passes dryRun", a
     pdfOriginalName: "oath.pdf",
     pdfHash: "a".repeat(64),
     sessionId: "session-dry",
-    rosterMode: "download",
     dryRun: true,
   });
   assert.equal(r.status, 202);

@@ -1,6 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { resolve } from "node:path";
 import type { Hono } from "hono";
 
 import {
@@ -9,7 +7,6 @@ import {
   buildOathUploadStartHandler,
   saveUploadedPdf,
 } from "../../oath-upload/http.js";
-import { resolveRosterDirs } from "../../../../services/matching/roster-loader.js";
 import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
@@ -78,20 +75,13 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
       }).catch(() => undefined);
     }
 
-    const rosterMode = (multipart.parsed.fields.rosterMode?.trim() ?? "download") as "existing" | "download";
+    // `rosterMode`/`rosterPath` parsing was removed (E2E-006): the start
+    // handler 400s full mode (full runs go via /api/ocr/prepare, which owns
+    // roster choice), upload-only never uses a roster, and the old resolution
+    // scanned the REAL .tracker (no deps.dir) picking a lexicographic-latest
+    // file. The oath-upload input schema no longer carries the fields.
     const mode = (multipart.parsed.fields.mode?.trim() ?? "full") as "full" | "upload-only";
     const dryRun = multipart.parsed.fields.dryRun === "true" || multipart.parsed.fields.dryRun === "1";
-    let rosterPath: string | undefined;
-    if (mode === "full" && rosterMode === "existing") {
-      const rosterDirs = resolveRosterDirs();
-      const rosterDir = rosterDirs.find((dir) => existsSync(dir)) ?? rosterDirs[0];
-      try {
-        const files = readdirSync(rosterDir).filter((fileName) => fileName.endsWith(".xlsx"));
-        if (files.length > 0) rosterPath = resolve(rosterDir, files.sort().at(-1)!);
-      } catch {
-        /* tolerate */
-      }
-    }
 
     const result = await handlers.start({
       pdfPath,
@@ -100,8 +90,6 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
       pdfHash,
       sessionId,
       mode,
-      rosterMode,
-      rosterPath,
       dryRun,
     });
     return jsonResponse(result.body, result.status);
