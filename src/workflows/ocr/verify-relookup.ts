@@ -22,9 +22,8 @@
 import { randomUUID } from "node:crypto";
 import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
-import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
-import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
-import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
+import { type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
+import { fanOutAndWatch } from "../../services/ocr/fan-out.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
@@ -57,7 +56,7 @@ export interface VerifyRelookupOpts {
   /** Tracker directory override. Default: `.tracker`. */
   trackerDir?: string;
   // ─── Test escape hatches (mirror force-research.ts) ──────────
-  _watchChildRunsOverride?: (opts: Parameters<typeof watchChildRuns>[0]) => Promise<ChildOutcome[]>;
+  _watchChildRunsOverride?: (opts: WatchChildRunsOpts) => Promise<ChildOutcome[]>;
   _enqueueOverride?: (itemId: string, input: unknown) => Promise<void>;
 }
 
@@ -190,48 +189,28 @@ async function runPersonRelookup(ctx: {
     ...(parentSubject ? { parentSubject } : {}),
   };
 
-  if (opts._enqueueOverride) {
-    await opts._enqueueOverride(itemId, childInput);
-  } else {
-    const { delegateToAllImpl } = await import("../../core/delegate.js");
-    const { personLookupWorkflow } = await import("../person-lookup/index.js");
-    await delegateToAllImpl<PersonLookupChildInput, readonly string[]>({
-      parentRunId: input.runId,
-      trackerDir,
-      child: personLookupWorkflow as unknown as Parameters<
-        typeof delegateToAllImpl<PersonLookupChildInput, readonly string[]>
-      >[0]["child"],
-      inputs: [childInput],
-      renderAs: "flat",
-      fireAndForget: true,
-      ...(rootTracePrefix ? { rootTracePrefix } : {}),
-      deriveItemId: () => itemId,
-    });
-  }
+  const { personLookupWorkflow } = await import("../person-lookup/index.js");
+  // Shared dispatch→watch→cascade-cancel pipeline (BM-1). The HTTP test seams
+  // (`_enqueueOverride`/`_watchChildRunsOverride`) map to fanOutAndWatch's
+  // dispatch/watch overrides; the cascade-cancel on operator discard-abort lives
+  // in fanOutAndWatch.
+  const { byItemId } = await fanOutAndWatch<PersonLookupChildInput>({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    parentRunId: input.runId,
+    trackerDir,
+    date,
+    child: personLookupWorkflow as never,
+    children: [{ input: childInput, itemId }],
+    timeoutMs: 30 * 60_000,
+    ...(rootTracePrefix ? { rootTracePrefix } : {}),
+    ...(opts._enqueueOverride
+      ? { dispatch: async () => opts._enqueueOverride!(itemId, childInput) }
+      : {}),
+    ...(opts._watchChildRunsOverride ? { watch: opts._watchChildRunsOverride } : {}),
+  });
 
-  const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  let outcomes: ChildOutcome[];
-  try {
-    outcomes = await watchFn({
-      workflow: "person-lookup",
-      expectedItemIds: [itemId],
-      trackerDir,
-      date,
-      timeoutMs: 30 * 60_000,
-      // Operator-cancel bridge: throws a discard-abort error when the prepare-
-      // abort flag is set (orchestrator trips it on `ctx.signal`).
-      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
-    });
-  } catch (err) {
-    if (isOperatorDiscardAbortError(err)) {
-      // Cancel mid-relookup: cascade-cancel the still-queued person-lookup child.
-      // Fail-loud — a cascade error propagates.
-      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
-    }
-    throw err;
-  }
-
-  const outcome = outcomes.find((o) => o.itemId === itemId);
+  const outcome = byItemId.get(itemId);
   if (outcome) {
     patchOcrRecordFromEidLookupOutcome(recs, idx, outcome, "name");
     applyPersonLookupToVerifyRecord(records[idx], outcome.data);
@@ -270,48 +249,27 @@ async function runI9Relookup(ctx: {
     ...(parentSubject ? { parentSubject } : {}),
   };
 
-  if (opts._enqueueOverride) {
-    await opts._enqueueOverride(itemId, childInput);
-  } else {
-    const { delegateToAllImpl } = await import("../../core/delegate.js");
-    const { i9LookupWorkflow } = await import("../i9-lookup/index.js");
-    await delegateToAllImpl<I9ChildInput, readonly string[]>({
-      parentRunId: input.runId,
-      trackerDir,
-      child: i9LookupWorkflow as unknown as Parameters<
-        typeof delegateToAllImpl<I9ChildInput, readonly string[]>
-      >[0]["child"],
-      inputs: [childInput],
-      renderAs: "flat",
-      fireAndForget: true,
-      ...(rootTracePrefix ? { rootTracePrefix } : {}),
-      deriveItemId: () => itemId,
-    });
-  }
+  const { i9LookupWorkflow } = await import("../i9-lookup/index.js");
+  // Shared dispatch→watch→cascade-cancel pipeline (BM-1). The watched workflow is
+  // i9-lookup (not the default child name), so pass it explicitly.
+  const { byItemId } = await fanOutAndWatch<I9ChildInput>({
+    sessionId: input.sessionId,
+    runId: input.runId,
+    parentRunId: input.runId,
+    trackerDir,
+    date,
+    child: i9LookupWorkflow as never,
+    watchWorkflow: "i9-lookup",
+    children: [{ input: childInput, itemId }],
+    timeoutMs: 30 * 60_000,
+    ...(rootTracePrefix ? { rootTracePrefix } : {}),
+    ...(opts._enqueueOverride
+      ? { dispatch: async () => opts._enqueueOverride!(itemId, childInput) }
+      : {}),
+    ...(opts._watchChildRunsOverride ? { watch: opts._watchChildRunsOverride } : {}),
+  });
 
-  const watchFn = opts._watchChildRunsOverride ?? watchChildRuns;
-  let outcomes: ChildOutcome[];
-  try {
-    outcomes = await watchFn({
-      workflow: "i9-lookup",
-      expectedItemIds: [itemId],
-      trackerDir,
-      date,
-      timeoutMs: 30 * 60_000,
-      // Operator-cancel bridge: throws a discard-abort error when the prepare-
-      // abort flag is set (orchestrator trips it on `ctx.signal`).
-      shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
-    });
-  } catch (err) {
-    if (isOperatorDiscardAbortError(err)) {
-      // Cancel mid-relookup: cascade-cancel the still-queued i9-lookup child.
-      // Fail-loud — a cascade error propagates.
-      cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
-    }
-    throw err;
-  }
-
-  const outcome = outcomes.find((o) => o.itemId === itemId);
+  const outcome = byItemId.get(itemId);
   if (outcome) {
     applyI9ToVerifyRecord(records[idx], outcome.data);
   } else {
