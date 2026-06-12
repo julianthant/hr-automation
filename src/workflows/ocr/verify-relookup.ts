@@ -20,10 +20,11 @@
  * the resolved identity and target either underlying lookup.
  */
 import { randomUUID } from "node:crypto";
-import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
+import { dateLocal } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { fanOutAndWatch } from "../../services/ocr/fan-out.js";
+import { emitOcrReviewSnapshot } from "../../services/ocr/review-snapshot.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
@@ -278,8 +279,8 @@ async function runI9Relookup(ctx: {
 }
 
 /**
- * Re-emit the OCR prep row carrying the (possibly patched) records. Mirrors
- * force-research's re-stamp set so the dashboard resolves the row by
+ * Re-emit the OCR prep row carrying the (possibly patched) records via the
+ * shared OCR preview-row envelope (BM-5), so the dashboard resolves the row by
  * archetype/__id/__name/parentSubject/parentRunId rather than whatever the
  * latest row happened to carry.
  */
@@ -296,26 +297,17 @@ function emitRelookupRow(
   const parentSubject =
     readQueueTitle(latest.data) ??
     (latest.data?.parentSubject as unknown as string | undefined);
-  const baseData: Record<string, string> = {
-    ...((latest.data ?? {}) as Record<string, string>),
-    records: JSON.stringify(records),
-    mode: "prepare",
-    archetype: "preview",
-    __id: input.sessionId,
-    __name: parentSubject ?? "OCR",
-    ...(parentSubject ? { parentSubject } : {}),
-  };
-  emitTrackerRow(
-    {
-      workflow: WORKFLOW,
-      timestamp: new Date().toISOString(),
-      id: input.sessionId,
-      runId: input.runId,
+  emitOcrReviewSnapshot({
+    base: { ...(latest.data ?? {}) },
+    sessionId: input.sessionId,
+    runId: input.runId,
+    records,
+    status,
+    step,
+    parent: {
       ...(parentRunId ? { parentRunId } : {}),
-      status,
-      step,
-      data: baseData as StampedData,
+      ...(parentSubject ? { parentSubject } : {}),
     },
     trackerDir,
-  );
+  });
 }

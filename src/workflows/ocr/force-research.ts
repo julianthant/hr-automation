@@ -2,10 +2,11 @@
  * Drops resolved fields on selected records, re-fans-out eid-lookup, watches
  * for completions, patches the OCR row's records progressively.
  */
-import { emitTrackerRow, dateLocal, type StampedData } from "../../tracker/jsonl.js";
+import { emitTrackerRow, dateLocal } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
 import { fanOutAndWatch } from "../../services/ocr/fan-out.js";
+import { emitOcrReviewSnapshot } from "../../services/ocr/review-snapshot.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import {
   patchOcrRecordFromEidLookupOutcome,
@@ -143,49 +144,24 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     );
   }
 
-  // Mirror the orchestrator's emit shape so the dashboard can resolve the row
-  // by archetype/__id/__name/parentSubject — re-stamp on every emit rather
-  // than relying on whatever the latest row happened to carry.
+  // Re-emit via the shared OCR preview-row envelope (BM-5) so the dashboard
+  // resolves the row by archetype/__id/__name/parentSubject. Running → done pair.
   const parentRunId = (latest.data?.parentRunId as unknown as string | undefined) ?? latest.parentRunId;
   const parentSubject =
     readQueueTitle(latest.data) ??
     (latest.data?.parentSubject as unknown as string | undefined);
-  const baseData: Record<string, string> = {
-    ...(latest.data ?? {}),
-    records: JSON.stringify(records),
-    mode: "prepare",
-    archetype: "preview",
-    __id: input.sessionId,
-    __name: parentSubject ?? "OCR",
-    ...(parentSubject ? { parentSubject } : {}),
-  };
-  // baseData already carries `archetype: "preview"` (line above) so
-  // emitTrackerRow's StampedData contract is satisfied at compile time.
-  const stampedBase = baseData as StampedData;
-  emitTrackerRow(
-    {
-      workflow: WORKFLOW,
-      timestamp: new Date().toISOString(),
-      id: input.sessionId,
-      runId: input.runId,
+  const snapshotArgs = {
+    base: { ...(latest.data ?? {}) },
+    sessionId: input.sessionId,
+    runId: input.runId,
+    records,
+    step: "awaiting-approval",
+    parent: {
       ...(parentRunId ? { parentRunId } : {}),
-      status: "running",
-      step: "awaiting-approval",
-      data: stampedBase,
+      ...(parentSubject ? { parentSubject } : {}),
     },
     trackerDir,
-  );
-  emitTrackerRow(
-    {
-      workflow: WORKFLOW,
-      timestamp: new Date().toISOString(),
-      id: input.sessionId,
-      runId: input.runId,
-      ...(parentRunId ? { parentRunId } : {}),
-      status: "done",
-      step: "awaiting-approval",
-      data: stampedBase,
-    },
-    trackerDir,
-  );
+  } as const;
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "running" });
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "done" });
 }
