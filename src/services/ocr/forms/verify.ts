@@ -25,9 +25,9 @@ import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
 } from "../eid-lookup-results.js";
-import { watchChildRuns } from "../../../tracker/delegation/watch-child-runs.js";
-import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../../tracker/ocr-prepare-abort.js";
-import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../../tracker/tasks/store.js";
+import { type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
+import { isOcrPrepareAbortRequested } from "../../../tracker/ocr-prepare-abort.js";
+import { fanOutAndWatch } from "../fan-out.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import {
   DocumentTypeSchema,
@@ -490,21 +490,16 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
 
     // Operator-cancel bridge. The orchestrator trips the in-process prepare-abort
     // flag when `ctx.signal` aborts (queue-row Cancel ×, daemon stop), and the
-    // `watchChildRuns` calls below poll `shouldAbort` and throw a discard-abort
-    // error when it's set. On that abort we cascade-cancel the still-queued
-    // person-lookup / i9-lookup children so a daemon doesn't claim and run them
-    // after the operator gave up on the prep. Fail-loud — a cascade error rethrows.
+    // shared `fanOutAndWatch` calls below poll `shouldAbort` and throw a
+    // discard-abort error when it's set — then cascade-cancel the still-queued
+    // person-lookup / i9-lookup children (so a daemon doesn't claim and run them
+    // after the operator gave up) and rethrow. Fail-loud — the cascade lives
+    // inside fanOutAndWatch, so there is no outer catch here.
     const shouldAbort = (): boolean => isOcrPrepareAbortRequested(sessionId, runId);
-    const cascadeCancelOnAbort = (): void => {
-      const store = openTaskStore(trackerDir);
-      cancelQueuedChildTasksForParentRun(store, { parentRunId: runId });
-    };
 
-    // Dynamic imports avoid an import cycle (mirrors force-research.ts).
-    const { delegateToAllImpl } = await import("../../../core/delegate.js");
+    // Dynamic import avoids an import cycle (mirrors force-research.ts).
     const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
 
-    try {
     // ── Step 1: person-lookup fan-out (EID-or-name → CRM dates + active) ──
     //
     // Per-record input shape + outcome-patch kind are chosen by the pure
@@ -547,46 +542,8 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     }
 
     if (plInputs.length > 0) {
-      const plInputToItemId = new Map(
-        plInputs.map((inp, i) => [JSON.stringify(inp), plItemIds[i] ?? ""]),
-      );
-      const plDispatchResults = await delegateToAllImpl<PersonLookupChildInput, readonly string[]>({
-        parentRunId: runId,
-        trackerDir,
-        child: personLookupWorkflow as unknown as Parameters<
-          typeof delegateToAllImpl<PersonLookupChildInput, readonly string[]>
-        >[0]["child"],
-        inputs: plInputs,
-        renderAs: "flat",
-        fireAndForget: true,
-        rootTracePrefix,
-        ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
-        deriveItemId: (inp: PersonLookupChildInput) =>
-          plInputToItemId.get(JSON.stringify(inp)) ?? "",
-      });
-
-      for (const result of plDispatchResults) {
-        const idx = plItemIdToIdx.get(result.itemId);
-        if (idx === undefined) continue;
-        records[idx].personLookupStatus = "pending";
-        records[idx].personLookupTraceId = buildTraceId({
-          code: "pl",
-          runId: result.runId,
-          at: new Date(),
-          rootPrefix: rootTracePrefix,
-        });
-        log.step({
-          message: `[verify/person-lookup] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].personLookupTraceId ?? ""}`,
-          category: "ocr",
-          occasion: "started",
-          childWorkflow: "person-lookup",
-          subject: `record:${idx}`,
-        });
-      }
-      input.emitProgress(records);
-
       const processedPlItemIds = new Set<string>();
-      const applyPersonLookupOutcome = (outcome: Awaited<ReturnType<typeof watchChildRuns>>[number]): void => {
+      const applyPersonLookupOutcome = (outcome: ChildOutcome): void => {
         const idx = plItemIdToIdx.get(outcome.itemId);
         if (idx === undefined) return;
         processedPlItemIds.add(outcome.itemId);
@@ -607,13 +564,43 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         input.emitProgress(records);
       };
 
-      const plOutcomes = await watchChildRuns({
-        workflow: "person-lookup",
-        expectedItemIds: plItemIds,
+      // Shared dispatch→watch→cascade-cancel pipeline (BM-1). `onDispatched`
+      // stamps each record `pending` + its child trace id before the watch
+      // begins (so the Preview tab shows the children queued); `onProgress`
+      // patches each record as its child terminates.
+      const { outcomes: plOutcomes, missingItemIds: plMissing } = await fanOutAndWatch<PersonLookupChildInput>({
+        sessionId,
+        runId,
+        parentRunId: runId,
         trackerDir,
         date,
+        child: personLookupWorkflow as never,
+        children: plInputs.map((inp, i) => ({ input: inp, itemId: plItemIds[i] ?? "" })),
         timeoutMs: 30 * 60_000,
+        ...(rootTracePrefix ? { rootTracePrefix } : {}),
+        ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
         shouldAbort,
+        onDispatched: (results) => {
+          for (const result of results) {
+            const idx = plItemIdToIdx.get(result.itemId);
+            if (idx === undefined) continue;
+            records[idx].personLookupStatus = "pending";
+            records[idx].personLookupTraceId = buildTraceId({
+              code: "pl",
+              runId: result.runId,
+              at: new Date(),
+              rootPrefix: rootTracePrefix,
+            });
+            log.step({
+              message: `[verify/person-lookup] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].personLookupTraceId ?? ""}`,
+              category: "ocr",
+              occasion: "started",
+              childWorkflow: "person-lookup",
+              subject: `record:${idx}`,
+            });
+          }
+          input.emitProgress(records);
+        },
         onProgress: (outcome) => applyPersonLookupOutcome(outcome),
       });
 
@@ -622,9 +609,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         applyPersonLookupOutcome(outcome);
       }
 
-      const receivedPl = new Set(plOutcomes.map((o) => o.itemId));
-      for (const itemId of plItemIds) {
-        if (receivedPl.has(itemId)) continue;
+      for (const itemId of plMissing) {
         const idx = plItemIdToIdx.get(itemId);
         if (idx === undefined) continue;
         patchOcrRecordUnresolved(recs, idx, "person-lookup timed out without a result");
@@ -681,45 +666,8 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     }
 
     if (i9Inputs.length > 0) {
-      const i9InputToItemId = new Map(
-        i9Inputs.map((inp, i) => [JSON.stringify(inp), i9ItemIds[i] ?? ""]),
-      );
-      const i9DispatchResults = await delegateToAllImpl<I9ChildInput, readonly string[]>({
-        parentRunId: runId,
-        trackerDir,
-        child: i9LookupWorkflow as unknown as Parameters<
-          typeof delegateToAllImpl<I9ChildInput, readonly string[]>
-        >[0]["child"],
-        inputs: i9Inputs,
-        renderAs: "flat",
-        fireAndForget: true,
-        rootTracePrefix,
-        ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
-        deriveItemId: (inp: I9ChildInput) => i9InputToItemId.get(JSON.stringify(inp)) ?? "",
-      });
-
-      for (const result of i9DispatchResults) {
-        const idx = i9ItemIdToIdx.get(result.itemId);
-        if (idx === undefined) continue;
-        records[idx].i9LookupStatus = "pending";
-        records[idx].i9LookupTraceId = buildTraceId({
-          code: "i9",
-          runId: result.runId,
-          at: new Date(),
-          rootPrefix: rootTracePrefix,
-        });
-        log.step({
-          message: `[verify/i9] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].i9LookupTraceId ?? ""}`,
-          category: "ocr",
-          occasion: "started",
-          childWorkflow: "i9-lookup",
-          subject: `record:${idx}`,
-        });
-      }
-      input.emitProgress(records);
-
       const processedI9ItemIds = new Set<string>();
-      const applyI9Outcome = (outcome: Awaited<ReturnType<typeof watchChildRuns>>[number]): void => {
+      const applyI9Outcome = (outcome: ChildOutcome): void => {
         const idx = i9ItemIdToIdx.get(outcome.itemId);
         if (idx === undefined) return;
         processedI9ItemIds.add(outcome.itemId);
@@ -746,13 +694,42 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         input.emitProgress(records);
       };
 
-      const i9Outcomes = await watchChildRuns({
-        workflow: "i9-lookup",
-        expectedItemIds: i9ItemIds,
+      // Shared dispatch→watch→cascade-cancel pipeline (BM-1). The watched
+      // workflow is i9-lookup (not the default child name), so pass it explicitly.
+      const { outcomes: i9Outcomes, missingItemIds: i9Missing } = await fanOutAndWatch<I9ChildInput>({
+        sessionId,
+        runId,
+        parentRunId: runId,
         trackerDir,
         date,
+        child: i9LookupWorkflow as never,
+        watchWorkflow: "i9-lookup",
+        children: i9Inputs.map((inp, i) => ({ input: inp, itemId: i9ItemIds[i] ?? "" })),
         timeoutMs: 30 * 60_000,
+        ...(rootTracePrefix ? { rootTracePrefix } : {}),
+        ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
         shouldAbort,
+        onDispatched: (results) => {
+          for (const result of results) {
+            const idx = i9ItemIdToIdx.get(result.itemId);
+            if (idx === undefined) continue;
+            records[idx].i9LookupStatus = "pending";
+            records[idx].i9LookupTraceId = buildTraceId({
+              code: "i9",
+              runId: result.runId,
+              at: new Date(),
+              rootPrefix: rootTracePrefix,
+            });
+            log.step({
+              message: `[verify/i9] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].i9LookupTraceId ?? ""}`,
+              category: "ocr",
+              occasion: "started",
+              childWorkflow: "i9-lookup",
+              subject: `record:${idx}`,
+            });
+          }
+          input.emitProgress(records);
+        },
         onProgress: (outcome) => applyI9Outcome(outcome),
       });
 
@@ -761,9 +738,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         applyI9Outcome(outcome);
       }
 
-      const receivedI9 = new Set(i9Outcomes.map((o) => o.itemId));
-      for (const itemId of i9ItemIds) {
-        if (receivedI9.has(itemId)) continue;
+      for (const itemId of i9Missing) {
         const idx = i9ItemIdToIdx.get(itemId);
         if (idx === undefined) continue;
         records[idx].i9LookupStatus = "failed";
@@ -802,13 +777,5 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     });
 
     return records;
-    } catch (err) {
-      // Operator cancel mid-enrichment: cascade-cancel the still-queued
-      // person-lookup / i9-lookup children so a daemon doesn't run them after the
-      // operator gave up, then rethrow so the orchestrator unwinds to terminal
-      // cancelled. Fail-loud — a cascade error propagates.
-      if (isOperatorDiscardAbortError(err)) cascadeCancelOnAbort();
-      throw err;
-    }
   },
 };
