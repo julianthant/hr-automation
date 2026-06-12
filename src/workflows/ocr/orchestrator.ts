@@ -417,6 +417,11 @@ export async function runOcrOrchestrator(
     // Carry the target-workflow operation intent so the approve route can route
     // the fan-out (e.g. an oath-signature PDF run fans signers but no ticket).
     if (input.operationWorkflow) flat.operationWorkflow = input.operationWorkflow;
+    // Carry the operator's dry-run choice onto every OCR row — the durable
+    // bridge to the approve fan-out: `readDryRun` walks the OCR session's rows
+    // (not the operation coordinator's), so without this stamp a dry-run
+    // operation fanned out members that performed REAL UCPath saves (E2E-016).
+    if (input.dryRun) flat.dryRun = "true";
     // Carry the operator's worker count so the approve route can apply the same
     // setting to its signer/contact fan-out (read back via shared.ts). Rides
     // every row in the re-stamp set, surviving the dashboard's latest-wins dedupe.

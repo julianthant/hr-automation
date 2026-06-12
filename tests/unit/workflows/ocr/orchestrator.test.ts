@@ -1542,3 +1542,59 @@ test("second opinion: a re-read that ranks no better KEEPS the original reading 
   assert.ok(name.includes("Merrell"), `original reading must be kept, got "${name}"`);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("orchestrator stamps data.dryRun on EVERY OCR row when the input is a dry run (E2E-016)", async () => {
+  // The approve route's readDryRun walks the OCR session's rows — NOT the
+  // operation coordinator's — so the dry-run choice must ride the OCR re-stamp
+  // set. Without it a dry-run operation fanned out members performing REAL
+  // UCPath saves.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-dry",
+      rosterPath,
+      rosterMode: "existing",
+      dryRun: true,
+    },
+    {
+      runId: "run-dry",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-dry-r0",
+        runId: "verify-dry-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+      }],
+    },
+  );
+
+  assert.ok(writtenEntries.length >= 3, "expected multiple emitted rows");
+  for (const entry of writtenEntries) {
+    assert.equal(
+      entry.data?.dryRun,
+      "true",
+      `every emitted row must carry data.dryRun (offender: ${entry.status}/${entry.step ?? ""})`,
+    );
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+});
