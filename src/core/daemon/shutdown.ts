@@ -4,6 +4,7 @@ import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
 import { runRegistry } from '../run-registry.js'
 import { findAliveDaemons, filterResponsiveDaemons } from './registry.js'
+import { wakeDaemonsForReleasedParents } from './client.js'
 import {
   readQueueState,
   markItemCancelled,
@@ -425,10 +426,11 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
           try {
             await markItemFailed(wf.config.name, item.id, failReason, runId, trackerDir)
             if (item.taskId) {
-              taskStore.markDependencyFromChildTerminal({
+              const released = taskStore.markDependencyFromChildTerminal({
                 childTaskId: item.taskId,
                 childState: 'failed',
               })
+              void wakeDaemonsForReleasedParents(released, trackerDir)
             }
           } catch {
             /* best-effort — queue event append; tracker row below is the user-visible signal */

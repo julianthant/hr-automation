@@ -30,6 +30,7 @@ import {
   markDependencyFromChildTerminal,
   releaseParentsIfDependenciesSatisfied,
   waitForDependencies,
+  type ReleasedParentTask,
 } from './child-state.js'
 import { retryTaskFromAttempt } from './retry.js'
 import {
@@ -53,6 +54,7 @@ export type {
   ClaimedTask,
   EnqueuedTask,
   EnqueueTasksRequest,
+  ReleasedParentTask,
 }
 
 export interface ControlTaskStore {
@@ -75,8 +77,10 @@ export interface ControlTaskStore {
     resumeParentAfterChildRetry?: boolean
     now?: string
   }): string
-  markDependencyFromChildTerminal(request: { childTaskId: string; childState: 'done' | 'failed' | 'cancelled'; now?: string }): void
-  releaseParentsIfDependenciesSatisfied(request: { childTaskId: string; now?: string }): void
+  /** Returns parents flipped waiting_dependencies→queued — callers wake those workflows' daemons (E2E-017). */
+  markDependencyFromChildTerminal(request: { childTaskId: string; childState: 'done' | 'failed' | 'cancelled'; now?: string }): ReleasedParentTask[]
+  /** Returns parents flipped waiting_dependencies→queued — callers wake those workflows' daemons (E2E-017). */
+  releaseParentsIfDependenciesSatisfied(request: { childTaskId: string; now?: string }): ReleasedParentTask[]
   requestCancelParentAndChildren(request: { parentTaskId: string; reason?: string; now?: string }): void
   waitForDependencies(request: { parentTaskId: string; timeoutMs?: number; pollMs?: number }): Promise<void>
   getTask(taskId: string): TaskRow | null
