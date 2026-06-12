@@ -155,7 +155,18 @@ export async function fanOutAndWatch<TInput>(
     // `fireAndForget:true` because the watch below drives the wait (a second
     // wait inside delegateToAllImpl would double-count).
     const { delegateToAllImpl } = await import("../../core/delegate.js");
-    const itemIdByInput = new Map<TInput, string>(children.map((c) => [c.input, c.itemId]));
+    // Key the itemId map by JSON, NOT object identity: `delegateToAllImpl` wraps
+    // each input with `__runtimeOptions` (rowShape/rootCode/rootTracePrefix), and
+    // `ensureDaemonsAndEnqueue`'s idFn calls `splitPrefilled` to STRIP those
+    // before invoking `deriveItemId` — so `deriveItemId` receives a NEW cleaned
+    // object, never the original `c.input` reference. The cleaned object
+    // stringifies back to the original logical input, so JSON keying round-trips
+    // where reference keying would miss → empty id → invisible row → watch hangs
+    // (the 2026-06-02 empty-item_id footgun). This is why the original sites all
+    // keyed by `JSON.stringify(input)`.
+    const itemIdByInputJson = new Map<string, string>(
+      children.map((c) => [JSON.stringify(c.input), c.itemId]),
+    );
     const dispatchResults: ChildRunResult<TInput>[] = await delegateToAllImpl<TInput, readonly string[]>({
       parentRunId,
       trackerDir,
@@ -166,7 +177,7 @@ export async function fanOutAndWatch<TInput>(
       ...(daemonFlags ? { daemonFlags } : {}),
       ...(buildPendingExtras ? { buildPendingExtras } : {}),
       ...(onPreparedItems ? { onPreparedItems: (items) => onPreparedItems(items) } : {}),
-      deriveItemId: (input: TInput) => itemIdByInput.get(input) ?? "",
+      deriveItemId: (input: TInput) => itemIdByInputJson.get(JSON.stringify(input)) ?? "",
     });
     args.onDispatched?.(dispatchResults.map((r) => ({ itemId: r.itemId, runId: r.runId })));
   }
