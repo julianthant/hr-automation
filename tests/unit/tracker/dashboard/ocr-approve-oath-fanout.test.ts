@@ -309,3 +309,59 @@ test("oath approve stamps the OCR root's trace PREFIX as rootTracePrefix on BOTH
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ─── buildFanOutItemIdResolver (E2E-015 / E2E-018) ───────────────────────────
+// The real `ensureDaemonsAndEnqueue` strips `__runtimeOptions` via
+// `splitPrefilled` and hands `deriveItemId` a structural CLONE of the logical
+// input. The resolver must key by that logical JSON — the old wrapped-input
+// keying missed every lookup and the constant `ocr-fallback-…-r0` fallback
+// collapsed N members into one queue row.
+
+test("buildFanOutItemIdResolver resolves cleaned structural clones to their own itemIds", async () => {
+  const { buildFanOutItemIdResolver } = await import(
+    "../../../../src/tracker/dashboard/ocr/approve.js"
+  );
+  const logicalInputs = [
+    { employee: { name: "Coleman, Renee", employeeId: "10706431" }, parentSubject: "EC · 4234" },
+    { employee: { name: "Sanchez, Emily", employeeId: "10664209" }, parentSubject: "EC · 4234" },
+    { employee: { name: "Wu, Mandy", employeeId: "10873316" }, parentSubject: "EC · 4234" },
+  ];
+  const itemIds = ["ocr-ec-run1-r0", "ocr-ec-run1-r1", "ocr-ec-run1-r2"];
+  const resolve = buildFanOutItemIdResolver(logicalInputs, itemIds, "emergency-contact");
+
+  // Simulate splitPrefilled: the wrapped input loses __runtimeOptions and is
+  // a NEW object (structural clone), never the original reference.
+  const cleaned = logicalInputs.map((inp) => JSON.parse(JSON.stringify(inp)) as unknown);
+  assert.equal(resolve(cleaned[1]), "ocr-ec-run1-r1");
+  assert.equal(resolve(cleaned[0]), "ocr-ec-run1-r0");
+  assert.equal(resolve(cleaned[2]), "ocr-ec-run1-r2");
+});
+
+test("buildFanOutItemIdResolver hands duplicate logical inputs their own itemIds in order", async () => {
+  const { buildFanOutItemIdResolver } = await import(
+    "../../../../src/tracker/dashboard/ocr/approve.js"
+  );
+  const twin = { emplId: "10000001", parentSubject: "Oath · 5a15" };
+  const resolve = buildFanOutItemIdResolver(
+    [twin, { ...twin }],
+    ["ocr-oath-run1-r0", "ocr-oath-run1-r1"],
+    "oath-signature",
+  );
+  assert.equal(resolve(JSON.parse(JSON.stringify(twin))), "ocr-oath-run1-r0");
+  assert.equal(resolve(JSON.parse(JSON.stringify(twin))), "ocr-oath-run1-r1");
+});
+
+test("buildFanOutItemIdResolver fails loud on a shape mismatch instead of returning a colliding fallback", async () => {
+  const { buildFanOutItemIdResolver } = await import(
+    "../../../../src/tracker/dashboard/ocr/approve.js"
+  );
+  const resolve = buildFanOutItemIdResolver(
+    [{ emplId: "10000001" }],
+    ["ocr-oath-run1-r0"],
+    "oath-signature",
+  );
+  assert.throws(
+    () => resolve({ emplId: "10000001", __runtimeOptions: { rowShape: "operation-member" } }),
+    /deriveItemId lookup missed/,
+  );
+});

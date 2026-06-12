@@ -171,6 +171,11 @@ export function buildOcrApproveHandler(
 
     const fannedOut: Array<{ workflow: string; itemId: string }> = [];
     const enqueueInputs: unknown[] = [];
+    // The LOGICAL (pre-`__runtimeOptions`) shape of each enqueue input —
+    // `ensureDaemonsAndEnqueue`'s idFn strips the runtime-options channel via
+    // `splitPrefilled` before calling `deriveItemId`, so the itemId lookup must
+    // key on this shape, not the wrapped one (BM-1 family; E2E-015).
+    const logicalEnqueueInputs: unknown[] = [];
     const itemIds: string[] = [];
     if (approveTo) {
       // Only fan out records the operator selected in the preview pane.
@@ -183,22 +188,24 @@ export function buildOcrApproveHandler(
         if (!isSelectedRecord(rec)) return;
         if (approveTo.canFanOut && !approveTo.canFanOut(rec as never)) return;
         const baseFanInput = approveTo.deriveInput(rec as never);
-        const fanInput =
+        const logicalFanInput =
           baseFanInput && typeof baseFanInput === "object"
+            ? {
+                ...(baseFanInput as Record<string, unknown>),
+                ...(dryRun ? { dryRun: true } : {}),
+                ...(parentSubject ? { parentSubject } : {}),
+              }
+            : baseFanInput;
+        const fanInput =
+          logicalFanInput && typeof logicalFanInput === "object"
             ? withMemberShapeRuntimeOption(
-                withRootTracePrefixRuntimeOption(
-                  {
-                    ...(baseFanInput as Record<string, unknown>),
-                    ...(dryRun ? { dryRun: true } : {}),
-                    ...(parentSubject ? { parentSubject } : {}),
-                  },
-                  ocrRootTracePrefix,
-                ),
+                withRootTracePrefixRuntimeOption(logicalFanInput, ocrRootTracePrefix),
                 fanMemberShape,
               )
-            : baseFanInput;
+            : logicalFanInput;
         const itemId = approveTo.deriveItemId(rec as never, input.runId, index);
         enqueueInputs.push(fanInput);
+        logicalEnqueueInputs.push(logicalFanInput);
         itemIds.push(itemId);
         fannedOut.push({ workflow: approveTo.workflow, itemId });
       });
@@ -286,8 +293,10 @@ export function buildOcrApproveHandler(
           } else {
             const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
             const childWf = childWfForArchetype;
-            const inputToItemId = new Map(
-              enqueueInputs.map((inp, idx) => [JSON.stringify(inp), itemIds[idx] ?? `ocr-fallback-${input.runId}-r${idx}`])
+            const resolveFanOutItemId = buildFanOutItemIdResolver(
+              logicalEnqueueInputs,
+              itemIds,
+              approveTo.workflow,
             );
             dispatchResult = await ensureDaemonsAndEnqueue(
               childWf,
@@ -295,7 +304,7 @@ export function buildOcrApproveHandler(
               approveDaemonFlags,
               {
                 trackerDir,
-                deriveItemId: (inp: unknown) => inputToItemId.get(JSON.stringify(inp)) ?? `ocr-fallback-${input.runId}-r0`,
+                deriveItemId: resolveFanOutItemId,
                 ...(childParentRunId ? { parentRunId: childParentRunId } : {}),
                 onPreEmitPending: (item, childRunId, passedParentRunId, itemId) => {
                   const childInput =
@@ -653,6 +662,47 @@ function readLatestOcrReviewData(
  * greppable tail/runId/itemId. No-op when the prefix is absent (the OCR row had
  * no trace id) or the input isn't a plain object.
  */
+/**
+ * Build the `deriveItemId` resolver for the approve per-record fan-out.
+ *
+ * Keyed by the JSON of each LOGICAL (pre-`__runtimeOptions`) input:
+ * `ensureDaemonsAndEnqueue`'s idFn strips the kernel runtime-options channel
+ * via `splitPrefilled` BEFORE invoking `deriveItemId`, so the resolver sees a
+ * cleaned structural clone that round-trips to the logical input's JSON —
+ * never the wrapped object this route enqueues (the BM-1 footgun). Values are
+ * QUEUES so two records with identical logical JSON still receive their own
+ * itemIds (`deriveItemId` runs once per input, in enqueue order).
+ *
+ * A miss FAILS LOUD. The old `?? ocr-fallback-<runId>-r0` fallback handed
+ * every member the SAME id, collapsing N people into one queue row and making
+ * per-signer outcomes unrecoverable (E2E-015/E2E-018) — a thrown error
+ * surfaces as `failed step=approve-failed` instead.
+ */
+export function buildFanOutItemIdResolver(
+  logicalInputs: readonly unknown[],
+  itemIds: readonly string[],
+  fanOutWorkflow: string,
+): (input: unknown) => string {
+  const queueByInputJson = new Map<string, string[]>();
+  logicalInputs.forEach((inp, idx) => {
+    const key = JSON.stringify(inp);
+    const queue = queueByInputJson.get(key);
+    if (queue) queue.push(itemIds[idx]!);
+    else queueByInputJson.set(key, [itemIds[idx]!]);
+  });
+  return (input: unknown): string => {
+    const itemId = queueByInputJson.get(JSON.stringify(input))?.shift();
+    if (!itemId) {
+      throw new Error(
+        `approve-batch fan-out: deriveItemId lookup missed for a ${fanOutWorkflow} input — ` +
+          `the enqueue path no longer hands deriveItemId the logical input shape ` +
+          `(${logicalInputs.length} inputs were keyed)`,
+      );
+    }
+    return itemId;
+  };
+}
+
 function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix: string | undefined): TInput {
   if (!rootTracePrefix || !input || typeof input !== "object" || Array.isArray(input)) {
     return input;
