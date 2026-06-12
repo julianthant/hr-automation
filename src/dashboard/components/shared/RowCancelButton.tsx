@@ -8,7 +8,11 @@ import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActio
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
 import { findEnabledAction } from "@/lib/workflow-action-utils";
-import { buildRowCancelDispatchArgs, resolveRowCancelStatus } from "@/lib/row-cancel-request";
+import {
+  buildRowCancelDispatchArgs,
+  isOcrPrepProxyEntry,
+  resolveRowCancelStatus,
+} from "@/lib/row-cancel-request";
 
 interface RowCancelButtonProps {
   workflow: string;
@@ -58,10 +62,7 @@ export function RowCancelButton({
   if (!cancelEnabled) return null;
 
   const label = subject?.trim() || id;
-  const isOcrPrep =
-    entry?.data?.mode === "prepare" &&
-    typeof entry.data.ocrSessionId === "string" &&
-    typeof entry.data.ocrRunId === "string";
+  const isOcrPrep = isOcrPrepProxyEntry(entry);
   const isRunning = resolveRowCancelStatus({ workflow, id, runId, date, entry, actions }) === "running";
 
   const tooltip = isOcrPrep ? "Discard OCR prep" : isRunning ? "Stop running item" : "Cancel queued item";

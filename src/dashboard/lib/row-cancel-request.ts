@@ -29,6 +29,14 @@ interface OcrPrepContext {
   formType?: string;
 }
 
+/**
+ * OCR statuses (the operation row's denormalized `data.ocrStatus`) for which
+ * the × still means "discard the OCR prep". Once the prep is approved or
+ * terminal, the coordinator's cancel falls through to the ordinary cancel
+ * path instead of discarding an already-decided prep.
+ */
+const DISCARDABLE_OCR_STATUSES = new Set(["running", "preparing", "awaiting-review"]);
+
 function ocrPrepContext(entry: TrackerEntry | undefined): OcrPrepContext | null {
   const data = entry?.data;
   if (
@@ -36,6 +44,9 @@ function ocrPrepContext(entry: TrackerEntry | undefined): OcrPrepContext | null 
     typeof data.ocrSessionId === "string" &&
     typeof data.ocrRunId === "string"
   ) {
+    if (typeof data.ocrStatus === "string" && !DISCARDABLE_OCR_STATUSES.has(data.ocrStatus)) {
+      return null;
+    }
     return {
       ocrSessionId: data.ocrSessionId,
       ocrRunId: data.ocrRunId,
@@ -43,6 +54,11 @@ function ocrPrepContext(entry: TrackerEntry | undefined): OcrPrepContext | null 
     };
   }
   return null;
+}
+
+/** True when the row's × routes through the OCR prep discard handler. */
+export function isOcrPrepProxyEntry(entry: TrackerEntry | undefined): boolean {
+  return ocrPrepContext(entry) !== null;
 }
 
 /**
@@ -70,16 +86,29 @@ export function buildRowCancelDispatchArgs(args: RowCancelRequestArgs): BuildWor
   const ocrPrep = ocrPrepContext(entry);
 
   if (ocrPrep) {
+    // The discard handler needs the OCR RUN's identity, not the clicked row's.
+    // The action descriptor's targets carry the clicked row (for an operation
+    // coordinator, the operation runId) and `buildWorkflowActionRequest`
+    // prefers them over `fallbackTarget`, so override the targets too —
+    // keeping the descriptor's scope/source intact.
+    const ocrTarget = { workflowId: "ocr", id: ocrPrep.ocrSessionId, runId: ocrPrep.ocrRunId };
+    // Parent context describes the clicked row only when it IS the OCR run's
+    // parent (an operation coordinator / target-panel proxy). For the OCR
+    // row's own panel the server derives the real parent from the tracker
+    // (`readParentRunId` / `readOperationWorkflow`) — sending the OCR row's
+    // own identity here would make the discard mirror onto itself and leave
+    // the operation row stale.
+    const isParentRow = workflow !== "ocr";
     return {
       transport: "cancel-queued",
       kind: "cancel",
-      action: cancelAction,
-      fallbackTarget: { workflowId: workflow, id, runId: ocrPrep.ocrRunId },
+      action: cancelAction ? { ...cancelAction, targets: [ocrTarget] } : cancelAction,
+      fallbackTarget: ocrTarget,
       ocrSessionId: ocrPrep.ocrSessionId,
       reason: `Cancelled from ${workflow} queue`,
-      parentWorkflow: workflow,
-      parentRunId: runId,
-      parentItemId: id,
+      ...(isParentRow
+        ? { parentWorkflow: workflow, parentRunId: runId, parentItemId: id }
+        : {}),
       formType: ocrPrep.formType,
     };
   }
