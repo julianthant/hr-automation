@@ -89,23 +89,40 @@ async function cancelTarget(
   // so there's no in-flight controller to abort; running tasks dispatch
   // a `cancel_task` worker command which both flips cancelTarget and
   // aborts the controller.
+  //
+  // The caller's `status` is advisory, not load-bearing: the row's rendered
+  // status can lag the SQLite truth (a queued task claimed between render
+  // and click, or vice versa). Each handler 409s with the precise "wrong
+  // state" signal, so cancel falls through to the other handler instead of
+  // surfacing the race to the operator (E2E-008).
+  const cancelRunning = async (runId: string) =>
+    buildCancelRunningHandler(deps.dir)({ workflow: t.workflow, id: t.id, runId });
+  const cancelQueued = async () =>
+    buildCancelQueuedHandler(deps.dir)({
+      workflow: t.workflow,
+      id: t.id,
+      ...(t.runId ? { runId: t.runId } : {}),
+    });
+
   if (t.status === "running") {
     if (!t.runId) {
       return failTarget(t, "runId is required to cancel a running row", 400);
     }
-    const r = await buildCancelRunningHandler(deps.dir)({
-      workflow: t.workflow,
-      id: t.id,
-      runId: t.runId,
-    });
-    return r.ok ? okTarget(t) : failTarget(t, r.error, r.status);
+    const r = await cancelRunning(t.runId);
+    if (r.ok) return okTarget(t);
+    if (r.status === 409) {
+      const fallback = await cancelQueued();
+      return fallback.ok ? okTarget(t) : failTarget(t, fallback.error, fallback.status);
+    }
+    return failTarget(t, r.error, r.status);
   }
-  const r = await buildCancelQueuedHandler(deps.dir)({
-    workflow: t.workflow,
-    id: t.id,
-    ...(t.runId ? { runId: t.runId } : {}),
-  });
-  return r.ok ? okTarget(t) : failTarget(t, r.error, r.status);
+  const r = await cancelQueued();
+  if (r.ok) return okTarget(t);
+  if (r.status === 409 && t.runId) {
+    const fallback = await cancelRunning(t.runId);
+    return fallback.ok ? okTarget(t) : failTarget(t, fallback.error, fallback.status);
+  }
+  return failTarget(t, r.error, r.status);
 }
 
 /** OCR prep cancel is file-scope: route to the discard-prepare service path. */

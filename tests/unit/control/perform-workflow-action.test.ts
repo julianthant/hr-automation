@@ -180,6 +180,62 @@ describe("performWorkflowAction — cancel action routing", () => {
     assert.equal(result.errors.length, 1);
     assert.match(result.errors[0]?.error ?? "", /runId is required/);
   });
+
+  it("falls back to the running handler when the queued cancel 409s (stale queued status, E2E-008)", async () => {
+    mockedResolveTargets.mockReturnValueOnce({
+      ok: true,
+      targets: [{ workflow: "oath-upload", id: "sess-1", runId: "run-a", date: "2026-06-11", status: "pending" }],
+    });
+    mockCancelQueuedFn.mockResolvedValueOnce({
+      ok: false,
+      error: "item already claimed by a daemon — use cancel running",
+      status: 409,
+    });
+
+    const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
+
+    assert.equal(result.ok, true);
+    assert.equal(mockCancelQueuedFn.mock.calls.length, 1);
+    assert.equal(mockCancelRunningFn.mock.calls.length, 1);
+    const callArg = mockCancelRunningFn.mock.calls[0]?.[0] as { runId: string };
+    assert.equal(callArg.runId, "run-a");
+  });
+
+  it("falls back to the queued handler when the running cancel 409s (stale running status, E2E-008)", async () => {
+    mockedResolveTargets.mockReturnValueOnce({
+      ok: true,
+      targets: [{ workflow: "oath-upload", id: "sess-1", runId: "run-a", date: "2026-06-11", status: "running" }],
+    });
+    mockCancelRunningFn.mockResolvedValueOnce({
+      ok: false,
+      error: "item is queued — use cancel queued",
+      status: 409,
+    });
+
+    const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
+
+    assert.equal(result.ok, true);
+    assert.equal(mockCancelRunningFn.mock.calls.length, 1);
+    assert.equal(mockCancelQueuedFn.mock.calls.length, 1);
+  });
+
+  it("does not mask a non-409 cancel failure with the fallback", async () => {
+    mockedResolveTargets.mockReturnValueOnce({
+      ok: true,
+      targets: [{ workflow: "oath-upload", id: "sess-1", runId: "run-a", date: "2026-06-11", status: "pending" }],
+    });
+    mockCancelQueuedFn.mockResolvedValueOnce({
+      ok: false,
+      error: "item is already done",
+      status: 410,
+    });
+
+    const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
+
+    assert.equal(result.ok, false);
+    assert.equal(mockCancelRunningFn.mock.calls.length, 0);
+    assert.match(result.errors[0]?.error ?? "", /already done/);
+  });
 });
 
 describe("performWorkflowAction — retry action routing", () => {
