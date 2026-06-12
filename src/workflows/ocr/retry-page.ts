@@ -18,13 +18,12 @@ import { runOcrPerPage } from "../../services/ocr/per-page.js";
 import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
-import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
-import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
+import { type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
+import { fanOutAndWatch } from "../../services/ocr/fan-out.js";
 import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { patchOcrRecordFromEidLookupOutcome } from "../../services/ocr/eid-lookup-results.js";
-import { flattenForData } from "../../services/ocr/tracker-data.js";
+import { emitOcrReviewSnapshot } from "../../services/ocr/review-snapshot.js";
 import { countVerified } from "../../services/ocr/records-stats.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
@@ -79,7 +78,6 @@ export async function runOcrRetryPage(
   const date = opts.date ?? dateLocal();
   const emit = opts._emitOverride ?? ((e: TrackerEntry) => emitTrackerRow(e as TrackerRowEmission, trackerDir));
   const loadRosterFn = opts._loadRosterOverride ?? realLoadRoster;
-  const watchChildren = opts._watchChildRunsOverride ?? realWatchChildRuns;
 
   // 1. Load the latest row state.
   const row = readLatestRow(input.sessionId, input.runId, trackerDir, date);
@@ -170,90 +168,47 @@ export async function runOcrRetryPage(
       kind: t.kind,
       itemId: `ocr-retry-${input.runId}-p${input.pageNum}-r${i}`,
     }));
-    if (opts._enqueueEidLookupOverride) {
-      await opts._enqueueEidLookupOverride(
-        enqueueItems.map((e) => ({
-          ...(e.kind === "name"
-            ? { name: extractOcrRecordName(e.record, spec) }
-            : { emplId: extractOcrRecordEid(e.record) }),
-          itemId: e.itemId,
-        })),
-      );
-    } else {
-      // Contract 3 (Finding #23): route through delegateToAllImpl so
-      // parentRunId stamping, canonical archetype derivation, and child pending pre-emit
-      // share one code path with the OCR orchestrator's eid-lookup fan-out.
-      //   - `renderAs: "flat"` remains a projection hint; eid-lookup rows
-      //     stamp `single`, parentRunId marks delegated scope, and one vs
-      //     many children controls single vs batch grouping.
-      //   - `fireAndForget: true` because the `watchChildren` call below
-      //     drives the wait — wrapping a second wait inside delegateToAllImpl
-      //     would double-count.
-      //   - `parentRunId: input.runId` so the OCR session row is the parent
-      //     of each eid-lookup child row.
-      const { delegateToAllImpl } = await import("../../core/delegate.js");
-      const { personLookupWorkflow } = await import("../person-lookup/index.js");
-      const inputs = enqueueItems.map((e) =>
-        e.kind === "name"
-          ? { name: extractOcrRecordName(e.record, spec) }
-          : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true },
-      );
-      const nameKeyToItemId = new Map<string, string>();
-      const eidKeyToItemId = new Map<string, string>();
-      const fallbackItemId = `ocr-retry-fallback-${input.runId}-p${input.pageNum}`;
-      for (const e of enqueueItems) {
-        if (e.kind === "name") {
-          const nk = extractOcrRecordName(e.record, spec);
-          if (nk) nameKeyToItemId.set(nk, e.itemId);
-        } else {
-          const ek = extractOcrRecordEid(e.record);
-          if (ek) eidKeyToItemId.set(ek, e.itemId);
-        }
-      }
-      type EidLookupChildInput = { name?: string; emplId?: string; keepNonHdh?: boolean };
-      await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
-        parentRunId: input.runId,
-        trackerDir,
-        // personLookupWorkflow's exact generic param is a union of name-only /
-        // emplId-only variants; the local `EidLookupChildInput` widens both
-        // into one optional-fields shape, so cast through unknown — the
-        // runtime schema validates either variant.
-        child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
-        inputs,
-        renderAs: "flat",
-        fireAndForget: true,
-        deriveItemId: (inp: EidLookupChildInput) => {
-          if ("name" in inp && inp.name) return nameKeyToItemId.get(inp.name) ?? fallbackItemId;
-          if ("emplId" in inp && inp.emplId) return eidKeyToItemId.get(inp.emplId) ?? fallbackItemId;
-          return fallbackItemId;
-        },
-      });
-    }
+    // Shared dispatch→watch→cascade-cancel pipeline (BM-1). retry-page fans out a
+    // mix of name- and EID-input person-lookup children (one per re-OCR'd record
+    // that still needs a lookup); the per-record outcome patch picks the matching
+    // kind. The `_enqueueEidLookupOverride` HTTP test seam maps to fanOutAndWatch's
+    // dispatch override; the cascade-cancel on operator discard-abort lives in
+    // fanOutAndWatch.
+    type EidLookupChildInput = { name?: string; emplId?: string; keepNonHdh?: boolean };
+    const fanChildren = enqueueItems.map((e) => ({
+      input: (e.kind === "name"
+        ? { name: extractOcrRecordName(e.record, spec) }
+        : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true }) as EidLookupChildInput,
+      itemId: e.itemId,
+    }));
+    const { personLookupWorkflow } = await import("../person-lookup/index.js");
+    const { byItemId } = await fanOutAndWatch<EidLookupChildInput>({
+      sessionId: input.sessionId,
+      runId: input.runId,
+      parentRunId: input.runId,
+      trackerDir,
+      date,
+      child: personLookupWorkflow as never,
+      children: fanChildren,
+      timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
+      ...(opts._enqueueEidLookupOverride
+        ? {
+            dispatch: async () =>
+              opts._enqueueEidLookupOverride!(
+                enqueueItems.map((e) => ({
+                  ...(e.kind === "name"
+                    ? { name: extractOcrRecordName(e.record, spec) }
+                    : { emplId: extractOcrRecordEid(e.record) }),
+                  itemId: e.itemId,
+                })),
+              ),
+          }
+        : {}),
+      ...(opts._watchChildRunsOverride ? { watch: opts._watchChildRunsOverride } : {}),
+    });
 
-    let outcomes: ChildOutcome[];
-    try {
-      outcomes = await watchChildren({
-        workflow: "person-lookup",
-        expectedItemIds: enqueueItems.map((e) => e.itemId),
-        trackerDir,
-        date,
-        timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
-        // Operator-cancel bridge: throws a discard-abort error when the prepare-
-        // abort flag is set (orchestrator trips it on `ctx.signal`).
-        shouldAbort: () => isOcrPrepareAbortRequested(input.sessionId, input.runId),
-      });
-    } catch (err) {
-      if (isOperatorDiscardAbortError(err)) {
-        // Cancel mid-retry: cascade-cancel the still-queued person-lookup children
-        // so a daemon doesn't run them after the operator gave up. Fail-loud.
-        cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId: input.runId });
-      }
-      throw err;
-    }
-
-    const outcomesByItemId = new Map(outcomes.map((o) => [o.itemId, o]));
     for (const enq of enqueueItems) {
-      const outcome = outcomesByItemId.get(enq.itemId);
+      const outcome = byItemId.get(enq.itemId);
       const idx = enq.localIndex;
       if (!outcome) {
         patchUnresolved(newRecords, idx);
@@ -469,49 +424,40 @@ function emitRow(args: {
 }): void {
   const verifiedCount = countVerified(args.records);
   // Inherit display fields from the prior row so dashboard preview-tab
-  // affordance and batch label are preserved after a page retry.
+  // affordance and batch label are preserved after a page retry. The prior
+  // `__name` is passed as the displayName override (retry-page keeps the row's
+  // own label rather than re-deriving from parentSubject).
   const priorName = (args.row.data?.__name as string | undefined) ?? "OCR";
   const priorParentSubject = args.row.data?.parentSubject as string | undefined;
-  const data = flattenForData({
-    formType: args.formType,
-    pdfOriginalName: args.pdfOriginalName,
-    ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
+  // Re-emit via the shared OCR preview-row envelope (BM-5). Running → done pair.
+  // Pass the explicit base fields retry-page rebuilds (it does NOT spread the
+  // latest row's data); the envelope adds mode/archetype/__id/__name/parentSubject.
+  const snapshotArgs = {
+    base: {
+      formType: args.formType,
+      pdfOriginalName: args.pdfOriginalName,
+      ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
+      sessionId: args.sessionId,
+      rosterPath: args.rosterPath,
+      ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
+      recordCount: args.records.length,
+      verifiedCount,
+      failedPages: args.failedPages,
+      pageStatusSummary: args.summary,
+    },
     sessionId: args.sessionId,
-    rosterPath: args.rosterPath,
-    ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-    recordCount: args.records.length,
-    verifiedCount,
+    runId: args.runId,
     records: args.records,
-    failedPages: args.failedPages,
-    pageStatusSummary: args.summary,
-    // Mirror the orchestrator's awaiting-approval stamp so dashboard
-    // surfaces the preview-tab affordance on retried rows.
-    archetype: "preview",
-    mode: "prepare",
-    __id: args.sessionId,
-    __name: priorName,
-    ...(priorParentSubject ? { parentSubject: priorParentSubject } : {}),
-  });
-  args.emit({
-    workflow: WORKFLOW,
-    timestamp: new Date().toISOString(),
-    id: args.sessionId,
-    runId: args.runId,
-    ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-    status: "running",
     step: "awaiting-approval",
-    data,
-  });
-  args.emit({
-    workflow: WORKFLOW,
-    timestamp: new Date().toISOString(),
-    id: args.sessionId,
-    runId: args.runId,
-    ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
-    status: "done",
-    step: "awaiting-approval",
-    data,
-  });
+    displayName: priorName,
+    parent: {
+      ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
+      ...(priorParentSubject ? { parentSubject: priorParentSubject } : {}),
+    },
+    emit: (e: TrackerRowEmission) => args.emit(e as TrackerEntry),
+  } as const;
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "running" });
+  emitOcrReviewSnapshot({ ...snapshotArgs, status: "done" });
 }
 
 function patchUnresolved(records: unknown[], idx: number): void {

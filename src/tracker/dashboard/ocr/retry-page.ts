@@ -2,6 +2,7 @@ import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { runOcrRetryPage, RetryPageError } from "../../../workflows/ocr/retry-page.js";
 import { rowKey, hasRowLock, acquireRowLock, releaseRowLock } from "./lock.js";
+import { buildOcrTriggerHandler } from "./trigger-handler.js";
 
 // ─── POST /api/ocr/retry-page ─────────────────────────────────
 
@@ -10,35 +11,37 @@ export interface RetryPageBody {
   runId: string;
   pageNum: number;
 }
+type RetryPageOkBody = { ok: true; page: number; recordsAdded: number; stillFailed: boolean };
 export interface RetryPageHttpResponse {
   status: 200 | 400 | 404 | 409 | 410;
-  body: { ok: true; page: number; recordsAdded: number; stillFailed: boolean } | { ok: false; error: string };
+  body: RetryPageOkBody | { ok: false; error: string };
 }
 export interface RetryPageHandlerOpts {
   trackerDir?: string;
-  runRetryPageOverride?: (input: RetryPageBody, opts: { trackerDir?: string }) => Promise<{
-    ok: true; page: number; recordsAdded: number; stillFailed: boolean;
-  }>;
+  runRetryPageOverride?: (input: RetryPageBody, opts: { trackerDir?: string }) => Promise<RetryPageOkBody>;
 }
 
 export function buildOcrRetryPageHandler(opts: RetryPageHandlerOpts = {}) {
   const trackerDir = opts.trackerDir;
-  return async (input: RetryPageBody): Promise<RetryPageHttpResponse> => {
-    if (!input.sessionId || !input.runId || typeof input.pageNum !== "number" || input.pageNum < 1) {
-      return { status: 400, body: { ok: false, error: "Missing or invalid sessionId/runId/pageNum" } };
-    }
-    const key = rowKey(input.sessionId, input.runId);
-    if (hasRowLock(key)) {
-      return { status: 409, body: { ok: false, error: "Retry already in progress for this row" } };
-    }
-    acquireRowLock(key);
-    try {
-      const fn = opts.runRetryPageOverride ?? (async (i, o) => {
-        return runOcrRetryPage(i, { trackerDir: o.trackerDir });
-      });
-      const result = await fn(input, { trackerDir });
-      return { status: 200, body: { ok: true, page: result.page, recordsAdded: result.recordsAdded, stillFailed: result.stillFailed } };
-    } catch (err) {
+  const handler = buildOcrTriggerHandler<RetryPageBody, RetryPageOkBody, RetryPageHttpResponse["body"]>({
+    validate: (input) =>
+      !input.sessionId || !input.runId || typeof input.pageNum !== "number" || input.pageNum < 1
+        ? "Missing or invalid sessionId/runId/pageNum"
+        : null,
+    ...(opts.runRetryPageOverride
+      ? { override: (input) => opts.runRetryPageOverride!(input, { trackerDir }) }
+      : {}),
+    run: (input) => runOcrRetryPage(input, { trackerDir }),
+    onSuccess: (result) => ({
+      ok: true,
+      page: result.page,
+      recordsAdded: result.recordsAdded,
+      stillFailed: result.stillFailed,
+    }),
+    onError: (error) => ({ ok: false, error }),
+    // RetryPageError carries a code that maps to a specific HTTP status;
+    // anything else falls through to the default 400 (with a log line).
+    mapError: (err) => {
       if (err instanceof RetryPageError) {
         const status: 400 | 404 | 409 | 410 =
           err.code === "row-not-found" ? 404 :
@@ -48,9 +51,16 @@ export function buildOcrRetryPageHandler(opts: RetryPageHandlerOpts = {}) {
         return { status, body: { ok: false, error: err.message } };
       }
       log.error(`[ocr-http] retry-page threw: ${errorMessage(err)}`);
-      return { status: 400, body: { ok: false, error: errorMessage(err) } };
-    } finally {
-      releaseRowLock(key);
-    }
-  };
+      return null;
+    },
+    lock: {
+      key: (input) => rowKey(input.sessionId, input.runId),
+      isHeld: hasRowLock,
+      acquire: acquireRowLock,
+      release: releaseRowLock,
+      onLocked: () => ({ status: 409, body: { ok: false, error: "Retry already in progress for this row" } }),
+    },
+  });
+  return (input: RetryPageBody): Promise<RetryPageHttpResponse> =>
+    handler(input) as Promise<RetryPageHttpResponse>;
 }

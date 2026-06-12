@@ -18,34 +18,23 @@ const SRC_DIR = join(ROOT, "src");
 
 const ALLOWED_CALLERS = new Set<string>([
   "src/workflows/ocr/orchestrator.ts",
-  // OCR's `force-research` and `retry-page` are operator-driven entrypoints
-  // invoked from HTTP route handlers, not from inside a workflow `ctx`. They
-  // need the same `delegateToAllImpl` escape hatch as the orchestrator for
-  // the eid-lookup fan-out: `fireAndForget: true` (their own watchChildRuns
-  // drives the wait) + `deriveItemId` (stable per-record item IDs so outcome
-  // patching can correlate child results back to OCR records).
-  "src/workflows/ocr/force-research.ts",
-  "src/workflows/ocr/retry-page.ts",
-  // The `verify` OCR form spec owns all of its cross-system enrichment in
-  // `OcrFormSpec.enrichRecords` (person-lookup for CRM dates + active status,
-  // i9-lookup for the Section-2 signer). The orchestrator awaits the hook, but
-  // the hook drives its own `watchChildRuns` wait — so it needs the same
-  // escape hatch as force-research: `fireAndForget: true` + `deriveItemId` for
-  // stable per-record item IDs that correlate child outcomes back to records.
-  "src/services/ocr/forms/verify.ts",
-  // `verify-relookup` is the verify analogue of force-research: an
-  // operator-driven HTTP entrypoint that re-runs ONE background lookup
-  // (person-lookup or i9-lookup) for ONE verify record from the review pane.
-  // Same escape-hatch needs as force-research/verify: `fireAndForget: true` +
-  // `deriveItemId` for a fresh per-invocation item id its own `watchChildRuns`
-  // correlates.
-  "src/workflows/ocr/verify-relookup.ts",
+  // The shared OCR fan-out pipeline (BM-1). `force-research`, `retry-page`,
+  // `verify` (enrichRecords ×2), and `verify-relookup` all delegated through
+  // BYTE-IDENTICAL dispatch→watch→cascade-cancel copies — those copies now live
+  // here as `fanOutAndWatch`, so this is the ONE delegateToAllImpl site for the
+  // operator-driven re-fan paths. It needs the same escape hatch as the
+  // orchestrator: `fireAndForget: true` (its own watchChildRuns drives the wait)
+  // + `deriveItemId` (stable per-record item ids so outcome patching can
+  // correlate child results back to OCR records).
+  "src/services/ocr/fan-out.ts",
   // `reocr-whole-pdf` is the operator-driven whole-PDF re-OCR HTTP entrypoint.
-  // It re-fans person-lookup for the re-extracted records and must use the same
-  // escape hatch as its siblings so the re-fan shares the OCR root's trace
+  // Its dispatch and watch are split across the 202-early-return boundary (the
+  // watch runs in a detached background task and emits a terminal failed/cancelled
+  // row on abort, rather than rethrowing), so it keeps its own delegateToAllImpl
+  // call instead of folding into `fanOutAndWatch` (which couples dispatch+watch).
+  // It uses the same escape hatch so the re-fan shares the OCR root's trace
   // prefix (`rootTracePrefix`) instead of minting fresh `pl-…` prefixes:
-  // `fireAndForget: true` (its background watchChildRuns drives the wait) +
-  // `deriveItemId` for stable per-record item ids.
+  // `fireAndForget: true` + `deriveItemId` for stable per-record item ids.
   "src/tracker/dashboard/ocr/reocr-whole-pdf.ts",
 ]);
 

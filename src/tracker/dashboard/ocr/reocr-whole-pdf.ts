@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
-import { emitTrackerRow, dateLocal, type TrackerRowEmission } from "../../jsonl.js";
+import { emitTrackerRow, dateLocal, type TrackerRowEmission, type StampedData } from "../../jsonl.js";
 import type { TrackerEntry } from "../../jsonl.js";
+import { buildOcrReviewSnapshotData } from "../../../services/ocr/review-snapshot.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../delegation/watch-child-runs.js";
 import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
@@ -157,7 +158,6 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
               typeof delegateToAllImpl<PersonLookupChildInput, readonly string[]>
             >[0]["child"],
             inputs,
-            renderAs: "flat",
             fireAndForget: true,
             ...(childRootTracePrefix ? { rootTracePrefix: childRootTracePrefix } : {}),
             deriveItemId: (inp: PersonLookupChildInput) =>
@@ -316,23 +316,33 @@ function buildReviewData(input: {
   sessionId: string;
   parentRunId?: string;
   records: unknown[];
-}): Record<string, string> & { archetype: "preview" } {
+}): StampedData {
   const { row, formType, sessionId, parentRunId, records } = input;
-  return {
-    ...stringData(row.data),
-    formType,
-    pdfOriginalName: (row.data?.pdfOriginalName as unknown as string | undefined) ?? "",
+  const parentSubject =
+    readQueueTitle(row.data) ?? (row.data?.parentSubject as unknown as string | undefined);
+  // Shared OCR preview-row envelope (BM-5): the canonical re-stamp set (mode/
+  // archetype/__id/__name/parentSubject) overlaid on the explicit fields a
+  // whole-PDF re-OCR rebuilds. failedPages/pageStatusSummary are cleared because
+  // a whole-PDF re-OCR reprocesses every page.
+  return buildOcrReviewSnapshotData({
+    base: {
+      ...stringData(row.data),
+      formType,
+      pdfOriginalName: (row.data?.pdfOriginalName as unknown as string | undefined) ?? "",
+      sessionId,
+      ...(parentRunId ? { parentRunId } : {}),
+      recordCount: records.length,
+      verifiedCount: countVerified(records),
+      failedPages: [],
+      pageStatusSummary: { total: 0, succeeded: 0, failed: 0 },
+    },
     sessionId,
-    ...(parentRunId ? { parentRunId } : {}),
-    recordCount: String(records.length),
-    verifiedCount: String(countVerified(records)),
-    records: JSON.stringify(records),
-    failedPages: JSON.stringify([]),
-    pageStatusSummary: JSON.stringify({ total: 0, succeeded: 0, failed: 0 }),
-    mode: "prepare",
-    // OCR prep parent rows are preview-shaped.
-    archetype: "preview" as const,
-  };
+    records,
+    parent: {
+      ...(parentRunId ? { parentRunId } : {}),
+      ...(parentSubject ? { parentSubject } : {}),
+    },
+  });
 }
 
 function countVerified(records: unknown[]): number {
