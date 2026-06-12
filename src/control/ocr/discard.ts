@@ -10,6 +10,7 @@ import {
   PriorTrackerRowNotFoundError,
 } from "../ops/emit-inherited.js";
 import { openControlStores } from "../ops/shared.js";
+import { isTerminalTaskState } from "../../core/task-store/types.js";
 import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import { readFormType, readParentRunId, readOperationWorkflow } from "../../tracker/dashboard/ocr/shared.js";
 import { emitDiscarded } from "../../services/ocr/approval-signal.js";
@@ -121,7 +122,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
       itemId: input.sessionId,
       runId: input.runId,
     });
-    if (anchorTask && anchorTask.state !== "done" && anchorTask.state !== "failed" && anchorTask.state !== "cancelled") {
+    if (anchorTask && !isTerminalTaskState(anchorTask.state)) {
       stores.taskStore.markTaskCancelled({
         taskId: anchorTask.taskId,
         reason: input.reason ?? "OCR prep discarded",
