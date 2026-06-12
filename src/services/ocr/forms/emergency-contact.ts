@@ -361,10 +361,8 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   rosterMode: "required",
-  // F5: brand a STANDALONE EC OCR run `ec-…` (matches EC's own approve-target
-  // workflow code). Without this, a standalone EC run fell back to the OCR
-  // default `oc-…`. An EC PDF run started as an operation still derives `ec`
-  // from `operationTraceCode("emergency-contact")` first; this covers the bare
-  // OCR-hub EC upload (no operation intent).
-  traceCode: "ec",
+  // No `traceCode` (E2E-007, reverses F5): a STANDALONE EC upload to the OCR
+  // panel brands the OCR default `oc-…`. The spec-level `"ec"` made standalone
+  // OCR-hub EC preps grep-collide with real emergency-contact operations; only
+  // an operation run derives `ec` (`operationTraceCode("emergency-contact")`).
 };

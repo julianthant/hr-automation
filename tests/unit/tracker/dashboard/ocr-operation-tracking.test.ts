@@ -371,7 +371,7 @@ test("prepare with targetWorkflow=oath-upload enqueues the oath-upload task and 
       },
       enqueueOathUploadAtPrepare: async (args) => {
         enqueueArgs = args;
-        return "oath-upload-run-xyz";
+        return { runId: "oath-upload-run-xyz", traceId: "ou-215457-f17e" };
       },
     });
     const resp = await handler({
