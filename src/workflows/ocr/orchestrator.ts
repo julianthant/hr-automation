@@ -593,16 +593,13 @@ export async function runOcrOrchestrator(
 
     // Seed the Preview tab with one blank record per page so the operator
     // sees the page image + empty inputs immediately. As OCR finishes,
-    // these are replaced with real extracted records.
+    // these are replaced with real extracted records. The form-specific
+    // field skeleton comes from the spec (record shape is set by the RUN,
+    // so an EC run must seed EC-shaped placeholders, not oath-shaped ones);
+    // specs without the hook keep the oath-shaped default.
     const placeholderRecords: unknown[] = Array.from({ length: knownPageCount }, (_, i) => ({
       formKind: input.formType,
       sourcePage: i + 1,
-      rowIndex: 0,
-      printedName: "",
-      employeeId: "",
-      employeeSigned: true,
-      officerSigned: null,
-      dateSigned: null,
       notes: [],
       documentType: "expected",
       originallyMissing: [],
@@ -610,6 +607,14 @@ export async function runOcrOrchestrator(
       matchSource: "manual",
       selected: false,
       warnings: ["Loading… OCR running"],
+      ...(spec.placeholderFields?.() ?? {
+        rowIndex: 0,
+        printedName: "",
+        employeeId: "",
+        employeeSigned: true,
+        officerSigned: null,
+        dateSigned: null,
+      }),
     }));
     emitSnapshot(placeholderRecords, "ocr", "running", { rosterPath: resolvedRosterPath });
 

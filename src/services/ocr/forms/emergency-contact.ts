@@ -361,6 +361,26 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   rosterMode: "required",
+
+  // Loading-phase placeholders must be EC-SHAPED (identity under `employee.*`,
+  // contact under `emergencyContact.*`) — the shared oath-shaped default put
+  // top-level `printedName`/`employeeId` on EC rows (the E2E-004 shape flip)
+  // and crashed `EcRecordView`'s unguarded `record.emergencyContact.X` reads
+  // while the Preview tab was open mid-extraction. `sameAddressAsEmployee`
+  // defaults true to match the no-address convention above.
+  placeholderFields(): Record<string, unknown> {
+    return {
+      employee: { name: "", employeeId: "" },
+      emergencyContact: {
+        name: "",
+        relationship: "",
+        primary: true,
+        sameAddressAsEmployee: true,
+        address: null,
+      },
+    };
+  },
+
   // No `traceCode` (E2E-007, reverses F5): a STANDALONE EC upload to the OCR
   // panel brands the OCR default `oc-…`. The spec-level `"ec"` made standalone
   // OCR-hub EC preps grep-collide with real emergency-contact operations; only
