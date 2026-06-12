@@ -497,10 +497,13 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
     // inside fanOutAndWatch, so there is no outer catch here.
     const shouldAbort = (): boolean => isOcrPrepareAbortRequested(sessionId, runId);
 
-    // Dynamic import avoids an import cycle (mirrors force-research.ts).
+    // Dynamic imports avoid an import cycle (mirrors force-research.ts).
+    // Sequential on purpose: concurrent dynamic imports of two large module
+    // graphs interact badly with vitest's resetModules-based tests.
     const { personLookupWorkflow } = await import("../../../workflows/person-lookup/index.js");
+    const { i9LookupWorkflow } = await import("../../../workflows/i9-lookup/index.js");
 
-    // ── Step 1: person-lookup fan-out (EID-or-name → CRM dates + active) ──
+    // ── Person-lookup inputs (EID-or-name → CRM dates + active) ──────────
     //
     // Per-record input shape + outcome-patch kind are chosen by the pure
     // `buildVerifyPersonLookupInput` / `verifyPlPatchKind` helpers (unit-tested):
@@ -541,7 +544,52 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       plInputs.push(chosen.input);
     }
 
-    if (plInputs.length > 0) {
+    // ── i9-lookup inputs (oath, blank official signer) ───────────────────
+    // Derived from RAW OCR fields only (formKind / officerSigned / name) —
+    // person-lookup outcomes never rewrite `name` — so the two fan-outs are
+    // fully independent and can run concurrently below (F-2).
+    type I9ChildInput = {
+      lastName: string;
+      firstName: string;
+      parentSubject?: string;
+    };
+    const i9Inputs: I9ChildInput[] = [];
+    const i9ItemIds: string[] = [];
+    const i9ItemIdToIdx = new Map<string, number>();
+
+    for (let idx = 0; idx < records.length; idx++) {
+      const rec = records[idx];
+      if (rec.formKind !== "oath") continue;
+      if (rec.officerSigned === true) continue;
+      const name = nonEmpty(rec.name);
+      if (!name) continue;
+      let parsed: { lastName: string; first: string };
+      try {
+        parsed = parsePersonOrgNameInput(name);
+      } catch (err) {
+        log.warn(`[verify/i9] skipping record ${idx}: name parse failed for "${name}": ${String(err)}`);
+        continue;
+      }
+      if (!parsed.lastName || !parsed.first) continue;
+      const itemId = `${ocrChildItemIdPrefix("verify")}-i9-${runId}-r${idx}`;
+      i9ItemIds.push(itemId);
+      i9ItemIdToIdx.set(itemId, idx);
+      i9Inputs.push({
+        lastName: parsed.lastName,
+        firstName: parsed.first,
+        ...(parentSubject ? { parentSubject } : {}),
+      });
+    }
+
+    // ── Concurrent fan-outs (F-2): person-lookup + i9-lookup together ────
+    // The i9 dispatch used to wait for EVERY person-lookup to settle, so i9
+    // children couldn't even be CLAIMED until the slowest Duo-serialized
+    // person-lookup finished — doubling enrichment wall-clock for no data
+    // dependency. Each branch patches disjoint per-record fields
+    // (personLookup* vs i9Lookup*/officialSigner*), so concurrent onProgress
+    // patching is safe.
+    const runPersonFanOut = async (): Promise<void> => {
+      if (plInputs.length === 0) return;
       const processedPlItemIds = new Set<string>();
       const applyPersonLookupOutcome = (outcome: ChildOutcome): void => {
         const idx = plItemIdToIdx.get(outcome.itemId);
@@ -622,50 +670,10 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
           subject: `record:${idx}`,
         });
       }
-    }
-
-    // Re-render the Preview tab with the person-lookup results so far.
-    for (let idx = 0; idx < records.length; idx++) {
-      records[idx].checks = buildVerifyChecks(records[idx]);
-    }
-    input.emitProgress(records);
-
-    // ── Step 2: i9-lookup fan-out (oath, blank official signer) ──────────
-    const { i9LookupWorkflow } = await import("../../../workflows/i9-lookup/index.js");
-    type I9ChildInput = {
-      lastName: string;
-      firstName: string;
-      parentSubject?: string;
     };
-    const i9Inputs: I9ChildInput[] = [];
-    const i9ItemIds: string[] = [];
-    const i9ItemIdToIdx = new Map<string, number>();
 
-    for (let idx = 0; idx < records.length; idx++) {
-      const rec = records[idx];
-      if (rec.formKind !== "oath") continue;
-      if (rec.officerSigned === true) continue;
-      const name = nonEmpty(rec.name);
-      if (!name) continue;
-      let parsed: { lastName: string; first: string };
-      try {
-        parsed = parsePersonOrgNameInput(name);
-      } catch (err) {
-        log.warn(`[verify/i9] skipping record ${idx}: name parse failed for "${name}": ${String(err)}`);
-        continue;
-      }
-      if (!parsed.lastName || !parsed.first) continue;
-      const itemId = `${ocrChildItemIdPrefix("verify")}-i9-${runId}-r${idx}`;
-      i9ItemIds.push(itemId);
-      i9ItemIdToIdx.set(itemId, idx);
-      i9Inputs.push({
-        lastName: parsed.lastName,
-        firstName: parsed.first,
-        ...(parentSubject ? { parentSubject } : {}),
-      });
-    }
-
-    if (i9Inputs.length > 0) {
+    const runI9FanOut = async (): Promise<void> => {
+      if (i9Inputs.length === 0) return;
       const processedI9ItemIds = new Set<string>();
       const applyI9Outcome = (outcome: ChildOutcome): void => {
         const idx = i9ItemIdToIdx.get(outcome.itemId);
@@ -750,7 +758,17 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
           subject: `record:${idx}`,
         });
       }
-    }
+    };
+
+    // Both branches settle FULLY before the first error is rethrown — on an
+    // operator abort each fan-out cascade-cancels its own queued children;
+    // Promise.all would orphan the surviving branch mid-watch (its later
+    // rejection would surface as an unhandled rejection).
+    const settled = await Promise.allSettled([runPersonFanOut(), runI9FanOut()]);
+    const firstRejection = settled.find(
+      (s): s is PromiseRejectedResult => s.status === "rejected",
+    );
+    if (firstRejection) throw firstRejection.reason;
 
     input.emitProgress(records);
 

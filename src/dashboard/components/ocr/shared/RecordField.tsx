@@ -1,6 +1,17 @@
 import { Pencil } from "lucide-react";
 import type { ReactNode } from "react";
 
+/**
+ * Was this field blank on the paper form? Shared by every record view that
+ * renders `RecordField` (oath + EC twins, extracted 2026-06-11).
+ */
+export function recordFieldMissing(
+  record: { originallyMissing?: string[] | null },
+  fieldKey: string,
+): boolean {
+  return record.originallyMissing?.includes(fieldKey) ?? false;
+}
+
 export function MissingFlag({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (

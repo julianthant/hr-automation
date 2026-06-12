@@ -35,6 +35,16 @@ import {
   cancelQueuedChildTasksForParentRun,
 } from "../../tracker/tasks/store.js";
 
+// The delegate module is imported dynamically to avoid an import cycle, and
+// MEMOIZED so concurrent fanOutAndWatch calls (verify runs its person + i9
+// fan-outs in parallel) share ONE import promise — two racing dynamic imports
+// of the same path can resolve inconsistently under vitest's module mocker.
+let delegateModulePromise: Promise<typeof import("../../core/delegate.js")> | undefined;
+function loadDelegateModule(): Promise<typeof import("../../core/delegate.js")> {
+  delegateModulePromise ??= import("../../core/delegate.js");
+  return delegateModulePromise;
+}
+
 /** One child to fan out: its logical input plus its stable, watch-correlated itemId. */
 export interface FanOutChild<TInput> {
   input: TInput;
@@ -154,7 +164,7 @@ export async function fanOutAndWatch<TInput>(
     // delegated scope, one vs many children controls single vs batch grouping);
     // `fireAndForget:true` because the watch below drives the wait (a second
     // wait inside delegateToAllImpl would double-count).
-    const { delegateToAllImpl } = await import("../../core/delegate.js");
+    const { delegateToAllImpl } = await loadDelegateModule();
     // Key the itemId map by JSON, NOT object identity: `delegateToAllImpl` wraps
     // each input with `__runtimeOptions` (rowShape/rootCode/rootTracePrefix), and
     // `ensureDaemonsAndEnqueue`'s idFn calls `splitPrefilled` to STRIP those

@@ -1,0 +1,27 @@
+-> [Daemon i9-lookup/ilo-81ca] listening on 127.0.0.1:56475 (pid=86400)
+-> [Daemon i9-lookup/ilo-81ca] phase: launching → authenticating
+-> Launching browser...
+-> [Auth: i9] Starting login (attempt 1/3)
+✗ Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD
+✗ Create a .env file with these variables. See .env.example
+! [Auth: i9] Retrying (attempt 2/3) — previous error: Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD. Create a .env file with these variables. See .env.example
+✗ Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD
+✗ Create a .env file with these variables. See .env.example
+! [Auth: i9] Retrying (attempt 3/3) — previous error: Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD. Create a .env file with these variables. See .env.example
+✗ Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD
+✗ Create a .env file with these variables. See .env.example
+✗ [Daemon i9-lookup/ilo-81ca] auth/launch failed during phase='authenticating' — Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD. Create a .env file with these variables. See .env.example
+-> [Daemon i9-lookup/ilo-81ca] phase: authenticating → exited
+-> [Daemon i9-lookup/ilo-81ca] exited cleanly
+✗ cli-daemon: fatal Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD. Create a .env file with these variables. See .env.example
+✗ EnvValidationError: Missing required .env variables: UCPATH_USER_ID, UCPATH_PASSWORD. Create a .env file with these variables. See .env.example
+    at validateEnv (/Users/julianhein/Documents/hr-automation/src/utils/env.ts:20:11)
+    at validateI9Env (/Users/julianhein/Documents/hr-automation/src/utils/env.ts:51:10)
+    at loginToI9 (/Users/julianhein/Documents/hr-automation/src/systems/i9/login.ts:20:32)
+    at Object.login (/Users/julianhein/Documents/hr-automation/src/infra/auth/require-login.ts:28:22)
+    at loginWithRetry (/Users/julianhein/Documents/hr-automation/src/core/kernel/session.ts:1025:30)
+    at async Session.launch (/Users/julianhein/Documents/hr-automation/src/core/kernel/session.ts:257:9)
+    at async <anonymous> (/Users/julianhein/Documents/hr-automation/src/core/daemon/daemon.ts:340:21)
+    at async withBatchLifecycle (/Users/julianhein/Documents/hr-automation/src/core/kernel/batch-lifecycle.ts:293:20)
+    at async runWorkflowDaemon (/Users/julianhein/Documents/hr-automation/src/core/daemon/daemon.ts:317:5)
+    at async main (/Users/julianhein/Documents/hr-automation/src/cli-daemon.ts:36:3)
