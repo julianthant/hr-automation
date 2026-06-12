@@ -178,14 +178,18 @@ export async function runDependencySchedulerTick(
           status: childTaskStatus,
           now,
         });
-        if (allDependenciesTerminal(opts.store, dep.parent.id)) {
-          // The task_kind=ocr parent is a dependency ANCHOR, not daemon work —
-          // no daemon ever claims an "ocr" task. Terminalize it once the last
-          // dependency settles: re-stamping waiting_on_children left it in
-          // waiting_dependencies, from where the control-dep release
-          // (releaseParentsForChildren has no kind filter) flipped it to
-          // queued — a zombie task lingering for every prep, done or failed
-          // (E2E-003).
+        // ONLY a task_kind=ocr parent — the dependency ANCHOR no daemon ever
+        // claims — terminalizes here once the last dependency settles
+        // (E2E-003: re-stamping waiting_on_children left it releasable to
+        // queued, a zombie per prep). The guard is load-bearing:
+        // listPendingDependencies has NO kind filter, so kind='control' deps
+        // whose parent is a REAL daemon task (the born oath-upload ticket
+        // parked in waiting_dependencies during wait-signatures) flow through
+        // this loop too — stamping THAT parent done would be terminal
+        // (releaseParentsForChildren only flips waiting_dependencies) and the
+        // ServiceNow ticket would silently never file. Mirrors the
+        // task_kind === 'ocr' guard at the release site (child-state.ts).
+        if (dep.parent.taskKind === "ocr" && allDependenciesTerminal(opts.store, dep.parent.id)) {
           updateTaskStatus(opts.store, {
             taskId: dep.parent.id,
             status: "done",

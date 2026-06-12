@@ -52,15 +52,20 @@ interface StatusBearer {
 
 /**
  * The status key for a row, applying the ONE shared override every status map
- * needs: a cancelled row (`failed` + `step === "cancelled"`) is reported as
- * `"cancelled"`, not `"failed"`, so it renders amber (intentional) instead of
- * red (a bug). EntryItem's `STATUS_CONFIG`, the operation coordinator's
- * `HEADER_STATUS`, and the batch member status map all route their lookup
- * through this so the special-case can't drift between them. Each component
+ * needs: a deliberate operator action — a cancelled row (`failed` +
+ * `step === "cancelled"`) or a discarded prep/operation mirror (`failed` +
+ * `step === "discarded"`) — is reported as `"cancelled"`, not `"failed"`, so
+ * it renders amber (intentional) instead of red (a bug). EntryItem's
+ * `STATUS_CONFIG`, the operation coordinator's `HEADER_STATUS`, the batch
+ * member status map, and the queue-status chip counting all route their
+ * lookup through this so the special-case can't drift between them (E2E-009:
+ * the failure bell excludes both steps; the chips must agree). Each component
  * keeps its own status→class map keyed on the returned string.
  */
 export function statusKeyForEntry(entry: StatusBearer): string {
-  if (entry.status === "failed" && entry.step === "cancelled") return "cancelled";
+  if (entry.status === "failed" && (entry.step === "cancelled" || entry.step === "discarded")) {
+    return "cancelled";
+  }
   return entry.status;
 }
 

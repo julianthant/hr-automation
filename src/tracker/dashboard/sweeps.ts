@@ -12,6 +12,7 @@ import { log } from "../../utils/log.js";
 import { detectFailurePattern } from "../alerts/failure-detector.js";
 import { notify } from "../alerts/notify.js";
 import { findAliveDaemons } from "../../core/daemon/registry.js";
+import { wakeDaemonsForReleasedParents } from "../../core/daemon/client.js";
 import { readQueueState, markItemFailed } from "../../core/daemon/queue.js";
 import { buildTrackerDataForInput } from "../../core/daemon/enqueue-dispatch.js";
 import { openControlDb } from "../../core/control-db.js";
@@ -194,10 +195,15 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
           try {
             await markItemFailed(wf, item.id, failError, runId, dir);
             if (item.taskId) {
-              taskStore.markDependencyFromChildTerminal({
+              const released = taskStore.markDependencyFromChildTerminal({
                 childTaskId: item.taskId,
                 childState: "failed",
               });
+              // The sweep proves the CHILD workflow has no alive daemons; a
+              // released cross-workflow parent (e.g. oath-upload while
+              // oath-signature daemons are down) may still have one — wake it
+              // like every other settle site (E2E-017).
+              void wakeDaemonsForReleasedParents(released, dir);
             }
           } catch {
             /* best-effort */

@@ -424,7 +424,6 @@ export const oathOcrFormSpec: OcrFormSpec<
         ...(doc.pdfHash ? { pdfHash: doc.pdfHash } : {}),
         signerItemIds: doc.perRecordItemIds,
         mode: "full",
-        rosterMode: "download",
         ...(doc.dryRun ? { dryRun: true } : {}),
       } as OathUploadInput;
     },

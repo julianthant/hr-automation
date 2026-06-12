@@ -66,12 +66,7 @@ export function buildFailuresHandler(deps: FailuresDeps) {
         // failures - they're audit-only at that point. Mirrors the
         // QueuePanel's `isResolvedPrepRow` predicate.
         if (isResolvedPrepEntry(e)) continue;
-        // Deliberate operator actions are not failures — surfacing them in
-        // the triage popover buries real ones (E2E-009). `cancelled` is the
-        // row × ; `discarded` is the OCR discard's mirror onto an operation
-        // coordinator row (the OCR prep row itself is covered by
-        // isResolvedPrepEntry above).
-        if (e.step === "cancelled" || e.step === "discarded") continue;
+        if (isOperatorResolvedFailure(e)) continue;
         failures.push({
           workflow: wf,
           id: e.id,
@@ -87,6 +82,17 @@ export function buildFailuresHandler(deps: FailuresDeps) {
     failures.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
     return failures.slice(0, limit);
   };
+}
+
+/**
+ * A `failed` row that is a deliberate OPERATOR action, not a failure:
+ * `step === "cancelled"` is the row ×; `step === "discarded"` is the OCR
+ * discard (and its mirror onto an operation coordinator row). Neither rings
+ * the failure bell nor lists in /api/failures (E2E-009) — the dashboard
+ * chips agree via `statusKeyForEntry`'s matching override.
+ */
+function isOperatorResolvedFailure(e: TrackerEntry): boolean {
+  return e.step === "cancelled" || e.step === "discarded";
 }
 
 /**
@@ -115,9 +121,7 @@ export function computeFailureCounts(entries: TrackerEntry[]): number {
     // Discarded prep rows (`failed`+`discarded`) are operator-resolved and
     // shouldn't inflate the navbar failure-bell badge.
     if (isResolvedPrepEntry(e)) continue;
-    // Deliberate operator actions (cancel ×, OCR discard mirrored onto an
-    // operation row) are not failures and don't ring the bell (E2E-009).
-    if (e.step === "cancelled" || e.step === "discarded") continue;
+    if (isOperatorResolvedFailure(e)) continue;
     count++;
   }
   return count;

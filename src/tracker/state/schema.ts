@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 11;
+export const LATEST_SCHEMA_VERSION = 12;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -249,6 +249,13 @@ CREATE INDEX IF NOT EXISTS tasks_status_idx
 
 CREATE INDEX IF NOT EXISTS tasks_parent_idx
   ON tasks(parent_task_id);
+
+-- Cascade-cancel walks children by the parent RUN id
+-- (cancelQueuedChildTasksForParentRun) and the tree-cancel resolver reads the
+-- same column; without this partial index every discard/abort full-scans the
+-- never-pruned tasks table (perf review of the E2E-010 cascade).
+CREATE INDEX IF NOT EXISTS tasks_parent_run_idx
+  ON tasks(parent_run_id) WHERE parent_run_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS tasks_control_claimable_idx
   ON tasks(workflow, control_state, priority DESC, enqueued_at ASC);
@@ -530,6 +537,18 @@ WHERE workflow = 'ocr'
     version: 11,
     sql: String.raw`
 ALTER TABLE tasks ADD COLUMN original_input_json TEXT;
+    `,
+  },
+  {
+    // Migration 12: index tasks by parent_run_id. Cascade-cancel
+    // (cancelQueuedChildTasksForParentRun) and the tree-cancel resolver walk
+    // children by the parent RUN id; without the index every discard/abort
+    // full-scans the never-pruned tasks table (perf review of the E2E-010
+    // cascade). Partial — most tasks have no parent.
+    version: 12,
+    sql: String.raw`
+CREATE INDEX IF NOT EXISTS tasks_parent_run_idx
+  ON tasks(parent_run_id) WHERE parent_run_id IS NOT NULL;
     `,
   },
 ];

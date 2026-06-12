@@ -250,7 +250,7 @@ export function buildOcrPrepareHandler(
       // ticket — threaded into the orchestrator so the delegated OCR run
       // COMPOSES it instead of minting its own HHMMSS (VQ-1).
       let delegationRootTracePrefix = operationRef
-        ? tracePrefix(operationRef.baseData.__traceId!) ?? undefined
+        ? tracePrefix(operationRef.baseData.__traceId!)
         : undefined;
       try {
         if (isOathUploadTarget) {
@@ -265,7 +265,7 @@ export function buildOcrPrepareHandler(
             ...(input.runOptions ? { runOptions: input.runOptions } : {}),
           });
           delegationParentRunId = born?.runId;
-          delegationRootTracePrefix = born?.traceId ? tracePrefix(born.traceId) ?? undefined : undefined;
+          delegationRootTracePrefix = born?.traceId ? tracePrefix(born.traceId) : undefined;
           if (!delegationParentRunId) {
             // Fail loud, don't run orphaned. The oath-upload approve path SKIPS
             // the ServiceNow ticket fan-out for an oath-upload operation (the

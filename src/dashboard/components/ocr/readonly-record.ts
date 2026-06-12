@@ -98,12 +98,17 @@ export function buildReadonlyChecks(record: OathPreviewRecord | PreviewRecord): 
   const activeCheck = valueCheck("activeStatus", "Active Status", activeStatus, "ucpath");
 
   if (isOathShapedRecord(record)) {
-    // EID provenance: a record whose EID came from a person-lookup
-    // (`matchSource === "eid-lookup"`) shows it as LOOKED UP ("ucpath"), not
-    // "(on paper)" — the form had no EID and labeling the resolved value as
-    // paper miscounts the "N on paper · N looked up" tally (E2E-005). The EC
-    // branch below already labels its lookup-backed EID "ucpath".
-    const eidSource = record.matchSource === "eid-lookup" ? "ucpath" : "paper";
+    // EID provenance: only a FORM-sourced EID is "(on paper)". `form-eid`
+    // (extracted from the page) and `manual` (operator transcription) count as
+    // paper; `eid-lookup`, `roster`, and `llm` all injected the EID from a
+    // non-paper source — labeling those as paper miscounts the
+    // "N on paper · N looked up" tally (E2E-005; the roster single-candidate
+    // accept is the most common non-paper path). The EC branch below already
+    // labels its lookup-backed EID "ucpath".
+    const eidSource =
+      record.matchSource === "eid-lookup" || record.matchSource === "roster" || record.matchSource === "llm"
+        ? "ucpath"
+        : "paper";
     // Oath-shaped: a re-classified page (formKind != "oath") has no oath
     // signature data worth showing, so drop the signature checks for it.
     if (record.formKind === "oath") {
