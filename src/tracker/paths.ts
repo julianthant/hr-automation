@@ -20,6 +20,7 @@ import { join } from "node:path";
  *   <dir>/screenshots/ …                 operator audit screenshots (PATHS.screenshotDir)
  *   <dir>/sharepoint/  *.xlsx            SharePoint roster downloads (sharepoint-download)
  *   <dir>/rosters/     *.xlsx            emergency-contact pre-flight roster downloads
+ *   <dir>/e2e-gates/   *.hold            HRAUTO_E2E_STUBS hold gates (core/e2e/gates.ts)
  * ```
  *
  * Row "kind" is conveyed by DIRECTORY, not by a filename suffix: a `rows/` file
@@ -35,6 +36,7 @@ export const RUNTIME_SUBDIR = "runtime";
 export const SCREENSHOTS_SUBDIR = "screenshots";
 export const SHAREPOINT_SUBDIR = "sharepoint";
 export const ROSTERS_SUBDIR = "rosters";
+export const E2E_GATES_SUBDIR = "e2e-gates";
 
 export function rowsDir(dir: string): string {
   return join(dir, ROWS_SUBDIR);
@@ -65,6 +67,21 @@ export function sharepointDir(dir: string): string {
 /** `<dir>/rosters` — emergency-contact pre-flight roster `.xlsx` downloads. */
 export function rostersDir(dir: string): string {
   return join(dir, ROSTERS_SUBDIR);
+}
+
+/** `<dir>/e2e-gates` — hold-gate files for HRAUTO_E2E_STUBS scripted runs (core/e2e/gates.ts). */
+export function e2eGatesDir(dir: string): string {
+  return join(dir, E2E_GATES_SUBDIR);
+}
+
+/**
+ * Hold-gate file for a stubbed workflow. `<workflow>.hold` parks every step of
+ * every run of that workflow; `<workflow>--<step>.hold` parks only the named
+ * step. The e2e driver creates/removes these files to deterministically hold
+ * and release scripted runs.
+ */
+export function e2eGateHoldPath(workflow: string, step: string | undefined, dir: string): string {
+  return join(e2eGatesDir(dir), step ? `${workflow}--${step}.hold` : `${workflow}.hold`);
 }
 
 /** `<dir>/rows/<workflow>-<date>.jsonl` — tracker/queue rows for one workflow+day. */

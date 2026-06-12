@@ -18,7 +18,8 @@ JSONL + SQLite projection for workflow observability. Workflow handlers should u
 ├── pdf-cache/ , uploads/               artifacts
 ├── screenshots/  *.png                 operator audit screenshots (PATHS.screenshotDir)
 ├── sharepoint/   *.xlsx                 SharePoint roster downloads (sharepoint-download)
-└── rosters/      *.xlsx                 emergency-contact pre-flight roster downloads
+├── rosters/      *.xlsx                 emergency-contact pre-flight roster downloads
+└── e2e-gates/    *.hold                 HRAUTO_E2E_STUBS hold gates (src/core/e2e/gates.ts)
 ```
 
 Row **kind is the directory**, not a filename suffix: a `rows/` file and a `logs/` file share the identical `<workflow>-<date>.jsonl` name. Classify by `trackerKindForPath(path)` (parent-dir segment), never by `.endsWith("-logs.jsonl")` or a `sessions-` prefix. Helpers: `rowFilePath` / `logFilePath` / `sessionFilePath` / `runtimeFilePath`, the `*Dir` accessors, and `parseWorkflowDateFilename` / `parseSessionFilename`. All are re-exported from the `jsonl.ts` barrel.
