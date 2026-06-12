@@ -979,9 +979,10 @@ export async function runOcrOrchestrator(
           // archetype derivation, and pending-row pre-emit share one code path with
           // every other delegation site. Behavioural equivalence vs the
           // pre-Contract-3 ensureDaemonsAndEnqueue call:
-          //   - `renderAs: "flat"` remains a projection hint; the child row
-          //     stamp is `single`, parentRunId marks it as delegated, and
-          //     one vs many children controls single vs batch grouping.
+          //   - Each child is a delegated single row (the default — no
+          //     `renderAs`): the child row stamp is `single`, parentRunId marks
+          //     it delegated, and one vs many children controls single vs batch
+          //     grouping.
           //   - `onPreparedItems` is forwarded verbatim so the SQLite task
           //     dependency batch is still created in the same lifecycle slot.
           //   - `fireAndForget: true` because the orchestrator's own
@@ -1022,7 +1023,6 @@ export async function runOcrOrchestrator(
             // validates both shapes.
             child: personLookupWorkflow as unknown as Parameters<typeof delegateToAllImpl<EidLookupChildInput, readonly string[]>>[0]["child"],
             inputs,
-            renderAs: "flat",
             fireAndForget: true,
             // Root trace-id propagation (trace/span model): pass the OCR root's
             // trace PREFIX (`ou-<HHMMSS>` for oath, `oc-<HHMMSS>` otherwise) so

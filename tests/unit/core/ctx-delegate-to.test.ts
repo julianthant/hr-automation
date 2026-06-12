@@ -113,7 +113,7 @@ test("ctx.delegateTo pre-emits child pending row with parentRunId, derived arche
   assert.equal(r.status, "done", "child reached terminal done status");
 });
 
-test("ctx.delegateTo with renderAs: 'flat' leaves row archetype canonical", async (t) => {
+test("ctx.delegateTo with no renderAs (delegated single) leaves row archetype canonical", async (t) => {
   const trackerDir = mkdtempSync(join(tmpdir(), "ctx-delegate-flat-"));
   t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }));
 
@@ -122,7 +122,9 @@ test("ctx.delegateTo with renderAs: 'flat' leaves row archetype canonical", asyn
     name: "deleg-parent-flat",
     onCtx: async (ctx) => {
       const c = ctx as { delegateTo: (...args: unknown[]) => Promise<unknown> };
-      await c.delegateTo(child, { payload: "p" }, { renderAs: "flat" });
+      // No `renderAs` → a delegated single row. (The legacy `renderAs:"flat"`
+      // hint was an identical no-op and has been removed; this is its successor.)
+      await c.delegateTo(child, { payload: "p" });
     },
   });
   await runWorkflow(parent, { parentPayload: "p" }, { trackerDir });

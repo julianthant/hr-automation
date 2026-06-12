@@ -149,11 +149,11 @@ export async function fanOutAndWatch<TInput>(
   } else {
     // Route through delegateToAllImpl so parentRunId stamping, canonical
     // archetype derivation, child pending pre-emit, and root-trace propagation
-    // share one code path with every other delegation site. `renderAs:"flat"`
-    // stamps each child `single` (parentRunId marks delegated scope; one vs many
-    // children controls single vs batch grouping); `fireAndForget:true` because
-    // the watch below drives the wait (a second wait inside delegateToAllImpl
-    // would double-count).
+    // share one code path with every other delegation site. Each child is a
+    // delegated single row (the default — no `renderAs`; parentRunId marks
+    // delegated scope, one vs many children controls single vs batch grouping);
+    // `fireAndForget:true` because the watch below drives the wait (a second
+    // wait inside delegateToAllImpl would double-count).
     const { delegateToAllImpl } = await import("../../core/delegate.js");
     const itemIdByInput = new Map<TInput, string>(children.map((c) => [c.input, c.itemId]));
     const dispatchResults: ChildRunResult<TInput>[] = await delegateToAllImpl<TInput, readonly string[]>({
@@ -161,7 +161,6 @@ export async function fanOutAndWatch<TInput>(
       trackerDir,
       child: child as RegisteredWorkflow<TInput, readonly string[]>,
       inputs: children.map((c) => c.input),
-      renderAs: "flat",
       fireAndForget: true,
       ...(rootTracePrefix ? { rootTracePrefix } : {}),
       ...(daemonFlags ? { daemonFlags } : {}),

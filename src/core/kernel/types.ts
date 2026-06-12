@@ -331,14 +331,16 @@ export interface RetryOpts {
 }
 
 /** See `src/core/delegate.ts` for the delegation API + `renderAs` semantics. */
-export type DelegateRenderAs = "batch" | "preview" | "flat"
+export type DelegateRenderAs = "batch" | "preview"
 
 export interface DelegateOpts {
   /**
    * Projection hint for delegated rows. The child row's stamped archetype
    * still comes from the child workflow's resolved shape (`single` / `batch`)
-   * plus the top-level `parentRunId` scope.
-   *   - "flat"    → flat single row
+   * plus the top-level `parentRunId` scope. OMITTING `renderAs` (the default)
+   * is a delegated single row — there is no separate "flat" hint (a delegated
+   * row always lives in its own tab; the flat/grouped distinction was a
+   * rendering hack, removed per the workflow vocabulary).
    *   - "preview" → preview card row
    *   - "batch"   → grouped delegation member
    */
