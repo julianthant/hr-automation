@@ -77,6 +77,13 @@ export interface OathUploadHandlerOpts {
   _verifyOverride?: typeof verifyOnInquiryForm;
   _fillFormOverride?: typeof fillHrInquiryForm;
   _submitOverride?: typeof submitAndCaptureTicketNumber;
+  /**
+   * Replaces `ctx.page("servicenow")` — for runs with no servicenow system at
+   * all (e2e stub mode declares `systems: []`, so `ctx.page` would hang).
+   * Pair with the other overrides; the returned page is only ever passed to
+   * them.
+   */
+  _pageOverride?: () => Promise<import("playwright").Page>;
 }
 
 export async function oathUploadHandler(
@@ -227,7 +234,7 @@ export async function oathUploadHandler(
     return;
   }
 
-  const page = await ctx.page("servicenow");
+  const page = await (opts._pageOverride ? opts._pageOverride() : ctx.page("servicenow"));
   await ctx.step("servicenow-auth", async () => {
     // ServiceNow auth is deferred from session launch to right before we use
     // the page, so the daemon doesn't hold a SAML session open across the

@@ -58,11 +58,21 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
  * Resolve a workflow name to its registered kernel workflow. Returns
  * `null` for unknown names — callers decide whether to surface a 400 or
  * an internal dispatch error.
+ *
+ * With `HRAUTO_E2E_STUBS=1` (AI e2e test, mode C) the loaded workflow is
+ * wrapped with a scripted stub handler — `src/core/e2e/stub-workflows.ts` —
+ * so daemons exercise queue/cancel/parallel machinery without touching real
+ * systems. The import stays lazy so normal runs never load the stub module.
  */
 export async function loadWorkflow(name: string): Promise<AnyRegisteredWorkflow | null> {
   const loader = WORKFLOW_LOADERS[name];
   if (!loader) return null;
-  return loader();
+  const wf = await loader();
+  if (process.env.HRAUTO_E2E_STUBS === "1") {
+    const { maybeWrapE2EStub } = await import("./e2e/stub-workflows.js");
+    return maybeWrapE2EStub(name, wf);
+  }
+  return wf;
 }
 
 export function listWorkflowNames(): string[] {
