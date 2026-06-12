@@ -160,4 +160,44 @@ describe("fanOutAndWatch", () => {
     assert.equal((threw as Error).message, "watchChildRuns timeout");
     assert.equal(mocks.cascadeCalls.length, 0, "no cascade-cancel on a non-abort failure");
   });
+
+  it("derives child itemIds by JSON (survives delegateToAllImpl's input clone), not object identity", async () => {
+    // delegateToAllImpl wraps each input with __runtimeOptions then strips them
+    // via splitPrefilled before calling deriveItemId — so deriveItemId sees a
+    // NEW cleaned object, never the original `c.input` reference. A
+    // reference-keyed map would miss → empty itemId → invisible row → the watch
+    // hangs (the bug the Tier-1 ocr-verify-lookup test caught). Mock the real
+    // delegate path to invoke deriveItemId with a structural CLONE and assert the
+    // correct itemIds still come back.
+    vi.resetModules();
+    vi.doMock("../../../../src/core/delegate.js", () => ({
+      delegateToAllImpl: async (opts: {
+        inputs: ReadonlyArray<{ name: string }>;
+        deriveItemId: (input: { name: string }) => string;
+      }) =>
+        opts.inputs.map((input, index) => {
+          // Clone (drop reference identity) like splitPrefilled does.
+          const cleaned = JSON.parse(JSON.stringify(input)) as { name: string };
+          return { itemId: opts.deriveItemId(cleaned), runId: `cr-${index}`, workflow: "person-lookup", status: "pending" as const };
+        }),
+    }));
+    const { fanOutAndWatch } = await import("../../../../src/services/ocr/fan-out.js");
+
+    const dispatchedItemIds: string[] = [];
+    await fanOutAndWatch<{ name: string }>({
+      sessionId: "s1",
+      runId: "r1",
+      parentRunId: "p1",
+      trackerDir: undefined,
+      date: "2026-06-11",
+      child: fakeChild,
+      children: [child("item-a", "Doe, Jane"), child("item-b", "Roe, Sam")],
+      timeoutMs: 1000,
+      onDispatched: (results) => dispatchedItemIds.push(...results.map((r) => r.itemId)),
+      watch: async (): Promise<ChildOutcome[]> => [],
+    });
+    // If deriveItemId had keyed by object identity, these would be "" (empty).
+    assert.deepEqual(dispatchedItemIds.sort(), ["item-a", "item-b"]);
+    vi.doUnmock("../../../../src/core/delegate.js");
+  });
 });
