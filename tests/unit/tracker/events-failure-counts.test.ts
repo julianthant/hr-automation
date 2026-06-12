@@ -48,3 +48,14 @@ describe("computeFailureCounts", () => {
     assert.equal(computeFailureCounts([]), 0);
   });
 });
+
+describe("computeFailureCounts — operator-resolved exclusions (E2E-009)", () => {
+  it("excludes cancelled and discarded rows from the bell count", () => {
+    const entries = [
+      entry({ id: "a", runId: "r1", status: "failed", step: "cancelled", timestamp: "2026-06-12T10:00:00Z" }),
+      entry({ id: "b", runId: "r2", status: "failed", step: "discarded", timestamp: "2026-06-12T10:01:00Z" }),
+      entry({ id: "c", runId: "r3", status: "failed", step: "submit", timestamp: "2026-06-12T10:02:00Z" }),
+    ];
+    assert.equal(computeFailureCounts(entries), 1);
+  });
+});

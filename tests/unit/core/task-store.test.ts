@@ -278,3 +278,25 @@ test('markDependencyFromChildTerminal returns the released parents with their wo
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('dependency release terminalizes a task_kind=ocr anchor instead of queueing it (E2E-003)', () => {
+  // The OCR dependency anchor is never daemon work — releasing it to queued
+  // stranded a zombie task for every prep. The generic settle path usually
+  // wins the race against the OCR scheduler's tick, so the flip site itself
+  // must terminalize the anchor.
+  const { dir, store } = openTempStore()
+  try {
+    const [anchor] = store.enqueueTasks({ workflow: 'ocr', inputs: [{ id: 'session-1' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const [child] = store.enqueueTasks({ workflow: 'person-lookup', inputs: [{ id: 'lookup-1' }], deriveItemId: (x) => x.id, now: iso(0) })
+    store.db.prepare(`UPDATE tasks SET task_kind = 'ocr' WHERE id = ?`).run(anchor.taskId)
+    store.createDependency({ parentTaskId: anchor.taskId, childTaskId: child.taskId, onChildFailed: 'block_parent' })
+
+    const released = store.markDependencyFromChildTerminal({ childTaskId: child.taskId, childState: 'done', now: iso(1) })
+
+    assert.deepEqual(released, [], 'an anchor is terminalized, never released for claiming')
+    assert.equal(store.getTask(anchor.taskId)?.state, 'done')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

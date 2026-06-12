@@ -14,9 +14,21 @@ import { oathUploadHandler, oathUploadSteps } from "./handler.js";
  * The Oath Upload row is a single, top-level row in the oath-upload tab.
  * OCR now fans out signer rows separately; oath-upload waits for those
  * cross-daemon child rows, then files the HR ticket after every signer finishes.
+ *
+ * Cancel is TREE-scoped: a full-mode ticket owns a delegated OCR prep
+ * (born-at-upload, `parentRunId` = the ticket run), so cancelling the ticket
+ * must unwind the prep + its lookup descendants too — a row-scoped cancel
+ * left the OCR review orphaned at awaiting-approval for a cancelled parent
+ * (E2E-010).
  */
-export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
-  DEFAULT_WORKFLOW_RUNTIME_POLICY;
+export const OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
+  ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
+  rowActions: DEFAULT_WORKFLOW_RUNTIME_POLICY.rowActions.map((action) =>
+    action.kind === "cancel"
+      ? { ...action, scope: "tree" as const, label: "Cancel workflow tree" }
+      : action,
+  ),
+};
 
 const WORKFLOW = "oath-upload";
 

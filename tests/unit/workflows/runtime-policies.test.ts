@@ -58,7 +58,9 @@ describe("workflow runtime policies", () => {
     assert.equal(policy?.delegation?.failedChildBlocksParent, undefined);
     // subtitleTemplate was removed — oath-upload uses the standard trace-id subtitle.
     assert.equal(policy?.subtitleTemplate, undefined);
-    assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "row");
+    // Cancel is TREE-scoped: the born-at-upload ticket owns a delegated OCR
+    // prep that must unwind with it (E2E-010).
+    assert.equal(policy?.rowActions.find((action) => action.kind === "cancel")?.scope, "tree");
   });
 
   it("registers Emergency Contact OCR-prep and member-row rules", () => {
