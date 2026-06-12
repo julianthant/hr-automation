@@ -231,6 +231,25 @@ function releaseParentsForChildren(
           AND status NOT IN ('satisfied', 'cancelled')
       `).get(parent.parent_task_id) as { n: number }
       if (pending.n !== 0) continue
+      const row = db.prepare(`SELECT workflow, task_kind FROM tasks WHERE id = ?`)
+        .get(parent.parent_task_id) as { workflow: string; task_kind: string | null } | undefined
+      if (!row) continue
+      // A task_kind=ocr parent is a dependency ANCHOR, not daemon work — no
+      // daemon ever claims an "ocr" task, so flipping it to queued strands a
+      // zombie (E2E-003). Its job ends when the last dependency settles:
+      // terminalize it here, at the flip site, because this generic settle
+      // path usually wins the race against the OCR scheduler's own tick.
+      if (row.task_kind === 'ocr') {
+        db.prepare(`
+          UPDATE tasks
+          SET control_state = 'done',
+              terminal_at = COALESCE(terminal_at, @now),
+              updated_at = @now
+          WHERE id = @parentTaskId
+            AND control_state = 'waiting_dependencies'
+        `).run({ parentTaskId: parent.parent_task_id, now })
+        continue
+      }
       const result = db.prepare(`
         UPDATE tasks
         SET control_state = 'queued',
@@ -239,9 +258,7 @@ function releaseParentsForChildren(
           AND control_state = 'waiting_dependencies'
       `).run({ parentTaskId: parent.parent_task_id, now })
       if (result.changes === 0) continue
-      const row = db.prepare(`SELECT workflow FROM tasks WHERE id = ?`)
-        .get(parent.parent_task_id) as { workflow: string } | undefined
-      if (row) released.push({ taskId: parent.parent_task_id, workflow: row.workflow })
+      released.push({ taskId: parent.parent_task_id, workflow: row.workflow })
     }
   }
   return released

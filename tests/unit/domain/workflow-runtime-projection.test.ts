@@ -439,7 +439,9 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(projection.workflowId, "oath-upload");
     assert.equal(projection.runId, "oath-upload-run-1");
     assert.equal(projection.itemId, "upload-session-1");
-    assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "row");
+    // Tree-scoped: a full-mode ticket owns a delegated OCR prep that must
+    // unwind with it (E2E-010).
+    assert.equal(projection.actions.find((action) => action.kind === "cancel")?.scope, "tree");
     // No subtitleTemplate on oath-upload — falls back to the item id.
     assert.equal(projection.subtitle, "upload-session-1");
     // No batch members — single archetype row.
