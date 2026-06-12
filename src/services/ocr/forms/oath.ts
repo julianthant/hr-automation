@@ -21,9 +21,9 @@ import type { OathSignerInput } from "../../../workflows/oath-signature/schema.j
 import type { OathUploadInput } from "../../../workflows/oath-upload/schema.js";
 import {
   DocumentTypeSchema,
-  LLM_HIGH_CONFIDENCE,
   MatchStateSchema,
   VerificationSchema,
+  applyDisambiguationStd,
   assertCarryForwardKindCompatible,
   isForceResearchFlagRecord,
   ocrChildItemIdPrefix,
@@ -307,43 +307,17 @@ export const oathOcrFormSpec: OcrFormSpec<
   },
 
   applyDisambiguation({ record, result }): OathPreviewRecord {
-    const resultEid = normalizeUcpathEmployeeId(result.eid);
-    if (resultEid.length === 0) {
-      // LLM said "none of these" — operator must intervene.
-      return {
-        ...record,
-        employeeId: "",
-        matchState: "lookup-pending",
+    // Shared 3-branch outcome (forms/shared.ts); oath writes the flat
+    // `employeeId` and routes the no-candidate branch to manual review.
+    return applyDisambiguationStd({
+      record,
+      result,
+      writeEid: (r, eid) => ({ ...r, employeeId: eid }),
+      noMatch: {
         matchSource: "manual",
-        warnings: [
-          ...(record.warnings ?? []),
-          "LLM disambiguation: no candidate matched — manual review",
-        ],
-      };
-    }
-
-    if (result.confidence < LLM_HIGH_CONFIDENCE) {
-      return {
-        ...record,
-        employeeId: resultEid,
-        matchState: "lookup-pending",
-        matchSource: "llm",
-        matchConfidence: result.confidence,
-        warnings: [
-          ...(record.warnings ?? []),
-          `LLM picked EID ${resultEid} but low confidence (${result.confidence.toFixed(2)}) — review`,
-        ],
-      };
-    }
-
-    return {
-      ...record,
-      employeeId: resultEid,
-      matchState: "matched",
-      matchSource: "llm",
-      matchConfidence: result.confidence,
-      warnings: record.warnings ?? [],
-    };
+        warning: "LLM disambiguation: no candidate matched — manual review",
+      },
+    });
   },
 
   needsLookup(record): LookupKind {

@@ -17,9 +17,9 @@ import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import type { EmergencyContactRecord } from "../../../workflows/emergency-contact/schema.js";
 import {
   DocumentTypeSchema,
-  LLM_HIGH_CONFIDENCE,
   MatchStateSchema,
   VerificationSchema,
+  applyDisambiguationStd,
   assertCarryForwardKindCompatible,
   isForceResearchFlagRecord,
   ocrChildItemIdPrefix,
@@ -274,42 +274,17 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   },
 
   applyDisambiguation({ record, result }): PreviewRecord {
-    const resultEid = normalizeUcpathEmployeeId(result.eid);
-    if (resultEid.length === 0) {
-      return {
-        ...record,
-        employee: { ...record.employee, employeeId: "" },
-        matchState: "lookup-pending",
+    // Shared 3-branch outcome (forms/shared.ts); EC writes the nested
+    // `employee.employeeId` and falls back to name lookup on no-candidate.
+    return applyDisambiguationStd({
+      record,
+      result,
+      writeEid: (r, eid) => ({ ...r, employee: { ...r.employee, employeeId: eid } }),
+      noMatch: {
         matchSource: "llm",
-        warnings: [
-          ...(record.warnings ?? []),
-          "LLM disambiguation: no roster candidate matched — falling back to eid-lookup by name",
-        ],
-      };
-    }
-
-    if (result.confidence < LLM_HIGH_CONFIDENCE) {
-      return {
-        ...record,
-        employee: { ...record.employee, employeeId: resultEid },
-        matchState: "lookup-pending",
-        matchSource: "llm",
-        matchConfidence: result.confidence,
-        warnings: [
-          ...(record.warnings ?? []),
-          `LLM picked EID ${resultEid} but low confidence (${result.confidence.toFixed(2)}) — review`,
-        ],
-      };
-    }
-
-    return {
-      ...record,
-      employee: { ...record.employee, employeeId: resultEid },
-      matchState: "matched",
-      matchSource: "llm",
-      matchConfidence: result.confidence,
-      warnings: record.warnings ?? [],
-    };
+        warning: "LLM disambiguation: no roster candidate matched — falling back to eid-lookup by name",
+      },
+    });
   },
 
   needsLookup(record): LookupKind {

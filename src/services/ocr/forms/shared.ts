@@ -1,7 +1,56 @@
 import { z } from "zod/v4";
+import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 
 /** Minimum LLM confidence to auto-accept a disambiguation result as `matched`. */
 export const LLM_HIGH_CONFIDENCE = 0.6;
+
+/**
+ * Shared 3-branch LLM-disambiguation outcome (oath + EC twins, extracted):
+ * no-EID → `lookup-pending` with the spec's own matchSource/warning (oath
+ * routes to manual review, EC falls back to name lookup); low confidence →
+ * `lookup-pending`/`llm` + review warning; high confidence → `matched`/`llm`.
+ * The EID write path differs per record shape (oath flat `employeeId`, EC
+ * nested `employee.employeeId`) — supplied via `writeEid`.
+ */
+export function applyDisambiguationStd<R extends { warnings?: string[] }>(args: {
+  record: R;
+  result: { eid?: string | null; confidence: number };
+  writeEid: (record: R, eid: string) => R;
+  /** matchSource + warning for the LLM "none of these candidates" branch. */
+  noMatch: { matchSource: string; warning: string };
+}): R {
+  const { record, result } = args;
+  const resultEid = normalizeUcpathEmployeeId(result.eid ?? "");
+  if (resultEid.length === 0) {
+    return {
+      ...args.writeEid(record, ""),
+      matchState: "lookup-pending",
+      matchSource: args.noMatch.matchSource,
+      warnings: [...(record.warnings ?? []), args.noMatch.warning],
+    } as R;
+  }
+
+  if (result.confidence < LLM_HIGH_CONFIDENCE) {
+    return {
+      ...args.writeEid(record, resultEid),
+      matchState: "lookup-pending",
+      matchSource: "llm",
+      matchConfidence: result.confidence,
+      warnings: [
+        ...(record.warnings ?? []),
+        `LLM picked EID ${resultEid} but low confidence (${result.confidence.toFixed(2)}) — review`,
+      ],
+    } as R;
+  }
+
+  return {
+    ...args.writeEid(record, resultEid),
+    matchState: "matched",
+    matchSource: "llm",
+    matchConfidence: result.confidence,
+    warnings: record.warnings ?? [],
+  } as R;
+}
 
 export const VerificationSchema = z.discriminatedUnion("state", [
   z.object({

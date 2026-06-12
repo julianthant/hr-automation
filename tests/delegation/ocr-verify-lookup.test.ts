@@ -360,7 +360,12 @@ test(
     t.onTestFinished(() => rt.cleanup());
 
     // Hold every person-lookup child at `searching` BEFORE the run starts.
-    rt.holdAll("person-lookup", "searching");
+    // NOTE: arm the LOCAL coordinator — the gated stubs above were pre-wrapped
+    // with it (to override their schema), so `rt.holdAll` (which arms the
+    // runtime's own coordinator) never reaches them. This hold silently
+    // no-opped before 2026-06-11; the test passed only because the sequential
+    // i9 dispatch left enough wall-clock for the cancel to land mid-run.
+    coordinator.holdAll("person-lookup", "searching");
 
     const cancelRecords: StubVerifyOcrRecord[] = [
       { formKind: "oath", sourcePage: 1, printedName: "Doe, Jane A", employeeId: null, officerSigned: false },

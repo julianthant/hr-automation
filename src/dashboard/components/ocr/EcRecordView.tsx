@@ -1,6 +1,6 @@
 import type { PreviewRecord } from "./types";
 import { RELATIONSHIP_OPTIONS } from "./types";
-import { RecordField } from "./shared/RecordField";
+import { RecordField, recordFieldMissing } from "./shared/RecordField";
 
 export interface EcRecordViewProps {
   record: PreviewRecord;
@@ -24,9 +24,6 @@ const FIELD_LABELS = {
   workPhone: "Work Phone",
 } as const;
 
-function isMissing(record: PreviewRecord, fieldKey: string): boolean {
-  return record.originallyMissing?.includes(fieldKey) ?? false;
-}
 
 /**
  * Trimmed EC review form — only the fields the kernel workflow writes
@@ -58,7 +55,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
     <div className="flex flex-col gap-3">
       <RecordField
         label={FIELD_LABELS.employeeName}
-        missing={isMissing(record, "employee.name")}
+        missing={recordFieldMissing(record, "employee.name")}
       >
         <input
           type="text"
@@ -69,7 +66,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
       </RecordField>
       <RecordField
         label={FIELD_LABELS.emplId}
-        missing={isMissing(record, "employee.employeeId")}
+        missing={recordFieldMissing(record, "employee.employeeId")}
       >
         <input
           type="text"
@@ -80,7 +77,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
       </RecordField>
       <RecordField
         label={FIELD_LABELS.contactName}
-        missing={isMissing(record, "emergencyContact.name")}
+        missing={recordFieldMissing(record, "emergencyContact.name")}
       >
         <input
           type="text"
@@ -91,7 +88,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
       </RecordField>
       <RecordField
         label={FIELD_LABELS.relationship}
-        missing={isMissing(record, "emergencyContact.relationship")}
+        missing={recordFieldMissing(record, "emergencyContact.relationship")}
       >
         <select
           value={record.emergencyContact.relationship}
@@ -127,7 +124,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
         <div className="grid grid-cols-2 gap-3">
           <RecordField
             label={FIELD_LABELS.street}
-            missing={isMissing(record, "emergencyContact.address.street")}
+            missing={recordFieldMissing(record, "emergencyContact.address.street")}
           >
             <input
               type="text"
@@ -165,7 +162,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
       <div className="grid grid-cols-3 gap-3">
         <RecordField
           label={FIELD_LABELS.cellPhone}
-          missing={isMissing(record, "emergencyContact.cellPhone")}
+          missing={recordFieldMissing(record, "emergencyContact.cellPhone")}
         >
           <input
             type="text"

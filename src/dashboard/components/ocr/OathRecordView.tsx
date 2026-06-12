@@ -1,5 +1,5 @@
 import type { OathPreviewRecord } from "./types";
-import { RecordField } from "./shared/RecordField";
+import { RecordField, recordFieldMissing } from "./shared/RecordField";
 
 export interface OathRecordViewProps {
   record: OathPreviewRecord;
@@ -8,9 +8,6 @@ export interface OathRecordViewProps {
   isResearching?: boolean;
 }
 
-function isMissing(record: OathPreviewRecord, fieldKey: string): boolean {
-  return record.originallyMissing?.includes(fieldKey) ?? false;
-}
 
 /**
  * Oath review form — Empl ID, Printed Name, Date Signed, Employee
@@ -24,7 +21,7 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <RecordField label="Empl ID" missing={isMissing(record, "employeeId")}>
+      <RecordField label="Empl ID" missing={recordFieldMissing(record, "employeeId")}>
         <input
           type="text"
           value={record.employeeId}
@@ -32,7 +29,7 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
           className="form-input font-mono"
         />
       </RecordField>
-      <RecordField label="Printed Name" missing={isMissing(record, "printedName")}>
+      <RecordField label="Printed Name" missing={recordFieldMissing(record, "printedName")}>
         <input
           type="text"
           value={record.printedName}
@@ -41,7 +38,7 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
         />
       </RecordField>
       <div className="grid grid-cols-2 gap-3">
-        <RecordField label="Date Signed" missing={isMissing(record, "dateSigned")}>
+        <RecordField label="Date Signed" missing={recordFieldMissing(record, "dateSigned")}>
           <input
             type="text"
             value={formatOathDateForDisplay(record.dateSigned)}
