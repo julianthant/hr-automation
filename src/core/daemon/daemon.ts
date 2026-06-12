@@ -104,7 +104,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   wf: RegisteredWorkflow<TData, TSteps>,
   opts: DaemonOpts = {},
 ): Promise<void> {
-  const trackerDir = opts.trackerDir
+  // Spawned daemons receive their isolated tracker root via HRAUTO_TRACKER_DIR
+  // (set in core/daemon/registry.ts::spawnDaemon); without this fallback the
+  // daemon's lockfile/control-DB/emits land in `.tracker` while the spawner
+  // watches the isolated root — the daemon never finds its queue.
+  const trackerDir = opts.trackerDir ?? process.env.HRAUTO_TRACKER_DIR
   const launchFn = opts.sessionLaunchFn ?? Session.launch.bind(Session)
   const idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_MS
 
