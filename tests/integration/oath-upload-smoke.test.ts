@@ -117,7 +117,6 @@ test(
         sessionId: itemId,
         pdfHash: "a".repeat(64),
         mode: "full" as const,
-        rosterMode: "download" as const,
         signerItemIds: ["smoke-r0", "smoke-r1"],
       },
       itemId,

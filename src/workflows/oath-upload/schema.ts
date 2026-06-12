@@ -18,11 +18,11 @@ export const OathUploadInputSchema = z.object({
    * `upload-only` mode).
    */
   signerItemIds:   z.array(z.string()).optional(),
-  // Roster source for legacy/standalone runs. "existing" requires `rosterPath`;
-  // "download" pulls a fresh copy from SharePoint. Unused by OCR-fan-out rows
-  // (OCR already matched the roster) but kept for `upload-only` compatibility.
-  rosterMode:      z.enum(["existing", "download"]).default("download"),
-  rosterPath:      z.string().optional(),
+  // `rosterMode`/`rosterPath` were REMOVED (E2E-006): the handler never read
+  // them — OCR owns roster matching — yet the born-at-upload input hardcoded
+  // rosterMode:"download", silently contradicting the operator's modal choice.
+  // Old persisted inputs that still carry the keys parse fine (Zod strips
+  // unknown keys), so retries of pre-removal tasks are unaffected.
   dryRun:          z.boolean().optional(),
 });
 

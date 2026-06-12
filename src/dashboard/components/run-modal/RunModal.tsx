@@ -73,6 +73,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [files, setFiles] = useState<File[]>([]);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<RosterMode>("existing");
+  // Whether the current rosterMode was picked by the OPERATOR (radio click)
+  // or auto-applied by the flip effect below. Only an auto-applied
+  // download/wait may be flipped back to "existing" when rosters load —
+  // overriding an operator's deliberate choice would be its own bug.
+  const rosterModeSource = useRef<"auto" | "user">("auto");
   const rosters = useRosters();
   const seenSharePointCompletionTs = useRef<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -167,11 +172,22 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   useEffect(() => {
     if (!rosters) return;
     if (rosters.length === 0 && rosterMode === "existing") {
+      rosterModeSource.current = "auto";
       setRosterMode(sharePointWaitAvailable ? "wait" : "download");
       return;
     }
     if (rosterMode === "wait" && !sharePointWaitAvailable) {
+      rosterModeSource.current = "auto";
       setRosterMode(rosters.length > 0 ? "existing" : "download");
+      return;
+    }
+    // Flip BACK to the local roster once rosters load, but only when the
+    // current download/wait choice was auto-applied above (a momentarily
+    // empty useRosters() on open used to strand the modal on a silent
+    // SharePoint download while the operator believed "Use latest roster"
+    // was in effect — E2E-006). An operator-clicked choice is never undone.
+    if (rosters.length > 0 && rosterMode !== "existing" && rosterModeSource.current === "auto") {
+      setRosterMode("existing");
     }
   }, [rosters, rosterMode, sharePointWaitAvailable]);
 
@@ -592,7 +608,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
                 <RosterRow
                   checked={rosterMode === "existing"}
                   disabled={!hasRoster || submitting}
-                  onSelect={() => setRosterMode("existing")}
+                  onSelect={() => {
+                    rosterModeSource.current = "user";
+                    setRosterMode("existing");
+                  }}
                   label="Use latest roster"
                   hint={
                     hasRoster && latestRoster
@@ -606,7 +625,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
                   <RosterRow
                     checked={rosterMode === "wait"}
                     disabled={submitting}
-                    onSelect={() => setRosterMode("wait")}
+                    onSelect={() => {
+                      rosterModeSource.current = "user";
+                      setRosterMode("wait");
+                    }}
                     label="Wait for queued SharePoint"
                     hint={sharePointQueueHint}
                   />
@@ -614,7 +636,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
                 <RosterRow
                   checked={rosterMode === "download"}
                   disabled={submitting}
-                  onSelect={() => setRosterMode("download")}
+                  onSelect={() => {
+                    rosterModeSource.current = "user";
+                    setRosterMode("download");
+                  }}
                   label="Download fresh from SharePoint"
                   hint={
                     sharePointWaitAvailable

@@ -64,10 +64,6 @@ export interface StartInput {
   pdfHash: string;
   sessionId?: string;
   mode?: "full" | "upload-only";
-  /** Roster source for the delegated OCR step. Defaults to "download". */
-  rosterMode?: "existing" | "download";
-  /** Required when `rosterMode === "existing"`. Resolved by the route from disk. */
-  rosterPath?: string;
   dryRun?: boolean;
 }
 export interface StartResponse {
@@ -112,7 +108,6 @@ export function buildOathUploadStartHandler(
         body: { ok: false, error: "full oath-upload runs must start via /api/ocr/prepare" },
       };
     }
-    const rosterMode = input.rosterMode ?? "download";
     const sessionId = input.sessionId ?? randomUUID();
     void runCli([
       {
@@ -122,8 +117,6 @@ export function buildOathUploadStartHandler(
         sessionId,
         pdfHash: input.pdfHash,
         mode,
-        rosterMode,
-        rosterPath: input.rosterPath,
         dryRun: input.dryRun,
       },
     ]).catch((err) =>

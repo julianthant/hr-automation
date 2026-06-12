@@ -66,7 +66,6 @@ test("oathUploadHandler: waits on signers → servicenow-auth → open-hr-form �
       pdfOriginalName: "test.pdf",
       sessionId: "session-1",
       mode: "full",
-      rosterMode: "download",
       signerItemIds: ["ocr-oath-r0", "ocr-oath-r1", "ocr-oath-r2"],
     }, {
       trackerDir: dir,
@@ -119,7 +118,6 @@ test("oathUploadHandler: a failed signer THROWS and does NOT file the ticket", a
         pdfOriginalName: "test.pdf",
         sessionId: "session-fail",
         mode: "full",
-        rosterMode: "download",
         signerItemIds: ["r0", "r1"],
       }, {
         trackerDir: dir,
@@ -153,7 +151,6 @@ test("oathUploadHandler: a MISSING signer outcome THROWS and does NOT file", asy
         pdfOriginalName: "test.pdf",
         sessionId: "session-missing",
         mode: "full",
-        rosterMode: "download",
         signerItemIds: ["r0", "r1"],
       }, {
         trackerDir: dir,
@@ -183,7 +180,6 @@ test("oathUploadHandler: dryRun skips ServiceNow submit", async () => {
       sessionId: "session-dry",
       pdfHash: "a".repeat(64),
       mode: "full",
-      rosterMode: "download",
       signerItemIds: ["r0"],
       dryRun: true,
     }, {
@@ -221,7 +217,6 @@ test("oathUploadHandler: upload-only mode skips the signature wait then submits"
       sessionId: "session-upload-only",
       pdfHash: "a".repeat(64),
       mode: "upload-only",
-      rosterMode: "download",
     }, {
       trackerDir: dir,
       _resolvePdfOverride: RESOLVE_PDF,
@@ -265,7 +260,6 @@ test("oathUploadHandler born-at-upload: wait-approval learns the signer set, the
       pdfOriginalName: "oaths.pdf",
       sessionId: "sess-op",
       mode: "full",
-      rosterMode: "download",
       // NO signerItemIds → born at upload, learns them at approval.
     }, {
       trackerDir: dir,
@@ -317,7 +311,6 @@ test("oathUploadHandler born-at-upload: approval with zero signer rows THROWS an
         pdfOriginalName: "oaths.pdf",
         sessionId: "sess-empty",
         mode: "full",
-        rosterMode: "download",
       }, {
         trackerDir: dir,
         _resolvePdfOverride: RESOLVE_PDF,
@@ -359,7 +352,6 @@ test("oathUploadHandler born-at-upload: a discarded OCR prep THROWS and never fi
         pdfOriginalName: "oaths.pdf",
         sessionId: "sess-discard",
         mode: "full",
-        rosterMode: "download",
       }, {
         trackerDir: dir,
         _resolvePdfOverride: RESOLVE_PDF,
@@ -396,7 +388,6 @@ test("oathUploadHandler born-at-upload: a hard OCR failure THROWS and never file
         pdfOriginalName: "oaths.pdf",
         sessionId: "sess-ocr-failed",
         mode: "full",
-        rosterMode: "download",
       }, {
         trackerDir: dir,
         _resolvePdfOverride: RESOLVE_PDF,
