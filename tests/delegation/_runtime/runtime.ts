@@ -240,6 +240,39 @@ export interface DelegationRuntime {
   cleanup(): Promise<void>;
 
   /**
+   * Alive daemons for `workflow` (liveness-probed via `findAliveDaemons`):
+   * `{ port, instanceId }` per daemon. Use to count the pool before/after a
+   * teardown (spawn-exactly-N / orphan-lockfile assertions).
+   */
+  daemons(
+    workflow: DelegationWorkflow | string,
+  ): Promise<Array<{ port: number; instanceId: string }>>;
+
+  /** POST `/wake` to every alive daemon of `workflow` (idle-wake path). */
+  wake(workflow: DelegationWorkflow | string): Promise<void>;
+
+  /**
+   * Workflow-scoped **Stop All** (`/api/daemon/stop` → each alive daemon `/stop`
+   * with NO `reassign`): in-flight items FAIL red (no `step:"cancelled"`
+   * sentinel), queued items are terminalized by the last daemon. The
+   * teardown-soak's stop-all leg.
+   */
+  stopAll(workflow: DelegationWorkflow | string, opts?: { force?: boolean }): Promise<void>;
+
+  /**
+   * Per-instance card stop (`/api/daemon/stop-instance` → ONE daemon `/stop`
+   * with `{ reassign: true }`): the in-flight item is un-claimed and a
+   * responsive surviving peer finishes it (else it fails loud). Targets the
+   * daemon whose `/status.inFlightRunId` matches `holdingRunId` (so the reassign
+   * actually has an item to bounce); without it, stops the first alive daemon.
+   * Returns the stopped `{ instanceId, port }`.
+   */
+  stopInstance(
+    workflow: DelegationWorkflow | string,
+    opts?: { reassign?: boolean; holdingRunId?: string },
+  ): Promise<{ instanceId: string; port: number }>;
+
+  /**
    * Seed the FORM-APPROPRIATE raw OCR records (+ optional roster) the stub
    * `runOcrOrchestrator` pipeline returns VERBATIM (oath-shaped for the oath
    * form, EC-shaped for emergency-contact — build them via
@@ -756,6 +789,58 @@ export async function createDelegationRuntime(
     return enqueuedChildren;
   };
 
+  // ── daemon pool control (teardown matrix) ────────────────────────────────
+  const postDaemon = (port: number, route: string, body: Record<string, unknown>): Promise<void> =>
+    fetch(`http://127.0.0.1:${port}${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(() => undefined)
+      .catch(() => undefined);
+
+  const daemonsOf: DelegationRuntime["daemons"] = async (workflow) => {
+    const name = resolveWf(workflow).config.name;
+    invalidateAliveDaemonsCache(name, trackerDir);
+    const alive = await findAliveDaemons(name, trackerDir);
+    return alive.map((d) => ({ port: d.port, instanceId: d.instanceId }));
+  };
+
+  const wake: DelegationRuntime["wake"] = async (workflow) => {
+    const alive = await daemonsOf(workflow);
+    await Promise.all(alive.map((d) => postDaemon(d.port, "/wake", {})));
+  };
+
+  const stopAll: DelegationRuntime["stopAll"] = async (workflow, stopOpts) => {
+    const alive = await daemonsOf(workflow);
+    await Promise.all(
+      alive.map((d) => postDaemon(d.port, "/stop", { force: stopOpts?.force ?? false })),
+    );
+  };
+
+  const stopInstance: DelegationRuntime["stopInstance"] = async (workflow, stopOpts) => {
+    const alive = await daemonsOf(workflow);
+    if (alive.length === 0) {
+      throw new Error(
+        `stopInstance: no alive daemon for '${resolveWf(workflow).config.name}'`,
+      );
+    }
+    let target = alive[0]!;
+    if (stopOpts?.holdingRunId) {
+      for (const d of alive) {
+        const status = (await fetch(`http://127.0.0.1:${d.port}/status`)
+          .then((r) => r.json())
+          .catch(() => null)) as { inFlightRunId?: string } | null;
+        if (status?.inFlightRunId === stopOpts.holdingRunId) {
+          target = d;
+          break;
+        }
+      }
+    }
+    await postDaemon(target.port, "/stop", { reassign: stopOpts?.reassign ?? true });
+    return target;
+  };
+
   // ── cleanup ──────────────────────────────────────────────────────────────
   let cleanedUp = false;
   const cleanup: DelegationRuntime["cleanup"] = async () => {
@@ -792,6 +877,10 @@ export async function createDelegationRuntime(
     children,
     dashboard,
     cleanup,
+    daemons: daemonsOf,
+    wake,
+    stopAll,
+    stopInstance,
     stubOcr,
     enqueueOcr,
     approveOcr,

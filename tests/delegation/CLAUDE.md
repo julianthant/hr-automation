@@ -19,6 +19,7 @@ projection tooling `snapshot-row.ts`). Full harness API + gotchas:
 | `ocr-verify-lookup.test.ts` | **P2.11** — OCR `verify` → person-lookup + i9-lookup **`enrichRecords`** fan-out (NO approve fan-out; verify is read-only). Asserts the full enrichment projection + a cancel-mid-enrichment invariant. See "verify enrichment fan-out shape" below. |
 | `ocr-oath-upload.test.ts` | **P2.12** — OCR (oath form) → oath-upload **`approveDocumentTo`** once-per-document fan-out. Approving an oath OCR run fans out to TWO daemons: 1 oath-signature signer row (`approveTo`) + 1 oath-upload TICKET row (`approveDocumentTo`), both under the OCR run, sharing the `ou-` trace prefix. Asserts the doc fan-out projection (ticket row file-kind title + `signerItemIds` input) + cancel-the-ticket-leaves-signer invariant. Drove the multi-target `rt.approveOcr` generalization. See "approveDocumentTo doc fan-out shape" below. |
 | `concurrency-soak.test.ts` | **P3.13** — Concurrency/soak: 2 parents × [3+2] children in flight concurrently, children cancelled at DIFFERENT stages, looped `SOAK_ITERATIONS` times. Pins no-stall / no-orphan / no-count-drift / sibling-independence / projection / group-anchor invariants every iteration plus cross-iteration drift checks. See "Concurrency/soak (P3.13)" below. |
+| `daemon-teardown-soak.test.ts` | **Teardown soak** — the daemon force-stop / reassign / stop-all state machine (the recurring AI-e2e bug NEST: 2026-06-04 signal-only-wait, 2026-06-07 reassign/fail-loud, 2026-06-13 VQ-003) looped under index-derived jitter, FRESH runtime per iteration. Pins: Stop-All → in-flight fails RED with EXACTLY ONE terminal (VQ-003) + no orphan lockfiles; Stop-Instance(reassign) → peer finishes the SAME runId, exactly one terminal, stopped lockfile gone. See "Daemon-teardown soak" below. |
 
 ## OCR fan-out test pattern (P2.9)
 
@@ -281,7 +282,71 @@ Crank with the env var for local heavy soak runs.
 
 The runtime is shared across soak iterations (cheaper startup; fresh `parentRunId`s per iteration provide isolation). This makes cross-iteration drift visible as an assertion failure rather than silently hiding it.
 
+## Daemon-teardown soak
+
+`daemon-teardown-soak.test.ts` is the proactive guard for the daemon
+teardown/concurrency state machine — the subsystem that produced a finding in
+nearly every AI-e2e run. Where `daemon.test.ts` pins ONE ordering per contract
+(reactive — each finding added a case AFTER an e2e discovered it), this loops
+the teardown matrix many times under jitter so a NEW race shows up in CI rather
+than in the next expensive headed-browser run.
+
+### Why a separate harness vehicle
+
+The `_runtime` already manages a daemon pool against a temp tracker; it gained
+four teardown primitives (`daemons` / `wake` / `stopAll` / `stopInstance` — see
+`_runtime/CLAUDE.md`). A teardown KILLS daemons, so each iteration spins a FRESH
+runtime (unlike `concurrency-soak`, which reuses one pool because it only
+cancels/releases runs). The held gated stub parks in a SIGNAL-ONLY wait — the
+exact VQ-003 / 2026-06-04 repro condition (no live browser to kill; only
+`ctx.signal` unwinds it).
+
+### What it pins (every iteration)
+
+- **Stop-All (no reassign)** — 2 items, 2 daemons, both held in-flight,
+  `rt.stopAll`. Each run terminalizes FAILED red (`status:"failed"`, step NOT
+  `"cancelled"`) with EXACTLY ONE terminal row (VQ-003 — the in-flight signal-
+  only wait that once double-wrote a `running/step:cancelled` step marker's
+  terminal twin then a fail row; the `origin:'shutdown'` suppression keeps it to
+  one). Zero alive daemons + zero leftover lockfiles after.
+- **Stop-Instance (reassign)** — 1 held item, `rt.stopInstance({ reassign:true,
+  holdingRunId })` (targets the daemon actually holding the run via
+  `/status.inFlightRunId`). The surviving peer re-claims the SAME runId →
+  re-enters the held stage (2nd `step:start`) → release pump → completes `done`.
+  EXACTLY ONE terminal row (the reassign writes none on the stopped daemon); the
+  stopped instance's lockfile is gone; one peer survives.
+
+### Gotchas baked into the test
+
+- `stopInstance` must target the **holder**, not `alive[0]` — with 2 daemons +
+  1 item one daemon is idle; stopping the idle one reassigns nothing. Pass
+  `holdingRunId`.
+- The peer re-registers its hold a tick AFTER its `step:start` fires, and
+  `GateCoordinator.release` only resolves an ALREADY-registered hold — so the
+  test PUMPS `release` until terminal (`releaseUntilTerminal`), not once.
+- The release pump runs only AFTER the 2nd `step:start`, by which point the
+  stopped daemon is gone — so the pump can't accidentally resolve the stopped
+  daemon's hold and let it complete on the wrong daemon.
+
+### Candidate finding the harness surfaced (NOT yet a pinned assertion)
+
+On a simultaneous Stop-All of EVERY daemon, a **never-claimed QUEUED** task can
+be orphaned `queued` (each dying daemon leaves it "for a peer" that is also
+dying → nobody terminalizes it; 0 daemons alive, task stuck `queued` in SQLite
+with no terminal row). The e2e skill's Phase-5 expects "queued items
+terminalized by the last daemon," so this is a real candidate — tracked in
+`docs/engineering/daemon-teardown-state-machine.md`. The soak deliberately does
+NOT assert the queued path (a soak must pin stable behavior); it guards the
+in-flight path and the doc carries the queued-orphan as a to-confirm.
+
 ## Not yet asserted here
 
 - **Retry-after-cancel** — P2.9–P3.13 do NOT assert it; `tests/integration/
   retry-original-input.test.ts` is kept until a Tier-1 test owns it.
+- **Idle-wake (ISS-001) + parallel spawn/reuse/no-overspawn** — the teardown
+  soak covers stop-all + reassign, but NOT the fresh-enqueue idle-wake path
+  (the `_runtime.enqueue` wakes explicitly rather than routing through
+  `ensureDaemonsAndEnqueue`) or mid-test spawn (the runtime spawns daemons only
+  at construction). Those stay in `daemon.test.ts` point-tests for now; widening
+  the harness to drive `ensureDaemonsAndEnqueue` + mid-test spawn would let the
+  soak cover them too.
