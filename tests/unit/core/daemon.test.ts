@@ -12,6 +12,7 @@ import { clear } from '../../../src/core/kernel/registry.js'
 import { runWorkflowDaemon } from '../../../src/core/daemon/daemon.js'
 import { Session } from '../../../src/core/kernel/session.js'
 import { enqueueItems, readQueueStateIncludingTerminals } from '../../../src/core/daemon/queue.js'
+import { ensureDaemonsAndEnqueue } from '../../../src/core/daemon/client.js'
 import {
   findAliveDaemons,
   ensureDaemonsDir,
@@ -1237,6 +1238,62 @@ test('runWorkflowDaemon: forwards QueueItem.parentRunId into runOneItem so track
       assert.equal(r.parentRunId, parentRunId, `tracker row for child-1 missing parentRunId: ${JSON.stringify(r)}`)
     }
 
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureDaemonsAndEnqueue wakes an idle daemon after enqueue (no manual /wake) — ISS-001', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-iss001-'))
+  try {
+    const seen: string[] = []
+    const wf = defineWorkflow({
+      name: 'dint-iss001',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx, data) => {
+        await ctx.step('run', async () => {
+          seen.push((data as { id: string }).id)
+        })
+      },
+    })
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000, // long enough that only /wake unblocks
+    })
+
+    await waitForDaemon('dint-iss001', dir)
+
+    // Let the daemon enter the idle wait — no work is queued yet.
+    await new Promise((r) => setTimeout(r, 200))
+
+    // Call ensureDaemonsAndEnqueue with NO manual /wake afterward.
+    // The fix (ISS-001) ensures the daemon is woken AFTER task rows are
+    // written, so the claim loop finds claimable work on its first re-poll.
+    await ensureDaemonsAndEnqueue(wf, [{ id: 'late' }], {}, { trackerDir: dir, quiet: true })
+
+    // The daemon must claim and complete the item driven solely by the
+    // internal wake fired by ensureDaemonsAndEnqueue — no /wake from us.
+    await waitFor(async () => {
+      const st = await readQueueStateIncludingTerminals('dint-iss001', dir)
+      return st.done.length === 1
+    }, 6_000)
+
+    assert.deepEqual(seen, ['late'])
+
+    const { port } = await waitForDaemon('dint-iss001', dir)
     await fetch(`http://127.0.0.1:${port}/stop`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
