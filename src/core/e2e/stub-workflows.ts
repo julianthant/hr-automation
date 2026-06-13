@@ -167,7 +167,11 @@ const personLookupScript: StepDataFn = (input) => {
     }),
     "active-status": {
       hrStatus: "Active",
-      activeStatus: "A",
+      // Canonical person-lookup ActiveCheckStatus value ("active"|"inactive"|
+      // "non-hdh"|...), NOT the dashboard A/IA display-chip label. computeOcrVerification
+      // lower-cases and matches this exactly; "A" fell through to lookup-failed, so OCR
+      // records never verified and the review pane deselected every signed record (VP-001).
+      activeStatus: "active",
       isActive: "true",
     },
     "crm-dates": compact(
