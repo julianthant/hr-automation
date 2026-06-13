@@ -185,13 +185,21 @@ export async function wakeDaemonsForReleasedParents(
  * Ensure at least one daemon is alive for a workflow, then wake every alive
  * daemon. Used by enqueue paths and by retry paths that requeue an existing
  * SQLite task instead of inserting a new one through ensureDaemonsAndEnqueue.
+ *
+ * @param opts.skipWake - When `true`, skips the final `wakeDaemons` call.
+ *   Use this when the caller will write task rows AFTER this function returns
+ *   and wants to wake daemons only once those rows are visible in SQLite
+ *   (i.e. `ensureDaemonsAndEnqueue` passes `skipWake: true` and fires its own
+ *   post-enqueue wake so an idle daemon's re-poll finds claimable work).
+ *   The default (`false`) wakes immediately — correct for requeue/retry paths
+ *   where the task row already exists in SQLite before this call.
  */
 export async function ensureDaemonsAvailable(
   workflow: string,
   flags: DaemonFlags = {},
-  opts: { trackerDir?: string; quiet?: boolean } = {},
+  opts: { trackerDir?: string; quiet?: boolean; skipWake?: boolean } = {},
 ): Promise<Daemon[]> {
-  const { trackerDir, quiet } = opts
+  const { trackerDir, quiet, skipWake = false } = opts
   const daemons = await withDaemonSpawnLock(workflow, trackerDir, async () => {
     invalidateAliveDaemonsCache(workflow, trackerDir)
     const alive = await findAliveDaemons(workflow, trackerDir)
@@ -246,7 +254,9 @@ export async function ensureDaemonsAvailable(
   if (daemons.length === 0) {
     throw new Error('ensureDaemonsAvailable: expected at least one daemon after spawn phase')
   }
-  await wakeDaemons(daemons)
+  if (!skipWake) {
+    await wakeDaemons(daemons)
+  }
   return daemons
 }
 
@@ -372,7 +382,8 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
 
   // ---------------------------------------------------------------------
   // Order (2026-04-28 reorder per Cluster A spec; discover+spawn moved
-  // under withDaemonSpawnLock 2026-05-22):
+  // under withDaemonSpawnLock 2026-05-22; wake moved AFTER enqueue 2026-06-13
+  // ISS-001 — idle daemon must find tasks in SQLite when its claim loop fires):
   //   1. Pre-assign runIds for every input
   //   2. FIRE onPreEmitPending (dashboard sees pending rows in <100ms)
   //   3-4. withDaemonSpawnLock — serialized per workflow:
@@ -381,10 +392,11 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   //         a fresh daemon doesn't pile chrome on top of leaked tabs from
   //         a SIGKILLed predecessor)
   //      c. Spawn new daemons (await lockfile registration, ~5-10s)
-  //   5. Wake every alive daemon (now includes spawned ones)
-  //   6. Write SQLite task rows + JSONL enqueue audit — ONLY after a daemon is registered,
+  //   5. Write SQLite task rows + JSONL enqueue audit — ONLY after a daemon is registered,
   //      so the orphan sweep can be aggressive (5s/0-grace) without
   //      false-positives during a spawn-in-flight window.
+  //   6. Wake every alive daemon (now includes spawned ones) — AFTER the task
+  //      rows are written so an idle daemon's claim loop finds claimable work.
   //
   // Failure handling: if the spawn step throws, we fire onPreEmitFailed for
   // every pre-emitted runId so the caller can mark the stranded
@@ -443,7 +455,8 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   try {
-    // Steps 3-4: discover + spawn, serialized per workflow.
+    // Steps 3-4: discover + spawn, serialized per workflow — skipWake so the
+    // idle daemon's claim loop doesn't re-poll before task rows exist in SQLite.
     //
     // The discover→spawn window is a TOCTOU race: two near-simultaneous
     // enqueues for the same workflow would both run findAliveDaemons before
@@ -452,11 +465,9 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
     // withDaemonSpawnLock serializes the section so the second caller
     // re-discovers AFTER the first's spawn registers, finds that daemon, and
     // computeSpawnPlan returns 0 for it — it reuses the existing daemon.
-    const daemons = await ensureDaemonsAvailable(wf.config.name, flags, { trackerDir, quiet })
+    const daemons = await ensureDaemonsAvailable(wf.config.name, flags, { trackerDir, quiet, skipWake: true })
 
-    // Step 5 wake is handled inside ensureDaemonsAvailable.
-
-    // Step 6: write task rows + queue audit. Now safe — at least one daemon is registered
+    // Step 5: write task rows + queue audit. Now safe — at least one daemon is registered
     // for this workflow, so the orphan sweep won't false-positive on these
     // items in the spawn-in-flight window.
     // Use the pre-computed ids[] rather than idFn directly — idFn's fallback
@@ -470,6 +481,10 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
       runIds,
       parentRunId ? inputs.map(() => parentRunId) : undefined,
     )
+
+    // Step 6: wake daemons AFTER task rows are committed so an idle daemon's
+    // claim loop finds claimable work on its first re-poll (ISS-001 fix).
+    await wakeDaemons(daemons)
 
     if (!quiet) {
       for (const { id, position } of enqueued) {
