@@ -73,5 +73,7 @@ Thumbs.db
 
 # Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.
 tests/data/*.pdf
+# e2e roster identities sidecar (PII — real names+EIDs for make-e2e-roster.mjs)
+tests/data/e2e-roster-identities.json
 # AI e2e test run artifacts (manifests, issue ledgers, reports)
 .e2e/
