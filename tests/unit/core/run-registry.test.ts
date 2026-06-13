@@ -249,35 +249,35 @@ test('runRegistry: SQLite-backed cancel marks browser rows kill_requested + enqu
   }
 })
 
-test('runRegistry: cancelReason records the structured origin (VQ-003) — defaults to user, shutdown when passed', async () => {
+test('runRegistry: cancelOrigin records the structured origin (VQ-003) — defaults to user, shutdown when passed', async () => {
   const r = createRunRegistry()
   r.register(makeHandle({ runId: 'user-run' }))
   r.register(makeHandle({ runId: 'shutdown-run' }))
 
   // No cancel fired yet → no recorded origin.
-  assert.equal(r.cancelReason('user-run'), undefined)
+  assert.equal(r.cancelOrigin('user-run'), undefined)
 
   // Default origin is 'user' (deliberate cancel — kernel keeps its orange row).
   await r.cancel('user-run', { reason: 'http_cancel_current', hardKillAfterMs: 0 })
-  assert.equal(r.cancelReason('user-run'), 'user')
+  assert.equal(r.cancelOrigin('user-run'), 'user')
 
   // Explicit 'shutdown' origin (daemon teardown — kernel suppresses its row).
   await r.cancel('shutdown-run', { reason: 'daemon_shutdown', origin: 'shutdown', hardKillAfterMs: 0 })
-  assert.equal(r.cancelReason('shutdown-run'), 'shutdown')
+  assert.equal(r.cancelOrigin('shutdown-run'), 'shutdown')
 })
 
 test('runRegistry: unregister clears the recorded cancel origin so a reused runId cannot inherit it (VQ-003)', async () => {
   const r = createRunRegistry()
   r.register(makeHandle({ runId: 'reused' }))
   await r.cancel('reused', { reason: 'daemon_shutdown', origin: 'shutdown', hardKillAfterMs: 0 })
-  assert.equal(r.cancelReason('reused'), 'shutdown')
+  assert.equal(r.cancelOrigin('reused'), 'shutdown')
 
   r.unregister('reused')
-  assert.equal(r.cancelReason('reused'), undefined, 'origin cleared on unregister')
+  assert.equal(r.cancelOrigin('reused'), undefined, 'origin cleared on unregister')
 
   // A fresh run reusing the same id starts with no origin until it cancels.
   r.register(makeHandle({ runId: 'reused' }))
-  assert.equal(r.cancelReason('reused'), undefined, 'reused runId does not inherit the stale shutdown origin')
+  assert.equal(r.cancelOrigin('reused'), undefined, 'reused runId does not inherit the stale shutdown origin')
 })
 
 test('runRegistry: a second cancel re-records the origin even after the controller already aborted (VQ-003)', async () => {
@@ -288,12 +288,28 @@ test('runRegistry: a second cancel re-records the origin even after the controll
   r.register(makeHandle({ runId: 'r1' }))
 
   await r.cancel('r1', { reason: 'first', origin: 'user', hardKillAfterMs: 0 })
-  assert.equal(r.cancelReason('r1'), 'user')
+  assert.equal(r.cancelOrigin('r1'), 'user')
 
   const second = await r.cancel('r1', { reason: 'second', origin: 'shutdown', hardKillAfterMs: 0 })
   assert.equal(second.ok, true)
   if (second.ok) assert.equal(second.alreadyCancelled, true)
-  assert.equal(r.cancelReason('r1'), 'shutdown', 'origin updated on the second cancel despite already-cancelled')
+  assert.equal(r.cancelOrigin('r1'), 'shutdown', 'origin updated on the second cancel despite already-cancelled')
+})
+
+test('runRegistry: shutdown origin is STICKY — a later user cancel does NOT downgrade it (VQ-003 reverse race)', async () => {
+  // Reverse of the upgrade test: once daemon teardown claims a run (shutdown),
+  // a deliberate /cancel-current (user) arriving afterward must NOT flip the
+  // origin back to 'user' — otherwise the kernel would resume emitting its
+  // terminal cancelled row while the daemon's teardown already owns the sole
+  // terminal, re-introducing the VQ-003 double terminal.
+  const r = createRunRegistry()
+  r.register(makeHandle({ runId: 'r2' }))
+
+  await r.cancel('r2', { reason: 'shutdown', origin: 'shutdown', hardKillAfterMs: 0 })
+  assert.equal(r.cancelOrigin('r2'), 'shutdown')
+
+  await r.cancel('r2', { reason: 'user-cancel', origin: 'user', hardKillAfterMs: 0 })
+  assert.equal(r.cancelOrigin('r2'), 'shutdown', 'a later user cancel must not downgrade a shutdown origin')
 })
 
 test('runRegistry: module singleton is shared across imports (proves single-process scope)', () => {

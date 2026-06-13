@@ -448,7 +448,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           // Reading `runRegistry` HERE (core) keeps it out of the tracker
           // layer — the callback is the boundary.
           suppressTerminalRowOnCancel: () =>
-            runRegistry.cancelReason(runId) === 'shutdown',
+            runRegistry.cancelOrigin(runId) === 'shutdown',
         },
       )
     }, trackerDir)
