@@ -43,7 +43,7 @@ import type { TrackerEntry } from "./jsonl.js";
 const TERMINAL_STATUSES = new Set<TrackerEntry["status"]>(["done", "failed", "skipped"]);
 
 /** Operator action / milestone that produced a self-triggered transition. */
-export type RowCause = "create" | "retry" | "cancel" | "discard" | "ocr-approval";
+export type RowCause = "create" | "retry" | "reassign" | "cancel" | "discard" | "ocr-approval";
 
 export type RowEventType = RowCause | "reach-terminal" | "post-terminal-surface-change";
 
@@ -343,6 +343,20 @@ function observeRow(args: ObserveArgs): void {
   } else if (isSelf) {
     if (live.status === "pending" && wasTerminal && live.runId && live.runId !== currentRunId) {
       cause = "retry";
+    } else if (
+      live.status === "pending" &&
+      live.runId &&
+      live.runId === currentRunId &&
+      prev.status !== "pending"
+    ) {
+      // A `pending` re-emit under the SAME runId after the row already progressed
+      // (running→pending un-claim, or a failed→pending dead-worker/teardown
+      // requeue) is a REASSIGN — the item bounced to a surviving peer. Distinct
+      // from a retry, which re-pends under a NEW runId (handled above). Without
+      // this the reassign transition showed `cause=None` in the lifecycle debug
+      // (VL-004). The `prev.status !== "pending"` guard excludes a benign
+      // double-pending at run start (HTTP pre-emit + a daemon pending re-emit).
+      cause = "reassign";
     } else if (live.status === "failed" && live.step === "cancelled") {
       cause = "cancel";
     } else if (live.status === "failed" && live.step === "discarded") {
@@ -389,7 +403,7 @@ function observeRow(args: ObserveArgs): void {
     cycle.events.push({ ts, type: cause, ...(live.runId ? { runId: live.runId } : {}) });
   }
 
-  if (prev && prev.surface !== surface && wasTerminal && cause !== "retry") {
+  if (prev && prev.surface !== surface && wasTerminal && cause !== "retry" && cause !== "reassign") {
     cycle.postTerminalSurfaceChanges += 1;
     cycle.events.push({
       ts,
