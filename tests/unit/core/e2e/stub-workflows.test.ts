@@ -4,8 +4,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maybeWrapE2EStub } from "../../../../src/core/e2e/stub-workflows.js";
+import { E2EScriptedFailError } from "../../../../src/core/e2e/gates.js";
 import { loadWorkflow, type AnyRegisteredWorkflow } from "../../../../src/core/workflow-loaders.js";
-import { e2eGatesDir, e2eGateHoldPath } from "../../../../src/tracker/paths.js";
+import { e2eGatesDir, e2eGateHoldPath, e2eGateFailPath } from "../../../../src/tracker/paths.js";
 import { oathSignatureWorkflow } from "../../../../src/workflows/oath-signature/index.js";
 
 /**
@@ -121,6 +122,38 @@ test("scripted handler parks at a held step and resumes on release", async () =>
     unlinkSync(hold);
     await run;
     assert.equal(finished, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("scripted handler throws at an armed fail gate, stamps no success data, then the retry replay passes (organic fail → retry)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "e2e-stub-fail-"));
+  try {
+    mkdirSync(e2eGatesDir(dir), { recursive: true });
+    writeFileSync(e2eGateFailPath("oath-signature", "transaction", dir), "");
+
+    const stub = wrappedOathSignature();
+
+    // First run: the fail gate fires at `transaction` — handler rejects with a
+    // non-cancel error (kernel → terminal `failed` row + Retry), and the
+    // failed step never stamped its success data (emplId/name).
+    const first = makeFakeCtx(dir);
+    await assert.rejects(
+      stub.config.handler(first.ctx as never, { emplId: "10000009", name: "Fail, Test", date: "06/12/2026" } as never),
+      (err: unknown) => err instanceof E2EScriptedFailError,
+    );
+    assert.equal(first.data.e2eStub, "true");
+    assert.ok(first.calls.some((c) => c.step === "transaction"), "reached the failing step");
+    assert.equal(first.data.emplId, undefined, "a failed step stamps no success data");
+
+    // Retry replays the SAME original input; the gate self-consumed, so the
+    // replay walks both steps to completion.
+    const retry = makeFakeCtx(dir);
+    await stub.config.handler(retry.ctx as never, { emplId: "10000009", name: "Fail, Test", date: "06/12/2026" } as never);
+    const steps = retry.calls.filter((c) => c.kind === "step").map((c) => c.step);
+    assert.deepEqual(steps, ["ucpath-auth", "transaction"]);
+    assert.equal(retry.data.emplId, "10000009", "retry stamps the step data the first run never reached");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

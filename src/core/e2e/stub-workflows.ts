@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import type { Ctx } from "../kernel/types.js";
 import type { AnyRegisteredWorkflow } from "../workflow-loaders.js";
 import { log } from "../../utils/log.js";
-import { awaitGateRelease, waitWithSignal } from "./gates.js";
+import { awaitGateRelease, consumeFailGate, E2EScriptedFailError, waitWithSignal } from "./gates.js";
 import { oathUploadHandler, type OathUploadHandlerOpts } from "../../workflows/oath-upload/handler.js";
 import type { OathUploadInput } from "../../workflows/oath-upload/schema.js";
 
@@ -69,6 +69,20 @@ function cloneWithScriptedSteps(wf: AnyRegisteredWorkflow, stepData: StepDataFn)
           ...(ctx.trackerDir !== undefined ? { trackerDir: ctx.trackerDir } : {}),
           signal: ctx.signal,
         });
+        // Organic-failure injection (one-shot): if the driver armed a
+        // `<wf>--fail-at--<step>.fail` gate, throw a non-cancel error so the
+        // kernel writes a terminal `failed` row (red badge + Retry). The Retry
+        // replays `tasks.original_input_json` and the consumed gate is gone, so
+        // the replay passes. Checked AFTER the hold release (the driver can park
+        // then arm) but BEFORE the success-data patch (a failed step stamps no
+        // success data).
+        if (consumeFailGate({
+          workflow: wf.config.name,
+          step,
+          ...(ctx.trackerDir !== undefined ? { trackerDir: ctx.trackerDir } : {}),
+        })) {
+          throw new E2EScriptedFailError(wf.config.name, step);
+        }
         const patch = data[step];
         if (patch && Object.keys(patch).length > 0) ctx.updateData(patch);
         await waitWithSignal(STUB_STEP_PAUSE_MS, ctx.signal);
