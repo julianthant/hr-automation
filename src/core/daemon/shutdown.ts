@@ -63,7 +63,14 @@ export function createAbortLaunchAndKillSession<TData, TSteps extends readonly s
     const activeRunId = state.activeRun?.runId
     if (activeRunId) {
       void runRegistry
-        .cancel(activeRunId, { reason: `daemon_shutdown (${reason})`, hardKillAfterMs: 0 })
+        .cancel(activeRunId, {
+          reason: `daemon_shutdown (${reason})`,
+          // VQ-003: daemon-originated cancel — the kernel must NOT also emit
+          // its terminal cancelled row; `failInFlightItem`/`reassignInFlightItem`
+          // owns the sole terminal.
+          origin: 'shutdown',
+          hardKillAfterMs: 0,
+        })
         .catch((err) => {
           log.warn(
             `[Daemon ${wf.config.name}/${instanceId}] shutdown cancel of in-flight run failed: ${
@@ -171,7 +178,9 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
   // just race the natural shutdown path.
   for (const handle of runRegistry.list()) {
     void runRegistry
-      .cancel(handle.runId, { reason: 'daemon_shutdown', hardKillAfterMs: 0 })
+      // VQ-003: daemon-originated — kernel suppresses its terminal cancelled
+      // row; this sweep (and the claim loop) own the sole terminal.
+      .cancel(handle.runId, { reason: 'daemon_shutdown', origin: 'shutdown', hardKillAfterMs: 0 })
       .catch(() => {
         /* best-effort — shutdown writes the cancelled row below */
       })

@@ -622,6 +622,133 @@ test('runWorkflowDaemon: /stop force-cancels an in-flight handler parked in a si
   }
 })
 
+test('runWorkflowDaemon: force-/stop of an in-flight signal-only wait writes EXACTLY ONE terminal row (failed, NO step:cancelled) — VQ-003', async () => {
+  // VQ-003 regression. Pre-fix, a force-shutdown of a daemon parked in a
+  // signal-only wait DOUBLE-terminalized the one in-flight run:
+  //   1. `withTrackedWorkflow`'s catch emitted a `failed/step:cancelled` row
+  //      when the abort unwound the handler (the kernel's cancelled terminal).
+  //   2. `failInFlightItem` then emitted the canonical
+  //      `failed` (no step:cancelled) row from the daemon teardown.
+  // Latest-wins landed the right red FAILED, but the transient orange
+  // Cancelled chip + "Cancelled by user" cause polluted the row history. The
+  // fix threads `origin:'shutdown'` through `runRegistry.cancel` so the kernel
+  // suppresses its terminal cancelled row for daemon-originated cancels,
+  // leaving the daemon's `failInFlightItem` the SOLE terminal emitter.
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-vq003-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  let port: number | undefined
+  let inFlight: { itemId: string; runId: string } | null = null
+  let runPromise: Promise<void> | undefined
+  try {
+    const started = deferred()
+    const wf = defineWorkflow({
+      name: 'dint-vq003',
+      schema: z.object({ id: z.string() }),
+      steps: ['wait-approval'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('wait-approval', async () => {
+          started.resolve()
+          await new Promise<void>((_resolve, reject) => {
+            if (ctx.signal.aborted) {
+              reject(new Error('aborted before wait'))
+              return
+            }
+            ctx.signal.addEventListener(
+              'abort',
+              () => reject(new Error('approval wait aborted')),
+              { once: true },
+            )
+          })
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-vq003', [{ id: 'held' }], (d) => d.id, dir)
+    runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    ;({ port } = await waitForDaemon('dint-vq003', dir))
+    await started.promise
+
+    const status = (await fetch(`http://127.0.0.1:${port}/status`).then((r) => r.json())) as {
+      inFlight: string | null
+      inFlightRunId: string | null
+    }
+    if (status.inFlight && status.inFlightRunId) {
+      inFlight = { itemId: status.inFlight, runId: status.inFlightRunId }
+    }
+    assert.ok(inFlight, 'precondition: daemon reports an in-flight run')
+    const runId = inFlight.runId
+
+    // Workflow-scoped Stop-All: force, no reassign, no peer → in-flight FAILS.
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    })
+
+    await Promise.race([
+      runPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('daemon did not stop (deadlock)')), 4_000),
+      ),
+    ])
+
+    const [task] = taskStore.listTasksForWorkflow('dint-vq003')
+    assert.equal(task.state, 'failed', 'in-flight item fails for a lone-daemon force-stop')
+
+    // Inspect the JSONL row history for THIS run. The contract: exactly ONE
+    // terminal row for the run — status `failed`, NO `step:"cancelled"` — and
+    // NO transient `failed/step:cancelled` row written before it.
+    const date = dateLocal()
+    const jsonlPath = rowFilePath('dint-vq003', date, dir)
+    const rows = readFileSync(jsonlPath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { id?: string; runId?: string; status?: string; step?: string; error?: string })
+      .filter((row) => row.runId === runId)
+
+    const cancelledRows = rows.filter((r) => r.status === 'failed' && r.step === 'cancelled')
+    assert.equal(
+      cancelledRows.length,
+      0,
+      `expected NO failed/step:cancelled kernel row for the shutdown-aborted run; got ${cancelledRows.length}`,
+    )
+
+    const terminalFailed = rows.filter((r) => r.status === 'failed' && r.step !== 'cancelled')
+    assert.equal(
+      terminalFailed.length,
+      1,
+      `expected EXACTLY ONE terminal failed row; got ${terminalFailed.length}`,
+    )
+    assert.equal(
+      terminalFailed[0].error,
+      'Daemon stopped and no other daemon is available to finish this item.',
+      'the sole terminal row carries the no-daemon fail reason, not "Cancelled by user"',
+    )
+  } finally {
+    if (port !== undefined && inFlight) {
+      await fetch(`http://127.0.0.1:${port}/cancel-current`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(inFlight),
+      }).catch(() => {})
+    }
+    if (runPromise) {
+      await Promise.race([runPromise.catch(() => {}), new Promise((r) => setTimeout(r, 2_000))])
+    }
+    taskStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: per-instance /stop with a RESPONSIVE surviving peer RE-QUEUES the in-flight item (no fail)', async () => {
   // Per-instance stop (dashboard session card) sends `/stop { reassign: true }`.
   // When another daemon for the workflow is still alive AND responds to

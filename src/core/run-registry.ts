@@ -104,6 +104,23 @@ export interface RunHandle {
   control?: RunControlAudit
 }
 
+/**
+ * Structured cancel origin (VQ-003). Distinct from the free-form `reason`
+ * audit label: it classifies WHO initiated the cancel so the kernel can
+ * decide whether to suppress its own terminal row.
+ *
+ * - `'user'` (default) — a DELIBERATE per-item cancel (HTTP `/cancel-current`,
+ *   worker-command `cancel_task`, browser-disconnect, in-process dashboard
+ *   cancel, OCR prep discard). The daemon stays alive and the kernel owns the
+ *   single orange `cancelled` terminal row.
+ * - `'shutdown'` — the cancel ORIGINATES from daemon teardown (force-stop via
+ *   `createAbortLaunchAndKillSession`, or the `runDaemonShutdownCleanup`
+ *   sweep). The daemon's `failInFlightItem` / `reassignInFlightItem` owns the
+ *   sole terminal row, so the kernel must SUPPRESS its cancelled terminal row
+ *   to avoid double-terminalizing the one in-flight run.
+ */
+export type CancelOrigin = 'user' | 'shutdown'
+
 export interface CancelOptions {
   /**
    * Free-form label included in the abort reason + audit log. Helps
@@ -111,6 +128,14 @@ export interface CancelOptions {
    * `browser_disconnect`, `daemon_shutdown`, …).
    */
   reason: string
+  /**
+   * Structured origin of the cancel (VQ-003). Defaults to `'user'` to
+   * preserve the deliberate-cancel behavior (kernel owns the orange
+   * `cancelled` row). Daemon teardown passes `'shutdown'` so the kernel
+   * suppresses its terminal cancelled row, leaving the daemon's
+   * `failInFlightItem`/`reassignInFlightItem` the sole terminal emitter.
+   */
+  origin?: CancelOrigin
   /**
    * Watchdog timeout. After abort, if the run hasn't unregistered by
    * this many ms, the watchdog calls `session.killChromeHard()` to force
@@ -131,6 +156,14 @@ export interface RunRegistry {
   list(): RunHandle[]
   unregister(runId: string): void
   cancel(runId: string, opts: CancelOptions): Promise<CancelResult>
+  /**
+   * The structured origin of the cancel recorded for `runId` by `cancel`
+   * (VQ-003), or `undefined` if no cancel has fired for it yet. The kernel's
+   * `run-one-item` reads this in `withTrackedWorkflow`'s suppress callback to
+   * decide whether to skip its own terminal cancelled row. Cleared on
+   * `unregister` so a reused runId can't inherit a stale origin.
+   */
+  cancelReason(runId: string): CancelOrigin | undefined
 }
 
 const DEFAULT_HARD_KILL_AFTER_MS = 5_000
@@ -151,6 +184,12 @@ export function createRunRegistry(): RunRegistry {
    * for finer-grain reasons, the parent-signal hook in delegation, …).
    */
   const cancelled = new Set<string>()
+  /**
+   * Per-runId structured cancel origin (VQ-003). Recorded by `cancel` and
+   * read back by `cancelReason`. MUST be cleared on `unregister` alongside
+   * `cancelled` so a reused runId can't inherit a stale origin.
+   */
+  const cancelOrigins = new Map<string, CancelOrigin>()
 
   const register = (handle: RunHandle): void => {
     handles.set(handle.runId, handle)
@@ -160,9 +199,13 @@ export function createRunRegistry(): RunRegistry {
 
   const list = (): RunHandle[] => Array.from(handles.values())
 
+  const cancelReason = (runId: string): CancelOrigin | undefined =>
+    cancelOrigins.get(runId)
+
   const unregister = (runId: string): void => {
     handles.delete(runId)
     cancelled.delete(runId)
+    cancelOrigins.delete(runId)
   }
 
   const cancel = async (
@@ -171,6 +214,10 @@ export function createRunRegistry(): RunRegistry {
   ): Promise<CancelResult> => {
     const handle = handles.get(runId)
     if (!handle) return { ok: false, reason: 'not-found' }
+    // Record the structured origin BEFORE the already-cancelled short-circuit
+    // (VQ-003): the kernel's suppress check must read the correct origin even
+    // when the abort already fired via another path. Default `'user'`.
+    cancelOrigins.set(runId, opts.origin ?? 'user')
     if (cancelled.has(runId)) {
       return { ok: true, alreadyCancelled: true, hardKilled: false }
     }
@@ -223,7 +270,7 @@ export function createRunRegistry(): RunRegistry {
     return { ok: true, alreadyCancelled: false, hardKilled: true }
   }
 
-  return { register, get, list, unregister, cancel }
+  return { register, get, list, unregister, cancel, cancelReason }
 }
 
 async function waitForUnregisterOrTimeout(

@@ -438,6 +438,17 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
           ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
           archetype: rowArchetype,
+          // VQ-003: suppress the kernel's terminal cancelled row when the
+          // cancel ORIGINATES from daemon teardown (force-shutdown / reassign).
+          // The daemon's `failInFlightItem` / `reassignInFlightItem` owns the
+          // sole terminal in that case, so the kernel's cancelled row would be
+          // a duplicate that pollutes the row history with a transient orange
+          // chip. A deliberate `/cancel-current` records `origin:'user'`
+          // (the default), so this returns false and the orange row stays.
+          // Reading `runRegistry` HERE (core) keeps it out of the tracker
+          // layer — the callback is the boundary.
+          suppressTerminalRowOnCancel: () =>
+            runRegistry.cancelReason(runId) === 'shutdown',
         },
       )
     }, trackerDir)
