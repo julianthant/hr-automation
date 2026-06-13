@@ -751,7 +751,6 @@ export function App() {
           entries={dedupedEntries}
           delegationSourceEntries={entries}
           statPanelEntries={statPanelEntries}
-          topLevelQueueCount={queuePanelTopLevelCount}
           workflow={workflow}
           workflowLabel={wfLabel}
           runtimePolicies={runtimePolicies}
