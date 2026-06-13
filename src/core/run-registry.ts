@@ -163,7 +163,7 @@ export interface RunRegistry {
    * decide whether to skip its own terminal cancelled row. Cleared on
    * `unregister` so a reused runId can't inherit a stale origin.
    */
-  cancelReason(runId: string): CancelOrigin | undefined
+  cancelOrigin(runId: string): CancelOrigin | undefined
 }
 
 const DEFAULT_HARD_KILL_AFTER_MS = 5_000
@@ -186,7 +186,7 @@ export function createRunRegistry(): RunRegistry {
   const cancelled = new Set<string>()
   /**
    * Per-runId structured cancel origin (VQ-003). Recorded by `cancel` and
-   * read back by `cancelReason`. MUST be cleared on `unregister` alongside
+   * read back by `cancelOrigin`. MUST be cleared on `unregister` alongside
    * `cancelled` so a reused runId can't inherit a stale origin.
    */
   const cancelOrigins = new Map<string, CancelOrigin>()
@@ -199,7 +199,7 @@ export function createRunRegistry(): RunRegistry {
 
   const list = (): RunHandle[] => Array.from(handles.values())
 
-  const cancelReason = (runId: string): CancelOrigin | undefined =>
+  const cancelOrigin = (runId: string): CancelOrigin | undefined =>
     cancelOrigins.get(runId)
 
   const unregister = (runId: string): void => {
@@ -216,8 +216,18 @@ export function createRunRegistry(): RunRegistry {
     if (!handle) return { ok: false, reason: 'not-found' }
     // Record the structured origin BEFORE the already-cancelled short-circuit
     // (VQ-003): the kernel's suppress check must read the correct origin even
-    // when the abort already fired via another path. Default `'user'`.
-    cancelOrigins.set(runId, opts.origin ?? 'user')
+    // when the abort already fired via another path. `'shutdown'` is STICKY —
+    // once daemon teardown has claimed this run, a later deliberate
+    // `/cancel-current` (`origin:'user'`) must NOT downgrade it, or the kernel
+    // would resume emitting its terminal cancelled row while the daemon's
+    // teardown already owns the sole terminal (reverse-race re-introduction of
+    // the VQ-003 double terminal). Default `'user'`; `user → shutdown` upgrades.
+    const incomingOrigin = opts.origin ?? 'user'
+    if (incomingOrigin === 'shutdown' || cancelOrigins.get(runId) === 'shutdown') {
+      cancelOrigins.set(runId, 'shutdown')
+    } else {
+      cancelOrigins.set(runId, 'user')
+    }
     if (cancelled.has(runId)) {
       return { ok: true, alreadyCancelled: true, hardKilled: false }
     }
@@ -270,7 +280,7 @@ export function createRunRegistry(): RunRegistry {
     return { ok: true, alreadyCancelled: false, hardKilled: true }
   }
 
-  return { register, get, list, unregister, cancel, cancelReason }
+  return { register, get, list, unregister, cancel, cancelOrigin }
 }
 
 async function waitForUnregisterOrTimeout(

@@ -235,11 +235,17 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   // lockfile (VS-003). A concurrently-spawning peer scans alive lockfiles
   // (`scanAliveDaemonInstanceNames`) to learn the names already claimed by
   // daemons that haven't emitted their `workflow_start` yet, so two daemons
-  // spawned near-simultaneously never both pick "<wf> 1". The lockfile is the
-  // only artifact with a happens-before edge to the next spawn (written before
-  // `/whoami`, which gates the parent spawning the next daemon). This name is
-  // threaded into `withBatchLifecycle` via `preAssignedInstance` so it does NOT
-  // re-derive a (possibly-colliding) name from session events.
+  // spawned near-simultaneously never both pick "<wf> 1". The happens-before
+  // edge that makes this deterministic is the PARENT's spawn gate, not the
+  // local emit order: the parent's `spawnDaemon` (registry.ts) only resolves
+  // once this daemon's lockfile is readable on disk AND `/whoami` answers
+  // (`findAliveDaemons` reads the lockfile before probing). So the next daemon
+  // cannot start its own allocation until this lockfile — WITH `instanceName`
+  // — is durably on disk. (The HTTP listener serving `/whoami` actually comes
+  // up earlier, at `await listenPromise` above; it's the lockfile-readable half
+  // of the gate, not the listener, that orders allocation.) The name is threaded
+  // into `withBatchLifecycle` via `preAssignedInstance` so it does NOT re-derive
+  // a (possibly-colliding) name from session events.
   const reservedInstanceNames = scanAliveDaemonInstanceNames(wf.config.name, trackerDir)
   const instanceName = generateInstanceName(wf.config.name, trackerDir, reservedInstanceNames)
 

@@ -137,7 +137,7 @@ export interface WithTrackedWorkflowOpts {
    * daemon-originated cancels (force-shutdown / reassign): the daemon's
    * `failInFlightItem` / `reassignInFlightItem` owns the SOLE terminal row, so
    * the kernel's cancelled row would be a duplicate. `run-one-item` wires this
-   * to `() => runRegistry.cancelReason(runId) === 'shutdown'`, keeping the
+   * to `() => runRegistry.cancelOrigin(runId) === 'shutdown'`, keeping the
    * `runRegistry` import in the core layer (tracker never imports core).
    * Absent (default) → emit the cancelled row as before (deliberate
    * `/cancel-current` keeps its single orange row).

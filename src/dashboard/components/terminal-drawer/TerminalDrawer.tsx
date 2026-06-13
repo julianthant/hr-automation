@@ -29,6 +29,17 @@ const MIN_BODY_HEIGHT = 32;
  * backend's pid-based check); it falls back to the instance label only when a
  * pid is missing (legacy session events written before pid was stamped).
  */
+/**
+ * Two session-card states refer to DIFFERENT live daemons. Prefer the OS `pid`
+ * (matching the backend's pid-based reassignable check); fall back to the
+ * instance label only when a pid is missing (legacy session events written
+ * before pid was stamped).
+ */
+function isDifferentPeer(w: WorkflowInstanceState, self: WorkflowInstanceState): boolean {
+  if (w.pid != null && self.pid != null) return w.pid !== self.pid;
+  return w.instance !== self.instance;
+}
+
 function hasReassignablePeer(
   instances: WorkflowInstanceState[],
   self: WorkflowInstanceState,
@@ -36,7 +47,7 @@ function hasReassignablePeer(
   if (!self.workflow) return false;
   return instances.some(
     (w) =>
-      (w.pid != null && self.pid != null ? w.pid !== self.pid : w.instance !== self.instance) &&
+      isDifferentPeer(w, self) &&
       w.workflow === self.workflow &&
       w.pidAlive &&
       w.active &&
