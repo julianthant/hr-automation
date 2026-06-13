@@ -49,6 +49,7 @@ These should stay accurate relative to the code and are fair game for stale-doc 
 | `docs/engineering/dashboard-api-reference.md` | Full Dashboard API: endpoints, types, hooks, icons, file tree |
 | `docs/engineering/tracker-reference.md` | Tracker module internals: file-by-file, JSONL format, cleanup, withTrackedWorkflow |
 | `docs/engineering/core-internals.md` | Kernel internals: kernel/, daemon/, task-store/ file-by-file |
+| `docs/engineering/daemon-teardown-state-machine.md` | Map of the daemon claim/force-stop/reassign/stop-all transitions (states × intents × where each lives), the recurring-bug gap analysis, and the proposed explicit-transition-table refactor (planned, not yet executed) |
 | `docs/engineering/workflow-patterns.md` | Daemon-mode conversion template, edit-data opt-in recipe |
 | `docs/engineering/hands-off-duo-webauthn.md` | Hands-off Duo via CDP WebAuthn: enrollment, two-phase factor selection, the six Duo flows, testing, and failure modes |
 | `docs/workflow/README.md` | Workflow delegation index: row units, global actions, cancellation rules, workflow inventory |
