@@ -84,6 +84,31 @@ describe("buildRowLifecycles", () => {
     assert.ok(row.history.some((s) => s.cause === "retry" && s.runId === "run-B"));
   });
 
+  it("attributes a same-runId re-pend (reassign) with cause=reassign, not retry (VL-004)", () => {
+    // A per-instance daemon stop reassigns the in-flight item to a peer:
+    // returnTaskToQueued re-emits `pending` under the SAME runId, then the peer
+    // runs it. Pre-fix this transition carried cause=None (it is not a retry —
+    // a retry re-pends under a NEW runId).
+    const rows = buildRowLifecycles("work-study", [
+      entry({ id: "ws-7", runId: "run-X", status: "pending", timestamp: ts(0) }),
+      entry({ id: "ws-7", runId: "run-X", status: "running", step: "updating", timestamp: ts(1) }),
+      entry({ id: "ws-7", runId: "run-X", status: "pending", timestamp: ts(2) }), // un-claim → reassign
+      entry({ id: "ws-7", runId: "run-X", status: "running", step: "updating", timestamp: ts(3) }),
+      entry({ id: "ws-7", runId: "run-X", status: "done", step: "updating", timestamp: ts(4) }),
+    ]);
+    assert.equal(rows.length, 1);
+    const row = rows[0]!;
+    assert.deepEqual(row.runIds, ["run-X"]); // single runId — NOT a new attempt
+    assert.equal(row.endState.status, "done");
+    const reassign = row.history.find((s) => s.cause === "reassign");
+    assert.ok(reassign, "the same-runId re-pend should carry cause=reassign");
+    assert.ok(
+      !row.history.some((s) => s.cause === "retry"),
+      "a same-runId re-pend must NOT be mistaken for a retry",
+    );
+    assert.ok(row.events.some((e) => e.type === "reassign"));
+  });
+
   it("does not flag a post-terminal surface flip for stable batch anchors", () => {
     // Oath-signature PDF rows are real batch anchors now. Adding the signer
     // member changes member count, but the parent stays card:batch.
