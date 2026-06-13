@@ -165,6 +165,13 @@ export interface WorkflowInstanceState {
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;
   /**
+   * OS pid of the spawning Node process, from the latest `workflow_start`
+   * event. Lets the client-side `hasReassignablePeer` check match the backend's
+   * authoritative pid-based peer detection (`alive.some(d => d.pid !== pid)` in
+   * worker-control.ts) instead of relying on the instance label alone.
+   */
+  pid?: number;
+  /**
    * True when workflow_end (finalStatus=failed) fired but no browser_launch event
    * was ever emitted for this instance - i.e. the workflow crashed before
    * Playwright launched a browser. Used by the dashboard to render a
@@ -230,6 +237,7 @@ export function rebuildSessionState(dir?: string): SessionState {
         instance: inst,
         workflow: workflowNameFromInstance(inst),
         startedAt: e.timestamp,
+        pid: e.pid,
         active: true,
         pidAlive: true,
         currentItemId: null,

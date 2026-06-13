@@ -12,6 +12,7 @@ import {
   ensureDaemonsDir,
   findAliveDaemons,
   filterResponsiveDaemons,
+  scanAliveDaemonInstanceNames,
 } from './registry.js'
 import {
   claimNextItem,
@@ -33,6 +34,7 @@ import {
   emitItemCancelled,
   emitDaemonPhase,
   emitIdleSignal,
+  generateInstanceName,
 } from '../../tracker/session-events.js'
 import { emitTrackerRow, type StampedData } from '../../tracker/jsonl.js'
 import { isIdleRefreshSystem } from '../../domain/idle-refresh.js'
@@ -228,12 +230,26 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   const httpHandle = await listenPromise
   const port = httpHandle.port
 
+  // Allocate the session-drawer instance name HERE — at lockfile-write time,
+  // before `withBatchLifecycle` emits `workflow_start` — and store it in the
+  // lockfile (VS-003). A concurrently-spawning peer scans alive lockfiles
+  // (`scanAliveDaemonInstanceNames`) to learn the names already claimed by
+  // daemons that haven't emitted their `workflow_start` yet, so two daemons
+  // spawned near-simultaneously never both pick "<wf> 1". The lockfile is the
+  // only artifact with a happens-before edge to the next spawn (written before
+  // `/whoami`, which gates the parent spawning the next daemon). This name is
+  // threaded into `withBatchLifecycle` via `preAssignedInstance` so it does NOT
+  // re-derive a (possibly-colliding) name from session events.
+  const reservedInstanceNames = scanAliveDaemonInstanceNames(wf.config.name, trackerDir)
+  const instanceName = generateInstanceName(wf.config.name, trackerDir, reservedInstanceNames)
+
   const lock: DaemonLockfile = {
     workflow: wf.config.name,
     instanceId,
     pid: process.pid,
     parentPid: process.ppid,
     port,
+    instanceName,
     startedAt: new Date().toISOString(),
     hostname: hostname(),
     version: 1,
@@ -328,6 +344,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         perItem: [],
         trackerDir,
         ownSigint: false,
+        preAssignedInstance: instanceName,
       },
       async ({ instance, markTerminated, makeObserver }) => {
         state.workflowInstanceForCleanup = instance

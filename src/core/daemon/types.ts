@@ -22,6 +22,13 @@ export interface DaemonLockfile {
   parentPid?: number
   /** HTTP listener port (from `server.address()`). */
   port: number
+  /**
+   * Session-drawer instance name allocated for this daemon, e.g.
+   * "Person Lookup 2". Stored so a concurrently-spawning peer can discover it
+   * BEFORE this daemon emits its `workflow_start`, making instance-name
+   * allocation deterministic. Optional for back-compat with older lockfiles.
+   */
+  instanceName?: string
   startedAt: string
   hostname: string
   version: 1

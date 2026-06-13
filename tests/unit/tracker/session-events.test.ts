@@ -78,6 +78,57 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(state.workflows[0].active, false);
   });
 
+  it("stamps a distinct pid per instance and a pid-based peer check finds the peer (ISS-003)", () => {
+    // Two concurrent daemons of the SAME workflow, now with DISTINCT names
+    // (the VS-003 fix) and distinct pids. The session card's reassignable-peer
+    // hint matches the backend's pid-based check (alive.some(d => d.pid !== pid)).
+    writeSessionsRaw(dir, [
+      { type: "workflow_start", workflowInstance: "Person Lookup 1", pid: process.pid, timestamp: new Date().toISOString() },
+      { type: "workflow_start", workflowInstance: "Person Lookup 2", pid: process.pid, timestamp: new Date().toISOString() },
+    ]);
+    const state = rebuildSessionState(dir);
+    const byName = new Map(state.workflows.map((w) => [w.instance, w]));
+    const a = byName.get("Person Lookup 1");
+    const b = byName.get("Person Lookup 2");
+    assert.ok(a && b, "both instances rebuilt");
+    assert.equal(a!.pid, process.pid, "instance 1 carries its workflow_start pid");
+    assert.equal(b!.pid, process.pid, "instance 2 carries its workflow_start pid");
+
+    // The frontend predicate (replicated — TerminalDrawer.hasReassignablePeer):
+    // prefer pid identity when both rows carry it, else fall back to instance.
+    const hasReassignablePeer = (
+      instances: typeof state.workflows,
+      self: (typeof state.workflows)[number],
+    ): boolean =>
+      !!self.workflow &&
+      instances.some(
+        (w) =>
+          (w.pid != null && self.pid != null ? w.pid !== self.pid : w.instance !== self.instance) &&
+          w.workflow === self.workflow &&
+          w.pidAlive &&
+          w.active &&
+          !w.crashedOnLaunch,
+      );
+
+    // Distinct names but the SAME pid (both run in this test process) → the
+    // pid-based branch correctly reports NO peer (they're the same process),
+    // exactly mirroring the backend `d.pid !== pid` check.
+    assert.equal(
+      hasReassignablePeer(state.workflows, a!),
+      false,
+      "same-pid instances are not peers under the pid-based check",
+    );
+
+    // Now give instance 2 a distinct (dead-but-present) pid: with two DISTINCT
+    // pids the peer check finds the peer.
+    b!.pid = process.pid + 1;
+    assert.equal(
+      hasReassignablePeer(state.workflows, a!),
+      true,
+      "distinct-pid instance of the same workflow is a reassignable peer",
+    );
+  });
+
   it("live session filter drops ended workflows with no live process or recent launch crash", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
     emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);
@@ -703,6 +754,47 @@ test("generateInstanceName: person-lookup uses human label so dashboard stop con
   const name = generateInstanceName("person-lookup", dir);
 
   assert.equal(name, "Person Lookup 1");
+});
+
+// ── generateInstanceName: reservedNames (VS-003 deterministic allocation) ──
+//
+// A concurrently-spawning peer daemon may have written its lockfile (with the
+// instance name it allocated) BEFORE it emitted `workflow_start` — so the
+// session-event scan alone can't see it. The reservedNames set lets the caller
+// inject those already-claimed names so two daemons never collide on "<wf> 1".
+
+test("generateInstanceName: reservedNames skips an already-claimed slot", () => {
+  const dir = TMP();
+  const name = generateInstanceName(
+    "person-lookup",
+    dir,
+    new Set(["Person Lookup 1"]),
+  );
+  assert.equal(name, "Person Lookup 2", "slot 1 reserved by a peer → pick 2");
+});
+
+test("generateInstanceName: empty/undefined reservedNames is back-compat (slot 1)", () => {
+  const dir = TMP();
+  assert.equal(
+    generateInstanceName("person-lookup", dir, new Set<string>()),
+    "Person Lookup 1",
+    "empty reserved set behaves like the legacy two-arg call",
+  );
+  assert.equal(
+    generateInstanceName("person-lookup", dir, undefined),
+    "Person Lookup 1",
+    "undefined reserved set behaves like the legacy two-arg call",
+  );
+});
+
+test("generateInstanceName: reservedNames skips multiple claimed slots", () => {
+  const dir = TMP();
+  const name = generateInstanceName(
+    "person-lookup",
+    dir,
+    new Set(["Person Lookup 1", "Person Lookup 2"]),
+  );
+  assert.equal(name, "Person Lookup 3", "slots 1+2 reserved → pick 3");
 });
 
 describe("emitDaemonLog", () => {

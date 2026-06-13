@@ -94,6 +94,12 @@ test("workflowEqual returns true for identical workflow", () => {
   assert.equal(workflowEqual(before, after), true);
 });
 
+test("workflowEqual detects a pid change (drawer re-renders for pid-based peer check)", () => {
+  const before = { ...makeWorkflow([]), pid: 1234 };
+  const after = { ...makeWorkflow([]), pid: 5678 };
+  assert.equal(workflowEqual(before, after), false);
+});
+
 test("duoEntryEqual compares the documented fields", () => {
   const a: DuoQueueEntry = {
     position: 1,

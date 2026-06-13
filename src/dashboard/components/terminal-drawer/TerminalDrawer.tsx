@@ -20,9 +20,14 @@ const MIN_BODY_HEIGHT = 32;
  * launch instances and the card's own instance are excluded.
  *
  * This is the same axis the backend re-derives authoritatively at stop time
- * (`reassignable` in worker-control), but computing it client-side lets the
- * StopPill decide whether to confirm BEFORE firing the request — so the
- * destructive last-daemon confirm only appears when there really is no peer.
+ * (`reassignable` in worker-control, which compares `alive.some(d => d.pid !==
+ * pid)`), but computing it client-side lets the StopPill decide whether to
+ * confirm BEFORE firing the request — so the destructive last-daemon confirm
+ * only appears when there really is no peer.
+ *
+ * Peer identity prefers the OS `pid` when both rows carry it (matching the
+ * backend's pid-based check); it falls back to the instance label only when a
+ * pid is missing (legacy session events written before pid was stamped).
  */
 function hasReassignablePeer(
   instances: WorkflowInstanceState[],
@@ -31,7 +36,7 @@ function hasReassignablePeer(
   if (!self.workflow) return false;
   return instances.some(
     (w) =>
-      w.instance !== self.instance &&
+      (w.pid != null && self.pid != null ? w.pid !== self.pid : w.instance !== self.instance) &&
       w.workflow === self.workflow &&
       w.pidAlive &&
       w.active &&

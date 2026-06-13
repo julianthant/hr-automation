@@ -20,7 +20,9 @@ import {
   writeLockfile,
   lockfilePath,
   invalidateAliveDaemonsCache,
+  scanAliveDaemonInstanceNames,
 } from '../../../src/core/daemon/registry.js'
+import { readSessionEvents } from '../../../src/tracker/session-events.js'
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
@@ -1300,6 +1302,173 @@ test('ensureDaemonsAndEnqueue wakes an idle daemon after enqueue (no manual /wak
       body: JSON.stringify({}),
     })
     await runPromise
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: two daemons spawned serially get DISTINCT instance names (VS-003)', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-distinct-names-'))
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-distinct',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    // Daemon A: start and wait until its lockfile (carrying instanceName) is
+    // on disk — mirroring the serial spawn the parent does (it only spawns the
+    // next daemon AFTER the prior one's lockfile + /whoami are up).
+    const runA = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    const a = await waitForDaemon('dint-distinct', dir)
+
+    // Daemon B: start in the SAME trackerDir. Because A's lockfile already
+    // exists, B's lockfile-time scan sees A's claimed name and skips it.
+    const runB = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    // Wait for two distinct daemons (two alive lockfiles).
+    await waitFor(async () => {
+      const alive = await findAliveDaemons('dint-distinct', dir)
+      return alive.length === 2
+    }, 5_000)
+
+    // The two lockfiles must carry DISTINCT instance names "<wf> 1" / "<wf> 2".
+    const reserved = scanAliveDaemonInstanceNames('dint-distinct', dir)
+    assert.deepEqual(
+      [...reserved].sort(),
+      ['dint-distinct 1', 'dint-distinct 2'],
+      'two concurrently-alive daemons claim distinct lockfile instanceNames',
+    )
+
+    // The session events must show two distinct session_create instances —
+    // proving the distinct name flowed through preAssignedInstance into
+    // withBatchLifecycle (not just the lockfile).
+    await waitFor(() => {
+      const created = new Set(
+        readSessionEvents(dir)
+          .filter((e) => e.type === 'session_create')
+          .map((e) => e.workflowInstance),
+      )
+      return created.size === 2
+    }, 5_000)
+    const createdInstances = new Set(
+      readSessionEvents(dir)
+        .filter((e) => e.type === 'session_create')
+        .map((e) => e.workflowInstance),
+    )
+    assert.deepEqual(
+      [...createdInstances].sort(),
+      ['dint-distinct 1', 'dint-distinct 2'],
+      'each daemon emitted session_create under its OWN distinct instance name',
+    )
+
+    // Stop both daemons.
+    const alive = await findAliveDaemons('dint-distinct', dir)
+    for (const d of alive) {
+      await fetch(`http://127.0.0.1:${d.port}/stop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ force: false }),
+      }).catch(() => {})
+    }
+    // Touch the start handles so they don't dangle if a /stop above missed.
+    void a
+    await Promise.all([runA, runB])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: allocates from the lockfile scan in the pre-workflow_start race window (VS-003 root)', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-race-window-'))
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-race',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    // Simulate the EXACT race: a peer daemon (A) whose lockfile is on disk
+    // (carrying its allocated `instanceName`) but which has NOT yet emitted its
+    // `workflow_start` session event. This is the window between the peer
+    // writing its lockfile (daemon.ts ~242) and `withBatchLifecycle` emitting
+    // `workflow_start` (after /whoami comes up). A session-event-only allocator
+    // would see ZERO starts here and pick "dint-race 1" — colliding with the
+    // peer. The lockfile scan is the only artifact that closes this gap.
+    ensureDaemonsDir(dir)
+    writeLockfile(
+      {
+        workflow: 'dint-race',
+        instanceId: 'din-peer',
+        pid: process.pid, // alive, so the scan counts it
+        port: 59999, // never probed by the sync scan
+        instanceName: 'dint-race 1',
+        startedAt: new Date().toISOString(),
+        hostname: 'test',
+        version: 1,
+      },
+      lockfilePath('dint-race', 'din-peer', dir),
+    )
+    invalidateAliveDaemonsCache('dint-race', dir)
+
+    // Sanity: no session events exist yet — a pure event-count allocator is blind.
+    assert.equal(
+      readSessionEvents(dir).filter((e) => e.type === 'workflow_start').length,
+      0,
+      'no workflow_start on disk — the peer is in its pre-start window',
+    )
+
+    // Start the real daemon (B). With the fix it scans the peer lockfile, sees
+    // "dint-race 1" reserved, and picks "dint-race 2".
+    const runB = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    // Wait until B's own lockfile is written with an instanceName.
+    await waitFor(() => {
+      const names = scanAliveDaemonInstanceNames('dint-race', dir)
+      return names.size === 2
+    }, 5_000)
+
+    const reserved = scanAliveDaemonInstanceNames('dint-race', dir)
+    assert.deepEqual(
+      [...reserved].sort(),
+      ['dint-race 1', 'dint-race 2'],
+      'daemon B picked "dint-race 2" from the peer lockfile scan, NOT a colliding "dint-race 1"',
+    )
+
+    // B must also emit its session_create under the distinct name (preAssignedInstance).
+    await waitFor(() => {
+      return readSessionEvents(dir).some(
+        (e) => e.type === 'session_create' && e.workflowInstance === 'dint-race 2',
+      )
+    }, 5_000)
+
+    const aliveB = (await findAliveDaemons('dint-race', dir)).find((d) => d.instanceId !== 'din-peer')
+    if (aliveB) {
+      await fetch(`http://127.0.0.1:${aliveB.port}/stop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ force: false }),
+      }).catch(() => {})
+    }
+    await runB
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
