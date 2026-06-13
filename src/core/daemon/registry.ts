@@ -273,6 +273,55 @@ async function findAliveDaemonsUncached(workflow: string, trackerDir?: string): 
   return alive
 }
 
+/**
+ * SYNCHRONOUS, UNCACHED scan of alive-daemon lockfiles for `workflow`,
+ * returning the set of `instanceName`s already claimed by live peers.
+ *
+ * Used by `runWorkflowDaemon` at lockfile-write time to seed
+ * `generateInstanceName`'s `reservedNames` so two daemons spawned
+ * near-simultaneously never collide on "<wf> 1" (VS-003). The lockfile is the
+ * ONLY artifact with a reliable happens-before edge to the next spawn — it is
+ * written BEFORE `/whoami` comes up, and `/whoami` is what gates the parent
+ * spawning the next daemon — so reading freshly-written peer lockfiles closes
+ * the race.
+ *
+ * Deliberately does NOT use `findAliveDaemons`: that is async, `/whoami`-probes
+ * (a peer's listener may not be up yet), has side-effect unlinks, and is
+ * CACHED — a stale cache would miss a just-written peer lockfile and reintroduce
+ * the race. We only need pid-liveness + the stored name, both readable from the
+ * lockfile alone.
+ *
+ * Dead-pid lockfiles are excluded (a crashed daemon's slot is reusable). Missing
+ * dir, readdir errors, malformed lockfiles, and lockfiles without an
+ * `instanceName` all degrade to "not reserved".
+ */
+export function scanAliveDaemonInstanceNames(
+  workflow: string,
+  trackerDir?: string,
+): Set<string> {
+  const names = new Set<string>()
+  const dir = daemonsDir(trackerDir)
+  if (!existsSync(dir)) return names
+  const prefix = `${workflow}-`
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return names
+  }
+  const candidates = entries.filter(
+    (f) => f.startsWith(prefix) && f.endsWith('.lock.json') && !f.includes('.lock.json.tmp'),
+  )
+  for (const entry of candidates) {
+    const lock = readLockfile(join(dir, entry))
+    if (!lock || lock.workflow !== workflow) continue
+    if (!isProcessAlive(lock.pid)) continue
+    if (!lock.instanceName) continue
+    names.add(lock.instanceName)
+  }
+  return names
+}
+
 const delay = sleep
 
 /**

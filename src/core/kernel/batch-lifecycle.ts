@@ -153,6 +153,14 @@ export interface BatchLifecycleOpts<TData = unknown> {
    * `failed` rows on thrown errors; only the signal listener is skipped.
    */
   ownSigint?: boolean
+  /**
+   * When set (daemon mode), use this pre-allocated instance name instead of
+   * calling `generateInstanceName`. The daemon allocates the name at
+   * lockfile-write time — before its `workflow_start` is emitted — so
+   * concurrent peers don't collide. Non-daemon callers omit it and allocate
+   * from session events.
+   */
+  preAssignedInstance?: string
 }
 
 export interface BatchLifecycleCtx {
@@ -200,7 +208,7 @@ export async function withBatchLifecycle<TData, R>(
   opts: BatchLifecycleOpts<TData>,
   body: (ctx: BatchLifecycleCtx) => Promise<R>,
 ): Promise<R> {
-  const instance = generateInstanceName(opts.workflow, opts.trackerDir)
+  const instance = opts.preAssignedInstance ?? generateInstanceName(opts.workflow, opts.trackerDir)
   emitWorkflowStart(instance, opts.trackerDir)
   emitSessionCreate(instance, '1', opts.trackerDir)
 

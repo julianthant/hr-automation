@@ -276,6 +276,12 @@ export interface WorkflowInstanceState {
   active: boolean;
   /** True while the spawning Node process (and therefore its Playwright browsers) is still alive. */
   pidAlive: boolean;
+  /**
+   * OS pid of the spawning Node process (latest `workflow_start`). Lets
+   * `hasReassignablePeer` match the backend's pid-based peer detection rather
+   * than relying on the instance label alone.
+   */
+  pid?: number;
   crashedOnLaunch?: boolean;
   currentItemId: string | null;
   /**

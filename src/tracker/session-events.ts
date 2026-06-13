@@ -422,8 +422,22 @@ export function workflowNameFromInstance(instance: string): string | null {
   return null;
 }
 
-/** Generate a unique instance name like "Separation 1", "Separation 2", etc. */
-export function generateInstanceName(workflowType: string, dir?: string): string {
+/**
+ * Generate a unique instance name like "Separation 1", "Separation 2", etc.
+ *
+ * `reservedNames` is a caller-supplied set of names already claimed by alive
+ * peers whose `workflow_start` may not be on disk yet (VS-003): a daemon
+ * allocates its session-drawer name at lockfile-write time — BEFORE it emits
+ * `workflow_start` — and stores it in the lockfile so a concurrently-spawning
+ * peer can scan alive lockfiles and pass the discovered names here. A slot is
+ * occupied when EITHER the session-event count says so OR it is in
+ * `reservedNames`, so two near-simultaneous daemons never both pick "<wf> 1".
+ */
+export function generateInstanceName(
+  workflowType: string,
+  dir?: string,
+  reservedNames?: ReadonlySet<string>,
+): string {
   const label = INSTANCE_LABELS[workflowType] || workflowType;
 
   const events = readSessionEvents(dir);
@@ -454,7 +468,8 @@ export function generateInstanceName(workflowType: string, dir?: string): string
     const name = `${label} ${n}`;
     const s = startCount.get(name) ?? 0;
     const e = endCount.get(name) ?? 0;
-    if (s <= e) break;
+    const free = s <= e && !reservedNames?.has(name);
+    if (free) break;
     n++;
   }
   return `${label} ${n}`;
