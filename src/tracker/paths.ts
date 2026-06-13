@@ -84,6 +84,18 @@ export function e2eGateHoldPath(workflow: string, step: string | undefined, dir:
   return join(e2eGatesDir(dir), step ? `${workflow}--${step}.hold` : `${workflow}.hold`);
 }
 
+/**
+ * Fail-gate file for a stubbed workflow step: `<workflow>--fail-at--<step>.fail`.
+ * Arming it makes the scripted handler throw a non-cancel error the first time
+ * it reaches that step, so the e2e driver can exercise organic failure → red
+ * badge → Retry → `tasks.original_input_json` replay → success. The gate is
+ * ONE-SHOT (the handler deletes it when it fires) so the replayed run passes
+ * without the driver having to clean up. See `core/e2e/gates.ts`.
+ */
+export function e2eGateFailPath(workflow: string, step: string, dir: string): string {
+  return join(e2eGatesDir(dir), `${workflow}--fail-at--${step}.fail`);
+}
+
 /** `<dir>/rows/<workflow>-<date>.jsonl` — tracker/queue rows for one workflow+day. */
 export function rowFilePath(workflow: string, date: string, dir: string): string {
   return join(rowsDir(dir), `${workflow}-${date}.jsonl`);

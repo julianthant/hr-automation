@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { e2eGateHoldPath } from "../../tracker/paths.js";
+import { existsSync, rmSync } from "node:fs";
+import { e2eGateHoldPath, e2eGateFailPath } from "../../tracker/paths.js";
 
 /**
  * File-based hold gates for HRAUTO_E2E_STUBS scripted runs.
@@ -36,6 +36,42 @@ export function isGateHeld(opts: {
     existsSync(e2eGateHoldPath(opts.workflow, undefined, dir)) ||
     existsSync(e2eGateHoldPath(opts.workflow, opts.step, dir))
   );
+}
+
+/**
+ * Error thrown by a scripted step when its fail gate is armed. A plain Error
+ * (NOT a CancelledError) so the kernel stepper's catch runs `emitFailed` and
+ * the daemon writes a terminal `failed` row (red badge + Retry button), the
+ * organic-failure path the e2e retry test exercises.
+ */
+export class E2EScriptedFailError extends Error {
+  constructor(workflow: string, step: string) {
+    super(`[e2e-stubs] scripted fail gate fired for ${workflow} at step "${step}"`);
+    this.name = "E2EScriptedFailError";
+  }
+}
+
+/**
+ * One-shot fail gate. Returns true (and DELETES the gate file) when a
+ * `<workflow>--fail-at--<step>.fail` file exists, so the caller throws an
+ * `E2EScriptedFailError` exactly once. Self-consuming: the driver arms the
+ * file, the run fails at that step, and the Retry replay sees no gate → passes
+ * — no manual cleanup between fail and retry. A non-existent file is the
+ * common case (no fs delete attempted).
+ */
+export function consumeFailGate(opts: {
+  workflow: string;
+  step: string;
+  trackerDir?: string;
+}): boolean {
+  const path = e2eGateFailPath(opts.workflow, opts.step, resolveTrackerDir(opts.trackerDir));
+  if (!existsSync(path)) return false;
+  try {
+    rmSync(path, { force: true });
+  } catch {
+    /* best-effort — if the unlink races the driver, the throw still fires once */
+  }
+  return true;
 }
 
 /**
