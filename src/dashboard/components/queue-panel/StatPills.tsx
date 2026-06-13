@@ -4,8 +4,6 @@ import { countEntriesByQueueStatus } from "./queue-status";
 
 interface StatPillsProps {
   entries: TrackerEntry[];
-  /** When set, "All" uses this instead of `entries.length` (top-level queue rows). */
-  allCountOverride?: number;
   activeFilter: string | null;
   onFilter: (status: string | null) => void;
 }
@@ -23,30 +21,29 @@ interface StatPillsProps {
  * lead, label trails (mono digit gets the eye first, label confirms).
  */
 const STATS = [
-  { key: null,        label: "All",       color: "text-foreground",  tint: "bg-foreground/10",  ring: "ring-foreground/30" },
   { key: "done",      label: "Done",      color: "text-success",     tint: "bg-success/12",     ring: "ring-success/40" },
   { key: "running",   label: "Active",    color: "text-primary",     tint: "bg-primary/15",     ring: "ring-primary/40" },
   { key: "failed",    label: "Failed",    color: "text-destructive", tint: "bg-destructive/12", ring: "ring-destructive/40" },
   // Cancelled (failed + step=cancelled) is its own bucket so "Failed" stays
   // genuine failures (E2E-009). Warning tone matches the row badge.
-  { key: "cancelled", label: "Cancelled", color: "text-warning",     tint: "bg-warning/12",     ring: "ring-warning/40" },
+  { key: "cancelled", label: "Cancel", color: "text-warning",     tint: "bg-warning/12",     ring: "ring-warning/40" },
   { key: "pending",   label: "Queue",     color: "text-warning",     tint: "bg-warning/12",     ring: "ring-warning/40" },
 ] as const;
 
-export function StatPills({ entries, allCountOverride, activeFilter, onFilter }: StatPillsProps) {
+export function StatPills({ entries, activeFilter, onFilter }: StatPillsProps) {
   const counts = countEntriesByQueueStatus(entries);
 
   return (
-    <div role="group" aria-label="Filter queue by status" className="w-full grid grid-cols-6 gap-1.5 h-full items-center">
+    <div role="group" aria-label="Filter queue by status" className="w-full grid grid-cols-5 gap-1.5 h-full items-center">
       {STATS.map((s) => {
-        const count = s.key === null ? (allCountOverride ?? entries.length) : counts[s.key] || 0;
+        const count = counts[s.key] || 0;
         const isActive = activeFilter === s.key;
         const dim = !isActive && count === 0;
         const countClass = count === 0 && !isActive ? "text-muted-foreground" : s.color;
 
         return (
           <button
-            key={s.key ?? "all"}
+            key={s.key}
             type="button"
             onClick={() => onFilter(isActive ? null : s.key)}
             aria-pressed={isActive}
