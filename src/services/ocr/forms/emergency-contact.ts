@@ -49,6 +49,25 @@ const PermissiveAddressOcrSchema = z.object({
 });
 
 /**
+ * Tolerant wrapper for an OCR-pass address (VL-003). The vision LLM sometimes
+ * returns an address as a single STRING (a one-line "123 Main St, City, CA")
+ * instead of the structured object — a strict object schema then rejected the
+ * field and per-page `finalize()` dropped the WHOLE record (the operator saw
+ * fewer approvable EC records than the PDF held). `z.preprocess` coerces a bare
+ * string into `{ street: <string> }` so the record survives and the downstream
+ * `.transform`'s `c.address.street` read (+ the strict EC daemon-boundary
+ * re-parse) keep working; the operator splits the line out in review. `null` /
+ * `undefined` short-circuit through `.nullable().optional()` BEFORE the
+ * preprocess runs, so only an actual string is coerced. Same "never drop a
+ * record over one field" precedent as the 2026-06-07 documentType/employee
+ * tolerant-coercion lessons.
+ */
+const TolerantAddressOcrSchema = z.preprocess(
+  (v) => (typeof v === "string" ? { street: v } : v),
+  PermissiveAddressOcrSchema,
+);
+
+/**
  * Permissive emergency-contact shape for the OCR pass.
  *
  * Key differences from the strict `EmergencyContactSchema`:
@@ -72,7 +91,7 @@ const PermissiveEmergencyContactOcrSchema = z
      * employee's address rather than nothing.
      */
     sameAddressAsEmployee: z.boolean().optional(),
-    address: PermissiveAddressOcrSchema.nullable().optional(),
+    address: TolerantAddressOcrSchema.nullable().optional(),
     cellPhone: z.string().nullable().optional(),
     homePhone: z.string().nullable().optional(),
     workPhone: z.string().nullable().optional(),
@@ -103,7 +122,7 @@ const PermissiveEmployeeSchema = z.object({
   supervisor: z.string().nullable().optional(),
   workEmail: z.string().nullable().optional(),
   personalEmail: z.string().nullable().optional(),
-  homeAddress: PermissiveAddressOcrSchema.nullable().optional(),
+  homeAddress: TolerantAddressOcrSchema.nullable().optional(),
   homePhone: z.string().nullable().optional(),
   cellPhone: z.string().nullable().optional(),
 });

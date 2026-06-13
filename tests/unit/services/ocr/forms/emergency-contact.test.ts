@@ -145,6 +145,47 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
     assert.ok(parsed.data.emergencyContact.address != null, "address should be present");
   });
 
+  it("coerces a STRING contact address into { street } instead of dropping the record (VL-003)", () => {
+    // The vision LLM sometimes returns address as a one-line string rather than
+    // the structured object. Pre-fix, the strict object schema rejected it and
+    // per-page finalize() dropped the WHOLE record (operator saw fewer
+    // approvable EC records than the PDF held). It must survive instead.
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 6,
+      employee: { name: "Mandy Wu", employeeId: "10678901" },
+      emergencyContact: {
+        name: "Kelly Wu",
+        relationship: "Sibling",
+        address: "123 Main St, San Diego, CA 92122", // single string, not an object
+        cellPhone: "(858) 555-0006",
+      },
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(
+      parsed.success,
+      `EC record with a STRING address must parse — got: ${JSON.stringify(!parsed.success && parsed.error.issues)}`,
+    );
+    // String coerced to { street }, so the contact has an address → not same-as-employee.
+    assert.equal(parsed.data.emergencyContact.sameAddressAsEmployee, false);
+    assert.equal(parsed.data.emergencyContact.address?.street, "123 Main St, San Diego, CA 92122");
+  });
+
+  it("coerces a STRING employee homeAddress into { street } (VL-003)", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 7,
+      employee: { name: "Emily Sanchez", employeeId: "10789012", homeAddress: "456 Elm Ave, La Jolla, CA 92037" },
+      emergencyContact: { name: "Pat Sanchez", relationship: "Parent" },
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(
+      parsed.success,
+      `EC record with a STRING employee homeAddress must parse — got: ${JSON.stringify(!parsed.success && parsed.error.issues)}`,
+    );
+    assert.equal(parsed.data.employee.homeAddress?.street, "456 Elm Ave, La Jolla, CA 92037");
+  });
+
   it("approveTo.deriveInput: produces an EmergencyContactRecord-compatible shape from a permissive record", () => {
     // Verify matchRecord + deriveInput compile and produce the downstream shape.
     // The cast `as EmergencyContactRecord` is intentional — strict re-parse happens
