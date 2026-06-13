@@ -129,6 +129,20 @@ export interface WithTrackedWorkflowOpts {
   traceCode?: string;
   /** Optional root prefix for trace/span composition on non-preassigned runs. */
   rootTracePrefix?: string;
+  /**
+   * VQ-003 suppress guard. When the run unwinds on a `CancelledError` AND this
+   * callback returns `true`, the wrapper SKIPS its terminal cancelled (`failed`
+   * / `step:"cancelled"`) row emit — but still re-throws so the caller's
+   * `{ ok:false, kind:'cancelled' }` accounting is unchanged. Used for
+   * daemon-originated cancels (force-shutdown / reassign): the daemon's
+   * `failInFlightItem` / `reassignInFlightItem` owns the SOLE terminal row, so
+   * the kernel's cancelled row would be a duplicate. `run-one-item` wires this
+   * to `() => runRegistry.cancelReason(runId) === 'shutdown'`, keeping the
+   * `runRegistry` import in the core layer (tracker never imports core).
+   * Absent (default) → emit the cancelled row as before (deliberate
+   * `/cancel-current` keeps its single orange row).
+   */
+  suppressTerminalRowOnCancel?: () => boolean;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -401,7 +415,18 @@ export async function withTrackedWorkflow<T>(
     } else {
       log.error({ message: error, event: "run:terminal", occasion: "failed", ...(lastStep ? { step: lastStep } : {}) });
     }
-    emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
+    // VQ-003: for a daemon-ORIGINATED cancel (force-shutdown / reassign), the
+    // daemon's `failInFlightItem` / `reassignInFlightItem` owns the SOLE
+    // terminal row. Suppress the kernel's terminal cancelled row here so the
+    // run isn't double-terminalized (a transient orange `failed/step:cancelled`
+    // chip before the real red `failed`). We still re-throw, so the caller's
+    // `{ ok:false, kind:'cancelled' }` accounting — and the daemon's three-way
+    // branch — are unchanged. A deliberate `/cancel-current` has no suppress
+    // guard, so it keeps emitting its single orange cancelled row.
+    const suppressCancelledRow = cancelled && opts.suppressTerminalRowOnCancel?.() === true;
+    if (!suppressCancelledRow) {
+      emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
+    }
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     throw e;
   } finally {

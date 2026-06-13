@@ -249,6 +249,53 @@ test('runRegistry: SQLite-backed cancel marks browser rows kill_requested + enqu
   }
 })
 
+test('runRegistry: cancelReason records the structured origin (VQ-003) — defaults to user, shutdown when passed', async () => {
+  const r = createRunRegistry()
+  r.register(makeHandle({ runId: 'user-run' }))
+  r.register(makeHandle({ runId: 'shutdown-run' }))
+
+  // No cancel fired yet → no recorded origin.
+  assert.equal(r.cancelReason('user-run'), undefined)
+
+  // Default origin is 'user' (deliberate cancel — kernel keeps its orange row).
+  await r.cancel('user-run', { reason: 'http_cancel_current', hardKillAfterMs: 0 })
+  assert.equal(r.cancelReason('user-run'), 'user')
+
+  // Explicit 'shutdown' origin (daemon teardown — kernel suppresses its row).
+  await r.cancel('shutdown-run', { reason: 'daemon_shutdown', origin: 'shutdown', hardKillAfterMs: 0 })
+  assert.equal(r.cancelReason('shutdown-run'), 'shutdown')
+})
+
+test('runRegistry: unregister clears the recorded cancel origin so a reused runId cannot inherit it (VQ-003)', async () => {
+  const r = createRunRegistry()
+  r.register(makeHandle({ runId: 'reused' }))
+  await r.cancel('reused', { reason: 'daemon_shutdown', origin: 'shutdown', hardKillAfterMs: 0 })
+  assert.equal(r.cancelReason('reused'), 'shutdown')
+
+  r.unregister('reused')
+  assert.equal(r.cancelReason('reused'), undefined, 'origin cleared on unregister')
+
+  // A fresh run reusing the same id starts with no origin until it cancels.
+  r.register(makeHandle({ runId: 'reused' }))
+  assert.equal(r.cancelReason('reused'), undefined, 'reused runId does not inherit the stale shutdown origin')
+})
+
+test('runRegistry: a second cancel re-records the origin even after the controller already aborted (VQ-003)', async () => {
+  // The suppress check must read the correct origin even when the abort already
+  // fired via another path — so cancel records the origin BEFORE the
+  // already-cancelled short-circuit.
+  const r = createRunRegistry()
+  r.register(makeHandle({ runId: 'r1' }))
+
+  await r.cancel('r1', { reason: 'first', origin: 'user', hardKillAfterMs: 0 })
+  assert.equal(r.cancelReason('r1'), 'user')
+
+  const second = await r.cancel('r1', { reason: 'second', origin: 'shutdown', hardKillAfterMs: 0 })
+  assert.equal(second.ok, true)
+  if (second.ok) assert.equal(second.alreadyCancelled, true)
+  assert.equal(r.cancelReason('r1'), 'shutdown', 'origin updated on the second cancel despite already-cancelled')
+})
+
 test('runRegistry: module singleton is shared across imports (proves single-process scope)', () => {
   _resetRunRegistryForTests()
   runRegistry.register(makeHandle({ runId: 'global-1' }))
