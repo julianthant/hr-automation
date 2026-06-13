@@ -222,7 +222,13 @@ export async function ensureDaemonsAvailable(
             ? `--new (${alive.length} alive)`
             : `no alive daemons`
       log.step(`[Daemon] Spawning ${spawnCount} new ${workflow} daemon(s) (${why}).`)
-      log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
+      // Under HRAUTO_E2E_STUBS the spawned daemons run scripted handlers with
+      // `systems: []` — no browser, no Duo — so the "approve Duo" prompt is a
+      // lie (T3). Checked via the env directly (matching workflow-loaders.ts) to
+      // avoid importing the heavy stub-workflows module here.
+      if (process.env.HRAUTO_E2E_STUBS !== '1') {
+        log.step('[Daemon] Approve Duo(s) in the new browser window(s); this takes 30s–2min.')
+      }
     } else if (!quiet && alive.length > 0) {
       log.step(`[Daemon] Reusing ${alive.length} alive ${workflow} daemon(s); no spawn needed.`)
     }
