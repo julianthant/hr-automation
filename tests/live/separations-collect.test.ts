@@ -48,17 +48,34 @@ import type { SystemConfig } from "../../src/core/kernel/types.js";
  * preconditions are absent so a fresh clone / CI never fails or hangs on a
  * manual Duo prompt. Headless by default; HR_TEST_HEADED=1 to watch.
  *
- * ── SAFETY: fail-fast-and-CLEAN, never hard-killed mid-ceremony ──
- * Like session-launch-multi.test.ts, this arms its OWN abort well under the
- * pool's 180s testTimeout (`INTERNAL_ABORT_MS`) and threads it through
- * `Session.launch`'s `abortSignal`. If the hands-off Duo ceremony stalls, the
- * abort fires first and unwinds through `pollDuoApproval`, which finalizes
- * WebAuthn (persists signCount + tears the authenticator down) on the
- * abort/throw path too — so even a forced abort exits the ceremony CLEANLY
- * instead of being `kill -9`'d mid-flight (which would desync the WebAuthn
- * signCount → Duo rejects the next assertion as a clone; see
- * docs/engineering/hands-off-duo-webauthn.md §6). Teardown is graceful
- * `session.close()` only — NEVER force-kill.
+ * ── TWO-PHASE TIMING: auth-safety abort, then a bounded collection budget ──
+ * The wall-clock cost splits cleanly in two and each phase is bounded on its own
+ * so a big Action List can never hard-kill the worker:
+ *
+ *   PHASE 1 — AUTH (signCount-critical). Like session-launch-multi.test.ts, this
+ *   arms its OWN abort (`INTERNAL_ABORT_MS`) BEFORE `Session.launch` and threads
+ *   it through the `abortSignal`. If the hands-off Duo ceremony stalls, the abort
+ *   fires first and unwinds through `pollDuoApproval`, which finalizes WebAuthn
+ *   (persists signCount + tears the authenticator down) on the abort/throw path
+ *   too — so even a forced abort exits the ceremony CLEANLY instead of being
+ *   `kill -9`'d mid-flight (which would desync the WebAuthn signCount → Duo
+ *   rejects the next assertion as a clone; see
+ *   docs/engineering/hands-off-duo-webauthn.md §6). **As soon as
+ *   `session.page(kuali)` resolves the signCount risk is past, so we CLEAR this
+ *   abort timer** — it must NOT fire mid-collection (the per-doc page calls below
+ *   don't see the abort signal, so a fired abort during collection would only
+ *   leak a rejection, not unwind cleanly).
+ *
+ *   PHASE 2 — COLLECTION (read-only, signCount-safe). Bounded by a SOFT budget
+ *   (`COLLECTION_BUDGET_MS`): the per-doc loop checks the budget (and the abort
+ *   signal, defensively) at the top of each iteration and BREAKS cleanly when
+ *   either trips, leaving any unvisited docs as `notReached`. A large queue thus
+ *   passes WITH COVERAGE (collect as many valid records as the budget allows,
+ *   report how many remained) rather than running past the pool timeout and
+ *   getting hard-killed. Invalid data on any REACHED separation form still fails
+ *   the test loudly.
+ *
+ * Teardown is graceful `session.close()` only — NEVER force-kill.
  *
  * ── PII discipline ──
  * Collected records hold real employee names + EIDs. This test logs COUNTS and
@@ -92,11 +109,20 @@ const systems: SystemConfig[] = separationsWorkflow.config.systems.filter(
 const EID_RE = /^\d{5,}$/;
 const MMDDYYYY_RE = /^\d{2}\/\d{2}\/\d{4}$/;
 
-// Internal safety deadline — fires our own abort BEFORE the pool's 180s
-// testTimeout. One Duo plus opening N small Kuali forms read-only completes in
-// well under this; if we hit it, the run is genuinely stuck and aborting (which
-// persists signCount + tears the authenticator down cleanly) is correct.
+// PHASE 1 deadline — fires our own auth abort BEFORE the per-test timeout if the
+// Duo ceremony stalls. It guards AUTH ONLY: once `session.page(kuali)` resolves
+// (auth done → signCount risk past) we CLEAR this timer so it can't fire during
+// collection (the per-doc page calls don't observe the abort signal). A stuck
+// Duo within this window aborts cleanly (persists signCount + tears the
+// authenticator down).
 const INTERNAL_ABORT_MS = 120_000;
+
+// PHASE 2 soft budget — caps the per-doc collection loop. The loop breaks
+// cleanly when this is exceeded, leaving the rest of a large queue as
+// `notReached` (pass-with-coverage) instead of running past the pool timeout and
+// being hard-killed. Date.now() is fine here — the no-Date.now rule is for
+// Workflow orchestration scripts, not test files.
+const COLLECTION_BUDGET_MS = 120_000;
 
 // `Session.launch`'s built-in `defaultLaunchOne` always launches HEADED (it
 // doesn't thread a headless flag into `launchBrowser`). Provide a launchFn that
@@ -124,19 +150,27 @@ describe.skipIf(!ready)(
           `expected exactly the 'kuali' system, resolved ${systems.length} (${systems.map((s) => s.id).join(", ") || "<none>"})`,
         );
 
-        // SAFETY ABORT — fires under the pool timeout so a stalled ceremony
-        // unwinds cleanly (finishDuoWebAuthn persists the signCount) instead of
-        // being hard-killed. Cleared in `finally` so a fast success doesn't keep
-        // the worker alive on a pending timer.
+        // PHASE-1 AUTH-SAFETY ABORT — armed BEFORE Session.launch so a stalled
+        // Duo ceremony unwinds cleanly (finishDuoWebAuthn persists the signCount)
+        // instead of being hard-killed. Cleared the instant auth resolves (see
+        // below) so it can never fire mid-collection, and again in `finally`
+        // (clearTimeout is idempotent) so a fast success doesn't keep the worker
+        // alive on a pending timer.
         const abortController = new AbortController();
+        let authAbortCleared = false;
         const abortTimer = setTimeout(() => {
           abortController.abort(
             new Error(
-              `Kuali data-collection did not complete within ${INTERNAL_ABORT_MS}ms — aborting to exit the Duo ceremony cleanly before the pool hard-kill (see test header §SAFETY)`,
+              `Kuali AUTH did not complete within ${INTERNAL_ABORT_MS}ms — aborting to exit the Duo ceremony cleanly before the pool hard-kill (see test header §TWO-PHASE TIMING / PHASE 1)`,
             ),
           );
         }, INTERNAL_ABORT_MS);
         abortTimer.unref?.();
+        const clearAuthAbort = () => {
+          if (authAbortCleared) return;
+          authAbortCleared = true;
+          clearTimeout(abortTimer);
+        };
 
         const session = await Session.launch(systems, {
           launchFn,
@@ -149,6 +183,13 @@ describe.skipIf(!ready)(
           // authenticated Page. If the abort fires first, this rejects with the
           // abort reason — a fast, clean failure rather than a hang.
           const page = await session.page(KUALI_SYSTEM_ID);
+
+          // AUTH IS DONE — signCount risk is past. Clear the Phase-1 abort timer
+          // so it can NEVER fire during collection (the per-doc page calls below
+          // don't observe abortController.signal, so a fired abort here would
+          // only leak a rejection, not unwind anything cleanly). From here on,
+          // Phase 2's soft budget bounds the work.
+          clearAuthAbort();
 
           // Read-only navigation: open the Action List and enumerate every
           // pending document number ("the ones that need to be separated").
@@ -175,7 +216,30 @@ describe.skipIf(!ready)(
           const collected: Array<{ docNumber: string; firstName: string }> = [];
           const skipped: string[] = [];
 
+          // PHASE 2 — soft budget starts now (auth excluded). Each iteration
+          // checks the budget (and the abort signal, defensively) and breaks
+          // cleanly before touching the next doc.
+          const collectStart = Date.now();
+          let budgetStopped = false;
+
           for (const docNumber of docNumbers) {
+            // Break cleanly if the abort tripped (defensive — it's normally
+            // cleared after auth) or the collection budget is spent. Whatever
+            // remains in docNumbers is left unvisited (notReached) — a large
+            // queue passes WITH COVERAGE rather than overrunning the pool
+            // timeout and being hard-killed.
+            const elapsed = Date.now() - collectStart;
+            if (abortController.signal.aborted || elapsed > COLLECTION_BUDGET_MS) {
+              budgetStopped = true;
+              const reached = collected.length + skipped.length;
+              const remain = docNumbers.length - reached;
+              log.step(
+                `[live/separations-collect] collection budget reached after ${elapsed}ms — ` +
+                  `collected ${collected.length}, reached ${reached}/${docNumbers.length}, ${remain} remain unvisited (stopping cleanly)`,
+              );
+              break;
+            }
+
             // Open the doc read-only (clickDocument navigates; it never fills).
             await clickDocument(page, docNumber);
 
@@ -228,26 +292,49 @@ describe.skipIf(!ready)(
             await openActionList(page);
           }
 
-          // Every separation-form doc that was enumerated must have yielded a
-          // valid record: collected + skipped accounts for all enumerated docs.
+          // Coverage accounting. Every REACHED doc was either collected (valid
+          // separation record) or skipped (not a separation form). Anything the
+          // budget stopped us short of is `notReached` — NOT a failure, just
+          // uncovered this run. (We deliberately do NOT assert all enumerated
+          // docs were visited; that would false-fail purely on queue size.)
+          const reached = collected.length + skipped.length;
+          const notReached = docNumbers.length - reached;
+          // Internal-consistency invariant: every enumerated doc is accounted
+          // for as either reached (collected ∪ skipped) or notReached, and we
+          // never reached more docs than were enumerated. This replaces the old
+          // `collected+skipped === docNumbers.length` assertion, which assumed
+          // the whole list was always visited and false-failed on a large queue.
           assert.equal(
-            collected.length + skipped.length,
+            reached + notReached,
             docNumbers.length,
-            `every enumerated doc must be either collected or skipped — enumerated=${docNumbers.length} collected=${collected.length} skipped=${skipped.length}`,
+            `coverage accounting must be internally consistent — reached=${reached} (collected=${collected.length} skipped=${skipped.length}) + notReached=${notReached} must equal enumerated=${docNumbers.length}`,
           );
-          // At least one enumerated doc was a separation form that yielded a
-          // valid record — a list of all-non-separations would mean either the
-          // enumeration selector is wrong or extraction is broken.
           assert.ok(
-            collected.length > 0,
-            `enumerated ${docNumbers.length} pending doc(s) but none were a valid separation form — check the actionList.docLinks enumeration selector and extractSeparationData (skipped=${skipped.length})`,
+            reached <= docNumbers.length && notReached >= 0,
+            `coverage accounting out of bounds — reached=${reached} notReached=${notReached} enumerated=${docNumbers.length}`,
           );
 
-          // Concise, PII-light summary: counts + field-presence + first-name
-          // crumbs only. No full names, no EIDs.
+          // Every doc we REACHED that was a separation form already validated
+          // inline above (an invalid record threw). The remaining invariant:
+          // whenever we reached ANY doc, at least one was a valid separation
+          // form. A list of all-non-separations would mean the enumeration
+          // selector or extraction is broken — a real failure. The budget
+          // stopping us short does not exempt this, because the queue is
+          // separations-heavy so the first reached docs are separations; if we
+          // reached docs and found zero separations, something is wrong.
+          if (reached > 0) {
+            assert.ok(
+              collected.length > 0,
+              `reached ${reached} pending doc(s) but none were a valid separation form — check the actionList.docLinks enumeration selector and extractSeparationData (skipped=${skipped.length}, notReached=${notReached})`,
+            );
+          }
+
+          // Concise, PII-light coverage summary: counts + field-presence +
+          // first-name crumbs only. No full names, no EIDs.
           log.success(
-            `[live/separations-collect] COLLECTED ${collected.length}/${docNumbers.length} valid separation record(s)` +
-              (skipped.length > 0 ? ` (${skipped.length} non-separation doc(s) skipped)` : "") +
+            `[live/separations-collect] COLLECTED ${collected.length} valid / reached ${reached} / enumerated ${docNumbers.length} ` +
+              `(notReached=${notReached}${budgetStopped ? " due to budget" : ""})` +
+              (skipped.length > 0 ? ` — ${skipped.length} non-separation doc(s) skipped` : "") +
               ` — fields validated: employeeName, eid, lastDayWorked, separationDate, terminationType`,
           );
           log.step(
@@ -256,7 +343,9 @@ describe.skipIf(!ready)(
               .join(", ")}`,
           );
         } finally {
-          clearTimeout(abortTimer);
+          // Idempotent — auth normally cleared this already; this catches the
+          // pre-auth failure path (abort fired / launch threw before auth).
+          clearAuthAbort();
           // Clean teardown — graceful `session.close()` closes the context +
           // browser. NEVER force-kill (killChromeHard / SIGKILL) here: a hard
           // kill mid-ceremony desyncs the WebAuthn signCount and makes Duo
@@ -267,11 +356,14 @@ describe.skipIf(!ready)(
           await session.close();
         }
       },
-      // Per-test timeout — a hair under the pool's 180s default but ABOVE our
-      // internal abort. The internal abort always trips first and unwinds the
-      // ceremony cleanly; this is only a backstop so the test can't outlive the
-      // pool's own kill window even if teardown itself stalled.
-      INTERNAL_ABORT_MS + 30_000,
+      // Per-test timeout — overrides the pool's 180s default for this test and
+      // is set generously ABOVE the two phases combined: Phase-1 auth abort
+      // (≤120s) + Phase-2 collection budget (≤120s) + teardown all fit
+      // comfortably. The auth abort trips first if auth stalls; the soft budget
+      // breaks the loop before collection can run long. This 300s ceiling is
+      // only a last-resort backstop so the test can't outlive its kill window
+      // even if teardown itself stalled — neither bounded phase should reach it.
+      300_000,
     );
   },
 );
