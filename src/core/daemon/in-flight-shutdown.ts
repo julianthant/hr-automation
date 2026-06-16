@@ -220,8 +220,20 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
   bestEffort?: boolean
   /** When false, skip the child-dependency settle (shutdown in-flight path). */
   settleDependency?: boolean
+  /**
+   * Terminal-write guard (E2E-101 / E2E-105). When provided, called to claim
+   * the run's single terminal-row write: the `failed` row is emitted ONLY when
+   * it returns `true`. If a prior emitter (the kernel's `withTrackedWorkflow`
+   * catch on a signal-only-wait abort) already terminalized this run, the
+   * callback returns `false` and this defers — no duplicate terminal row. The
+   * task is STILL marked failed + dependencies settled regardless (the SQLite
+   * control truth must reflect the failure even when the tracker row already
+   * exists). Absent → emit unconditionally (callers without a per-run registry
+   * context, e.g. the queued-item sweep, pass nothing).
+   */
+  claimTerminalWrite?: () => boolean
 }): Promise<void> {
-  const { wf, item, failReason, taskStore, trackerDir, bestEffort } = args
+  const { wf, item, failReason, taskStore, trackerDir, bestEffort, claimTerminalWrite } = args
   const settleDependency = args.settleDependency ?? true
   const nowIso = args.timestamp ?? new Date().toISOString()
   const markAndSettle = async (): Promise<void> => {
@@ -237,19 +249,26 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
       void wakeDaemonsForReleasedParents(released, trackerDir)
     }
   }
+  // Claim the single terminal-row token (E2E-101). The mark/settle below still
+  // runs so SQLite reflects the failure; only the tracker ROW emit is gated.
+  const shouldEmitRow = claimTerminalWrite ? claimTerminalWrite() : true
   if (bestEffort) {
     try {
       await markAndSettle()
     } catch {
       /* best-effort — queue event append; tracker row below is the user-visible signal */
     }
-    try {
-      emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
-    } catch {
-      /* best-effort */
+    if (shouldEmitRow) {
+      try {
+        emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
+      } catch {
+        /* best-effort */
+      }
     }
     return
   }
   await markAndSettle()
-  emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
+  if (shouldEmitRow) {
+    emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
+  }
 }

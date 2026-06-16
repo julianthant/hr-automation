@@ -438,17 +438,28 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           ...(callerPreEmits ? {} : (inputForRow ? { input: inputForRow } : {})),
           ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
           archetype: rowArchetype,
-          // VQ-003: suppress the kernel's terminal cancelled row when the
-          // cancel ORIGINATES from daemon teardown (force-shutdown / reassign).
-          // The daemon's `failInFlightItem` / `reassignInFlightItem` owns the
-          // sole terminal in that case, so the kernel's cancelled row would be
-          // a duplicate that pollutes the row history with a transient orange
-          // chip. A deliberate `/cancel-current` records `origin:'user'`
-          // (the default), so this returns false and the orange row stays.
-          // Reading `runRegistry` HERE (core) keeps it out of the tracker
-          // layer — the callback is the boundary.
+          // VQ-003 + E2E-101: suppress the kernel's terminal cancelled row
+          // whenever the cancel arrived through `runRegistry.cancel` (i.e.
+          // `cancelOrigin` is set — origin:'shutdown' force-stop/reassign OR
+          // origin:'user' deliberate `/cancel-current`/`cancel_task`). In every
+          // such case the daemon's three-way teardown/cancel branch owns the
+          // run's SOLE terminal row, and that row is RICHER than the kernel's
+          // (the daemon rebuilds full display data via `buildShutdownTrackerData`
+          // — e.g. OCR's file-kind title that the sparse kernel row lacks). If
+          // the kernel ALSO emitted, latest-wins would either double-write
+          // (E2E-101) or clobber the title with the sparse row. The ONLY caller
+          // that reaches here WITHOUT a `runRegistry.cancel` is a direct
+          // `runOneItem` unit test that aborts the controller itself — there
+          // `cancelOrigin` is undefined, so the kernel still writes its row.
+          // Reading `runRegistry` HERE (core) keeps it out of the tracker layer.
           suppressTerminalRowOnCancel: () =>
-            runRegistry.cancelOrigin(runId) === 'shutdown',
+            runRegistry.cancelOrigin(runId) !== undefined,
+          // E2E-101 / E2E-105: claim the single terminal-row write. Defense in
+          // depth alongside the suppression above — the daemon's teardown/cancel
+          // branches claim the same token, so even if two emitters ever race
+          // (e.g. multiple dying daemons on the queued-orphan path) exactly one
+          // terminal row lands per run.
+          claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),
         },
       )
     }, trackerDir)

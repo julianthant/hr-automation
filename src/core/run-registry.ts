@@ -164,6 +164,39 @@ export interface RunRegistry {
    * `unregister` so a reused runId can't inherit a stale origin.
    */
   cancelOrigin(runId: string): CancelOrigin | undefined
+  /**
+   * Terminal-write guard (E2E-101 / E2E-105). Atomically claim the SINGLE
+   * terminal-row write for `runId`: returns `true` for the FIRST caller (which
+   * MUST then write the terminal row) and `false` for every later caller
+   * (which MUST skip its write). Enforces the "exactly one terminal write per
+   * run" invariant STRUCTURALLY, across the two emitters that race on a
+   * teardown / deliberate-cancel of a signal-only wait:
+   *   - the kernel's `withTrackedWorkflow` catch (its terminal cancelled/failed
+   *     row), and
+   *   - the daemon's teardown branches (`failInFlightItem` /
+   *     `reassignInFlightItem` / the deliberate-cancel emit).
+   * Whoever unwinds first claims the token and writes; the other defers. This
+   * replaces "convention + the VQ-003 suppression seam" with a structural
+   * guarantee. Cleared on `unregister` so a reused runId starts fresh.
+   *
+   * Idempotent for a single logical write: a caller that already claimed and
+   * is re-entered (shouldn't happen, but harmless) sees `false` and skips.
+   */
+  claimTerminalWrite(runId: string): boolean
+  /**
+   * Read-only probe of whether a terminal row has already been claimed for
+   * `runId` (by `claimTerminalWrite`). Lets a caller decide to defer WITHOUT
+   * claiming the token itself (e.g. a branch that has its own emit path and
+   * only wants to know "did someone already terminalize this run?").
+   */
+  hasTerminalWrite(runId: string): boolean
+  /**
+   * Release the terminal-write token for `runId`. The daemon's per-item finally
+   * calls this AFTER its teardown/cancel branch ran, so a reused runId starts
+   * fresh. Deliberately separate from `unregister` (which fires earlier, inside
+   * `run-one-item`, before the daemon branch reads the token). No-op if unset.
+   */
+  releaseTerminalWrite(runId: string): void
 }
 
 const DEFAULT_HARD_KILL_AFTER_MS = 5_000
@@ -190,6 +223,15 @@ export function createRunRegistry(): RunRegistry {
    * `cancelled` so a reused runId can't inherit a stale origin.
    */
   const cancelOrigins = new Map<string, CancelOrigin>()
+  /**
+   * Per-runId "the single terminal row has been claimed" flag (E2E-101 /
+   * E2E-105). The first `claimTerminalWrite(runId)` adds the id and returns
+   * true; later calls see it present and return false. Cleared on `unregister`
+   * so a reused runId can terminalize again. Survives independently of
+   * `cancelled` / `cancelOrigins` because a terminal write can be a plain
+   * failure, not only a cancel.
+   */
+  const terminalWritten = new Set<string>()
 
   const register = (handle: RunHandle): void => {
     handles.set(handle.runId, handle)
@@ -202,10 +244,38 @@ export function createRunRegistry(): RunRegistry {
   const cancelOrigin = (runId: string): CancelOrigin | undefined =>
     cancelOrigins.get(runId)
 
+  const claimTerminalWrite = (runId: string): boolean => {
+    if (terminalWritten.has(runId)) return false
+    terminalWritten.add(runId)
+    return true
+  }
+
+  const hasTerminalWrite = (runId: string): boolean => terminalWritten.has(runId)
+
   const unregister = (runId: string): void => {
     handles.delete(runId)
     cancelled.delete(runId)
     cancelOrigins.delete(runId)
+    // NOTE: `terminalWritten` is deliberately NOT cleared here. The kernel's
+    // `withTrackedWorkflow` claims the token and emits INSIDE the run, then
+    // `run-one-item`'s finally calls `unregister` — but the daemon's three-way
+    // teardown/cancel branch runs AFTER `runOneItem` returns and must still see
+    // the token as claimed so it defers (E2E-101). Clearing here would let the
+    // daemon branch re-claim a fresh token and double-write. The daemon's
+    // per-item finally calls `releaseTerminalWrite(runId)` once its branch has
+    // run, which is the real lifecycle boundary; `unregister` (handle cleanup)
+    // is not.
+  }
+
+  /**
+   * Explicitly release a run's terminal-write token. Called by the daemon's
+   * per-item finally AFTER its teardown/cancel branch has had its chance to
+   * read the token — the true lifecycle boundary for the single-terminal guard
+   * (NOT `unregister`, which fires earlier, inside `run-one-item`). Safe to
+   * call for a runId that never claimed (no-op).
+   */
+  const releaseTerminalWrite = (runId: string): void => {
+    terminalWritten.delete(runId)
   }
 
   const cancel = async (
@@ -280,7 +350,17 @@ export function createRunRegistry(): RunRegistry {
     return { ok: true, alreadyCancelled: false, hardKilled: true }
   }
 
-  return { register, get, list, unregister, cancel, cancelOrigin }
+  return {
+    register,
+    get,
+    list,
+    unregister,
+    cancel,
+    cancelOrigin,
+    claimTerminalWrite,
+    hasTerminalWrite,
+    releaseTerminalWrite,
+  }
 }
 
 async function waitForUnregisterOrTimeout(
@@ -361,6 +441,10 @@ export const runRegistry: RunRegistry = createRunRegistry()
 export function _resetRunRegistryForTests(): void {
   for (const handle of runRegistry.list()) {
     runRegistry.unregister(handle.runId)
+    // `unregister` no longer clears the terminal-write token (E2E-101 — the
+    // daemon's per-item finally owns that release); clear it here too so a
+    // fresh test run never inherits a stale claimed token.
+    runRegistry.releaseTerminalWrite(handle.runId)
   }
 }
 

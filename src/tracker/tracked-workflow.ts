@@ -143,6 +143,21 @@ export interface WithTrackedWorkflowOpts {
    * `/cancel-current` keeps its single orange row).
    */
   suppressTerminalRowOnCancel?: () => boolean;
+  /**
+   * Terminal-write guard (E2E-101 / E2E-105). When present, the wrapper calls
+   * this to ATOMICALLY claim the single terminal-row write for the run BEFORE
+   * emitting its terminal `done`/`failed` row: it emits only when the callback
+   * returns `true` (this wrapper is the first to claim) and SKIPS the emit when
+   * it returns `false` (a daemon teardown branch already terminalized the run).
+   * Enforces "exactly one terminal write per run" structurally across the two
+   * racing emitters (the kernel catch here + the daemon's
+   * `failInFlightItem`/`reassignInFlightItem`/deliberate-cancel emit) — see the
+   * VQ-003 / E2E-101 lesson. `run-one-item` wires it to
+   * `() => runRegistry.claimTerminalWrite(runId)`, keeping the `runRegistry`
+   * import in core (tracker never imports core). Absent (default, e.g.
+   * in-process `runWorkflow`) → emit unconditionally as before.
+   */
+  claimTerminalWrite?: () => boolean;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -424,7 +439,21 @@ export async function withTrackedWorkflow<T>(
     // branch — are unchanged. A deliberate `/cancel-current` has no suppress
     // guard, so it keeps emitting its single orange cancelled row.
     const suppressCancelledRow = cancelled && opts.suppressTerminalRowOnCancel?.() === true;
-    if (!suppressCancelledRow) {
+    // E2E-101: terminal-write guard. Even when this wrapper is the legitimate
+    // terminal emitter (a deliberate `/cancel-current`, origin:'user', so NOT
+    // suppressed above), the daemon's deliberate-cancel branch ALSO wants to
+    // emit a `failed/step:cancelled` row for the same run — two consistent rows
+    // ~ms apart, violating "exactly one terminal write per run". Claim the
+    // single terminal token here: emit only if WE win the claim; if a teardown
+    // branch already terminalized this run, defer. `claimTerminalWrite`
+    // defaults to "always allowed" (in-process `runWorkflow` passes no guard).
+    //
+    // IMPORTANT: only claim the token when we are ACTUALLY going to emit (i.e.
+    // NOT suppressed). On a daemon-originated cancel (VQ-003) the row is
+    // suppressed here and the daemon's `failInFlightItem` owns the sole
+    // terminal — claiming-then-not-emitting would steal the token and leave the
+    // run with NO terminal row at all.
+    if (!suppressCancelledRow && (opts.claimTerminalWrite?.() ?? true)) {
       emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
     }
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);

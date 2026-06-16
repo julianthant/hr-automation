@@ -110,6 +110,20 @@ export function isProcessAlive(pid: number): boolean {
  */
 type ProbeResult = 'match' | 'mismatch' | 'unreachable'
 
+/**
+ * Richer probe outcome that also surfaces the peer's self-reported teardown
+ * state (`/whoami.shuttingDown`). Used by the hand-off availability check
+ * (E2E-105): a peer that POSITIVELY matches but reports `shuttingDown: true`
+ * is responsive yet NOT a valid target to leave queued/in-flight work for —
+ * it is itself dying. `shuttingDown` is only meaningful when `result` is
+ * `'match'`; it defaults to `false` for legacy daemons whose `/whoami`
+ * predates the field.
+ */
+interface WhoamiProbe {
+  result: ProbeResult
+  shuttingDown: boolean
+}
+
 const ALIVE_DAEMONS_CACHE_TTL_MS = 2_000
 const aliveDaemonsCache = new Map<string, { value: Promise<Daemon[]>; expires: number }>()
 
@@ -135,19 +149,23 @@ async function probeWhoami(
   port: number,
   expected: { workflow: string; instanceId: string },
   timeoutMs = 1500,
-): Promise<ProbeResult> {
+): Promise<WhoamiProbe> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/whoami`, {
       signal: AbortSignal.timeout(timeoutMs),
     })
-    if (!res.ok) return 'unreachable'
-    const body = (await res.json()) as { workflow?: string; instanceId?: string }
-    if (body.workflow === expected.workflow && body.instanceId === expected.instanceId) {
-      return 'match'
+    if (!res.ok) return { result: 'unreachable', shuttingDown: false }
+    const body = (await res.json()) as {
+      workflow?: string
+      instanceId?: string
+      shuttingDown?: boolean
     }
-    return 'mismatch'
+    if (body.workflow === expected.workflow && body.instanceId === expected.instanceId) {
+      return { result: 'match', shuttingDown: body.shuttingDown === true }
+    }
+    return { result: 'mismatch', shuttingDown: false }
   } catch {
-    return 'unreachable'
+    return { result: 'unreachable', shuttingDown: false }
   }
 }
 
@@ -169,7 +187,31 @@ export async function isDaemonResponsive(daemon: Daemon, timeoutMs = 1500): Prom
     { workflow: daemon.workflow, instanceId: daemon.instanceId },
     timeoutMs,
   )
-  return probe === 'match'
+  return probe.result === 'match'
+}
+
+/**
+ * Like `isDaemonResponsive`, but ALSO requires the peer is not itself tearing
+ * down: a peer is available to HAND WORK OFF to only if it positively matches
+ * `/whoami` AND reports `shuttingDown: false`. This is the E2E-105 gate — on a
+ * simultaneous workflow-scoped stop-all, every dying daemon still answers
+ * `/whoami` with `match` (its HTTP listener stays up until the very end of
+ * teardown), so `isDaemonResponsive` alone would let each daemon leave its
+ * queued/in-flight work "for a peer" that is also dying → orphaned `queued`.
+ * The dashboard's stop sets `shuttingDown` synchronously in every daemon's
+ * `/stop` handler before it responds, so by teardown-sweep time a stopped peer
+ * reports `shuttingDown: true` and is correctly excluded here.
+ */
+export async function isDaemonAvailableForHandoff(
+  daemon: Daemon,
+  timeoutMs = 1500,
+): Promise<boolean> {
+  const probe = await probeWhoami(
+    daemon.port,
+    { workflow: daemon.workflow, instanceId: daemon.instanceId },
+    timeoutMs,
+  )
+  return probe.result === 'match' && !probe.shuttingDown
 }
 
 /**
@@ -183,6 +225,27 @@ export async function filterResponsiveDaemons(
 ): Promise<Daemon[]> {
   const results = await Promise.all(
     daemons.map(async (d) => ((await isDaemonResponsive(d, timeoutMs)) ? d : null)),
+  )
+  return results.filter((d): d is Daemon => d !== null)
+}
+
+/**
+ * Filter a peer set down to daemons that are AVAILABLE FOR HAND-OFF — responsive
+ * AND not themselves shutting down (`isDaemonAvailableForHandoff`). This is the
+ * authority the teardown sweeps consult to decide "will a peer actually finish
+ * the queued/in-flight item I'm about to leave behind?": a stricter check than
+ * `filterResponsiveDaemons` because a peer that already received `/stop` is
+ * responsive but will NOT pick up new work. Used by both the in-flight reassign
+ * decision and the never-claimed-queued sweep so a force teardown that is
+ * effectively the last responsive owner terminalizes its queue instead of
+ * orphaning it (E2E-105).
+ */
+export async function filterPeersAvailableForHandoff(
+  daemons: Daemon[],
+  timeoutMs = 1500,
+): Promise<Daemon[]> {
+  const results = await Promise.all(
+    daemons.map(async (d) => ((await isDaemonAvailableForHandoff(d, timeoutMs)) ? d : null)),
   )
   return results.filter((d): d is Daemon => d !== null)
 }
@@ -240,10 +303,10 @@ async function findAliveDaemonsUncached(workflow: string, trackerDir?: string): 
         safeUnlink(path)
         return null
       }
-      const probe = await probeWhoami(lock.port, {
+      const probe = (await probeWhoami(lock.port, {
         workflow: lock.workflow,
         instanceId: lock.instanceId,
-      })
+      })).result
       if (probe === 'mismatch') {
         // Positive identity mismatch: that port is bound by a different daemon
         // (or an unrelated process). Lockfile is stale — unlink so subsequent

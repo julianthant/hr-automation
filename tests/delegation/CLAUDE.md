@@ -309,6 +309,15 @@ exact VQ-003 / 2026-06-04 repro condition (no live browser to kill; only
   only wait that once double-wrote a `running/step:cancelled` step marker's
   terminal twin then a fail row; the `origin:'shutdown'` suppression keeps it to
   one). Zero alive daemons + zero leftover lockfiles after.
+- **Stop-All queued-orphan (E2E-105)** — 2 daemons, 4 items: 2 claimed + held
+  in-flight, 2 NEVER-claimed `queued`. `rt.stopAll` of every daemon. EVERY
+  never-claimed queued task must reach a terminal SQLite `control_state`
+  (`failed`) at teardown — NOT orphaned `queued`. Pins the fix: the queued sweep
+  gates on a peer being AVAILABLE-FOR-HANDOFF (responsive AND not itself
+  shutting down, via `/whoami.shuttingDown`), not on a peer being merely
+  PID-alive, so the effectively-last responsive owner terminalizes the queue
+  instead of leaving it for a dying peer. Reads `control_state` directly from
+  the temp `state.db` (`openControlDb` → `listTasksForWorkflow`).
 - **Stop-Instance (reassign)** — 1 held item, `rt.stopInstance({ reassign:true,
   holdingRunId })` (targets the daemon actually holding the run via
   `/status.inFlightRunId`). The surviving peer re-claims the SAME runId →
@@ -328,16 +337,18 @@ exact VQ-003 / 2026-06-04 repro condition (no live browser to kill; only
   stopped daemon is gone — so the pump can't accidentally resolve the stopped
   daemon's hold and let it complete on the wrong daemon.
 
-### Candidate finding the harness surfaced (NOT yet a pinned assertion)
+### Queued-orphan — NOW PINNED (E2E-105, 2026-06-15)
 
-On a simultaneous Stop-All of EVERY daemon, a **never-claimed QUEUED** task can
-be orphaned `queued` (each dying daemon leaves it "for a peer" that is also
-dying → nobody terminalizes it; 0 daemons alive, task stuck `queued` in SQLite
-with no terminal row). The e2e skill's Phase-5 expects "queued items
-terminalized by the last daemon," so this is a real candidate — tracked in
-`docs/engineering/daemon-teardown-state-machine.md`. The soak deliberately does
-NOT assert the queued path (a soak must pin stable behavior); it guards the
-in-flight path and the doc carries the queued-orphan as a to-confirm.
+On a simultaneous Stop-All of EVERY daemon, a **never-claimed QUEUED** task USED
+TO be orphaned `queued` (each dying daemon left it "for a peer" that was also
+dying → nobody terminalized it; 0 daemons alive, task stuck `queued` in SQLite
+with no terminal row). Confirmed production-real (E2E-105) and FIXED: the queued
+sweep now gates on `filterPeersAvailableForHandoff` (responsive AND not
+shutting down) being empty, so the effectively-last responsive owner
+terminalizes the queue. The soak's third leg ("Stop-All terminalizes EVERY
+never-claimed QUEUED item") pins it under jitter. See
+`docs/engineering/daemon-teardown-state-machine.md` ("open gap" section now
+CLOSED) + the `src/core/CLAUDE.md` 2026-06-15 lesson.
 
 ## Not yet asserted here
 

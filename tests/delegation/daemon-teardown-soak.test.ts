@@ -25,12 +25,15 @@
  *       "cancelled" (the operator asked to SEE these fail);
  *     - EXACTLY ONE terminal row per run (VQ-003 — the in-flight signal-only
  *       wait that historically double-wrote a cancel row then a fail row);
- *     - zero alive daemons + zero leftover lockfiles after (no orphans).
- *   (A never-claimed QUEUED item is deliberately NOT asserted here: on a
- *   simultaneous stop-all of EVERY daemon, each dying daemon leaves the queued
- *   task "for a peer" that is also dying, so it can be orphaned `queued` — a
- *   candidate finding the harness surfaced, tracked in the state-machine doc,
- *   not stable behavior to pin. This soak guards the in-flight path.)
+ *     - zero alive daemons + zero leftover lockfiles after (no orphans);
+ *     - EVERY never-claimed QUEUED task reaches a terminal `control_state`
+ *       (`failed`) at teardown — NOT orphaned `queued` (E2E-105). On a
+ *       simultaneous stop-all of EVERY daemon, each dying daemon used to leave
+ *       the queued task "for a peer" that is also dying, so nobody
+ *       terminalized it (0 daemons alive, task stuck `queued` in SQLite, no
+ *       terminal row). Fixed by gating the queued sweep on a peer being
+ *       AVAILABLE-FOR-HANDOFF (responsive AND not itself shutting down), not on
+ *       a peer merely being PID-alive. This soak pins it under jitter.
  *   Stop-instance (reassign):
  *     - the in-flight run is NOT failed — a surviving peer re-claims the SAME
  *       runId and completes it (done);
@@ -52,6 +55,9 @@ import { createDelegationRuntime, type DelegationRuntime } from "./_runtime/inde
 import { rowFilePath } from "../../src/tracker/paths.js";
 import { dateLocal } from "../../src/tracker/jsonl.js";
 import { isProcessAlive, lockfilePath } from "../../src/core/daemon/registry.js";
+import { openControlDb } from "../../src/core/control-db.js";
+import { createTaskStore, type TaskState } from "../../src/core/task-store/index.js";
+import { isTerminalTaskState } from "../../src/core/task-store/types.js";
 
 // ---------------------------------------------------------------------------
 // Soak knob
@@ -107,6 +113,27 @@ function terminalRows(dir: string, runId: string): RawRow[] {
   return readRows(dir).filter(
     (r) => r.runId === runId && (r.status === "done" || r.status === "failed"),
   );
+}
+
+/**
+ * Read every WF task's SQLite `control_state` by `itemId`. Opens a fresh
+ * read handle on the temp `state.db` (WAL → concurrent reads are safe while
+ * the runtime still holds the DB open), so the E2E-105 probe asserts the
+ * authoritative control truth — not just the JSONL projection. Closed before
+ * returning so the handle never leaks past the assertion.
+ */
+function taskStatesByItemId(dir: string): Map<string, TaskState> {
+  const control = openControlDb({ trackerDir: dir });
+  try {
+    const store = createTaskStore(control);
+    const byId = new Map<string, TaskState>();
+    for (const task of store.listTasksForWorkflow(WF)) {
+      byId.set(task.itemId, task.state);
+    }
+    return byId;
+  } finally {
+    control.close();
+  }
 }
 
 /** Lockfiles physically on disk for WF (alive or orphaned). */
@@ -247,6 +274,105 @@ test(
           `[iter ${i}] daemons + lockfiles cleared after Stop-All`,
           10_000,
         );
+      } finally {
+        await rt.cleanup();
+      }
+    }
+
+    assert.deepEqual(snapshotRealTracker(), before, "real .tracker/ must be unchanged by the soak");
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Stop-All → never-claimed QUEUED items terminalize (E2E-105 — queued orphan)
+// ---------------------------------------------------------------------------
+
+test(
+  "daemon-teardown soak — Stop-All terminalizes EVERY never-claimed QUEUED item (E2E-105), none left queued",
+  { timeout: 180_000 },
+  async () => {
+    const before = snapshotRealTracker();
+
+    for (let i = 0; i < SOAK_ITERATIONS; i++) {
+      const rt = await makeRuntime();
+      try {
+        rt.holdAll(WF, "transaction");
+
+        const tag = `oq${i}`;
+        // 2 daemons, 4 items: the 2 daemons each claim one and park at the held
+        // `transaction`; the other 2 stay NEVER-CLAIMED `queued`. A simultaneous
+        // stop-all of EVERY daemon used to orphan those queued items (each dying
+        // daemon left them "for a peer" that was also dying → 0 daemons alive,
+        // tasks stuck `queued`, no terminal row — E2E-105).
+        const inFlight = [
+          await rt.enqueue(WF, { id: `${tag}-1`, name: `A-${tag}` }),
+          await rt.enqueue(WF, { id: `${tag}-2`, name: `B-${tag}` }),
+        ];
+        const queuedOnly = [
+          await rt.enqueue(WF, { id: `${tag}-3`, name: `C-${tag}` }),
+          await rt.enqueue(WF, { id: `${tag}-4`, name: `D-${tag}` }),
+        ];
+
+        // Both daemons claim + park at the hold; the extra items stay queued.
+        await rt.waitForEvent("step:start", { step: "transaction", count: 2, timeoutMs: 15_000 });
+        assert.equal(
+          (await rt.daemons(WF)).length,
+          2,
+          `[iter ${i}] expected 2 daemons in flight before Stop-All`,
+        );
+        // Precondition: the 2 extra items really are still queued (never claimed)
+        // — otherwise the orphan path under test wouldn't be exercised.
+        const preStates = taskStatesByItemId(rt.trackerDir);
+        for (const q of queuedOnly) {
+          assert.equal(
+            preStates.get(q.itemId),
+            "queued",
+            `[iter ${i}] precondition: ${q.itemId} must be queued (never claimed) before Stop-All`,
+          );
+        }
+
+        await sleep(jitterMs(i));
+        await rt.stopAll(WF);
+
+        // Daemons gone, no lockfile left behind.
+        await waitFor(
+          async () => (await rt.daemons(WF)).length === 0 && lockfilesOnDisk(rt.trackerDir).length === 0,
+          `[iter ${i}] daemons + lockfiles cleared after Stop-All`,
+          10_000,
+        );
+
+        // EVERY queued item must reach a terminal control_state — NOT stuck
+        // `queued`. This is the E2E-105 pin: the last responsive owner
+        // terminalizes the queue instead of leaving it for a dying peer.
+        await waitFor(
+          () => {
+            const states = taskStatesByItemId(rt.trackerDir);
+            return queuedOnly.every((q) => {
+              const s = states.get(q.itemId);
+              return s !== undefined && isTerminalTaskState(s);
+            });
+          },
+          `[iter ${i}] every never-claimed queued item terminalized at Stop-All (no orphan)`,
+          15_000,
+        );
+
+        const finalStates = taskStatesByItemId(rt.trackerDir);
+        for (const q of queuedOnly) {
+          const s = finalStates.get(q.itemId);
+          assert.equal(
+            s,
+            "failed",
+            `[iter ${i}] orphaned-candidate ${q.itemId} must terminalize FAILED (red), got ${s}`,
+          );
+        }
+        // And the in-flight ones still fail (the existing correct behavior).
+        for (const c of inFlight) {
+          const s = finalStates.get(c.itemId);
+          assert.ok(
+            s !== undefined && isTerminalTaskState(s),
+            `[iter ${i}] in-flight ${c.itemId} must terminalize, got ${s}`,
+          );
+        }
       } finally {
         await rt.cleanup();
       }
