@@ -190,9 +190,11 @@ export function TerminalDrawer({ connected, viewingHistory = false }: TerminalDr
           ) : (
             <div
               className={cn(
-                "min-w-0 flex-1 flex gap-2.5 px-3.5 py-3",
+                "min-w-0 flex-1 flex gap-2.5 px-3.5 pt-3 pb-5",
                 // items-stretch so every session card grows to the tallest in
                 // the row — short cards (e.g. OCR) match the others' height.
+                // pb-5 (20px) instead of py-3 (12px) lifts the Stop button and
+                // elapsed timer off the viewport bottom edge (E2E-104).
                 "overflow-x-auto overflow-y-hidden items-stretch",
                 "[scrollbar-width:thin]",
               )}
