@@ -1,5 +1,6 @@
 export {
   openActionList,
+  listActionListSeparations,
   clickDocument,
   extractSeparationData,
   isVoluntaryTermination,
