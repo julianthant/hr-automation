@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock, Loader2, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -19,6 +19,7 @@ export interface StatusCountValues {
   running: number;
   queued: number;
   failed: number;
+  cancelled?: number;
 }
 
 interface CountSpec {
@@ -34,6 +35,7 @@ const COUNT_SPECS: CountSpec[] = [
   { key: "running", label: "running", icon: Loader2, tone: "text-primary", spin: true },
   { key: "queued", label: "queued", icon: Clock, tone: "text-warning" },
   { key: "failed", label: "failed", icon: AlertTriangle, tone: "text-destructive" },
+  { key: "cancelled", label: "cancelled", icon: Ban, tone: "text-warning" },
 ];
 
 function StatusCount({ spec, n }: { spec: CountSpec; n: number }) {
@@ -63,9 +65,9 @@ export function StatusCounts({
   return (
     <>
       {COUNT_SPECS.map((spec) => {
-        const n = counts[spec.key];
-        // `failed` only ever shows when non-zero; the others honor includeZeros.
-        if (spec.key === "failed" ? n <= 0 : !includeZeros && n <= 0) return null;
+        const n = counts[spec.key] ?? 0;
+        // `failed` and `cancelled` only show when non-zero; the others honor includeZeros.
+        if (spec.key === "failed" || spec.key === "cancelled" ? n <= 0 : !includeZeros && n <= 0) return null;
         return <StatusCount key={spec.key} spec={spec} n={n} />;
       })}
     </>
