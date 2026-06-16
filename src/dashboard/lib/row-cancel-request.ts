@@ -127,3 +127,37 @@ export function buildRowCancelDispatchArgs(args: RowCancelRequestArgs): BuildWor
 export function buildRowCancelRequest(args: RowCancelRequestArgs): WorkflowActionHttpRequest {
   return buildWorkflowActionRequest(buildRowCancelDispatchArgs(args));
 }
+
+export interface OperationTreeCancelArgs {
+  /** The coordinator's own workflow id (e.g. "oath-signature", "emergency-contact"). */
+  workflow: string;
+  /** The coordinator's item id. */
+  id: string;
+  /** The coordinator's runId — the BFS root for resolve-targets `scope:"tree"`. */
+  runId?: string;
+}
+
+/**
+ * Build the HTTP request for the "Cancel remaining" action on an operation
+ * coordinator (E2E-102). Posts to `/api/cancel-queued` with `scope: "tree"`
+ * so the backend's `collectDescendants` BFS cancels every non-terminal member
+ * whose `parent_run_id` chains to this coordinator's runId — no sibling bleed.
+ *
+ * The coordinator itself is a display row (no daemon task); the cancel touches
+ * only the fanned-out member tasks. Members already terminal are skipped by
+ * the BFS (they have `latest_status` done/failed/skipped in SQLite).
+ */
+export function buildOperationTreeCancelRequest(
+  args: OperationTreeCancelArgs,
+): WorkflowActionHttpRequest {
+  const { workflow, id, runId } = args;
+  return {
+    path: "/api/cancel-queued",
+    body: {
+      workflow,
+      id,
+      ...(runId !== undefined ? { runId } : {}),
+      scope: "tree",
+    },
+  };
+}
