@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
+import { OperationCancelButton } from "./OperationCancelButton";
 import { useMemo, useState, type ReactNode } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
@@ -172,6 +173,10 @@ export function OperationRowUnified({
   const StatusIcon = cfg.icon;
 
   const counts = useMemo(() => aggregateBatchCounts(members), [members]);
+  // Non-terminal members = running + queued; when any exist the coordinator
+  // shows a "Cancel remaining" button to cancel the whole fan-out at once
+  // (E2E-102). When all members are terminal the button hides automatically.
+  const hasNonTerminalMembers = counts.running + counts.queued > 0;
   const memberProjectionById = useMemo(
     () => new Map((projection?.batchMembers ?? []).map((m) => [m.itemId, m])),
     [projection?.batchMembers],
@@ -227,16 +232,34 @@ export function OperationRowUnified({
           suppressIdWhenEquals: name,
           elapsed: isActivelyRunning ? elapsed : null,
           duration: isTerminal || awaitingReview ? duration : null,
-          rowAction: {
-            workflow: parent.workflow,
-            id: parent.id,
-            runId: parent.runId,
-            date,
-            actions: projection?.actions,
-            entry: displayParent,
-            subject: name || parent.id,
-            onDelete,
-          },
+          // When non-terminal members exist, show the one-click "Cancel
+          // remaining" tree-cancel. `actions` overrides `rowAction`'s cluster
+          // — the coordinator's projection returns only groupActions (no
+          // row-level cancel/retry/delete) when members are present, so the
+          // normal rowAction cluster is empty anyway (E2E-102).
+          ...(hasNonTerminalMembers
+            ? {
+                actions: (
+                  <OperationCancelButton
+                    workflow={parent.workflow}
+                    id={parent.id}
+                    runId={parent.runId}
+                    subject={name || parent.id}
+                  />
+                ),
+              }
+            : {
+                rowAction: {
+                  workflow: parent.workflow,
+                  id: parent.id,
+                  runId: parent.runId,
+                  date,
+                  actions: projection?.actions,
+                  entry: displayParent,
+                  subject: name || parent.id,
+                  onDelete,
+                },
+              }),
         }}
       >
         {/* Header zone */}
