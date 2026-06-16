@@ -450,6 +450,17 @@ export async function createDelegationRuntime(
       input && typeof (input as Record<string, unknown>).__runtimeOptions === "object"
         ? ((input as Record<string, unknown>).__runtimeOptions as Record<string, unknown>)
         : undefined;
+    // `renderAs:"batch"` is the harness DEFAULT shape for an approve fan-out
+    // child (the bare-fan-out tests want `batch-member`). But the real approve
+    // route already stamps the authoritative `rowShape` on the input — an
+    // `operation-member` for an operation-coordinator workflow
+    // (`withMemberShapeRuntimeOption`) — so the existing shape WINS; `renderAs`
+    // only supplies a shape when the input carries none. Clobbering it would
+    // turn every operation member back into a `batch-member` (the bug this guards).
+    const inputAlreadyHasRowShape =
+      existingRuntimeOptions !== undefined &&
+      typeof existingRuntimeOptions.rowShape === "string" &&
+      existingRuntimeOptions.rowShape.length > 0;
     const item: GatedInput = {
       id: enqueueOpts?.itemId ?? input?.id ?? `item-${randomUUID().slice(0, 8)}`,
       ...(input ?? {}),
@@ -459,7 +470,9 @@ export async function createDelegationRuntime(
         ? {
             __runtimeOptions: {
               ...(existingRuntimeOptions ?? {}),
-              ...(enqueueOpts?.renderAs === "batch" ? { rowShape: "batch-member" } : {}),
+              ...(enqueueOpts?.renderAs === "batch" && !inputAlreadyHasRowShape
+                ? { rowShape: "batch-member" }
+                : {}),
             },
           }
         : {}),
