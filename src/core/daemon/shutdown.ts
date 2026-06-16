@@ -3,7 +3,11 @@ import { unlinkSync } from 'node:fs'
 import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
 import { runRegistry } from '../run-registry.js'
-import { findAliveDaemons, filterResponsiveDaemons } from './registry.js'
+import {
+  findAliveDaemons,
+  filterResponsiveDaemons,
+  filterPeersAvailableForHandoff,
+} from './registry.js'
 import { wakeDaemonsForReleasedParents } from './client.js'
 import {
   readQueueState,
@@ -321,6 +325,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
           trackerDir,
           bestEffort: true,
           settleDependency: false,
+          claimTerminalWrite: () => runRegistry.claimTerminalWrite(inFlightSnapshot.runId),
         })
         state.activeRun = null
       } else if (state.forceShutdown) {
@@ -338,6 +343,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
           trackerDir,
           bestEffort: true,
           settleDependency: false,
+          claimTerminalWrite: () => runRegistry.claimTerminalWrite(inFlightSnapshot.runId),
         })
         state.activeRun = null
       } else {
@@ -400,13 +406,29 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
       }
     }
 
-    // Queued (never-claimed) items when this is the LAST daemon and we're not
-    // draining gracefully. With a surviving peer (`otherAlive.length > 0`) we
-    // leave them queued — a live daemon will claim them ("≥1 daemon → fine").
-    // With none left, nothing will ever run them, so fail them (red) — the
-    // operator asked to SEE work fail when no daemon is available, rather than
-    // sit queued forever.
-    if (otherAlive.length === 0 && !state.drainOnlyShutdown) {
+    // Queued (never-claimed) items when no peer will ACTUALLY pick them up and
+    // we're not draining gracefully. The gate is NOT "no peer is PID-alive"
+    // (`otherAlive.length === 0`) — that orphans the queue on a simultaneous
+    // workflow-scoped stop-all (E2E-105): every dying daemon sees its peers'
+    // lockfiles still on disk, leaves the queued task "for a peer," and the
+    // peer is ALSO dying, so nobody terminalizes it (0 daemons alive, task
+    // stuck `queued`, no terminal row). Instead, probe which peers are
+    // AVAILABLE FOR HAND-OFF — responsive AND not themselves shutting down
+    // (`filterPeersAvailableForHandoff`, which reads `/whoami.shuttingDown`).
+    // A peer that received `/stop` reports `shuttingDown: true` (set
+    // synchronously in its `/stop` handler before it responded, so the signal
+    // is on-disk-observable by sweep time), so it does NOT count. If NO peer is
+    // available to absorb them, this daemon is effectively the last responsive
+    // owner and terminalizes the queue (red) rather than leaving it for a dying
+    // peer. A genuinely-surviving (not-stopped) peer still answers
+    // `shuttingDown: false` and absorbs the items, so a per-instance stop /
+    // partial teardown keeps "≥1 live daemon → leave queued" intact. (Multiple
+    // dying daemons may each reach this sweep and elect themselves the owner;
+    // the `stillQueued` re-read below plus the run-registry terminal-write
+    // guard keep it to one terminal row per item.)
+    const handoffPeers =
+      otherAlive.length > 0 ? await filterPeersAvailableForHandoff(otherAlive) : []
+    if (handoffPeers.length === 0 && !state.drainOnlyShutdown) {
       const queueState = await readQueueState(wf.config.name, trackerDir)
       if (queueState.queued.length > 0) {
         log.warn(

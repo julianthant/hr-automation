@@ -749,6 +749,143 @@ test('runWorkflowDaemon: force-/stop of an in-flight signal-only wait writes EXA
   }
 })
 
+test('runWorkflowDaemon: deliberate /cancel-current of an in-flight signal-only wait writes EXACTLY ONE terminal row (failed/step:cancelled) — E2E-101', async () => {
+  // E2E-101 regression. A deliberate `/cancel-current` of an oath-upload-style
+  // ticket parked in a SIGNAL-ONLY wait (wait-approval) DOUBLE-terminalized the
+  // one in-flight run:
+  //   1. `withTrackedWorkflow`'s catch emitted a `failed/step:cancelled` row
+  //      (the kernel's terminal cancelled row) when the abort unwound the
+  //      handler — NOT suppressed for a deliberate cancel (origin:'user').
+  //   2. the daemon's deliberate-cancel branch ALSO emitted its own
+  //      `failed/step:cancelled` row.
+  // Both rows are CONSISTENT (one orange surface after latest-wins), so the
+  // display is correct — but the "exactly one terminal write per run" invariant
+  // was violated (two rows ~32ms apart). The fix: a terminal-write guard keyed
+  // by runId makes the daemon's deliberate-cancel branch a no-op once the kernel
+  // already wrote the run's terminal row (and vice-versa), so the run keeps its
+  // single orange `failed/step:cancelled` terminal. Unlike VQ-003 (shutdown
+  // origin → kernel SUPPRESSES, daemon owns), a deliberate cancel keeps the
+  // kernel row and the daemon defers — net exactly one in both cases.
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-e2e101-'))
+  const control = openControlDb({ trackerDir: dir })
+  const taskStore = createTaskStore(control)
+  let port: number | undefined
+  let inFlight: { itemId: string; runId: string } | null = null
+  let runPromise: Promise<void> | undefined
+  try {
+    const started = deferred()
+    const wf = defineWorkflow({
+      name: 'dint-e2e101',
+      schema: z.object({ id: z.string() }),
+      steps: ['wait-approval'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx) => {
+        await ctx.step('wait-approval', async () => {
+          started.resolve()
+          await new Promise<void>((_resolve, reject) => {
+            if (ctx.signal.aborted) {
+              reject(new Error('aborted before wait'))
+              return
+            }
+            ctx.signal.addEventListener(
+              'abort',
+              () => reject(new Error('approval wait aborted')),
+              { once: true },
+            )
+          })
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-e2e101', [{ id: 'held' }], (d) => d.id, dir)
+    runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 10_000,
+    })
+    ;({ port } = await waitForDaemon('dint-e2e101', dir))
+    await started.promise
+
+    const status = (await fetch(`http://127.0.0.1:${port}/status`).then((r) => r.json())) as {
+      inFlight: string | null
+      inFlightRunId: string | null
+    }
+    if (status.inFlight && status.inFlightRunId) {
+      inFlight = { itemId: status.inFlight, runId: status.inFlightRunId }
+    }
+    assert.ok(inFlight, 'precondition: daemon reports an in-flight run')
+    const runId = inFlight.runId
+
+    // Deliberate per-item cancel — the daemon STAYS alive (no force, no
+    // reassign). Renders Cancelled (orange) via `step:"cancelled"`.
+    const cancelRes = await fetch(`http://127.0.0.1:${port}/cancel-current`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(inFlight),
+    })
+    assert.equal(cancelRes.status, 200, 'cancel-current accepted')
+
+    // The task settles cancelled (deliberate cancel keeps the daemon alive, so
+    // it claims nothing else — but the item is terminalized).
+    await waitFor(
+      () => taskStore.getTaskByRunId(runId)?.state === 'cancelled',
+      6_000,
+    )
+    inFlight = null // cancelled — no best-effort cleanup needed in finally
+
+    // EXACTLY ONE terminal row for the run: status `failed`, step `cancelled`
+    // (the orange Cancelled badge). Pre-fix there were TWO (kernel + daemon),
+    // ~32ms apart.
+    const date = dateLocal()
+    const jsonlPath = rowFilePath('dint-e2e101', date, dir)
+    const rows = readFileSync(jsonlPath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { id?: string; runId?: string; status?: string; step?: string })
+      .filter((row) => row.runId === runId)
+
+    const cancelledTerminals = rows.filter((r) => r.status === 'failed' && r.step === 'cancelled')
+    assert.equal(
+      cancelledTerminals.length,
+      1,
+      `expected EXACTLY ONE failed/step:cancelled terminal row; got ${cancelledTerminals.length}: ${JSON.stringify(cancelledTerminals)}`,
+    )
+    // And no OTHER terminal (no stray plain failed/done) for the run.
+    const otherTerminals = rows.filter(
+      (r) => (r.status === 'failed' && r.step !== 'cancelled') || r.status === 'done',
+    )
+    assert.equal(
+      otherTerminals.length,
+      0,
+      `expected NO non-cancelled terminal row for a deliberate cancel; got ${otherTerminals.length}: ${JSON.stringify(otherTerminals)}`,
+    )
+  } finally {
+    if (port !== undefined && inFlight) {
+      await fetch(`http://127.0.0.1:${port}/cancel-current`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(inFlight),
+      }).catch(() => {})
+    }
+    // Deliberate cancel leaves the daemon alive — stop it so the runner exits.
+    if (port !== undefined) {
+      await fetch(`http://127.0.0.1:${port}/stop`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      }).catch(() => {})
+    }
+    if (runPromise) {
+      await Promise.race([runPromise.catch(() => {}), new Promise((r) => setTimeout(r, 2_000))])
+    }
+    taskStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: per-instance /stop with a RESPONSIVE surviving peer RE-QUEUES the in-flight item (no fail)', async () => {
   // Per-instance stop (dashboard session card) sends `/stop { reassign: true }`.
   // When another daemon for the workflow is still alive AND responds to

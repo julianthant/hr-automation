@@ -214,6 +214,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     getQueueDepthCache: () => state.queueDepthCache,
     getInFlight: () => daemonInFlight(state.activeRun),
     getLastActivity: () => state.lastActivity,
+    getShuttingDown: () => state.shuttingDown,
     getActiveSession: () => state.activeSession,
     getWorkerStore: () => state.workerStore,
     setCancelTarget: (target) => {
@@ -657,6 +658,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       failReason: SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
                       taskStore,
                       trackerDir,
+                      claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),
                     })
                   } else if (state.forceShutdown) {
                     // Force-stop with no spare to absorb the item (stop-all,
@@ -671,6 +673,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       failReason: SHUTDOWN_NO_DAEMON_FAIL_REASON,
                       taskStore,
                       trackerDir,
+                      claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),
                     })
                   } else {
                     // Deliberate per-item cancel (/cancel-current); the daemon
@@ -688,30 +691,41 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       })
                       void wakeDaemonsForReleasedParents(released, trackerDir)
                     }
-                    // Always overwrite with a cancelled tracker row, even if
-                    // the handler returned r.ok=true (which would have written
-                    // a status:done row). The latest tracker entry wins on
-                    // dedup, so this row makes the badge show Cancelled.
-                    emitTrackerRow(
-                      {
-                        workflow: wf.config.name,
-                        timestamp: new Date().toISOString(),
-                        id: item.id,
-                        runId,
-                        status: 'failed',
-                        step: 'cancelled',
-                        // buildShutdownTrackerData always stamps `data.archetype`
-                        // (via buildHttpPendingData or its fallback path) so the
-                        // returned record satisfies StampedData at runtime.
-                        data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                    // E2E-101: this daemon branch owns the SINGLE rich terminal
+                    // cancelled row. The kernel's `withTrackedWorkflow` catch
+                    // SUPPRESSES its own (sparse) cancelled row for any
+                    // daemon-path cancel (`cancelOrigin` is set — see
+                    // `run-one-item`'s `suppressTerminalRowOnCancel`), so this
+                    // row — rebuilt with full display data via
+                    // `buildShutdownTrackerData` (e.g. OCR's file-kind title) —
+                    // is the run's sole terminal. Claim the terminal token as
+                    // defense in depth (if the kernel ever did write, we'd defer
+                    // rather than double-write); under the suppression above the
+                    // token is free here, so we write. Overwrites a racing
+                    // `done` row (handler returned r.ok=true the same instant the
+                    // cancel landed) so the badge shows Cancelled.
+                    if (runRegistry.claimTerminalWrite(runId)) {
+                      emitTrackerRow(
+                        {
+                          workflow: wf.config.name,
+                          timestamp: new Date().toISOString(),
+                          id: item.id,
                           runId,
-                          trackerDir,
-                        }) as StampedData,
-                        ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                        error: cancelError,
-                      },
-                      trackerDir,
-                    )
+                          status: 'failed',
+                          step: 'cancelled',
+                          // buildShutdownTrackerData always stamps `data.archetype`
+                          // (via buildHttpPendingData or its fallback path) so the
+                          // returned record satisfies StampedData at runtime.
+                          data: buildShutdownTrackerData(wf, item.input, item.parentRunId, {
+                            runId,
+                            trackerDir,
+                          }) as StampedData,
+                          ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                          error: cancelError,
+                        },
+                        trackerDir,
+                      )
+                    }
                     emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
                   }
                 } else if (r.ok) {
@@ -774,6 +788,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 // rejected before reaching its register/unregister window
                 // and our pre-registered handle is still in the registry.
                 runRegistry.unregister(runId)
+                // Release the single-terminal token now that this item's
+                // three-way teardown/cancel branch has had its chance to read
+                // it (E2E-101). Deferred to here — not `unregister` — because
+                // the kernel claims+emits INSIDE `runOneItem` and the daemon
+                // branch reads the token AFTER `runOneItem` returns; clearing it
+                // any earlier would let the daemon branch double-write.
+                runRegistry.releaseTerminalWrite(runId)
                 state.activeRun = null
               }
               setPhase('idle')

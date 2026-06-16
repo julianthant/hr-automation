@@ -12,6 +12,19 @@ export interface DaemonHttpOpts {
   getQueueDepthCache: () => number
   getInFlight: () => { itemId: string; runId: string; taskId?: string; attemptId?: string } | null
   getLastActivity: () => number
+  /**
+   * Whether this daemon is tearing down (received `/stop`, a stop worker
+   * command, or SIGINT/SIGTERM/SIGHUP). Reported in `/whoami` so a PEER
+   * deciding whether to leave its queued/in-flight work "for this daemon"
+   * can tell a genuinely-surviving daemon from one that is ALSO dying — the
+   * happens-before edge that closes the simultaneous-stop-all queued-orphan
+   * race (E2E-105): the dashboard's workflow-scoped stop sets `shuttingDown`
+   * synchronously in EVERY daemon's `/stop` handler before that handler
+   * responds, so by the time any daemon runs its teardown sweep, a peer that
+   * received `/stop` already reports `shuttingDown: true` and is NOT counted
+   * as an available hand-off target.
+   */
+  getShuttingDown: () => boolean
   getActiveSession: () => Session | null
   getWorkerStore: () => ControlWorkerStore | null
   setCancelTarget: (target: { itemId: string; runId: string } | null) => void
@@ -37,6 +50,7 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
     getQueueDepthCache,
     getInFlight,
     getLastActivity,
+    getShuttingDown,
     getActiveSession,
     getWorkerStore,
     setCancelTarget,
@@ -58,6 +72,9 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
           workflow: workflowName,
           instanceId,
           pid: process.pid,
+          // E2E-105: a peer deciding whether to leave queued/in-flight work
+          // "for this daemon" must not pick one that is ALSO tearing down.
+          shuttingDown: getShuttingDown(),
           version: 1,
         }),
       )
