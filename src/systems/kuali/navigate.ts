@@ -60,6 +60,53 @@ export async function openActionList(page: Page): Promise<void> {
 }
 
 /**
+ * Enumerate the pending document numbers in the Kuali Build Action List.
+ *
+ * Read-only: reads the accessible text of every document-number link in the
+ * Action List (the same links `clickDocument` clicks one at a time) and
+ * returns the de-duplicated, trimmed list of document numbers. Opens or
+ * mutates nothing. Must be called after `openActionList()`.
+ *
+ * The accessible-name filter in `actionList.docLinks` keeps only links whose
+ * text is a bare number, so nav / action / pagination links are excluded. The
+ * Action List can hold non-separation document types; this returns every
+ * pending document number it finds — callers that want separations only must
+ * attempt extraction per doc and skip rows whose form isn't a separation form.
+ *
+ * Returns an empty array when the Action List is empty (a clean no-op for
+ * callers, not an error).
+ */
+export async function listActionListSeparations(page: Page): Promise<string[]> {
+  log.step("Enumerating pending documents in the Kuali Action List...");
+
+  const links = actionList.docLinks(page);
+  // Wait briefly for at least one row to render; an empty Action List is a
+  // valid state, so a timeout here means "no pending docs", not a failure.
+  const count = await links
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .then(() => links.count())
+    .catch(() => 0);
+
+  if (count === 0) {
+    log.step("Action List has no pending documents");
+    return [];
+  }
+
+  const rawNames = await links.allTextContents();
+  const docNumbers = Array.from(
+    new Set(
+      rawNames
+        .map((name) => name.trim())
+        .filter((name) => /^\d+$/.test(name)),
+    ),
+  );
+
+  log.success(`Found ${docNumbers.length} pending document(s) in the Action List`);
+  return docNumbers;
+}
+
+/**
  * Click on a document row by its document number in the Action List.
  * Returns the URL of the opened document form.
  */

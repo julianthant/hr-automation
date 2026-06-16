@@ -29,3 +29,11 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Scroll to the top of the page first, then target the navbar via `[class*="action-bar"] button:has-text("Save")` or `nav button:has-text("Save")`, with the role-based selector only as the third fallback. Encoded as the 3-deep `.or()` chain in `save.navbarSaveButton`.
 **Selector:** `save.navbarSaveButton` in `selectors.ts`
 **Tags:** save, navbar, modal, fallback, scroll, button
+
+## 2026-06-15 — Action List multi-doc enumeration is UNVERIFIED against live DOM
+
+**Tried:** Added `actionList.docLinks(page)` (`page.getByRole("link", { name: /^\s*\d+\s*$/ })`) to enumerate ALL pending Action List documents, plus `listActionListSeparations(page)` in `navigate.ts` (reads `allTextContents()`, trims, de-dupes, keeps numeric-only names). Used by the read-only live test `tests/live/separations-collect.test.ts`.
+**Failed because:** Not yet a failure — but it is NOT live-verified. The existing single-doc `docLink` matches one known doc number; this generalization ASSUMES every pending Action List row exposes its document number as the accessible name of a `link` whose text is a bare run of digits, and that nav / action / pagination links carry word labels (so the numeric filter excludes them). That assumption is derived from the `docLink` pattern + Kuali Build conventions, not confirmed on a live page (Duo MFA is manual, so the selector couldn't be mapped via `playwright-cli` in the session that added it). If Kuali renders doc numbers as non-link cells, prefixes them (e.g. `#1234`), or uses a different role, enumeration returns the wrong set.
+**Fix:** When you next run the live test (`npm run test:live` with creds + `.auth/duo-webauthn.json`), snapshot the Action List, confirm `docLinks` matches exactly the pending-document rows (count + numbers), then bump its JSDoc comment from `// NEEDS LIVE VERIFICATION` to `// verified <date>` in `selectors.ts` and re-run `npm run selectors:catalog`. If the assumption is wrong, remap against the live DOM (compound row locator scoped to the Action List table) and update both the selector and this lesson.
+**Selector:** `actionList.docLinks` in `selectors.ts` (consumed by `listActionListSeparations` in `navigate.ts`)
+**Tags:** action-list, document, links, enumerate, pending, verify, separation, kuali

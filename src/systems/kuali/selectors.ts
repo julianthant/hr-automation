@@ -24,6 +24,27 @@ export const actionList = {
    */
   docLink: (page: Page, docNumber: string): Locator =>
     page.getByRole("link", { name: new RegExp(docNumber) }),
+
+  /**
+   * All pending-document links in the Action List, one per row. Each
+   * Kuali Build Action List row exposes its document number as the
+   * accessible name of a link (the same anchor `docLink` matches by an
+   * exact number). This enumerates every such link so a caller can read
+   * the full set of pending document numbers without knowing them ahead
+   * of time. The accessible-name filter `/^\s*\d+\s*$/` keeps only links
+   * whose text is a bare document number, excluding the page's nav /
+   * action / pagination links (which carry word labels).
+   *
+   * Read-only: locating these links never opens or mutates a document.
+   *
+   * NEEDS LIVE VERIFICATION — derived from the single-doc `docLink`
+   * pattern + Kuali Build Action List DOM conventions; not yet confirmed
+   * against a live Action List (Duo MFA is manual). Bump to
+   * `// verified <date>` once driven live.
+   * @tags document, doc, links, action-list, pending, enumerate, kuali
+   */
+  docLinks: (page: Page): Locator =>
+    page.getByRole("link", { name: /^\s*\d+\s*$/ }),
 };
 
 // ─── Separation form: extraction / base fields ────────────────────────────
