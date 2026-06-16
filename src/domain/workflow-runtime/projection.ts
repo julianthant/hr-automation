@@ -302,16 +302,43 @@ function memberAggregateStatus(members: readonly TrackerEntry[]): string {
   return "done";
 }
 
+/**
+ * The operation coordinator's chip always reflects the coordinator's OWN
+ * lifecycle status — never a worst-member rollup (E2E-106).
+ *
+ * The coordinator is a display-only row whose lifecycle is self-contained:
+ * - preparing → running/ocr-prep
+ * - awaiting-review → running/awaiting-review (needsReview chip, handled in
+ *   `headerStatus` in operation-row-variants.tsx via `ocr?.status`)
+ * - approved → running/approved (members fanning out)
+ * - failed/discarded → failed
+ * - done → done
+ *
+ * Per-member outcomes (done/running/failed/cancelled) are surfaced by the
+ * member mini-badge (`StatusCounts`), not by the coordinator's top chip.
+ * A single failed member must NOT promote the coordinator to "Failed" — that
+ * would misread as "the whole operation failed" when 2/3 contacts succeeded.
+ * The rule is identical across oath-signature, emergency-contact, and
+ * oath-upload (E2E-106).
+ *
+ * Pre-member fallbacks (no members yet, pre-fan-out) derive from the
+ * coordinator's own status/step and denormalized OCR gate — never from
+ * `memberAggregateStatus`.
+ */
 function operationSurfaceStatus(surface: Extract<TrackerQueueGroupSurface, { kind: "operation" }>): string {
-  if (surface.members.length > 0) return memberAggregateStatus(surface.members);
+  // When members exist, always return the coordinator's own row status.
+  // Member outcomes are shown in the mini-badge, not the coordinator chip.
+  if (surface.members.length > 0) return surface.parent.status || "running";
+  // No members yet (pre-fan-out): use the coordinator's own status first.
   if (surface.parent.status === "failed" || surface.parent.status === "done") {
     return surface.parent.status;
   }
+  // Denormalized OCR gate signals (pre-fan-out only, when no members).
   if (surface.ocr?.status === "failed" || surface.ocr?.status === "discarded") {
     return "failed";
   }
   if (surface.ocr?.status === "approved" || surface.ocr?.status === "done") {
-    return "done";
+    return surface.parent.status || "running";
   }
   return surface.parent.status || "running";
 }
