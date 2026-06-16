@@ -1,11 +1,13 @@
 import type { TrackerEntry } from "@/components/shared/types.js";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
+import { statusKeyForEntry } from "@/components/shared/status-styles.js";
 
 export interface BatchCounts {
   done: number;
   running: number;
   queued: number;
   failed: number;
+  cancelled: number;
   total: number;
 }
 
@@ -26,19 +28,25 @@ export interface BatchElapsed {
 
 export type BatchAccent = "warning" | "success" | "destructive";
 
-/** Group children by status. `skipped` is folded into `done` (terminal success). */
+/**
+ * Group children by status. `skipped` is folded into `done` (terminal success).
+ * A cancelled member (`failed` + `step === "cancelled"`) lands in `cancelled`,
+ * consistent with `statusKeyForEntry` and the per-member chip (E2E-103).
+ */
 export function aggregateBatchCounts(children: TrackerEntry[]): BatchCounts {
   const counts: BatchCounts = {
     done: 0,
     running: 0,
     queued: 0,
     failed: 0,
+    cancelled: 0,
     total: children.length,
   };
   for (const c of children) {
     if (c.status === "done" || c.status === "skipped") counts.done += 1;
     else if (c.status === "running") counts.running += 1;
     else if (c.status === "pending") counts.queued += 1;
+    else if (statusKeyForEntry(c) === "cancelled") counts.cancelled += 1;
     else if (c.status === "failed") counts.failed += 1;
   }
   return counts;
@@ -135,6 +143,8 @@ export function computeBatchElapsed(
 /** Color the 3px left accent stripe by overall batch state. */
 export function resolveBatchAccent(counts: BatchCounts): BatchAccent {
   if (counts.failed > 0) return "destructive";
+  // Cancelled members are amber (operator action, not a system failure). A batch
+  // with only cancelled + done members reads as complete-but-partial, not failed.
   if (counts.total > 0 && counts.running === 0 && counts.queued === 0)
     return "success";
   return "warning";

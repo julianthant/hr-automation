@@ -37,6 +37,7 @@ describe("aggregateBatchCounts", () => {
       running: 1,
       queued: 2,
       failed: 1,
+      cancelled: 0,
       total: 6,
     });
   });
@@ -55,8 +56,22 @@ describe("aggregateBatchCounts", () => {
       running: 0,
       queued: 0,
       failed: 0,
+      cancelled: 0,
       total: 0,
     });
+  });
+
+  it("counts cancelled members (failed+step=cancelled) in a separate cancelled bucket, not failed (E2E-103)", () => {
+    // A member with status=failed but step=cancelled is a deliberate operator
+    // action — it should land in `cancelled`, not `failed`, consistent with how
+    // statusKeyForEntry classifies it for the per-member chip.
+    const result = aggregateBatchCounts([
+      child({ status: "failed" }),
+      child({ status: "failed", step: "cancelled" }),
+    ]);
+    assert.equal(result.failed, 1, "only the genuinely-failed member counts as failed");
+    assert.equal(result.cancelled, 1, "the cancelled member lands in its own bucket");
+    assert.equal(result.total, 2);
   });
 });
 
@@ -209,33 +224,42 @@ describe("computeBatchElapsed", () => {
 describe("resolveBatchAccent", () => {
   it("returns destructive when any child failed", () => {
     assert.equal(
-      resolveBatchAccent({ done: 1, running: 0, queued: 0, failed: 1, total: 2 }),
+      resolveBatchAccent({ done: 1, running: 0, queued: 0, failed: 1, cancelled: 0, total: 2 }),
       "destructive",
     );
   });
 
   it("returns success when all children done", () => {
     assert.equal(
-      resolveBatchAccent({ done: 5, running: 0, queued: 0, failed: 0, total: 5 }),
+      resolveBatchAccent({ done: 5, running: 0, queued: 0, failed: 0, cancelled: 0, total: 5 }),
       "success",
     );
   });
 
   it("returns warning while running or queued", () => {
     assert.equal(
-      resolveBatchAccent({ done: 1, running: 1, queued: 0, failed: 0, total: 2 }),
+      resolveBatchAccent({ done: 1, running: 1, queued: 0, failed: 0, cancelled: 0, total: 2 }),
       "warning",
     );
     assert.equal(
-      resolveBatchAccent({ done: 0, running: 0, queued: 3, failed: 0, total: 3 }),
+      resolveBatchAccent({ done: 0, running: 0, queued: 3, failed: 0, cancelled: 0, total: 3 }),
       "warning",
     );
   });
 
   it("returns warning for empty batch (zero children)", () => {
     assert.equal(
-      resolveBatchAccent({ done: 0, running: 0, queued: 0, failed: 0, total: 0 }),
+      resolveBatchAccent({ done: 0, running: 0, queued: 0, failed: 0, cancelled: 0, total: 0 }),
       "warning",
+    );
+  });
+
+  it("returns success (not destructive) when all non-done members are cancelled", () => {
+    // A batch where some members were cancelled by the operator but none genuinely
+    // failed should not go red — the operator chose to stop those rows.
+    assert.equal(
+      resolveBatchAccent({ done: 2, running: 0, queued: 0, failed: 0, cancelled: 1, total: 3 }),
+      "success",
     );
   });
 });

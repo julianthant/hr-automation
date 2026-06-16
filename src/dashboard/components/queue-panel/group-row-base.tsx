@@ -207,6 +207,8 @@ function computeProgressSegments(counts: ReturnType<typeof aggregateBatchCounts>
   if (counts.running > 0) segs.push({ cls: "bg-primary", flex: counts.running });
   if (counts.queued > 0) segs.push({ cls: "bg-warning", flex: counts.queued });
   if (counts.failed > 0) segs.push({ cls: "bg-destructive", flex: counts.failed });
+  // Cancelled members render amber (operator action, not a system failure).
+  if ((counts.cancelled ?? 0) > 0) segs.push({ cls: "bg-warning/60", flex: counts.cancelled ?? 0 });
   if (segs.length === 0) segs.push({ cls: "bg-secondary", flex: 1 });
   return segs;
 }
