@@ -149,29 +149,35 @@ export interface KualiSeparationData {
 export async function extractSeparationData(page: Page): Promise<KualiSeparationData> {
   log.step("Extracting separation data from Kuali form...");
 
-  const employeeName = await separationForm.employeeName(page).inputValue({ timeout: 5_000 });
+  // Kuali form inputs come back whitespace-padded (observed live: EID with a
+  // leading space, Location with a trailing space). Trim every extracted field
+  // so EIDs match `^\d{5,}$` and the vol/invol exact-match on terminationType
+  // isn't broken by stray whitespace. This is normalization of the SAME value,
+  // not a cross-source correction.
+  const employeeName = (await separationForm.employeeName(page).inputValue({ timeout: 5_000 })).trim();
   log.step(`  Employee Name: ${employeeName}`);
 
-  const eid = await separationForm.eid(page).inputValue({ timeout: 5_000 });
+  const eid = (await separationForm.eid(page).inputValue({ timeout: 5_000 })).trim();
   log.step(`  EID: ${eid}`);
 
-  const lastDayWorked = await separationForm.lastDayWorked(page).inputValue({ timeout: 5_000 });
+  const lastDayWorked = (await separationForm.lastDayWorked(page).inputValue({ timeout: 5_000 })).trim();
   log.step(`  Last Day Worked: ${lastDayWorked}`);
 
-  const separationDate = await separationForm.separationDate(page).inputValue({ timeout: 5_000 });
+  const separationDate = (await separationForm.separationDate(page).inputValue({ timeout: 5_000 })).trim();
   log.step(`  Separation Date: ${separationDate}`);
 
-  // Get the selected option's visible text (not the internal value)
+  // Get the selected option's visible text (not the internal value). Trim the
+  // result in TS after the evaluate returns (keep the in-page function simple).
   const termCombo = separationForm.terminationType(page);
-  const terminationType = await termCombo.evaluate((el) => {
+  const terminationType = (await termCombo.evaluate((el) => {
     const select = el as HTMLSelectElement;
     return select.options[select.selectedIndex]?.text ?? select.value;
-  });
+  })).trim();
   log.step(`  Type of Termination: ${terminationType}`);
 
   let location = "";
   try {
-    location = await separationForm.location(page).inputValue({ timeout: 3_000 });
+    location = (await separationForm.location(page).inputValue({ timeout: 3_000 })).trim();
     log.step(`  Location: ${location}`);
   } catch {
     log.step("  Location: (not found)");
