@@ -38,11 +38,13 @@ node_modules/
 # Playwright MCP (snapshots, console logs)
 .playwright-mcp/
 
-# Docs: ignore ad hoc docs by default, but keep canonical workflow docs trackable.
+# Docs: ignore ad hoc docs by default, but keep canonical workflow + engineering docs trackable.
 docs/*
 !docs/README.md
 !docs/workflow/
 !docs/workflow/**
+!docs/engineering/
+!docs/engineering/**
 
 # Tracker data (local runtime)
 .tracker/
@@ -61,6 +63,9 @@ generated/schemas/*.schema.json
 generated/pathfinder/
 generated/.tracker-*/
 generated/.e2e-screenshots/
+# e2e-test harness scratch scripts (regenerated each run by the e2e-test skill)
+generated/e2e-*
+generated/build-e2e-report.py
 
 # OS
 .DS_Store
