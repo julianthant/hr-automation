@@ -72,11 +72,12 @@ export interface SessionContext {
  */
 export interface WithTrackedWorkflowOpts {
   /**
-   * Declared detailFields keys from `defineWorkflow`. If provided, the wrapper
+   * Declared detailFields from `defineWorkflow`. If provided, the wrapper
    * logs `log.warn` for any key never populated via `updateData` before the
-   * `done` emit. Non-fatal — only a warning.
+   * `done` emit. Fields with `conditional: true` are exempt — they are
+   * legitimately unpopulated on some code paths. Non-fatal — only a warning.
    */
-  declaredDetailFields?: readonly string[];
+  declaredDetailFields?: ReadonlyArray<{ key: string; conditional?: boolean }>;
   /**
    * Server-side name computation. Result is stored as `data.__name`.
    */
@@ -398,10 +399,14 @@ export async function withTrackedWorkflow<T>(
     // workflow never populated is surfaced as a log.warn so drift is audible
     // without being fatal. Only runs on the success path; failed runs often
     // short-circuit before populating everything.
+    // Fields declared with `conditional: true` are exempt — they are
+    // legitimately absent on some code paths (e.g. terminationDate only
+    // present for terminated employees, submittedAt only on a real submit).
     if (opts.declaredDetailFields) {
-      for (const key of opts.declaredDetailFields) {
-        if (!(key in data)) {
-          log.warn(`dashboard: detailField '${key}' was declared but never populated`);
+      for (const field of opts.declaredDetailFields) {
+        if (field.conditional) continue;
+        if (!(field.key in data)) {
+          log.warn(`dashboard: detailField '${field.key}' was declared but never populated`);
         }
       }
     }

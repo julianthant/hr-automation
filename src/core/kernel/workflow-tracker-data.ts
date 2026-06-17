@@ -113,7 +113,7 @@ export function buildTrackerOpts<TData, TSteps extends readonly string[]>(
   return {
     declaredDetailFields: (wf.config.detailFields ?? [])
       .map(normalizeDetailField)
-      .map((f) => f.key),
+      .map((f) => ({ key: f.key, conditional: f.conditional })),
     nameFn: wf.config.getName,
     idFn: wf.config.getId,
   }
