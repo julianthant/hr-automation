@@ -92,9 +92,9 @@ export const oathSignatureWorkflow = defineWorkflow({
     betweenItems: ["reset"],
   },
   detailFields: [
-    { key: "name", label: "Employee" },
+    { key: "name", label: "Employee", conditional: true },
     { key: "emplId", label: "Empl ID" },
-    { key: "date", label: "Signature Date" },
+    { key: "date", label: "Signature Date", conditional: true },
   ],
   initialData: (input) => ({
     emplId: input.emplId,

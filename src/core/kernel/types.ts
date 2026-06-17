@@ -117,7 +117,7 @@ export interface BatchConfig {
  */
 export type DetailField<TData> =
   | (keyof TData & string)
-  | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }
+  | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean }
 
 export type WorkflowQueueTitleConfig<TData> =
   | { kind: 'single' }
@@ -552,7 +552,7 @@ export interface WorkflowMetadata {
    * on the wire. `editable` and `displayInGrid` are omitted when they
    * match the default (false + true respectively).
    */
-  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }>
+  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean }>
   /**
    * Data-field key for the dashboard's "Copy from prior run" lookup in
    * EditDataTab. See `WorkflowConfig.matchKey` for the full contract.
