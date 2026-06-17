@@ -92,6 +92,16 @@ export interface RunModalConfig {
   /** Allow selecting and submitting multiple PDFs as grouped single-file runs. */
   allowMultipleFiles?: boolean;
   /**
+   * Opt this workflow into the in-modal "Capture photos" upload method — a
+   * mobile-photo → PDF → OCR-prepare flow that produces the same OCR prep row
+   * as a file upload. When `true`, the RunModal shows an "Upload file | Capture
+   * photos" mode switch (gated additionally on a live capture registration from
+   * `GET /api/capture/registry`, so the option only appears when the backend
+   * actually registered a capture handler for the workflow). Declarative
+   * counterpart to the server-side `captureRegistrations` entry (Commit 4).
+   */
+  capture?: boolean;
+  /**
    * If set, the workflow's run modal locks the OCR `formType` to this value
    * — picker is hidden, the field is force-injected on submit. Used so
    * `emergency-contact`, `oath-signature`, and `oath-upload` can each
@@ -113,6 +123,7 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     sections: { roster: true, dryRun: true, workers: true },
     lockedFormType: "emergency-contact",
     allowMultipleFiles: true,
+    capture: true,
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,
@@ -128,6 +139,7 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     sections: { roster: true, dryRun: true, workers: true },
     lockedFormType: "oath",
     allowMultipleFiles: true,
+    capture: true,
     buildSuccessToast: (_resp, file) => ({
       title: "Preparation started",
       description: file.name,
@@ -208,4 +220,13 @@ export function resolveTargetWorkflow(
 
 export function isRunModalEnabled(workflow: string): boolean {
   return workflow in RUN_MODAL_REGISTRY;
+}
+
+/**
+ * Whether this workflow's run modal declares the in-modal "Capture photos"
+ * upload method. The actual mode switch is shown only when this is true AND a
+ * live capture registration exists server-side (`GET /api/capture/registry`).
+ */
+export function isRunModalCaptureCapable(workflow: string): boolean {
+  return getRunModalConfig(workflow)?.capture === true;
 }
