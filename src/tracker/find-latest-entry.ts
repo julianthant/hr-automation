@@ -86,7 +86,7 @@ export function findLatestEntryForPredicate(
     try {
       if (opts.runId) {
         const row = opts.db.prepare(`
-          SELECT item_id, run_id, latest_tracker_ts, latest_status, latest_step,
+          SELECT item_id, run_id, parent_run_id, latest_tracker_ts, latest_status, latest_step,
                  latest_data_json, latest_error
           FROM runs
           WHERE workflow = @workflow AND run_id = @runId
@@ -94,6 +94,7 @@ export function findLatestEntryForPredicate(
         `).get({ workflow: opts.workflow, runId: opts.runId }) as {
           item_id: string;
           run_id: string;
+          parent_run_id: string | null;
           latest_tracker_ts: string;
           latest_status: string;
           latest_step: string | null;
@@ -112,6 +113,7 @@ export function findLatestEntryForPredicate(
               workflow: opts.workflow,
               id: row.item_id,
               runId: row.run_id,
+              ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
               timestamp: row.latest_tracker_ts,
               status,
               ...(row.latest_step ? { step: row.latest_step } : {}),
@@ -122,9 +124,16 @@ export function findLatestEntryForPredicate(
           }
         }
       } else if (opts.itemId) {
+        // The `items` projection has no parent_run_id column; recover it from the
+        // run's projection so itemId-only inheritance lookups keep member→parent
+        // linkage (a missing parentRunId orphans batch/operation members on re-emit).
         const row = opts.db.prepare(`
           SELECT item_id, latest_run_id, latest_ts, latest_status, latest_step,
-                 latest_data_json, latest_error
+                 latest_data_json, latest_error,
+                 (SELECT r.parent_run_id FROM runs r
+                    WHERE r.workflow = items.workflow AND r.run_id = items.latest_run_id
+                      AND r.parent_run_id IS NOT NULL
+                    ORDER BY r.latest_tracker_ts DESC LIMIT 1) AS parent_run_id
           FROM items
           WHERE workflow = @workflow AND item_id = @itemId
           ORDER BY latest_ts DESC LIMIT 1
@@ -136,6 +145,7 @@ export function findLatestEntryForPredicate(
           latest_step: string | null;
           latest_data_json: string | null;
           latest_error: string | null;
+          parent_run_id: string | null;
         } | undefined;
         if (row) {
           const status = rowStatusOrUndefined(row.latest_status, {
@@ -149,6 +159,7 @@ export function findLatestEntryForPredicate(
               workflow: opts.workflow,
               id: row.item_id,
               runId: row.latest_run_id,
+              ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
               timestamp: row.latest_ts,
               status,
               ...(row.latest_step ? { step: row.latest_step } : {}),
