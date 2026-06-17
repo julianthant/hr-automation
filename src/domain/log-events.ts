@@ -46,7 +46,17 @@ export type LogEventName =
   | "ocr:awaiting-approval"
   | "ocr:review-complete"
   | "cancel:requested"
-  | "run:terminal";
+  | "run:terminal"
+  // Operation-coordinator lifecycle (oath-signature / emergency-contact PDF
+  // runs). These fire on the COORDINATOR's run log — the OCR run + member runs
+  // have almost no activity on the coordinator's own runId, so without these
+  // the coordinator row's Logs panel shows only the synthetic tracker-state
+  // fallback. They are NOT tailed by the Tier-1 harness (which keys on the OCR
+  // run's runId), but they share the closed-set contract: additive + stable.
+  | "operation:created"
+  | "operation:ocr-status"
+  | "operation:approved"
+  | "operation:discarded";
 
 export interface StructuredLogEvent {
   level: "step" | "success" | "error" | "waiting" | "warn" | "debug";

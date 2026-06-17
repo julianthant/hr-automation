@@ -171,6 +171,24 @@ export function buildOcrPrepareHandler(
         baseData,
       };
     }
+    // Emit a sparse, EVENT-level lifecycle log on the COORDINATOR's runId so
+    // its Logs panel shows a real timeline (preparing → awaiting-review →
+    // approved/failed/cancelled). The OCR run + fanned-out members live on
+    // OTHER runIds, so without these the coordinator row has almost no log
+    // activity of its own and the panel falls back to a synthetic line. Bound
+    // to the coordinator's (workflow, itemId, runId) so the strict per-run logs
+    // filter picks them up. Kept to one line per lifecycle transition.
+    const logOnCoordinator = (
+      message: string,
+      event: "operation:created" | "operation:ocr-status" | "operation:approved" | "operation:discarded",
+    ): void => {
+      if (!operationRef) return;
+      const ref = operationRef;
+      void withLogContext(ref.workflow, ref.id, async () => {
+        setLogRunId(ref.runId);
+        log.step({ message, event, category: "operator" });
+      }, trackerDir);
+    };
     const emitOperationRow = (
       ocrStatus: string,
       ocrStep: string,
@@ -190,7 +208,14 @@ export function buildOcrPrepareHandler(
         },
         trackerDir,
       );
+      logOnCoordinator(`OCR ${ocrStatus} · ${ocrStep}`, "operation:ocr-status");
     };
+    if (operationRef) {
+      logOnCoordinator(
+        `Operation created — OCR delegated (target: ${operationRef.workflow})`,
+        "operation:created",
+      );
+    }
     emitOperationRow("running", "preparing");
 
     if (input.isReupload && input.previousRunId) {

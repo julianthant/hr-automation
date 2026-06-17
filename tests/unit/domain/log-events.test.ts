@@ -64,9 +64,14 @@ describe("structured log events", () => {
       "ocr:review-complete",
       "cancel:requested",
       "run:terminal",
+      // Operation-coordinator lifecycle (additive — not Tier-1 harness keys).
+      "operation:created",
+      "operation:ocr-status",
+      "operation:approved",
+      "operation:discarded",
     ];
     // Type-level guard: every member is assignable to LogEventName (compile)
     // and the runtime set is the expected size.
-    assert.equal(new Set(names).size, 7, "expected 7 distinct stable event names");
+    assert.equal(new Set(names).size, 11, "expected 11 distinct stable event names");
   });
 });

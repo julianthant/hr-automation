@@ -194,13 +194,21 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
           }
           throw err;
         }
+        // Sparse EVENT-level lifecycle log on the operation COORDINATOR's runId
+        // (parentWorkflow is the coordinator for oath-signature / emergency-contact;
+        // undefined → skipped for oath-upload, which is a real task, not a
+        // coordinator row). Records the discard on the coordinator's own Logs
+        // timeline. `event: "operation:discarded"` is part of the closed set.
         appendLogEntry(
           {
             workflow: parentWorkflow,
             itemId: parentItemId,
             runId: parentRunId,
             level: "error",
-            message: `Discarded · ${input.reason ?? "operator discarded the OCR prep row"}`,
+            message: `Operator discarded OCR preparation · ${input.reason ?? "operator discarded the OCR prep row"}`,
+            event: "operation:discarded",
+            category: "operator",
+            occasion: "cancelled",
             ts,
           },
           opts.trackerDir,
