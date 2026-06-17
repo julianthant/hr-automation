@@ -151,6 +151,11 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
   separations: {
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
     parseInput: parseCommaSeparated("docId"),
+    // Dry run skips BOTH irreversible writes — the UCPath Smart HR submit and
+    // the Kuali finalization save (see `separations/workflow.ts` dry-run
+    // terminal). The toggle folds `dryRun: true` onto every parsed docId; the
+    // workflow's Zod schema declares the optional `dryRun` that validates it.
+    supportsDryRun: true,
   },
   "person-lookup": {
     placeholder: "Enter EIDs or names, semicolon-separated (e.g. 10873698; Battistessa, Johnnie)",

@@ -60,9 +60,42 @@ Screen 2560x1440. `Session.launch` with `tiling: "auto"` detects actual screen d
 - **Drill-in selector**: `PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG${rowIndex}` — row index must be exact.
 - **Batch mode**: `runSeparationBatch(docIds)` wraps `runWorkflowBatch(separationsWorkflow, items, { deriveItemId, onPreEmitPending })` — emits `pending` per docId before auth begins so the dashboard populates the queue; `session.reset(id)` runs between docs for all 4 systems.
 
+## Dry-run boundary
+
+`SeparationInputSchema` carries an optional `dryRun` flag (mirrors onboarding /
+oath-signature / emergency-contact). Unlike onboarding — which has a SINGLE
+irreversible write (the UCPath Smart HR submit) at its last step — separations
+has **two** committing mutations: the UCPath Smart HR submit
+(`clickSaveAndSubmit`, inside `ucpath-transaction`) and the Kuali finalization
+save (`runKualiFinalize`, inside `kuali-finalization`). So the dry-run terminal
+sits **earlier**, right after Kronos-vs-Kuali date reconciliation and **before
+the first Kuali write**: it `skipStep`s `ucpath-job-summary` /
+`ucpath-transaction` / `kuali-finalization`, captures a
+`separations-dry-run-before-submit` screenshot, stamps `status: "Dry Run
+Complete"` + `dryRun: true` (plus the resolved read data for the detail panel),
+logs `DRY RUN: reached UCPath Smart HR transaction … submit + Kuali finalization
+skipped`, and returns succeeded / `done`.
+
+What still runs in dry-run: 4-system auth (**4 Duos**), Kuali extraction, the
+4-way Kronos/Job-Summary parallel fetch, and date reconciliation — the entire
+READ path. The **one** residual write is the timekeeper-name fill bundled into
+`kronos-search`'s parallel block; it touches the **unsubmitted** Kuali draft and
+commits nothing (the doc is never finalized), the same way onboarding's
+search-first I-9 create runs in its dry-run. The load-bearing no-mutation proofs
+are: **no UCPath transaction exists** (`clickSaveAndSubmit` never called → no
+`transactionNumber`, no UCPath-submitted screenshot) and **the Kuali document is
+never finalized** (`runKualiFinalize` skipped). Live mode (no `dryRun`) is
+unchanged.
+
+Dashboard exposure: separations is a dashboard **input-run** start surface
+(`INPUT_RUN_REGISTRY`, `supportsDryRun: true`) — typed doc id(s), comma-separated
+→ sequential batch — with a per-page-load dry-run toggle in the input panel's
+run-settings gear that folds `dryRun: true` onto each enqueued docId.
+
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Before adding a separations lesson, search this section and the four per-system `LESSONS.md` files. Merge stale auth/daemon/kernel notes into the current rule instead of appending another dated migration entry.
+- **2026-06-17: Dry-run halts before BOTH irreversible writes (UCPath submit + Kuali finalization).** `dryRun` (optional schema flag) terminates the handler right after date reconciliation, before any Kuali form write — skipping `ucpath-job-summary` / `ucpath-transaction` / `kuali-finalization` and stamping `status: "Dry Run Complete"`. Placed earlier than onboarding's guard because separations commits in two steps, not one. MUST stay declared in the Zod schema — an unknown `dryRun` is stripped by Zod, which would silently re-enable a real termination. Added so the workflow can be e2e-tested live (read path + 4 Duos) through the dashboard input run without creating a UCPath transaction or finalizing the Kuali doc. Pinned by `tests/unit/workflows/separations/dry-run.test.ts`.
 - **Duplicate prevention matches by EID/date, not name.** `findExistingTerminationTransaction(page, employeeId, effectiveDate)` and transaction-number readback key off Person ID plus effective date and termination text. Kuali/UCPath name variants are common enough that name matching created duplicate terminations; do not reintroduce name or template-code prefilters for duplicate checks.
 - **No tracker-side step cache/idempotency for UCPath submits.** The removed `step-cache`, `idempotency`, `runSeparationRecover`, and `separation:recover` paths should stay removed. Retrying converges through the live Smart HR transaction list; Kuali extraction is re-scraped.
 - **Transaction number must be persisted immediately.** Call `ctx.updateData({ transactionNumber })` at each UCPath success point: existing-transaction branch and fresh-submit branch. Do not rely on the handler's final update, because Kuali finalization can still fail after UCPath accepted the transaction.

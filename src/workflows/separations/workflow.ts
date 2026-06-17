@@ -64,9 +64,21 @@ import { runUcpathJobSummary } from "./steps/ucpath-job-summary.js";
 import { runUcpathTransaction } from "./steps/ucpath-transaction.js";
 import { runKualiFinalize } from "./steps/kuali-finalize.js";
 
-/** Input schema for the separations kernel workflow — only docId from the CLI. */
+/**
+ * Input schema for the separations kernel workflow.
+ *
+ * `docId` is the Kuali document id (the operator-typed input). `dryRun` is an
+ * optional safety flag (mirrors onboarding / oath-signature / emergency-contact):
+ * when set, the handler runs the full READ path but halts before BOTH
+ * irreversible writes — the UCPath Smart HR submit and the Kuali finalization
+ * save. It MUST be declared here: Zod strips unknown keys, so without this
+ * field a `dryRun: true` folded on by the dashboard's input-run toggle would be
+ * silently dropped and a REAL termination would fire. See the dry-run terminal
+ * in the handler below and `CLAUDE.md` → "Dry-run boundary".
+ */
 const SeparationInputSchema = z.object({
   docId: z.string().min(1),
+  dryRun: z.boolean().optional(),
 });
 export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
@@ -412,6 +424,52 @@ export const separationsWorkflow = defineWorkflow({
     // Early-populate separationDate so the dashboard shows it as soon as
     // Kronos reconciliation completes (not only after the transaction submits).
     ctx.updateData({ separationDate: resolved.separationDate, terminationType: isVol ? "Vol" : "Invol" });
+
+    // ─── DRY RUN terminal — stop before EVERY irreversible write ───
+    // Separations has TWO committing mutations: the UCPath Smart HR submit
+    // (`clickSaveAndSubmit`, inside `ucpath-transaction`) and the Kuali
+    // finalization save (`runKualiFinalize`, inside `kuali-finalization`).
+    // Onboarding's dry-run only had to guard its single final UCPath submit;
+    // separations halts before BOTH committing steps AND before the
+    // pre-submit Kuali form writes (date corrections + dept/payroll fill) that
+    // would otherwise start at the next line. The full READ path has already
+    // run by here — 4-system auth (4 Duos), Kuali extraction, Kronos search,
+    // UCPath Job Summary fetch, and Kronos-vs-Kuali date reconciliation — so a
+    // dry run exercises everything except the writes. Result: no UCPath
+    // transaction is created and the Kuali document is never finalized.
+    // (One benign residual: the timekeeper-name fill bundled into the
+    // `kronos-search` parallel block has already touched the UNSUBMITTED Kuali
+    // draft — it commits nothing, mirroring onboarding's pre-submit I-9 create.)
+    if (input.dryRun) {
+      const dryRunTermEffDate =
+        resolved.separationDate !== kualiData.separationDate
+          ? computeTerminationEffDate(resolved.separationDate)
+          : termEffDate;
+      ctx.skipStep("ucpath-job-summary");
+      ctx.skipStep("ucpath-transaction");
+      ctx.skipStep("kuali-finalization");
+      await ctx.screenshot({ kind: "form", label: "separations-dry-run-before-submit" });
+      ctx.updateData({
+        status: "Dry Run Complete",
+        dryRun: true,
+        terminationType: isVol ? "Vol" : "Invol",
+        separationDate: resolved.separationDate,
+        lastDayWorked: resolved.lastDayWorked,
+        terminationEffDate: dryRunTermEffDate,
+        deptId: jobSummaryData?.deptId ?? "",
+        departmentDescription: jobSummaryData?.departmentDescription ?? "",
+        jobCode: jobSummaryData?.jobCode ?? "",
+        jobDescription: jobSummaryData?.jobDescription ?? "",
+        foundInOldKronos: String(oldKronosFound),
+        foundInNewKronos: String(newKronosFound),
+      });
+      log.success(
+        `DRY RUN: reached UCPath Smart HR transaction for doc #${docId} — ` +
+        `Kuali writes, UCPath submit, and Kuali finalization all skipped ` +
+        `(no UCPath transaction created, Kuali document not finalized)`,
+      );
+      return;
+    }
 
     const kualiPage = await ctx.page("kuali");
     if (resolved.changed) {
