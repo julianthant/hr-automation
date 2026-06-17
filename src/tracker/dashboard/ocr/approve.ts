@@ -1,5 +1,5 @@
 import { emitTrackerRow } from "../../jsonl.js";
-import { log } from "../../../utils/log.js";
+import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
 import { openControlDb } from "../../../core/control-db.js";
@@ -431,6 +431,8 @@ export function buildOcrApproveHandler(
           sessionId: input.sessionId,
           parentRunId,
           trackerDir,
+          fannedOutCount: enqueuedIds.length,
+          childWorkflow: approveTo?.workflow,
         });
         // Wake any kernel-path handler subscribed via
         // `subscribeToApproval`. Dashboard-path runs (no kernel wrapping)
@@ -600,8 +602,10 @@ function mirrorOperationApproved(args: {
   sessionId: string;
   parentRunId: string | undefined;
   trackerDir: string | undefined;
+  fannedOutCount: number;
+  childWorkflow: string | undefined;
 }): void {
-  const { operationWorkflow, sessionId, parentRunId, trackerDir } = args;
+  const { operationWorkflow, sessionId, parentRunId, trackerDir, fannedOutCount, childWorkflow } = args;
   if (parentRunId === undefined || operationWorkflow === undefined) return;
   if (!isOperationCoordinatorWorkflow(operationWorkflow)) return;
   const operationItemId = `ocr-prep-${sessionId}`;
@@ -625,6 +629,22 @@ function mirrorOperationApproved(args: {
     },
     trackerDir,
   );
+  // Sparse EVENT-level lifecycle log on the COORDINATOR's runId so the
+  // operation row's Logs panel records the approval transition (the fan-out
+  // children run on their own runIds). Bound to the coordinator's
+  // (workflow, itemId, runId) so the strict per-run logs filter picks it up.
+  const childLabel = childWorkflow ?? "downstream";
+  void withLogContext(operationWorkflow, operationItemId, async () => {
+    setLogRunId(parentRunId);
+    log.step({
+      message: `Approved ${fannedOutCount} record(s) — fanning out ${childLabel}`,
+      event: "operation:approved",
+      category: "operator",
+      occasion: "started",
+      ...(childWorkflow ? { childWorkflow } : {}),
+      count: fannedOutCount,
+    });
+  }, trackerDir);
 }
 
 function readLatestEntryDataWithLookback(

@@ -60,6 +60,10 @@ harness matches on `runId`. (If a future need arises, thread the frozen id via
 | `ocr:review-complete` | The OCR orchestrator completes a standalone run — terminal `done` after person-lookup (no parked review). Only fires when `!parentRunId`; delegated runs emit `ocr:awaiting-approval` instead. | `src/workflows/ocr/orchestrator.ts` · `runOcrOrchestrator` (the `completesAfterLookup` branch) | `step:"person-lookup"`, `count` (record count), `category:"ocr"`, `occasion:"completed"` | annotated |
 | `cancel:requested` | A run observes an operator cancel at a step boundary and turns it into a `CancelledError`. The run-scope counterpart of the daemon's `cancel_task` command (which is daemon-scope and not on the run log). | `src/core/kernel/stepper.ts` · `Stepper.throwCancelled` | `step` (the step being cancelled), `category:"queue"`, `occasion:"cancelled"` | new line |
 | `run:terminal` | A run reaches its terminal emit. Exactly one per run. Branch on `occasion` for the outcome. | `src/tracker/tracked-workflow.ts` · `withTrackedWorkflow` (success/done + catch) | `occasion: "completed" \| "failed" \| "cancelled"`, `step` | success: new line · failure/cancel: annotated |
+| `operation:created` | An operation coordinator row (oath-signature / emergency-contact PDF run) is created at `/api/ocr/prepare`, with the OCR run delegated under it. | `src/tracker/dashboard/ocr/prepare.ts` · `logOnCoordinator` | `category:"operator"` | new line |
+| `operation:ocr-status` | The coordinator's denormalized OCR status transitions (preparing → awaiting-review → approved/failed/cancelled). One line per `emitOperationRow`. | `src/tracker/dashboard/ocr/prepare.ts` · `emitOperationRow` → `logOnCoordinator` | `category:"operator"` | new line |
+| `operation:approved` | The operator approves the OCR prep; the per-record fan-out is enqueued. Mirrored onto the coordinator's run log. | `src/tracker/dashboard/ocr/approve.ts` · `mirrorOperationApproved` | `childWorkflow`, `count`, `category:"operator"`, `occasion:"started"` | new line |
+| `operation:discarded` | The operator discards the OCR prep; mirrored onto the coordinator's run log. | `src/control/ocr/discard.ts` · the parent-mirror `appendLogEntry` | `category:"operator"`, `occasion:"cancelled"` | annotated |
 
 ### Notes on a few sites
 
@@ -76,6 +80,13 @@ harness matches on `runId`. (If a future need arises, thread the frozen id via
   worker-command handler runs in the command-poll loop (daemon-scope → session
   log). The Stepper's `throwCancelled` is where the in-flight run actually
   observes the aborted signal, so that's the line a run-log tailer can see.
+- **The `operation:*` events are coordinator-scope, NOT Tier-1 harness keys.**
+  They fire on the operation coordinator's own runId (oath-signature /
+  emergency-contact PDF runs) so the coordinator row's dashboard Logs panel has
+  a real lifecycle timeline — the OCR run and fanned-out member runs live on
+  different runIds and contribute almost nothing to the coordinator's own log.
+  The Tier-1 harness keys on the OCR run's runId, so it does not tail these; they
+  share the closed-set contract (additive + stable) for the dashboard's benefit.
 
 ## Proof / tests
 
