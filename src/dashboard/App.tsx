@@ -200,7 +200,7 @@ export function App() {
   }, [queueSortMode]);
 
   // SSE entries
-  const { entries, entriesKey, workflows, wfCounts, failureCounts, connected, loading } = useEntries(workflow, date);
+  const { entries, entriesKey, workflows, wfCounts, wfQueuedCounts, failureCounts, connected, loading } = useEntries(workflow, date);
 
   // Merge entries that resolve to the same person (same EID) into a single
   // queue row. The "primary" is the entry that owns the latest run; its
@@ -733,6 +733,7 @@ export function App() {
           workflow={workflow}
           workflows={workflows}
           entryCounts={entryCounts}
+          queuedCounts={wfQueuedCounts}
           onWorkflowChange={handleWorkflowChange}
           overviewActive={showOverview}
           onShowOverview={() => setShowOverview(true)}
@@ -858,7 +859,7 @@ export function App() {
         )}
       </div>
       </OcrReviewPrepProvider>
-      <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} />
+      <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} queuedCounts={wfQueuedCounts} />
       <ShortcutsGuide open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       {/* Reupload RunModal — opened by the Reupload action in the OCR review toolbar */}
       <RunModal
