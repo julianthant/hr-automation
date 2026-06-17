@@ -71,8 +71,18 @@ export function validateEmployeeData(
 }
 
 
-/** Input schema for the onboarding kernel workflow. `email` is the only CLI-supplied field. */
+/**
+ * Input schema for the onboarding kernel workflow. `email` is the
+ * operator-supplied field.
+ *
+ * - `dryRun` — when true, the workflow runs the full extraction / search /
+ *   I-9 chain but SKIPS the irreversible UCPath Smart HR transaction submit
+ *   (`clickSaveAndSubmit`). Mirrors the `dryRun` flag on oath-signature /
+ *   emergency-contact. The I-9 profile create still runs (it is search-first,
+ *   so idempotent for a fixed identity).
+ */
 export const OnboardingInputSchema = z.object({
   email: z.string().email(),
+  dryRun: z.boolean().optional(),
 });
 export type OnboardingInput = z.infer<typeof OnboardingInputSchema>;

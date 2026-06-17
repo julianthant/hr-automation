@@ -40,9 +40,18 @@ Until that probe lands, operators retrying onboarding are responsible for confir
 - Triple-browser setup (single mode): CRM page, UCPath page, I-9 page. CRM and UCPath need Duo; I-9 uses the same UCSD creds without Duo
 - No Excel tracker — all observability flows through the dashboard JSONL. Run `npm run dashboard` in a separate terminal to watch
 
+## Dry-run boundary
+
+`OnboardingInputSchema` carries an optional `dryRun` flag (mirrors oath-signature / emergency-contact). When set, the `transaction` step runs everything up to the UCPath Smart HR submit, then captures a `onboarding-dry-run-before-submit` screenshot, stamps `status: "Dry Run Complete"` + `dryRun: true`, logs `DRY RUN: reached Smart HR transaction — submit skipped (no UCPath mutation)`, and returns **before** `buildTransactionPlan(...).execute()` → `clickSaveAndSubmit`. That submit is the **only** irreversible UCPath write in the workflow, so it is the sole guarded mutation.
+
+Everything upstream still runs in dry-run: CRM auth/search/extraction, iDocs PDF download (read-only GET to local disk, non-fatal), UCPath person-search, and **I-9 profile create**. The I-9 create is deliberately NOT guarded — `i9-creation` is search-first (`searchI9Employee` by SSN before `createI9Employee`), so for a fixed identity it's idempotent across runs and won't spawn duplicate profiles. Live mode (no `dryRun`) is unchanged.
+
+Dashboard exposure: onboarding is a dashboard **input-run** start surface (`DASHBOARD_INPUT_RUN_WORKFLOWS` + `INPUT_RUN_REGISTRY`) — typed email(s), comma-separated → a `pool` batch — with a per-page-load dry-run toggle in the input panel's run-settings gear (folds `dryRun: true` onto each enqueued input).
+
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section plus CRM/UCPath/I9 system docs before adding onboarding lessons. Merge old retry/kernel/selector notes into the current daemon + kernel model instead of preserving obsolete `retryStep` history.
+- **2026-06-17: Dry-run mode skips ONLY the UCPath Smart HR transaction submit; I-9 profile create still runs (search-first → idempotent).** `dryRun` (optional schema flag) guards `clickSaveAndSubmit` in the `transaction` step — the single irreversible UCPath mutation. All reads (CRM extraction, person-search) and the non-fatal iDocs download proceed; the I-9 `createI9Employee` is intentionally left to run because `i9-creation` searches by SSN first, so a fixed identity never duplicates. Terminal status is `Dry Run Complete`. Added so the workflow can be e2e-tested through the dashboard input run without touching UCPath.
 - **No tracker-side cache/idempotency.** CRM extraction re-scrapes on retry, and UCPath Smart HR submit has no tracker-side duplicate guard. If duplicate submits become a real issue, add a live Smart HR transaction-list probe like separations; do not restore `stepCacheGet`, `hasRecentlySucceeded`, or `recordSuccess`.
 - **2026-05-25: Public start path removed until a dashboard input run is added.** `npm run onboarding` is retired. Do not re-expose this workflow through package scripts; add an `InputRunPanel` parser if operators need direct onboarding starts again.
 - **Daemon mode is the queue path.** `runOnboardingCli` enqueues into the shared SQLite tasks queue for internal callers; each daemon is one worker with 3 browsers and 2 Duos. In-process pool mode remains for tests/programmatic callers only.

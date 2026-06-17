@@ -1,6 +1,10 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { validateEmployeeData, EmployeeDataSchema } from "../../../../src/workflows/onboarding/schema.js";
+import {
+  validateEmployeeData,
+  EmployeeDataSchema,
+  OnboardingInputSchema,
+} from "../../../../src/workflows/onboarding/schema.js";
 import { ExtractionError } from "../../../../src/systems/crm/types.js";
 
 const VALID_DATA: Record<string, string> = {
@@ -219,5 +223,43 @@ describe("EmployeeDataSchema", () => {
         return true;
       },
     );
+  });
+});
+
+describe("OnboardingInputSchema", () => {
+  it("accepts a bare email (dryRun is optional)", () => {
+    const result = OnboardingInputSchema.parse({ email: "dong7777125@gmail.com" });
+    assert.equal(result.email, "dong7777125@gmail.com");
+    assert.equal(result.dryRun, undefined);
+  });
+
+  it("accepts { email, dryRun: true }", () => {
+    const result = OnboardingInputSchema.parse({
+      email: "dong7777125@gmail.com",
+      dryRun: true,
+    });
+    assert.equal(result.email, "dong7777125@gmail.com");
+    assert.equal(result.dryRun, true);
+  });
+
+  it("accepts { email, dryRun: false }", () => {
+    const result = OnboardingInputSchema.parse({
+      email: "dong7777125@gmail.com",
+      dryRun: false,
+    });
+    assert.equal(result.dryRun, false);
+  });
+
+  it("rejects a non-boolean dryRun", () => {
+    const result = OnboardingInputSchema.safeParse({
+      email: "dong7777125@gmail.com",
+      dryRun: "true",
+    });
+    assert.equal(result.success, false);
+  });
+
+  it("rejects a malformed email", () => {
+    const result = OnboardingInputSchema.safeParse({ email: "not-an-email" });
+    assert.equal(result.success, false);
   });
 });
