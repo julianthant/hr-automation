@@ -9,6 +9,7 @@ export {
   clickGoToTimecard,
   switchToPreviousPayPeriod,
   getTimecardLastDate,
+  scrollTimecardToDate,
   checkTimecardDates,
   goBackToMain,
 } from "./navigate.js";

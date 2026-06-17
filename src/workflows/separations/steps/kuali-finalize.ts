@@ -70,6 +70,10 @@ export async function runKualiFinalize(
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
   await clickSave(kualiPage);
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved' });
+  // Capture the ENTIRE Kuali finalization form as 3 vertical slices of ONLY the
+  // Kuali page. A single `fullPage` shot of the tall form rendered as an
+  // unreadable narrow ribbon on the quarter-screen tiled viewport, and without
+  // `systems:["kuali"]` the event captured all 4 systems mixed together.
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], slices: 3 });
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

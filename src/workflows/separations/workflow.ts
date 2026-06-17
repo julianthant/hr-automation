@@ -486,15 +486,28 @@ export const separationsWorkflow = defineWorkflow({
     log.step(`[Old Kronos / New Kronos] Resolved dates — using ${chosenDateSource}`);
 
     // Position the New Kronos timecard view so the chosen Last Day Worked
-    // is the topmost visible row. Any error screenshot taken later in the
-    // run (handler-throw in ucpath-transaction / kuali-finalization) will
-    // then show the operator the chosen date + every row after it, so they
-    // can verify "was there actually a later date that should have been
-    // picked?" without opening the Kronos browser themselves. Best-effort —
-    // a scroll failure here must not disrupt the rest of the run.
+    // row is CENTERED, then take a dedicated audit screenshot of ONLY the
+    // new-kronos page showing that date with its neighbours above/below — so
+    // the operator can verify "was there actually a later date that should
+    // have been picked?" without opening the Kronos browser. A VIEWPORT
+    // capture (centerSelector), NOT fullPage: the New Kronos timecard is a
+    // virtual-scroll grid (`.ui-grid-viewport`) — fullPage only captures the
+    // rows currently rendered in the DOM, missing off-screen data. The
+    // screenshot fires even when the scroll best-effort-fails (it captures
+    // whatever is shown). Best-effort — neither the scroll nor the shot may
+    // disrupt the rest of the run.
     try {
       const newKronosPage = await ctx.page("new-kronos");
       await scrollNewKronosTimecardToDate(newKronosPage, resolved.lastDayWorked);
+      await ctx.screenshot({
+        kind: 'form',
+        label: 'new-kronos-last-worked-date',
+        systems: ['new-kronos'],
+        // The grid viewport fills the page, so centering it is a near no-op;
+        // its real job is selecting the viewport-only capture path while the
+        // target row stays centered from scrollNewKronosTimecardToDate above.
+        centerSelector: '.ui-grid-viewport',
+      });
     } catch { /* best-effort */ }
 
     // Early-populate separationDate so the dashboard shows it as soon as

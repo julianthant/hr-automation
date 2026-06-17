@@ -53,3 +53,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Call `dismissModal(page, iframe)` from `navigate.ts` before each interaction. The helper iterates through OK / Close button variants registered in `modalDismiss` and is best-effort — it is fine if no modal is present.
 **Selector:** `modalDismiss.okButton`, `modalDismiss.closeButton` in `selectors.ts`
 **Tags:** modal, dialog, dismiss, ok, close, between-steps
+
+## 2026-06-17 — Audit screenshot of the timecard needs scroll-to-date-then-CENTERED-VIEWPORT, not fullPage
+
+**Tried:** Capturing the Old Kronos timecard with the generic all-systems `ctx.screenshot` (which uses `Session.captureFullPage` → `page.screenshot({ fullPage: true })`) to record the latest worked date for the separations audit.
+**Failed because:** The UKG timecard is a VIRTUAL-SCROLL grid living in a nested iframe — `fullPage` only renders the rows currently in the DOM, so off-screen dates (including the actual latest day if it scrolled out) never make it into the image. The shot also captured all 4 separation browsers in one event because no `systems` filter was set.
+**Fix:** Added `scrollTimecardToDate(page, targetDate)` to `navigate.ts` (walks `page.frames()` to find the timecard iframe, matches the date cell — `cells[2]` text like "Mon 3/16" — and `scrollIntoView({ block: "center" })`), then take a VIEWPORT-only shot via `ctx.screenshot({ systems:['old-kronos'], centerSelector:'iframe', label:'old-kronos-last-worked-date' })`. `centerSelector` (kernel `Session.captureViewportCenteredOnElement`) captures the viewport, NOT fullPage. Best-effort: fires even if the row lookup missed. The row/date-cell selector mirrors `getTimecardLastDate` and is flagged `// NEEDS LIVE RE-VERIFY 2026-06-17` in `navigate.ts` — confirm against the live frame in the live phase.
+**Tags:** screenshot, timecard, virtual-scroll, fullpage, viewport, scroll-to-date, center, iframe, audit

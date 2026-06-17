@@ -37,3 +37,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Look for the literal text `"There are no items to display."` via `f.getByText(...)`. The string is stable across session states and only appears when the search yields zero employees.
 **Selector:** `search.noResultsText` in `selectors.ts`
 **Tags:** no-results, empty, search, employee, text, probe
+
+## 2026-06-17 — Timecard audit screenshot must be a CENTERED VIEWPORT shot, not fullPage
+
+**Tried:** Relying on `scrollTimecardToDate` (which scrolled the target row to `block:"start"`) but taking NO screenshot after it — and elsewhere using the generic all-systems `ctx.screenshot` (`fullPage`) to record the latest worked date for the separations audit.
+**Failed because:** The New Kronos timecard is a VIRTUAL-SCROLL grid (`.ui-grid-viewport`) — `fullPage` only captures the rows currently rendered in the DOM, missing off-screen dates. And `block:"start"` put the target row at the top edge with no later-date context below visible in a clamped viewport. No screenshot was emitted at all after the scroll, so the positioning was wasted.
+**Fix:** Changed `scrollTimecardToDate` to `scrollIntoView({ block: "center" })` so the chosen day sits mid-viewport with neighbours above and below, then take a VIEWPORT-only shot right after it in the workflow: `ctx.screenshot({ systems:['new-kronos'], centerSelector:'.ui-grid-viewport', label:'new-kronos-last-worked-date' })`. `centerSelector` (kernel `Session.captureViewportCenteredOnElement`) captures the viewport, NOT fullPage; centering the full-viewport grid container is a near no-op whose real job is selecting the viewport-only path while the row stays centered from the scroll helper. Best-effort: fires even if the scroll missed.
+**Tags:** screenshot, timecard, virtual-scroll, fullpage, viewport, scroll-to-date, center, ui-grid, audit
