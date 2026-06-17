@@ -13,6 +13,46 @@ const MAX_DRAWER_HEIGHT = 320;
 const MIN_BODY_HEIGHT = 32;
 
 /**
+ * Bucket active daemon instances into running / authenticating / idle / failed
+ * counts for the collapsed-bar summary. Three-way split:
+ *
+ *   • itemInFlight → running   (processing a live item)
+ *   • daemonPhase set (idle|keepalive) → idle   (reached the claim loop, no item)
+ *   • alive but daemonPhase not yet set → authenticating   (mid-auth: serial Duo
+ *     prompts, browser launch, login retries — hasn't entered the claim loop yet)
+ *   • crashedOnLaunch | finalStatus === "failed" → failed
+ *
+ * `daemonPhase` is only emitted once the daemon transitions to 'idle' or
+ * 'keepalive' (daemon.ts `setPhase`), so its absence reliably signals that auth
+ * is still in progress. A daemon that finished auth and is genuinely parked MUST
+ * count as idle (daemonPhase is defined), not authenticating.
+ */
+export function bucketDaemonCounts(workers: WorkflowInstanceState[]): {
+  running: number;
+  authenticating: number;
+  idle: number;
+  failed: number;
+} {
+  let running = 0;
+  let authenticating = 0;
+  let idle = 0;
+  let failed = 0;
+  for (const w of workers) {
+    if (w.crashedOnLaunch || w.finalStatus === "failed") {
+      failed += 1;
+    } else if (w.itemInFlight) {
+      running += 1;
+    } else if (w.daemonPhase === "idle" || w.daemonPhase === "keepalive") {
+      idle += 1;
+    } else {
+      // Alive but hasn't reached the claim loop yet → still authenticating.
+      authenticating += 1;
+    }
+  }
+  return { running, authenticating, idle, failed };
+}
+
+/**
  * Best-effort "would another daemon absorb this card's in-flight item?" hint,
  * computed from the live session list. A peer counts only when it is a SEPARATE
  * instance of the SAME workflow that is currently alive (`pidAlive`) and active
@@ -99,14 +139,7 @@ export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts
 
   // Bucket active sessions so the collapsed bar shows health at a glance —
   // a red "failed" dot draws the eye before the operator expands the drawer.
-  let running = 0;
-  let idle = 0;
-  let failed = 0;
-  for (const w of active) {
-    if (w.crashedOnLaunch || w.finalStatus === "failed") failed += 1;
-    else if (w.itemInFlight) running += 1;
-    else idle += 1;
-  }
+  const { running, authenticating, idle, failed } = bucketDaemonCounts(active);
 
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
@@ -164,7 +197,7 @@ export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts
         <span className="flex items-center gap-3 min-w-0">
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
-          <SessionSummary count={count} running={running} idle={idle} failed={failed} />
+          <SessionSummary count={count} running={running} authenticating={authenticating} idle={idle} failed={failed} />
         </span>
         {/* Right edge: Live pill, then the clock. Live sits before the
             clock so the operator's eye lands on connection state first
@@ -248,18 +281,20 @@ function CountBadge({ count, noun = "active" }: { count: number; noun?: string }
 
 /**
  * Collapsed-bar session summary. With nothing active it falls back to the muted
- * "0 active" badge; otherwise it breaks the active count into running / idle /
- * failed status dots (failed first, in destructive) so the operator reads
- * session health without expanding the drawer.
+ * "0 active" badge; otherwise it breaks the active count into running /
+ * authenticating / idle / failed status dots (failed first, in destructive) so
+ * the operator reads session health without expanding the drawer.
  */
 function SessionSummary({
   count,
   running,
+  authenticating,
   idle,
   failed,
 }: {
   count: number;
   running: number;
+  authenticating: number;
   idle: number;
   failed: number;
 }) {
@@ -267,10 +302,11 @@ function SessionSummary({
   return (
     <span
       className="inline-flex items-center gap-2.5"
-      aria-label={`${running} running, ${idle} idle, ${failed} failed`}
+      aria-label={`${running} running, ${authenticating} authenticating, ${idle} idle, ${failed} failed`}
     >
       {failed > 0 && <DotGroup tone="failed" n={failed} label="failed" />}
       {running > 0 && <DotGroup tone="running" n={running} label="running" />}
+      {authenticating > 0 && <DotGroup tone="authenticating" n={authenticating} label="authenticating" />}
       {idle > 0 && <DotGroup tone="idle" n={idle} label="idle" />}
     </span>
   );
@@ -281,7 +317,7 @@ function DotGroup({
   n,
   label,
 }: {
-  tone: "running" | "idle" | "failed";
+  tone: "running" | "authenticating" | "idle" | "failed";
   n: number;
   label: string;
 }) {
@@ -293,6 +329,7 @@ function DotGroup({
           "w-1.5 h-1.5 rounded-full",
           tone === "failed" && "bg-destructive",
           tone === "running" && "bg-info motion-safe:animate-pulse",
+          tone === "authenticating" && "bg-warning motion-safe:animate-pulse",
           tone === "idle" && "bg-muted-foreground",
         )}
       />
