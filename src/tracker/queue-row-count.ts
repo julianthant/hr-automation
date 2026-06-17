@@ -1,7 +1,11 @@
 import type { TrackerEntry } from "./jsonl.js";
 import { isDelegatedOcrAwaitingApprovalEntry } from "./dashboard/prep-rows.js";
-import { countTopLevelQueueSurfaceRows } from "./queue-surfaces.js";
+import {
+  countQueuedTopLevelQueueSurfaceRows,
+  countTopLevelQueueSurfaceRows,
+} from "./queue-surfaces.js";
 import { resolveRowArchetype } from "../domain/row-archetype.js";
+import type { WorkflowRuntimePolicyLookup } from "../domain/workflow-runtime/registry.js";
 
 /** SSE payloads may enrich rows; JSONL replay may omit this — both are valid. */
 function activityTimestamp(e: TrackerEntry): string {
@@ -180,18 +184,53 @@ export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEn
 }
 
 /**
+ * Shared collapse pipeline for both the rail TOTAL and the rail QUEUED counts:
+ * dedupe by item id → drop resolved prep → merge by emplId → (the caller then
+ * collapses delegation batches via the queue-surface model).
+ */
+function collapseSidebarSurfaceInput(
+  raw: TrackerEntry[],
+  isExcluded: (e: TrackerEntry) => boolean,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): { entries: TrackerEntry[]; delegationSourceEntries: TrackerEntry[]; runtimePolicies?: WorkflowRuntimePolicyLookup } {
+  const deduped = dedupeLatestByIdWithCarriedEmplId(raw);
+  const visible = deduped.filter((e) => !isExcluded(e));
+  const primaries = groupMergedTrackerEntries(visible).map((g) => g.primary);
+  return {
+    entries: primaries,
+    delegationSourceEntries: visible,
+    ...(runtimePolicies ? { runtimePolicies } : {}),
+  };
+}
+
+/**
  * Rail badge + cross-workflow sidebar count: dedupe by item id → drop resolved
  * prep → merge by emplId → collapse delegation batches (`parentRunId`).
  */
 export function countSidebarRowsFromTrackerHistory(
   raw: TrackerEntry[],
   isExcluded: (e: TrackerEntry) => boolean = () => false,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
 ): number {
-  const deduped = dedupeLatestByIdWithCarriedEmplId(raw);
-  const visible = deduped.filter((e) => !isExcluded(e));
-  const primaries = groupMergedTrackerEntries(visible).map((g) => g.primary);
-  return countTopLevelQueueSurfaceRows({
-    entries: primaries,
-    delegationSourceEntries: visible,
-  });
+  return countTopLevelQueueSurfaceRows(
+    collapseSidebarSurfaceInput(raw, isExcluded, runtimePolicies),
+  );
+}
+
+/**
+ * Rail "queued" sub-badge count — the QUEUED slice of the same collapsed
+ * top-level-surface model as {@link countSidebarRowsFromTrackerHistory}, so the
+ * sub-badge is always `<= total`. For a delegated-member workflow (person-lookup)
+ * this collapses many queued members into one queued ANCHOR, never the raw member
+ * count; for a non-delegated single workflow (oath-upload tickets) it equals the
+ * raw queued depth. Replaces the rail's prior raw `readQueueDepth` read (ISS-002).
+ */
+export function countSidebarQueuedRowsFromTrackerHistory(
+  raw: TrackerEntry[],
+  isExcluded: (e: TrackerEntry) => boolean = () => false,
+  runtimePolicies?: WorkflowRuntimePolicyLookup,
+): number {
+  return countQueuedTopLevelQueueSurfaceRows(
+    collapseSidebarSurfaceInput(raw, isExcluded, runtimePolicies),
+  );
 }

@@ -31,7 +31,10 @@ import {
 } from "../../run-timelines.js";
 import { computeFailureCounts } from "../../failures.js";
 import { SCREENSHOTS_DIR } from "../../screenshots.js";
-import { countSidebarRowsFromTrackerHistory } from "../../../queue-row-count.js";
+import {
+  countSidebarQueuedRowsFromTrackerHistory,
+  countSidebarRowsFromTrackerHistory,
+} from "../../../queue-row-count.js";
 import { ttlMemoize } from "../memo.js";
 import { isStateDbReady, openStateDb } from "../../../state/db.js";
 import { getWorkflowRuntimePolicy } from "../../../../domain/workflow-runtime/registry.js";
@@ -65,19 +68,27 @@ const getCrossWorkflowCounts = ttlMemoize(
   function getCrossWorkflowCounts(
     targetDate: string,
     dir: string,
-  ): { workflows: string[]; wfCounts: Record<string, number>; failureCounts: Record<string, number> } {
+  ): {
+    workflows: string[];
+    wfCounts: Record<string, number>;
+    wfQueuedCounts: Record<string, number>;
+    failureCounts: Record<string, number>;
+  } {
     const workflows = listWorkflows(dir);
     const wfCounts: Record<string, number> = {};
+    const wfQueuedCounts: Record<string, number> = {};
     const failureCounts: Record<string, number> = {};
     for (const wf of workflows) {
       const all = readEntriesForDate(wf, targetDate, dir);
       wfCounts[wf] = countSidebarRowsFromTrackerHistory(all);
+      wfQueuedCounts[wf] = countSidebarQueuedRowsFromTrackerHistory(all);
       const failures = computeFailureCounts(all);
       if (failures > 0) failureCounts[wf] = failures;
     }
     return {
       workflows: filterRetiredDashboardWorkflows(workflows),
       wfCounts: filterRetiredDashboardWorkflowCounts(wfCounts),
+      wfQueuedCounts: filterRetiredDashboardWorkflowCounts(wfQueuedCounts),
       failureCounts: filterRetiredDashboardWorkflowCounts(failureCounts),
     };
   },
@@ -199,6 +210,7 @@ export function buildJsonlEventsPayload(
   }>;
   workflows: string[];
   wfCounts: Record<string, number>;
+  wfQueuedCounts: Record<string, number>;
   failureCounts: Record<string, number>;
 } {
   const entries = withRuntimeContextEntries(
@@ -281,7 +293,7 @@ export function buildJsonlEventsPayload(
   });
 
   const targetDate = date || today;
-  const { workflows, wfCounts, failureCounts } = getCrossWorkflowCounts(targetDate, dir);
+  const { workflows, wfCounts, wfQueuedCounts, failureCounts } = getCrossWorkflowCounts(targetDate, dir);
 
-  return { entries: enriched, workflows, wfCounts, failureCounts };
+  return { entries: enriched, workflows, wfCounts, wfQueuedCounts, failureCounts };
 }

@@ -13,7 +13,6 @@ import { useConfirm } from "@/components/shared/useConfirm";
 import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
-import { useQueueDepth } from "@/components/hooks/useQueueDepth";
 import { useNow } from "@/components/hooks/useNow";
 import { useWorkflow } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
@@ -354,6 +353,13 @@ function StopPill({
 interface WorkflowBoxProps {
   workflow: WorkflowInstanceState;
   reassignable?: boolean;
+  /**
+   * Collapsed top-level QUEUED surface count for this card's workflow (backend
+   * `wfQueuedCounts`, threaded from `TerminalDrawer`). The SAME collapse model
+   * as the rail total, so the footer "N queued" chip never shows the inflated
+   * raw delegated-member count the old `useQueueDepth` read produced (ISS-002).
+   */
+  queued: number;
 }
 
 /**
@@ -373,7 +379,7 @@ interface WorkflowBoxProps {
  *   - Cyan border tint when an item is in-flight (distinct from the
  *     amber duo-glow on individual browser tiles).
  */
-export function WorkflowBox({ workflow, reassignable = false }: WorkflowBoxProps) {
+export function WorkflowBox({ workflow, reassignable = false, queued }: WorkflowBoxProps) {
   const {
     instance,
     workflow: workflowName,
@@ -390,11 +396,8 @@ export function WorkflowBox({ workflow, reassignable = false }: WorkflowBoxProps
   } = workflow;
   const { focusedInstance, setFocusedInstance } = useTerminalDrawer();
   const meta = useWorkflow(workflowName ?? "");
-  const queueDepth = useQueueDepth();
   const elapsed = useElapsed(startedAt ?? null);
   const isFocused = focusedInstance === instance;
-
-  const queued = workflowName ? queueDepth[workflowName] ?? 0 : 0;
 
   if (workflow.crashedOnLaunch) {
     return (
