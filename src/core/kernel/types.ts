@@ -638,6 +638,23 @@ export interface ScreenshotOpts {
   label: string
   systems?: string[]
   pages?: import('playwright').Page[]
+  /**
+   * Capture each targeted page as N equal vertical slices (literal PNG files,
+   * `{label}-1of{N}`, …) instead of one `fullPage` shot. Use for tall forms
+   * whose `fullPage` capture is an unreadable narrow ribbon on a quarter-screen
+   * tiled viewport (Kuali finalization → 3, UCPath confirmation → 2). Routes to
+   * `Session.capturePageInSlices`. Ignored (treated as 1) when ≤1.
+   */
+  slices?: number
+  /**
+   * Scroll the element matching this CSS selector to the vertical CENTER of the
+   * viewport and capture the VIEWPORT (not `fullPage`). Use for virtual-scroll
+   * grids (Kronos timecards) where `fullPage` only captures the DOM-rendered
+   * rows. Routes to `Session.captureViewportCenteredOnElement`. Mutually
+   * exclusive with `slices` (center wins if both are set). Best-effort scroll —
+   * a missing element still captures whatever is shown.
+   */
+  centerSelector?: string
 }
 export interface ScreenshotCapture {
   kind: 'form' | 'error' | 'manual'
@@ -657,4 +674,8 @@ export interface CaptureFileOpts {
   ts: number
   systems?: string[]
   pages?: Page[]
+  /** N equal vertical slices per targeted page (see ScreenshotOpts.slices). */
+  slices?: number
+  /** Center-on-element viewport capture (see ScreenshotOpts.centerSelector). */
+  centerSelector?: string
 }

@@ -15,6 +15,16 @@ Declarative workflow runtime. Cross-workflow execution behavior, cancellation, t
 
 Auth is global: one system uses the fast path; multiple systems use parallel prepare + staggered Duo submit. See `src/infra/auth/CLAUDE.md`.
 
+## Audit Screenshots (`ctx.screenshot`)
+
+`ctx.screenshot(opts)` captures pages, writes `{workflow}-{itemId}-{kind}-{label}-{system}-{ts}.png` under `.screenshots/` (or the run's `screenshotDir`), and emits one `screenshot` session event whose `files[]` lists every PNG written (so all land in the dashboard Screenshots tab). Three capture MODES, all on `ScreenshotOpts`, routed in `Session.captureAll` → `captureOnePage`:
+
+- **`systems: string[]`** — restrict capture to specific system page(s) (e.g. `["kuali"]`). **Always set this for an audit shot of one system** — omitting it captures EVERY open page in one event (a 4-system separations run mixes Kuali + both Kronos + UCPath into one label). The legacy default (all systems) stays for genuinely whole-session captures only.
+- **`slices: N`** (>1) — capture each targeted page as N equal vertical slices (`{label}-1of{N}`, … via `formatCaptureFilename`'s `sliceIndex`/`sliceTotal`). For TALL forms whose single `fullPage` shot is an unreadable narrow ribbon on a quarter-screen tiled viewport. `Session.capturePageInSlices` strips inner-scroll overflow (shared `expandScrollContainers`, same as `captureFullPage`), widens the viewport, measures `fullHeight`, and shoots `page.screenshot({ fullPage: true, clip:{ x:0, y:i*sliceHeight, width, height } })` per slice. **`fullPage: true` is LOAD-BEARING** with `clip`: a plain `clip` resolves against the *viewport* image and throws "Clipped area is empty or outside the resulting image" for any region below the current viewport; `fullPage: true` makes `clip` resolve against the full-page image so off-screen page-coordinate regions capture real content. No image library is used (the repo depends on `playwright` only — no `sharp`/`jimp`/`pngjs`).
+- **`centerSelector: string`** — scroll the matching element to the vertical CENTER (`scrollIntoView({ block:'center' })`) and capture the VIEWPORT (NOT `fullPage`) via `Session.captureViewportCenteredOnElement`. For VIRTUAL-SCROLL grids (Kronos timecards) where `fullPage` only captures the DOM-rendered rows and misses off-screen data. Best-effort scroll — a missing element still captures whatever is shown. Mutually exclusive with `slices` (center wins).
+
+`captureAndStampScreenshot(label, dataKey, { systems })` is the stamp-into-tracker-data variant; it does not take `slices`/`centerSelector` (single stamped filename). Tests: `tests/unit/core/session-slice-capture.test.ts`.
+
 ## Daemon Mode
 
 Dashboard input runs use daemon mode when the workflow is registered in `src/core/workflow-loaders.ts`.
