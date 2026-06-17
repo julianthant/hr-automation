@@ -77,6 +77,25 @@ export interface WorkflowStatusExtensions {
   secondaryTag?: (entry: StatusExtensionEntry, ctx: StatusTagContext) => QueueRowStatusTag | null;
 }
 
+/**
+ * Cross-workflow dry-run predicate. A workflow run started in dry-run mode
+ * stamps `data.dryRun` onto every row it emits (onboarding via the schema
+ * `dryRun` flag → `initialData` + `ctx.updateData`; oath-signature /
+ * emergency-contact / oath-upload / OCR via their own `dryRun` flags). The
+ * field is stringified through the SQLite task store and re-emitted by the
+ * daemon, so it can arrive as the boolean `true` or the string `"true"` —
+ * both mean dry-run. Anything else (absent, `"false"`, `false`) is a live run.
+ *
+ * This is a ROW-LEVEL concern shared by every workflow, not a per-workflow
+ * status rule — so it lives here as a plain predicate the renderer reads
+ * directly, NOT as a `statusExtensions.secondaryTag` (which is workflow-
+ * specific). Pure + client-bundle-safe: reads only `entry.data`.
+ */
+export function isDryRunEntry(entry: { data?: Record<string, string> }): boolean {
+  const v = entry.data?.dryRun;
+  return v === "true" || (v as unknown) === true;
+}
+
 const REGISTRY = new Map<string, WorkflowStatusExtensions>();
 
 /**

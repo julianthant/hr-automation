@@ -5,6 +5,7 @@ import {
   resolveQueueRowStatus,
   getWorkflowStatusExtensions,
   registerWorkflowStatusExtensions,
+  isDryRunEntry,
   __resetWorkflowStatusExtensionsForTests,
   type StatusExtensionEntry,
 } from "../../../src/domain/queue-row-status.js";
@@ -180,5 +181,29 @@ describe("resolveQueueRowStatus — secondaryTag (person-lookup A/IA)", () => {
     assert.equal(tagFor!(entry({ workflow: "ocr", status: "done", data: { formType: "verify", verifiedCount: "2", recordCount: "2" } }), { isDone: true }), null);
     assert.equal(tagFor!(entry({ workflow: "ocr", status: "done", data: { formType: "oath", verifiedCount: "0", recordCount: "1" } }), { isDone: true }), null);
     assert.equal(tagFor!(verifyEntry, { isDone: false }), null);
+  });
+});
+
+describe("isDryRunEntry — cross-workflow dry-run predicate", () => {
+  it("data.dryRun string \"true\" → true (daemon re-emit / stringified task store)", () => {
+    assert.equal(isDryRunEntry({ data: { dryRun: "true" } }), true);
+  });
+
+  it("data.dryRun boolean true → true (in-process initialData / updateData)", () => {
+    // The kernel can carry the raw boolean before stringification.
+    assert.equal(isDryRunEntry({ data: { dryRun: true } as unknown as Record<string, string> }), true);
+  });
+
+  it("dryRun absent → false (live run)", () => {
+    assert.equal(isDryRunEntry({ data: { email: "a@b.edu" } }), false);
+  });
+
+  it("no data at all → false", () => {
+    assert.equal(isDryRunEntry({}), false);
+  });
+
+  it("dryRun=\"false\" or boolean false → false (not a dry run)", () => {
+    assert.equal(isDryRunEntry({ data: { dryRun: "false" } }), false);
+    assert.equal(isDryRunEntry({ data: { dryRun: false } as unknown as Record<string, string> }), false);
   });
 });

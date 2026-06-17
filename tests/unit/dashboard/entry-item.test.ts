@@ -56,6 +56,39 @@ test("delegated OCR needs-review rows keep normal retry delete and timer footer 
   assert.match(html, /aria-label="Delete this entry permanently"/);
 });
 
+test("dry-run rows render the cross-workflow DRY RUN chip", () => {
+  const html = renderEntry({
+    workflow: "onboarding",
+    id: "onboarding-dryrun-1",
+    runId: "ob-run-1",
+    status: "running",
+    timestamp: "2026-05-19T12:54:08.000Z",
+    firstLogTs: "2026-05-19T12:53:20.000Z",
+    lastLogTs: "2026-05-19T12:54:08.000Z",
+    data: { email: "jane@ucsd.edu", dryRun: "true" },
+    _hash: "dryrun-1",
+  } as TrackerEntry);
+
+  assert.match(html, /Dry run/);
+  assert.match(html, /text-warning/);
+});
+
+test("live (non-dry-run) rows do NOT render the DRY RUN chip", () => {
+  const html = renderEntry({
+    workflow: "onboarding",
+    id: "onboarding-live-1",
+    runId: "ob-run-2",
+    status: "running",
+    timestamp: "2026-05-19T12:54:08.000Z",
+    firstLogTs: "2026-05-19T12:53:20.000Z",
+    lastLogTs: "2026-05-19T12:54:08.000Z",
+    data: { email: "jane@ucsd.edu" },
+    _hash: "live-1",
+  } as TrackerEntry);
+
+  assert.doesNotMatch(html, /Dry run/);
+});
+
 test("batch footer actions render retry and delete icon controls for grouped rows", () => {
   const html = renderToStaticMarkup(
     React.createElement(BatchFooterActions, {
