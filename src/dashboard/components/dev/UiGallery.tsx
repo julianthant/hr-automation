@@ -850,31 +850,31 @@ function SessionCardsTab() {
         </p>
         <div className="grid grid-cols-1 min-[680px]:grid-cols-2 min-[1040px]:grid-cols-3 gap-4 items-start">
           <Variant width={290} label="in-flight" axes="active · itemInFlight · 2 browsers authed" note="cyan border tint; subtitle = trace id, footer = current step">
-            <div className="px-2"><WorkflowBox workflow={sessInFlight} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessInFlight} queued={0} /></div>
           </Variant>
           <Variant width={290} label="authenticating" axes="active · auth · 1/2 authed" note="blue step; one tile still spinning">
-            <div className="px-2"><WorkflowBox workflow={sessAuthing} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessAuthing} queued={0} /></div>
           </Variant>
           <Variant width={290} label="duo waiting" axes="active · auth · duo_waiting tile" note="amber pulse tile + amber elapsed pill (≥1m)">
-            <div className="px-2"><WorkflowBox workflow={sessDuo} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessDuo} queued={0} /></div>
           </Variant>
           <Variant width={290} label="idle + UCPath ring" axes="active · daemonPhase=idle · idleBySystem set" note="idle-refresh countdown ring on the UCPath tile">
-            <div className="px-2"><WorkflowBox workflow={sessIdleUcpath} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessIdleUcpath} queued={0} /></div>
           </Variant>
           <Variant width={290} label="idle (had a run)" axes="active · daemonPhase=idle · currentTraceId set" note="trace id hidden once idle; subtitle falls back to phase">
-            <div className="px-2"><WorkflowBox workflow={sessIdleLogs} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessIdleLogs} queued={0} /></div>
           </Variant>
           <Variant width={290} label="keepalive" axes="active · daemonPhase=keepalive" note="'keepalive — checking browsers'">
-            <div className="px-2"><WorkflowBox workflow={sessKeepalive} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessKeepalive} queued={0} /></div>
           </Variant>
           <Variant width={290} label="complete" axes="!active · finalStatus=done" note="dimmed (opacity 55); no stop pill">
-            <div className="px-2"><WorkflowBox workflow={sessComplete} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessComplete} queued={0} /></div>
           </Variant>
           <Variant width={290} label="failed" axes="!active · finalStatus=failed" note="dimmed; failed auth tile">
-            <div className="px-2"><WorkflowBox workflow={sessFailed} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessFailed} queued={0} /></div>
           </Variant>
           <Variant width={290} label="crashed on launch" axes="crashedOnLaunch" note="compact destructive card; points to the queue row">
-            <div className="px-2"><WorkflowBox workflow={sessCrashed} /></div>
+            <div className="px-2"><WorkflowBox workflow={sessCrashed} queued={0} /></div>
           </Variant>
         </div>
       </TerminalDrawerProvider>

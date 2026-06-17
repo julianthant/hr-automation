@@ -3,7 +3,10 @@ import { computeFailureCounts } from "../../dashboard/failures.js";
 import { computeStepDurations, pickEarlier, pickLater } from "../../dashboard/run-timelines.js";
 import type { ProjectionEntriesPayload } from "../types.js";
 import { dateLocal, type TrackerEntry } from "../../jsonl-io.js";
-import { countSidebarRowsFromTrackerHistory } from "../../queue-row-count.js";
+import {
+  countSidebarQueuedRowsFromTrackerHistory,
+  countSidebarRowsFromTrackerHistory,
+} from "../../queue-row-count.js";
 import { log } from "../../../utils/log.js";
 import { isTrackerStatus, parseJsonObject, parseTypedDataJson, readStmts } from "./statements.js";
 import {
@@ -219,6 +222,7 @@ export function queryEntriesPayload(
   const resolvedEmplFromDay = resolvedEmplIdMapFromRunEvents(db, opts.date);
 
   const wfCounts: Record<string, number> = {};
+  const wfQueuedCounts: Record<string, number> = {};
   const rawWfCountRows = readStmts(db).selectWfCountRowsForDate.all({ date: opts.date }) as Array<{
     workflow: string;
     id: string;
@@ -277,6 +281,7 @@ export function queryEntriesPayload(
       ...(row.error ? { error: row.error } : {}),
     }));
     wfCounts[wf] = countSidebarRowsFromTrackerHistory(asTracker);
+    wfQueuedCounts[wf] = countSidebarQueuedRowsFromTrackerHistory(asTracker);
   }
 
   const failureCounts: Record<string, number> = {};
@@ -340,6 +345,7 @@ export function queryEntriesPayload(
     entries,
     workflows,
     wfCounts: filterRetiredDashboardWorkflowCounts(wfCounts),
+    wfQueuedCounts: filterRetiredDashboardWorkflowCounts(wfQueuedCounts),
     failureCounts: filterRetiredDashboardWorkflowCounts(failureCounts),
     source: "sqlite",
   };

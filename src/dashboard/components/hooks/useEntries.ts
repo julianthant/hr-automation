@@ -18,6 +18,8 @@ interface UseEntriesResult {
   entriesKey: string;
   workflows: string[];
   wfCounts: Record<string, number>;
+  /** Collapsed top-level QUEUED surface count per workflow — rail "queued" sub-badge (always <= wfCounts). */
+  wfQueuedCounts: Record<string, number>;
   failureCounts: Record<string, number>;
   connected: boolean;
   loading: boolean;
@@ -28,6 +30,7 @@ type EntriesEnvelope = {
   entries: TrackerEntry[];
   workflows: string[];
   wfCounts?: Record<string, number>;
+  wfQueuedCounts?: Record<string, number>;
   failureCounts?: Record<string, number>;
 };
 
@@ -123,6 +126,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
   const [entriesKey, setEntriesKey] = useState("");
   const [workflows, setWorkflows] = useState<string[]>([]);
   const [wfCounts, setWfCounts] = useState<Record<string, number>>({});
+  const [wfQueuedCounts, setWfQueuedCounts] = useState<Record<string, number>>({});
   const [failureCounts, setFailureCounts] = useState<Record<string, number>>({});
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -130,6 +134,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
   const activeKeyRef = useRef("");
   const prevWorkflowsRef = useRef<string>("");
   const prevWfCountsRef = useRef<string>("");
+  const prevWfQueuedCountsRef = useRef<string>("");
   const prevFailureCountsRef = useRef<string>("");
   // Cache: maps entry id → the last-emitted { entry, _hash } object.
   // Reusing the same object reference for unchanged rows lets EntryItem's
@@ -147,6 +152,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     prevHashRef.current = "";
     prevWorkflowsRef.current = "";
     prevWfCountsRef.current = "";
+    prevWfQueuedCountsRef.current = "";
     prevFailureCountsRef.current = "";
     // Clear ref cache on workflow/date switch so stale objects from the
     // previous subscription don't contaminate the next one.
@@ -170,7 +176,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
           });
           return;
         }
-        const { entries: raw, workflows: wfs, wfCounts: counts, failureCounts: fcounts } = data;
+        const { entries: raw, workflows: wfs, wfCounts: counts, wfQueuedCounts: queuedCounts, failureCounts: fcounts } = data;
 
         setConnected(true);
         setLoading(false);
@@ -193,6 +199,14 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
             prevWfCountsRef.current = countsKey;
             setWfCounts(counts);
           }
+        }
+        // Collapsed-queued sub-badge counts ride the same date-wide aggregate as
+        // wfCounts; update them unconditionally per tick (an older backend that
+        // omits the field clears to {} so the rail falls back to no sub-badge).
+        const queuedCountsKey = JSON.stringify(queuedCounts ?? {});
+        if (queuedCountsKey !== prevWfQueuedCountsRef.current) {
+          prevWfQueuedCountsRef.current = queuedCountsKey;
+          setWfQueuedCounts(queuedCounts ?? {});
         }
         const fcountsKey = JSON.stringify(fcounts ?? {});
         if (fcountsKey !== prevFailureCountsRef.current) {
@@ -264,5 +278,5 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
     };
   }, [workflow, date]);
 
-  return { entries, entriesKey, workflows, wfCounts, failureCounts, connected, loading };
+  return { entries, entriesKey, workflows, wfCounts, wfQueuedCounts, failureCounts, connected, loading };
 }

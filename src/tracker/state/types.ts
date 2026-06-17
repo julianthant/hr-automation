@@ -23,6 +23,8 @@ export interface ProjectionEntriesPayload {
   entries: unknown[];
   workflows: string[];
   wfCounts: Record<string, number>;
+  /** Collapsed top-level QUEUED surface count per workflow (rail "queued" sub-badge; always <= wfCounts). */
+  wfQueuedCounts: Record<string, number>;
   failureCounts: Record<string, number>;
   source: "sqlite";
 }

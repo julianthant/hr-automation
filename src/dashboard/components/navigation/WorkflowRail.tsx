@@ -1,13 +1,20 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useWorkflows, autoLabel, type WorkflowMetadata } from "@/lib/workflows-context";
-import { useQueueDepth } from "@/components/hooks/useQueueDepth";
 
 interface WorkflowRailProps {
   workflow: string;
   /** Workflow names seen via SSE (file-on-disk discovery). */
   workflows: string[];
   entryCounts: Record<string, number>;
+  /**
+   * Per-workflow collapsed top-level QUEUED surface count (backend
+   * `wfQueuedCounts`). This is the SAME collapse model as the total
+   * (`entryCounts`), so the queued sub-badge is always `<= total` — unlike the
+   * old raw `useQueueDepth` SQLite task count, which counted every delegated
+   * member and could exceed the collapsed total (ISS-002: "53 queued / 18").
+   */
+  queuedCounts: Record<string, number>;
   onWorkflowChange: (wf: string) => void;
   /** When true, the Overview entry is highlighted (queue panels are hidden). */
   overviewActive?: boolean;
@@ -52,12 +59,12 @@ export function WorkflowRail({
   workflow,
   workflows,
   entryCounts,
+  queuedCounts,
   onWorkflowChange,
   overviewActive = false,
   onShowOverview,
 }: WorkflowRailProps) {
   const registered = useWorkflows();
-  const queueDepth = useQueueDepth();
 
   const labelFor = (wf: string): string =>
     registered.find((r) => r.name === wf)?.label ?? autoLabel(wf);
@@ -130,7 +137,7 @@ export function WorkflowRail({
               {group.members.map((wf) => {
                 const active = wf === workflow && !overviewActive;
                 const count = entryCounts[wf] || 0;
-                const queued = queueDepth[wf] || 0;
+                const queued = queuedCounts[wf] || 0;
                 return (
                   <li key={wf}>
                     <button

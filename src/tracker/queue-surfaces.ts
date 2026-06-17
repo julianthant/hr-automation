@@ -4,6 +4,7 @@ import {
   type WorkflowRuntimePolicyLookup,
 } from "../domain/workflow-runtime/registry.js";
 import type { TrackerEntry } from "./jsonl.js";
+import { isDelegatedOcrAwaitingApprovalEntry } from "./dashboard/prep-rows.js";
 
 export interface TrackerRowClassification {
   shape: RowArchetype;
@@ -341,4 +342,48 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
 export function countTopLevelQueueSurfaceRows(input: BuildTrackerQueueSurfacesInput): number {
   const { groupRows, flatEntries } = buildTrackerQueueSurfaces(input);
   return groupRows.length + flatEntries.length;
+}
+
+function isAuthRunningEntry(entry: TrackerEntry): boolean {
+  return entry.status === "running" && Boolean(entry.step?.startsWith("auth:"));
+}
+
+/**
+ * A row that occupies the queue (not yet running its real work and not
+ * terminal). Mirrors the dashboard's `isQueueLikeEntry` + the queue strip's
+ * `isQueueLikeForQueueStrip` (pending / skipped / authenticating / a delegated
+ * OCR row parked at awaiting-approval) so the collapsed-queued count matches the
+ * panel's "N Queue" status filter.
+ */
+function isQueueLikeEntry(entry: TrackerEntry): boolean {
+  return (
+    entry.status === "pending" ||
+    entry.status === "skipped" ||
+    isAuthRunningEntry(entry) ||
+    isDelegatedOcrAwaitingApprovalEntry(entry)
+  );
+}
+
+/** A flat row or group surface counts as queued if its anchor or any member is queue-like. */
+function surfaceIsQueued(surface: TrackerQueueGroupSurface): boolean {
+  const parent = "parent" in surface ? surface.parent : undefined;
+  if (parent && isQueueLikeEntry(parent)) return true;
+  return surface.members.some((m) => isQueueLikeEntry(m));
+}
+
+/**
+ * Collapsed top-level **queued** surface count — the queue-surface analogue of
+ * the panel's "N Queue" status filter, computed by the SAME collapse logic that
+ * produces the rail total ({@link countTopLevelQueueSurfaceRows}). A delegated-
+ * member workflow (person-lookup) collapses many queued members into one queued
+ * batch ANCHOR, so this returns the number of queued anchors, never the raw
+ * member count — keeping `queued <= total` (ISS-002). For a non-delegated single
+ * workflow (oath-upload tickets) every queued surface is one queued row, so
+ * collapsed-queued equals the raw queued depth there.
+ */
+export function countQueuedTopLevelQueueSurfaceRows(input: BuildTrackerQueueSurfacesInput): number {
+  const { groupRows, flatEntries } = buildTrackerQueueSurfaces(input);
+  const queuedGroups = groupRows.filter(surfaceIsQueued).length;
+  const queuedFlat = flatEntries.filter(isQueueLikeEntry).length;
+  return queuedGroups + queuedFlat;
 }
