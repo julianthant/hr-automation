@@ -22,7 +22,7 @@ import {
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { QueueRowCard } from "./QueueRowCard";
 import { statusKeyForEntry } from "@/components/shared/status-styles";
-import { resolveQueueRowStatus } from "../../../domain/queue-row-status.js";
+import { resolveQueueRowStatus, isDryRunEntry } from "../../../domain/queue-row-status.js";
 // Side-effect import: registers each workflow's status extensions into the
 // queue-row-status registry for the client bundle (defineWorkflow doesn't run
 // here). Keep this even though no symbol is used directly.
@@ -207,6 +207,12 @@ function EntryItemImpl({
   // non-default preset via the InputRunPanel gear menu. Read from the kernel-
   // stamped `data.__preset` (set at runOneItem startup).
   const presetId = typeof entry.data?.__preset === "string" ? entry.data.__preset : undefined;
+
+  // Cross-workflow DRY RUN chip — true for ANY row whose run was started in
+  // dry-run mode (`data.dryRun`, stamped by onboarding / oath-signature /
+  // emergency-contact / oath-upload / OCR). Row-level concern, resolved by the
+  // shared `isDryRunEntry` predicate — not a per-workflow `secondaryTag`.
+  const isDryRun = isDryRunEntry(entry);
   const footerSecondaryId = projection?.subtitle ?? subtitle ?? resolveEntryId(entry);
   const liveMessage = resolveQueueRowLiveMessage(entry);
   const showLiveRow =
@@ -270,6 +276,14 @@ function EntryItemImpl({
             </span>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {isDryRun && (
+              <span
+                title="Dry run — no live system writes (the final irreversible submit is skipped)"
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md font-sans tracking-wide uppercase bg-warning/12 text-warning border border-warning/40"
+              >
+                Dry run
+              </span>
+            )}
             {presetId && (
               <span
                 title={`Run mode: ${presetId}`}
