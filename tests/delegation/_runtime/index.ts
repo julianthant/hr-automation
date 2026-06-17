@@ -1,9 +1,6 @@
 export * from "./runtime.js";
 export * from "./scenario-handler.js";
 export * from "./snapshot-row.js";
-export * from "./operation.js";
-export * from "./oath-upload.js";
-export * from "./consistency.js";
 export {
   rawOathRecordFromStub,
   rawEcRecordFromStub,
