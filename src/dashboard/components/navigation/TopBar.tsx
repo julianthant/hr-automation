@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, History } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn, dateLocal } from "@/lib/utils";
@@ -60,8 +60,6 @@ export function TopBar({
 }: TopBarProps) {
   void availableDates;
 
-  const today = dateLocal();
-  const isToday = date === today;
   const dateObj = new Date(date + "T00:00:00");
 
   const dateDisplay = (() => {
@@ -122,17 +120,6 @@ export function TopBar({
             headerSlot={failureBellHeaderSlot}
           />
         )}
-        {/* Viewing-history cue — only when off today. The Live pill in the
-            drawer is downgraded in parallel so "not live" is unmistakable. */}
-        {!isToday && (
-          <span
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-warning/30 bg-warning/10 px-2.5 text-[11px] font-medium text-warning"
-            role="status"
-          >
-            <History aria-hidden className="h-3.5 w-3.5" />
-            History
-          </span>
-        )}
         <button
           onClick={() => navigateDay(-1)}
           aria-label="Previous day"
@@ -162,17 +149,6 @@ export function TopBar({
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
-
-        {!isToday && (
-          <button
-            onClick={() => onDateChange(today)}
-            aria-label="Jump to today"
-            title="Jump to today"
-            className="h-8 rounded-md border border-info/40 bg-info/10 px-3 text-[12px] font-semibold text-info cursor-pointer hover:bg-info/20 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-info"
-          >
-            Today
-          </button>
-        )}
 
         {rightSlot}
       </div>
