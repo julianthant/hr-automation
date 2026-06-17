@@ -31,12 +31,18 @@ const ICON_MAP: Record<LogCategory, { icon: typeof Check; color: string }> = {
 type LogLineProps = {
   isCurrent: boolean;
   onCopy: (text: string) => void;
+  /**
+   * Optional source-stream label (e.g. "OCR" / "Operation" / "Member"),
+   * rendered as a small prefix badge. Only used by the operation coordinator
+   * panel's merged timeline; absent for ordinary single-source rows.
+   */
+  sourceLabel?: string;
 } & (
   | { kind: "log"; entry: CollapsedLogEntry }
   | { kind: "event"; entry: RunEvent }
 );
 
-function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
+function LogLineImpl({ entry, kind, isCurrent, onCopy, sourceLabel }: LogLineProps) {
   if (kind === "event") {
     return <EventLine event={entry} />;
   }
@@ -66,6 +72,11 @@ function LogLineImpl({ entry, kind, isCurrent, onCopy }: LogLineProps) {
     >
       <span className="text-muted-foreground text-xs whitespace-nowrap min-w-[72px] mt-[3px]">{ts}</span>
       <Icon className={cn("w-[14px] h-[14px] shrink-0 mt-[3px]", color)} aria-hidden />
+      {sourceLabel && (
+        <span className="mt-[2px] shrink-0 rounded bg-secondary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border border-border/60">
+          {sourceLabel}
+        </span>
+      )}
       <span className={cn(
         "flex-1 min-w-0 break-words",
         category === "success" && "text-[#4ade80]",

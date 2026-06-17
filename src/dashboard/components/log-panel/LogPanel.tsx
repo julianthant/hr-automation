@@ -9,7 +9,9 @@ import { RetryButton } from "@/components/shared/RetryButton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
-import { useLogs } from "@/components/hooks/useLogs";
+import { useLogs, type CollapsedLogEntry } from "@/components/hooks/useLogs";
+import { useCoordinatorAggregatedLogs } from "@/components/hooks/useCoordinatorAggregatedLogs";
+import { COORDINATOR_LOG_SOURCE_LABEL, type CoordinatorLogLine } from "./coordinator-logs";
 import { useRunEvents } from "@/components/hooks/useRunEvents";
 import { useRunsForMergedEntry } from "@/components/hooks/useRunsForMergedEntry";
 import { cn } from "@/lib/utils";
@@ -122,6 +124,13 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     setActiveRunId(remainingRuns[remainingRuns.length - 1]?.runId ?? null);
   };
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
+  // Operation coordinator rows (oath-signature / emergency-contact) merge their
+  // own sparse lifecycle logs with the delegated OCR run's KEY events + a
+  // one-line-per-member summary, so the Logs panel shows the real workflow
+  // lifecycle instead of just the coordinator's near-empty runId. No-op
+  // (`active: false`) for every other row.
+  const { active: coordinatorAggregateActive, logs: coordinatorLogs } =
+    useCoordinatorAggregatedLogs({ entry, coordinatorLogs: logs, childEntries, date });
   const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
   const screenshotEventCount = useMemo(
     () => events.reduce((n, e) => (e.type === "screenshot" ? n + 1 : n), 0),
@@ -131,13 +140,31 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
     () => deriveTrackerFallbackLog(entry, activeRunId),
     [entry, activeRunId],
   );
-  const displayedLogs = useMemo(
-    () =>
-      !logsLoading && logs.length === 0 && trackerFallbackLog
-        ? [trackerFallbackLog]
-        : logs,
-    [logs, logsLoading, trackerFallbackLog],
-  );
+  const displayedLogs = useMemo(() => {
+    // Coordinator rows show the merged (coordinator + OCR + member) timeline
+    // when it has any real content; otherwise fall through to the normal
+    // fallback (e.g. a just-created operation with no logs yet).
+    if (coordinatorAggregateActive && coordinatorLogs.length > 0) {
+      return coordinatorLogs;
+    }
+    if (!logsLoading && logs.length === 0 && trackerFallbackLog) {
+      return [trackerFallbackLog];
+    }
+    return logs;
+  }, [coordinatorAggregateActive, coordinatorLogs, logs, logsLoading, trackerFallbackLog]);
+
+  // Source-label resolver for the merged coordinator timeline — maps each line's
+  // `source` to its human badge. undefined for non-coordinator rows (no badge).
+  const sourceLabelOf = useMemo(() => {
+    if (!coordinatorAggregateActive) return undefined;
+    return (entry: CollapsedLogEntry): string | undefined => {
+      // The merged coordinator lines are `CoordinatorLogLine`s (carry `source`);
+      // the LogStream prop is typed on the base `CollapsedLogEntry`, so read it
+      // through the wider shape. Non-coordinator lines (none here) yield no badge.
+      const source = (entry as CoordinatorLogLine).source;
+      return source ? COORDINATOR_LOG_SOURCE_LABEL[source] : undefined;
+    };
+  }, [coordinatorAggregateActive]);
 
   // Derive step/status from active run when viewing a HISTORICAL run via the
   // RunSelector. For the LIVE run (activeRun matches the SSE-delivered entry's
@@ -353,6 +380,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         loading={logsLoading}
         delegationLabel={delegationLabel}
         failureBanner={failureBanner}
+        sourceLabelOf={sourceLabelOf}
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={logSourceWorkflow}
