@@ -130,6 +130,23 @@ function headerStatus(entry: TrackerEntry, ocr?: OperationOcrLink): HeaderStatus
   return HEADER_STATUS[statusKeyForEntry(entry)] ?? HEADER_STATUS.pending;
 }
 
+/**
+ * The status label used for both the visible chip AND the `aria-label` on the
+ * coordinator card's root button. Extracted as a pure function so it can be
+ * tested without mounting the React component.
+ *
+ * The label must be derived from the SAME source as the chip — `headerStatus`
+ * which promotes `ocr.status === "awaiting-review"` to the `needsReview`
+ * config ("awaiting review"). Using the raw `entry.status` would say "running"
+ * while the chip shows "awaiting review", breaking a11y parity (ISS-001).
+ */
+export function resolveOperationStatusLabel(
+  entry: TrackerEntry,
+  ocr: OperationOcrLink | undefined,
+): string {
+  return headerStatus(entry, ocr).label;
+}
+
 function isAwaitingOcrReview(ocr?: OperationOcrLink): boolean {
   return ocr?.status === "awaiting-review";
 }
@@ -212,7 +229,7 @@ export function OperationRowUnified({
           role: "button",
           tabIndex: 0,
           "aria-pressed": selected,
-          "aria-label": `${name || parent.id} — ${cfg.label.toLowerCase()}`,
+          "aria-label": `${name || parent.id} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`,
           "data-queue-entry-id": parent.id,
           onKeyDown: (e) => {
             if (e.key === "Enter" || e.key === " ") {
