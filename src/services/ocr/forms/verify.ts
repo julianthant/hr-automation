@@ -26,8 +26,11 @@ import {
   patchOcrRecordUnresolved,
 } from "../eid-lookup-results.js";
 import { type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
-import { isOcrPrepareAbortRequested } from "../../../tracker/ocr-prepare-abort.js";
-import { fanOutAndWatch } from "../fan-out.js";
+import {
+  isOcrPrepareAbortRequested,
+  isOperatorDiscardAbortError,
+} from "../../../tracker/ocr-prepare-abort.js";
+import { fanOutAndWatch, type FanOutResult } from "../fan-out.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import {
   DocumentTypeSchema,
@@ -616,7 +619,18 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       // stamps each record `pending` + its child trace id before the watch
       // begins (so the Preview tab shows the children queued); `onProgress`
       // patches each record as its child terminates.
-      const { outcomes: plOutcomes, missingItemIds: plMissing } = await fanOutAndWatch<PersonLookupChildInput>({
+      //
+      // ISS-003: a watchChildRuns TIMEOUT is not an operator abort — it means a
+      // backed-up person-lookup queue took longer than timeoutMs (30 min). We
+      // catch it here and degrade gracefully: records that DID finish before the
+      // timeout are already stamped via `onProgress`; the ones that didn't get
+      // marked `personLookupStatus: "failed"` with a timed-out note, then
+      // `enrichRecords` resolves normally so the operator sees a partial report
+      // (`N of M enriched — lookup timed out`) instead of a hard-failed OCR run
+      // that discards all completed enrichment. Operator-abort errors are NOT
+      // caught here — they propagate so `Promise.allSettled` sees the rejection
+      // and the `firstRejection` rethrow unwinds the prep as cancelled.
+      const plWatchResult = await fanOutAndWatch<PersonLookupChildInput>({
         sessionId,
         runId,
         parentRunId: runId,
@@ -624,7 +638,10 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         date,
         child: personLookupWorkflow as never,
         children: plInputs.map((inp, i) => ({ input: inp, itemId: plItemIds[i] ?? "" })),
-        timeoutMs: 30 * 60_000,
+        timeoutMs:
+          typeof process !== "undefined" && process.env["OCR_VERIFY_WATCH_TIMEOUT_MS"]
+            ? Number(process.env["OCR_VERIFY_WATCH_TIMEOUT_MS"])
+            : 30 * 60_000,
         ...(rootTracePrefix ? { rootTracePrefix } : {}),
         ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
         shouldAbort,
@@ -650,7 +667,21 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
           input.emitProgress(records);
         },
         onProgress: (outcome) => applyPersonLookupOutcome(outcome),
+      }).catch((err: unknown): FanOutResult => {
+        if (isOperatorDiscardAbortError(err)) throw err; // operator cancel — rethrow
+        // Timeout (or other non-abort watch failure): mark all unprocessed
+        // children as failed and degrade to a partial report.
+        const timedOut = plItemIds.filter((id) => !processedPlItemIds.has(id));
+        log.warn({
+          message: `[verify/person-lookup] watch timed out — ${timedOut.length} of ${plItemIds.length} lookups did not settle: ${timedOut.join(", ")}`,
+          category: "ocr",
+          occasion: "failed",
+          childWorkflow: "person-lookup",
+          subject: "verify-enrichment",
+        });
+        return { outcomes: [], byItemId: new Map(), missingItemIds: timedOut };
       });
+      const { outcomes: plOutcomes, missingItemIds: plMissing } = plWatchResult;
 
       for (const outcome of plOutcomes) {
         if (processedPlItemIds.has(outcome.itemId)) continue;
@@ -704,7 +735,11 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
 
       // Shared dispatch→watch→cascade-cancel pipeline (BM-1). The watched
       // workflow is i9-lookup (not the default child name), so pass it explicitly.
-      const { outcomes: i9Outcomes, missingItemIds: i9Missing } = await fanOutAndWatch<I9ChildInput>({
+      //
+      // ISS-003: same graceful-timeout handling as the person fan-out above.
+      // Operator-abort errors still rethrow; a plain watch timeout degrades to a
+      // partial report with the unsettled records marked failed.
+      const i9WatchResult = await fanOutAndWatch<I9ChildInput>({
         sessionId,
         runId,
         parentRunId: runId,
@@ -713,7 +748,10 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         child: i9LookupWorkflow as never,
         watchWorkflow: "i9-lookup",
         children: i9Inputs.map((inp, i) => ({ input: inp, itemId: i9ItemIds[i] ?? "" })),
-        timeoutMs: 30 * 60_000,
+        timeoutMs:
+          typeof process !== "undefined" && process.env["OCR_VERIFY_WATCH_TIMEOUT_MS"]
+            ? Number(process.env["OCR_VERIFY_WATCH_TIMEOUT_MS"])
+            : 30 * 60_000,
         ...(rootTracePrefix ? { rootTracePrefix } : {}),
         ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
         shouldAbort,
@@ -739,7 +777,21 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
           input.emitProgress(records);
         },
         onProgress: (outcome) => applyI9Outcome(outcome),
+      }).catch((err: unknown): FanOutResult => {
+        if (isOperatorDiscardAbortError(err)) throw err; // operator cancel — rethrow
+        // Timeout (or other non-abort watch failure): mark all unprocessed
+        // i9-lookup children as failed and continue with partial results.
+        const timedOut = i9ItemIds.filter((id) => !processedI9ItemIds.has(id));
+        log.warn({
+          message: `[verify/i9] watch timed out — ${timedOut.length} of ${i9ItemIds.length} lookups did not settle: ${timedOut.join(", ")}`,
+          category: "ocr",
+          occasion: "failed",
+          childWorkflow: "i9-lookup",
+          subject: "verify-enrichment",
+        });
+        return { outcomes: [], byItemId: new Map(), missingItemIds: timedOut };
       });
+      const { outcomes: i9Outcomes, missingItemIds: i9Missing } = i9WatchResult;
 
       for (const outcome of i9Outcomes) {
         if (processedI9ItemIds.has(outcome.itemId)) continue;
