@@ -103,12 +103,22 @@ export const onboardingWorkflow = defineWorkflow({
     return d.email ?? "(extracting)";
   },
   getId: (d) => d.email ?? "",
-  initialData: (input) => ({ email: input.email }),
+  initialData: (input) => ({
+    email: input.email,
+    ...(input.dryRun ? { dryRun: true } : {}),
+  }),
   operatorSubject: (input) =>
     buildOperatorSubject({ kind: "email", value: input.email, prefix: "Onboarding" }),
   handler: async (ctx, input) => {
     const email = input.email;
     let data: EmployeeData | null = null;
+
+    // Stamp dryRun onto every running row's data (initialData stamps the
+    // pending pre-emit; this carries it to subsequent live rows so the
+    // dashboard detail + tracker reflect dry-run mode for the whole run).
+    if (input.dryRun) {
+      ctx.updateData({ dryRun: true });
+    }
 
     // --- Phase 1: CRM auth + record lookup + extraction ---
 
@@ -381,6 +391,20 @@ export const onboardingWorkflow = defineWorkflow({
           `[Step: transaction] START template='${TEMPLATE_ID}' `
           + `effectiveDate='${data.effectiveDate}'`,
         );
+
+        // Dry-run guard: stop BEFORE the irreversible UCPath Smart HR submit.
+        // Everything upstream (CRM extraction, person search, I-9 search-first
+        // create) has already run; we only skip `plan.execute()` →
+        // `clickSaveAndSubmit`, the single UCPath mutation in this workflow.
+        // Mirrors oath-signature / emergency-contact dry-run behavior.
+        if (input.dryRun) {
+          await ctx.screenshot({ kind: "form", label: "onboarding-dry-run-before-submit" });
+          ctx.updateData({ status: "Dry Run Complete", dryRun: true });
+          log.success(
+            "DRY RUN: reached Smart HR transaction — submit skipped (no UCPath mutation)",
+          );
+          return;
+        }
 
         try {
           const plan = buildTransactionPlan(data, ucpathPage, i9ProfileId);
