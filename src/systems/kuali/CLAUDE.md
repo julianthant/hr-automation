@@ -26,6 +26,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 - Location field is optional — 3s timeout, silent failure
 - "Does not need Final Pay (student employee)" is hardcoded — assumes all separations are students
 - Throws generic `Error` for missing documents (not custom error class)
+- **`clickDocument` filters via the Action List search box** — the list paginates at 25 rows/page, so instead of paging it types the doc number into `actionList.searchInput`, clicks `actionList.searchGoButton` ("GO"), then clicks the matching row. Two live-verified gotchas: there are **two** "Search" textboxes (the Action List one is scoped to `.kp-input-group:has(.kp-input-button-right)`; the global nav search top-right has no GO), and Kuali search is **substring** (`"414"`→4140–4149), so `actionList.docLink` is **anchored** (`^\s*<n>\s*$`) to hit the exact row. Empty results ⇒ doc genuinely not in the Action List.
 - **`clickSave` targets navbar**: Scrolls to top first, then targets `[class*="action-bar"] button:has-text("Save")` or `nav button:has-text("Save")` before falling back to generic `button[name="Save"]` — avoids clicking wrong save button in modals or other form sections
 - `fillTransactionResults` fills fields only — does NOT save. Must call `clickSave()` separately after all form sections are filled
 

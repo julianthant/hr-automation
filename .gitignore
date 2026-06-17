@@ -75,6 +75,7 @@ Thumbs.db
 # Scratch files (chat references, not meant to be committed)
 /image.png
 /notes.md
+/duo.yaml
 .worktrees/
 
 # Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.

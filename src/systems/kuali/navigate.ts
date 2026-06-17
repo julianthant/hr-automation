@@ -109,15 +109,34 @@ export async function listActionListSeparations(page: Page): Promise<string[]> {
 /**
  * Click on a document row by its document number in the Action List.
  * Returns the URL of the opened document form.
+ *
+ * The Action List paginates at 25 rows/page, so a target document often isn't on
+ * the first page. Rather than page through, this types the document number into
+ * the list's own search box and clicks GO to filter to the matching row, then
+ * clicks it. `docLink` matches the row by EXACT number (anchored), so the fact
+ * that Kuali's search is substring-based (a search for "414" returns 4140–4149)
+ * can't open the wrong document. Throws if the search returns no matching row —
+ * i.e. the document genuinely isn't in the Action List.
  */
 export async function clickDocument(page: Page, docNumber: string): Promise<string> {
   log.step(`Searching for document #${docNumber}...`);
 
-  // Find link containing the doc number in the action list table
-  const docLink = actionList.docLink(page, docNumber);
-  const count = await docLink.count();
+  // Filter the Action List to the target doc via its search box. fill() replaces
+  // any prior query, so this also clears a stale search from a previous doc.
+  await safeFill(actionList.searchInput(page), docNumber, {
+    timeout: 10_000,
+    label: "kuali action list search",
+  });
+  await safeClick(actionList.searchGoButton(page), {
+    timeout: 10_000,
+    label: "kuali action list search GO",
+  });
+  // Let the filtered result render (Kuali refetches the list server-side).
+  await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
+  await page.waitForTimeout(1_500);
 
-  if (count === 0) {
+  const docLink = actionList.docLink(page, docNumber);
+  if ((await docLink.count()) === 0) {
     throw new Error(`Document #${docNumber} not found in Action List`);
   }
 
