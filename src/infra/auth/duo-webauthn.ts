@@ -722,7 +722,31 @@ const armedByPage = new WeakMap<Page, ArmedDuoWebAuthn>();
  * callers degrade to manual Duo.
  */
 export async function armDuoWebAuthn(page: Page, opts: { abortSignal?: AbortSignal } = {}): Promise<boolean> {
-  if (armedByPage.has(page)) return true;
+  const existing = armedByPage.get(page);
+  if (existing) {
+    // Defense-in-depth: the page may have been reloaded out from under us (e.g.
+    // an idle-refresh tick that slipped past the auth guard) — that destroys
+    // the CDP target, so the cached authenticator is dead even though the
+    // WeakMap (keyed by the Page object, which survives a reload) still reports
+    // the page as armed. Probe the stored CDP session; if it's live, the
+    // cached arm is reusable. If the probe throws, the target is stale — tear
+    // the stale entry down (release its cross-process lock) and re-arm fresh
+    // below instead of returning a phantom "armed: true".
+    try {
+      await existing.cdp.send("WebAuthn.enable");
+      return true;
+    } catch {
+      log.warn("Duo WebAuthn: cached CDP authenticator is stale (page likely reloaded) — re-arming fresh.");
+      armedByPage.delete(page);
+      try {
+        await existing.cdp.detach().catch(() => {});
+      } catch {
+        /* best-effort */
+      }
+      existing.lock.release();
+      // Fall through to a fresh arm.
+    }
+  }
   let creds = loadDuoWebAuthnCredentials();
   if (creds.length === 0) return false;
 

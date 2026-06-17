@@ -12,6 +12,8 @@ import {
   reserveDuoWebAuthnSignCounts,
   resyncDuoWebAuthnSignCounts,
   acquireDuoWebAuthnLock,
+  armDuoWebAuthn,
+  finishDuoWebAuthn,
   loadDuoWebAuthnCredential,
   loadDuoWebAuthnCredentials,
   mergeDuoWebAuthnCredential,
@@ -354,6 +356,118 @@ describe("ctap2SupportShim", () => {
       assert.doesNotThrow(() => ctap2SupportShim());
     } finally {
       if (had) g.PublicKeyCredential = prev;
+    }
+  });
+});
+
+describe("armDuoWebAuthn (stale-CDP re-arm)", () => {
+  // A minimal in-memory CDP stub. `WebAuthn.enable` is the probe the re-arm
+  // guard uses; flip `staleAfterArm` to make a previously-armed session's probe
+  // throw (simulating a page reload that destroyed the CDP target).
+  interface FakeCdp {
+    id: number;
+    enableThrows: boolean;
+    detached: boolean;
+    send: (method: string, params?: unknown) => Promise<unknown>;
+    detach: () => Promise<void>;
+  }
+
+  const makeArmEnv = () => {
+    const dir = mkdtempSync(join(tmpdir(), "duo-arm-"));
+    const credPath = join(dir, "creds.json");
+    const lockDir = join(dir, "lock");
+    writeFileSync(credPath, JSON.stringify({ credentials: [{ ...VALID, signCount: 1 }] }));
+    const prevCred = process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH;
+    const prevLock = process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR;
+    process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH = credPath;
+    process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR = lockDir;
+    return {
+      dir,
+      restore: () => {
+        if (prevCred === undefined) delete process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH;
+        else process.env.HR_AUTOMATION_DUO_WEBAUTHN_CREDENTIAL_PATH = prevCred;
+        if (prevLock === undefined) delete process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR;
+        else process.env.HR_AUTOMATION_DUO_WEBAUTHN_LOCK_DIR = prevLock;
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  // Each newCDPSession() hands out a fresh fake CDP; `cdps` keeps them so the
+  // test can flip the FIRST one stale before the second arm.
+  const makePage = (cdps: FakeCdp[]) => {
+    let nextId = 0;
+    const newCDPSession = async (): Promise<FakeCdp> => {
+      const cdp: FakeCdp = {
+        id: nextId++,
+        enableThrows: false,
+        detached: false,
+        send: async (method: string) => {
+          if (method === "WebAuthn.enable" && cdp.enableThrows) {
+            throw new Error("Target closed (page reloaded)");
+          }
+          if (method === "WebAuthn.addVirtualAuthenticator") {
+            return { authenticatorId: `auth-${cdp.id}` };
+          }
+          // enable / disable / addCredential / getCredentials / remove → ok
+          return {};
+        },
+        detach: async () => {
+          cdp.detached = true;
+        },
+      };
+      cdps.push(cdp);
+      return cdp;
+    };
+    const page = {
+      addInitScript: async () => {},
+      evaluate: async () => {},
+      context: () => ({ newCDPSession }),
+    } as unknown as import("playwright").Page;
+    return page;
+  };
+
+  it("reuses the cached arm when the CDP probe succeeds", async () => {
+    const env = makeArmEnv();
+    const cdps: FakeCdp[] = [];
+    const page = makePage(cdps);
+    try {
+      assert.equal(await armDuoWebAuthn(page), true);
+      assert.equal(cdps.length, 1, "first arm creates one CDP session");
+      // Second arm: probe succeeds → no new CDP session, no detach.
+      assert.equal(await armDuoWebAuthn(page), true);
+      assert.equal(cdps.length, 1, "probe-OK path must NOT create a second CDP session");
+      assert.equal(cdps[0].detached, false);
+    } finally {
+      await finishDuoWebAuthn(page);
+      env.restore();
+    }
+  });
+
+  it("re-arms fresh when the cached CDP probe fails (stale target after a reload)", async () => {
+    const env = makeArmEnv();
+    const cdps: FakeCdp[] = [];
+    const page = makePage(cdps);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    try {
+      assert.equal(await armDuoWebAuthn(page), true);
+      assert.equal(cdps.length, 1);
+
+      // Simulate the page being reloaded out from under the cached authenticator:
+      // the stored CDP target is now dead, so its WebAuthn.enable probe throws.
+      cdps[0].enableThrows = true;
+
+      assert.equal(await armDuoWebAuthn(page), true, "must self-heal to armed");
+      assert.equal(cdps.length, 2, "stale probe must trigger a FRESH CDP session");
+      assert.equal(cdps[0].detached, true, "stale CDP session is detached");
+      assert.ok(
+        warn.mock.calls.some((c) => String(c[0]).includes("stale")),
+        "logs a stale-authenticator warning",
+      );
+    } finally {
+      await finishDuoWebAuthn(page);
+      warn.mockRestore();
+      env.restore();
     }
   });
 });

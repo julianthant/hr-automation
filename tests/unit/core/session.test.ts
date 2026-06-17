@@ -685,6 +685,74 @@ test('session: idle reload also fires for i9 (registry-driven, not ucpath-only)'
   }
 })
 
+test('session: idle reload is suppressed while auth in progress, fires after auth completes', async () => {
+  const reloads: number[] = []
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/psp',
+    reload: async () => {
+      reloads.push(1)
+    },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+
+  // Two systems take the ≥2-system parallel-staggered path. There, the login
+  // IIFEs are NOT awaited by Session.launch — it returns immediately while auth
+  // continues in the background, so we can observe the in-progress window from
+  // the test. Hold both logins open, let the idle timer tick well past the
+  // threshold, assert NO reload fired, then release auth and assert a reload
+  // fires once the threshold elapses post-auth.
+  let releaseA!: () => void
+  let releaseB!: () => void
+  const gateA = new Promise<void>((r) => { releaseA = r })
+  const gateB = new Promise<void>((r) => { releaseB = r })
+
+  const s = await Session.launch(
+    [
+      { id: 'ucpath', login: async () => { await gateA } },
+      { id: 'i9', login: async () => { await gateB } },
+    ],
+    {
+      launchFn: async () => ({
+        page,
+        context,
+        browser: { close: async () => {} } as import('playwright').Browser,
+      }),
+      staggerMs: 0,
+      settleMs: 0,
+      maxConcurrentDuos: 2,
+      idleRefreshOverride: { thresholdMs: 100, tickMs: 20 },
+    },
+  )
+
+  try {
+    // ucpath + i9 both opt into idle-refresh. Auth is in progress (gates not
+    // released). Wait well past the idle threshold — the auth guard must
+    // suppress every tick.
+    await new Promise((r) => setTimeout(r, 250))
+    assert.equal(reloads.length, 0, 'no reload may fire while auth is in progress')
+
+    // Release auth. After auth settles, authInProgress flips false; the next
+    // idle tick past the threshold should reload (no ctx.step guard wired).
+    releaseA!()
+    releaseB!()
+    await Promise.all([s.page('ucpath'), s.page('i9')])
+    // Settle the post-auth `authInProgress = false` microtask, then wait past
+    // the threshold so a tick fires.
+    await new Promise((r) => setTimeout(r, 250))
+    assert.ok(reloads.length >= 1, `a reload should fire after auth completes + idle threshold (got ${reloads.length})`)
+  } finally {
+    await s.close()
+  }
+})
+
 test('session: idle reload does NOT fire for a non-registry system (crm)', async () => {
   const reloads: number[] = []
   const page = {
