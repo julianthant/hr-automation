@@ -124,11 +124,31 @@ export class Session {
   private idleTouchCb?: (systemId: string) => void
   private idleRefreshCb?: (systemId: string, phase: 'start' | 'end') => void
 
+  /**
+   * True while the auth chain (`Session.launch` → `loginWithRetry` →
+   * Duo prompt / queue wait → per-system readiness) is in progress. Guards the
+   * idle-refresh timer across the ENTIRE auth window — `idleGuard` (the
+   * `ctx.step` body check) is only wired in `makeCtx`, which runs AFTER auth, so
+   * without this flag an idle tick could fire `page.reload()` mid-Duo (navigates
+   * the prompt away → auth fails; invalidates the armed CDP WebAuthn target).
+   * A worker session inherits the parent's window: a `forWorker` child reads
+   * `this.parent.authInProgress` so the parent's auth covers the child too.
+   */
+  private authInProgress = false
+
   private constructor(private state: SessionState) {}
 
   /** Test-only factory to construct a Session with pre-built state. */
   static forTesting(state: SessionState): Session {
     return new Session(state)
+  }
+
+  /**
+   * True when this session OR (for a worker view) its parent is mid-auth. Used
+   * by the idle-refresh timer so no reload fires during the auth chain.
+   */
+  private isAuthInProgress(): boolean {
+    return this.authInProgress || (this.parent?.isAuthInProgress() ?? false)
   }
 
   /**
@@ -244,6 +264,14 @@ export class Session {
     //     synchronously, so `Session.launch` returns immediately and per-
     //     system handlers can proceed via `ctx.page(id)` as each Duo clears
     //     (in user-approval order, not click order).
+    // Guard the idle-refresh timer across the ENTIRE auth chain (login retries,
+    // Duo prompts, the serial Duo queue wait, per-system readiness). The
+    // `idleGuard` (ctx.step body check) is only wired post-auth in `makeCtx`, so
+    // without this flag an idle tick could fire `page.reload()` mid-Duo and
+    // break authentication (see `authInProgress` docs). Set BEFORE the dispatch
+    // and reset once every system's readiness settles — for the ≥2-system path
+    // that is AFTER `Session.launch` returns, since the IIFEs are not awaited
+    // here. The 1-system path resets inline in its own finally.
     if (systems.length === 1) {
       const sys = systems[0]
       const slot = browsers.get(sys.id)!
@@ -251,16 +279,21 @@ export class Session {
         log.step(`[Auth: ${sys.id}] auth deferred — login handled by workflow step`)
         readyPromises.set(sys.id, Promise.resolve())
       } else {
-        throwIfAborted(abortSignal)
-        await slot.page.bringToFront()
-        opts.observer?.onAuthStart?.(sys.id, sys.id)
-        await loginWithRetry(
-          sys, slot.page, opts.observer?.instance,
-          () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
-          abortSignal,
-        )
-        opts.observer?.onAuthComplete?.(sys.id, sys.id)
-        readyPromises.set(sys.id, Promise.resolve())
+        session.authInProgress = true
+        try {
+          throwIfAborted(abortSignal)
+          await slot.page.bringToFront()
+          opts.observer?.onAuthStart?.(sys.id, sys.id)
+          await loginWithRetry(
+            sys, slot.page, opts.observer?.instance,
+            () => opts.observer?.onAuthFailed?.(sys.id, sys.id),
+            abortSignal,
+          )
+          opts.observer?.onAuthComplete?.(sys.id, sys.id)
+          readyPromises.set(sys.id, Promise.resolve())
+        } finally {
+          session.authInProgress = false
+        }
       }
     } else if (systems.length > 1) {
       const STAGGER_MS = opts.staggerMs ?? 5_000
@@ -284,6 +317,10 @@ export class Session {
         inFlight--
       }
 
+      // Auth window opens now — every login IIFE below (and its Duo wait) runs
+      // inside it. Reset once they all settle, which happens AFTER
+      // `Session.launch` returns (the IIFEs are not awaited here).
+      session.authInProgress = true
       const settleEndTs = Date.now() + SETTLE_MS
       let nextEligibleSubmitTs = settleEndTs
       const submitPromises: Promise<void>[] = []
@@ -338,8 +375,12 @@ export class Session {
       // once every system has its `readyPromise` registered. Auth failures
       // surface via the observer's `onAuthFailed` (kernel emits a `failed`
       // tracker row attributed to `auth:<systemId>`), not by throwing out
-      // of Session.launch.
-      void Promise.allSettled(submitPromises)
+      // of Session.launch. The auth window stays open until they all settle,
+      // so the idle timer can't reload mid-Duo even though the timer starts
+      // (below) before these resolve.
+      void Promise.allSettled(submitPromises).then(() => {
+        session.authInProgress = false
+      })
     }
 
     session.applyIdleRefreshOverride(opts.idleRefreshOverride)
@@ -842,6 +883,7 @@ export class Session {
     try {
       const st = this.idleStates.get(systemId)
       if (!st) return
+      if (this.isAuthInProgress()) return
       if (this.idleGuard()) return
       if (st.reloadInFlight) return
       const slot = this.state.browsers.get(systemId)
@@ -873,6 +915,7 @@ export class Session {
         } catch {
           return
         }
+        if (this.isAuthInProgress()) return
         if (this.idleGuard()) return
         if (Date.now() - st.lastTouchMs < st.thresholdMs) return
         log.step(`[Session: ${systemId}] Idle refresh — reloading page after automation idle`)
