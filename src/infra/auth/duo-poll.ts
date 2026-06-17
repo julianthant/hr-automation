@@ -280,6 +280,74 @@ export interface DuoPollOptions {
 }
 
 /**
+ * Duo's Universal Prompt now defaults to a device factor ("Use Touch ID" /
+ * "Use your security key") and does NOT auto-send a push — so the poll loop,
+ * which only waits for the success URL, would sit out the whole timeout while
+ * the page is parked on that screen with nothing to approve on the phone. This
+ * is also where the hands-off WebAuthn path lands when its assertion is rejected
+ * ("signs but never completes"). The documented manual rescue is "Other options
+ * → Duo Push"; this fires it automatically.
+ *
+ * Gated tightly so it never disturbs a working prompt: it acts ONLY when a
+ * device-factor screen is visible AND no push is already pending (no "request
+ * sent" text, "Try Again", or code-entry state). Returns true once a Duo Push
+ * was triggered (the caller then waits the full window for phone approval),
+ * false when this isn't the stuck-factor screen. Best-effort — never throws.
+ */
+async function triggerDuoPushFromFactorScreen(page: Page, abortSignal?: AbortSignal): Promise<boolean> {
+  try {
+    abortSignal?.throwIfAborted();
+    // Don't touch a prompt that already pushed (or is mid-resend / code entry).
+    const pushPending =
+      (await page
+        .getByText(/pushed a (login )?request|check for a duo push|sent a request|enter code/i)
+        .count()
+        .catch(() => 0)) > 0;
+    if (pushPending) return false;
+
+    // Only act on the stuck device-factor screen the manual loop can't clear.
+    const onFactorScreen =
+      (await page
+        .getByText(/use touch id|use your security key|verify your identity using this device/i)
+        .count()
+        .catch(() => 0)) > 0;
+    if (!onFactorScreen) return false;
+
+    const pushLink = (): ReturnType<Page["getByRole"]> =>
+      page
+        .getByRole("link", { name: /duo push|send me a push/i })
+        .or(page.getByRole("button", { name: /duo push|send me a push/i }))
+        .first();
+
+    // Push may already be listed (factor list directly on screen); else reveal
+    // the full "Other options" list first, then click it.
+    if ((await pushLink().count()) > 0) {
+      await pushLink().click({ timeout: 5_000 }).catch(() => {});
+      return true;
+    }
+
+    const other = page
+      .getByRole("link", { name: /other options|other methods/i })
+      .or(page.getByRole("button", { name: /other options|other methods/i }))
+      .first();
+    if ((await other.count()) > 0) {
+      await other.click({ timeout: 3_000 }).catch(() => {});
+      // Let the options list finish rendering before clicking — clicking
+      // mid-navigation lands Duo on a /error page (the UCPath race).
+      await page.waitForTimeout(1_500);
+      if ((await pushLink().count()) > 0) {
+        await pushLink().click({ timeout: 5_000 }).catch(() => {});
+        return true;
+      }
+    }
+  } catch (err) {
+    if (abortSignal?.aborted) throw err;
+    // Best-effort — fall through to the normal manual wait.
+  }
+  return false;
+}
+
+/**
  * Unified Duo MFA polling loop.
  *
  * Replaces the 5 near-identical polling loops in login.ts:
@@ -412,14 +480,17 @@ export async function pollDuoApproval(
       // possible clone and silently refuses. Resync the persisted counter forward
       // so the kernel's NEXT login attempt re-arms above Duo's counter and approves
       // hands-off. Best-effort + monotonic, so it's safe even if the failure wasn't
-      // counter-related. Then take the SHORTENED manual window below (no push was
-      // sent — the full 180s wait would just stall before the auto-retry).
+      // counter-related (a chronically-rejected credential keeps signing but never
+      // completing — bumping won't help, and the auto-Push below is what actually
+      // unblocks). Enter the manual window below, which auto-sends a Duo Push for
+      // phone approval; if no push can be sent it stays a short window and fails
+      // fast into the kernel's auto-retry.
       const resynced = resyncDuoWebAuthnSignCounts();
       webauthnFellBack = true;
       log.warn(
         resynced
-          ? "Duo WebAuthn signed but did not complete (likely signCount drift) — bumped counter; brief manual window, then auto-retry"
-          : "Duo WebAuthn did not complete within grace window — brief manual window, then auto-retry",
+          ? "Duo WebAuthn signed but did not complete — bumped counter; sending a Duo Push for phone approval, else auto-retry"
+          : "Duo WebAuthn did not complete within grace window — sending a Duo Push for phone approval, else auto-retry",
       );
     }
   }
@@ -445,13 +516,16 @@ export async function pollDuoApproval(
       : "Waiting for Duo approval (approve on your phone)...",
   );
 
-  // After a WebAuthn assertion signed-but-stalled, no push was sent, so cap the
-  // manual wait to a short window: long enough for the operator to hand-rescue the
-  // visible browser via "Other options → Duo Push", short enough to fail fast into
-  // the kernel's auto-retry (which re-arms from the resynced counter).
-  const effectiveTimeoutSeconds = webauthnFellBack
+  // After a WebAuthn assertion signed-but-stalled, no push was sent yet, so cap the
+  // manual wait to a short window: long enough to auto-trigger (or hand-rescue) a
+  // Duo Push, short enough to fail fast into the kernel's auto-retry. The instant a
+  // push IS sent (auto-trigger below), the window opens back up to the full timeout
+  // so the operator has time to approve on their phone.
+  let effectiveTimeoutSeconds = webauthnFellBack
     ? Math.min(timeoutSeconds, options.webauthnFallbackSeconds ?? DUO_WEBAUTHN_FALLBACK_MANUAL_SECONDS)
     : timeoutSeconds;
+  // Auto-send-a-push fires at most once — re-clicking thrashes the prompt.
+  let pushTriggered = false;
 
   for (let elapsed = 0; elapsed < effectiveTimeoutSeconds; elapsed += pollIntervalSec) {
     options.abortSignal?.throwIfAborted();
@@ -460,6 +534,22 @@ export async function pollDuoApproval(
       if (recovery) {
         log.step("Duo: running mid-auth recovery check...");
         await recovery(page).catch(() => {});
+      }
+
+      // Duo defaulted to a device factor ("Use Touch ID" / security key) without
+      // auto-sending a push (also where a rejected hands-off WebAuthn assertion
+      // lands) — the loop would otherwise wait out the whole window. Send a Duo
+      // Push ourselves so the operator can approve on their phone, once, and open
+      // the wait back up to the full timeout now that a push is actually pending.
+      if (!pushTriggered) {
+        const sent = await triggerDuoPushFromFactorScreen(page, options.abortSignal);
+        if (sent) {
+          pushTriggered = true;
+          effectiveTimeoutSeconds = timeoutSeconds;
+          log.waiting("Duo defaulted to a device prompt — sent a Duo Push; approve on your phone...");
+          await waitForDuoPoll(pollIntervalMs, options.abortSignal);
+          continue;
+        }
       }
 
       // Check for Duo push timeout — click "Try Again" to resend
