@@ -257,16 +257,15 @@ export async function getTimecardLastDate(page: Page): Promise<string | null> {
 
 /**
  * Scroll the New Kronos timecard grid so the row for `targetDate`
- * (MM/DD/YYYY) is the topmost visible row. Used to position the
- * browser before an audit screenshot so the human can verify:
- *   (a) the workflow picked the correct last day, and
- *   (b) whether any later dates exist below it.
+ * (MM/DD/YYYY) is CENTERED in the view. Used to position the browser
+ * before an audit screenshot so the human can verify:
+ *   (a) the workflow picked the correct last day (centered = easy to read), and
+ *   (b) whether any later dates exist below it (visible above and below center).
  *
- * When the target date is near the end of the loaded rows and there
- * aren't enough rows below to fill the viewport, the browser's native
- * scroll clamps at the bottom — which is exactly what we want: the
- * operator sees the target row plus everything after it, and the
- * empty space below proves there's nothing later.
+ * `block: "center"` keeps surrounding rows in frame on both sides; when the
+ * target is near the top/bottom of the loaded rows the browser's native scroll
+ * clamps at the edge, which is fine — the operator still sees the target row
+ * plus its neighbors.
  *
  * Best-effort: a missing row logs + returns without throwing. Callers
  * wrap screenshots around this; a scroll failure must not mask the
@@ -292,7 +291,7 @@ export async function scrollTimecardToDate(page: Page, targetDate: string): Prom
       // Match the "/" form ("Mon 3/23" contains "3/23") to avoid
       // false-positive matches like "3/23" inside a different cell.
       if (text.includes(` ${wantMd}`) || text.endsWith(wantMd)) {
-        (row as HTMLElement).scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
+        (row as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
         return true;
       }
     }
@@ -300,7 +299,7 @@ export async function scrollTimecardToDate(page: Page, targetDate: string): Prom
   }, md).catch(() => false);
 
   if (scrolled) {
-    log.step(`[New Kronos] Scrolled timecard to ${targetDate} at top of view`);
+    log.step(`[New Kronos] Scrolled timecard to ${targetDate} centered in view`);
   } else {
     log.warn(`[New Kronos] Could not locate ${targetDate} row in timecard — screenshot scroll unchanged`);
   }

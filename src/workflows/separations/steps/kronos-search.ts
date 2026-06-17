@@ -8,6 +8,7 @@ import {
   setDateRange as setOldKronosDateRange,
   clickGoToTimecard as clickOldKronosGoToTimecard,
   getTimecardLastDate as getOldKronosTimecardLastDate,
+  scrollTimecardToDate as scrollOldKronosTimecardToDate,
 } from "../../../systems/old-kronos/index.js";
 import { modalDismiss } from "../../../systems/old-kronos/selectors.js";
 import {
@@ -81,6 +82,28 @@ export async function runKronosSearch(
       await page.waitForTimeout(3_000);
       await dismissModal(page, iframe);
       const date = await getOldKronosTimecardLastDate(page);
+      // Audit screenshot: center the latest-worked-date row and capture ONLY
+      // the old-kronos VIEWPORT (not fullPage — the UKG timecard is a
+      // virtual-scroll grid in a nested iframe, so fullPage would miss
+      // off-screen rows). Best-effort: fires even if scroll/lookup missed
+      // (centerSelector capture falls back to whatever is shown). A failure
+      // here must never sink the Kronos date result.
+      if (date) {
+        try {
+          await scrollOldKronosTimecardToDate(page, date);
+          await ctx.screenshot({
+            kind: "form",
+            label: "old-kronos-last-worked-date",
+            systems: ["old-kronos"],
+            // The timecard iframe fills the page; centering it is a near no-op,
+            // its real job is selecting the viewport-only capture path while the
+            // target row stays centered from scrollOldKronosTimecardToDate.
+            centerSelector: "iframe",
+          });
+        } catch {
+          /* best-effort audit screenshot */
+        }
+      }
       return { found: true, date };
     },
     newK: async () => {

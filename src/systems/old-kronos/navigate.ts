@@ -475,6 +475,67 @@ export async function getTimecardLastDate(
 }
 
 /**
+ * Scroll the Old Kronos timecard grid so the row for `targetDate`
+ * (MM/DD/YYYY) is CENTERED in the view, before an audit screenshot — the
+ * analog of New Kronos's `scrollTimecardToDate`. The timecard grid lives in
+ * a nested iframe (not the top page), so this walks `page.frames()` and runs
+ * the row search in each frame (same frame-hunt pattern as
+ * `getTimecardLastDate`).
+ *
+ * Old Kronos rows render `cells[2]` as the date, formatted "Mon 3/16" — month +
+ * day without leading zeros. We convert "03/16/2026" → "3/16" and match that
+ * within the row's date cell text, then `scrollIntoView({ block: "center" })`
+ * so the captured viewport shows the chosen day with its neighbours on both
+ * sides (so the operator can spot a later date that should have won).
+ *
+ * Best-effort: a missing row logs + returns without throwing; a scroll failure
+ * must never mask the real error the screenshot is being taken to capture.
+ */
+export async function scrollTimecardToDate(page: Page, targetDate: string): Promise<void> {
+  const match = targetDate.match(/^(\d{2})\/(\d{2})\/\d{4}$/);
+  if (!match) return;
+  const md = `${parseInt(match[1], 10)}/${parseInt(match[2], 10)}`;
+
+  let scrolled = false;
+  for (const f of page.frames()) {
+    // NEEDS LIVE RE-VERIFY 2026-06-17 — row/date-cell selector for the
+    // Old Kronos timecard grid (rows: [role='row'] with ≥10 [role='gridcell'],
+    // date in cells[2] as "Mon 3/16"). Mirrors getTimecardLastDate's parsing;
+    // confirm against the live frame when the live phase runs.
+    const ok = await f
+      .evaluate((wantMd: string) => {
+        const rows = document.querySelectorAll("[role='row']");
+        for (const row of rows) {
+          const cells = row.querySelectorAll("[role='gridcell']");
+          if (cells.length < 10) continue;
+          const dateText = (cells[2]?.textContent ?? "").trim();
+          if (!/^[A-Z][a-z]{2}\s+\d+\/\d+$/.test(dateText)) continue;
+          if (dateText.includes(` ${wantMd}`) || dateText.endsWith(wantMd)) {
+            (row as HTMLElement).scrollIntoView({
+              block: "center",
+              behavior: "instant" as ScrollBehavior,
+            });
+            return true;
+          }
+        }
+        return false;
+      }, md)
+      .catch(() => false);
+    if (ok) {
+      scrolled = true;
+      log.step(`[Old Kronos] Scrolled timecard to ${targetDate} centered in view (frame: ${f.name()})`);
+      break;
+    }
+  }
+
+  if (!scrolled) {
+    log.warn(`[Old Kronos] Could not locate ${targetDate} row in timecard — screenshot scroll unchanged`);
+  }
+  // Let the grid repaint before the caller captures a screenshot.
+  await page.waitForTimeout(500);
+}
+
+/**
  * Full timecard check: Go To → Timecard, check current period, if empty check previous.
  * Returns the latest date with time entries, or null if nothing found.
  */

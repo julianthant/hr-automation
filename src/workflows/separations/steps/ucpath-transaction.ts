@@ -64,7 +64,7 @@ export async function runUcpathTransaction(
       // of the body — without this inline call the dashboard detail
       // panel shows "—".
       ctx.updateData({ transactionNumber, existingTransactionFound: "true" });
-      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing' });
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing', systems: ['ucpath'] });
       return { transactionNumber, submittedWithoutTxnNumber };
     }
 
@@ -107,14 +107,18 @@ export async function runUcpathTransaction(
       if (!transactionNumber) {
         submittedWithoutTxnNumber = true;
         await scrollToTransactionReadbackArea(getContentFrame(ucpathPage));
-        await ctx.screenshot({ kind: 'error', label: 'ucpath-transaction-submitted-missing-number' });
+        await ctx.screenshot({ kind: 'error', label: 'ucpath-transaction-submitted-missing-number', systems: ['ucpath'] });
         return { transactionNumber, submittedWithoutTxnNumber };
       }
       // Persist txn # immediately so kuali-finalization failures don't
       // drop it from the tracker entry's data.
       ctx.updateData({ transactionNumber });
       log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
-      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted' });
+      // Capture the WHOLE UCPath transaction confirmation as 2 vertical slices
+      // of ONLY the UCPath page. The PeopleSoft form lives in a nested iframe;
+      // captureFullPage/widen already probe child frames for width, and the
+      // 2-slice split keeps the tall confirmation readable instead of a ribbon.
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], slices: 2 });
     } catch (e) {
       log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
       // Diagnostic capture for this soft-failure path. The handler
@@ -122,7 +126,7 @@ export async function runUcpathTransaction(
       // with an empty txn#), so the kernel's step-failure screenshot
       // never fires — explicit ctx.screenshot keeps the debug image
       // reachable from the dashboard Screenshots panel.
-      await ctx.screenshot({ kind: "error", label: "ucpath-transaction-failed" });
+      await ctx.screenshot({ kind: "error", label: "ucpath-transaction-failed", systems: ['ucpath'] });
     }
 
     // In batch mode, navigate UCPath back to Smart HR base URL so the next
