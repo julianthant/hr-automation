@@ -52,6 +52,13 @@ interface LogStreamProps {
   delegationLabel?: string;
   /** Run-level failure banner (reason + Retry), rendered under the surface bar when the run failed. */
   failureBanner?: ReactNode;
+  /**
+   * Optional per-log source label (e.g. "OCR" / "Operation" / "Member") shown
+   * as a small prefix badge before the message. Used by the operation
+   * coordinator panel, whose stream merges three lifecycle sources; returns
+   * undefined for an unlabeled line. Non-log (event) lines never get a label.
+   */
+  sourceLabelOf?: (entry: CollapsedLogEntry) => string | undefined;
   /** Default-active when first mounted — used to deep-link into Preview from another row. */
   initialTab?: string;
   /**
@@ -203,6 +210,7 @@ export function LogStream({
   runControlsSlot,
   delegationLabel,
   failureBanner,
+  sourceLabelOf,
   initialTab,
   maximized,
   onToggleMaximize,
@@ -512,6 +520,7 @@ export function LogStream({
                     <LogLine
                       entry={item.entry}
                       kind="log"
+                      sourceLabel={sourceLabelOf?.(item.entry)}
                       isCurrent={
                         virtualRow.index === visible.length - 1 && item.entry.level === "step"
                       }
