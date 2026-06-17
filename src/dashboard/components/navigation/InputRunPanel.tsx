@@ -41,6 +41,9 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
   const [presetId, setPresetId] = useState<string>(FULL_PRESET_ID);
   // Per-page-load ephemeral Automation-workers selection — resets to Auto.
   const [workerChoice, setWorkerChoice] = useState<WorkerChoice>(AUTO_WORKERS);
+  // Per-page-load ephemeral dry-run toggle — resets to off (live) on reload.
+  // Only meaningful for workflows whose registry entry sets `supportsDryRun`.
+  const [dryRun, setDryRun] = useState(false);
 
   if (!config) return null;
 
@@ -65,12 +68,18 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
       const parentRunId =
         batchQueueParentRunId;
       const parallelWorkers = workerChoiceToParam(workerChoice);
+      // Dry-run rides `input_json` as a schema field (not the runtimeOptions
+      // channel) — fold it onto each parsed input when the toggle is on.
+      const inputs =
+        config.supportsDryRun && dryRun
+          ? parsed.inputs.map((item) => ({ ...item, dryRun: true }))
+          : parsed.inputs;
       const res = await fetch("/api/enqueue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workflow,
-          inputs: parsed.inputs,
+          inputs,
           ...(parentRunId ? { parentRunId } : {}),
           ...(selectedPreset
             ? { skipSteps: selectedPreset.skipSteps, preset: selectedPreset.id }
@@ -161,6 +170,9 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
         presets={presets}
         presetId={presetId}
         onSelectPreset={setPresetId}
+        supportsDryRun={config.supportsDryRun ?? false}
+        dryRun={dryRun}
+        onToggleDryRun={setDryRun}
         workflowLabel={workflowDef?.label ?? workflow}
       />
       {config.runEmptyAction && (

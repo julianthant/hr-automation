@@ -51,6 +51,15 @@ export interface InputRunConfig {
    */
   parseInput: (raw: string) => InputRunParseResult;
   /**
+   * When true, the input-run panel surfaces a per-page-load **Dry run**
+   * toggle in its run-settings gear. On submit it folds `dryRun: true`
+   * onto every parsed input (the field rides `input_json` and is validated
+   * by the workflow's Zod schema, which must declare an optional `dryRun`).
+   * Use for workflows whose dry-run path skips an irreversible external
+   * write (onboarding skips the UCPath Smart HR submit).
+   */
+  supportsDryRun?: boolean;
+  /**
    * Optional: when set, clicking Run with an empty text box opens the
    * RunModal instead of being a no-op. Use for workflows whose Run
    * affordance has both an input-run path (typed IDs) and an
@@ -161,6 +170,18 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
       regex: /^\d{5,}$/,
       message: "EID must be numeric (5+ digits)",
     }),
+  },
+  onboarding: {
+    placeholder: "Enter emails, comma-separated (e.g. jdoe@ucsd.edu, asmith@ucsd.edu)",
+    // Comma-separated emails → a `pool` batch (onboarding declares
+    // `batch: { mode: "pool" }`). The regex catches obviously-malformed input
+    // before enqueue; the workflow's Zod `z.string().email()` is the
+    // authoritative check at claim time.
+    parseInput: parseCommaSeparated("email", {
+      regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      message: "Must be a valid email address",
+    }),
+    supportsDryRun: true,
   },
 };
 

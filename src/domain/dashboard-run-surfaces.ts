@@ -5,6 +5,7 @@ export const DASHBOARD_INPUT_RUN_WORKFLOWS = [
   "person-lookup",
   "oath-signature",
   "crm-doc-download",
+  "onboarding",
 ] as const;
 
 export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [

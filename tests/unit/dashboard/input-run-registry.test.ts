@@ -42,3 +42,23 @@ test("crm-doc-download input run accepts EIDs separated by commas", () => {
     inputs: [{ emplId: "10873698" }, { emplId: "10873699" }],
   });
 });
+
+test("onboarding input run accepts comma-separated emails and opts into dry-run", () => {
+  const config = getInputRunConfig("onboarding");
+
+  assert.ok(config);
+  assert.match(config.placeholder, /emails/);
+  assert.equal(config.supportsDryRun, true);
+  assert.deepEqual(config.parseInput("jdoe@ucsd.edu, asmith@ucsd.edu"), {
+    ok: true,
+    inputs: [{ email: "jdoe@ucsd.edu" }, { email: "asmith@ucsd.edu" }],
+  });
+});
+
+test("onboarding input run rejects a malformed email", () => {
+  const config = getInputRunConfig("onboarding");
+
+  assert.ok(config);
+  const parsed = config.parseInput("not-an-email");
+  assert.equal(parsed.ok, false);
+});
