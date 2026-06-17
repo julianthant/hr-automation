@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pollDuoApproval, type DuoPollOptions } from "../../infra/auth/duo-poll.js";
 import { finishDuoWebAuthn } from "../../infra/auth/duo-webauthn.js";
-import { emitSessionEvent, readSessionEvents } from "../session-events.js";
+import { emitSessionEvent, readSessionEvents, type SessionEvent } from "../session-events.js";
 import { log } from "../../utils/log.js";
 
 /** Options for requestDuoApproval — extends DuoPollOptions with queue metadata. */
@@ -67,16 +67,86 @@ export async function requestDuoApproval(
   }
 }
 
-async function waitForDuoTurn(
+/** Poll interval for the serial Duo queue. */
+const DUO_QUEUE_POLL_MS = 500;
+
+/**
+ * Wall-clock cap on how long a single worker will sit in the queue waiting for
+ * its turn. If a worker can't reach the head of the queue within this window it
+ * fails fast (and the kernel retries) rather than blocking one of N parallel
+ * workers forever. Chosen well above one full manual Duo cycle (180s UCPath
+ * timeout) so a healthy in-progress prompt ahead of us is never cut off.
+ */
+export const DUO_QUEUE_MAX_WAIT_MS = 300_000;
+
+/**
+ * Age (since the request's own event timestamp) past which a STILL-RUNNING (PID
+ * alive) head-of-queue request is treated as stalled and timed out so the queue
+ * advances. Set just above the longest manual Duo timeout (180s UCPath) so a
+ * normally-progressing prompt is never preempted — only a wedged one (e.g. a
+ * worker mid-`page.reload()` that never recovers, or a hung WebAuthn ceremony)
+ * trips it. The PID-dead advance below stays as the fast path; this covers the
+ * "alive but stuck" case the PID check can't see.
+ */
+export const DUO_QUEUE_STALE_REQUEST_MS = 200_000;
+
+function eventAgeMs(timestamp: string | undefined, now: number): number {
+  if (!timestamp) return 0;
+  const ts = Date.parse(timestamp);
+  if (!Number.isFinite(ts)) return 0;
+  return now - ts;
+}
+
+/**
+ * Injectable seams for the queue-turn loop. Production wires these to the real
+ * session-event reader/emitter, `node:timers/promises` sleep, the process clock,
+ * and `process.kill(pid, 0)`. Tests inject deterministic doubles so the
+ * max-wait / stale-advance thresholds can be exercised without real time.
+ */
+export interface DuoQueueTurnDeps {
+  readEvents: () => SessionEvent[];
+  emitTimeout: (e: { workflowInstance: string; system: string; duoRequestId: string }) => void;
+  isAlive: (pid: number) => boolean;
+  now: () => number;
+  sleep: (ms: number, abortSignal?: AbortSignal) => Promise<void>;
+}
+
+const defaultDuoQueueTurnDeps: DuoQueueTurnDeps = {
+  readEvents: () => readSessionEvents(),
+  emitTimeout: (e) => emitSessionEvent({ type: "duo_timeout", ...e }),
+  isAlive: isProcessAlive,
+  now: () => Date.now(),
+  sleep: (ms, abortSignal) => waitForDuoQueue(ms, abortSignal),
+};
+
+/**
+ * Core of the serial-Duo-queue wait, factored out so the timeout/stale-advance
+ * logic is unit-testable without real time or a real `.tracker/`. Resolves when
+ * `requestId` reaches the head of the queue. Advances past a head-of-queue
+ * request that is either dead (PID) or wedged (alive but older than
+ * `DUO_QUEUE_STALE_REQUEST_MS`), and throws if this worker has waited longer
+ * than `DUO_QUEUE_MAX_WAIT_MS` (fail-fast so one stuck worker can't block the
+ * pool — the run retries instead).
+ */
+export async function runDuoQueueTurn(
   requestId: string,
-  _instance: string,
-  _system: string,
-  abortSignal?: AbortSignal,
+  abortSignal: AbortSignal | undefined,
+  deps: DuoQueueTurnDeps = defaultDuoQueueTurnDeps,
 ): Promise<void> {
   let logged = false;
+  const waitStartedAt = deps.now();
   while (true) {
     throwIfDuoQueueAborted(abortSignal);
-    const events = readSessionEvents();
+
+    // Fail fast rather than block a parallel worker indefinitely: if one
+    // stalled worker ahead of us never resolves, we'd otherwise wait forever.
+    if (deps.now() - waitStartedAt >= DUO_QUEUE_MAX_WAIT_MS) {
+      throw new Error(
+        `[Duo Queue] Timed out after ${Math.round(DUO_QUEUE_MAX_WAIT_MS / 1000)}s waiting for a Duo turn — a worker ahead in the queue is stuck; failing fast so this run can retry.`,
+      );
+    }
+
+    const events = deps.readEvents();
     const duoEvents = events.filter(
       (e) => e.type === "duo_request" || e.type === "duo_complete" || e.type === "duo_timeout",
     );
@@ -95,12 +165,31 @@ async function waitForDuoTurn(
       return;
     }
 
-    if (firstUnresolved && !isProcessAlive(firstUnresolved.pid)) {
+    if (firstUnresolved && !deps.isAlive(firstUnresolved.pid)) {
       log.step(
         `[Duo Queue] Stale request detected (PID ${firstUnresolved.pid} dead) — advancing queue`,
       );
-      emitSessionEvent({
-        type: "duo_timeout",
+      deps.emitTimeout({
+        workflowInstance: firstUnresolved.workflowInstance ?? "",
+        system: firstUnresolved.system ?? "",
+        duoRequestId: firstUnresolved.duoRequestId ?? "",
+      });
+      continue;
+    }
+
+    // Time-based stale advance: a request whose PID is still alive but which has
+    // sat at the head of the queue longer than DUO_QUEUE_STALE_REQUEST_MS is
+    // wedged (its own Duo poll has long since timed out). Time it out from the
+    // request's own event timestamp — it may belong to another process, so its
+    // age cannot be derived from this worker's local clock-since-wait-start.
+    if (
+      firstUnresolved &&
+      eventAgeMs(firstUnresolved.timestamp, deps.now()) >= DUO_QUEUE_STALE_REQUEST_MS
+    ) {
+      log.step(
+        `[Duo Queue] Stale request detected (PID ${firstUnresolved.pid} alive but request older than ${Math.round(DUO_QUEUE_STALE_REQUEST_MS / 1000)}s) — advancing queue`,
+      );
+      deps.emitTimeout({
         workflowInstance: firstUnresolved.workflowInstance ?? "",
         system: firstUnresolved.system ?? "",
         duoRequestId: firstUnresolved.duoRequestId ?? "",
@@ -115,8 +204,17 @@ async function waitForDuoTurn(
       logged = true;
     }
 
-    await waitForDuoQueue(500, abortSignal);
+    await deps.sleep(DUO_QUEUE_POLL_MS, abortSignal);
   }
+}
+
+async function waitForDuoTurn(
+  requestId: string,
+  _instance: string,
+  _system: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  await runDuoQueueTurn(requestId, abortSignal);
 }
 
 function duoQueueAbortReason(signal: AbortSignal): Error {
