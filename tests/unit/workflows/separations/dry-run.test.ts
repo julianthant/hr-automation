@@ -92,9 +92,14 @@ beforeAll(async () => {
 // A KualiSeparationData fixture with PAST dates (today is well after Jan 2026)
 // so the handler's `validateLastDayWorked` future-date preflight passes, and a
 // VOLUNTARY type so reason-code mapping resolves cleanly.
+// `eid` is a VALID 8-digit UCPath EID (`^10\d{6}$`) so the short-EID guard
+// (`resolveSeparationEid`) is a no-op here — it returns the EID unchanged with
+// no person-lookup delegation, keeping these tests focused on the dry-run /
+// write-gating logic. (The guard's delegate/fail-loud behavior is covered by
+// resolve-eid.test.ts.)
 const KUALI_FIXTURE = {
   employeeName: "Test Employee",
-  eid: "12345",
+  eid: "10772489",
   lastDayWorked: "01/15/2026",
   separationDate: "01/16/2026",
   terminationType: "Resign",
