@@ -1737,3 +1737,171 @@ test('runWorkflowDaemon: allocates from the lockfile scan in the pre-workflow_st
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+/**
+ * ISS-006 — an idle daemon whose `shuttingDown` flips true in the
+ * keepalive/poll window (waiters momentarily null) must observe it and exit
+ * PROMPTLY, not re-park its idle-wait for the full idle timeout.
+ *
+ * The race the daemon's claim loop hits: `/stop` calls `setShuttingDown(true)`
+ * then `resolveShutdown()`/`resolveWake()`. Those resolves are NO-OPS whenever
+ * `state.wakeResolve`/`state.shutdownResolve` are null — and they ARE null while
+ * the loop is suspended at the TOP-of-iteration awaits (`pollWorkerCommands` /
+ * `claimNextItem`), AFTER the `while (!state.shuttingDown)` check has already
+ * passed for this iteration but BEFORE the idle-wait re-arms its waiters. When
+ * `/stop` lands in that window, the loop finishes the await, finds no item, and
+ * falls straight into the idle-wait `new Promise(...)` — which (before the fix)
+ * arms fresh waiters and parks for the WHOLE `idleTimeoutMs` without ever
+ * re-checking `state.shuttingDown` synchronously. `/stop` already fired and
+ * won't fire again, so the daemon lingers the full idle window before the next
+ * `if (state.shuttingDown) break`.
+ *
+ * To pin the race DETERMINISTICALLY (no timing luck), we suspend the loop
+ * inside the FIRST `pollWorkerCommands` of the daemon's life — line ~470, the
+ * top-of-iteration poll that runs once at startup BEFORE any idle-wait or
+ * keepalive — by feeding it a queued `health_check` worker command whose
+ * `session.healthCheck(system)` blocks on a `page.evaluate` deferred we
+ * control. While the loop is parked there (waiters null), we `/stop`. Then we
+ * release the deferred: the loop unwinds, claims nothing (shuttingDown→item is
+ * null), and re-enters the idle-wait. With a LARGE `idleTimeoutMs` (60s) the
+ * pre-fix bug strands the daemon for the full 60s; the fix's synchronous
+ * `if (state.shuttingDown) { resolve(); return }` guard at the top of the
+ * idle-wait executor makes it resolve immediately and break. We assert the
+ * daemon promise settles WAY under the idle window (3s bound).
+ */
+test('runWorkflowDaemon: /stop in the poll window makes an idle daemon exit promptly, not park the full idle timeout (ISS-006)', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-iss006-'))
+  const control = openControlDb({ trackerDir: dir })
+  const workerStore = createWorkerStore(control)
+  try {
+    // A workflow with ONE system, so the daemon's `health_check` worker-command
+    // handler calls `session.healthCheck(systemId)` exactly once.
+    const wf = defineWorkflow({
+      name: 'dint-iss006',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    // Two controllable gates:
+    //  - `authGate` holds the system's auth (`session.page(ucpath)`) until the
+    //    test has read the daemon's workerId and queued a `health_check`
+    //    command. This guarantees the command is on disk BEFORE the claim
+    //    loop's FIRST top-of-iteration `pollWorkerCommands` (line ~470) runs,
+    //    so that very first poll consumes it — NOT a later idle-wait/keepalive
+    //    poll (which would land in the wrong window).
+    //  - `holdGate` blocks the `health_check` handler's `session.healthCheck`
+    //    (via `page.evaluate`) so the loop is parked INSIDE that line-470 poll,
+    //    waiters momentarily null, while the test fires `/stop`.
+    const authGate = deferred<void>()
+    const holdGate = deferred<void>()
+    const pollWindowEntered = deferred<void>()
+    let evaluateCalls = 0
+    const launchFn = (async (systems: SystemConfig[], opts?: Parameters<typeof Session.launch>[1]) => {
+      const fakePage = {
+        close: async () => {},
+        isClosed: () => false,
+        url: () => 'https://ucpath.example/landing',
+        evaluate: async () => {
+          evaluateCalls += 1
+          if (evaluateCalls === 1) {
+            // First (and only) evaluate is the health_check probe consumed at
+            // line ~470 — park here while the test stops the daemon.
+            pollWindowEntered.resolve()
+            await holdGate.promise
+          }
+          return 1
+        },
+      } as unknown as import('playwright').Page
+      const fakeContext = { close: async () => {} } as unknown as import('playwright').BrowserContext
+      const session = Session.forTesting({
+        systems,
+        browsers: new Map([
+          ['ucpath', { page: fakePage, browser: null as never, context: fakeContext, chromiumPid: 525252 }],
+        ]),
+        // Hold auth until the test releases authGate.
+        readyPromises: new Map([['ucpath', authGate.promise]]),
+      })
+      opts?.onReady?.(session)
+      return session
+    }) as unknown as typeof Session.launch
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: launchFn,
+      idleTimeoutMs: 60_000, // LARGE: a missed re-park strands the daemon 60s
+      heartbeatIntervalMs: 30_000, // keep the background worker tick from
+      commandPollIntervalMs: 30_000, // racing the claim loop for the command
+    })
+
+    const { port } = await waitForDaemon('dint-iss006', dir)
+
+    // The worker registers BEFORE auth (daemon.ts registerWorker precedes the
+    // withBatchLifecycle auth body), so its workerId is readable while auth is
+    // still gated.
+    await waitFor(() => workerStore.listWorkers('dint-iss006').length === 1)
+    const workerId = workerStore.listWorkers('dint-iss006')[0].workerId
+
+    // Queue the health_check command, THEN release auth. The daemon finishes
+    // auth, enters the claim loop, and its first `pollWorkerCommands` (line
+    // ~470) picks up the command and parks inside `session.healthCheck` on
+    // `holdGate` — the exact waiters-null window the race needs.
+    workerStore.enqueueWorkerCommand({
+      commandType: 'health_check',
+      workflow: 'dint-iss006',
+      targetWorkerId: workerId,
+    })
+    authGate.resolve()
+
+    // Wait until the loop is genuinely parked in the line-470 poll window.
+    await pollWindowEntered.promise
+
+    // /stop NOW — while waiters are null. setShuttingDown(true) lands, but the
+    // resolveWake()/resolveShutdown() no-op (nothing to resolve).
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+
+    // Release the held poll. The loop unwinds and re-enters the idle-wait.
+    holdGate.resolve()
+
+    // The daemon must settle WAY under the 60s idle window. Pre-fix it parks
+    // the full idle timeout (it re-arms waiters without re-checking
+    // shuttingDown); post-fix the synchronous guard resolves immediately.
+    let exitTimer: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      runPromise.then(() => 'exited' as const).catch(() => 'exited' as const),
+      new Promise<'timeout'>((r) => {
+        exitTimer = setTimeout(() => r('timeout'), 3_000)
+      }),
+    ])
+    if (exitTimer) clearTimeout(exitTimer)
+
+    // Whether or not the assertion below holds, unstick the daemon so the test
+    // never hangs the suite: a pre-fix daemon parked in the idle-wait wakes on
+    // /wake, re-checks `while (!state.shuttingDown)`, and breaks out. (On the
+    // fixed daemon it has already exited; this is a harmless no-op.)
+    await fetch(`http://127.0.0.1:${port}/wake`, { method: 'POST' }).catch(() => {})
+    await runPromise.catch(() => {})
+
+    assert.equal(
+      outcome,
+      'exited',
+      'idle daemon did not observe shuttingDown promptly — it parked the full idle timeout (ISS-006)',
+    )
+
+    // Lockfile gone → clean graceful teardown, not a force-kill timeout.
+    const entries = readdirSync(join(dir, 'daemons')).filter(
+      (f) => f.startsWith('dint-iss006-') && f.endsWith('.lock.json'),
+    )
+    assert.equal(entries.length, 0)
+  } finally {
+    workerStore.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

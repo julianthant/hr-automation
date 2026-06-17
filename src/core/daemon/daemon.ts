@@ -804,6 +804,23 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
 
             // Idle: wait for wake OR keepalive OR shutdown.
             await new Promise<void>((resolve) => {
+              // Check-before-park (ISS-006): `/stop` (and the worker stop
+              // command) set `state.shuttingDown` then call
+              // `resolveWake()`/`resolveShutdown()` — but those resolves are
+              // NO-OPS whenever the waiters are null, which they ARE while the
+              // loop was suspended at the top-of-iteration awaits
+              // (`pollWorkerCommands` / `claimNextItem`) just before this
+              // re-park. If shutdown landed in that window, the resolves
+              // already fired into the void; without this synchronous guard
+              // we'd arm fresh waiters and park for the FULL `idleTimeoutMs`
+              // before the next `if (state.shuttingDown) break` ever runs.
+              // Mirror the browser-disconnect handler above (which resolves
+              // these same waiters) and the e2e abort-signal gate
+              // (`core/e2e/gates.ts`): observe the terminal flag BEFORE arming.
+              if (state.shuttingDown) {
+                resolve()
+                return
+              }
               state.wakeResolve = (): void => {
                 state.wakeResolve = null
                 resolve()
