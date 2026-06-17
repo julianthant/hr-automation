@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
 import { withLogContext, log } from "../../../src/utils/log.js";
 import { logsDir } from "../../../src/tracker/jsonl.js";
 
-const TEST_DIR = "generated/.tracker-log-test";
+const TEST_DIR = "generated/.tests/log";
 
 describe("withLogContext", () => {
   beforeEach(() => {

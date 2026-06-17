@@ -58,14 +58,15 @@ docs/*
 # the .tracker/ rule above. Runtime writers mkdir their targets on demand.
 
 # Generated artifacts. Directory shells/docs may be tracked; generated outputs
-# are re-created by scripts/tests.
+# are re-created by scripts/tests. See generated/README.md for the layout.
 generated/schemas/*.schema.json
 generated/pathfinder/
-generated/.tracker-*/
-generated/.e2e-screenshots/
-# e2e-test harness scratch scripts (regenerated each run by the e2e-test skill)
-generated/e2e-*
-generated/build-e2e-report.py
+generated/reports/
+# All e2e run artifacts: .e2e/tracker/ (app's isolated tracker + e2e-gates) and
+# .e2e/runs/<ts>/ (harness manifests, issue ledgers, reports). Regenerated each run.
+generated/.e2e/
+# Unit-test tracker output (.tests/{tracker,log,log-validator}). Regenerated each test run.
+generated/.tests/
 
 # OS
 .DS_Store
@@ -80,5 +81,3 @@ Thumbs.db
 tests/data/*.pdf
 # e2e roster identities sidecar (PII — real names+EIDs for make-e2e-roster.mjs)
 tests/data/e2e-roster-identities.json
-# AI e2e test run artifacts (manifests, issue ledgers, reports)
-.e2e/

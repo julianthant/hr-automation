@@ -10,7 +10,7 @@ import {
   __resetParseCacheForTests,
 } from "../../../src/tracker/jsonl.js";
 
-const TEST_DIR = "generated/.tracker-log-validator-test";
+const TEST_DIR = "generated/.tests/log-validator";
 
 describe("isLogEntry — readLogEntries boundary validation", () => {
   beforeEach(() => {
