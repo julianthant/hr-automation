@@ -5,6 +5,9 @@ import { defineWorkflow } from "../../core/index.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
+import type { Ctx } from "../../core/kernel/types.js";
+import { isUcpathEmployeeId } from "../../domain/identity/eid.js";
+import { personLookupWorkflow } from "../person-lookup/index.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
 // phases so Session.launch can pre-fill every SSO form in parallel before
@@ -124,6 +127,69 @@ export function resolveJobSummaryResult(
   result: PromiseSettledResult<JobSummaryData | undefined>,
 ): JobSummaryData | undefined {
   return unwrapSettled("UCPath Job Summary extraction", result);
+}
+
+/**
+ * Resolve a provably-invalid Kuali EID via a person-lookup delegation.
+ *
+ * Operators sometimes type a short / malformed EID into the Kuali form (e.g.
+ * `"1061029"` — 7 digits; a valid UCPath EID is 8 digits starting with `10`,
+ * `isUcpathEmployeeId`). A short EID makes the UCPath Smart HR lookup find
+ * nothing → no transaction number, so the separation fails far downstream with
+ * an opaque error. This guard runs right after Kuali extraction (or the
+ * edit-and-resume prefilled bypass) and BEFORE any consumer of
+ * `kualiData.eid`:
+ *
+ *   - If the EID already passes `isUcpathEmployeeId`, it is returned unchanged
+ *     (no delegation, no latency).
+ *   - Otherwise it DELEGATES to `person-lookup` by the employee NAME (the name
+ *     path has no EID-format constraint) to resolve the correct full EID, then
+ *     continues the separation with the corrected value. person-lookup is
+ *     daemon-capable, so `ctx.delegateTo` routes through its daemon, which
+ *     authenticates UCPath + CRM independently — this adds latency; that is the
+ *     accepted tradeoff for recovering an otherwise-doomed run.
+ *   - If person-lookup returns no valid EID (failed run, or a `done` run that
+ *     still produced no `isUcpathEmployeeId`-passing `emplId`), it FAILS LOUD:
+ *     the error names the employee + the bad EID and tells the operator to fix
+ *     the Kuali form. It does NOT silently continue with the bad EID.
+ *
+ * This is a deliberately-scoped exception to the "wrong Kuali EID should fail
+ * loudly" rule: only PROVABLY-invalid EIDs (failing `isUcpathEmployeeId`)
+ * delegate. An 8-digit-but-semantically-wrong EID still passes the guard and
+ * stays the operator's problem (EID/date duplicate protection covers the rest).
+ *
+ * Returns the EID to use for the rest of the run. On a successful correction it
+ * also `ctx.updateData({ eid })` so the corrected value persists to the tracker
+ * row / final snapshot / detail panel (the caller separately threads it into
+ * `kualiData`).
+ */
+export async function resolveSeparationEid(
+  ctx: Pick<Ctx<typeof separationsSteps, Record<string, unknown>>, "delegateTo" | "updateData">,
+  kualiData: KualiSeparationData,
+): Promise<string> {
+  if (isUcpathEmployeeId(kualiData.eid)) return kualiData.eid;
+
+  log.warn(
+    `[EID guard] Kuali EID "${kualiData.eid}" for "${kualiData.employeeName}" is not a valid ` +
+    `UCPath EID (need 8 digits starting with 10) — delegating to person-lookup by name to resolve it`,
+  );
+
+  const result = await ctx.delegateTo(personLookupWorkflow, { name: kualiData.employeeName });
+  const resolvedEid = result.status === "done" ? (result.data?.emplId ?? "") : "";
+
+  if (!isUcpathEmployeeId(resolvedEid)) {
+    throw new Error(
+      `Short/invalid EID "${kualiData.eid}" for "${kualiData.employeeName}" — ` +
+      `person-lookup returned no EID. Fix the EID in the Kuali form and retry.`,
+    );
+  }
+
+  log.success(
+    `[EID guard] person-lookup resolved "${kualiData.employeeName}": ` +
+    `"${kualiData.eid}" → "${resolvedEid}" — continuing separation with corrected EID`,
+  );
+  ctx.updateData({ eid: resolvedEid });
+  return resolvedEid;
 }
 
 export const separationsWorkflow = defineWorkflow({
@@ -306,6 +372,16 @@ export const separationsWorkflow = defineWorkflow({
     } else {
       kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
     }
+
+    // ─── EID guard: resolve a provably-invalid Kuali EID via person-lookup ───
+    // Must run AFTER kualiData is established by EITHER path (extraction or the
+    // prefilled bypass) and BEFORE any consumer of kualiData.eid (the kronos
+    // date math and runKronosSearch below). A short/malformed EID is corrected
+    // by delegating to person-lookup by NAME; an unresolvable one fails loud
+    // (resolveSeparationEid throws). On success it rewrites kualiData.eid and
+    // persists ctx.data.eid so every downstream step + the final snapshot use
+    // the corrected value. See resolveSeparationEid + CLAUDE.md "Wrong Kuali EID".
+    kualiData = { ...kualiData, eid: await resolveSeparationEid(ctx, kualiData) };
 
     // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
     // work on a record that isn't yet actionable. Both Last Day Worked and

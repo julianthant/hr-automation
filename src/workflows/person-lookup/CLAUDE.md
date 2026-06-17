@@ -10,6 +10,10 @@ Each dashboard input run enqueues N names/EIDs as N kernel items to an alive dae
 
 `lookup.ts` exports `lookupPersonInUcpath` — the raw UCPath Person Org search. Other workflows (OCR orchestrator, force-research, retry-page) call this function or delegate to `personLookupWorkflow` for EID-resolution work. Do not call `searchByName` / `searchByEid` directly from composing workflows — route through `lookupPersonInUcpath` so hidden Employment Instances are handled consistently.
 
+## Delegated by separations (short-EID resolution)
+
+`separations` delegates to `personLookupWorkflow` via `ctx.delegateTo` when a Kuali-extracted EID is *provably* invalid (fails `isUcpathEmployeeId`, e.g. a 7-digit value): in `{ name: employeeName }`, out the corrected EID at `result.data.emplId` (the resolved 8-digit `emplId` stamped by the `searching`/`active-status` steps). person-lookup is daemon-capable, so this routes through a person-lookup daemon (its own UCPath + CRM auth — adds latency). If person-lookup returns no valid EID, separations fails loud rather than continuing with the bad EID. See `src/workflows/separations/CLAUDE.md` ("Short/invalid Kuali EIDs", 2026-06-17).
+
 ## Status derivation
 
 `outcome.ts` exports:
