@@ -20,6 +20,14 @@ interface RunSettingsMenuProps {
   /** Selected preset id (`"full"` for the default). Ignored when `presets` is empty. */
   presetId: string;
   onSelectPreset: (presetId: string) => void;
+  /**
+   * When true, render a **Dry run** toggle (workflow's registry entry opts in
+   * via `supportsDryRun`). Hidden otherwise.
+   */
+  supportsDryRun?: boolean;
+  /** Current dry-run toggle state (`true` = dry run, skip the irreversible write). */
+  dryRun?: boolean;
+  onToggleDryRun?: (next: boolean) => void;
   /** Workflow label for the trigger's tooltip. */
   workflowLabel: string;
 }
@@ -42,17 +50,22 @@ export function RunSettingsMenu({
   presets,
   presetId,
   onSelectPreset,
+  supportsDryRun = false,
+  dryRun = false,
+  onToggleDryRun,
   workflowLabel,
 }: RunSettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const workersDefault = workerChoice === AUTO_WORKERS;
   const presetDefault = presetId === FULL_PRESET_ID;
-  const isDefault = workersDefault && presetDefault;
+  const dryRunDefault = !supportsDryRun || !dryRun;
+  const isDefault = workersDefault && presetDefault && dryRunDefault;
   const selectedPreset = presetDefault ? null : presets.find((p) => p.id === presetId);
 
   const tooltip = [
     `Workers: ${workerChoiceLabel(workerChoice)}`,
     presets.length > 0 ? `Run mode: ${presetDefault ? "Full" : selectedPreset?.label ?? "(unknown)"}` : null,
+    supportsDryRun ? `Dry run: ${dryRun ? "On" : "Off"}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -87,6 +100,40 @@ export function RunSettingsMenu({
           <span className="text-[13px] font-medium text-foreground">Workers</span>
           <WorkerStepper value={workerChoice} onChange={onSelectWorker} />
         </div>
+
+        {supportsDryRun && (
+          <>
+            <div className="my-1.5 border-t border-border/60" aria-hidden />
+            <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+              <span className="flex flex-col min-w-0">
+                <span className="text-[13px] font-medium text-foreground">Dry run</span>
+                <span className="text-[11px] text-muted-foreground leading-snug">
+                  Run every step but skip the final submit.
+                </span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={dryRun}
+                aria-label="Dry run"
+                onClick={() => onToggleDryRun?.(!dryRun)}
+                className={cn(
+                  "relative shrink-0 h-5 w-9 rounded-full border transition-colors outline-none cursor-pointer",
+                  "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:ring-offset-card",
+                  dryRun ? "bg-primary border-primary" : "bg-secondary border-border",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute top-0.5 h-3.5 w-3.5 rounded-full transition-all",
+                    dryRun ? "left-4 bg-primary-foreground" : "left-0.5 bg-muted-foreground",
+                  )}
+                />
+              </button>
+            </div>
+          </>
+        )}
 
         {presets.length > 0 && (
           <>
