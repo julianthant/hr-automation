@@ -60,6 +60,13 @@ interface TerminalDrawerProps {
   connected: boolean;
   /** When viewing a past date, the Live pill downgrades to a muted History pill. */
   viewingHistory?: boolean;
+  /**
+   * Per-workflow collapsed top-level QUEUED surface count (backend
+   * `wfQueuedCounts`) — the same collapse model as the rail total, so the
+   * session-card "N queued" chip never shows the inflated raw delegated-member
+   * count (ISS-002). Threaded to each `WorkflowBox`.
+   */
+  queuedCounts: Record<string, number>;
 }
 
 /**
@@ -79,7 +86,7 @@ interface TerminalDrawerProps {
  * Only workflows whose process is alive (or crashed-on-launch) and whose
  * batch has not ended are shown.
  */
-export function TerminalDrawer({ connected, viewingHistory = false }: TerminalDrawerProps) {
+export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts }: TerminalDrawerProps) {
   const { open, toggle } = useTerminalDrawer();
   const clock = useClock();
   const { state } = useSessions();
@@ -204,6 +211,7 @@ export function TerminalDrawer({ connected, viewingHistory = false }: TerminalDr
                   key={wf.instance}
                   workflow={wf}
                   reassignable={hasReassignablePeer(active, wf)}
+                  queued={wf.workflow ? queuedCounts[wf.workflow] ?? 0 : 0}
                 />
               ))}
             </div>
