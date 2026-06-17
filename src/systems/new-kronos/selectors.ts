@@ -19,6 +19,25 @@ export function searchFrame(page: Page): FrameLocator {
   return page.frameLocator('iframe[name^="portal-frame-"]');
 }
 
+// ─── WFD loading overlay ──────────────────────────────────────────────────
+//
+// Dayforce shows a full-page loading mask (.wfd-loading-overlay or
+// [data-wfd-loading]) during navigation and after actions. Clicks that land
+// while the overlay is visible are intercepted with "Another element
+// intercepted the click (modal/overlay)". Wait for it to disappear before
+// clicking. // NEEDS LIVE RE-VERIFY 2026-06-17
+
+export const loadingOverlay = {
+  /**
+   * WFD full-page loading overlay — wait for it to be hidden before clicking.
+   * Common selectors for Dayforce loading masks; at least one fires on the
+   * employee-search button click. // NEEDS LIVE RE-VERIFY 2026-06-17
+   * @tags loading, overlay, spinner, busy, wfd, dayforce, new-kronos
+   */
+  overlay: (page: Page): Locator =>
+    page.locator(".wfd-loading-overlay, [data-wfd-loading], .wfd-modal-overlay, .wfd-busy-indicator"),
+};
+
 // ─── Top-level navbar ──────────────────────────────────────────────────────
 
 export const navbar = {
@@ -168,6 +187,7 @@ export const timecard = {
 
 export const newKronosSelectors = {
   searchFrame,
+  loadingOverlay,
   navbar,
   search,
   goToMenu,

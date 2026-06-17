@@ -3,6 +3,7 @@ import { log } from "../../utils/log.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import {
   searchFrame,
+  loadingOverlay,
   navbar,
   search as searchSelectors,
   goToMenu,
@@ -37,6 +38,18 @@ export async function searchEmployee(
   // Close any existing search sidebar first (prevents "2 elements" error between docs)
   await closeEmployeeSearch(page);
   await page.waitForTimeout(1_000);
+
+  // Wait for the WFD loading overlay to clear before clicking Employee Search.
+  // When the overlay is present it intercepts pointer events and the click fails
+  // with "Another element intercepted the click (modal/overlay)" (2026-06-17).
+  // The selector is best-effort and NEEDS LIVE RE-VERIFY — if none of the CSS
+  // classes match the live Dayforce build the waitFor resolves immediately via
+  // the hidden/detached check in the catch, which is safe.
+  try {
+    await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 });
+  } catch {
+    // Overlay absent or selector doesn't match — proceed without waiting.
+  }
 
   // Click the Employee Search button in the navbar
   log.step("[New Kronos] Opening Employee Search sidebar...");
