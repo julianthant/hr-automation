@@ -155,11 +155,57 @@ export async function enrollDuoWebAuthn(opts: EnrollOptions): Promise<DuoWebAuth
     await fillSsoCredentials(page);
     await clickSsoSubmit(page);
 
+    // The enrollment login has no working hands-off credential yet, so the first
+    // Duo must be approved on the phone. Duo's portal prompt defaults to a
+    // platform-auth ("Use Touch ID") screen that does NOT self-send a push — and
+    // its native OS dialog can hide the factor text from the DOM, so the poll
+    // loop's factor-screen auto-push never fires and nothing reaches the phone.
+    // Proactively reveal the method list and send a Duo Push (fire-once) so the
+    // operator only has to tap approve. Best-effort: if the controls aren't found,
+    // the operator can still complete the visible prompt by hand.
+    let pushSent = false;
+    let revealedOptions = false;
+    const pushControl = (): ReturnType<Page["getByRole"]> =>
+      page
+        .getByRole("link", { name: /duo push|send me a push/i })
+        .or(page.getByRole("button", { name: /duo push|send me a push/i }))
+        .first();
+    const sendDuoPushOnce = async (): Promise<void> => {
+      if (pushSent) return;
+      try {
+        if ((await pushControl().count().catch(() => 0)) > 0) {
+          await pushControl().click({ timeout: 5_000 }).catch(() => {});
+          pushSent = true;
+          log.waiting("Duo Push sent for enrollment — approve on your phone...");
+          return;
+        }
+        if (!revealedOptions) {
+          // Dismiss a possible native platform-auth dialog that blocks DOM clicks,
+          // then open the full "Other options" method list.
+          await page.keyboard.press("Escape").catch(() => {});
+          const other = page
+            .getByRole("link", { name: /other options|other methods/i })
+            .or(page.getByRole("button", { name: /other options|other methods/i }))
+            .first();
+          if ((await other.count().catch(() => 0)) > 0) {
+            await other.click({ timeout: 3_000 }).catch(() => {});
+            revealedOptions = true;
+            // Let the list render before the next pass clicks Duo Push — clicking
+            // mid-navigation lands Duo on an /error page.
+            await page.waitForTimeout(1_500);
+          }
+        }
+      } catch {
+        /* best-effort — operator can still complete the prompt by hand */
+      }
+    };
+
     log.waiting("Approve the FIRST Duo on your phone — needed once to reach the device portal...");
     const reachedPortal = await pollDuoApproval(page, {
       successUrlMatch: DEVICE_MGMT_MATCH,
       systemLabel: "Duo Enrollment",
       timeoutSeconds: 300,
+      recovery: sendDuoPushOnce,
     });
     if (!reachedPortal) {
       throw new Error("Did not reach the Duo device-management portal after SSO/Duo.");
