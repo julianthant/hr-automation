@@ -66,7 +66,7 @@ export const oathUploadWorkflow = defineWorkflow({
     { key: "pdfOriginalName", label: "PDF" },
     { key: "signerCount",     label: "Signers" },
     { key: "ticketNumber",    label: "HR ticket #" },
-    { key: "submittedAt",     label: "Filed" },
+    { key: "submittedAt",     label: "Filed", conditional: true },
     { key: "status",          label: "Status" },
   ],
   getName: (d) => d.pdfOriginalName ?? "",
