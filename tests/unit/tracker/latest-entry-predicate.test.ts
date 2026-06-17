@@ -156,6 +156,79 @@ test("readLatestTrackerEntriesByRunKey uses tolerant newest-first JSONL scan", (
   }
 });
 
+test("findLatestEntryForPredicate preserves parentRunId from the SQLite runs projection", () => {
+  // Regression: bulk cancel/retry/discard inherit the prior row through the
+  // SQLite fast path (db + runId). The reconstructed entry must carry
+  // parentRunId — otherwise emitInheritedRow drops the batch/operation member's
+  // parent linkage, the synthetic batch anchor evaporates, and every cancelled
+  // member surfaces as a standalone row (the separation cancel-all bug).
+  const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
+  try {
+    openStateDb(dir);
+    const date = dateLocal();
+    trackEvent({
+      workflow: "separations",
+      timestamp: `${date}T10:00:00.000Z`,
+      id: "4131",
+      runId: "member-run",
+      parentRunId: "batch-anchor-1",
+      status: "pending",
+      data: { archetype: "batch-member" },
+    }, dir);
+    const db = openStateDb(dir);
+
+    const latest = findLatestEntryForPredicate({
+      workflow: "separations",
+      trackerDir: dir,
+      lookbackDays: 1,
+      db,
+      runId: "member-run",
+      predicate: (entry) => entry.runId === "member-run",
+    });
+
+    assert.equal(latest?.parentRunId, "batch-anchor-1", "parentRunId preserved from runs projection");
+    assert.equal(latest?.data?.archetype, "batch-member");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findLatestEntryForPredicate preserves parentRunId via the SQLite items (itemId) projection", () => {
+  // The items table has no parent_run_id column; the itemId fast path must
+  // recover it from the run's projection so itemId-only inheritance lookups
+  // don't drop member parent linkage either.
+  const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
+  try {
+    openStateDb(dir);
+    const date = dateLocal();
+    trackEvent({
+      workflow: "separations",
+      timestamp: `${date}T10:00:00.000Z`,
+      id: "4130",
+      runId: "member-run-2",
+      parentRunId: "batch-anchor-1",
+      status: "pending",
+      data: { archetype: "batch-member" },
+    }, dir);
+    const db = openStateDb(dir);
+
+    const latest = findLatestEntryForPredicate({
+      workflow: "separations",
+      trackerDir: dir,
+      lookbackDays: 1,
+      db,
+      itemId: "4130",
+      predicate: (entry) => entry.id === "4130",
+    });
+
+    assert.equal(latest?.parentRunId, "batch-anchor-1", "parentRunId recovered for itemId lookup");
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("findLatestEntryForPredicate falls back to JSONL when SQLite latest_status is invalid", () => {
   const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
   try {

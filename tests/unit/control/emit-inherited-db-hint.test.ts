@@ -17,12 +17,13 @@ import { join } from "path";
 import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { openControlStores } from "../../../src/control/ops/shared.js";
 import * as findLatest from "../../../src/tracker/find-latest-entry.js";
+import { findLatestEntryForPredicate } from "../../../src/tracker/find-latest-entry.js";
 import {
   emitInheritedRow,
   PriorTrackerRowNotFoundError,
 } from "../../../src/control/ops/emit-inherited.js";
 import { emitDashboardCancelTrackerRow } from "../../../src/control/ops/shared.js";
-import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
+import { trackEvent, type TrackerEntry } from "../../../src/tracker/jsonl.js";
 
 let tmp: string;
 beforeEach(() => {
@@ -124,5 +125,40 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
     const priorRowLookup = spy.mock.calls.find((c) => c[0].lookbackDays === 30);
     assert.ok(priorRowLookup, "emit-inherited prior-row lookup happened");
     assert.equal(priorRowLookup[0].db, undefined, "no db hint when caller omits it");
+  });
+});
+
+describe("emitDashboardCancelTrackerRow — preserves batch-member parent linkage (separation cancel-all regression)", () => {
+  it("cancel row inherits parentRunId through the db fast path so the batch anchor survives", () => {
+    // Repro: a multi-id separation input run stamps batch-member rows under a
+    // synthetic batch anchor (shared parentRunId). Bulk cancel passes `db`, so
+    // the prior-row lookup hits the SQLite projection. The emitted cancel row
+    // MUST keep parentRunId — otherwise every member orphans out of the
+    // (synthetic) anchor and surfaces as a standalone row.
+    const stores = openControlStores(tmp);
+    trackEvent({
+      workflow: "separations",
+      timestamp: new Date().toISOString(),
+      id: "4131",
+      runId: "member-run",
+      parentRunId: "batch-anchor-1",
+      status: "pending",
+      data: { archetype: "batch-member" },
+    }, tmp);
+
+    emitDashboardCancelTrackerRow("separations", "4131", "member-run", tmp, stores.taskStore.db);
+
+    // Read the actually-written cancel row from JSONL (no db) — the audit row
+    // the dashboard's latest-wins queue read consumes.
+    const cancelled = findLatestEntryForPredicate({
+      workflow: "separations",
+      trackerDir: tmp,
+      lookbackDays: 1,
+      predicate: (e) => e.runId === "member-run" && e.status === "failed",
+    });
+
+    assert.equal(cancelled?.parentRunId, "batch-anchor-1", "cancel row keeps parentRunId");
+    assert.equal(cancelled?.data?.archetype, "batch-member", "cancel row keeps batch-member archetype");
+    assert.equal(cancelled?.step, "cancelled");
   });
 });
