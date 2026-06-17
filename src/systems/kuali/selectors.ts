@@ -19,11 +19,19 @@ export const actionList = {
     page.getByRole("menuitem", { name: "Action List" }),
 
   /**
-   * Document link matching a doc number regex. verified 2026-03-16
-   * @tags document, doc, link, action-list, kuali
+   * Document link matching a doc number EXACTLY (anchored). verified 2026-06-17
+   *
+   * The Action List row exposes its document number as the accessible name of a
+   * bare-number link. The match is anchored (`^\s*<n>\s*$`) so a doc id that is a
+   * substring of another can never resolve the wrong row — important because
+   * `clickDocument` filters via the substring-based Action List search box (a
+   * search for "414" returns 4140–4149). A row shows the number in both the
+   * "Document #" and "Document Title" columns, so this can match 2 links for one
+   * doc; `clickDocument` clicks `.first()`.
+   * @tags document, doc, link, action-list, exact, kuali
    */
   docLink: (page: Page, docNumber: string): Locator =>
-    page.getByRole("link", { name: new RegExp(docNumber) }),
+    page.getByRole("link", { name: new RegExp(`^\\s*${docNumber}\\s*$`) }),
 
   /**
    * All pending-document links in the Action List, one per row. Each
@@ -45,6 +53,31 @@ export const actionList = {
    */
   docLinks: (page: Page): Locator =>
     page.getByRole("link", { name: /^\s*\d+\s*$/ }),
+
+  /**
+   * Action List search box. verified 2026-06-17
+   *
+   * The Action List paginates at 25 rows/page; rather than page through,
+   * `clickDocument` types the document number here and clicks `searchGoButton`
+   * to filter the list to the matching row(s). Scoped to the `.kp-input-group`
+   * that holds the GO button so it never resolves the global nav search box —
+   * a second textbox also labelled "Search" (top-right) that has no GO button.
+   * @tags action-list, search, input, textbox, filter, kuali
+   */
+  searchInput: (page: Page): Locator =>
+    page
+      .locator('.kp-input-group:has(.kp-input-button-right)')
+      .getByRole("textbox", { name: "Search" }),
+
+  /**
+   * Action List search "GO" button. verified 2026-06-17
+   *
+   * Submits the `searchInput` filter. The only "GO" button on the page (the
+   * `.kp-input-button-right` affixed to the Action List search box).
+   * @tags action-list, search, go, button, submit, kuali
+   */
+  searchGoButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "GO", exact: true }),
 };
 
 // ─── Separation form: extraction / base fields ────────────────────────────

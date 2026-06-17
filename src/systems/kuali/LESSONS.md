@@ -38,6 +38,14 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `actionList.docLinks` in `selectors.ts` (consumed by `listActionListSeparations` in `navigate.ts`)
 **Tags:** action-list, document, links, enumerate, pending, verify, separation, kuali
 
+## 2026-06-17 — Action List `clickDocument` only searched the first page
+
+**Tried:** `clickDocument(page, docNumber)` located the doc with `actionList.docLink` (an UNANCHORED `new RegExp(docNumber)`) and threw `Document #X not found in Action List` when `count() === 0`, reading only the currently-displayed Action List page.
+**Failed because:** The Action List paginates at 25 rows/page (footer "N-M of T"; live: "1-25 of 97" across 4 pages) sorted by Created date, so a target doc frequently is NOT on the first page — the single-page check threw a false "not found" for any doc on page 2+.
+**Fix:** `clickDocument` now filters via the Action List's own **search box** (`actionList.searchInput` + `actionList.searchGoButton`) instead of paging: type the doc number → click GO → click the matching row. Verified live (doc on page 4 found instantly; searching an absent id returns 0 rows → genuine "not found"). Two gotchas confirmed live and handled: (1) there are **two** "Search" textboxes — the Action List one is scoped to `.kp-input-group:has(.kp-input-button-right)` (the global nav search top-right has no GO button); (2) Kuali search is **substring** based — `"414"` returns 4140–4149 — so `docLink` is now **anchored** (`^\s*<n>\s*$`) to guarantee the exact row, never a longer id that contains it. (A prior revision in this session tried a page-through loop with a `nextPage` arrow selector + `MAX_ACTION_LIST_PAGES` cap; the search box is simpler and was kept instead.)
+**Selector:** `actionList.searchInput`, `actionList.searchGoButton`, `actionList.docLink` in `selectors.ts` (consumed by `clickDocument` in `navigate.ts`)
+**Tags:** action-list, search, go, document, clickDocument, anchored, substring, separation, kuali
+
 ## 2026-06-16 — Kuali form inputs return whitespace-padded values
 
 **Tried:** Returning each extracted field from `extractSeparationData` (`navigate.ts`) raw, straight from `.inputValue()` / the `.evaluate()` combobox read, then passing `eid` into UCPath person search and `SeparationDataSchema`.
