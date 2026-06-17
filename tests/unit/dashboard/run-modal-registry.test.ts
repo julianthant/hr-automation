@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   getRunModalConfig,
+  isRunModalCaptureCapable,
   resolveTargetWorkflow,
   OCR_PREPARE_SUBMIT_URL,
 } from "../../../src/dashboard/lib/run-modal-registry.js";
@@ -55,4 +56,25 @@ test("resolveTargetWorkflow returns undefined for a standalone OCR run (no targe
   assert.equal(config!.submitUrl({}), OCR_PREPARE_SUBMIT_URL);
   // The `ocr` entry declares no targetWorkflow → no coordinator row.
   assert.equal(resolveTargetWorkflow(config!, {}), undefined);
+});
+
+/**
+ * `isRunModalCaptureCapable` is the declarative opt-in for the in-modal
+ * "Capture photos" upload method. It mirrors the server-side
+ * `captureRegistrations` entries (oath-signature + emergency-contact). The
+ * RunModal additionally gates the mode switch on a LIVE capture registration,
+ * so this flag is necessary but not sufficient on its own.
+ */
+test("isRunModalCaptureCapable is true for the capture-registered upload workflows", () => {
+  assert.equal(isRunModalCaptureCapable("oath-signature"), true);
+  assert.equal(isRunModalCaptureCapable("emergency-contact"), true);
+});
+
+test("isRunModalCaptureCapable is false for upload workflows without a capture entry", () => {
+  assert.equal(isRunModalCaptureCapable("ocr"), false);
+  assert.equal(isRunModalCaptureCapable("oath-upload"), false);
+});
+
+test("isRunModalCaptureCapable is false for an unregistered workflow", () => {
+  assert.equal(isRunModalCaptureCapable("separations"), false);
 });

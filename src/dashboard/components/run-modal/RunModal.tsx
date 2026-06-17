@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, FileText, Loader2, UploadCloud, X } from "lucide-react";
+import { AlertCircle, Camera, FileText, Loader2, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -11,9 +11,12 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { DuplicateBanner } from "@/components/oath-upload";
+import { CaptureModal } from "@/components/capture/modal/index.js";
+import { useCaptureRegistration } from "@/components/hooks/useCaptureRegistration";
 import type { PriorRunSummary } from "@/components/shared/types";
 import {
   getRunModalConfig,
+  isRunModalCaptureCapable,
   resolveTargetWorkflow,
   type RunModalSubmitResponse,
 } from "@/lib/run-modal-registry";
@@ -42,6 +45,13 @@ async function sha256OfFile(file: File): Promise<string> {
  * to render, success-toast shape) is declared in
  * `src/dashboard/lib/run-modal-registry.ts`. Adding a new file-upload
  * workflow needs only an entry there — this component does not change.
+ *
+ * Capture-photos is offered as an alternate upload METHOD inside the same run
+ * flow: a workflow that declares `capture: true` in the registry AND has a
+ * live capture registration (`GET /api/capture/registry`) shows an "Upload
+ * file | Capture photos" switch. Picking Capture hands off to the shared
+ * `CaptureModal` (the capture state machine is reused, not forked); the same
+ * `/api/capture/*` endpoints produce the same OCR prep row as a file upload.
  */
 interface RunModalProps {
   open: boolean;
@@ -54,6 +64,16 @@ interface RunModalProps {
 
 export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModalProps) {
   const config = getRunModalConfig(workflow);
+  // Capture-photos upload method. Declarative opt-in via the registry
+  // (`config.capture`, Commit 4 counterpart), gated additionally on a live
+  // capture registration so the option only shows when the backend actually
+  // registered a capture handler. Suppressed in reupload mode (reupload is
+  // file-specific). When the operator picks Capture, we open the shared
+  // CaptureModal (state machine unforked) and dismiss this modal's file UI.
+  const captureRegistration = useCaptureRegistration(workflow);
+  const captureCapable =
+    !reuploadFor && isRunModalCaptureCapable(workflow) && captureRegistration !== null;
+  const [captureOpen, setCaptureOpen] = useState(false);
   // The workflow's registry entry can lock the form type so the modal hides
   // the picker and force-injects the value on submit (emergency-contact →
   // emergency-contact, oath-signature → oath).
@@ -266,6 +286,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     setDryRun(false);
     setOathUploadMode("full");
     setWorkerChoice(AUTO_WORKERS);
+    // NB: `captureOpen` is intentionally NOT reset here. Picking "Capture
+    // photos" closes this file-upload dialog (open=false) while opening the
+    // CaptureModal — resetting it here would immediately kill that handoff.
+    // The CaptureModal owns its own close via its onOpenChange.
     // Reset the form-type pick so the standalone-OCR modal re-defaults on the
     // next open (the default-select effect is gated on `!formType`); a locked
     // form-type re-injects via the `open && effectiveLockedFormType` effect.
@@ -463,6 +487,15 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
       : "Use the currently queued SharePoint download when it finishes.";
 
   return (
+    <>
+    {captureCapable && captureRegistration && (
+      <CaptureModal
+        open={captureOpen}
+        onOpenChange={setCaptureOpen}
+        workflow={workflow}
+        workflowLabel={captureRegistration.label}
+      />
+    )}
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         hideClose
@@ -507,6 +540,37 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
         </DialogHeader>
 
         <div className="px-[38px] pt-[24px] pb-0 space-y-6">
+          {captureCapable && (
+            <section>
+              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
+                Upload method
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <ModeButton
+                  active
+                  disabled={submitting}
+                  label="Upload file"
+                  hint="Pick a PDF from this computer"
+                  onClick={() => {}}
+                />
+                <ModeButton
+                  active={false}
+                  disabled={submitting}
+                  label="Capture photos"
+                  hint="Scan a QR on your phone, take photos, bundle to a PDF"
+                  icon={<Camera aria-hidden className="h-3.5 w-3.5" />}
+                  onClick={() => {
+                    // Hand off to the shared CaptureModal (unforked state
+                    // machine). Close the file-upload dialog so only one
+                    // dialog is open at a time; the same /api/capture flow
+                    // produces the same OCR prep row as a file upload.
+                    setCaptureOpen(true);
+                    onOpenChange(false);
+                  }}
+                />
+              </div>
+            </section>
+          )}
           {showOathUploadMode && (
             <section>
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
@@ -799,6 +863,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 
@@ -807,12 +872,14 @@ function ModeButton({
   disabled,
   label,
   hint,
+  icon,
   onClick,
 }: {
   active: boolean;
   disabled: boolean;
   label: string;
   hint: string;
+  icon?: React.ReactNode;
   onClick: () => void;
 }) {
   return (
@@ -832,7 +899,10 @@ function ModeButton({
         backgroundColor: active ? "var(--capture-bg-raised)" : "transparent",
       }}
     >
-      <span className="text-[13px] font-medium text-foreground">{label}</span>
+      <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+        {icon}
+        {label}
+      </span>
       <span className="text-[11px] leading-[1.35] text-muted-foreground">{hint}</span>
     </button>
   );
