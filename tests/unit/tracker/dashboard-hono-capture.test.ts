@@ -6,6 +6,11 @@ import { tmpdir } from "node:os";
 
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
+import {
+  captureRegistrations,
+  makeCaptureFinalize,
+} from "../../../src/tracker/dashboard/capture-state.js";
+import type { CaptureSession } from "../../../src/services/capture/sessions.js";
 
 let dir: string;
 let previousPublicUrl: string | undefined;
@@ -59,9 +64,77 @@ test("Hono capture upload missing file returns 400", async () => {
   assert.deepEqual(await upload.json(), { ok: false, error: "missing 'file' part" });
 });
 
-test("Hono capture registry remains available", async () => {
+test("Hono capture registry returns label + formType per entry", async () => {
   const res = await app().request("/api/capture/registry");
   assert.equal(res.status, 200);
-  const body = await res.json() as Record<string, { label: string }>;
+  const body = await res.json() as Record<string, { label: string; formType: string }>;
   assert.equal(body["oath-signature"].label, "Capture paper roster");
+  assert.equal(body["oath-signature"].formType, "oath");
+  assert.equal(body["emergency-contact"].label, "Capture emergency contact forms");
+  assert.equal(body["emergency-contact"].formType, "emergency-contact");
+});
+
+/** A minimal CaptureSession stub with a finalized PDF, for finalize tests. */
+function fakeFinalizedSession(over: Partial<CaptureSession>): CaptureSession {
+  return {
+    sessionId: "11111111-2222-3333-4444-555555555555",
+    token: "tok",
+    workflow: "oath-signature",
+    createdAt: 0,
+    expiresAt: 0,
+    state: "finalizing",
+    photos: [],
+    pdfPath: "/tmp/fake.pdf",
+    onFinalize: async () => {},
+    ...over,
+  } as CaptureSession;
+}
+
+/**
+ * Captures the `formType` the prepare handler is invoked with, via the
+ * `buildPrepareHandler` test seam — proving `makeCaptureFinalize` resolves it
+ * from the declarative `captureRegistrations` entry (or `session.formType` for
+ * `ocr`), NOT a hardcoded per-workflow branch.
+ */
+function finalizeAndCaptureFormType(session: CaptureSession): Promise<string | undefined> {
+  let seen: string | undefined;
+  const finalize = makeCaptureFinalize(dir, {
+    buildPrepareHandler: () => async (input) => {
+      seen = input.formType;
+      return { status: 202, body: { ok: true, sessionId: input.sessionId ?? "", runId: "r" } };
+    },
+  });
+  return finalize(session).then(() => seen);
+}
+
+test("makeCaptureFinalize resolves oath-signature formType from the registration", async () => {
+  assert.equal(captureRegistrations["oath-signature"].formType, "oath");
+  const seen = await finalizeAndCaptureFormType(fakeFinalizedSession({ workflow: "oath-signature" }));
+  assert.equal(seen, "oath");
+});
+
+test("makeCaptureFinalize resolves emergency-contact formType from the registration", async () => {
+  assert.equal(captureRegistrations["emergency-contact"].formType, "emergency-contact");
+  const seen = await finalizeAndCaptureFormType(fakeFinalizedSession({ workflow: "emergency-contact" }));
+  assert.equal(seen, "emergency-contact");
+});
+
+test("makeCaptureFinalize falls back to session.formType for an unregistered ocr workflow", async () => {
+  assert.equal(captureRegistrations["ocr"], undefined);
+  const seen = await finalizeAndCaptureFormType(
+    fakeFinalizedSession({ workflow: "ocr", formType: "verify" }),
+  );
+  assert.equal(seen, "verify");
+});
+
+test("makeCaptureFinalize does not prepare when no formType can be resolved", async () => {
+  let called = false;
+  const finalize = makeCaptureFinalize(dir, {
+    buildPrepareHandler: () => async (input) => {
+      called = true;
+      return { status: 202, body: { ok: true, sessionId: input.sessionId ?? "", runId: "r" } };
+    },
+  });
+  await finalize(fakeFinalizedSession({ workflow: "not-registered" }));
+  assert.equal(called, false);
 });

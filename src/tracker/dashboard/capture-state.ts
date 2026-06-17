@@ -41,9 +41,35 @@ export function getHeic2anyAsset(): Buffer | undefined {
   }
 }
 
-export const captureRegistrations: Record<string, { label: string; contextHints?: string[] }> = {
-  "oath-signature": { label: "Capture paper roster" },
-  "emergency-contact": { label: "Capture emergency contact forms" },
+/**
+ * One declarative capture registration per workflow. Adding capture to a
+ * workflow is a SINGLE entry here — no `makeCaptureFinalize` branch.
+ *
+ * - `label` — operator-facing button/modal title (also surfaced to the
+ *   frontend via `GET /api/capture/registry`).
+ * - `formType` — the OCR form type the bundled PDF is prepared as. This is
+ *   what `makeCaptureFinalize` feeds to `buildOcrPrepareHandler`; it
+ *   REPLACES the old per-workflow `if (workflow === ...)` mapping.
+ * - `contextHints` — optional free-text hints surfaced on the phone.
+ *
+ * The `ocr` workflow is a special case: it carries its `formType` on the
+ * capture session itself (operator-picked in the run modal), so it is NOT
+ * listed here — `makeCaptureFinalize` falls back to `session.formType` when
+ * the session's workflow has no registration entry.
+ */
+export interface CaptureRegistration {
+  label: string;
+  /** OCR form type for the bundled PDF (e.g. "oath", "emergency-contact"). */
+  formType: string;
+  contextHints?: string[];
+}
+
+export const captureRegistrations: Record<string, CaptureRegistration> = {
+  "oath-signature": { label: "Capture paper roster", formType: "oath" },
+  "emergency-contact": {
+    label: "Capture emergency contact forms",
+    formType: "emergency-contact",
+  },
 };
 
 export function serializeCaptureSession(session: CaptureSession): {
@@ -70,7 +96,17 @@ export function serializeCaptureSession(session: CaptureSession): {
   };
 }
 
-export function makeCaptureFinalize(trackerDir: string) {
+export interface MakeCaptureFinalizeOpts {
+  /**
+   * Test seam — override the OCR prepare handler builder so a test can assert
+   * which `formType` the declarative registration resolved to without running
+   * the real OCR orchestrator. Production omits it (uses `buildOcrPrepareHandler`).
+   */
+  buildPrepareHandler?: typeof buildOcrPrepareHandler;
+}
+
+export function makeCaptureFinalize(trackerDir: string, opts: MakeCaptureFinalizeOpts = {}) {
+  const buildPrepareHandler = opts.buildPrepareHandler ?? buildOcrPrepareHandler;
   return async (session: CaptureSession): Promise<void> => {
     if (!session.pdfPath) {
       log.warn(`[capture] finalized session ${session.sessionId} without pdfPath`);
@@ -90,22 +126,19 @@ export function makeCaptureFinalize(trackerDir: string) {
     const pdfOriginalName = `capture-${session.sessionId.slice(0, 8)}.pdf`;
     const rosterMode: "existing" | "download" = rosterPath ? "existing" : "download";
 
-    // All captures route through the shared OCR prepare path. Oath captures
-    // are `formType: "oath"` — OCR is now the prep/approval hub and fans out
-    // signer rows (oath-signature) + a ticket row (oath-upload) on approve.
-    let formType: string;
-    if (session.workflow === "oath-signature") {
-      formType = "oath";
-    } else if (session.workflow === "emergency-contact") {
-      formType = "emergency-contact";
-    } else if (session.workflow === "ocr" && session.formType) {
-      formType = session.formType;
-    } else {
+    // All captures route through the shared OCR prepare path. The form type is
+    // resolved DECLARATIVELY from the workflow's `captureRegistrations` entry —
+    // adding capture to a workflow is one entry there, no branch here. The
+    // `ocr` workflow is the lone exception: it has no registration entry and
+    // carries its operator-picked `formType` on the session itself.
+    const registration = captureRegistrations[session.workflow];
+    const formType = registration?.formType ?? session.formType;
+    if (!formType) {
       log.warn(`[capture] no OCR form type mapping for workflow ${session.workflow}`);
       return;
     }
 
-    const handler = buildOcrPrepareHandler({ trackerDir });
+    const handler = buildPrepareHandler({ trackerDir });
     const result = await handler({
       pdfPath: session.pdfPath,
       pdfOriginalName,
