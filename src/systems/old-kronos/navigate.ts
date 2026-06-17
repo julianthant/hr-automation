@@ -29,9 +29,10 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
   // Reduced from 1s — clickIfPresent already polls for up to 3s.
   await page.waitForTimeout(300);
 
-  // Try OK button
+  // Try OK button (1.5s timeout — modals appear quickly; 3s was overkill for the
+  // common absent-modal case that runs 5+ times per doc, 2026-06-17)
   const okBtn = modalDismiss.okButton(iframe);
-  if (await clickIfPresent(okBtn, { timeout: 3_000, label: "old kronos modal ok button" })) {
+  if (await clickIfPresent(okBtn, { timeout: 1_500, label: "old kronos modal ok button" })) {
     log.step("Dismissed modal (OK)");
     // Short settle — modal dismissal is near-instant on click.
     await page.waitForTimeout(500);
@@ -39,7 +40,7 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
 
   // Try Close button
   const closeBtn = modalDismiss.closeButton(iframe);
-  if (await clickIfPresent(closeBtn, { timeout: 3_000, label: "old kronos modal close button" })) {
+  if (await clickIfPresent(closeBtn, { timeout: 1_500, label: "old kronos modal close button" })) {
     log.step("Dismissed modal (Close)");
     await page.waitForTimeout(500);
   }

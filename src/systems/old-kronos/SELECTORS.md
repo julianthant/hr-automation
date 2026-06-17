@@ -88,11 +88,11 @@ Close button (multiple CSS variants).
 
 ## `dateRange.calendarButton()` — verified 2026-03-16
 
-Calendar button — two variants covering different UKG builds.
+Calendar button — two variants covering different UKG builds. First branch: button containing an <i class="icon-k-calendar"> icon. Second branch: any button with title "Select Dates" (simplified from the original malformed "button.btn.i.dropdown-toggle[title='Select Dates']" where "i" was treated as a class but should have been a descendant element — fixed 2026-06-17). // NEEDS LIVE RE-VERIFY 2026-06-17
 
 **Tags:** calendar, button, date, range, dialog, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:111`](./selectors.ts#L111)
+**Source:** [`src/systems/old-kronos/selectors.ts:116`](./selectors.ts#L116)
 
 ## `dateRange.dateInputs()` — verified 2026-03-16
 
@@ -100,7 +100,7 @@ Date input fields inside the timeframeSelection dialog.
 
 **Tags:** date, input, range, timeframe, dialog, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:120`](./selectors.ts#L120)
+**Source:** [`src/systems/old-kronos/selectors.ts:125`](./selectors.ts#L125)
 
 ## `dateRange.applyButton()` — verified 2026-03-16
 
@@ -108,7 +108,7 @@ Apply button — two variants covering different UKG builds.
 
 **Tags:** apply, button, date, range, dialog, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:128`](./selectors.ts#L128)
+**Source:** [`src/systems/old-kronos/selectors.ts:133`](./selectors.ts#L133)
 
 ## `goToMenu.goToTrigger()` — verified 2026-03-16
 
@@ -116,7 +116,7 @@ Apply button — two variants covering different UKG builds.
 
 **Tags:** go-to, trigger, navigation, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:141`](./selectors.ts#L141)
+**Source:** [`src/systems/old-kronos/selectors.ts:146`](./selectors.ts#L146)
 
 ## `goToMenu.dropdownToggles()` — verified 2026-03-16
 
@@ -124,7 +124,7 @@ Dropdown toggles inside the iframe (used in GoTo → Reports strategy).
 
 **Tags:** dropdown, toggle, go-to, reports, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:147`](./selectors.ts#L147)
+**Source:** [`src/systems/old-kronos/selectors.ts:152`](./selectors.ts#L152)
 
 ## `goToMenu.reportsItem()` — verified 2026-03-16
 
@@ -132,7 +132,7 @@ Dropdown toggles inside the iframe (used in GoTo → Reports strategy).
 
 **Tags:** reports, menu, item, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:153`](./selectors.ts#L153)
+**Source:** [`src/systems/old-kronos/selectors.ts:158`](./selectors.ts#L158)
 
 ## `goToMenu.sidebarReports()` — verified 2026-03-16
 
@@ -140,7 +140,7 @@ Sidebar fallback for Reports.
 
 **Tags:** reports, sidebar, fallback, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:160`](./selectors.ts#L160)
+**Source:** [`src/systems/old-kronos/selectors.ts:165`](./selectors.ts#L165)
 
 ## `goToMenu.timecardsItem()` — verified 2026-03-16
 
@@ -148,7 +148,7 @@ Timecards menu item (exact match to avoid "Approve Timecards").
 
 **Tags:** timecards, menu, item, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:167`](./selectors.ts#L167)
+**Source:** [`src/systems/old-kronos/selectors.ts:172`](./selectors.ts#L172)
 
 ## `timecard.previousPayPeriodLink()` — verified 2026-04-01
 
@@ -156,7 +156,7 @@ Previous Pay Period link (inside an open period dropdown).
 
 **Tags:** previous, pay, period, link, timecard, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:178`](./selectors.ts#L178)
+**Source:** [`src/systems/old-kronos/selectors.ts:183`](./selectors.ts#L183)
 
 ## `workspace.manageDeptTab()` — verified 2026-03-16
 
@@ -164,7 +164,7 @@ Manage My Department tab (preferred).
 
 **Tags:** manage, department, tab, workspace, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:189`](./selectors.ts#L189)
+**Source:** [`src/systems/old-kronos/selectors.ts:194`](./selectors.ts#L194)
 
 ## `workspace.manageDeptLi()` — verified 2026-03-16
 
@@ -172,7 +172,7 @@ Manage My Department li tab fallback.
 
 **Tags:** manage, department, tab, fallback, workspace, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:196`](./selectors.ts#L196)
+**Source:** [`src/systems/old-kronos/selectors.ts:201`](./selectors.ts#L201)
 
 ## `reportsPage.timecardNavTreeEntry()` — verified 2026-03-16
 
@@ -180,4 +180,4 @@ Timecard nav-tree entry.
 
 **Tags:** timecard, nav, tree, entry, reports, ukg, old-kronos
 
-**Source:** [`src/systems/old-kronos/selectors.ts:235`](./selectors.ts#L235)
+**Source:** [`src/systems/old-kronos/selectors.ts:240`](./selectors.ts#L240)

@@ -30,6 +30,22 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `reportsPage.checkStatusSelectors`, `reportsPage.refreshStatusSelectors` in `selectors.ts`
 **Tags:** report, status, polling, stale, complete, running, view
 
+## 2026-06-17 — `calendarButton` second `.or()` branch was malformed CSS
+
+**Tried:** `button.btn.i.dropdown-toggle[title='Select Dates']` as the second fallback for the date range calendar button (treating `i` as an additional class selector).
+**Failed because:** `i` in a CSS compound selector is a type-selector for `<i>` elements, not a class. The intent was `button.btn.dropdown-toggle[title='Select Dates']` (a button with those classes and title). As written, `button.btn.i.dropdown-toggle[title='Select Dates']` attempts to match an element that is simultaneously a `<button>`, a `<div class="btn">`, an `<i>`, and a `<div class="dropdown-toggle">` with that title — which never exists. This selector was called 22× with 10s timeouts so fixing it meaningfully reduces per-run cost when the primary branch misses.
+**Fix:** Simplified second branch to `button[title='Select Dates']` — precise, robust, and avoids the class/type confusion. The primary branch (`button:has(i.icon-k-calendar)`) is unchanged. // NEEDS LIVE RE-VERIFY 2026-06-17
+**Selector:** `dateRange.calendarButton` in `selectors.ts`
+**Tags:** calendar, button, date-range, css, malformed, class, type-selector, fallback
+
+## 2026-06-17 — `dismissModal` probe timeouts cost 3s per absent modal
+
+**Tried:** `clickIfPresent(okBtn, { timeout: 3_000 })` and `clickIfPresent(closeBtn, { timeout: 3_000 })` — each probe runs 5+ times per document.
+**Failed because:** When no modal is present both probes each wait the full 3s before returning false, spending up to 6s doing nothing per invocation.
+**Fix:** Reduced both timeouts to 1_500ms. The 300ms preamble wait lets a real modal appear; 1.5s is more than enough to detect a rendered button. When a modal is present the click resolves in <200ms anyway — success-path latency is unchanged.
+**Selector:** `modalDismiss.okButton`, `modalDismiss.closeButton` in `selectors.ts`
+**Tags:** modal, dismiss, timeout, performance, clickIfPresent
+
 ## 2026-03-16 — Modal dialogs pop up between steps without warning
 
 **Tried:** Driving the Genies grid (search, click row, Go To) without checking for modals.

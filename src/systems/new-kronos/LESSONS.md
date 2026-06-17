@@ -22,6 +22,14 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `goToMenu.goToButtonOnPage`, `goToMenu.goToButtonInFrame`, `goToMenu.timecardItem` in `selectors.ts`
 **Tags:** go-to, timecard, menu, frame, page, fallback, plural
 
+## 2026-06-17 — WFD loading overlay intercepts Employee Search button click
+
+**Tried:** Clicking `navbar.employeeSearchButton(page)` immediately after `closeEmployeeSearch` + 1s wait.
+**Failed because:** Dayforce (WFD) renders a full-page loading overlay after certain navigation and post-action states. When the overlay is visible it intercepts pointer events and the click fails with "Another element intercepted the click (modal/overlay)" (`classifyPlaywrightError` kind: `timeout-intercepted`). The overlay is NOT a PeopleSoft `#pt_modalMask` — do NOT use `dismissPeopleSoftModalMask` here (that targets `#pt_modalMask` / `.ptModalMask`, which are PeopleSoft-only and absent in Dayforce).
+**Fix:** Before the employee search button click, call `loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 })` wrapped in a try/catch so a missing or non-matching selector degrades gracefully (the wait resolves immediately). The overlay selector (`loadingOverlay.overlay` in `selectors.ts`) uses `.wfd-loading-overlay, [data-wfd-loading], .wfd-modal-overlay, .wfd-busy-indicator` — needs live verification to confirm which class the live Dayforce build uses. // NEEDS LIVE RE-VERIFY 2026-06-17
+**Selector:** `loadingOverlay.overlay` in `selectors.ts` (added 2026-06-17)
+**Tags:** loading, overlay, intercept, click, employee-search, wfd, dayforce, pointer-events
+
 ## 2026-04-06 — "There are no items to display." is the no-results probe
 
 **Tried:** Polling the result rows count to detect an empty employee search.

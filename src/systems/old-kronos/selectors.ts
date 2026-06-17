@@ -105,13 +105,18 @@ export const modalDismiss = {
 export const dateRange = {
   /**
    * Calendar button — two variants covering different UKG builds.
+   * First branch: button containing an <i class="icon-k-calendar"> icon.
+   * Second branch: any button with title "Select Dates" (simplified from the
+   * original malformed "button.btn.i.dropdown-toggle[title='Select Dates']" where
+   * "i" was treated as a class but should have been a descendant element — fixed
+   * 2026-06-17). // NEEDS LIVE RE-VERIFY 2026-06-17
    * verified 2026-03-16
    * @tags calendar, button, date, range, dialog, ukg, old-kronos
    */
   calendarButton: (iframe: Frame): Locator =>
     iframe
       .locator("button:has(i.icon-k-calendar)")
-      .or(iframe.locator("button.btn.i.dropdown-toggle[title='Select Dates']")),
+      .or(iframe.locator("button[title='Select Dates']")),
 
   /**
    * Date input fields inside the timeframeSelection dialog. verified 2026-03-16
