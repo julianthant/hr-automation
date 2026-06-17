@@ -154,6 +154,11 @@ export async function selectReasonCode(
 
   await page.waitForTimeout(2_000);
 
+  // Dismiss pt_modalMask raised by the dropdown round-trip before clicking Continue.
+  // Without this the mask intercepts the click for the full 5s timeout and the
+  // JS fallback below has to fire every time (2026-06-17).
+  await dismissPeopleSoftModalMask(page);
+
   // Click Continue — may need force or JS due to sidebar overlay
   log.step("Clicking Continue...");
   try {
@@ -352,14 +357,20 @@ export async function fillPersonalData(
 /**
  * Fill the Comments and Initiator Comments fields.
  *
+ * @param page - Playwright page (for dismissing the pt_modalMask overlay)
  * @param frame - PeopleSoft content iframe FrameLocator
  * @param comments - Comment text (same for both fields)
  */
 export async function fillComments(
+  page: Page,
   frame: FrameLocator,
   commentsText: string,
 ): Promise<void> {
   log.step("Filling comments...");
+
+  // Dismiss pt_modalMask that can linger after tab switches / round-trips
+  // before attempting to fill the textarea (2026-06-17).
+  await dismissPeopleSoftModalMask(page);
 
   await safeFill(commentsSelectors.commentsTextarea(frame), commentsText, {
     timeout: 10_000,

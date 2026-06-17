@@ -21,12 +21,13 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Always remove the listener after auth completes (via the listener's removal handle returned by `page.on(...)`).
 **Tags:** auth, listener, framenavigated, log, cleanup
 
-## 2026-04-16 — `pt_modalMask` overlay intercepts every click between tabs
+## 2026-04-16 — `pt_modalMask` overlay intercepts every click between tabs (extended 2026-06-17)
 
-**Tried:** Clicking iframe tabs (Personal Data, Job Data, Earns Dist, Employee Experience) directly with `.click()`.
-**Failed because:** PeopleSoft leaves a transparent `#pt_modalMask` (or `.ptModalMask`) overlay visible after dropdown round-trips and tab switches. The overlay intercepts clicks even though it is invisible.
-**Fix:** Call `dismissPeopleSoftModalMask(page)` from `src/systems/common/modal.ts` before each tab click. The helper hides every `#pt_modalMask` / `.ptModalMask` element via inline `style.display = "none"`.
-**Tags:** modal, mask, overlay, peoplesoft, tab, click, intercept
+**Tried:** Clicking iframe tabs (Personal Data, Job Data, Earns Dist, Employee Experience) directly with `.click()`. Also clicking the reason-code Continue button and the Comments textarea fill after the reason-code dropdown round-trip.
+**Failed because:** PeopleSoft leaves a transparent `#pt_modalMask` (or `.ptModalMask`) overlay visible after dropdown round-trips and tab switches. The overlay intercepts clicks even though it is invisible. Specifically: `selectReasonCode` raises a mask after the `selectOption` call that blocks the Continue button (`id=HR_TBH_WRK_TBH_NEXT`) for the full 5s timeout before the JS `submitAction_win0` fallback fires. `fillComments` has the same exposure — the mask from a prior tab round-trip can still be present when the textarea fill is attempted.
+**Fix:** Call `dismissPeopleSoftModalMask(page)` from `src/systems/common/modal.ts` before each tab click AND before the Continue button click in `selectReasonCode` AND before the first `safeFill` in `fillComments`. The helper hides every `#pt_modalMask` / `.ptModalMask` element via inline `style.display = "none"`. `fillComments` now takes a `page: Page` first parameter (same signature shape as `fillJobData` / `clickJobDataTab`) to make this dismiss possible.
+**Selector:** `smartHR.continueButton`, `commentsSelectors.commentsTextarea`, `commentsSelectors.initiatorCommentsTextarea` in `selectors.ts`
+**Tags:** modal, mask, overlay, peoplesoft, tab, click, intercept, comments, continue, reason-code
 
 ## 2026-04-16 — Comp Rate Code is a textbox, not a `<select>` dropdown
 

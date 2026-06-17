@@ -91,7 +91,7 @@ export async function runUcpathTransaction(
       log.step("[UCPath Txn] Filling Empl ID...");
       await ssSmartHRTransactions.emplIdInput(frame).fill(kualiData.eid, { timeout: 10_000 });
       await selectReasonCode(ucpathPage, frame, ucpathReason);
-      await fillComments(frame, finalComments);
+      await fillComments(ucpathPage, frame, finalComments);
 
       const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid);
       transactionNumber = submitResult.transactionNumber ?? "";
