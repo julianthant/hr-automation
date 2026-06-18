@@ -272,6 +272,10 @@ export const separationsWorkflow = defineWorkflow({
     // append-aware: existing field content is preserved + a newline-joined
     // append is filled.
     { key: "comments",          label: "Comments",        editable: true, displayInGrid: false, multiline: true },
+    // Read-only preview of the generated UCPath termination comment (incl.
+    // sick/holiday clause). Stamped in dry-run so the operator can verify it
+    // before a real termination.
+    { key: "separationComment", label: "Termination Comment", displayInGrid: false, multiline: true },
     // `rawTerminationType` is intentionally NOT in detailFields — it's an
     // internal field used to reconstruct kualiData on the edit-and-resume
     // bypass path, not meant for the user. The kernel still stores it in
@@ -490,6 +494,16 @@ export const separationsWorkflow = defineWorkflow({
       );
     }
 
+    // Build the termination comment now (a pure string) so the dry-run terminal
+    // can preview the EXACT comment that would be filed to UCPath — including the
+    // sick/holiday clause — letting the operator verify it before any real run.
+    const finalComments = buildTerminationComments(
+      termEffDate,
+      lastDayWorked,
+      docId,
+      { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
+    );
+
     // Position the New Kronos timecard view so the chosen Last Day Worked
     // row is CENTERED, then take a dedicated audit screenshot of ONLY the
     // new-kronos page showing that date with its neighbours above/below — so
@@ -526,7 +540,7 @@ export const separationsWorkflow = defineWorkflow({
     // separations halts before BOTH committing steps AND before the
     // pre-submit Kuali form writes (date corrections + dept/payroll fill) that
     // would otherwise start at the next line. The full READ path has already
-    // run by here — 4-system auth (4 Duos), Kuali extraction, Kronos search,
+    // run by here — 3-system auth (3 Duos), Kuali extraction, Kronos search,
     // UCPath Job Summary fetch, and Kronos-vs-Kuali date reconciliation — so a
     // dry run exercises everything except the writes. Result: no UCPath
     // transaction is created and the Kuali document is never finalized.
@@ -550,6 +564,7 @@ export const separationsWorkflow = defineWorkflow({
         jobCode: jobSummaryData?.jobCode ?? "",
         jobDescription: jobSummaryData?.jobDescription ?? "",
         foundInNewKronos: String(newKronosFound),
+        separationComment: finalComments,
       });
       log.success(
         `DRY RUN: reached UCPath Smart HR transaction for doc #${docId} — ` +
@@ -572,12 +587,6 @@ export const separationsWorkflow = defineWorkflow({
     }
 
     const finalTermEffDate = termEffDate;
-    const finalComments = buildTerminationComments(
-      finalTermEffDate,
-      lastDayWorked,
-      docId,
-      { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
-    );
 
     // ─── Step 5: ucpath-job-summary — fill Kuali department/payroll from
     // the UCPath Job Summary data fetched in Phase 1's parallel block.
@@ -689,6 +698,7 @@ export const separationsWorkflow = defineWorkflow({
       jobCode: jobSummaryData?.jobCode ?? "",
       jobDescription: jobSummaryData?.jobDescription ?? "",
       foundInNewKronos: String(newKronosFound),
+      separationComment: finalComments,
       transactionNumber,
     });
 
