@@ -83,6 +83,7 @@ export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
 const separationsSteps = [
   "kuali-extraction",
+  "identity-check",
   "kronos-search",
   "ucpath-job-summary",
   "ucpath-transaction",
@@ -124,63 +125,67 @@ export function resolveJobSummaryResult(
 }
 
 /**
- * Resolve a provably-invalid Kuali EID via a person-lookup delegation.
+ * Verify the Kuali-extracted EID against the employee NAME via person-lookup,
+ * and correct it when they disagree. The NAME is authoritative.
  *
- * Operators sometimes type a short / malformed EID into the Kuali form (e.g.
- * `"1061029"` — 7 digits; a valid UCPath EID is 8 digits starting with `10`,
- * `isUcpathEmployeeId`). A short EID makes the UCPath Smart HR lookup find
- * nothing → no transaction number, so the separation fails far downstream with
- * an opaque error. This guard runs right after Kuali extraction (or the
- * edit-and-resume prefilled bypass) and BEFORE any consumer of
- * `kualiData.eid`:
+ * Operators type the EID into the Kuali form by hand. A valid-FORMAT but WRONG
+ * EID (e.g. `"10694136"` for the wrong person — passes `isUcpathEmployeeId`) is
+ * NOT caught by any format check, yet UCPath Smart HR rejects it: the Empl ID
+ * field goes red, "Continue" never advances, and the run dies far downstream on
+ * a comments-field timeout with no transaction number. The only reliable way to
+ * catch this is to look the person up BY NAME and compare.
  *
- *   - If the EID already passes `isUcpathEmployeeId`, it is returned unchanged
- *     (no delegation, no latency).
- *   - Otherwise it DELEGATES to `person-lookup` by the employee NAME (the name
- *     path has no EID-format constraint) to resolve the correct full EID, then
- *     continues the separation with the corrected value. person-lookup is
- *     daemon-capable, so `ctx.delegateTo` routes through its daemon, which
- *     authenticates UCPath + CRM independently — this adds latency; that is the
- *     accepted tradeoff for recovering an otherwise-doomed run.
- *   - If person-lookup returns no valid EID (failed run, or a `done` run that
- *     still produced no `isUcpathEmployeeId`-passing `emplId`), it FAILS LOUD:
- *     the error names the employee + the bad EID and tells the operator to fix
- *     the Kuali form. It does NOT silently continue with the bad EID.
+ * This is the `identity-check` step, run right after `kuali-extraction` (or the
+ * edit-and-resume prefilled bypass) and BEFORE any consumer of `kualiData.eid`
+ * (the Kronos date math + `runKronosSearch`). Behavior:
  *
- * This is a deliberately-scoped exception to the "wrong Kuali EID should fail
- * loudly" rule: only PROVABLY-invalid EIDs (failing `isUcpathEmployeeId`)
- * delegate. An 8-digit-but-semantically-wrong EID still passes the guard and
- * stays the operator's problem (EID/date duplicate protection covers the rest).
+ *   - ALWAYS delegate to `person-lookup` by `{ name: employeeName }` (the name
+ *     path has no EID-format constraint). person-lookup is daemon-capable, so
+ *     `ctx.delegateTo` routes through its daemon, which authenticates UCPath +
+ *     CRM independently — this adds an auth pass + latency to EVERY separation;
+ *     the accepted cost of verifying the identity up front.
+ *   - person-lookup resolves a valid EID:
+ *       · matches the Kuali EID → proceed unchanged.
+ *       · differs               → take the NAME-derived EID (name wins) and
+ *                                 `ctx.updateData({ eid })` so the corrected
+ *                                 value rides every downstream step + the final
+ *                                 snapshot / detail panel.
+ *   - person-lookup resolves NO valid EID (failed run, or a `done` run whose
+ *     `emplId` still fails `isUcpathEmployeeId`) → FAIL LOUD. Per the operator
+ *     decision (2026-06-18) the separation must be verifiable: we NEVER proceed
+ *     with an unverified EID.
  *
- * Returns the EID to use for the rest of the run. On a successful correction it
- * also `ctx.updateData({ eid })` so the corrected value persists to the tracker
- * row / final snapshot / detail panel (the caller separately threads it into
- * `kualiData`).
+ * This deliberately REVERSES the prior "fail loud, operator fixes Kuali; never
+ * name-correct an 8-digit-but-wrong EID" policy (see `src/systems/ucpath/
+ * CLAUDE.md` "No cross-source auto-fallbacks" + separations CLAUDE.md) — an
+ * operator-confirmed change. Unlike the 2026-04-23 reverted in-read cascade,
+ * the correction is VISIBLE: its own `identity-check` pipeline step + a
+ * delegated person-lookup child row, not a hidden last-resort fallback.
+ *
+ * Returns the verified EID to use for the rest of the run.
  */
 export async function resolveSeparationEid(
   ctx: Pick<Ctx<typeof separationsSteps, Record<string, unknown>>, "delegateTo" | "updateData">,
   kualiData: KualiSeparationData,
 ): Promise<string> {
-  if (isUcpathEmployeeId(kualiData.eid)) return kualiData.eid;
-
-  log.warn(
-    `[EID guard] Kuali EID "${kualiData.eid}" for "${kualiData.employeeName}" is not a valid ` +
-    `UCPath EID (need 8 digits starting with 10) — delegating to person-lookup by name to resolve it`,
-  );
-
   const result = await ctx.delegateTo(personLookupWorkflow, { name: kualiData.employeeName });
   const resolvedEid = result.status === "done" ? (result.data?.emplId ?? "") : "";
 
   if (!isUcpathEmployeeId(resolvedEid)) {
     throw new Error(
-      `Short/invalid EID "${kualiData.eid}" for "${kualiData.employeeName}" — ` +
-      `person-lookup returned no EID. Fix the EID in the Kuali form and retry.`,
+      `Could not verify the EID for "${kualiData.employeeName}" (Kuali EID "${kualiData.eid}") — ` +
+      `person-lookup resolved no UCPath EID by name. Fix the name/EID in the Kuali form and retry.`,
     );
   }
 
-  log.success(
-    `[EID guard] person-lookup resolved "${kualiData.employeeName}": ` +
-    `"${kualiData.eid}" → "${resolvedEid}" — continuing separation with corrected EID`,
+  if (resolvedEid === kualiData.eid) {
+    log.success(`[EID guard] Name ↔ EID verified for "${kualiData.employeeName}" (${kualiData.eid})`);
+    return kualiData.eid;
+  }
+
+  log.warn(
+    `[EID guard] Kuali EID "${kualiData.eid}" does NOT match person-lookup for "${kualiData.employeeName}" ` +
+    `(resolved "${resolvedEid}") — taking the name-derived EID (name is authoritative)`,
   );
   ctx.updateData({ eid: resolvedEid });
   return resolvedEid;
@@ -371,15 +376,31 @@ export const separationsWorkflow = defineWorkflow({
       kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
     }
 
-    // ─── EID guard: resolve a provably-invalid Kuali EID via person-lookup ───
-    // Must run AFTER kualiData is established by EITHER path (extraction or the
+    // ─── Step: identity-check — verify the Kuali EID against the NAME ───
+    // Runs AFTER kualiData is established by EITHER path (extraction or the
     // prefilled bypass) and BEFORE any consumer of kualiData.eid (the kronos
-    // date math and runKronosSearch below). A short/malformed EID is corrected
-    // by delegating to person-lookup by NAME; an unresolvable one fails loud
-    // (resolveSeparationEid throws). On success it rewrites kualiData.eid and
-    // persists ctx.data.eid so every downstream step + the final snapshot use
-    // the corrected value. See resolveSeparationEid + CLAUDE.md "Wrong Kuali EID".
-    kualiData = { ...kualiData, eid: await resolveSeparationEid(ctx, kualiData) };
+    // date math and runKronosSearch below). Delegates to person-lookup by NAME:
+    // the name is authoritative, so a mismatch takes the name-derived EID and an
+    // unverifiable name fails loud (resolveSeparationEid throws). On a
+    // correction it rewrites kualiData.eid and persists ctx.data.eid so every
+    // downstream step + the final snapshot use the verified value. See
+    // resolveSeparationEid + CLAUDE.md "Name ↔ EID verification".
+    //
+    // Skipped only on the txn-prefilled resume path: when a transactionNumber is
+    // already carried forward, UCPath previously ACCEPTED that EID and the
+    // ucpath-transaction step is skipped below — there is no re-submit to
+    // protect, so re-verifying would only add a wasted person-lookup auth pass.
+    if (txnNumberPrefilled) {
+      ctx.skipStep("identity-check");
+      log.step(
+        `[Step: identity-check] SKIPPED — txn # prefilled (UCPath already accepted EID '${kualiData.eid}'; no re-submit)`,
+      );
+    } else {
+      const verifiedEid = await ctx.step("identity-check", () =>
+        resolveSeparationEid(ctx, kualiData),
+      );
+      kualiData = { ...kualiData, eid: verifiedEid };
+    }
 
     // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
     // work on a record that isn't yet actionable. Both Last Day Worked and

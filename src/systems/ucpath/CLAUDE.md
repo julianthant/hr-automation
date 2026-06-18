@@ -67,6 +67,8 @@ Auto-correction via cross-source name matching is a correctness risk: names aren
 
 **Before adding any cross-source fallback to a UCPath read, confirm with the user.** The default answer is no.
 
+**Confirmed exception — separations `identity-check` (2026-06-18).** Separations DOES name-correct the EID: every run delegates to person-lookup by NAME and takes the name-derived EID on a mismatch (fails loud if unverifiable). This was an explicit operator decision that reverses the rule above for that one workflow, to catch a valid-FORMAT but WRONG EID (e.g. `10694136` for the wrong person) that UCPath Smart HR rejects with a red Empl ID field. It is NOT the hidden in-read cascade reverted on 2026-04-23 — it is a VISIBLE pipeline step (`identity-check`) + a delegated person-lookup child row, and it runs ALWAYS, not as a last-resort fallback inside `getJobSummaryData`. The `getJobSummaryData` / Workforce-read no-fallback rule below is unchanged; this exception lives only in the separations handler. See `src/workflows/separations/CLAUDE.md` ("Name ↔ EID verification").
+
 ## Lessons Learned
 
 - **2026-06-02: Person Org Summary Last Hire is backend context, NOT the displayed start date.** Person Org detail exposes Last Hire in the ORG Instance section and assignment EFFDT in the Employment Instances grid. Keep `EidResult.startDate` on Last Hire and `EidResult.effectiveDate` on EFFDT for backend use (EID disambiguation / `crmMatch` date tolerance). The operator-facing person-lookup "Start Date" is sourced from CRM (First Day of Service), not from either UCPath date — see `src/workflows/person-lookup/CLAUDE.md`.

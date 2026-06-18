@@ -10,9 +10,9 @@ Each dashboard input run enqueues N names/EIDs as N kernel items to an alive dae
 
 `lookup.ts` exports `lookupPersonInUcpath` — the raw UCPath Person Org search. Other workflows (OCR orchestrator, force-research, retry-page) call this function or delegate to `personLookupWorkflow` for EID-resolution work. Do not call `searchByName` / `searchByEid` directly from composing workflows — route through `lookupPersonInUcpath` so hidden Employment Instances are handled consistently.
 
-## Delegated by separations (short-EID resolution)
+## Delegated by separations (name↔EID verification)
 
-`separations` delegates to `personLookupWorkflow` via `ctx.delegateTo` when a Kuali-extracted EID is *provably* invalid (fails `isUcpathEmployeeId`, e.g. a 7-digit value): in `{ name: employeeName }`, out the corrected EID at `result.data.emplId` (the resolved 8-digit `emplId` stamped by the `searching`/`active-status` steps). person-lookup is daemon-capable, so this routes through a person-lookup daemon (its own UCPath + CRM auth — adds latency). If person-lookup returns no valid EID, separations fails loud rather than continuing with the bad EID. See `src/workflows/separations/CLAUDE.md` ("Short/invalid Kuali EIDs", 2026-06-17).
+`separations` delegates to `personLookupWorkflow` via `ctx.delegateTo` on **every** run, at its `identity-check` step, to verify the Kuali-extracted EID against the employee NAME: in `{ name: employeeName }`, out the resolved EID at `result.data.emplId` (the 8-digit `emplId` stamped by the `searching`/`active-status` steps). The name is authoritative — separations proceeds when the resolved EID matches, takes the name-derived EID when it differs (e.g. a valid-format but wrong EID like the Perez `10694136` case), and **fails loud** when person-lookup resolves no valid EID (never proceeds with an unverified EID). person-lookup is daemon-capable, so this routes through a person-lookup daemon (its own UCPath + CRM auth — adds an auth pass + latency to *every* separation). See `src/workflows/separations/CLAUDE.md` ("Name ↔ EID verification", 2026-06-18).
 
 ## Status derivation
 
