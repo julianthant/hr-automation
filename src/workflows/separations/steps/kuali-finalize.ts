@@ -14,7 +14,12 @@ import type { Ctx } from "../../../core/kernel/types.js";
 export interface KualiFinalizationArgs {
   kualiPage: Page;
   kualiData: KualiSeparationData;
-  resolved: { lastDayWorked: string; separationDate: string; changed: boolean };
+  /** Reconciled Last Day Worked (New Kronos last punch override, else Kuali's). */
+  lastDayWorked: string;
+  /** Kuali-authoritative separation date (never overridden by Kronos). */
+  separationDate: string;
+  /** True when `lastDayWorked` differs from the Kuali-extracted LDW. */
+  ldwChanged: boolean;
   transactionNumber: string;
   finalTermEffDate: string;
   timekeeperName: string;
@@ -29,7 +34,7 @@ export async function runKualiFinalize(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
   args: KualiFinalizationArgs,
 ): Promise<void> {
-  const { kualiPage, kualiData, resolved, transactionNumber, finalTermEffDate, timekeeperName } = args;
+  const { kualiPage, kualiData, lastDayWorked, ldwChanged, transactionNumber, finalTermEffDate, timekeeperName } = args;
   const t0 = Date.now();
   log.debug(`[Step: kuali-finalization] START txnNumber='${transactionNumber || "<empty>"}'`);
   log.step("=== PHASE 3: Kuali finalization ===");
@@ -50,11 +55,12 @@ export async function runKualiFinalize(
   }
 
   const initials = getInitials(timekeeperName);
-  const dateChangeComments = buildDateChangeComments(
-    kualiData.lastDayWorked, resolved.lastDayWorked,
-    kualiData.separationDate, resolved.separationDate,
-    initials,
-  );
+  // Only the Last Day Worked can change (New Kronos last punch overrides Kuali's
+  // LDW); the Separation Date is Kuali-authoritative. Emit the date-change note
+  // only when the LDW actually moved.
+  const dateChangeComments = ldwChanged
+    ? buildDateChangeComments(kualiData.lastDayWorked, lastDayWorked, initials)
+    : "";
   // User-supplied free-form Kuali timekeeper-comments override (set
   // via the dashboard's EditDataTab → prefilledData channel). Joined
   // with auto-generated date-change comments using a newline. The

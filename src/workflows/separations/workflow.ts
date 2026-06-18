@@ -16,8 +16,6 @@ import { requireLogin, requirePrepareLogin } from "../../infra/auth/require-logi
 import {
   kualiNavigateAndFill,
   kualiSubmitAndWaitForDuo,
-  ukgNavigateAndFill,
-  ukgSubmitAndWaitForDuo,
   ucpathNavigateAndFill,
   ucpathSubmitAndWaitForDuo,
   newKronosNavigateAndFill,
@@ -30,7 +28,6 @@ import {
   isVoluntaryTermination,
   fillTimekeeperTasks,
   updateLastDayWorked,
-  updateSeparationDate,
 } from "../../systems/kuali/index.js";
 import type { KualiSeparationData } from "../../systems/kuali/index.js";
 
@@ -39,6 +36,7 @@ import {
   scrollNewKronosTimecardToDate,
   NEW_KRONOS_URL,
 } from "../../systems/new-kronos/index.js";
+import type { SeparationTimecardData } from "../../systems/new-kronos/index.js";
 
 // UCPath (used for jobSummary result resolution)
 import type { JobSummaryData } from "../../systems/ucpath/index.js";
@@ -47,7 +45,6 @@ import {
   computeTerminationEffDate,
   computeKronosDateRange,
   buildTerminationComments,
-  resolveKronosDates,
   mapReasonCode,
   validateLastDayWorked,
 } from "./schema.js";
@@ -56,8 +53,7 @@ import {
   UC_VOL_TERM_TEMPLATE,
   UC_INVOL_TERM_TEMPLATE,
 } from "./config.js";
-import { PATHS, UCPATH_SMART_HR_URL } from "../../config.js";
-import { getProcessIsolatedSessionDir } from "../../core/kernel/session.js";
+import { UCPATH_SMART_HR_URL } from "../../config.js";
 
 // Step functions
 import { runKualiExtract } from "./steps/kuali-extract.js";
@@ -99,22 +95,20 @@ export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
 /**
  * Kernel definition for the separations workflow.
  *
- * 4 systems, parallel-staggered auth: every browser's SSO form is pre-filled
+ * 3 systems, parallel-staggered auth: every browser's SSO form is pre-filled
  * in parallel via `prepareLogin`, then submit clicks fire 5 seconds apart
- * (Kuali at t=0, Old Kronos at t=5s, New Kronos at t=10s, UCPath at t=15s).
- * All 4 Duo prompts pend on the user's phone simultaneously — the user can
- * approve them in any order. `ctx.page(id)` awaits each system's ready
- * promise, so phase-1 tasks start as soon as their individual Duo clears
- * (in approval order, not click order).
+ * (Kuali at t=0, New Kronos at t=5s, UCPath at t=10s). All 3 Duo prompts pend
+ * on the user's phone simultaneously — the user can approve them in any order.
+ * `ctx.page(id)` awaits each system's ready promise, so phase-1 tasks start as
+ * soon as their individual Duo clears (in approval order, not click order).
  *
- * Phase 1 (`kronos-search`) runs 4 tasks in parallel via `ctx.parallel`:
- *   - Old Kronos timecard search
- *   - New Kronos timecard search
+ * Phase 1 (`kronos-search`) runs 3 tasks in parallel via `ctx.parallel`:
+ *   - New Kronos timecard search (last physical punch + sick/holiday days)
  *   - UCPath Job Summary lookup
  *   - Kuali timekeeper name fill
  * Each task `await ctx.page(id)` first to block on its system's auth.
  *
- * Phase 2 (`ucpath-job-summary`): Kronos date resolution + Kuali term date / dept fill.
+ * Phase 2 (`ucpath-job-summary`): Kuali dept/payroll fill from the Job Summary.
  * Phase 3 (`ucpath-transaction`): Smart HR UC_VOL_TERM or UC_INVOL_TERM.
  * Phase 4 (`kuali-finalization`): write txn number back, fill date-change comments, save.
  *
@@ -221,12 +215,6 @@ export const separationsWorkflow = defineWorkflow({
         if (!ok) throw new Error("Kuali authentication failed");
       },
       resetUrl: KUALI_SPACE_URL,
-    },
-    {
-      id: "old-kronos",
-      prepareLogin: requirePrepareLogin(ukgNavigateAndFill, "UKG prepareLogin failed"),
-      login: requireLogin(ukgSubmitAndWaitForDuo, "Old Kronos (UKG) authentication failed"),
-      sessionDir: getProcessIsolatedSessionDir(PATHS.ukgSessionSep),
     },
     {
       id: "new-kronos",
@@ -403,16 +391,20 @@ export const separationsWorkflow = defineWorkflow({
     log.step(`Employee: ${kualiData.employeeName} | EID: ${kualiData.eid}`);
     log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${termEffDate}`);
 
-    // ─── Step 4: kronos-search (4-way parallel) ───
+    // ─── Step 4: kronos-search (3-way parallel) ───
     const { startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(
       kualiData.lastDayWorked, kualiData.separationDate,
     );
-    log.step(`[Old Kronos / New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
+    log.step(`[New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
 
     // ─── Process Phase 1 results (preserve PromiseSettledResult fallback semantics) ───
-    let oldKronosDate: string | null = null;
-    let newKronosDate: string | null = null;
-    let oldKronosFound = false;
+    // New Kronos separation timecard: last physical punch + sick/holiday days.
+    // Empty default when kronos-search is skipped (prefill / preset paths).
+    let timecard: SeparationTimecardData = {
+      lastPunchDate: null,
+      sickDates: [],
+      holidayDates: [],
+    };
     let newKronosFound = false;
     let jobSummaryData: JobSummaryData | undefined;
 
@@ -421,8 +413,8 @@ export const separationsWorkflow = defineWorkflow({
     //   2. Operator selected the "Transactions only" preset from the
     //      InputRunPanel gear menu (asserts the Kuali form is already correct).
     // In both cases the handler falls back to `kualiData.lastDayWorked` (which
-    // kuali-extraction just read from the Kuali form) for downstream
-    // `resolveKronosDates`, so no extra plumbing is needed.
+    // kuali-extraction just read from the Kuali form) for the Last Day Worked,
+    // and sick/holiday stay empty — so no extra plumbing is needed.
     const presetSkippedKronos = ctx.shouldSkipStep("kronos-search");
     if (lastDayWorkedPrefilled || presetSkippedKronos) {
       ctx.skipStep("kronos-search");
@@ -445,15 +437,13 @@ export const separationsWorkflow = defineWorkflow({
       runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName),
     );
 
-    if (phase1.oldK.status === "fulfilled") {
-      oldKronosFound = phase1.oldK.value.found;
-      oldKronosDate = phase1.oldK.value.date;
-    } else {
-      logSettledRejection("Old Kronos", phase1.oldK);
-    }
     if (phase1.newK.status === "fulfilled") {
       newKronosFound = phase1.newK.value.found;
-      newKronosDate = phase1.newK.value.date;
+      timecard = {
+        lastPunchDate: phase1.newK.value.lastPunchDate,
+        sickDates: phase1.newK.value.sickDates,
+        holidayDates: phase1.newK.value.holidayDates,
+      };
     } else {
       logSettledRejection("New Kronos", phase1.newK);
     }
@@ -463,42 +453,56 @@ export const separationsWorkflow = defineWorkflow({
     jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
     logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper);
 
-    log.step(`[Old Kronos] ${oldKronosFound ? "Found" : "Not found"} (${oldKronosDate ?? "no time"})`);
-    log.step(`[New Kronos] ${newKronosFound ? "Found" : "Not found"} (${newKronosDate ?? "no time"})`);
+    log.step(
+      `[New Kronos] ${newKronosFound ? "Found" : "Not found"} ` +
+      `(lastPunch=${timecard.lastPunchDate ?? "none"}, ` +
+      `sick=${timecard.sickDates.length}, holiday=${timecard.holidayDates.length})`,
+    );
     } // end !lastDayWorkedPrefilled branch
 
-    // ─── Resolve Kronos dates (Kronos overrides Kuali — ground truth) ───
-    const resolved = resolveKronosDates(
-      kualiData.lastDayWorked, kualiData.separationDate,
-      oldKronosDate, newKronosDate,
-    );
+    // ─── Reconcile dates (NEW MODEL) ───
+    // Last Day Worked = New Kronos last physical punch (timecard ground truth),
+    //   which OVERRIDES the Kuali LDW when they differ. Falls back to Kuali's
+    //   LDW when New Kronos returned no punch or kronos-search was skipped.
+    // Separation Date = Kuali's separationDate — AUTHORITATIVE, never overridden
+    //   (it's the "last day actively employed", can be later than LDW via leave).
+    // Termination Effective Date = Separation Date + 1 day.
+    // Sick / holiday days drive the comment clause ONLY — never any date.
+    const lastDayWorked = timecard.lastPunchDate ?? kualiData.lastDayWorked;
+    const ldwChanged =
+      timecard.lastPunchDate != null && timecard.lastPunchDate !== kualiData.lastDayWorked;
+    // Separation Date is Kuali-authoritative; `termEffDate` (= separationDate + 1)
+    // was already computed from kualiData.separationDate above — reuse both.
+    const separationDate = kualiData.separationDate;
 
-    const prefilledOverridesKuali =
-      lastDayWorkedPrefilled &&
-      (ctx.data.lastDayWorked as string | undefined) !== kualiData.lastDayWorked;
-    const chosenDateSource = prefilledOverridesKuali
-      ? "Operator-prefilled (overrides Kuali)"
-      : resolved.changed
-        ? (oldKronosDate && newKronosDate
-            ? (oldKronosDate >= newKronosDate ? "Old Kronos" : "New Kronos")
-            : (oldKronosDate ? "Old Kronos" : "New Kronos"))
-        : "Kuali (no change)";
-    log.step(`[Old Kronos / New Kronos] Resolved dates — using ${chosenDateSource}`);
+    log.step(
+      `[Dates] Last Day Worked = ${lastDayWorked}` +
+      (ldwChanged
+        ? ` (New Kronos last punch overrides Kuali '${kualiData.lastDayWorked}')`
+        : ` (Kuali LDW — no Kronos override)`),
+    );
+    log.step(`[Dates] Separation Date = ${separationDate} (Kuali authoritative — never overridden)`);
+    log.step(`[Dates] Termination effective date = ${termEffDate} (separation date + 1 day)`);
+    if (timecard.sickDates.length || timecard.holidayDates.length) {
+      log.step(
+        `[Dates] Leave from timecard — sick=${timecard.sickDates.length} ` +
+        `holiday=${timecard.holidayDates.length} (comment clause only, no date change)`,
+      );
+    }
 
     // Position the New Kronos timecard view so the chosen Last Day Worked
     // row is CENTERED, then take a dedicated audit screenshot of ONLY the
     // new-kronos page showing that date with its neighbours above/below — so
-    // the operator can verify "was there actually a later date that should
-    // have been picked?" without opening the Kronos browser. A VIEWPORT
-    // capture (centerSelector), NOT fullPage: the New Kronos timecard is a
-    // virtual-scroll grid (`.ui-grid-viewport`) — fullPage only captures the
-    // rows currently rendered in the DOM, missing off-screen data. The
-    // screenshot fires even when the scroll best-effort-fails (it captures
-    // whatever is shown). Best-effort — neither the scroll nor the shot may
-    // disrupt the rest of the run.
+    // the operator can verify the last physical punch without opening the
+    // Kronos browser. A VIEWPORT capture (centerSelector), NOT fullPage: the
+    // New Kronos timecard is a virtual-scroll grid (`.ui-grid-viewport`) —
+    // fullPage only captures the rows currently rendered in the DOM, missing
+    // off-screen data. The screenshot fires even when the scroll best-effort-
+    // fails (it captures whatever is shown). Best-effort — neither the scroll
+    // nor the shot may disrupt the rest of the run.
     try {
       const newKronosPage = await ctx.page("new-kronos");
-      await scrollNewKronosTimecardToDate(newKronosPage, resolved.lastDayWorked);
+      await scrollNewKronosTimecardToDate(newKronosPage, lastDayWorked);
       await ctx.screenshot({
         kind: 'form',
         label: 'new-kronos-last-worked-date',
@@ -511,8 +515,8 @@ export const separationsWorkflow = defineWorkflow({
     } catch { /* best-effort */ }
 
     // Early-populate separationDate so the dashboard shows it as soon as
-    // Kronos reconciliation completes (not only after the transaction submits).
-    ctx.updateData({ separationDate: resolved.separationDate, terminationType: isVol ? "Vol" : "Invol" });
+    // date reconciliation completes (not only after the transaction submits).
+    ctx.updateData({ separationDate, terminationType: isVol ? "Vol" : "Invol" });
 
     // ─── DRY RUN terminal — stop before EVERY irreversible write ───
     // Separations has TWO committing mutations: the UCPath Smart HR submit
@@ -530,10 +534,6 @@ export const separationsWorkflow = defineWorkflow({
     // `kronos-search` parallel block has already touched the UNSUBMITTED Kuali
     // draft — it commits nothing, mirroring onboarding's pre-submit I-9 create.)
     if (input.dryRun) {
-      const dryRunTermEffDate =
-        resolved.separationDate !== kualiData.separationDate
-          ? computeTerminationEffDate(resolved.separationDate)
-          : termEffDate;
       ctx.skipStep("ucpath-job-summary");
       ctx.skipStep("ucpath-transaction");
       ctx.skipStep("kuali-finalization");
@@ -542,14 +542,13 @@ export const separationsWorkflow = defineWorkflow({
         status: "Dry Run Complete",
         dryRun: true,
         terminationType: isVol ? "Vol" : "Invol",
-        separationDate: resolved.separationDate,
-        lastDayWorked: resolved.lastDayWorked,
-        terminationEffDate: dryRunTermEffDate,
+        separationDate,
+        lastDayWorked,
+        terminationEffDate: termEffDate,
         deptId: jobSummaryData?.deptId ?? "",
         departmentDescription: jobSummaryData?.departmentDescription ?? "",
         jobCode: jobSummaryData?.jobCode ?? "",
         jobDescription: jobSummaryData?.jobDescription ?? "",
-        foundInOldKronos: String(oldKronosFound),
         foundInNewKronos: String(newKronosFound),
       });
       log.success(
@@ -561,27 +560,24 @@ export const separationsWorkflow = defineWorkflow({
     }
 
     const kualiPage = await ctx.page("kuali");
-    if (resolved.changed) {
-      log.step("[Old Kronos / New Kronos] Dates differ from Kuali — updating:");
-      if (resolved.lastDayWorked !== kualiData.lastDayWorked) {
-        log.step(`  Last Day Worked: ${kualiData.lastDayWorked} → ${resolved.lastDayWorked}`);
-        await updateLastDayWorked(kualiPage, resolved.lastDayWorked);
-      }
-      if (resolved.separationDate !== kualiData.separationDate) {
-        log.step(`  Separation Date: ${kualiData.separationDate} → ${resolved.separationDate}`);
-        await updateSeparationDate(kualiPage, resolved.separationDate);
-      }
+    // Only the Last Day Worked may change (New Kronos last punch overrides
+    // Kuali's). The Separation Date is Kuali-authoritative and is NEVER written
+    // back — it stays exactly what the requester entered.
+    if (ldwChanged) {
+      log.step(`[New Kronos] Last Day Worked differs from Kuali — updating:`);
+      log.step(`  Last Day Worked: ${kualiData.lastDayWorked} → ${lastDayWorked}`);
+      await updateLastDayWorked(kualiPage, lastDayWorked);
     } else {
-      log.step("[Dates] No date changes needed");
+      log.step("[Dates] No Last Day Worked change needed");
     }
 
-    const finalTermEffDate = resolved.separationDate !== kualiData.separationDate
-      ? computeTerminationEffDate(resolved.separationDate)
-      : termEffDate;
-    if (resolved.separationDate !== kualiData.separationDate) {
-      log.step(`Termination effective date: ${finalTermEffDate} (updated separation date ${resolved.separationDate} + 1 day)`);
-    }
-    const finalComments = buildTerminationComments(finalTermEffDate, resolved.lastDayWorked, docId);
+    const finalTermEffDate = termEffDate;
+    const finalComments = buildTerminationComments(
+      finalTermEffDate,
+      lastDayWorked,
+      docId,
+      { sickDates: timecard.sickDates, holidayDates: timecard.holidayDates },
+    );
 
     // ─── Step 5: ucpath-job-summary — fill Kuali department/payroll from
     // the UCPath Job Summary data fetched in Phase 1's parallel block.
@@ -617,6 +613,11 @@ export const separationsWorkflow = defineWorkflow({
     }
 
     // ─── Step 6: UCPath Smart HR Transaction ───
+    // TODO(separations): explicitly set UCPath Last Date Worked = lastDayWorked
+    // + Override Last Date Worked checkbox (needs live UCPath selector mapping).
+    // Today the reconciled lastDayWorked flows only through finalComments →
+    // fillComments; the UCPath form field / override checkbox are NOT set
+    // because those selectors don't exist yet (deferred — needs a live mapping).
     // Edit-and-resume: a prefilled `transactionNumber` means UCPath already
     // accepted the submit on a prior run and the user just wants Kuali
     // finalization re-run (the failure was downstream). Skip the step
@@ -668,7 +669,9 @@ export const separationsWorkflow = defineWorkflow({
       runKualiFinalize(ctx, {
         kualiPage,
         kualiData,
-        resolved,
+        lastDayWorked,
+        separationDate,
+        ldwChanged,
         transactionNumber,
         finalTermEffDate,
         timekeeperName,
@@ -678,13 +681,13 @@ export const separationsWorkflow = defineWorkflow({
     // Final state snapshot for the dashboard detail panel / JSONL readers.
     ctx.updateData({
       terminationType: isVol ? "Vol" : "Invol",
-      separationDate: resolved.separationDate,
+      separationDate,
+      lastDayWorked,
       terminationEffDate: finalTermEffDate,
       deptId: jobSummaryData?.deptId ?? "",
       departmentDescription: jobSummaryData?.departmentDescription ?? "",
       jobCode: jobSummaryData?.jobCode ?? "",
       jobDescription: jobSummaryData?.jobDescription ?? "",
-      foundInOldKronos: String(oldKronosFound),
       foundInNewKronos: String(newKronosFound),
       transactionNumber,
     });

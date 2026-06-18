@@ -22,7 +22,6 @@ export const SeparationDataSchema = z.object({
   jobDescription: z.string().optional(),
 
   // From Kronos search
-  foundInOldKronos: z.boolean().optional(),
   foundInNewKronos: z.boolean().optional(),
 
   // From UCPath transaction
@@ -42,13 +41,47 @@ export function computeTerminationEffDate(separationDate: string): string {
 
 /**
  * Build the comments text for the UCPath termination transaction.
+ *
+ * Base form: `Termination eff <eff>. Last Day Worked <ldw>.` then, when present,
+ * a Sick-leave clause and/or a Holiday-Pay clause (sick first, holiday second),
+ * then ` Kuali form #<docId>.`. The sick/holiday dates come from the New Kronos
+ * separation timecard (`SeparationTimecardData`) and ONLY drive this comment —
+ * they never change any date.
+ *
+ * Clause shapes (dates are MM/DD/YYYY, chronological):
+ *   - 0 dates  → no clause
+ *   - 1 date   → ` Sick Leave on <d>.`  /  ` Holiday Pay on <d>.`
+ *   - ≥2 dates → ` Sick leave from <first> to <last>.`  /  ` Holiday Pay from <first> to <last>.`
  */
 export function buildTerminationComments(
   terminationEffDate: string,
   lastDayWorked: string,
   docId: string,
+  leave?: { sickDates?: string[]; holidayDates?: string[] },
 ): string {
-  return `Termination EFF ${terminationEffDate}. Last day worked ${lastDayWorked}. Kuali form #${docId}.`;
+  const sickDates = leave?.sickDates ?? [];
+  const holidayDates = leave?.holidayDates ?? [];
+
+  let sickClause = "";
+  if (sickDates.length === 1) {
+    sickClause = ` Sick Leave on ${sickDates[0]}.`;
+  } else if (sickDates.length >= 2) {
+    sickClause = ` Sick leave from ${sickDates[0]} to ${sickDates[sickDates.length - 1]}.`;
+  }
+
+  let holidayClause = "";
+  if (holidayDates.length === 1) {
+    holidayClause = ` Holiday Pay on ${holidayDates[0]}.`;
+  } else if (holidayDates.length >= 2) {
+    holidayClause = ` Holiday Pay from ${holidayDates[0]} to ${holidayDates[holidayDates.length - 1]}.`;
+  }
+
+  return (
+    `Termination eff ${terminationEffDate}. Last Day Worked ${lastDayWorked}.` +
+    sickClause +
+    holidayClause +
+    ` Kuali form #${docId}.`
+  );
 }
 
 /**
@@ -149,56 +182,6 @@ function formatMmDdYyyy(d: Date): string {
 }
 
 /**
- * Compare Kronos timecard dates and Kuali dates to determine the correct
- * Last Day Worked and Separation Date.
- *
- * Logic:
- * - If either Kronos has time entries, pick the latest Kronos date
- * - If the Kronos date is later than Kuali's dates, update them
- * - If neither Kronos has time, keep Kuali's original dates
- *
- * Returns { lastDayWorked, separationDate, changed: boolean }
- */
-export function resolveKronosDates(
-  kualiLastDay: string,
-  kualiSepDate: string,
-  oldKronosDate: string | null,
-  newKronosDate: string | null,
-): { lastDayWorked: string; separationDate: string; changed: boolean } {
-  // No Kronos data — keep originals
-  if (!oldKronosDate && !newKronosDate) {
-    return { lastDayWorked: kualiLastDay, separationDate: kualiSepDate, changed: false };
-  }
-
-  // Pick the latest Kronos date
-  let kronosDate: string;
-  if (oldKronosDate && newKronosDate) {
-    kronosDate = parseDate(oldKronosDate) >= parseDate(newKronosDate) ? oldKronosDate : newKronosDate;
-  } else {
-    kronosDate = (oldKronosDate ?? newKronosDate)!;
-  }
-
-  const kronosParsed = parseDate(kronosDate);
-  const kualiLastParsed = parseDate(kualiLastDay);
-  const kualiSepParsed = parseDate(kualiSepDate);
-
-  // Only update if Kronos date is different from both Kuali dates
-  const lastDayDiffers = kronosParsed.getTime() !== kualiLastParsed.getTime();
-  const sepDateDiffers = kronosParsed.getTime() !== kualiSepParsed.getTime();
-
-  if (!lastDayDiffers && !sepDateDiffers) {
-    return { lastDayWorked: kualiLastDay, separationDate: kualiSepDate, changed: false };
-  }
-
-  // Kronos timecard data is ground truth — always use it when available
-  return {
-    lastDayWorked: lastDayDiffers ? kronosDate : kualiLastDay,
-    separationDate: sepDateDiffers ? kronosDate : kualiSepDate,
-    changed: true,
-  };
-}
-
-/**
  * Compute the Kronos date range for timecard search.
  * Start = min(lastDayWorked, separationDate) - 1 month
  * End   = max(lastDayWorked, separationDate) + 1 month
@@ -224,24 +207,20 @@ export function computeKronosDateRange(
 }
 
 /**
- * Build date change comments for the Timekeeper/Approver Comments field.
- * Only generates text if dates were actually changed.
+ * Build the date-change comment for the Timekeeper/Approver Comments field.
+ *
+ * Only the Last Day Worked can change now (the New Kronos last physical punch
+ * overrides Kuali's LDW). The Separation Date is Kuali-authoritative and is
+ * never overridden, so there is no separation-date branch. Returns an empty
+ * string when the LDW did not change.
  */
 export function buildDateChangeComments(
   originalLastDay: string,
   newLastDay: string,
-  originalSepDate: string,
-  newSepDate: string,
   initials: string,
 ): string {
-  const lines: string[] = [];
-  if (originalLastDay !== newLastDay) {
-    lines.push(`Updated Last Day Worked from ${originalLastDay} to ${newLastDay} per Kronos timesheet. -${initials}`);
-  }
-  if (originalSepDate !== newSepDate) {
-    lines.push(`Updated Separation Date from ${originalSepDate} to ${newSepDate} per Kronos timesheet. -${initials}`);
-  }
-  return lines.join("\n");
+  if (originalLastDay === newLastDay) return "";
+  return `Updated Last Day Worked from ${originalLastDay} to ${newLastDay} per Kronos timesheet. -${initials}`;
 }
 
 /**
