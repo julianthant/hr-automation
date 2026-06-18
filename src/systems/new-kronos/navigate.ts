@@ -134,29 +134,36 @@ export async function searchEmployee(
  */
 export async function selectEmployeeResult(page: Page): Promise<boolean> {
   log.step("[New Kronos] Selecting employee from search results...");
-  const root = await resolveSearchRoot(page);
 
-  // Check the first result's "Select Item" checkbox. SELECTING an employee is
-  // what ENABLES the Go To button (it is `ng-disabled` until a slat is
-  // selected), so this must actually register — the previous
-  // `input[type=checkbox]` target did not fire Angular's selection handler,
-  // leaving Go To disabled and the timecard unreachable.
-  const checkbox = searchSelectors.firstResultCheckbox(root);
-  try {
-    await checkbox.check({ timeout: 5_000 });
-    await page.waitForTimeout(1_000);
-    log.step("[New Kronos] Employee checkbox checked");
-    return true;
-  } catch {
-    log.warn("[New Kronos] Result checkbox not checkable — clicking the result row instead");
+  // The results render in the portal-frame iframe OR top-level. After a search
+  // the search INPUT collapses to "Show Search", so `resolveSearchRoot` (which
+  // probes the input) can mis-detect the context here — try the result CHECKBOX
+  // directly in BOTH contexts. Checking the "Select Item" checkbox is what
+  // registers the slat selection that ENABLES the Go To button. (2026-06-18: the
+  // daemon resolved to the wrong context and left Selected[0] / Go To disabled.)
+  const contexts: SearchRoot[] = [searchFrame(page), page];
+  for (const root of contexts) {
+    const checkbox = searchSelectors.firstResultCheckbox(root);
+    try {
+      if ((await checkbox.count()) > 0) {
+        await checkbox.check({ timeout: 5_000 });
+        await page.waitForTimeout(1_000);
+        log.step("[New Kronos] Employee checkbox checked");
+        return true;
+      }
+    } catch {
+      log.warn("[New Kronos] Result checkbox present but not checkable in this context — trying the next");
+    }
   }
 
-  // Fallback: click the result row (the `menuitemradio`) directly to select it.
-  const resultRow = searchSelectors.firstResultRow(root);
-  if (await clickIfPresent(resultRow, { timeout: 5_000, label: "new kronos search result row" })) {
-    await page.waitForTimeout(1_000);
-    log.step("[New Kronos] Employee row clicked");
-    return true;
+  // Fallback: click the result row (the `menuitemradio`) directly, in either context.
+  for (const root of contexts) {
+    const resultRow = searchSelectors.firstResultRow(root);
+    if (await clickIfPresent(resultRow, { timeout: 3_000, label: "new kronos search result row" })) {
+      await page.waitForTimeout(1_000);
+      log.step("[New Kronos] Employee row clicked");
+      return true;
+    }
   }
 
   log.error("[New Kronos] Could not select employee from results");

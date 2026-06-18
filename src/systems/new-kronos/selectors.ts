@@ -86,13 +86,15 @@ export const search = {
   /**
    * First result's "Select Item" checkbox — checking it SELECTS the employee,
    * which is what ENABLES the Go To button (it is `ng-disabled` until a slat is
-   * selected). The live control is `role=checkbox name="Select Item"`, NOT a
-   * bare `<input type=checkbox>` (a native input backs it, but checking that
-   * input does not fire Angular's selection handler). verified 2026-06-18
+   * selected). Target it PRECISELY by accessible name "Select Item" — do NOT
+   * union with a bare `input[type=checkbox]`, which would also match the
+   * "Select All" header checkbox and pick the wrong control (leaving
+   * Selected[0]). The result control is a native input with role=checkbox, so
+   * getByRole still matches it. verified 2026-06-18
    * @tags first, result, checkbox, select-item, search, new-kronos
    */
   firstResultCheckbox: (root: SearchRoot): Locator =>
-    root.getByRole("checkbox", { name: "Select Item" }).or(root.locator('input[type="checkbox"]')).first(),
+    root.getByRole("checkbox", { name: "Select Item" }).first(),
 
   /**
    * First result row fallback — the result renders as a `menuitemradio`
