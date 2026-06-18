@@ -12,6 +12,23 @@ const IDOCS_DOC_PATH = "/iDocsForSalesforce/iDocsForSalesforceDocumentServer";
 
 export const DEFAULT_CRM_DOC_INDICES = [0, 2] as const;
 
+/**
+ * Position-based default names for the CRM onboarding documents. The iDocs
+ * document server rarely sends a usable Content-Disposition filename, so the
+ * downloaded file falls back to the document's known identity by position:
+ * doc 1 (index 0) is the signed offer letter, doc 3 (index 2) is the EE data
+ * gathering form. Indices without a known identity fall back to `document-N`.
+ */
+export const CRM_DOC_DEFAULT_NAMES: Readonly<Record<number, string>> = {
+  0: "Signed Offer Letter",
+  2: "EE Data Gathering Form",
+};
+
+/** Fallback filename (with `.pdf`) used when CRM sends no usable filename. */
+export function defaultCrmDocumentName(index: number): string {
+  return `${CRM_DOC_DEFAULT_NAMES[index] ?? `document-${index + 1}`}.pdf`;
+}
+
 export interface CrmDocumentDownloadSubject {
   firstName: string;
   lastName: string;
@@ -263,9 +280,10 @@ export async function downloadCrmIdocsDocuments(
       throw new Error(`Document ${idx + 1} fetch did not return a PDF`);
     }
 
+    const fallbackName = defaultCrmDocumentName(idx);
     const filename = sanitizeCrmDocumentFilename(
-      parseCrmDocumentFilename(headers["content-disposition"] ?? null, `document-${idx + 1}.pdf`),
-      `document-${idx + 1}.pdf`,
+      parseCrmDocumentFilename(headers["content-disposition"] ?? null, fallbackName),
+      fallbackName,
     );
     const savedName = `Doc${idx + 1}-${filename}`;
     const savedPath = join(folderPath, savedName);
