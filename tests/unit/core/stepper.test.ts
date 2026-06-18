@@ -122,6 +122,74 @@ test('stepper.parallelAll: empty object returns empty object', async () => {
   assert.deepEqual(result, {})
 })
 
+// ── Bug #3: cancel must interrupt a long parallel step PROMPTLY ──────────────
+// Before the fix, parallel/parallelAll waited for every branch to settle
+// naturally, so an operator cancel during separations' multi-minute
+// 4-way `kronos-search` only surfaced at the NEXT step boundary ("can't stop
+// midway"). With the run signal wired in, the abort wins the race immediately.
+
+function mkStepperWithSignal(signal: AbortSignal) {
+  const events: RecordedEvent[] = []
+  const stepper = new Stepper({
+    workflow: 'wf',
+    itemId: 'id-1',
+    runId: 'run-1',
+    emitStep: (name) => events.push({ kind: 'step', step: name }),
+    emitData: (data) => events.push({ kind: 'data', data }),
+    emitFailed: (step, error) => events.push({ kind: 'failed', step, error }),
+    signal,
+  })
+  return { stepper, events }
+}
+
+test('stepper.parallel: signal abort mid-flight rejects with CancelledError + marks step cancelled', async () => {
+  const controller = new AbortController()
+  const { stepper, events } = mkStepperWithSignal(controller.signal)
+  // Branches that never settle on their own — only the abort can end the wait.
+  const pending = stepper.parallel({
+    a: () => new Promise<number>(() => {}),
+    b: () => new Promise<number>(() => {}),
+  })
+  controller.abort(new Error('operator cancel'))
+  await assert.rejects(
+    pending,
+    (err: unknown) => err instanceof Error && err.name === 'CancelledError',
+  )
+  assert.ok(
+    events.some((e) => e.kind === 'step' && e.step === 'cancelled'),
+    'cancel surfaces a cancelled step emit for the dashboard row',
+  )
+})
+
+test('stepper.parallel: already-aborted signal rejects immediately with CancelledError', async () => {
+  const controller = new AbortController()
+  controller.abort(new Error('pre-aborted'))
+  const { stepper } = mkStepperWithSignal(controller.signal)
+  await assert.rejects(
+    stepper.parallel({ a: async () => 1 }),
+    (err: unknown) => err instanceof Error && err.name === 'CancelledError',
+  )
+})
+
+test('stepper.parallel: settles normally when the signal never aborts', async () => {
+  const controller = new AbortController()
+  const { stepper } = mkStepperWithSignal(controller.signal)
+  const result = await stepper.parallel({ a: async () => 1, b: async () => 2 })
+  assert.equal(result.a.status, 'fulfilled')
+  assert.equal(result.b.status, 'fulfilled')
+})
+
+test('stepper.parallelAll: signal abort mid-flight rejects with CancelledError', async () => {
+  const controller = new AbortController()
+  const { stepper } = mkStepperWithSignal(controller.signal)
+  const pending = stepper.parallelAll({ a: () => new Promise<number>(() => {}) })
+  controller.abort(new Error('operator cancel'))
+  await assert.rejects(
+    pending,
+    (err: unknown) => err instanceof Error && err.name === 'CancelledError',
+  )
+})
+
 test('stepper.markStep: emits step name without wrapping a body', () => {
   const { stepper, events } = mkStepper()
   assert.equal(stepper.getCurrentStep(), null)

@@ -97,16 +97,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
     instance?: string,
   ): Promise<void> => {
     const runId = forcedRunId ?? opts.preAssignedRunId ?? randomUUID()
-    const stepper = new Stepper({
-      workflow: wf.config.name,
-      itemId: String(itemId),
-      runId,
-      emitStep: setStep,
-      // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
-      emitData: updateData,
-      emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
-      emitSkipped,
-    })
 
     // Per-run AbortController (Contract 5). Constructed BEFORE
     // `Session.launch` so the run can be registered with `runRegistry`
@@ -141,6 +131,20 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         }
       }
     }
+
+    // Constructed after the controller so `parallel`/`parallelAll` can race
+    // the per-run signal and surface an operator cancel promptly (Contract 5).
+    const stepper = new Stepper({
+      workflow: wf.config.name,
+      itemId: String(itemId),
+      runId,
+      emitStep: setStep,
+      // Tracker's updateData now accepts unknown; it stringifies at the write boundary.
+      emitData: updateData,
+      emitFailed: (step, error) => setStep(`${step}:failed:${error}`),
+      emitSkipped,
+      signal: controller.signal,
+    })
 
     // Register an in-process control row in SQLite (best-effort) before
     // Session.launch so the unified `RunHandle.control` carries the audit

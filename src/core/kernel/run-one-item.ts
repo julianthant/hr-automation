@@ -245,6 +245,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitFailed: emitters.emitFailed,
       emitSkipped: emitters.emitSkipped,
       isCancelRequested: isCancelRequestedWithAbort,
+      signal: controller.signal,
       ...(skipStepsSet ? { skipSteps: skipStepsSet } : {}),
     })
     await runWorkflowHandler({
