@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDownToLine, Check, ChevronDown, Eye, Image as ImageIcon, Maximize2, Minimize2, ScrollText, Search, SquarePen, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, Eye, ExternalLink, Image as ImageIcon, Maximize2, Minimize2, Network, ScrollText, Search, SquarePen, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
@@ -67,6 +67,16 @@ interface LogStreamProps {
    */
   maximized?: boolean;
   onToggleMaximize?: () => void;
+  /**
+   * Delegated child runs for this entry. When provided (even if empty), the
+   * "Delegated" surface tab is shown. Only visible when this array is present.
+   */
+  delegatedChildren?: DelegatedChild[];
+  /**
+   * Called when the operator clicks "Open" on a delegated child row.
+   * If absent the Open button is not rendered.
+   */
+  onOpenChild?: (child: DelegatedChild) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,15 +91,28 @@ interface LogStreamProps {
 // Events is a category (a lens on the timestamped stream), not a surface.
 // ---------------------------------------------------------------------------
 
-type Surface = "logs" | "screenshots" | "preview" | "edit-data";
+type Surface = "logs" | "screenshots" | "preview" | "edit-data" | "delegated";
 type Category = "all" | "errors" | "fill" | "navigate" | "extract" | "debug" | "events";
 
-const SURFACES: { key: Surface; label: string; icon: LucideIcon }[] = [
+/** Exported for testing surface-bar completeness assertions only. */
+export const SURFACES: readonly { key: Surface; label: string; icon: LucideIcon }[] = [
   { key: "logs", label: "Logs", icon: ScrollText },
   { key: "screenshots", label: "Screenshots", icon: ImageIcon },
   { key: "preview", label: "Preview", icon: Eye },
   { key: "edit-data", label: "Edit Data", icon: SquarePen },
+  { key: "delegated", label: "Delegated", icon: Network },
 ];
+
+/** A delegated child run surfaced in the Delegated tab. */
+export interface DelegatedChild {
+  workflow: string;
+  id: string;
+  runId: string;
+  status: string;
+  step?: string | null;
+  data?: Record<string, unknown>;
+  parentRunId?: string | null;
+}
 
 /** `categories` are the log levels a filter matches; `dot` is its accent token. */
 const CATEGORIES: { key: Category; label: string; categories: LogCategory[]; dot: string }[] = [
@@ -110,7 +133,7 @@ const CATEGORY_KEYS = new Set<string>(CATEGORIES.map((c) => c.key));
  * (all/errors/…/events) so existing deep-links keep working.
  */
 export function parseInitialTab(tab: string | undefined): { surface: Surface; category: Category } {
-  if (tab === "screenshots" || tab === "preview" || tab === "edit-data") {
+  if (tab === "screenshots" || tab === "preview" || tab === "edit-data" || tab === "delegated") {
     return { surface: tab, category: "all" };
   }
   if (tab && CATEGORY_KEYS.has(tab)) {
@@ -177,8 +200,16 @@ export function mergeDisplayItems(logs: CollapsedLogEntry[], events: RunEvent[])
   // the dedicated Events category, which renders `events` directly and bypasses
   // this merge. This is the render-time replacement for the old emit-time
   // dedup that used to suppress the event entirely (and broke `currentStep`).
+  //
+  // Drop `daemon_phase` events too: they fire on a ~1–2s heartbeat (one per
+  // daemon lifecycle tick) and carry no per-run detail. 102 daemon_phase events
+  // vs 67 item_start events in a typical session means they are the single
+  // noisiest non-step event class. They remain visible in the Events category
+  // and continue to drive session-card daemonPhase state — only the merged
+  // Logs/"all" view suppresses them to reduce noise.
+  const MERGE_DROPPED_EVENTS = new Set<string>(["step_change", "daemon_phase"]);
   const eventItems = events
-    .filter((entry) => entry.type !== "step_change")
+    .filter((entry) => !MERGE_DROPPED_EVENTS.has(entry.type))
     .map((entry) => ({ kind: "event" as const, entry }));
   const result: DisplayItem[] = [];
   let i = 0;
@@ -194,6 +225,108 @@ export function mergeDisplayItems(logs: CollapsedLogEntry[], events: RunEvent[])
   while (i < logItems.length) result.push(logItems[i++]!);
   while (j < eventItems.length) result.push(eventItems[j++]!);
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Delegated surface — a scrollable list of child runs delegated under this entry.
+// Status coloring mirrors the minimal list in LogPanel's "DELEGATED RUNS" section,
+// elevated to a full log-panel surface with an optional Open affordance.
+// ---------------------------------------------------------------------------
+
+function delegatedStatusClasses(child: DelegatedChild): string {
+  const isCancelled = child.status === "failed" && child.step === "cancelled";
+  if (isCancelled) return "bg-warning/10 text-warning";
+  switch (child.status) {
+    case "done": return "bg-success/10 text-success";
+    case "failed": return "bg-destructive/10 text-destructive";
+    case "running": return "bg-primary/10 text-primary";
+    case "pending": return "bg-warning/10 text-warning";
+    default: return "bg-secondary/90 text-muted-foreground";
+  }
+}
+
+/** Exported for unit testing. */
+export function delegatedStatusLabel(child: DelegatedChild): string {
+  if (child.status === "failed" && child.step === "cancelled") return "Cancelled";
+  switch (child.status) {
+    case "done": return "Done";
+    case "failed": return "Failed";
+    case "running": return "Running";
+    case "pending": return "Pending";
+    default: return child.status;
+  }
+}
+
+function DelegatedSurface({
+  children,
+  onOpenChild,
+}: {
+  children: DelegatedChild[];
+  onOpenChild?: (child: DelegatedChild) => void;
+}) {
+  if (children.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center border-b border-border text-sm text-muted-foreground">
+        No delegated runs for this entry.
+      </div>
+    );
+  }
+  return (
+    <div className="flex-1 overflow-y-auto border-b border-border">
+      <ul role="list" className="divide-y divide-border">
+        {children.map((child) => {
+          const traceId = typeof child.data?.["__traceId"] === "string" ? child.data["__traceId"] : null;
+          const archetype = typeof child.data?.["archetype"] === "string" ? child.data["archetype"] : null;
+          return (
+            <li
+              key={`${child.workflow}#${child.id}#${child.runId}`}
+              className="flex items-center gap-2 px-4 py-2.5 text-[11px]"
+            >
+              {/* Workflow name */}
+              <span className="shrink-0 font-medium text-foreground/80">{child.workflow}</span>
+              {/* Archetype chip */}
+              {archetype && (
+                <span className="shrink-0 rounded px-1.5 py-px bg-secondary/90 font-mono text-[10px] text-muted-foreground border border-border/60">
+                  {archetype}
+                </span>
+              )}
+              {/* Trace id — truncated, full value in title */}
+              <span
+                title={traceId ?? child.id}
+                className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
+              >
+                {traceId ?? child.id}
+              </span>
+              {/* Status badge */}
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
+                  delegatedStatusClasses(child),
+                )}
+              >
+                {delegatedStatusLabel(child)}
+              </span>
+              {/* Open button — only when handler provided */}
+              {onOpenChild && (
+                <button
+                  type="button"
+                  onClick={() => onOpenChild(child)}
+                  aria-label={`Open delegated run for ${child.workflow} ${traceId ?? child.id}`}
+                  className={cn(
+                    "shrink-0 inline-flex h-6 items-center gap-1 rounded border border-border/60 bg-secondary px-2 text-[10px] font-medium text-muted-foreground cursor-pointer outline-none transition-colors",
+                    "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                  )}
+                >
+                  <ExternalLink aria-hidden className="h-3 w-3" />
+                  <span>Open</span>
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 export function LogStream({
@@ -214,6 +347,8 @@ export function LogStream({
   initialTab,
   maximized,
   onToggleMaximize,
+  delegatedChildren,
+  onOpenChild,
 }: LogStreamProps) {
   const initialFilter = useMemo(() => parseInitialTab(initialTab), [initialTab]);
   const [surface, setSurface] = useState<Surface>(initialFilter.surface);
@@ -230,15 +365,17 @@ export function LogStream({
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevLenRef = useRef(0);
 
-  // Surfaces visible in the bar: Edit Data / Preview only when the row opts in.
+  // Surfaces visible in the bar: Edit Data / Preview only when the row opts in;
+  // Delegated only when delegatedChildren is explicitly provided.
   const visibleSurfaces = useMemo(
     () =>
       SURFACES.filter(
         (s) =>
           (s.key !== "edit-data" || editDataAvailable) &&
-          (s.key !== "preview" || previewAvailable),
+          (s.key !== "preview" || previewAvailable) &&
+          (s.key !== "delegated" || delegatedChildren !== undefined),
       ),
-    [editDataAvailable, previewAvailable],
+    [editDataAvailable, previewAvailable, delegatedChildren],
   );
 
   // If the active surface stops being available (e.g. previewAvailable flips
@@ -471,6 +608,11 @@ export function LogStream({
             </div>
           )}
         </div>
+      )}
+
+      {/* Delegated surface — shown when delegatedChildren is provided */}
+      {surface === "delegated" && (
+        <DelegatedSurface children={delegatedChildren ?? []} onOpenChild={onOpenChild} />
       )}
 
       {/* Log lines — hidden when a non-log surface owns the pane */}
