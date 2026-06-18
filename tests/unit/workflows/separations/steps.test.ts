@@ -9,7 +9,6 @@ test('separations effective step list is auth:<systems> + work steps', () => {
   assert.ok(meta, 'separations workflow must be registered')
   assert.deepEqual(meta.steps, [
     'auth:kuali',
-    'auth:old-kronos',
     'auth:new-kronos',
     'auth:ucpath',
     'kuali-extraction',
