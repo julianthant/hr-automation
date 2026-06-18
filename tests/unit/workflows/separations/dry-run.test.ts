@@ -106,13 +106,15 @@ const KUALI_FIXTURE = {
   location: "",
 };
 
-// All-not-found Kronos phase-1 result. Keeps `resolveKronosDates` from changing
-// dates (so the handler attempts no Kuali date writes) and `jobSummary:
+// All-not-found New Kronos phase-1 result. `lastPunchDate: null` makes the
+// handler fall back to the Kuali LDW (no Kuali date write), and `jobSummary:
 // undefined` so ucpath-job-summary self-skips — leaving the two mutating steps
-// as the only writes the test gates on.
+// as the only writes the test gates on. (Old Kronos is gone — only `newK`.)
 const KRONOS_NOT_FOUND = {
-  oldK: { status: "fulfilled" as const, value: { found: false, date: null } },
-  newK: { status: "fulfilled" as const, value: { found: false, date: null } },
+  newK: {
+    status: "fulfilled" as const,
+    value: { found: false, lastPunchDate: null, sickDates: [], holidayDates: [] },
+  },
   jobSummary: { status: "fulfilled" as const, value: undefined },
   kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
 };
@@ -259,6 +261,59 @@ describe("separations handler — dry-run terminal", () => {
     const { ctx } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
     assert.equal(mocks.runKualiExtract.mock.calls.length, 1);
+  });
+
+  it("stamps separationDate = Kuali's (authoritative — never the Kronos value)", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate);
+  });
+
+  it("stamps terminationEffDate = Kuali separationDate + 1 day", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    // KUALI_FIXTURE.separationDate = 01/16/2026 → 01/17/2026
+    assert.equal(probe.data.terminationEffDate, "01/17/2026");
+  });
+
+  it("no longer stamps foundInOldKronos (Old Kronos removed from separations)", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal("foundInOldKronos" in probe.data, false);
+  });
+
+  it("New Kronos last physical punch overrides the Kuali Last Day Worked", async () => {
+    // New Kronos found a later last punch (01/20) than the Kuali LDW (01/15).
+    mocks.runKronosSearch.mockResolvedValueOnce({
+      newK: {
+        status: "fulfilled" as const,
+        value: { found: true, lastPunchDate: "01/20/2026", sickDates: [], holidayDates: [] },
+      },
+      jobSummary: { status: "fulfilled" as const, value: undefined },
+      kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
+    });
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(probe.data.lastDayWorked, "01/20/2026");
+    // Separation date stays Kuali's — only LDW moves.
+    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate);
+  });
+
+  it("falls back to the Kuali Last Day Worked when New Kronos has no punch", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(probe.data.lastDayWorked, KUALI_FIXTURE.lastDayWorked);
+  });
+});
+
+describe("separationsWorkflow.config.systems (Old Kronos removed)", () => {
+  it("declares exactly 3 systems: kuali, new-kronos, ucpath", async () => {
+    const { separationsWorkflow } = await import(
+      "../../../../src/workflows/separations/workflow.js"
+    );
+    const ids = separationsWorkflow.config.systems.map((s: { id: string }) => s.id);
+    assert.deepEqual(ids, ["kuali", "new-kronos", "ucpath"]);
+    assert.equal(ids.includes("old-kronos"), false);
   });
 });
 
