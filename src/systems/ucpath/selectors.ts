@@ -456,6 +456,22 @@ export const jobSummary = {
     root.getByRole("tab", { name: "Job Information" }),
 
   /**
+   * Employee display name on the Workforce Job Summary detail page. PeopleSoft
+   * renders the bold header name (e.g. "Jayden Balmaceda", First Last order)
+   * in a stable derived field `#DERIVED_NAME_DISPLAY_NAME`; the fallback is its
+   * bold-header CSS class. Read after a successful search to verify the EID
+   * resolves to the expected person (separations name↔EID check). `root` is the
+   * `getFormRoot(page)` body locator (iframe or direct-URL case).
+   * verified 2026-06-18
+   * @tags employee, name, display, header, detail, job-summary
+   */
+  personName: (root: Locator): Locator =>
+    root
+      .locator("#DERIVED_NAME_DISPLAY_NAME")
+      .or(root.locator("span.PABOLD11TEXT"))
+      .first(),
+
+  /**
    * Iframe presence probe — when count > 0 we're in iframe mode. verified 2026-04-01
    * @tags iframe, probe, job-summary
    */
