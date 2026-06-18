@@ -345,8 +345,8 @@ export function runAllChecks(cwd: string = process.cwd()): CheckResult[] {
       "Check filesystem permissions in the repo root.",
     ),
     checkDirWritable(
-      "~/Downloads/onboarding/",
-      path.join(os.homedir(), "Downloads", "onboarding"),
+      "~/Documents/onboarding/",
+      path.join(os.homedir(), "Documents", "onboarding"),
       "Check filesystem permissions on your home directory.",
     ),
     checkNotifyCapability(),

@@ -4,21 +4,64 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import {
   buildCrmDocumentDownloadPath,
+  buildCrmDocumentFolderName,
+  sanitizeOnboardingFolderName,
   parseCrmDocumentFilename,
   sanitizeCrmDocumentFilename,
   isCrmPdfResponse,
   DEFAULT_CRM_DOC_INDICES,
 } from "../../../../src/systems/crm/idocs-download.js";
 
+const ONBOARDING_DIR = join(homedir(), "Documents", "onboarding");
+
 test("DEFAULT_CRM_DOC_INDICES downloads Doc 1 and Doc 3", () => {
   assert.deepEqual(DEFAULT_CRM_DOC_INDICES, [0, 2]);
 });
 
-test("buildCrmDocumentDownloadPath matches onboarding folder convention", () => {
+test("buildCrmDocumentDownloadPath lands under ~/Documents/onboarding", () => {
   assert.equal(
     buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    join(homedir(), "Downloads", "onboarding", "Doe, Jane A EID"),
+    join(ONBOARDING_DIR, "Doe, Jane A EID"),
   );
+});
+
+test("buildCrmDocumentFolderName: Last, First Middle EID (no lived name)", () => {
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
+    "Doe, Jane A EID",
+  );
+});
+
+test("buildCrmDocumentFolderName inserts the lived name parenthetically", () => {
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "John", lastName: "Smith", middleName: "Michael", livedName: "Johnny" }),
+    "Smith, John (Johnny) Michael EID",
+  );
+});
+
+test("buildCrmDocumentFolderName omits absent/blank middle and lived name", () => {
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Ada", lastName: "Lovelace", middleName: "", livedName: "  " }),
+    "Lovelace, Ada EID",
+  );
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Ada", lastName: "Lovelace" }),
+    "Lovelace, Ada EID",
+  );
+});
+
+test("buildCrmDocumentFolderName lived name without middle", () => {
+  assert.equal(
+    buildCrmDocumentFolderName({ firstName: "Robert", lastName: "Roe", livedName: "Bob" }),
+    "Roe, Robert (Bob) EID",
+  );
+});
+
+test("sanitizeOnboardingFolderName drops path separators, keeps name punctuation", () => {
+  // Apostrophes / commas / parens survive; a stray slash does not become a subdir.
+  assert.equal(sanitizeOnboardingFolderName("O'Brien, Sean (Seanie) EID"), "O'Brien, Sean (Seanie) EID");
+  assert.equal(sanitizeOnboardingFolderName("De/Vries, Anne EID"), "DeVries, Anne EID");
+  assert.equal(sanitizeOnboardingFolderName("A:B|C? EID"), "ABC EID");
 });
 
 test("parseCrmDocumentFilename handles RFC filename header", () => {

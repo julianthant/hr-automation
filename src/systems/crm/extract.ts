@@ -72,6 +72,54 @@ export function labelVariants(label: string): string[] {
  * never break a currently-working extract. Re-verify against the live DOM and
  * bump the `// verified` dates in `selectors.ts` once confirmed.
  */
+export interface CrmPersonName {
+  firstName: string | null;
+  lastName: string | null;
+  middleName: string | null;
+  livedName: string | null;
+}
+
+/**
+ * Label variants for each name field, ordered by likelihood. First/Last/Middle
+ * mirror onboarding's UCPath Entry Sheet extraction (live-verified there). The
+ * `livedName` labels are BEST-EFFORT and NOT yet verified against the live CRM
+ * DOM — they return null (parenthetical omitted) when none match, so a missing
+ * lived name degrades gracefully rather than failing. Re-verify on a real
+ * record and trim/extend this list.
+ */
+const NAME_FIELD_LABELS: Record<keyof CrmPersonName, string[]> = {
+  firstName: ["First Name", "Legal First Name"],
+  lastName: ["Last Name", "Legal Last Name"],
+  middleName: ["Middle Name", "Middle Initial"],
+  livedName: ["Lived Name", "Lived First Name", "Preferred Name", "Preferred First Name"],
+};
+
+/**
+ * Extract the person's structured name from the current CRM page (the UCPath
+ * Entry Sheet, where these labeled fields live). Each field tries its label
+ * variants in order and stops at the first hit; an absent field yields null.
+ *
+ * IMPORTANT: never log the extracted values (PII).
+ */
+export async function extractCrmPersonName(
+  page: Page,
+  selectors: CrmRecordFieldSelectors = record,
+): Promise<CrmPersonName> {
+  const pick = async (labels: string[]): Promise<string | null> => {
+    for (const label of labels) {
+      const value = await extractField(page, label, selectors);
+      if (value) return value;
+    }
+    return null;
+  };
+  return {
+    firstName: await pick(NAME_FIELD_LABELS.firstName),
+    lastName: await pick(NAME_FIELD_LABELS.lastName),
+    middleName: await pick(NAME_FIELD_LABELS.middleName),
+    livedName: await pick(NAME_FIELD_LABELS.livedName),
+  };
+}
+
 export async function extractField(
   page: Page,
   label: string,

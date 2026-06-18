@@ -21,6 +21,11 @@ const TRACKER_DIR = process.env.HRAUTO_TRACKER_DIR ?? ".tracker";
 export const PATHS = {
   reportsDir: join(HOME, "Downloads", "reports"),
   downloadsDir: join(HOME, "Downloads"),
+  // CRM onboarding-document output lives under ~/Documents/onboarding (moved
+  // off ~/Downloads on 2026-06-18). crm-doc-download zips each run's per-person
+  // folder(s) into this dir; onboarding's in-process iDocs download also lands
+  // its per-person folders here via buildCrmDocumentDownloadPath.
+  onboardingDocsDir: join(HOME, "Documents", "onboarding"),
   ukgSessionBase: join(HOME, "ukg_session"),
   ukgSessionSep: join(HOME, "ukg_session_sep"),
   screenshotDir: screenshotsDir(TRACKER_DIR),
