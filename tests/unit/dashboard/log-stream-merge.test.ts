@@ -36,6 +36,50 @@ describe("mergeDisplayItems", () => {
     assert.equal(merged[0]?.kind, "log");
   });
 
+  // USR-002 regression pin: daemon_phase events must NOT appear in the merged
+  // Logs/"all" stream. They fire on a ~1–2s heartbeat (102 events vs 67
+  // item_start in a typical session) and carry no per-run detail — they
+  // flood the log panel with noise. They remain visible in the Events category
+  // (which bypasses this merge) and continue to drive session-card daemonPhase
+  // state; only the merged view suppresses them.
+  it("drops daemon_phase events from the merged stream (USR-002)", () => {
+    const merged = mergeDisplayItems(
+      [log({ ts: "2026-05-15T12:00:00.000Z", message: "Phase: extraction" })],
+      [
+        event({ type: "daemon_phase", timestamp: "2026-05-15T11:59:59.000Z" }),
+        event({ type: "daemon_phase", timestamp: "2026-05-15T12:00:00.500Z" }),
+        event({ type: "daemon_phase", timestamp: "2026-05-15T12:00:01.000Z" }),
+      ],
+    );
+    const daemonPhaseItems = merged.filter(
+      (m) => m.kind === "event" && m.entry.type === "daemon_phase",
+    );
+    assert.equal(
+      daemonPhaseItems.length,
+      0,
+      "daemon_phase events must be absent from the merged Logs stream",
+    );
+  });
+
+  it("drops daemon_phase even when mixed with other events (USR-002)", () => {
+    const merged = mergeDisplayItems(
+      [],
+      [
+        event({ type: "daemon_phase", timestamp: "2026-05-15T12:00:00.000Z" }),
+        event({ type: "auth_complete", timestamp: "2026-05-15T12:00:00.001Z", system: "ucpath" }),
+        event({ type: "daemon_phase", timestamp: "2026-05-15T12:00:01.000Z" }),
+        event({ type: "screenshot", timestamp: "2026-05-15T12:00:02.000Z", screenshotKind: "form" }),
+        event({ type: "daemon_phase", timestamp: "2026-05-15T12:00:03.000Z" }),
+      ],
+    );
+    const types = merged.map((m) => (m.kind === "event" ? m.entry.type : "log"));
+    assert.deepEqual(
+      types,
+      ["auth_complete", "screenshot"],
+      "only non-dropped events survive; daemon_phase absent",
+    );
+  });
+
   it("keeps non-step_change events (e.g. screenshot, auth) in the merge", () => {
     const merged = mergeDisplayItems(
       [log({ ts: "2026-05-15T12:00:00.000Z" })],
