@@ -1,6 +1,10 @@
 # Utils Module
 
-Environment validation, error helpers, error classification, and colored logging.
+Environment validation, error helpers, error classification, colored logging, and filesystem archiving.
+
+## Archiving (`zip.ts`)
+
+`zipFolderInto(archivePath, folderPath)` shells out to the system `zip` binary (present on macOS; the repo carries no archive dependency) to **append** a folder into an archive by its basename — call it twice on one archive to build a combined zip. `withFileLock(lockPath, fn)` is a cross-process exclusive lock (atomic `wx` lockfile, polled, steals locks older than `staleMs`, fails loud on `timeoutMs`); wrap concurrent `zipFolderInto` calls to the same archive in it — parallel writes to one zip corrupt it. Both fail loud (missing binary / non-zero exit / lock timeout throw). Used by `crm-doc-download` to package each run's per-person folders into one combined zip from a `pool` of workers. Tested in `tests/unit/utils/zip.test.ts`.
 
 **Logging vocabulary** (run log vs session log, log file vs database, log context): `docs/engineering/notes-and-logging-vocabulary.md`.
 
