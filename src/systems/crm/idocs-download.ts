@@ -1,8 +1,8 @@
 import type { Page } from "playwright";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 import { tryRegisterDownloadedFile } from "../../tracker/files/register-download.js";
 
@@ -16,6 +16,8 @@ export interface CrmDocumentDownloadSubject {
   firstName: string;
   lastName: string;
   middleName?: string | null;
+  /** UCSD lived/preferred name, rendered parenthetically when present. */
+  livedName?: string | null;
 }
 
 export interface DownloadedCrmDocument {
@@ -40,11 +42,40 @@ interface ViewerInfo {
   totalDocs: number;
 }
 
+/**
+ * The per-person onboarding folder NAME (no directory), formatted as
+ * `Last, First (Lived) Middle EID`. The lived-name parenthetical and the
+ * middle name are each included only when present. "EID" is a literal trailing
+ * token (the operator's onboarding-folder convention), NOT the numeric employee
+ * id — a pre-hire often has none yet.
+ */
+export function buildCrmDocumentFolderName(subject: CrmDocumentDownloadSubject): string {
+  const lived = subject.livedName?.trim() ? ` (${subject.livedName.trim()})` : "";
+  const middle = subject.middleName?.trim() ? ` ${subject.middleName.trim()}` : "";
+  const raw = `${subject.lastName.trim()}, ${subject.firstName.trim()}${lived}${middle} EID`;
+  return sanitizeOnboardingFolderName(raw);
+}
+
+/**
+ * Absolute path to the per-person onboarding folder under
+ * `PATHS.onboardingDocsDir` (~/Documents/onboarding).
+ */
 export function buildCrmDocumentDownloadPath(subject: CrmDocumentDownloadSubject): string {
-  const downloads = join(homedir(), "Downloads");
-  const middle = subject.middleName ? ` ${subject.middleName}` : "";
-  const folderName = `${subject.lastName}, ${subject.firstName}${middle} EID`;
-  return join(downloads, "onboarding", folderName);
+  return join(PATHS.onboardingDocsDir, buildCrmDocumentFolderName(subject));
+}
+
+/**
+ * Make a name safe to use as a single path segment: drop reserved path
+ * characters (incl. separators) and collapse the resulting whitespace. A name
+ * like `O'Brien` survives unchanged; a stray `/` does not become a subdir.
+ */
+export function sanitizeOnboardingFolderName(name: string): string {
+  return name
+    .split("")
+    .filter((ch) => !RESERVED_FILENAME_CHARS.has(ch))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export async function ensureCrmDocumentDownloadFolder(folderPath: string): Promise<void> {
