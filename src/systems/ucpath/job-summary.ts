@@ -18,6 +18,27 @@ export interface JobSummaryData {
 }
 
 /**
+ * Identity-aware Workforce Job Summary result. Unlike `getJobSummaryData`
+ * (which throws when the EID resolves to nothing), this shape lets the caller
+ * branch on `found`:
+ *
+ * - `found: false` → the search returned "No matching values" for the EID. The
+ *   caller decides what to do (e.g. separations only falls back to person-lookup
+ *   when the typed EID is also short / incomplete).
+ * - `found: true`  → `name` is the employee NAME read from the detail-page
+ *   header (`jobSummary.personName`, rendered "First Last") and `data` carries
+ *   the dept/payroll extraction. The name lets the caller confirm the EID
+ *   resolved to the expected person before trusting the data.
+ */
+export interface JobSummaryIdentity {
+  found: boolean;
+  /** Detail-page header name when `found`; "" otherwise. */
+  name: string;
+  /** Dept/payroll extraction when `found`; null otherwise. */
+  data: JobSummaryData | null;
+}
+
+/**
  * Get the correct locator root — handles both iframe and direct URL cases.
  * When accessed via sidebar (activity guide), content is inside #main_target_win0.
  * When accessed via direct URL, content is directly in the page.
@@ -301,35 +322,84 @@ export async function extractJobInfo(
 }
 
 /**
+ * Read the employee display name from the Workforce Job Summary detail-page
+ * header (`jobSummary.personName` → `#DERIVED_NAME_DISPLAY_NAME`, rendered
+ * "First Last"). Returns "" if the header element is missing — best-effort, so
+ * an absent name never throws (the caller treats "" as "no name to compare").
+ * Call only after a successful `searchJobSummary` (the detail page must be up).
+ */
+export async function extractEmployeeName(page: Page): Promise<string> {
+  const root = await getFormRoot(page);
+  const name = (
+    await jobSummary
+      .personName(root)
+      .textContent({ timeout: 5_000 })
+      .catch(() => "")
+  )?.trim() ?? "";
+  log.step(`[Job Summary] Detail-page name: ${name || "<none>"}`);
+  return name;
+}
+
+/**
+ * Identity-aware Workforce Job Summary fetch. Navigates, searches by EID, and:
+ *
+ * - returns `{ found: false, name: "", data: null }` when the search returns
+ *   "No matching values" — a non-throwing branch the caller acts on (e.g.
+ *   separations decides whether to fall back to person-lookup);
+ * - returns `{ found: true, name, data }` otherwise, reading the detail-page
+ *   header NAME and extracting Work Location + Job Information.
+ *
+ * Genuine failures (selector/nav timeouts on a found record) still throw — only
+ * the "no results" state is converted to `found: false`. No cross-source
+ * fallback happens here; the caller owns any name-based EID correction.
+ */
+export async function getJobSummaryIdentity(
+  page: Page,
+  emplId: string,
+): Promise<JobSummaryIdentity> {
+  await navigateToWorkforceJobSummary(page);
+  const found = await searchJobSummary(page, emplId);
+  if (!found) {
+    return { found: false, name: "", data: null };
+  }
+
+  const name = await extractEmployeeName(page);
+  const workLocation = await extractWorkLocation(page);
+  const jobInfo = await extractJobInfo(page);
+
+  return {
+    found: true,
+    name,
+    data: {
+      deptId: workLocation.deptId,
+      departmentDescription: workLocation.departmentDescription,
+      jobCode: jobInfo.jobCode,
+      jobDescription: jobInfo.jobDescription,
+    },
+  };
+}
+
+/**
  * Full flow: navigate, search, extract Work Location + Job Information.
  *
  * Throws if Workforce Job Summary returns no results for the given EID.
  * No cross-source fallback — upstream data (e.g. a wrong EID in Kuali
  * Build) needs to be corrected rather than silently worked around.
  * Callers should surface the error verbatim so the user can fix the
- * upstream record.
+ * upstream record. Built on `getJobSummaryIdentity`; use that directly when
+ * you need the non-throwing `found` branch (and the detail-page name).
  */
 export async function getJobSummaryData(
   page: Page,
   emplId: string,
 ): Promise<JobSummaryData> {
-  await navigateToWorkforceJobSummary(page);
-  const found = await searchJobSummary(page, emplId);
-  if (!found) {
+  const identity = await getJobSummaryIdentity(page, emplId);
+  if (!identity.found || !identity.data) {
     throw new Error(
       `Workforce Job Summary returned no results for EID '${emplId}'. `
       + `Verify the EID in the upstream record (e.g. Kuali Build) is correct — `
       + `this workflow does not auto-correct via cross-source fallbacks.`,
     );
   }
-
-  const workLocation = await extractWorkLocation(page);
-  const jobInfo = await extractJobInfo(page);
-
-  return {
-    deptId: workLocation.deptId,
-    departmentDescription: workLocation.departmentDescription,
-    jobCode: jobInfo.jobCode,
-    jobDescription: jobInfo.jobDescription,
-  };
+  return identity.data;
 }
