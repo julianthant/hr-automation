@@ -23,13 +23,12 @@ import type { SystemConfig } from "../../src/core/kernel/types.js";
  * staggered ordering but with STUBBED logins. Neither hits the real concurrent
  * multi-system auth path — that is this test's unique value.
  *
- * System pair: **kuali + old-kronos** from `separationsWorkflow.config.systems`
+ * System pair: **kuali + new-kronos** from `separationsWorkflow.config.systems`
  * — a representative ≥2-system pair, each with a real `prepareLogin` + Duo
- * `login`. We deliberately drop the workflow's `ucpath`/`new-kronos` systems to
- * keep wall time well under the pool timeout (two Duos, not four) while still
- * proving the multi-system staggered path. old-kronos uses a persistent
- * `sessionDir`, so a warm UKG session may approve hands-off (cached trust) —
- * either way the staggered submit machinery is exercised.
+ * `login`. We deliberately drop the workflow's `ucpath` system to keep wall time
+ * well under the pool timeout (two Duos, not three) while still proving the
+ * multi-system staggered path. (Old Kronos was removed from separations on
+ * 2026-06-18 — separations is now a 3-system New-Kronos-only workflow.)
  *
  * Duo is approved hands-off via the enrolled WebAuthn credential
  * (`HR_AUTOMATION_DUO_WEBAUTHN=1`, set in `_setup.ts`). READ-ONLY: lands on the
@@ -64,10 +63,10 @@ if (!ready) {
   );
 }
 
-// The kuali + old-kronos pair from separations — a clean ≥2-system set with a
+// The kuali + new-kronos pair from separations — a clean ≥2-system set with a
 // real prepareLogin + Duo login on each. Pulled straight from the production
 // workflow config so this test stays faithful to what ships.
-const SELECTED_SYSTEM_IDS = ["kuali", "old-kronos"] as const;
+const SELECTED_SYSTEM_IDS = ["kuali", "new-kronos"] as const;
 const systems: SystemConfig[] = separationsWorkflow.config.systems.filter((s) =>
   (SELECTED_SYSTEM_IDS as readonly string[]).includes(s.id),
 );
@@ -82,8 +81,8 @@ const INTERNAL_ABORT_MS = 90_000;
 // `Session.launch`'s built-in `defaultLaunchOne` always launches HEADED (it
 // doesn't thread a headless flag into `launchBrowser`). Provide a launchFn that
 // mirrors it but honors `headless` so this test runs unattended by default.
-// Carries through each system's `sessionDir` / `acceptDownloads` so old-kronos's
-// persistent UKG profile is reused exactly as in production.
+// Carries through each system's `sessionDir` / `acceptDownloads` so any
+// persistent profile is reused exactly as in production.
 const launchFn = async ({ system }: { system: SystemConfig }) => {
   const { browser, context, page } = await launchBrowser({
     headless,

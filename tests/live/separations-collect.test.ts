@@ -38,10 +38,10 @@ import type { SystemConfig } from "../../src/core/kernel/types.js";
  * ── SCOPE: Kuali-only, single Duo ──
  * Only the `kuali` system is launched (`systems.length === 1`), so
  * `Session.launch` takes its single-system fast path: one `prepareLogin`, one
- * Duo prompt, no stagger/semaphore. We deliberately drop old-kronos / new-kronos
- * / ucpath — collection here is Kuali-only — which also keeps wall time to a
- * single Duo. The system is pulled straight from `separationsWorkflow.config`
- * so this test stays faithful to what ships.
+ * Duo prompt, no stagger/semaphore. We deliberately drop new-kronos / ucpath —
+ * collection here is Kuali-only — which also keeps wall time to a single Duo.
+ * The system is pulled straight from `separationsWorkflow.config` so this test
+ * stays faithful to what ships.
  *
  * Duo is approved hands-off via the enrolled WebAuthn credential
  * (`HR_AUTOMATION_DUO_WEBAUTHN=1`, set in `_setup.ts`). Skips cleanly when
