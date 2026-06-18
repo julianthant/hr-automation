@@ -68,9 +68,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** In `getSeparationTimecardData` (navigate.ts), walk the aligned `.ui-grid-viewport` grid. Punch = In(cell[1]) or Out(cell[2]) matches `/\d+:\d+\s*(AM|PM)/`. **Sick** = cell[4] matches `/sick/i` (live string: `"Sick - Hourly"`). **Holiday** = cell[4] matches `/holiday/i` (live string: `"Holiday - Hourly"`). Multiple data rows can share one date — carry last-seen date forward. Verified live 2026-06-18 against EIDs 10776990 (holiday) and 10776013 (sick).
 **Tags:** sick, holiday, timecard, parsing, pay-code, column-index, separations, getSeparationTimecardData
 
-## 2026-06-18 — Search input in `portal-frame-*` iframe on fresh login, top-level after Home navigation
+## 2026-06-18 — Search input renders in `portal-frame-*` iframe OR top-level — resolve both
 
-**Tried:** Always targeting the search input via `searchFrame(page)` (the `iframe[name^="portal-frame-"]` locator) regardless of navigation path.
-**Failed because:** After navigating Home from the timecard (not a fresh session login), the search sidebar content renders at the top-level page context rather than inside the iframe. The `searchFrame` locator times out in that context.
-**Fix:** The daemon's fresh-login path correctly uses `searchFrame(page)` (iframe). If future workflows navigate Home before searching, probe top-level first and fall back to the frame, or use a `.or()` chain spanning both contexts.
-**Tags:** iframe, portal-frame, search-input, fresh-login, home-navigation, frame-context
+**Tried:** Always targeting the search input/results/close via `searchFrame(page)` (the `iframe[name^="portal-frame-"]` locator) regardless of context.
+**Failed because:** The WFD Employee Search sidebar renders its input/results EITHER inside the portal-frame iframe (some loads) OR top-level on the page (others). The iframe-only locator timed out on the top-level variant — a real daemon separations run failed with `locator.fill: Timeout 5000ms exceeded` on `iframe[...].contentFrame().getByRole('textbox', { name: 'Search by Employee Name or ID' })` (EID 10602099), so New Kronos found nothing and the run fell back to the Kuali date. (An earlier assumption that the daemon's fresh-login path always uses the iframe was WRONG — the daemon hit the top-level variant.)
+**Fix:** Every `search.*` selector now accepts a `SearchRoot` (`FrameLocator | Page`); `resolveSearchRoot(page)` in `navigate.ts` probes the iframe's search input first (4s) and falls back to the top-level page, and `searchEmployee` / `selectEmployeeResult` / `closeEmployeeSearch` all use the resolved root (close tries both contexts). Verified-date bumped on all `search.*` selectors to 2026-06-18.
+**Selector:** `search.*` (now `SearchRoot`-typed) + `resolveSearchRoot` in `navigate.ts`
+**Tags:** iframe, portal-frame, search-input, top-level, resolveSearchRoot, frame-context, fill-timeout

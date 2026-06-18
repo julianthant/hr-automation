@@ -49,50 +49,60 @@ export const navbar = {
     page.getByRole("button", { name: "Employee Search" }).first(),
 };
 
-// ─── Employee Search sidebar (inside portal-frame-*) ──────────────────────
+// ─── Employee Search sidebar (portal-frame iframe OR top-level page) ──────
+//
+// The WFD search sidebar renders its input/results either INSIDE the
+// portal-frame iframe (fresh page load) or TOP-LEVEL on the page (e.g. when
+// reached after a timecard navigation). So every search selector accepts a
+// `SearchRoot` (FrameLocator | Page); navigate.ts resolves the live root via
+// `resolveSearchRoot`. (2026-06-18: the iframe-only assumption caused a
+// `locator.fill: Timeout` on the top-level variant — EID 10602099.)
+
+/** The search sidebar's root context — the portal-frame iframe or the page. */
+export type SearchRoot = FrameLocator | Page;
 
 export const search = {
   /**
-   * Search textbox inside the frame. verified 2026-04-06
+   * Search textbox (resolved iframe-or-top-level). verified 2026-06-18
    * @tags search, input, textbox, employee, name, id, new-kronos
    */
-  searchInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Search by Employee Name or ID" }),
+  searchInput: (root: SearchRoot): Locator =>
+    root.getByRole("textbox", { name: "Search by Employee Name or ID" }),
 
   /**
-   * Search submit (exact name to distinguish from other Search buttons). verified 2026-04-06
+   * Search submit (exact name to distinguish from other Search buttons). verified 2026-06-18
    * @tags search, submit, button, new-kronos
    */
-  searchSubmitButton: (f: FrameLocator): Locator =>
-    f.getByRole("button", { name: "Search", exact: true }),
+  searchSubmitButton: (root: SearchRoot): Locator =>
+    root.getByRole("button", { name: "Search", exact: true }),
 
   /**
-   * "There are no items to display" text — no-results probe. verified 2026-04-06
+   * "There are no items to display" text — no-results probe. verified 2026-06-18
    * @tags no-results, empty, text, probe, search, new-kronos
    */
-  noResultsText: (f: FrameLocator): Locator =>
-    f.getByText("There are no items to display."),
+  noResultsText: (root: SearchRoot): Locator =>
+    root.getByText("There are no items to display."),
 
   /**
-   * First-row checkbox on employee results. verified 2026-04-06
+   * First-row checkbox on employee results. verified 2026-06-18
    * @tags first, result, checkbox, search, new-kronos
    */
-  firstResultCheckbox: (f: FrameLocator): Locator =>
-    f.locator('input[type="checkbox"]').first(),
+  firstResultCheckbox: (root: SearchRoot): Locator =>
+    root.locator('input[type="checkbox"]').first(),
 
   /**
-   * First-row fallback (click the row directly). verified 2026-04-06
+   * First-row fallback (click the row directly). verified 2026-06-18
    * @tags first, result, row, fallback, search, new-kronos
    */
-  firstResultRow: (f: FrameLocator): Locator =>
-    f.locator('[role="row"]').first(),
+  firstResultRow: (root: SearchRoot): Locator =>
+    root.locator('[role="row"]').first(),
 
   /**
-   * Close the sidebar. verified 2026-04-06
+   * Close the sidebar. verified 2026-06-18
    * @tags close, sidebar, button, search, new-kronos
    */
-  closeButton: (f: FrameLocator): Locator =>
-    f.getByRole("button", { name: "Employee Search Close" }),
+  closeButton: (root: SearchRoot): Locator =>
+    root.getByRole("button", { name: "Employee Search Close" }),
 };
 
 // ─── Go To → Timecard menu (page-scoped + frame-scoped fallbacks) ─────────

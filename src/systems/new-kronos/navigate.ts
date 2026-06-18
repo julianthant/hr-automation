@@ -8,6 +8,7 @@ import {
   search as searchSelectors,
   goToMenu,
   timecard,
+  type SearchRoot,
 } from "./selectors.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 import {
@@ -17,6 +18,31 @@ import {
 } from "../../services/timecard/index.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
+
+/**
+ * The WFD Employee Search sidebar renders its input/results either INSIDE the
+ * portal-frame iframe (fresh page load) or TOP-LEVEL on the page (e.g. when
+ * reached after a timecard navigation). Probe the iframe first; fall back to
+ * the top-level page so search works in BOTH contexts. (2026-06-18: the
+ * iframe-only assumption caused `locator.fill: Timeout` on the top-level
+ * variant — EID 10602099.)
+ */
+async function resolveSearchRoot(page: Page): Promise<SearchRoot> {
+  const frame = searchFrame(page);
+  try {
+    await searchSelectors.searchInput(frame).waitFor({ state: "visible", timeout: 4_000 });
+    return frame;
+  } catch {
+    // Not in the iframe — fall back to the top-level page. Best-effort wait so
+    // the caller's safeFill gets a present element (or surfaces a clear error).
+    try {
+      await searchSelectors.searchInput(page).waitFor({ state: "visible", timeout: 4_000 });
+    } catch {
+      /* Neither context shows it yet — return the page; safeFill will report. */
+    }
+    return page;
+  }
+}
 
 /**
  * Search for an employee by ID in the new Kronos (WFD) system.
@@ -59,25 +85,27 @@ export async function searchEmployee(
   });
   await page.waitForTimeout(2_000);
 
-  const frame = searchFrame(page);
+  // Resolve whether the search sidebar rendered inside the portal-frame iframe
+  // or top-level on the page, then target that context for fill/submit/results.
+  const root = await resolveSearchRoot(page);
 
   // Fill the search input
   log.step(`[New Kronos] Filling search: ${employeeId}`);
-  await safeFill(searchSelectors.searchInput(frame), employeeId, {
+  await safeFill(searchSelectors.searchInput(root), employeeId, {
     timeout: 5_000,
     label: "new kronos employee search input",
   });
   await page.waitForTimeout(500);
 
-  // Click the Search button (inside the iframe)
+  // Click the Search button
   log.step("[New Kronos] Clicking Search...");
-  await safeClick(searchSelectors.searchSubmitButton(frame), {
+  await safeClick(searchSelectors.searchSubmitButton(root), {
     timeout: 5_000,
     label: "new kronos search submit button",
   });
 
-  const checkbox = searchSelectors.firstResultCheckbox(frame);
-  const noResults = searchSelectors.noResultsText(frame);
+  const checkbox = searchSelectors.firstResultCheckbox(root);
+  const noResults = searchSelectors.noResultsText(root);
   const searchResultTimeout = 15_000;
 
   let found: boolean;
@@ -106,10 +134,10 @@ export async function searchEmployee(
  */
 export async function selectEmployeeResult(page: Page): Promise<boolean> {
   log.step("[New Kronos] Selecting employee from search results...");
-  const frame = searchFrame(page);
+  const root = await resolveSearchRoot(page);
 
   // Click the checkbox on the first result row
-  const checkbox = searchSelectors.firstResultCheckbox(frame);
+  const checkbox = searchSelectors.firstResultCheckbox(root);
   if ((await checkbox.count()) > 0) {
     await checkbox.check({ timeout: 5_000 });
     await page.waitForTimeout(1_000);
@@ -118,7 +146,7 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
   }
 
   // Fallback: click the employee name/row directly
-  const resultRow = searchSelectors.firstResultRow(frame);
+  const resultRow = searchSelectors.firstResultRow(root);
   if (await clickIfPresent(resultRow, { timeout: 5_000, label: "new kronos search result row" })) {
     await page.waitForTimeout(1_000);
     log.step("[New Kronos] Employee row clicked");
@@ -474,13 +502,17 @@ export async function setDateRange(
  * Close the Employee Search sidebar if it's open.
  */
 export async function closeEmployeeSearch(page: Page): Promise<void> {
-  try {
-    const frame = searchFrame(page);
-    const closeBtn = searchSelectors.closeButton(frame);
-    if (await clickIfPresent(closeBtn, { timeout: 3_000, label: "new kronos search sidebar close button" })) {
-      log.step("[New Kronos] Search sidebar closed");
+  // The sidebar may be in the portal-frame iframe OR top-level — try both
+  // close buttons (best-effort; the sidebar may simply not be open).
+  for (const root of [searchFrame(page), page] as SearchRoot[]) {
+    try {
+      const closeBtn = searchSelectors.closeButton(root);
+      if (await clickIfPresent(closeBtn, { timeout: 2_000, label: "new kronos search sidebar close button" })) {
+        log.step("[New Kronos] Search sidebar closed");
+        return;
+      }
+    } catch {
+      // Not in this context — try the next.
     }
-  } catch {
-    // Sidebar may not be open
   }
 }
