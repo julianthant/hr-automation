@@ -21,8 +21,10 @@ This workflow touches **crm** only.
 
 ```bash
 InputRunPanel → /api/enqueue
-  body: { workflow: "crm-doc-download", inputs: [{ emplId }] }
+  body: { workflow: "crm-doc-download", inputs: [{ emplId } | { email }] }
 ```
+
+The comma-separated input box accepts **EIDs and emails interchangeably** — `parseCrmDocDownloadInputs` (`src/dashboard/lib/input-run-registry.ts`) discriminates each token (numeric 5+ digits → `emplId`, valid email → `email`) and rejects anything else. This mirrors the schema/`inputSubject`, which already keyed on whichever field is populated.
 
 Daemon spawn/enqueue matches other dashboard input-run workflows (`src/core/daemon/enqueue-dispatch.ts` + `cli-daemon.ts` registration).
 
