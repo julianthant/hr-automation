@@ -44,3 +44,33 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Failed because:** The New Kronos timecard is a VIRTUAL-SCROLL grid (`.ui-grid-viewport`) — `fullPage` only captures the rows currently rendered in the DOM, missing off-screen dates. And `block:"start"` put the target row at the top edge with no later-date context below visible in a clamped viewport. No screenshot was emitted at all after the scroll, so the positioning was wasted.
 **Fix:** Changed `scrollTimecardToDate` to `scrollIntoView({ block: "center" })` so the chosen day sits mid-viewport with neighbours above and below, then take a VIEWPORT-only shot right after it in the workflow: `ctx.screenshot({ systems:['new-kronos'], centerSelector:'.ui-grid-viewport', label:'new-kronos-last-worked-date' })`. `centerSelector` (kernel `Session.captureViewportCenteredOnElement`) captures the viewport, NOT fullPage; centering the full-viewport grid container is a near no-op whose real job is selecting the viewport-only path while the row stays centered from the scroll helper. Best-effort: fires even if the scroll missed.
 **Tags:** screenshot, timecard, virtual-scroll, fullpage, viewport, scroll-to-date, center, ui-grid, audit
+
+## 2026-06-18 — Date-range inputs silently reject `fill()` — use keystrokes (OBS-006)
+
+**Tried:** `safeFill(timecard.startDateInput(page), startDate, ...)` and the same for `endDateInput`.
+**Failed because:** The WFD date-range `<input type=text>` controls silently revert to today's date when Playwright `fill()` is used — no error is thrown, but the applied range is wrong (the timecard loads the current day instead of the requested range).
+**Fix:** Use real per-char keystrokes: `await loc.click({ timeout: 5_000 }); await loc.press("ControlOrMeta+a"); await loc.pressSequentially(dateStr, { delay: 20 });`. Verified live 2026-06-18 — this correctly set `4/01/2026 - 5/05/2026` where `fill` left the field at today.
+**Selector:** `timecard.startDateInput`, `timecard.endDateInput` in `selectors.ts`
+**Tags:** date-range, fill, input, keystrokes, pressSequentially, OBS-006, setDateRange, timecard
+
+## 2026-06-18 — Go To → Timecard is an `option` role, not `menuitem`
+
+**Tried:** `getByRole("menuitem", { name: /timecard/i })` as the primary in `goToMenu.timecardItem`.
+**Failed because:** The live Dayforce Go To dropdown renders the Timecard entry as `role="option"` (not `role="menuitem"`). The `menuitem` primary missed every time, triggering the next fallback and emitting a spurious fallback warning on every run.
+**Fix:** Add `getByRole("option", { name: /timecard/i })` (frame-scoped then page-scoped) as the first two choices in the `.or()` chain, before the `menuitem` fallbacks. Verified live 2026-06-18.
+**Selector:** `goToMenu.timecardItem` in `selectors.ts`
+**Tags:** go-to, timecard, option, menuitem, role, fallback, navigation
+
+## 2026-06-18 — Timecard sick/holiday parsing: column indices and pay-code strings
+
+**Tried:** Guessing cell indices and pay-code strings without live verification (e.g. assuming Pay code might be cell[3] or cell[5], or that holiday rows would all carry the day-of text like "Juneteenth Observed").
+**Failed because:** The WFD timecard grid has 10 cells per row (`[0]=Schedule, [1]=In, [2]=Out, [3]=Transfer, [4]=Pay code, [5]=Amount, [6]=Shift, [7]=Daily, [8]=Period, [9]=Absence`). Without live verification the wrong cell index returns an empty string, silently missing every pay-code match. Additionally, a "Juneteenth Observed" annotation row appears alongside the real "Holiday - Hourly" row for 6/19 — naively matching `/holiday/i` on ALL text rather than specifically on cell[4] would have counted it; the annotation row's cell[4] is empty/non-matching, so the regex is safe.
+**Fix:** In `getSeparationTimecardData` (navigate.ts), walk the aligned `.ui-grid-viewport` grid. Punch = In(cell[1]) or Out(cell[2]) matches `/\d+:\d+\s*(AM|PM)/`. **Sick** = cell[4] matches `/sick/i` (live string: `"Sick - Hourly"`). **Holiday** = cell[4] matches `/holiday/i` (live string: `"Holiday - Hourly"`). Multiple data rows can share one date — carry last-seen date forward. Verified live 2026-06-18 against EIDs 10776990 (holiday) and 10776013 (sick).
+**Tags:** sick, holiday, timecard, parsing, pay-code, column-index, separations, getSeparationTimecardData
+
+## 2026-06-18 — Search input in `portal-frame-*` iframe on fresh login, top-level after Home navigation
+
+**Tried:** Always targeting the search input via `searchFrame(page)` (the `iframe[name^="portal-frame-"]` locator) regardless of navigation path.
+**Failed because:** After navigating Home from the timecard (not a fresh session login), the search sidebar content renders at the top-level page context rather than inside the iframe. The `searchFrame` locator times out in that context.
+**Fix:** The daemon's fresh-login path correctly uses `searchFrame(page)` (iframe). If future workflows navigate Home before searching, probe top-level first and fall back to the frame, or use a `.or()` chain spanning both contexts.
+**Tags:** iframe, portal-frame, search-input, fresh-login, home-navigation, frame-context

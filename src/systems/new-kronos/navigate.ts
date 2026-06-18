@@ -329,13 +329,94 @@ export async function checkTimecardDates(page: Page): Promise<string | null> {
 }
 
 /**
+ * Timecard data extracted for use during separations: the last punch date,
+ * any days with a Sick pay code, and any days with a Holiday pay code.
+ */
+export interface SeparationTimecardData {
+  /** MM/DD/YYYY — latest day with an In/Out punch (the "Last Day Worked"), or null if none found. */
+  lastPunchDate: string | null;
+  /** MM/DD/YYYY[], chronological — days with a Sick pay code (e.g. "Sick - Hourly"). */
+  sickDates: string[];
+  /** MM/DD/YYYY[], chronological — days with a Holiday pay code (e.g. "Holiday - Hourly"). */
+  holidayDates: string[];
+}
+
+/**
+ * Parse the New Kronos (WFD) timecard grid to extract:
+ * - last day with an In/Out punch
+ * - all days with a Sick pay code (matches /sick/i, e.g. "Sick - Hourly")
+ * - all days with a Holiday pay code (matches /holiday/i, e.g. "Holiday - Hourly")
+ *
+ * Grid structure: `document.querySelectorAll(".ui-grid-viewport")` →
+ *   [0] = pinned date column (rows like "Thu 4/23")
+ *   [last] = data column; per-row cell indices:
+ *     [0]=Schedule [1]=In [2]=Out [3]=Transfer [4]=Pay code [5]=Amount
+ *     [6]=Shift [7]=Daily [8]=Period [9]=Absence
+ *
+ * Verified live 2026-06-18 against EIDs 10776990 (holiday) and 10776013 (sick).
+ * Multiple data rows can share one date; the date column shows the date once,
+ * so the last-seen date is carried forward across rows.
+ *
+ * NOTE: keep `getTimecardLastDate` as-is — it is still used by `checkTimecardDates`.
+ */
+export async function getSeparationTimecardData(
+  page: Page,
+): Promise<SeparationTimecardData> {
+  log.step("[New Kronos] Parsing timecard for separation data (last punch, sick, holiday)...");
+
+  const raw = await page.evaluate(() => {
+    const vps = document.querySelectorAll(".ui-grid-viewport");
+    if (vps.length < 2) return { lastPunch: null, sick: [] as { mon: number; day: number }[], holiday: [] as { mon: number; day: number }[] };
+    const dateVp = vps[0];
+    const dataVp = vps[vps.length - 1];
+    const dRows = [...dateVp.querySelectorAll("[role=row]")];
+    const xRows = [...dataVp.querySelectorAll("[role=row]")];
+    let cur: { mon: number; day: number } | null = null;
+    let lastPunch: { mon: number; day: number } | null = null;
+    const sick: { mon: number; day: number }[] = [];
+    const holiday: { mon: number; day: number }[] = [];
+    for (let i = 0; i < Math.max(dRows.length, xRows.length); i++) {
+      const dt = dRows[i] ? dRows[i].textContent!.replace(/\s+/g, " ").trim() : "";
+      const m = dt.match(/([A-Za-z]{3})\s+(\d+)\/(\d+)/);
+      if (m) cur = { mon: +m[2], day: +m[3] };
+      const cells = xRows[i]
+        ? [...xRows[i].querySelectorAll("[role=gridcell]")].map((c) =>
+            c.textContent!.replace(/\s+/g, " ").trim(),
+          )
+        : [];
+      const inOut = (cells[1] ?? "") + " " + (cells[2] ?? "");
+      if (cur && /\d+:\d+\s*(AM|PM)/.test(inOut)) lastPunch = cur;
+      const pay = cells[4] ?? "";
+      if (cur && /sick/i.test(pay)) sick.push(cur);
+      if (cur && /holiday/i.test(pay)) holiday.push(cur);
+    }
+    return { lastPunch, sick, holiday };
+  });
+
+  const lastPunchDate = raw.lastPunch
+    ? formatTimecardDate(raw.lastPunch.mon, raw.lastPunch.day)
+    : null;
+  const sickDates = raw.sick.map((d) => formatTimecardDate(d.mon, d.day));
+  const holidayDates = raw.holiday.map((d) => formatTimecardDate(d.mon, d.day));
+
+  log.step(
+    `[New Kronos] Timecard parse: lastPunch=${lastPunchDate ?? "none"}, sick=${sickDates.length}, holiday=${holidayDates.length}`,
+  );
+
+  return { lastPunchDate, sickDates, holidayDates };
+}
+
+/**
  * Set a custom date range on the New Kronos timecard view.
  * Must be called after navigating to the Timecards page.
  *
- * Mapped via playwright-cli 2026-04-06:
+ * Mapped via playwright-cli 2026-04-06, keystroke fix verified 2026-06-18:
  *   1. Click "Current Pay Period" button → opens timeframe dropdown
  *   2. Click "Select range" button → opens date range inputs
- *   3. Fill "Start date" and "End date" textboxes (MM/DD/YYYY)
+ *   3. Type "Start date" and "End date" via real keystrokes (MM/DD/YYYY)
+ *      NOTE: these <input type=text> controls silently reject Playwright
+ *      fill() — the value reverts to today. Use click → CtrlOrMeta+a →
+ *      pressSequentially to drive real per-char keystrokes. (OBS-006)
  *   4. Click "Apply" button
  *
  * After applying, the button text changes from "Current Pay Period"
@@ -363,19 +444,21 @@ export async function setDateRange(
   });
   await page.waitForTimeout(1_000);
 
-  // Step 3: Fill start date
-  await safeFill(timecard.startDateInput(page), startDate, {
-    timeout: 5_000,
-    label: "new kronos start date",
-  });
-  await page.waitForTimeout(500);
+  // Step 3: Type start date via real keystrokes.
+  // fill() silently reverts these inputs to today's date (OBS-006, verified 2026-06-18).
+  // Real per-char keystrokes (pressSequentially) correctly set the value.
+  const startLoc = timecard.startDateInput(page);
+  await startLoc.click({ timeout: 5_000 });
+  await startLoc.press("ControlOrMeta+a");
+  await startLoc.pressSequentially(startDate, { delay: 20 });
+  await page.waitForTimeout(300);
 
-  // Step 4: Fill end date
-  await safeFill(timecard.endDateInput(page), endDate, {
-    timeout: 5_000,
-    label: "new kronos end date",
-  });
-  await page.waitForTimeout(500);
+  // Step 4: Type end date via real keystrokes (same reason as start date).
+  const endLoc = timecard.endDateInput(page);
+  await endLoc.click({ timeout: 5_000 });
+  await endLoc.press("ControlOrMeta+a");
+  await endLoc.pressSequentially(endDate, { delay: 20 });
+  await page.waitForTimeout(300);
 
   // Step 5: Click Apply
   await safeClick(timecard.applyButton(page), {

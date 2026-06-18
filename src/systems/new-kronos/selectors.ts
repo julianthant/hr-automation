@@ -116,15 +116,19 @@ export const goToMenu = {
     f.getByRole("button", { name: /go to/i }).or(f.locator("text=Go To")),
 
   /**
-   * Timecard menu item — 6-deep fallback chain covering both frame
-   * (searchFrame) and page-level renderings, plus "Timecards" plural /
-   * "Timecard" singular variants. verified 2026-04-06
-   * @tags timecard, menu, item, fallback, navigation, new-kronos
+   * Timecard menu item — 8-deep fallback chain. The live Dayforce Go To menu
+   * renders Timecard as role="option" (not "menuitem") — option variants are
+   * tried first. Covers both frame- and page-level renderings plus
+   * "Timecards" plural / "Timecard" singular variants.
+   * verified 2026-06-18
+   * @tags timecard, menu, item, option, fallback, navigation, new-kronos
    */
   timecardItem: (page: Page): Locator => {
     const f = searchFrame(page);
     return f
-      .getByRole("menuitem", { name: /timecard/i })
+      .getByRole("option", { name: /timecard/i })
+      .or(page.getByRole("option", { name: /timecard/i }))
+      .or(f.getByRole("menuitem", { name: /timecard/i }))
       .or(f.locator("text=Timecards").first())
       .or(f.locator("text=Timecard").first())
       .or(page.getByRole("menuitem", { name: /timecard/i }))
@@ -139,7 +143,7 @@ export const timecard = {
   /**
    * Pay-period trigger button — text varies ("Current Pay Period",
    * "Previous Pay Period", or a date range). Match all three.
-   * verified 2026-04-06
+   * verified 2026-06-18
    * @tags pay, period, trigger, button, timecard, new-kronos
    */
   payPeriodTriggerButton: (page: Page): Locator =>
@@ -150,35 +154,35 @@ export const timecard = {
       .first(),
 
   /**
-   * Previous Pay Period option (inside an open period dropdown). verified 2026-04-06
+   * Previous Pay Period option (inside an open period dropdown). verified 2026-06-18
    * @tags previous, pay, period, option, timecard, new-kronos
    */
   previousPayPeriodOption: (page: Page): Locator =>
     page.getByRole("option", { name: "Previous Pay Period" }),
 
   /**
-   * "Select range" button to switch to custom date range. verified 2026-04-06
+   * "Select range" button to switch to custom date range. verified 2026-06-18
    * @tags select, range, button, custom, date, timecard, new-kronos
    */
   selectRangeButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Select range" }),
 
   /**
-   * Start date input (custom range). verified 2026-04-06
+   * Start date input (custom range). verified 2026-06-18
    * @tags start, date, input, range, timecard, new-kronos
    */
   startDateInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "Start date" }),
 
   /**
-   * End date input (custom range). verified 2026-04-06
+   * End date input (custom range). verified 2026-06-18
    * @tags end, date, input, range, timecard, new-kronos
    */
   endDateInput: (page: Page): Locator =>
     page.getByRole("textbox", { name: "End date" }),
 
   /**
-   * Apply button (custom range). verified 2026-04-06
+   * Apply button (custom range). verified 2026-06-18
    * @tags apply, button, range, timecard, new-kronos
    */
   applyButton: (page: Page): Locator =>
