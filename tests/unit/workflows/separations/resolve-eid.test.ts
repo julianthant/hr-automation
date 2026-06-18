@@ -1,35 +1,39 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { resolveSeparationEid } from "../../../../src/workflows/separations/workflow.js";
+import {
+  resolveSeparationEid,
+  separationNameMatches,
+} from "../../../../src/workflows/separations/workflow.js";
 import type { KualiSeparationData } from "../../../../src/systems/kuali/index.js";
 import { personLookupWorkflow } from "../../../../src/workflows/person-lookup/index.js";
 
 /**
- * Unit coverage for the name↔EID verification guard (`resolveSeparationEid`),
- * the `identity-check` step. The guard ALWAYS delegates to person-lookup BY
- * NAME and reconciles the resolved EID against the Kuali EID — the name is
- * authoritative. Exercised without a live browser or daemon: a scripted/stub
- * `ctx.delegateTo` stands in for the real person-lookup child run.
+ * Unit coverage for the CONDITIONAL name↔EID verification (`resolveSeparationEid`,
+ * the `identity-check` step) and its `separationNameMatches` gate.
  *
- *   (1) verified MATCH — resolved EID == Kuali EID → returned unchanged, but a
- *       delegation DID happen (always verify), and no ctx.data.eid write.
- *   (2) MISMATCH — valid Kuali EID, a DIFFERENT valid resolved EID → take the
- *       name-derived EID + write it to ctx.data (name wins).
- *   (3) short/invalid Kuali EID, valid resolved EID → take the resolved EID
- *       (the wrong-but-typed value is corrected from the name).
- *   (4) person-lookup resolves NO valid EID (failed run, or `done` with an
- *       invalid emplId, or `done` with no data) → FAIL LOUD. We never proceed
- *       with an unverified EID, even when the Kuali EID is valid-format.
+ * The handler now runs `resolveSeparationEid` ONLY when the Workforce Job
+ * Summary result is suspicious, passing the Job Summary `{ found, name }`:
  *
- * The guard runs after kualiData is established by EITHER the extraction step
- * OR the edit-and-resume prefilled bypass — both converge on the same
- * `kualiData` object the guard reads, so this coverage applies to both.
+ *   (1) FOUND + name mismatch, resolved EID differs → take the name-derived EID
+ *       (name wins) + write it to ctx.data.
+ *   (2) FOUND + name mismatch, resolved EID happens to MATCH the Kuali one →
+ *       return unchanged, no ctx.data write (the names just rendered
+ *       differently; the EID was right).
+ *   (3) NOT found + short/incomplete EID → delegate BY NAME, take the resolved
+ *       8-digit EID.
+ *   (4) NOT found + a COMPLETE 8-digit EID → FAIL LOUD with NO delegation (we do
+ *       not silently look up a complete-looking EID; the operator fixes Kuali).
+ *   (5) delegation resolves NO valid EID (failed run / done-but-invalid / no
+ *       data) → FAIL LOUD.
+ *
+ * A scripted/stub `ctx.delegateTo` stands in for the real person-lookup child
+ * run — no live browser or daemon.
  */
 
 function makeKualiData(overrides: Partial<KualiSeparationData> = {}): KualiSeparationData {
   return {
     employeeName: "Mendoza, Matthew",
-    eid: "1061029", // 7 digits — invalid UCPath EID
+    eid: "1061029", // 7 digits — incomplete UCPath EID
     lastDayWorked: "03/20/2026",
     separationDate: "03/21/2026",
     terminationType: "Resign - Personal Reasons",
@@ -38,11 +42,6 @@ function makeKualiData(overrides: Partial<KualiSeparationData> = {}): KualiSepar
   };
 }
 
-/**
- * Build a stub `ctx` exposing only the two members `resolveSeparationEid`
- * touches (`delegateTo` + `updateData`). The delegate stub records calls and
- * returns the scripted ChildRunResult.
- */
 function makeStubCtx(delegateResult: {
   status: "done" | "failed" | "cancelled" | "pending";
   data?: Record<string, string>;
@@ -67,80 +66,111 @@ function makeStubCtx(delegateResult: {
   return { ctx, calls, updated };
 }
 
-describe("resolveSeparationEid", () => {
-  it("(1) verifies a matching valid EID — delegates BY NAME, returns it unchanged, no ctx.data write", async () => {
-    const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
-    const kualiData = makeKualiData({ eid: "10772489", employeeName: "Mendoza, Matthew" });
-
-    const result = await resolveSeparationEid(ctx, kualiData);
-
-    assert.equal(result, "10772489", "matching EID returned verbatim");
-    assert.equal(calls.length, 1, "always verifies — exactly one person-lookup delegation even on a match");
-    assert.equal(calls[0].workflow, personLookupWorkflow.config.name, "delegated to person-lookup");
-    assert.deepEqual(calls[0].input, { name: "Mendoza, Matthew" }, "delegated BY NAME");
-    assert.equal(updated.eid, undefined, "no ctx.data.eid write when the EID already matches");
+describe("separationNameMatches", () => {
+  it("matches across format differences (Job Summary 'First Last' vs Kuali 'Last, First')", () => {
+    assert.equal(separationNameMatches("Balmaceda, Jayden", "Jayden Balmaceda"), true);
   });
 
-  it("(2) takes the name-derived EID when a valid Kuali EID does NOT match the lookup (name wins)", async () => {
-    // The Perez case: 10694136 is valid-FORMAT but the WRONG person; the name
-    // resolves the real EID, which must win.
+  it("matches when a middle name is present on one side only", () => {
+    assert.equal(separationNameMatches("Mendoza, Matthew James", "Matthew Mendoza"), true);
+  });
+
+  it("does NOT match two different people", () => {
+    assert.equal(separationNameMatches("Perez, Jason", "Jayden Balmaceda"), false);
+  });
+
+  it("does NOT match an empty Job Summary name", () => {
+    assert.equal(separationNameMatches("Mendoza, Matthew", ""), false);
+  });
+});
+
+describe("resolveSeparationEid (conditional)", () => {
+  it("(1) FOUND + name mismatch + different resolved EID → takes the name-derived EID", async () => {
+    // The Perez case: 10694136 is a valid-FORMAT EID Job Summary FOUND, but its
+    // detail-page name didn't match — so the handler calls us with found:true.
     const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
     const kualiData = makeKualiData({ eid: "10694136", employeeName: "Perez, Jason" });
 
-    const result = await resolveSeparationEid(ctx, kualiData);
+    const result = await resolveSeparationEid(ctx, kualiData, {
+      found: true,
+      name: "Some Other Person",
+    });
 
     assert.equal(result, "10772489", "name-derived EID returned over the mismatched Kuali EID");
     assert.equal(calls.length, 1, "exactly one delegation");
+    assert.equal(calls[0].workflow, personLookupWorkflow.config.name);
     assert.deepEqual(calls[0].input, { name: "Perez, Jason" }, "delegated BY NAME");
-    assert.equal(updated.eid, "10772489", "corrected EID persisted to ctx.data for downstream + snapshot");
+    assert.equal(updated.eid, "10772489", "corrected EID persisted to ctx.data");
   });
 
-  it("(3) corrects a short/invalid Kuali EID from the name", async () => {
+  it("(2) FOUND + name mismatch but resolved EID matches Kuali → returns unchanged, no ctx.data write", async () => {
+    const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
+    const kualiData = makeKualiData({ eid: "10772489", employeeName: "Mendoza, Matthew" });
+
+    const result = await resolveSeparationEid(ctx, kualiData, { found: true, name: "M. Mendoza" });
+
+    assert.equal(result, "10772489", "EID returned verbatim");
+    assert.equal(calls.length, 1, "still delegated to confirm");
+    assert.equal(updated.eid, undefined, "no ctx.data.eid write when the resolved EID matches");
+  });
+
+  it("(3) NOT found + short EID → delegates BY NAME and corrects to the resolved 8-digit EID", async () => {
     const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10610290" } });
     const kualiData = makeKualiData({ eid: "1061029", employeeName: "Mendoza, Matthew" });
 
-    const result = await resolveSeparationEid(ctx, kualiData);
+    const result = await resolveSeparationEid(ctx, kualiData, { found: false, name: "" });
 
     assert.equal(result, "10610290", "corrected 8-digit EID returned");
     assert.deepEqual(calls[0].input, { name: "Mendoza, Matthew" }, "delegated BY NAME (no bad EID passed)");
     assert.equal(updated.eid, "10610290", "corrected EID persisted to ctx.data");
   });
 
-  it("(4) fails loud when person-lookup returns a FAILED run (cannot verify)", async () => {
-    const { ctx } = makeStubCtx({ status: "failed", error: { message: "no match in UCPath" } });
+  it("(4) NOT found + a COMPLETE 8-digit EID → fails loud with NO delegation", async () => {
+    const { ctx, calls } = makeStubCtx({ status: "done", data: { emplId: "10999999" } });
     const kualiData = makeKualiData({ eid: "10772489", employeeName: "Mendoza, Matthew" });
 
     await assert.rejects(
-      () => resolveSeparationEid(ctx, kualiData),
+      () => resolveSeparationEid(ctx, kualiData, { found: false, name: "" }),
       (err: Error) => {
-        assert.match(err.message, /Could not verify the EID for "Mendoza, Matthew"/);
-        assert.match(err.message, /Kuali EID "10772489"/);
-        assert.match(err.message, /Fix the name\/EID in the Kuali form and retry\./);
+        assert.match(err.message, /found no record for "Mendoza, Matthew"/);
+        assert.match(err.message, /complete 8 digits/);
+        assert.match(err.message, /Fix the EID\/name in the Kuali form and retry\./);
         return true;
       },
-      "unverifiable EID must throw the clear operator error — even when the Kuali EID is valid-format",
+    );
+    assert.equal(calls.length, 0, "a complete-but-missing EID is never looked up by name");
+  });
+
+  it("(5) fails loud when person-lookup returns a FAILED run", async () => {
+    const { ctx } = makeStubCtx({ status: "failed", error: { message: "no match in UCPath" } });
+    const kualiData = makeKualiData({ eid: "1061029", employeeName: "Mendoza, Matthew" });
+
+    await assert.rejects(
+      () => resolveSeparationEid(ctx, kualiData, { found: false, name: "" }),
+      (err: Error) => {
+        assert.match(err.message, /Could not verify the EID for "Mendoza, Matthew"/);
+        assert.match(err.message, /person-lookup resolved no UCPath EID by name/);
+        return true;
+      },
     );
   });
 
-  it("(4) fails loud when person-lookup is DONE but resolves no valid EID", async () => {
-    // A `done` lookup that still produced a short / blank emplId is not a valid
-    // verification — isUcpathEmployeeId is re-checked on the resolved value.
+  it("(5) fails loud when person-lookup is DONE but resolves an invalid emplId", async () => {
     const { ctx } = makeStubCtx({ status: "done", data: { emplId: "1061029" } });
-    const kualiData = makeKualiData({ eid: "10772489" });
+    const kualiData = makeKualiData({ eid: "1061029" });
 
     await assert.rejects(
-      () => resolveSeparationEid(ctx, kualiData),
+      () => resolveSeparationEid(ctx, kualiData, { found: false, name: "" }),
       /person-lookup resolved no UCPath EID by name/,
-      "a done run with an invalid emplId still fails loud",
     );
   });
 
-  it("(4) fails loud when person-lookup returns done with no data at all", async () => {
+  it("(5) fails loud when person-lookup returns done with no data at all", async () => {
     const { ctx } = makeStubCtx({ status: "done" });
-    const kualiData = makeKualiData({ eid: "10772489" });
+    const kualiData = makeKualiData({ eid: "1061029" });
 
     await assert.rejects(
-      () => resolveSeparationEid(ctx, kualiData),
+      () => resolveSeparationEid(ctx, kualiData, { found: false, name: "" }),
       /Fix the name\/EID in the Kuali form and retry\./,
     );
   });

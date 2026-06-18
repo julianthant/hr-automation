@@ -7,13 +7,16 @@ test('separations effective step list is auth:<systems> + work steps', () => {
   // Import of separationsWorkflow triggers defineWorkflow which auto-registers.
   const meta = getByName('separations')
   assert.ok(meta, 'separations workflow must be registered')
+  // identity-check now sits AFTER kronos-search: the Workforce Job Summary
+  // (fetched in kronos-search) is the gate that decides whether person-lookup
+  // runs at all, so the verification step must follow it.
   assert.deepEqual(meta.steps, [
     'auth:kuali',
     'auth:new-kronos',
     'auth:ucpath',
     'kuali-extraction',
-    'identity-check',
     'kronos-search',
+    'identity-check',
     'ucpath-job-summary',
     'ucpath-transaction',
     'kuali-finalization',

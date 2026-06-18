@@ -6,7 +6,8 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import type { Ctx } from "../../core/kernel/types.js";
-import { isUcpathEmployeeId } from "../../domain/identity/eid.js";
+import { isUcpathEmployeeId, normalizeEid } from "../../domain/identity/eid.js";
+import { scoreNameMatch } from "../../services/matching/match.js";
 import { personLookupWorkflow } from "../person-lookup/index.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
@@ -38,8 +39,9 @@ import {
 } from "../../systems/new-kronos/index.js";
 import type { SeparationTimecardData } from "../../systems/new-kronos/index.js";
 
-// UCPath (used for jobSummary result resolution)
-import type { JobSummaryData } from "../../systems/ucpath/index.js";
+// UCPath (used for jobSummary result resolution + identity-check re-fetch)
+import { getJobSummaryIdentity } from "../../systems/ucpath/index.js";
+import type { JobSummaryData, JobSummaryIdentity } from "../../systems/ucpath/index.js";
 
 import {
   computeTerminationEffDate,
@@ -57,7 +59,7 @@ import { UCPATH_SMART_HR_URL } from "../../config.js";
 
 // Step functions
 import { runKualiExtract } from "./steps/kuali-extract.js";
-import { runKronosSearch } from "./steps/kronos-search.js";
+import { runKronosSearch, runNewKronosTimecard } from "./steps/kronos-search.js";
 import { logSettledRejection, unwrapSettled } from "./settled.js";
 import { runUcpathJobSummary } from "./steps/ucpath-job-summary.js";
 import { runUcpathTransaction } from "./steps/ucpath-transaction.js";
@@ -83,8 +85,8 @@ export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
 const separationsSteps = [
   "kuali-extraction",
-  "identity-check",
   "kronos-search",
+  "identity-check",
   "ucpath-job-summary",
   "ucpath-transaction",
   "kuali-finalization",
@@ -119,55 +121,86 @@ export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  */
 
 export function resolveJobSummaryResult(
-  result: PromiseSettledResult<JobSummaryData | undefined>,
-): JobSummaryData | undefined {
+  result: PromiseSettledResult<JobSummaryIdentity>,
+): JobSummaryIdentity {
   return unwrapSettled("UCPath Job Summary extraction", result);
 }
 
 /**
- * Verify the Kuali-extracted EID against the employee NAME via person-lookup,
- * and correct it when they disagree. The NAME is authoritative.
+ * Fuzzy-match floor for the Job-Summary↔Kuali name comparison — the same
+ * auto-accept threshold roster matching uses (`scoreNameMatch`).
+ */
+export const NAME_MATCH_THRESHOLD = 0.85;
+
+/**
+ * Whether the Workforce Job Summary detail-page name matches the Kuali-extracted
+ * name closely enough to trust that the EID resolved to the intended person.
  *
- * Operators type the EID into the Kuali form by hand. A valid-FORMAT but WRONG
- * EID (e.g. `"10694136"` for the wrong person — passes `isUcpathEmployeeId`) is
- * NOT caught by any format check, yet UCPath Smart HR rejects it: the Empl ID
- * field goes red, "Continue" never advances, and the run dies far downstream on
- * a comments-field timeout with no transaction number. The only reliable way to
- * catch this is to look the person up BY NAME and compare.
+ * Uses the token-sorted fuzzy matcher (`scoreNameMatch`, ≥ 0.85) — NOT an exact
+ * compare — because the two sources format names differently: Job Summary
+ * renders "First Last", Kuali typically "Last, First", and middle names / minor
+ * variants are common. An exact compare would flag those as mismatches and fire
+ * person-lookup constantly. An empty Job Summary name never matches.
+ */
+export function separationNameMatches(kualiName: string, jobSummaryName: string): boolean {
+  if (!jobSummaryName.trim()) return false;
+  return scoreNameMatch(kualiName, jobSummaryName).score >= NAME_MATCH_THRESHOLD;
+}
+
+/**
+ * The `identity-check` step. Verify the EID via person-lookup BY NAME and
+ * reconcile — but ONLY when the Workforce Job Summary result is suspicious. The
+ * handler runs this step (vs. skipping it) exactly when the Job Summary gate
+ * flags a problem, so person-lookup is a CONDITIONAL fallback, not an every-run
+ * pass. The three cases it's called for:
  *
- * This is the `identity-check` step, run right after `kuali-extraction` (or the
- * edit-and-resume prefilled bypass) and BEFORE any consumer of `kualiData.eid`
- * (the Kronos date math + `runKronosSearch`). Behavior:
+ *   1. Job Summary FOUND the EID but the detail-page name does NOT match the
+ *      Kuali name → the EID points at the wrong person (the valid-format-but-
+ *      wrong Perez `10694136` case) → look the intended person up BY NAME.
+ *   2. Job Summary did NOT find the EID AND the typed EID is short (< 8 digits,
+ *      incomplete) → the operator mistyped/truncated it → resolve BY NAME.
+ *   3. Job Summary did NOT find the EID AND the typed EID is a complete 8 digits
+ *      → nothing obviously wrong with the EID and no person to compare → FAIL
+ *      LOUD (the operator fixes the upstream record; we do NOT silently look up,
+ *      per `src/systems/ucpath/CLAUDE.md` "No cross-source auto-fallbacks").
  *
- *   - ALWAYS delegate to `person-lookup` by `{ name: employeeName }` (the name
- *     path has no EID-format constraint). person-lookup is daemon-capable, so
- *     `ctx.delegateTo` routes through its daemon, which authenticates UCPath +
- *     CRM independently — this adds an auth pass + latency to EVERY separation;
- *     the accepted cost of verifying the identity up front.
- *   - person-lookup resolves a valid EID:
- *       · matches the Kuali EID → proceed unchanged.
- *       · differs               → take the NAME-derived EID (name wins) and
- *                                 `ctx.updateData({ eid })` so the corrected
- *                                 value rides every downstream step + the final
- *                                 snapshot / detail panel.
- *   - person-lookup resolves NO valid EID (failed run, or a `done` run whose
- *     `emplId` still fails `isUcpathEmployeeId`) → FAIL LOUD. Per the operator
- *     decision (2026-06-18) the separation must be verifiable: we NEVER proceed
- *     with an unverified EID.
+ * When it delegates, the NAME is authoritative: a resolved valid EID that
+ * differs from Kuali's replaces it (`ctx.updateData({ eid })` so it rides every
+ * downstream step + the final snapshot), a match returns the EID unchanged, and
+ * an unresolvable name FAILS LOUD. The visible correction (its own pipeline step
+ * + a delegated person-lookup child row) is the operator-confirmed exception to
+ * the no-fallback rule — see CLAUDE.md "Conditional name↔EID verification".
  *
- * This deliberately REVERSES the prior "fail loud, operator fixes Kuali; never
- * name-correct an 8-digit-but-wrong EID" policy (see `src/systems/ucpath/
- * CLAUDE.md` "No cross-source auto-fallbacks" + separations CLAUDE.md) — an
- * operator-confirmed change. Unlike the 2026-04-23 reverted in-read cascade,
- * the correction is VISIBLE: its own `identity-check` pipeline step + a
- * delegated person-lookup child row, not a hidden last-resort fallback.
+ * The Job-Summary-name-matches case (the common path) is handled in the handler
+ * by SKIPPING this step entirely (no delegation) — that's the "dynamic timeline"
+ * signal that person-lookup wasn't needed.
  *
- * Returns the verified EID to use for the rest of the run.
+ * Returns the verified EID for the rest of the run.
  */
 export async function resolveSeparationEid(
   ctx: Pick<Ctx<typeof separationsSteps, Record<string, unknown>>, "delegateTo" | "updateData">,
   kualiData: KualiSeparationData,
+  jobSummary: { found: boolean; name: string },
 ): Promise<string> {
+  const eidDigits = normalizeEid(kualiData.eid).length;
+
+  // Case 3: not found + a complete 8-digit EID → no person to compare against
+  // and the EID looks valid → fail loud instead of guessing by name.
+  if (!jobSummary.found && eidDigits >= 8) {
+    throw new Error(
+      `Workforce Job Summary found no record for "${kualiData.employeeName}" (EID "${kualiData.eid}") ` +
+      `and the EID is a complete 8 digits — cannot verify the identity. ` +
+      `Fix the EID/name in the Kuali form and retry.`,
+    );
+  }
+
+  // Cases 1 + 2: delegate to person-lookup BY NAME (the name path has no
+  // EID-format constraint, so a short/blank EID is fine to pass through).
+  const reason = jobSummary.found
+    ? `Job Summary name "${jobSummary.name}" does not match Kuali "${kualiData.employeeName}"`
+    : `Job Summary found no record and the Kuali EID "${kualiData.eid}" is incomplete (${eidDigits} digits)`;
+  log.warn(`[identity-check] ${reason} — delegating to person-lookup by name`);
+
   const result = await ctx.delegateTo(personLookupWorkflow, { name: kualiData.employeeName });
   const resolvedEid = result.status === "done" ? (result.data?.emplId ?? "") : "";
 
@@ -179,13 +212,15 @@ export async function resolveSeparationEid(
   }
 
   if (resolvedEid === kualiData.eid) {
-    log.success(`[EID guard] Name ↔ EID verified for "${kualiData.employeeName}" (${kualiData.eid})`);
+    log.success(
+      `[identity-check] person-lookup confirms EID ${kualiData.eid} for "${kualiData.employeeName}"`,
+    );
     return kualiData.eid;
   }
 
   log.warn(
-    `[EID guard] Kuali EID "${kualiData.eid}" does NOT match person-lookup for "${kualiData.employeeName}" ` +
-    `(resolved "${resolvedEid}") — taking the name-derived EID (name is authoritative)`,
+    `[identity-check] Taking name-derived EID "${resolvedEid}" over Kuali "${kualiData.eid}" ` +
+    `for "${kualiData.employeeName}" (name is authoritative)`,
   );
   ctx.updateData({ eid: resolvedEid });
   return resolvedEid;
@@ -376,32 +411,6 @@ export const separationsWorkflow = defineWorkflow({
       kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
     }
 
-    // ─── Step: identity-check — verify the Kuali EID against the NAME ───
-    // Runs AFTER kualiData is established by EITHER path (extraction or the
-    // prefilled bypass) and BEFORE any consumer of kualiData.eid (the kronos
-    // date math and runKronosSearch below). Delegates to person-lookup by NAME:
-    // the name is authoritative, so a mismatch takes the name-derived EID and an
-    // unverifiable name fails loud (resolveSeparationEid throws). On a
-    // correction it rewrites kualiData.eid and persists ctx.data.eid so every
-    // downstream step + the final snapshot use the verified value. See
-    // resolveSeparationEid + CLAUDE.md "Name ↔ EID verification".
-    //
-    // Skipped only on the txn-prefilled resume path: when a transactionNumber is
-    // already carried forward, UCPath previously ACCEPTED that EID and the
-    // ucpath-transaction step is skipped below — there is no re-submit to
-    // protect, so re-verifying would only add a wasted person-lookup auth pass.
-    if (txnNumberPrefilled) {
-      ctx.skipStep("identity-check");
-      log.step(
-        `[Step: identity-check] SKIPPED — txn # prefilled (UCPath already accepted EID '${kualiData.eid}'; no re-submit)`,
-      );
-    } else {
-      const verifiedEid = await ctx.step("identity-check", () =>
-        resolveSeparationEid(ctx, kualiData),
-      );
-      kualiData = { ...kualiData, eid: verifiedEid };
-    }
-
     // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
     // work on a record that isn't yet actionable. Both Last Day Worked and
     // Separation Date are checked because either can be post-dated by the
@@ -438,6 +447,12 @@ export const separationsWorkflow = defineWorkflow({
     };
     let newKronosFound = false;
     let jobSummaryData: JobSummaryData | undefined;
+    // Workforce Job Summary identity (fetched inside the kronos-search parallel
+    // block): whether the EID resolved + the detail-page name. These GATE the
+    // conditional identity-check below (a name mismatch / not-found-short-EID
+    // triggers person-lookup; a clean name match skips it).
+    let jobSummaryFound = false;
+    let jobSummaryName = "";
 
     // Two reasons to skip kronos-search converge here:
     //   1. Edit-and-resume prefilled `lastDayWorked` (existing path).
@@ -445,9 +460,12 @@ export const separationsWorkflow = defineWorkflow({
     //      InputRunPanel gear menu (asserts the Kuali form is already correct).
     // In both cases the handler falls back to `kualiData.lastDayWorked` (which
     // kuali-extraction just read from the Kuali form) for the Last Day Worked,
-    // and sick/holiday stay empty — so no extra plumbing is needed.
+    // and sick/holiday stay empty — so no extra plumbing is needed. When kronos
+    // is skipped there is also no Job Summary gate, so identity-check is skipped
+    // too (the operator prefilled / asserted the data).
     const presetSkippedKronos = ctx.shouldSkipStep("kronos-search");
-    if (lastDayWorkedPrefilled || presetSkippedKronos) {
+    const kronosSkipped = lastDayWorkedPrefilled || presetSkippedKronos;
+    if (kronosSkipped) {
       ctx.skipStep("kronos-search");
       log.step(
         presetSkippedKronos
@@ -479,9 +497,15 @@ export const separationsWorkflow = defineWorkflow({
       logSettledRejection("New Kronos", phase1.newK);
     }
     logSettledRejection("UCPath Job Summary", phase1.jobSummary);
-    // resolveJobSummaryResult throws on rejection (classified log emitted above);
-    // no duplicate log.error here — the rejection is fatal and the throw propagates.
-    jobSummaryData = resolveJobSummaryResult(phase1.jobSummary);
+    // resolveJobSummaryResult throws only on a GENUINE rejection (selector/nav
+    // failure — classified log emitted above). A clean "no matching values" is
+    // NOT a rejection: it returns `found: false` for the identity-check to act
+    // on. The identity (found + detail-page name) gates person-lookup below; the
+    // dept/payroll `data` feeds the ucpath-job-summary fill step.
+    const jobSummary = resolveJobSummaryResult(phase1.jobSummary);
+    jobSummaryFound = jobSummary.found;
+    jobSummaryName = jobSummary.name;
+    jobSummaryData = jobSummary.data ?? undefined;
     logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper);
 
     log.step(
@@ -489,7 +513,83 @@ export const separationsWorkflow = defineWorkflow({
       `(lastPunch=${timecard.lastPunchDate ?? "none"}, ` +
       `sick=${timecard.sickDates.length}, holiday=${timecard.holidayDates.length})`,
     );
-    } // end !lastDayWorkedPrefilled branch
+    log.step(
+      `[Job Summary] ${jobSummaryFound ? `Found (name="${jobSummaryName}")` : "Not found"}`,
+    );
+    } // end !kronosSkipped branch
+
+    // ─── Step: identity-check — conditional name↔EID verification ───
+    // Gated on the Workforce Job Summary result (fetched above). person-lookup
+    // runs ONLY when the Job Summary flags a problem; otherwise the step is
+    // SKIPPED (the "dynamic timeline" signal that no lookup was needed, and no
+    // delegated person-lookup child row appears). Four outcomes:
+    //   · txn prefilled OR kronos skipped → SKIP (no Job Summary gate; UCPath
+    //     already accepted the EID, or the operator prefilled/asserted the data).
+    //   · Job Summary FOUND + name matches Kuali → SKIP (EID trusted).
+    //   · Job Summary FOUND + name mismatch, OR not found + short EID → RUN the
+    //     step → delegate to person-lookup BY NAME (name authoritative).
+    //   · not found + a complete 8-digit EID → RUN the step → FAIL LOUD
+    //     (resolveSeparationEid throws; the operator fixes the upstream record).
+    // On an EID correction we re-fetch the Job Summary (so dept/payroll is the
+    // RIGHT person's) and re-search New Kronos (so the timecard / LDW is too).
+    if (txnNumberPrefilled || kronosSkipped) {
+      ctx.skipStep("identity-check");
+      log.step(
+        txnNumberPrefilled
+          ? `[Step: identity-check] SKIPPED — txn # prefilled (UCPath already accepted EID '${kualiData.eid}'; no re-submit)`
+          : `[Step: identity-check] SKIPPED — kronos-search skipped, no Job Summary gate (operator prefilled/asserted the data)`,
+      );
+    } else if (jobSummaryFound && separationNameMatches(kualiData.employeeName, jobSummaryName)) {
+      ctx.skipStep("identity-check");
+      log.success(
+        `[Step: identity-check] SKIPPED — Job Summary name "${jobSummaryName}" matches Kuali ` +
+        `"${kualiData.employeeName}"; EID ${kualiData.eid} trusted (no person-lookup needed)`,
+      );
+    } else {
+      const verifiedEid = await ctx.step("identity-check", () =>
+        resolveSeparationEid(ctx, kualiData, { found: jobSummaryFound, name: jobSummaryName }),
+      );
+      if (verifiedEid !== kualiData.eid) {
+        const correctedFrom = kualiData.eid;
+        kualiData = { ...kualiData, eid: verifiedEid };
+        log.step(
+          `[identity-check] EID corrected ${correctedFrom} → ${verifiedEid} — re-fetching ` +
+          `Job Summary + New Kronos for the verified person`,
+        );
+        // Job Summary re-fetch is CRITICAL: the dept/payroll filled into Kuali
+        // must be the verified person's, not the wrong EID's. A miss now is a
+        // genuine failure (person-lookup said the EID is valid but Workforce
+        // Job Summary can't find it) → fail loud.
+        const ucpathPage = await ctx.page("ucpath");
+        const reJobSummary = await getJobSummaryIdentity(ucpathPage, verifiedEid);
+        if (!reJobSummary.found || !reJobSummary.data) {
+          throw new Error(
+            `Workforce Job Summary still found no record after correcting the EID to "${verifiedEid}" ` +
+            `for "${kualiData.employeeName}". Verify the person in UCPath, then retry.`,
+          );
+        }
+        jobSummaryFound = true;
+        jobSummaryName = reJobSummary.name;
+        jobSummaryData = reJobSummary.data;
+        // New Kronos re-search is best-effort — an empty timecard simply falls
+        // back to the Kuali Last Day Worked during reconciliation below.
+        try {
+          const newKronosPage = await ctx.page("new-kronos");
+          const reK = await runNewKronosTimecard(newKronosPage, verifiedEid, kronosStart, kronosEnd);
+          newKronosFound = reK.found;
+          timecard = {
+            lastPunchDate: reK.lastPunchDate,
+            sickDates: reK.sickDates,
+            holidayDates: reK.holidayDates,
+          };
+        } catch (e) {
+          log.warn(
+            `[identity-check] New Kronos re-search after EID correction failed (falling back to ` +
+            `Kuali LDW): ${errorMessage(e)}`,
+          );
+        }
+      }
+    }
 
     // ─── Reconcile dates (NEW MODEL) ───
     // Last Day Worked = New Kronos last physical punch (timecard ground truth),
