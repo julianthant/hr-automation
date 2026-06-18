@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   getInputRunConfig,
+  parseCrmDocDownloadInputs,
   parsePersonLookupInputs,
 } from "../../../src/dashboard/lib/input-run-registry.js";
 
@@ -40,6 +41,44 @@ test("crm-doc-download input run accepts EIDs separated by commas", () => {
   assert.deepEqual(config.parseInput("10873698, 10873699"), {
     ok: true,
     inputs: [{ emplId: "10873698" }, { emplId: "10873699" }],
+  });
+});
+
+test("crm-doc-download input run accepts emails and EIDs interchangeably", () => {
+  assert.deepEqual(
+    parseCrmDocDownloadInputs("10873698, jdoe@ucsd.edu, asmith@ucsd.edu"),
+    {
+      ok: true,
+      inputs: [
+        { emplId: "10873698" },
+        { email: "jdoe@ucsd.edu" },
+        { email: "asmith@ucsd.edu" },
+      ],
+    },
+  );
+});
+
+test("crm-doc-download input run mentions emails in its placeholder", () => {
+  const config = getInputRunConfig("crm-doc-download");
+
+  assert.ok(config);
+  assert.match(config.placeholder, /emails/);
+});
+
+test("crm-doc-download input run rejects a token that is neither EID nor email", () => {
+  const parsed = parseCrmDocDownloadInputs("not-an-id");
+
+  assert.equal(parsed.ok, false);
+  assert.deepEqual(parsed, {
+    ok: false,
+    error: 'Expected an EID (5+ digits) or email: "not-an-id"',
+  });
+});
+
+test("crm-doc-download input run rejects empty input", () => {
+  assert.deepEqual(parseCrmDocDownloadInputs("  ,  "), {
+    ok: false,
+    error: "Enter at least one EID or email",
   });
 });
 

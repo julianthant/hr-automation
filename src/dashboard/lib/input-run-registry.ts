@@ -147,6 +147,41 @@ export function parsePersonLookupInputs(raw: string): InputRunParseResult {
   };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * crm-doc-download takes either an EID or an email per record (the
+ * workflow's Zod schema and `inputSubject` already accept both, keyed on
+ * which field is populated). Both values are comma-safe — EIDs are digits
+ * and emails contain no commas — so we split on `,` and discriminate each
+ * piece: numeric (5+ digits) → `{ emplId }`, valid email → `{ email }`.
+ * Anything else is rejected with the offending token so the toast is
+ * actionable.
+ */
+export function parseCrmDocDownloadInputs(raw: string): InputRunParseResult {
+  const pieces = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pieces.length === 0) {
+    return { ok: false, error: "Enter at least one EID or email" };
+  }
+  const inputs: Array<Record<string, unknown>> = [];
+  for (const value of pieces) {
+    if (/^\d{5,}$/.test(value)) {
+      inputs.push({ emplId: value });
+    } else if (EMAIL_RE.test(value)) {
+      inputs.push({ email: value });
+    } else {
+      return {
+        ok: false,
+        error: `Expected an EID (5+ digits) or email: "${value}"`,
+      };
+    }
+  }
+  return { ok: true, inputs };
+}
+
 export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfig> = {
   separations: {
     placeholder: "Enter doc IDs, comma-separated (e.g. 3930, 3929)",
@@ -170,11 +205,8 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     runEmptyAction: { modalWorkflow: "oath-signature" },
   },
   "crm-doc-download": {
-    placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
-    parseInput: parseCommaSeparated("emplId", {
-      regex: /^\d{5,}$/,
-      message: "EID must be numeric (5+ digits)",
-    }),
+    placeholder: "Enter EIDs or emails, comma-separated (e.g. 10873611, jdoe@ucsd.edu)",
+    parseInput: parseCrmDocDownloadInputs,
   },
   onboarding: {
     placeholder: "Enter emails, comma-separated (e.g. jdoe@ucsd.edu, asmith@ucsd.edu)",
