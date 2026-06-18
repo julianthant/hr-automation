@@ -43,6 +43,17 @@ export interface StepperOpts {
    * because step bodies set closure variables downstream code depends on.
    */
   skipSteps?: ReadonlySet<string>
+  /**
+   * The per-run `AbortSignal` (Contract 5). When present, `parallel` /
+   * `parallelAll` RACE their `Promise.allSettled` / `Promise.all` against this
+   * signal so an operator cancel surfaces a `CancelledError` the instant the
+   * abort fires — instead of waiting for every branch to settle naturally.
+   * Without this, a long multi-branch step (e.g. separations `kronos-search`,
+   * a 4-way parallel browser fetch) could only observe the cancel at the NEXT
+   * `step(...)` boundary, minutes later. Optional — omitted by callers that
+   * don't wire cancellation (trackerStub), preserving today's behavior.
+   */
+  signal?: AbortSignal
 }
 
 export class Stepper {
@@ -174,11 +185,52 @@ export class Stepper {
     this.opts.emitData({ ...this.data })
   }
 
+  /**
+   * Race a pending work promise against the per-run abort signal. Resolves
+   * with the work's value on normal completion; on abort, routes through
+   * `throwCancelled` (logs the run-scope `cancel:requested` event + marks the
+   * step `cancelled`) and rejects with `CancelledError`. The orphaned `work`
+   * promise keeps running but is harmless: `parallel`'s `allSettled` never
+   * rejects, and the run's watchdog hard-kills chromium shortly after the
+   * abort, so any still-in-flight branch ops reject into the (now unobserved)
+   * settle. No signal wired → returns `work` unchanged (today's behavior).
+   */
+  private raceCancel<R>(work: Promise<R>): Promise<R> {
+    const signal = this.opts.signal
+    if (!signal) return work
+    const stepName = this.currentStep ?? 'cancelled'
+    return new Promise<R>((resolve, reject) => {
+      const fail = (): void => {
+        try {
+          this.throwCancelled(stepName)
+        } catch (err) {
+          reject(err)
+        }
+      }
+      if (signal.aborted) {
+        fail()
+        return
+      }
+      const onAbort = (): void => fail()
+      signal.addEventListener('abort', onAbort, { once: true })
+      work.then(
+        (value) => {
+          signal.removeEventListener('abort', onAbort)
+          resolve(value)
+        },
+        (err) => {
+          signal.removeEventListener('abort', onAbort)
+          reject(err)
+        },
+      )
+    })
+  }
+
   async parallel<T extends Record<string, () => Promise<unknown>>>(
     tasks: T,
   ): Promise<{ [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }> {
     const entries = Object.entries(tasks) as Array<[keyof T, () => Promise<unknown>]>
-    const settled = await Promise.allSettled(entries.map(([, fn]) => fn()))
+    const settled = await this.raceCancel(Promise.allSettled(entries.map(([, fn]) => fn())))
     return Object.fromEntries(
       entries.map(([key], i) => [key, settled[i]]),
     ) as { [K in keyof T]: PromiseSettledResult<Awaited<ReturnType<T[K]>>> }
@@ -194,7 +246,7 @@ export class Stepper {
     tasks: T,
   ): Promise<{ [K in keyof T]: Awaited<ReturnType<T[K]>> }> {
     const entries = Object.entries(tasks) as Array<[keyof T, () => Promise<unknown>]>
-    const values = await Promise.all(entries.map(([, fn]) => fn()))
+    const values = await this.raceCancel(Promise.all(entries.map(([, fn]) => fn())))
     return Object.fromEntries(
       entries.map(([key], i) => [key, values[i]]),
     ) as { [K in keyof T]: Awaited<ReturnType<T[K]>> }

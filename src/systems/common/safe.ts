@@ -44,6 +44,21 @@ interface ActionOpts extends SafeActionOpts {
   fn: () => Promise<void>;
 }
 
+/**
+ * True when an error represents a deliberate operator cancellation rather than
+ * a genuine selector miss / page problem. Two shapes reach this layer:
+ *   - `AbortError` — Playwright rejects an in-flight call when the per-run
+ *     `AbortSignal` (injected by the kernel's Page proxy) is aborted.
+ *   - `CancelledError` — the kernel's typed cancel error (matched by name to
+ *     avoid an upward `systems → core` import).
+ * A "best-effort optional" helper like `clickIfPresent` must re-throw these so
+ * the cancel propagates instead of being silently treated as "element absent"
+ * (which would let a cancelled run keep walking its steps).
+ */
+function isCancellation(err: unknown): boolean {
+  return err instanceof Error && (err.name === "AbortError" || err.name === "CancelledError");
+}
+
 async function instrumentedAction(opts: ActionOpts): Promise<void> {
   const { label, _slowThresholdMs = 3_000, actionName, fn } = opts;
   const start = Date.now();
@@ -83,12 +98,22 @@ export async function clickIfPresent(
   locator: Locator,
   opts: SafeActionOpts,
 ): Promise<boolean> {
-  const count = await locator.count().catch(() => 0);
+  let count: number;
+  try {
+    count = await locator.count();
+  } catch (err) {
+    // count() can reject on cancel (signal injected by the Page proxy) — that
+    // must propagate; any other count failure means "treat as absent".
+    if (isCancellation(err)) throw err;
+    return false;
+  }
   if (count === 0) return false;
   try {
     await safeClick(locator.first(), opts);
     return true;
-  } catch {
+  } catch (err) {
+    // A cancel must propagate; a real selector miss / click failure stays terse.
+    if (isCancellation(err)) throw err;
     return false;
   }
 }

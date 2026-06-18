@@ -274,4 +274,36 @@ describe("clickIfPresent", () => {
 
     assert.equal(result, false);
   });
+
+  // Bug #3: a deliberate operator cancel (AbortError from the Page-proxy
+  // signal, or the kernel's CancelledError) must PROPAGATE, never be swallowed
+  // as "element absent" — otherwise a cancelled run keeps walking its steps.
+  it("re-throws an AbortError from .click() instead of returning false", async () => {
+    const abort = Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+    const loc = fakeLocator({
+      count: async () => 1,
+      first: () => fakeLocator({ click: async () => { throw abort; } }),
+    });
+
+    const { error } = await runWithLogCapture("cancel-click", () =>
+      clickIfPresent(loc, { label: "cancel-during-click" }),
+    );
+
+    assert.equal(error, abort, "AbortError from click must propagate");
+  });
+
+  it("re-throws a CancelledError from .count() instead of returning false", async () => {
+    const cancelled = Object.assign(new Error("Cancelled by user before step 'x'"), {
+      name: "CancelledError",
+    });
+    const loc = fakeLocator({
+      count: async () => { throw cancelled; },
+    });
+
+    const { error } = await runWithLogCapture("cancel-count", () =>
+      clickIfPresent(loc, { label: "cancel-during-count" }),
+    );
+
+    assert.equal(error, cancelled, "CancelledError from count must propagate");
+  });
 });
