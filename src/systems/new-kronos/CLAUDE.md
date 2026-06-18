@@ -17,6 +17,16 @@ See [`SELECTORS.md`](./SELECTORS.md) for the auto-generated catalog of every sel
 
 Example intents for `npm run selector:search`: [`common-intents.txt`](./common-intents.txt).
 
+## Separation timecard parsing
+
+`getSeparationTimecardData(page)` (in `navigate.ts`, re-exported from `index.ts` with its `SeparationTimecardData` type) reads the open timecard grid and returns:
+
+- `lastPunchDate: string | null` — MM/DD/YYYY, the latest day carrying an In/Out punch (the separations workflow uses this as the **Last Day Worked**, overriding Kuali).
+- `sickDates: string[]` — MM/DD/YYYY, chronological, the `Sick - Hourly` days.
+- `holidayDates: string[]` — MM/DD/YYYY, chronological, the `Holiday - Hourly` days.
+
+Call it AFTER `clickGoToTimecard` + `setDateRange` so the grid shows the right window. Separations consumes `lastPunchDate` for the LDW and `sickDates` / `holidayDates` for the termination-comment clause only (they never change a date). See `src/workflows/separations/CLAUDE.md` "Date model".
+
 ## Gotchas
 
 - Uses modern `getByRole()` API (more maintainable than CSS selectors)
