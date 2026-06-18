@@ -127,16 +127,36 @@ interface CtxProbe {
   skipped: string[];
 }
 
+/**
+ * Result the stub `ctx.delegateTo` (person-lookup) returns from the
+ * `identity-check` step. Defaults to a `done` run resolving the SAME EID as
+ * KUALI_FIXTURE so the verification is a clean match (no correction, no
+ * throw) and these tests stay focused on the dry-run / write-gating logic.
+ */
+type DelegateResult = {
+  status: "done" | "failed" | "cancelled" | "pending";
+  data?: Record<string, string>;
+};
+
 /** A minimal ctx satisfying exactly what the separations handler touches. */
-function makeFakeCtx(input: Record<string, unknown>): { ctx: unknown; probe: CtxProbe } {
+function makeFakeCtx(
+  input: Record<string, unknown>,
+  opts: { delegateResult?: DelegateResult } = {},
+): { ctx: unknown; probe: CtxProbe } {
   const data: Record<string, unknown> = { ...input };
   const skipped: string[] = [];
+  const delegateResult = opts.delegateResult ?? {
+    status: "done" as const,
+    data: { emplId: KUALI_FIXTURE.eid },
+  };
   const ctx = {
     data,
     runId: "test-run",
     parentRunId: undefined,
     signal: undefined,
     isBatch: false,
+    // identity-check step delegates to person-lookup BY NAME to verify the EID.
+    delegateTo: async () => ({ workflow: "person-lookup", runId: "stub", itemId: "stub", ...delegateResult }),
     updateData: (patch: Record<string, unknown>) => {
       Object.assign(data, patch);
     },
@@ -373,6 +393,42 @@ describe("separations handler — empty transaction number fails the run", () =>
     // Default mock returns T999 — runHandler should resolve normally.
     const { ctx } = makeFakeCtx({ docId: "4131" });
     await runHandler(ctx, { docId: "4131" });
+  });
+});
+
+describe("separations handler — identity-check (name↔EID verification)", () => {
+  it("fails the run when person-lookup cannot verify the EID (never reaches the UCPath submit)", async () => {
+    const { ctx } = makeFakeCtx({ docId: "4131" }, { delegateResult: { status: "failed" } });
+    await assert.rejects(
+      () => runHandler(ctx, { docId: "4131" }),
+      /Could not verify the EID/,
+    );
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "no submit when the EID is unverified");
+  });
+
+  it("corrects the EID from the name on a mismatch, then proceeds to the UCPath submit", async () => {
+    const { ctx, probe } = makeFakeCtx(
+      { docId: "4131" },
+      { delegateResult: { status: "done", data: { emplId: "10999999" } } },
+    );
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(probe.data.eid, "10999999", "name-derived EID persisted to ctx.data");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "still submits, with the corrected EID");
+  });
+
+  it("skips identity-check on the txn-prefilled resume path (UCPath already accepted the EID)", async () => {
+    const { ctx, probe } = makeFakeCtx({
+      docId: "4131",
+      name: "Test Employee",
+      eid: "10772489",
+      rawTerminationType: "Resign",
+      separationDate: "01/16/2026",
+      lastDayWorked: "01/15/2026",
+      transactionNumber: "T123",
+    });
+    await runHandler(ctx, { docId: "4131" });
+    assert.ok(probe.skipped.includes("identity-check"), "identity-check skipped");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "txn prefilled — no re-submit");
   });
 });
 

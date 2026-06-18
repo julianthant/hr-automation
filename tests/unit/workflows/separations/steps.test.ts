@@ -12,6 +12,7 @@ test('separations effective step list is auth:<systems> + work steps', () => {
     'auth:new-kronos',
     'auth:ucpath',
     'kuali-extraction',
+    'identity-check',
     'kronos-search',
     'ucpath-job-summary',
     'ucpath-transaction',
