@@ -5,7 +5,6 @@ import {
   buildTerminationComments,
   mapReasonCode,
   getInitials,
-  resolveKronosDates,
   computeKronosDateRange,
   buildDateChangeComments,
 } from "../../../../src/workflows/separations/schema.js";
@@ -46,15 +45,97 @@ describe("computeTerminationEffDate", () => {
 });
 
 describe("buildTerminationComments", () => {
-  it("formats eff date, last day worked, and doc id in the expected order", () => {
-    const result = buildTerminationComments("03/15/2026", "03/14/2026", "999888");
+  // ─── Worked reference cases (live separations, pinned as exact strings) ───
+  it("Lydia Li (#3949): sick-range clause — 'Sick leave from … to …'", () => {
+    // New Kronos: lastPunch 04/23, sick ["04/27","04/28","04/30"], Kuali Sep 04/30.
+    // → LDW 04/23 (unchanged), Sep 04/30, TermEff 05/01.
+    const result = buildTerminationComments(
+      "05/01/2026",
+      "04/23/2026",
+      "3949",
+      { sickDates: ["04/27/2026", "04/28/2026", "04/30/2026"], holidayDates: [] },
+    );
     assert.equal(
       result,
-      "Termination EFF 03/15/2026. Last day worked 03/14/2026. Kuali form #999888.",
+      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. Sick leave from 04/27/2026 to 04/30/2026. Kuali form #3949.",
     );
   });
 
-  it("passes values through verbatim (no trimming or transformation)", () => {
+  it("Kou Nathan (#4016): single-holiday clause — 'Holiday Pay on …'", () => {
+    // New Kronos: lastPunch 06/12, holiday ["06/19"], Kuali Sep 06/19.
+    // → LDW 06/12, Sep 06/19, TermEff 06/20.
+    const result = buildTerminationComments(
+      "06/20/2026",
+      "06/12/2026",
+      "4016",
+      { sickDates: [], holidayDates: ["06/19/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 06/20/2026. Last Day Worked 06/12/2026. Holiday Pay on 06/19/2026. Kuali form #4016.",
+    );
+  });
+
+  it("Normal (#4131): no sick/holiday — no leave clause at all", () => {
+    const result = buildTerminationComments("06/20/2026", "06/19/2026", "4131");
+    assert.equal(
+      result,
+      "Termination eff 06/20/2026. Last Day Worked 06/19/2026. Kuali form #4131.",
+    );
+  });
+
+  it("≥2 holiday dates → 'Holiday Pay from … to …'", () => {
+    const result = buildTerminationComments(
+      "06/20/2026",
+      "06/12/2026",
+      "4016",
+      { sickDates: [], holidayDates: ["06/19/2026", "06/26/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 06/20/2026. Last Day Worked 06/12/2026. Holiday Pay from 06/19/2026 to 06/26/2026. Kuali form #4016.",
+    );
+  });
+
+  it("single sick date → 'Sick Leave on …' (title-case 'Leave')", () => {
+    const result = buildTerminationComments(
+      "05/01/2026",
+      "04/23/2026",
+      "3949",
+      { sickDates: ["04/27/2026"], holidayDates: [] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. Sick Leave on 04/27/2026. Kuali form #3949.",
+    );
+  });
+
+  it("both sick + holiday present → sick clause first, then holiday", () => {
+    const result = buildTerminationComments(
+      "05/01/2026",
+      "04/23/2026",
+      "3949",
+      {
+        sickDates: ["04/27/2026", "04/28/2026"],
+        holidayDates: ["04/30/2026"],
+      },
+    );
+    assert.equal(
+      result,
+      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. " +
+        "Sick leave from 04/27/2026 to 04/28/2026. Holiday Pay on 04/30/2026. Kuali form #3949.",
+    );
+  });
+
+  it("treats an omitted leave argument as no leave clause", () => {
+    const result = buildTerminationComments("03/15/2026", "03/14/2026", "DOC-42");
+    assert.equal(
+      result,
+      "Termination eff 03/15/2026. Last Day Worked 03/14/2026. Kuali form #DOC-42.",
+    );
+  });
+
+  it("passes the doc id through verbatim (no trimming or transformation)", () => {
     const result = buildTerminationComments("03/15/2026", "03/14/2026", "DOC-42");
     assert.ok(result.includes("DOC-42"));
   });
@@ -149,97 +230,6 @@ describe("getInitials", () => {
   });
 });
 
-describe("resolveKronosDates", () => {
-  it("returns Kuali dates unchanged when both Kronos dates are null", () => {
-    const result = resolveKronosDates("03/14/2026", "03/14/2026", null, null);
-    assert.deepEqual(result, {
-      lastDayWorked: "03/14/2026",
-      separationDate: "03/14/2026",
-      changed: false,
-    });
-  });
-
-  it("returns unchanged when the only Kronos date equals both Kuali dates", () => {
-    const result = resolveKronosDates("03/14/2026", "03/14/2026", "03/14/2026", null);
-    assert.equal(result.changed, false);
-    assert.equal(result.lastDayWorked, "03/14/2026");
-  });
-
-  it("overrides both Kuali dates when old Kronos is the only source and differs", () => {
-    const result = resolveKronosDates("03/14/2026", "03/14/2026", "03/20/2026", null);
-    assert.deepEqual(result, {
-      lastDayWorked: "03/20/2026",
-      separationDate: "03/20/2026",
-      changed: true,
-    });
-  });
-
-  it("overrides both Kuali dates when new Kronos is the only source and differs", () => {
-    const result = resolveKronosDates("03/14/2026", "03/14/2026", null, "03/21/2026");
-    assert.deepEqual(result, {
-      lastDayWorked: "03/21/2026",
-      separationDate: "03/21/2026",
-      changed: true,
-    });
-  });
-
-  it("picks the later date when both Kronos sources report different dates (old > new)", () => {
-    const result = resolveKronosDates("03/01/2026", "03/01/2026", "03/20/2026", "03/15/2026");
-    assert.equal(result.lastDayWorked, "03/20/2026");
-    assert.equal(result.separationDate, "03/20/2026");
-  });
-
-  it("picks the later date when both Kronos sources report different dates (new > old)", () => {
-    const result = resolveKronosDates("03/01/2026", "03/01/2026", "03/10/2026", "03/25/2026");
-    assert.equal(result.lastDayWorked, "03/25/2026");
-    assert.equal(result.separationDate, "03/25/2026");
-  });
-
-  it("picks either when both Kronos dates are equal (no distinction needed)", () => {
-    const result = resolveKronosDates("03/01/2026", "03/01/2026", "03/15/2026", "03/15/2026");
-    assert.equal(result.lastDayWorked, "03/15/2026");
-    assert.equal(result.separationDate, "03/15/2026");
-    assert.equal(result.changed, true);
-  });
-
-  it("overrides Kuali dates even when Kronos is EARLIER (Kronos is ground truth)", () => {
-    // Per CLAUDE.md 2026-04-10 lesson: Kronos always wins when it differs, not just when later.
-    const result = resolveKronosDates("03/20/2026", "03/20/2026", "03/10/2026", null);
-    assert.deepEqual(result, {
-      lastDayWorked: "03/10/2026",
-      separationDate: "03/10/2026",
-      changed: true,
-    });
-  });
-
-  it("updates only lastDayWorked when Kronos matches Kuali separationDate", () => {
-    const result = resolveKronosDates("03/14/2026", "03/20/2026", "03/20/2026", null);
-    assert.deepEqual(result, {
-      lastDayWorked: "03/20/2026",
-      separationDate: "03/20/2026",
-      changed: true,
-    });
-  });
-
-  it("updates only separationDate when Kronos matches Kuali lastDayWorked", () => {
-    const result = resolveKronosDates("03/20/2026", "03/14/2026", "03/20/2026", null);
-    assert.deepEqual(result, {
-      lastDayWorked: "03/20/2026",
-      separationDate: "03/20/2026",
-      changed: true,
-    });
-  });
-
-  it("overwrites both Kuali dates to the same Kronos date when it differs from both", () => {
-    const result = resolveKronosDates("03/10/2026", "03/12/2026", "03/25/2026", null);
-    assert.deepEqual(result, {
-      lastDayWorked: "03/25/2026",
-      separationDate: "03/25/2026",
-      changed: true,
-    });
-  });
-});
-
 describe("computeKronosDateRange", () => {
   it("expands ±1 month when lastDayWorked < separationDate", () => {
     const result = computeKronosDateRange("03/10/2026", "03/20/2026");
@@ -289,69 +279,26 @@ describe("computeKronosDateRange", () => {
 });
 
 describe("buildDateChangeComments", () => {
-  it("returns an empty string when no dates changed", () => {
-    const result = buildDateChangeComments(
-      "03/14/2026",
-      "03/14/2026",
-      "03/14/2026",
-      "03/14/2026",
-      "JZ",
-    );
+  it("returns an empty string when the Last Day Worked did not change", () => {
+    const result = buildDateChangeComments("03/14/2026", "03/14/2026", "JZ");
     assert.equal(result, "");
   });
 
-  it("produces a single line when only lastDayWorked changed", () => {
-    const result = buildDateChangeComments(
-      "03/14/2026",
-      "03/20/2026",
-      "03/14/2026",
-      "03/14/2026",
-      "JZ",
-    );
+  it("produces the Last Day Worked audit line when it changed", () => {
+    const result = buildDateChangeComments("03/14/2026", "03/20/2026", "JZ");
     assert.equal(
       result,
       "Updated Last Day Worked from 03/14/2026 to 03/20/2026 per Kronos timesheet. -JZ",
     );
   });
 
-  it("produces a single line when only separationDate changed", () => {
-    const result = buildDateChangeComments(
-      "03/14/2026",
-      "03/14/2026",
-      "03/14/2026",
-      "03/20/2026",
-      "JZ",
-    );
-    assert.equal(
-      result,
-      "Updated Separation Date from 03/14/2026 to 03/20/2026 per Kronos timesheet. -JZ",
-    );
-  });
-
-  it("produces two newline-separated lines when both dates changed", () => {
-    const result = buildDateChangeComments(
-      "03/14/2026",
-      "03/20/2026",
-      "03/14/2026",
-      "03/20/2026",
-      "JZ",
-    );
-    const lines = result.split("\n");
-    assert.equal(lines.length, 2);
-    assert.ok(lines[0].includes("Last Day Worked"));
-    assert.ok(lines[1].includes("Separation Date"));
-    assert.ok(lines[0].endsWith("-JZ"));
-    assert.ok(lines[1].endsWith("-JZ"));
+  it("never mentions the Separation Date (Kuali-authoritative, never changed)", () => {
+    const result = buildDateChangeComments("03/14/2026", "03/20/2026", "JZ");
+    assert.equal(result.includes("Separation Date"), false);
   });
 
   it("embeds the initials verbatim (no case change, no prefix)", () => {
-    const result = buildDateChangeComments(
-      "03/14/2026",
-      "03/20/2026",
-      "03/14/2026",
-      "03/14/2026",
-      "maS",
-    );
+    const result = buildDateChangeComments("03/14/2026", "03/20/2026", "maS");
     assert.ok(result.endsWith("-maS"));
   });
 });
