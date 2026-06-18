@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Page, Locator } from "playwright";
 import { log } from "../../utils/log.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import {
@@ -136,16 +136,22 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
   log.step("[New Kronos] Selecting employee from search results...");
   const root = await resolveSearchRoot(page);
 
-  // Click the checkbox on the first result row
+  // Check the first result's "Select Item" checkbox. SELECTING an employee is
+  // what ENABLES the Go To button (it is `ng-disabled` until a slat is
+  // selected), so this must actually register — the previous
+  // `input[type=checkbox]` target did not fire Angular's selection handler,
+  // leaving Go To disabled and the timecard unreachable.
   const checkbox = searchSelectors.firstResultCheckbox(root);
-  if ((await checkbox.count()) > 0) {
+  try {
     await checkbox.check({ timeout: 5_000 });
     await page.waitForTimeout(1_000);
     log.step("[New Kronos] Employee checkbox checked");
     return true;
+  } catch {
+    log.warn("[New Kronos] Result checkbox not checkable — clicking the result row instead");
   }
 
-  // Fallback: click the employee name/row directly
+  // Fallback: click the result row (the `menuitemradio`) directly to select it.
   const resultRow = searchSelectors.firstResultRow(root);
   if (await clickIfPresent(resultRow, { timeout: 5_000, label: "new kronos search result row" })) {
     await page.waitForTimeout(1_000);
@@ -165,23 +171,39 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
   log.step("[New Kronos] Clicking Go To → Timecard...");
 
   const frame = searchFrame(page);
-
-  // Try Go To button in the search frame first, fall back to top-level page
-  const gotoInFrame = goToMenu.goToButtonInFrame(frame);
-  const gotoOnPage = goToMenu.goToButtonOnPage(page);
-
-  let clicked = false;
-  if (await clickIfPresent(gotoInFrame, { timeout: 5_000, label: "new kronos go to button in frame" })) {
-    clicked = true;
-  } else if (await clickIfPresent(gotoOnPage, { timeout: 5_000, label: "new kronos go to button" })) {
-    clicked = true;
+  // Go To may render in the search frame OR top-level. The button is
+  // `ng-disabled` until an employee is selected, so clicking it while disabled
+  // just times out — poll for whichever context's button is visible AND ENABLED
+  // (up to 15s for the Angular selection from selectEmployeeResult to land).
+  const candidates = [
+    goToMenu.goToButtonInFrame(frame).first(),
+    goToMenu.goToButtonOnPage(page).first(),
+  ];
+  let gotoButton: Locator | null = null;
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && !gotoButton) {
+    for (const loc of candidates) {
+      try {
+        if ((await loc.isVisible()) && (await loc.isEnabled())) {
+          gotoButton = loc;
+          break;
+        }
+      } catch {
+        // Not present in this context — try the next candidate.
+      }
+    }
+    if (!gotoButton) await page.waitForTimeout(500);
   }
 
-  if (!clicked) {
-    log.error("[New Kronos] Go To button not found");
+  if (!gotoButton) {
+    log.error(
+      "[New Kronos] Go To button never became enabled — the employee selection " +
+      "did not register (no slat selected), so the timecard cannot be opened",
+    );
     return false;
   }
 
+  await gotoButton.click({ timeout: 5_000 });
   await page.waitForTimeout(2_000);
 
   // Click Timecard/Timecards in the dropdown menu (6-deep fallback)

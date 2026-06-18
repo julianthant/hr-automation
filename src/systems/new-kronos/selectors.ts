@@ -84,18 +84,24 @@ export const search = {
     root.getByText("There are no items to display."),
 
   /**
-   * First-row checkbox on employee results. verified 2026-06-18
-   * @tags first, result, checkbox, search, new-kronos
+   * First result's "Select Item" checkbox — checking it SELECTS the employee,
+   * which is what ENABLES the Go To button (it is `ng-disabled` until a slat is
+   * selected). The live control is `role=checkbox name="Select Item"`, NOT a
+   * bare `<input type=checkbox>` (a native input backs it, but checking that
+   * input does not fire Angular's selection handler). verified 2026-06-18
+   * @tags first, result, checkbox, select-item, search, new-kronos
    */
   firstResultCheckbox: (root: SearchRoot): Locator =>
-    root.locator('input[type="checkbox"]').first(),
+    root.getByRole("checkbox", { name: "Select Item" }).or(root.locator('input[type="checkbox"]')).first(),
 
   /**
-   * First-row fallback (click the row directly). verified 2026-06-18
-   * @tags first, result, row, fallback, search, new-kronos
+   * First result row fallback — the result renders as a `menuitemradio`
+   * ("Item Name <name> not checked"); clicking it also selects the employee.
+   * verified 2026-06-18
+   * @tags first, result, row, menuitemradio, fallback, search, new-kronos
    */
   firstResultRow: (root: SearchRoot): Locator =>
-    root.locator('[role="row"]').first(),
+    root.getByRole("menuitemradio").or(root.locator('[role="row"]')).first(),
 
   /**
    * Close the sidebar. verified 2026-06-18
