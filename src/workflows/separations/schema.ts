@@ -14,6 +14,10 @@ export const SeparationDataSchema = z.object({
   // Computed
   isVoluntary: z.boolean().optional(),
   terminationEffDate: z.string().regex(/^\d{2}\/\d{2}\/\d{4}$/, "Must be MM/DD/YYYY"),
+  // The generated UCPath termination comment (incl. any sick/holiday clause).
+  // Stamped on the dry-run terminal (preview) AND the final live snapshot so the
+  // operator can verify the exact comment before any real termination.
+  separationComment: z.string().optional(),
 
   // From UCPath Workforce Job Summary
   deptId: z.string().optional(),
