@@ -23,6 +23,27 @@ export interface UcpathTransactionResult {
 }
 
 /**
+ * Thrown when UCPath rejects the Empl ID on the "Enter Transaction Details"
+ * page: the field renders red, "Continue" never advances, and the downstream
+ * comments fill times out on a page that never loaded. We detect that stuck
+ * state and surface a clear, actionable error instead of the opaque
+ * comments-textarea timeout. It is FATAL — it escapes the step's soft-failure
+ * catch (which otherwise swallows the error and lets Kuali finalization run
+ * with a blank txn #).
+ */
+export class EmplIdNotRecognizedError extends Error {
+  constructor(emplId: string, employeeName: string) {
+    super(
+      `UCPath did not recognize Empl ID "${emplId}" for "${employeeName}" — the Smart HR ` +
+      `transaction never advanced past "Enter Transaction Details" (the Empl ID field is in an ` +
+      `error state / no Employment Record was found). The EID was name-verified upstream, so ` +
+      `confirm the employee has an active employment record eligible for termination, then retry.`,
+    );
+    this.name = "EmplIdNotRecognizedError";
+  }
+}
+
+/**
  * Body of the `ucpath-transaction` step.
  * Creates the UCPath Smart HR termination transaction.
  * Returns the transaction number (may be empty on soft failures) and
@@ -91,7 +112,27 @@ export async function runUcpathTransaction(
       log.step("[UCPath Txn] Filling Empl ID...");
       await ssSmartHRTransactions.emplIdInput(frame).fill(kualiData.eid, { timeout: 10_000 });
       await selectReasonCode(ucpathPage, frame, ucpathReason);
-      await fillComments(ucpathPage, frame, finalComments);
+
+      // fillComments fills the first field on the page AFTER "Enter Transaction
+      // Details". If it times out, the most common cause is that "Continue"
+      // never advanced because UCPath rejected the Empl ID (red field / no
+      // Employment Record). Detect that stuck state — the Empl ID input is
+      // still present because we never left the details page — and rethrow a
+      // clear, FATAL error instead of the opaque comments-textarea timeout.
+      // Only runs on the failure path, so the happy path is untouched.
+      try {
+        await fillComments(ucpathPage, frame, finalComments);
+      } catch (e) {
+        const stillOnDetails = await ssSmartHRTransactions
+          .emplIdInput(frame)
+          .isVisible({ timeout: 2_000 })
+          .catch(() => false);
+        if (stillOnDetails) {
+          await ctx.screenshot({ kind: "error", label: "ucpath-emplid-not-recognized", systems: ['ucpath'] });
+          throw new EmplIdNotRecognizedError(kualiData.eid, kualiData.employeeName);
+        }
+        throw e;
+      }
 
       const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid);
       transactionNumber = submitResult.transactionNumber ?? "";
@@ -120,12 +161,17 @@ export async function runUcpathTransaction(
       // 2-slice split keeps the tall confirmation readable instead of a ribbon.
       await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], slices: 2 });
     } catch (e) {
+      // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
+      // the run fails with the clear message (its own screenshot already fired)
+      // instead of falling through to a blank Kuali finalization.
+      if (e instanceof EmplIdNotRecognizedError) throw e;
       log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
-      // Diagnostic capture for this soft-failure path. The handler
-      // intentionally swallows the throw (kuali-finalization still runs
-      // with an empty txn#), so the kernel's step-failure screenshot
-      // never fires — explicit ctx.screenshot keeps the debug image
-      // reachable from the dashboard Screenshots panel.
+      // Diagnostic capture for this soft-failure path. The error is swallowed
+      // here (kuali-finalization still runs, preps the form blank for manual
+      // entry); the run then fails downstream on the empty txn # (see the
+      // separations handler), so the kernel's step-failure screenshot never
+      // fires — explicit ctx.screenshot keeps the debug image reachable from
+      // the dashboard Screenshots panel.
       await ctx.screenshot({ kind: "error", label: "ucpath-transaction-failed", systems: ['ucpath'] });
     }
 
