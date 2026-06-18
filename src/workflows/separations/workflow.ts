@@ -262,10 +262,16 @@ export const separationsWorkflow = defineWorkflow({
     { key: "eid",               label: "EID",             editable: true                          },
     { key: "docId",             label: "Doc ID"                                                   },
     { key: "terminationType",   label: "Term Type"                                                }, // computed (Vol/Invol) — display only
-    // separationDate stays editable for edit-and-resume but doesn't show in
-    // the LogPanel detail grid — keeps the grid focused on identifiers.
-    { key: "separationDate",    label: "Sep Date",        editable: true, displayInGrid: false    },
     { key: "lastDayWorked",     label: "Last Day Worked", editable: true                          },
+    // Separation Date now shows in the grid (Kuali-authoritative date, never
+    // overridden). Still editable for edit-and-resume. Always stamped via
+    // updateData (date reconciliation + final snapshot), so it never trips the
+    // "declared but never populated" warn.
+    { key: "separationDate",    label: "Separation Date", editable: true                          },
+    // Department name from the UCPath Workforce Job Summary (read-only). The
+    // final snapshot always stamps it ("" when no Job Summary ran), so the
+    // key is present on every success path — no populate warn.
+    { key: "departmentDescription", label: "Department"                                           },
     { key: "transactionNumber", label: "Txn #",           editable: true                          },
     // Free-form Kuali timekeeper-comments override. Edit-and-resume only —
     // not surfaced in the LogPanel detail grid. `fillTimekeeperComments` is
@@ -701,6 +707,29 @@ export const separationsWorkflow = defineWorkflow({
       separationComment: finalComments,
       transactionNumber,
     });
+
+    // A live run that reaches this point with NO transaction number means the
+    // UCPath Smart HR submit soft-failed (create/submit was rejected, or threw
+    // and was caught inside the step). kuali-finalization above already prepped
+    // + saved the Kuali form "blank for manual entry", but no usable UCPath
+    // transaction number exists. That MUST surface as a FAILED run — not a
+    // silent "Done" — so the operator notices the transaction still has to be
+    // created/entered manually (mirrors a Job Summary extraction failure). This
+    // throw fires AFTER the final snapshot updateData above, so the failed row
+    // still carries the reconciled dates / department for the detail panel.
+    //
+    // The distinct "submit succeeded but the number couldn't be read" case
+    // (`submittedWithoutTxnNumber`) already threw earlier, before finalization.
+    // Dry-run returned long before here, and the prefilled / existing-transaction
+    // paths always carry a non-empty number, so this only fires on a genuine
+    // submit failure.
+    if (!transactionNumber) {
+      throw new Error(
+        `No UCPath transaction number for doc #${docId} — the Smart HR submit failed, so ` +
+        `the Kuali form was saved blank for manual entry. Create/enter the transaction number ` +
+        `manually, then retry.`,
+      );
+    }
 
     log.success(`=== Separation complete for doc #${docId} ===`);
   },

@@ -337,6 +337,45 @@ describe("separations handler — live (non-dry-run) gates the writes", () => {
   });
 });
 
+describe("separations handler — empty transaction number fails the run", () => {
+  // Regression for the silent-Done bug: a live run whose UCPath Smart HR submit
+  // soft-failed (create/submit rejected, or threw and was caught) returns an
+  // empty transactionNumber with submittedWithoutTxnNumber:false. It used to
+  // run kuali-finalization (blank-for-manual-entry prep) and then report "Done"
+  // — hiding that the transaction was never created. It must now FAIL loud.
+  const EMPTY_TXN = { transactionNumber: "", submittedWithoutTxnNumber: false };
+
+  it("throws when the UCPath submit yields no transaction number", async () => {
+    mocks.runUcpathTransaction.mockResolvedValueOnce(EMPTY_TXN);
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(
+      () => runHandler(ctx, { docId: "4131" }),
+      /No UCPath transaction number for doc #4131/,
+    );
+  });
+
+  it("still runs kuali-finalization (blank-for-manual-entry prep) before failing", async () => {
+    mocks.runUcpathTransaction.mockResolvedValueOnce(EMPTY_TXN);
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(() => runHandler(ctx, { docId: "4131" }));
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 1);
+  });
+
+  it("stamps the reconciled snapshot before throwing (failed row keeps detail data)", async () => {
+    mocks.runUcpathTransaction.mockResolvedValueOnce(EMPTY_TXN);
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(() => runHandler(ctx, { docId: "4131" }));
+    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate);
+    assert.equal(probe.data.transactionNumber, "");
+  });
+
+  it("does NOT throw when a transaction number IS present (happy path)", async () => {
+    // Default mock returns T999 — runHandler should resolve normally.
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+  });
+});
+
 describe("INPUT_RUN_REGISTRY dry-run exposure", () => {
   it("enables the dry-run toggle for separations", () => {
     assert.equal(INPUT_RUN_REGISTRY.separations.supportsDryRun, true);
