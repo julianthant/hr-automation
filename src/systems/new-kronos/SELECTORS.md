@@ -30,53 +30,53 @@ Open the Employee Search sidebar.
 
 **Source:** [`src/systems/new-kronos/selectors.ts:48`](./selectors.ts#L48)
 
-## `search.searchInput()` — verified 2026-04-06
+## `search.searchInput()` — verified 2026-06-18
 
-Search textbox inside the frame.
+Search textbox (resolved iframe-or-top-level).
 
 **Tags:** search, input, textbox, employee, name, id, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:59`](./selectors.ts#L59)
+**Source:** [`src/systems/new-kronos/selectors.ts:69`](./selectors.ts#L69)
 
-## `search.searchSubmitButton()` — verified 2026-04-06
+## `search.searchSubmitButton()` — verified 2026-06-18
 
 Search submit (exact name to distinguish from other Search buttons).
 
 **Tags:** search, submit, button, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:66`](./selectors.ts#L66)
+**Source:** [`src/systems/new-kronos/selectors.ts:76`](./selectors.ts#L76)
 
-## `search.noResultsText()` — verified 2026-04-06
+## `search.noResultsText()` — verified 2026-06-18
 
 "There are no items to display" text — no-results probe.
 
 **Tags:** no-results, empty, text, probe, search, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:73`](./selectors.ts#L73)
+**Source:** [`src/systems/new-kronos/selectors.ts:83`](./selectors.ts#L83)
 
-## `search.firstResultCheckbox()` — verified 2026-04-06
+## `search.firstResultCheckbox()` — verified 2026-06-18
 
 First-row checkbox on employee results.
 
 **Tags:** first, result, checkbox, search, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:80`](./selectors.ts#L80)
+**Source:** [`src/systems/new-kronos/selectors.ts:90`](./selectors.ts#L90)
 
-## `search.firstResultRow()` — verified 2026-04-06
+## `search.firstResultRow()` — verified 2026-06-18
 
 First-row fallback (click the row directly).
 
 **Tags:** first, result, row, fallback, search, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:87`](./selectors.ts#L87)
+**Source:** [`src/systems/new-kronos/selectors.ts:97`](./selectors.ts#L97)
 
-## `search.closeButton()` — verified 2026-04-06
+## `search.closeButton()` — verified 2026-06-18
 
 Close the sidebar.
 
 **Tags:** close, sidebar, button, search, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:94`](./selectors.ts#L94)
+**Source:** [`src/systems/new-kronos/selectors.ts:104`](./selectors.ts#L104)
 
 ## `goToMenu.goToButtonOnPage()` — verified 2026-04-06
 
@@ -84,7 +84,7 @@ Go To button (outside the search frame). Two-deep fallback for the regex + liter
 
 **Tags:** go-to, button, page, navigation, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:106`](./selectors.ts#L106)
+**Source:** [`src/systems/new-kronos/selectors.ts:116`](./selectors.ts#L116)
 
 ## `goToMenu.goToButtonInFrame()` — verified 2026-04-06
 
@@ -92,7 +92,7 @@ Go To button inside the search frame.
 
 **Tags:** go-to, button, frame, navigation, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:115`](./selectors.ts#L115)
+**Source:** [`src/systems/new-kronos/selectors.ts:125`](./selectors.ts#L125)
 
 ## `goToMenu.timecardItem()` — verified 2026-06-18
 
@@ -100,7 +100,7 @@ Timecard menu item — 8-deep fallback chain. The live Dayforce Go To menu rende
 
 **Tags:** timecard, menu, item, option, fallback, navigation, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:126`](./selectors.ts#L126)
+**Source:** [`src/systems/new-kronos/selectors.ts:136`](./selectors.ts#L136)
 
 ## `timecard.payPeriodTriggerButton()` — verified 2026-06-18
 
@@ -108,7 +108,7 @@ Pay-period trigger button — text varies ("Current Pay Period", "Previous Pay P
 
 **Tags:** pay, period, trigger, button, timecard, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:149`](./selectors.ts#L149)
+**Source:** [`src/systems/new-kronos/selectors.ts:159`](./selectors.ts#L159)
 
 ## `timecard.previousPayPeriodOption()` — verified 2026-06-18
 
@@ -116,7 +116,7 @@ Previous Pay Period option (inside an open period dropdown).
 
 **Tags:** previous, pay, period, option, timecard, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:160`](./selectors.ts#L160)
+**Source:** [`src/systems/new-kronos/selectors.ts:170`](./selectors.ts#L170)
 
 ## `timecard.selectRangeButton()` — verified 2026-06-18
 
@@ -124,7 +124,7 @@ Previous Pay Period option (inside an open period dropdown).
 
 **Tags:** select, range, button, custom, date, timecard, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:167`](./selectors.ts#L167)
+**Source:** [`src/systems/new-kronos/selectors.ts:177`](./selectors.ts#L177)
 
 ## `timecard.startDateInput()` — verified 2026-06-18
 
@@ -132,7 +132,7 @@ Start date input (custom range).
 
 **Tags:** start, date, input, range, timecard, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:174`](./selectors.ts#L174)
+**Source:** [`src/systems/new-kronos/selectors.ts:184`](./selectors.ts#L184)
 
 ## `timecard.endDateInput()` — verified 2026-06-18
 
@@ -140,7 +140,7 @@ End date input (custom range).
 
 **Tags:** end, date, input, range, timecard, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:181`](./selectors.ts#L181)
+**Source:** [`src/systems/new-kronos/selectors.ts:191`](./selectors.ts#L191)
 
 ## `timecard.applyButton()` — verified 2026-06-18
 
@@ -148,4 +148,4 @@ Apply button (custom range).
 
 **Tags:** apply, button, range, timecard, new-kronos
 
-**Source:** [`src/systems/new-kronos/selectors.ts:188`](./selectors.ts#L188)
+**Source:** [`src/systems/new-kronos/selectors.ts:198`](./selectors.ts#L198)
