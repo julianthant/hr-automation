@@ -7,6 +7,7 @@ export const CrmDocDownloadInputSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   middleName: z.string().optional(),
+  livedName: z.string().optional(),
   folderPath: z.string().min(1).optional(),
   docIndices: z.array(z.number().int().min(0)).nonempty().optional(),
   ...DELEGATION_CONTEXT_FRAGMENT,
