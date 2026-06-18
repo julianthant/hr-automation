@@ -19,8 +19,8 @@ import type { TrackerEntry } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow, useWorkflows } from "@/lib/workflows-context";
-import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
 import { hasDelegationRole } from "../../../domain/row-archetype.js";
+import type { DelegatedChild } from "./LogStream.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
 
@@ -338,41 +338,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
 
       </>)}
 
-      {!maximized && childEntries.length > 0 && (
-        <section className="mb-3 rounded-md border border-border p-3 mx-0">
-          <h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-            Delegated runs ({childEntries.length})
-          </h3>
-          <ul className="space-y-1">
-            {childEntries.map((c) => {
-              const childDisplay = queueStatusDisplayLabel({
-                workflow: c.workflow,
-                status: c.status,
-                data: c.data,
-              });
-              return (
-              <li
-                key={`${c.workflow}#${c.id}#${c.runId}`}
-                className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground"
-              >
-                <span className="font-medium text-foreground/80">{c.workflow}</span>
-                <span className="truncate">{c.id}</span>
-                <span className={cn(
-                  "ml-auto px-1.5 py-px rounded text-[10px]",
-                  childDisplay === "Not found" && "bg-secondary/90 text-muted-foreground",
-                  childDisplay !== "Not found" && c.status === "done" && "bg-success/10 text-success",
-                  c.status === "failed" && "bg-destructive/10 text-destructive",
-                  c.status === "running" && "bg-primary/10 text-primary",
-                  c.status === "pending" && "bg-warning/10 text-warning",
-                )}>
-                  {childDisplay}
-                </span>
-              </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+      {/* Delegated runs are surfaced in the "Delegated" LogStream tab — see below. */}
 
       <LogStream
         logs={displayedLogs}
@@ -381,6 +347,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         delegationLabel={delegationLabel}
         failureBanner={failureBanner}
         sourceLabelOf={sourceLabelOf}
+        delegatedChildren={childEntries.length > 0 ? (childEntries as DelegatedChild[]) : undefined}
         screenshotsSlot={
           <ScreenshotsPanel
             workflow={logSourceWorkflow}
