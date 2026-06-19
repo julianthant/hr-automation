@@ -70,6 +70,90 @@ const d = levenshteinDistance(at.join(" "), bt.join(" "));
   return { score: 0, reason: "none" };
 }
 
+// ─── Name similarity tier (order-insensitive) ──────────────
+
+/** Max per-token Levenshtein distance still counted as a spelling variant. */
+export const TOKEN_VARIANT_MAX = 2;
+
+/**
+ * Three-way name comparison for "same person?" decisions where one side may be
+ * a misspelling of the other (e.g. Kuali "Balmaceda, Jaden" vs the UCPath
+ * detail-page "Jayden Balmaceda").
+ *
+ *   - `"same"`      — identical token multiset (order-insensitive), OR every
+ *                     token of the shorter name is an EXACT token of the longer
+ *                     (the longer side may carry extra middle names).
+ *   - `"similar"`   — every token of the shorter name finds a partner within
+ *                     `TOKEN_VARIANT_MAX` edits and at least one is a non-exact
+ *                     variant (a typo / spelling drift) → same person, fix the
+ *                     spelling.
+ *   - `"different"` — some token of the shorter name has NO partner within
+ *                     `TOKEN_VARIANT_MAX` edits → the names name different
+ *                     people (or one side is empty).
+ *
+ * Unlike `scoreNameMatch`'s fuzzy tier (Levenshtein on the UNSORTED joined
+ * tokens, which inflates the distance on a First-Last vs Last-First swap), this
+ * aligns token-by-token, so name-order differences never masquerade as a
+ * mismatch.
+ */
+export type NameSimilarityTier = "same" | "similar" | "different";
+
+export function classifyNameSimilarity(a: string, b: string): NameSimilarityTier {
+  const at = tokenize(a);
+  const bt = tokenize(b);
+  if (at.length === 0 || bt.length === 0) return "different";
+
+  // Order-insensitive exact: identical multiset of tokens → same spelling.
+  if ([...at].sort().join(" ") === [...bt].sort().join(" ")) return "same";
+
+  // Align the shorter token list against the longer one (extra middle names on
+  // the longer side are tolerated). Every shorter token must find a partner
+  // within TOKEN_VARIANT_MAX edits; one+ non-exact partner makes it "similar".
+  const [small, large] = at.length <= bt.length ? [at, bt] : [bt, at];
+  let anyVariant = false;
+  for (const token of small) {
+    let best = Infinity;
+    for (const other of large) {
+      best = Math.min(best, levenshteinDistance(token, other));
+      if (best === 0) break;
+    }
+    if (best > TOKEN_VARIANT_MAX) return "different";
+    if (best > 0) anyVariant = true;
+  }
+  return anyVariant ? "similar" : "same";
+}
+
+/**
+ * Re-spell `name` using `authoritative`'s tokens while PRESERVING `name`'s
+ * format (token order, comma, spacing). Only word tokens of `name` that are a
+ * near-match (Levenshtein ≤ `TOKEN_VARIANT_MAX`) to an authoritative token — and
+ * are not already an exact match — are replaced, with the authoritative token
+ * verbatim. Exact-match and unmatched tokens are left untouched.
+ *
+ * Use after `classifyNameSimilarity` returns `"similar"` to fix a misspelling in
+ * place: e.g. `correctNameSpelling("Balmaceda, Jaden", "Jayden Balmaceda")`
+ * → `"Balmaceda, Jayden"`. This keeps the Kuali "Last, First" comma format
+ * rather than reconstructing it from the UCPath "First Last" name (which would
+ * mangle compound last names).
+ */
+export function correctNameSpelling(name: string, authoritative: string): string {
+  const authTokens = authoritative.trim().split(/\s+/).filter(Boolean);
+  if (authTokens.length === 0) return name;
+  const authLower = authTokens.map((t) => t.toLowerCase());
+  return name.replace(/[A-Za-z]+/g, (word) => {
+    const lw = word.toLowerCase();
+    if (authLower.includes(lw)) return word; // exact token — keep verbatim
+    let best: { token: string; d: number } | null = null;
+    for (let i = 0; i < authTokens.length; i++) {
+      const d = levenshteinDistance(lw, authLower[i]);
+      if (d <= TOKEN_VARIANT_MAX && (best === null || d < best.d)) {
+        best = { token: authTokens[i], d };
+      }
+    }
+    return best ? best.token : word;
+  });
+}
+
 // ─── US address normalization + comparison ─────────────────
 
 const ABBREV: Record<string, string> = {

@@ -2,6 +2,9 @@ export { levenshteinDistance } from "./levenshtein.js";
 export { normalizeEid } from "../../domain/identity/eid.js";
 export {
   scoreNameMatch,
+  classifyNameSimilarity,
+  correctNameSpelling,
+  TOKEN_VARIANT_MAX,
   normalizeUsAddress,
   compareUsAddresses,
   matchAgainstRoster,
@@ -9,6 +12,7 @@ export {
 } from "./match.js";
 export type {
   NameMatchResult,
+  NameSimilarityTier,
   AddressLike,
   NormalizedAddress,
   RosterRow,

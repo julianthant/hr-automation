@@ -9,6 +9,7 @@ export {
   fillFinalTransactions,
   fillTransactionResults,
   fillTimekeeperComments,
+  updateEmployeeName,
   updateLastDayWorked,
   updateSeparationDate,
   verifyTxnNumberFilled,
