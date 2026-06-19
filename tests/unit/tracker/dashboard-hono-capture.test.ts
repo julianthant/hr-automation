@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from "vitest";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -10,6 +10,7 @@ import {
   captureRegistrations,
   makeCaptureFinalize,
 } from "../../../src/tracker/dashboard/capture-state.js";
+import { rostersDir } from "../../../src/tracker/paths.js";
 import type { CaptureSession } from "../../../src/services/capture/sessions.js";
 
 let dir: string;
@@ -111,6 +112,30 @@ test("makeCaptureFinalize resolves oath-signature formType from the registration
   assert.equal(captureRegistrations["oath-signature"].formType, "oath");
   const seen = await finalizeAndCaptureFormType(fakeFinalizedSession({ workflow: "oath-signature" }));
   assert.equal(seen, "oath");
+});
+
+// ISS-002 (e2e run 20260618-2146): makeCaptureFinalize resolved the roster via
+// resolveRosterDirs() with NO arg, defaulting to `.tracker` instead of the active
+// tracker dir. Under a non-default tracker root it found no roster, fell back to
+// rosterMode "download" (the forbidden SharePoint-download fallback), and the
+// capture->OCR prepare then threw — silently swallowed by onFinalize's catch.
+test("makeCaptureFinalize resolves the roster from the PASSED tracker dir, not the .tracker default (ISS-002)", async () => {
+  mkdirSync(rostersDir(dir), { recursive: true });
+  writeFileSync(join(rostersDir(dir), "fixture-roster.xlsx"), "stub");
+  let seen: { rosterMode?: string; rosterPath?: string } = {};
+  const finalize = makeCaptureFinalize(dir, {
+    buildPrepareHandler: () => async (input) => {
+      const i = input as { rosterMode?: string; rosterPath?: string; sessionId?: string };
+      seen = { rosterMode: i.rosterMode, rosterPath: i.rosterPath };
+      return { status: 202, body: { ok: true, sessionId: i.sessionId ?? "", runId: "r" } };
+    },
+  });
+  await finalize(fakeFinalizedSession({ workflow: "oath-signature" }));
+  assert.equal(seen.rosterMode, "existing");
+  assert.ok(
+    seen.rosterPath !== undefined && seen.rosterPath.startsWith(dir),
+    `rosterPath ${seen.rosterPath} should resolve under the passed tracker dir ${dir}`,
+  );
 });
 
 test("makeCaptureFinalize resolves emergency-contact formType from the registration", async () => {

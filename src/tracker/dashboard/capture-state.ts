@@ -8,11 +8,17 @@ import {
 import { resolveRosterDirs } from "../../services/matching/roster-loader.js";
 import type { CaptureSession } from "../../services/capture/sessions.js";
 import { log } from "../../utils/log.js";
+import { PATHS } from "../../config.js";
+import { capturesDir, uploadsDir } from "../paths.js";
 import { buildOcrPrepareHandler } from "./ocr/index.js";
 
 export const captureStore: CaptureSessionStore = createSessionStore();
-export const CAPTURE_PHOTOS_DIR = ".tracker/captures";
-export const CAPTURE_UPLOADS_DIR = ".tracker/uploads";
+// Keyed off the active tracker root (HRAUTO_TRACKER_DIR via PATHS.trackerDir), NOT a
+// hardcoded `.tracker/...` literal — otherwise an isolated tracker dir (e2e lane or any
+// non-default deploy) leaks capture artifacts into the real `.tracker/` and breaks the
+// capture->OCR handoff (the bundled PDF lands where OCR prepare can't see it).
+export const CAPTURE_PHOTOS_DIR = capturesDir(PATHS.trackerDir);
+export const CAPTURE_UPLOADS_DIR = uploadsDir(PATHS.trackerDir);
 
 const captureMobileHtmlPath = join(import.meta.dirname ?? ".", "../../services/capture/mobile.html");
 let captureMobileHtmlCache: string | undefined;
@@ -113,7 +119,11 @@ export function makeCaptureFinalize(trackerDir: string, opts: MakeCaptureFinaliz
       return;
     }
 
-    const rosterDirs = resolveRosterDirs();
+    // Resolve the roster against the ACTIVE tracker dir (not the `.tracker` default) —
+    // otherwise a non-default tracker root finds no roster, falls back to rosterMode
+    // "download", and the capture->OCR prepare throws (swallowed by onFinalize's catch),
+    // so no OCR prep row ever appears. Same ISS-002 isolation bug as the artifact dirs.
+    const rosterDirs = resolveRosterDirs(trackerDir);
     const rosterDir = rosterDirs.find((dir) => existsSync(dir)) ?? rosterDirs[0];
     let rosterPath: string | undefined;
     try {
