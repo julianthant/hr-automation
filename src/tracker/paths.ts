@@ -37,6 +37,8 @@ export const SCREENSHOTS_SUBDIR = "screenshots";
 export const SHAREPOINT_SUBDIR = "sharepoint";
 export const ROSTERS_SUBDIR = "rosters";
 export const E2E_GATES_SUBDIR = "e2e-gates";
+export const CAPTURES_SUBDIR = "captures";
+export const UPLOADS_SUBDIR = "uploads";
 
 export function rowsDir(dir: string): string {
   return join(dir, ROWS_SUBDIR);
@@ -72,6 +74,16 @@ export function rostersDir(dir: string): string {
 /** `<dir>/e2e-gates` — hold-gate files for HRAUTO_E2E_STUBS scripted runs (core/e2e/gates.ts). */
 export function e2eGatesDir(dir: string): string {
   return join(dir, E2E_GATES_SUBDIR);
+}
+
+/** `<dir>/captures` — mobile-capture photo bundles (per-session subdir of JPEGs/PNGs). */
+export function capturesDir(dir: string): string {
+  return join(dir, CAPTURES_SUBDIR);
+}
+
+/** `<dir>/uploads` — uploaded/bundled source PDFs fed to OCR prepare. */
+export function uploadsDir(dir: string): string {
+  return join(dir, UPLOADS_SUBDIR);
 }
 
 /**
