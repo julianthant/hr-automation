@@ -133,3 +133,64 @@ test("approve-batch omits parentSubject when the review data carries none", asyn
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ISS-006 (e2e run 20260618-2146): when an approve-batch dispatch FAILS, the
+// failed row must INHERIT the prior OCR row's identity (__traceId, queueRowKind,
+// pdfOriginalName, formType). Before the fix it re-emitted a bare
+// `data: { archetype: "preview" }`, which latest-wins-merged and WIPED the row's
+// title + trace (rendered as a cryptic "<sessionId> — failed") and severed the
+// delegation-trace lineage through that node.
+test("approve-batch failure preserves the row's identity fields (ISS-006)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "approve-fail-identity-"));
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    appendFileSync(
+      rowFilePath("ocr", todayLocal(), dir),
+      JSON.stringify({
+        workflow: "ocr",
+        timestamp: new Date().toISOString(),
+        id: "sess-fail",
+        runId: "ocr-run-fail",
+        parentRunId: "op-fail",
+        status: "done",
+        step: "awaiting-approval",
+        data: {
+          archetype: "preview",
+          formType: "emergency-contact",
+          sessionId: "sess-fail",
+          queueRowKind: "file",
+          pdfOriginalName: "emergency-contacts.pdf",
+          __traceId: "ec-120000-fa11",
+        },
+      }) + "\n",
+    );
+    // Force the fan-out dispatch to throw -> exercises the approve-failed emit path.
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {
+        throw new Error("boom: simulated dispatch failure");
+      },
+    });
+    const res = await handler({
+      sessionId: "sess-fail",
+      runId: "ocr-run-fail",
+      records: [emergencyContactPreviewRecord("10874100", "Alice One")],
+    });
+    assert.equal(res.status, 200);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const rows = readJsonl(rowFilePath("ocr", todayLocal(), dir));
+    const failed = rows.find(
+      (r) => (r as { step?: string }).step === "approve-failed",
+    ) as { status?: string; data: Record<string, string> } | undefined;
+    assert.ok(failed, "approve-failed row should exist");
+    assert.equal(failed!.status, "failed");
+    // The failure row must KEEP its identity (was wiped to null before the fix).
+    assert.equal(failed!.data.__traceId, "ec-120000-fa11");
+    assert.equal(failed!.data.queueRowKind, "file");
+    assert.equal(failed!.data.pdfOriginalName, "emergency-contacts.pdf");
+    assert.equal(failed!.data.formType, "emergency-contact");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
