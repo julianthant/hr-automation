@@ -186,8 +186,10 @@ export function buildEmergencyContactPlan(
         .click({ timeout: 10_000 });
       await page.waitForTimeout(2_000);
 
-      await page.getByRole("textbox", { name: "Address 1" }).first()
-        .fill(addr.street, { timeout: 10_000 });
+      if (addr.street) {
+        await page.getByRole("textbox", { name: "Address 1" }).first()
+          .fill(addr.street, { timeout: 10_000 });
+      }
       if (addr.city) {
         await page.getByRole("textbox", { name: "City" }).first()
           .fill(addr.city, { timeout: 10_000 });

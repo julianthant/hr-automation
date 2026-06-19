@@ -5,7 +5,11 @@ import { parse as parseYaml } from "yaml";
 // ── Address ────────────────────────────────────────────────
 
 export const AddressSchema = z.object({
-  street: z.string().min(1),
+  // `street` is nullable/optional like its siblings: OCR routinely emits a partial
+  // address (e.g. `{ street: null, city, zip }`) for a half-legible form. A non-null
+  // `homeAddress` object with a null `street` must NOT reject the whole approve batch —
+  // a fully-absent address already validates, so a partial one is treated the same.
+  street: z.string().min(1).nullable().optional(),
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
   zip: z.string().nullable().optional(),
