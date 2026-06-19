@@ -402,6 +402,25 @@ export async function updateLastDayWorked(
 }
 
 /**
+ * Update the Employee Name field ("Last Name, First Name") in the Kuali
+ * separation form. Used by the separations `identity-check` step when the
+ * Workforce Job Summary resolves the SAME person under a close spelling variant
+ * (e.g. Kuali "Balmaceda, Jaden" vs UCPath "Jayden Balmaceda") — the EID is
+ * trusted and the misspelled name is corrected in place. Mirrors
+ * `updateLastDayWorked`'s clear + fill-with-verify pattern.
+ */
+export async function updateEmployeeName(
+  page: Page,
+  newName: string,
+): Promise<void> {
+  log.step(`Updating Employee Name to: ${newName}`);
+  const field = separationForm.employeeName(page);
+  await field.clear({ timeout: 5_000 });
+  await fillWithVerify(field, newName, 'employeeName');
+  log.success(`Employee Name set to: ${newName}`);
+}
+
+/**
  * Update the Separation Date field in the Kuali form.
  */
 export async function updateSeparationDate(

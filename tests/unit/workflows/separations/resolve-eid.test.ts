@@ -1,18 +1,19 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import {
-  resolveSeparationEid,
-  separationNameMatches,
-} from "../../../../src/workflows/separations/workflow.js";
+import { resolveSeparationEid } from "../../../../src/workflows/separations/workflow.js";
 import type { KualiSeparationData } from "../../../../src/systems/kuali/index.js";
 import { personLookupWorkflow } from "../../../../src/workflows/person-lookup/index.js";
 
 /**
- * Unit coverage for the CONDITIONAL name↔EID verification (`resolveSeparationEid`,
- * the `identity-check` step) and its `separationNameMatches` gate.
+ * Unit coverage for the "very different name" / "EID not found" arm of the
+ * `identity-check` step (`resolveSeparationEid`). The three-tier name gate
+ * itself (`same` / `similar` / `different`) is covered by
+ * `classifyNameSimilarity` in `tests/unit/services/matching/match.test.ts`; the
+ * handler's branch wiring (skip on "same", correct-name on "similar",
+ * delegate on "different") is covered by `dry-run.test.ts`.
  *
- * The handler now runs `resolveSeparationEid` ONLY when the Workforce Job
- * Summary result is suspicious, passing the Job Summary `{ found, name }`:
+ * The handler calls `resolveSeparationEid` ONLY when the Workforce Job Summary
+ * result needs a NAME SEARCH, passing the Job Summary `{ found, name }`:
  *
  *   (1) FOUND + name mismatch, resolved EID differs → take the name-derived EID
  *       (name wins) + write it to ctx.data.
@@ -65,24 +66,6 @@ function makeStubCtx(delegateResult: {
   } as unknown as Parameters<typeof resolveSeparationEid>[0];
   return { ctx, calls, updated };
 }
-
-describe("separationNameMatches", () => {
-  it("matches across format differences (Job Summary 'First Last' vs Kuali 'Last, First')", () => {
-    assert.equal(separationNameMatches("Balmaceda, Jayden", "Jayden Balmaceda"), true);
-  });
-
-  it("matches when a middle name is present on one side only", () => {
-    assert.equal(separationNameMatches("Mendoza, Matthew James", "Matthew Mendoza"), true);
-  });
-
-  it("does NOT match two different people", () => {
-    assert.equal(separationNameMatches("Perez, Jason", "Jayden Balmaceda"), false);
-  });
-
-  it("does NOT match an empty Job Summary name", () => {
-    assert.equal(separationNameMatches("Mendoza, Matthew", ""), false);
-  });
-});
 
 describe("resolveSeparationEid (conditional)", () => {
   it("(1) FOUND + name mismatch + different resolved EID → takes the name-derived EID", async () => {

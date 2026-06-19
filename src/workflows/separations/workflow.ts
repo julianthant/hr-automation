@@ -7,7 +7,10 @@ import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/d
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { isUcpathEmployeeId, normalizeEid } from "../../domain/identity/eid.js";
-import { scoreNameMatch } from "../../services/matching/match.js";
+import {
+  classifyNameSimilarity,
+  correctNameSpelling,
+} from "../../services/matching/match.js";
 import { personLookupWorkflow } from "../person-lookup/index.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
@@ -29,6 +32,7 @@ import {
   isVoluntaryTermination,
   fillTimekeeperTasks,
   updateLastDayWorked,
+  updateEmployeeName,
 } from "../../systems/kuali/index.js";
 import type { KualiSeparationData } from "../../systems/kuali/index.js";
 
@@ -127,36 +131,15 @@ export function resolveJobSummaryResult(
 }
 
 /**
- * Fuzzy-match floor for the Job-Summary↔Kuali name comparison — the same
- * auto-accept threshold roster matching uses (`scoreNameMatch`).
- */
-export const NAME_MATCH_THRESHOLD = 0.85;
-
-/**
- * Whether the Workforce Job Summary detail-page name matches the Kuali-extracted
- * name closely enough to trust that the EID resolved to the intended person.
+ * The "very different name" / "EID not found" arm of the `identity-check` step:
+ * verify the EID via person-lookup BY NAME and reconcile. The handler calls this
+ * ONLY when the Workforce Job Summary result is suspicious enough to need a name
+ * search — it is a CONDITIONAL fallback, not an every-run pass. The three cases:
  *
- * Uses the token-sorted fuzzy matcher (`scoreNameMatch`, ≥ 0.85) — NOT an exact
- * compare — because the two sources format names differently: Job Summary
- * renders "First Last", Kuali typically "Last, First", and middle names / minor
- * variants are common. An exact compare would flag those as mismatches and fire
- * person-lookup constantly. An empty Job Summary name never matches.
- */
-export function separationNameMatches(kualiName: string, jobSummaryName: string): boolean {
-  if (!jobSummaryName.trim()) return false;
-  return scoreNameMatch(kualiName, jobSummaryName).score >= NAME_MATCH_THRESHOLD;
-}
-
-/**
- * The `identity-check` step. Verify the EID via person-lookup BY NAME and
- * reconcile — but ONLY when the Workforce Job Summary result is suspicious. The
- * handler runs this step (vs. skipping it) exactly when the Job Summary gate
- * flags a problem, so person-lookup is a CONDITIONAL fallback, not an every-run
- * pass. The three cases it's called for:
- *
- *   1. Job Summary FOUND the EID but the detail-page name does NOT match the
- *      Kuali name → the EID points at the wrong person (the valid-format-but-
- *      wrong Perez `10694136` case) → look the intended person up BY NAME.
+ *   1. Job Summary FOUND the EID but the detail-page name is VERY DIFFERENT from
+ *      the Kuali name (`classifyNameSimilarity` → "different") → the EID points
+ *      at the wrong person (the valid-format-but-wrong Perez `10694136` case) →
+ *      look the intended person up BY NAME.
  *   2. Job Summary did NOT find the EID AND the typed EID is short (< 8 digits,
  *      incomplete) → the operator mistyped/truncated it → resolve BY NAME.
  *   3. Job Summary did NOT find the EID AND the typed EID is a complete 8 digits
@@ -164,16 +147,18 @@ export function separationNameMatches(kualiName: string, jobSummaryName: string)
  *      LOUD (the operator fixes the upstream record; we do NOT silently look up,
  *      per `src/systems/ucpath/CLAUDE.md` "No cross-source auto-fallbacks").
  *
+ * The CLOSE-variant case (Job Summary FOUND + `classifyNameSimilarity` →
+ * "similar", e.g. Kuali "Balmaceda, Jaden" vs UCPath "Jayden Balmaceda") never
+ * reaches here — the handler trusts the EID and fixes the Kuali NAME in place
+ * (no person-lookup). And the clean-match case ("same") SKIPS this step entirely
+ * (the "dynamic timeline" signal that no verification was needed).
+ *
  * When it delegates, the NAME is authoritative: a resolved valid EID that
  * differs from Kuali's replaces it (`ctx.updateData({ eid })` so it rides every
  * downstream step + the final snapshot), a match returns the EID unchanged, and
  * an unresolvable name FAILS LOUD. The visible correction (its own pipeline step
  * + a delegated person-lookup child row) is the operator-confirmed exception to
  * the no-fallback rule — see CLAUDE.md "Conditional name↔EID verification".
- *
- * The Job-Summary-name-matches case (the common path) is handled in the handler
- * by SKIPPING this step entirely (no delegation) — that's the "dynamic timeline"
- * signal that person-lookup wasn't needed.
  *
  * Returns the verified EID for the rest of the run.
  */
@@ -519,19 +504,28 @@ export const separationsWorkflow = defineWorkflow({
     } // end !kronosSkipped branch
 
     // ─── Step: identity-check — conditional name↔EID verification ───
-    // Gated on the Workforce Job Summary result (fetched above). person-lookup
-    // runs ONLY when the Job Summary flags a problem; otherwise the step is
-    // SKIPPED (the "dynamic timeline" signal that no lookup was needed, and no
-    // delegated person-lookup child row appears). Four outcomes:
+    // Search by EID first (the Workforce Job Summary fetched above), then branch
+    // on how its detail-page name compares to the Kuali name
+    // (`classifyNameSimilarity`, order-insensitive token alignment). The step is
+    // SKIPPED only when there is nothing to verify/fix (the "dynamic timeline"
+    // signal). Outcomes:
     //   · txn prefilled OR kronos skipped → SKIP (no Job Summary gate; UCPath
     //     already accepted the EID, or the operator prefilled/asserted the data).
-    //   · Job Summary FOUND + name matches Kuali → SKIP (EID trusted).
-    //   · Job Summary FOUND + name mismatch, OR not found + short EID → RUN the
-    //     step → delegate to person-lookup BY NAME (name authoritative).
-    //   · not found + a complete 8-digit EID → RUN the step → FAIL LOUD
-    //     (resolveSeparationEid throws; the operator fixes the upstream record).
-    // On an EID correction we re-fetch the Job Summary (so dept/payroll is the
-    // RIGHT person's) and re-search New Kronos (so the timecard / LDW is too).
+    //   · Job Summary FOUND + name "same"     → SKIP (EID trusted, name correct).
+    //   · Job Summary FOUND + name "similar"  → RUN → trust the EID, CORRECT the
+    //     misspelled Kuali name in place (no person-lookup). Jaden→Jayden case.
+    //   · Job Summary FOUND + name "different" → RUN → delegate to person-lookup
+    //     BY NAME (very different = wrong-person EID; name authoritative).
+    //   · not found + short (<8) EID → RUN → delegate BY NAME.
+    //   · not found + complete 8-digit EID → RUN → FAIL LOUD (no lookup).
+    // On an EID correction (the "different"/not-found delegate path) we re-fetch
+    // the Job Summary (so dept/payroll is the RIGHT person's) and re-search New
+    // Kronos (so the timecard / LDW is too). The "similar" path keeps the EID, so
+    // the already-fetched Job Summary / Kronos data stay valid — no re-fetch.
+    const nameTier = jobSummaryFound
+      ? classifyNameSimilarity(kualiData.employeeName, jobSummaryName)
+      : "different";
+
     if (txnNumberPrefilled || kronosSkipped) {
       ctx.skipStep("identity-check");
       log.step(
@@ -539,12 +533,33 @@ export const separationsWorkflow = defineWorkflow({
           ? `[Step: identity-check] SKIPPED — txn # prefilled (UCPath already accepted EID '${kualiData.eid}'; no re-submit)`
           : `[Step: identity-check] SKIPPED — kronos-search skipped, no Job Summary gate (operator prefilled/asserted the data)`,
       );
-    } else if (jobSummaryFound && separationNameMatches(kualiData.employeeName, jobSummaryName)) {
+    } else if (jobSummaryFound && nameTier === "same") {
       ctx.skipStep("identity-check");
       log.success(
         `[Step: identity-check] SKIPPED — Job Summary name "${jobSummaryName}" matches Kuali ` +
         `"${kualiData.employeeName}"; EID ${kualiData.eid} trusted (no person-lookup needed)`,
       );
+    } else if (jobSummaryFound && nameTier === "similar") {
+      // Same person under a close spelling variant (e.g. "Balmaceda, Jaden" vs
+      // "Jayden Balmaceda"). The EID found a real, clearly-matching person — so
+      // TRUST IT and correct the misspelled Kuali name in place rather than
+      // firing a (doomed) name search on the typo. No EID change → no re-fetch.
+      await ctx.step("identity-check", async () => {
+        const correctedName = correctNameSpelling(kualiData.employeeName, jobSummaryName);
+        log.warn(
+          `[identity-check] Job Summary name "${jobSummaryName}" is a close variant of Kuali ` +
+          `"${kualiData.employeeName}" — trusting EID ${kualiData.eid}; correcting the Kuali name ` +
+          `to "${correctedName}"`,
+        );
+        // Write the correction to the Kuali draft even in dry-run — same as the
+        // timekeeper-name fill bundled into kronos-search. It touches the
+        // UNSUBMITTED draft and commits nothing; the dry-run terminal still
+        // skips finalization, so the document is never finalized/submitted.
+        const kp = await ctx.page("kuali");
+        await updateEmployeeName(kp, correctedName);
+        kualiData = { ...kualiData, employeeName: correctedName };
+        ctx.updateData({ name: correctedName });
+      });
     } else {
       const verifiedEid = await ctx.step("identity-check", () =>
         resolveSeparationEid(ctx, kualiData, { found: jobSummaryFound, name: jobSummaryName }),

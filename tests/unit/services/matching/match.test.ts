@@ -2,6 +2,8 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   scoreNameMatch,
+  classifyNameSimilarity,
+  correctNameSpelling,
   normalizeUsAddress,
   compareUsAddresses,
   matchAgainstRoster,
@@ -141,5 +143,65 @@ describe("matchAgainstRoster", () => {
     for (let i = 1; i < r.candidates.length; i++) {
       assert.ok(r.candidates[i - 1].score >= r.candidates[i].score);
     }
+  });
+});
+
+describe("classifyNameSimilarity", () => {
+  it("'same' for identical tokens regardless of order/format (Last, First vs First Last)", () => {
+    assert.equal(classifyNameSimilarity("Balmaceda, Jayden", "Jayden Balmaceda"), "same");
+    assert.equal(classifyNameSimilarity("John Doe", "JOHN  DOE"), "same");
+  });
+
+  it("'same' when the longer side only adds a middle name (all shared tokens exact)", () => {
+    assert.equal(classifyNameSimilarity("Mendoza, Matthew", "Matthew James Mendoza"), "same");
+    assert.equal(classifyNameSimilarity("Mendoza, Matthew James", "Matthew Mendoza"), "same");
+  });
+
+  it("'similar' for a one-letter first-name spelling variant (the Jaden/Jayden case)", () => {
+    assert.equal(classifyNameSimilarity("Balmaceda, Jaden", "Jayden Balmaceda"), "similar");
+  });
+
+  it("'similar' for common spelling variants within 2 edits", () => {
+    assert.equal(classifyNameSimilarity("Smith, Sara", "Sarah Smith"), "similar");
+    assert.equal(classifyNameSimilarity("Doe, Steven", "Stephen Doe"), "similar");
+  });
+
+  it("'different' for two different people (shared last name, far first name)", () => {
+    assert.equal(classifyNameSimilarity("Smith, Jonathan", "Robert Smith"), "different");
+  });
+
+  it("'different' for completely different names", () => {
+    assert.equal(classifyNameSimilarity("Perez, Jason", "Jayden Balmaceda"), "different");
+  });
+
+  it("'different' when either side is empty (no name to compare)", () => {
+    assert.equal(classifyNameSimilarity("Mendoza, Matthew", ""), "different");
+    assert.equal(classifyNameSimilarity("", "Matthew Mendoza"), "different");
+  });
+});
+
+describe("correctNameSpelling", () => {
+  it("fixes a misspelled token in place, preserving the 'Last, First' comma format", () => {
+    assert.equal(correctNameSpelling("Balmaceda, Jaden", "Jayden Balmaceda"), "Balmaceda, Jayden");
+  });
+
+  it("leaves an exact-match name untouched", () => {
+    assert.equal(correctNameSpelling("Balmaceda, Jayden", "Jayden Balmaceda"), "Balmaceda, Jayden");
+  });
+
+  it("only replaces near-matched tokens (does not invent or drop unmatched ones)", () => {
+    // Middle name "James" has no near token in the authoritative name → kept as-is.
+    assert.equal(
+      correctNameSpelling("Doe, Steven James", "Stephen Doe"),
+      "Doe, Stephen James",
+    );
+  });
+
+  it("uses the authoritative token's verbatim spelling/casing", () => {
+    assert.equal(correctNameSpelling("smith, sara", "Sarah Smith"), "smith, Sarah");
+  });
+
+  it("returns the original name unchanged when the authoritative name is empty", () => {
+    assert.equal(correctNameSpelling("Balmaceda, Jaden", ""), "Balmaceda, Jaden");
   });
 });

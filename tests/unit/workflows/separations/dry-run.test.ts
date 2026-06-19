@@ -45,6 +45,9 @@ const mocks = vi.hoisted(() => {
     // Job Summary re-fetch the handler runs after an identity-check EID
     // correction (real fn navigates UCPath — stub it).
     getJobSummaryIdentity: vi.fn(),
+    // Kuali name write the identity-check "similar" branch makes (real fn drives
+    // a live Kuali form — stub it).
+    updateEmployeeName: vi.fn(),
   };
 });
 
@@ -86,6 +89,13 @@ vi.mock("../../../../src/systems/new-kronos/index.js", async (importOriginal) =>
 vi.mock("../../../../src/systems/ucpath/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/systems/ucpath/index.js")>()),
   getJobSummaryIdentity: mocks.getJobSummaryIdentity,
+}));
+// Stub only the Kuali name write the identity-check "similar" branch makes on a
+// live run; keep every other kuali export real (isVoluntaryTermination, the
+// systems config wiring, etc.).
+vi.mock("../../../../src/systems/kuali/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../src/systems/kuali/index.js")>()),
+  updateEmployeeName: mocks.updateEmployeeName,
 }));
 
 import { INPUT_RUN_REGISTRY } from "../../../../src/dashboard/lib/input-run-registry.js";
@@ -224,6 +234,7 @@ beforeEach(() => {
     name: "Test Employee",
     data: { deptId: "", departmentDescription: "", jobCode: "", jobDescription: "" },
   });
+  mocks.updateEmployeeName.mockResolvedValue(undefined);
 });
 
 describe("SeparationInputSchema (separationsWorkflow.config.schema)", () => {
@@ -491,6 +502,61 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     await runHandler(ctx, { docId: "4131" });
     assert.ok(probe.skipped.includes("identity-check"), "identity-check skipped");
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "txn prefilled — no re-submit");
+  });
+});
+
+describe("separations handler — identity-check (similar name → correct in place)", () => {
+  // Kuali name is a close spelling variant of the Job Summary name — the EID is
+  // trusted and the Kuali name is corrected in place (no person-lookup, no EID
+  // change, no re-fetch). The Jaden/Jayden regression.
+  const KUALI_MISSPELLED = { ...KUALI_FIXTURE, employeeName: "Balmaceda, Jaden" };
+  const JOB_SUMMARY_SIMILAR = {
+    newK: {
+      status: "fulfilled" as const,
+      value: { found: false, lastPunchDate: null, sickDates: [], holidayDates: [] },
+    },
+    jobSummary: {
+      status: "fulfilled" as const,
+      value: { found: true, name: "Jayden Balmaceda", data: null },
+    },
+    kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
+  };
+
+  it("LIVE: corrects the Kuali name, keeps the EID, never delegates, and submits", async () => {
+    mocks.runKualiExtract.mockResolvedValueOnce(KUALI_MISSPELLED);
+    mocks.runKronosSearch.mockResolvedValueOnce(JOB_SUMMARY_SIMILAR);
+    const delegateSpy = vi.fn();
+    const { ctx, probe } = makeFakeCtx({ docId: "4126" });
+    (ctx as { delegateTo: unknown }).delegateTo = async (...args: unknown[]) => {
+      delegateSpy(...args);
+      return { workflow: "person-lookup", runId: "stub", itemId: "stub", status: "done" as const };
+    };
+
+    await runHandler(ctx, { docId: "4126" });
+
+    assert.equal(probe.skipped.includes("identity-check"), false, "identity-check RAN (not skipped)");
+    assert.equal(delegateSpy.mock.calls.length, 0, "no person-lookup delegation on a close variant");
+    assert.equal(mocks.updateEmployeeName.mock.calls.length, 1, "Kuali name written once");
+    assert.equal(mocks.updateEmployeeName.mock.calls[0][1], "Balmaceda, Jayden", "corrected spelling, Kuali format preserved");
+    assert.equal(probe.data.name, "Balmaceda, Jayden", "corrected name persisted to ctx.data");
+    assert.equal(probe.data.eid, undefined, "EID never changed via ctx.data (trusted as-is)");
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 0, "no Job Summary re-fetch (EID unchanged)");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "proceeds to submit with the trusted EID");
+  });
+
+  it("DRY-RUN: still corrects the name on the unsubmitted Kuali draft (like the timekeeper fill)", async () => {
+    mocks.runKualiExtract.mockResolvedValueOnce(KUALI_MISSPELLED);
+    mocks.runKronosSearch.mockResolvedValueOnce(JOB_SUMMARY_SIMILAR);
+    const { ctx, probe } = makeFakeCtx({ docId: "4126", dryRun: true });
+
+    await runHandler(ctx, { docId: "4126", dryRun: true });
+
+    assert.equal(mocks.updateEmployeeName.mock.calls.length, 1, "name written to the unsubmitted draft");
+    assert.equal(mocks.updateEmployeeName.mock.calls[0][1], "Balmaceda, Jayden");
+    assert.equal(probe.data.name, "Balmaceda, Jayden", "corrected name recorded in ctx.data");
+    // The doc is still never finalized — the dry-run terminal skips kuali-finalization.
+    assert.ok(probe.skipped.includes("kuali-finalization"));
+    assert.equal(probe.data.status, "Dry Run Complete");
   });
 });
 
