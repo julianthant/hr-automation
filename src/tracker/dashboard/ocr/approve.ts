@@ -1,4 +1,5 @@
 import { emitTrackerRow } from "../../jsonl.js";
+import { emitInheritedRow } from "../../../control/ops/emit-inherited.js";
 import { log, withLogContext, setLogRunId } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
 import { getFormSpec } from "../../../services/ocr/forms/registry.js";
@@ -461,22 +462,41 @@ export function buildOcrApproveHandler(
       } catch (err) {
         const msg = errorMessage(err);
         log.error(`[ocr-http] approve-batch dispatch failed: ${msg}`);
-        // Surface the failure on both rows so the operator notices.
-        emitTrackerRow(
-          {
+        // Surface the failure on the OCR review row so the operator notices.
+        // INHERIT the prior row's display metadata (__traceId, queueRowKind,
+        // pdfOriginalName, formType, archetype) — a bare re-emit of just
+        // `{ archetype: "preview" }` gets latest-wins-merged and WIPES the row's
+        // identity, so it renders as a cryptic "<sessionId> — failed" with no
+        // title/trace and severs the delegation-trace lineage through this node.
+        try {
+          emitInheritedRow({
             workflow: WORKFLOW,
-            timestamp: new Date().toISOString(),
+            trackerDir,
             id: input.sessionId,
             runId: input.runId,
             ...(parentRunId ? { parentRunId } : {}),
             status: "failed",
             step: "approve-failed",
-            // OCR prep parent is preview-shaped.
-            data: { archetype: "preview" },
             error: msg,
-          },
-          trackerDir,
-        );
+          });
+        } catch {
+          // No prior row to inherit from — fall back to a bare failure row so the
+          // operator still sees the failure (identity fields unavoidably absent).
+          emitTrackerRow(
+            {
+              workflow: WORKFLOW,
+              timestamp: new Date().toISOString(),
+              id: input.sessionId,
+              runId: input.runId,
+              ...(parentRunId ? { parentRunId } : {}),
+              status: "failed",
+              step: "approve-failed",
+              data: { archetype: "preview" },
+              error: msg,
+            },
+            trackerDir,
+          );
+        }
       }
     })();
 
