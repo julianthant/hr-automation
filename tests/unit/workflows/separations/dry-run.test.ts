@@ -304,6 +304,19 @@ describe("separations handler — dry-run terminal", () => {
     assert.equal(probe.data.dryRun, true);
   });
 
+  it("stamps transactionNumber + comments in dry-run (no 'declared but never populated' warn)", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    // Both are declared detailFields. `transactionNumber` is never set on the
+    // dry-run path (no UCPath submit runs) and `comments` is only set on the
+    // edit-and-resume prefill path, so a fresh dry run leaves both absent and
+    // trips the runtime "declared but never populated" populate-warn. The
+    // dry-run snapshot must stamp both (mirrors departmentDescription).
+    assert.ok("transactionNumber" in probe.data, "transactionNumber stamped in dry-run");
+    assert.equal(probe.data.transactionNumber, "");
+    assert.ok("comments" in probe.data, "comments stamped in dry-run");
+  });
+
   it("skips the ucpath-transaction step in dry-run", async () => {
     const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
@@ -397,6 +410,16 @@ describe("separations handler — live (non-dry-run) gates the writes", () => {
     const { ctx, probe } = makeFakeCtx({ docId: "4131" });
     await runHandler(ctx, { docId: "4131" });
     assert.notEqual(probe.data.status, "Dry Run Complete");
+  });
+
+  it("stamps the comments detailField on a live run (no populate warn)", async () => {
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    // `comments` is a declared detailField only ever populated on the
+    // edit-and-resume prefill path. The live final snapshot must stamp it so a
+    // fresh run doesn't trip the "declared but never populated" warn (the
+    // dry-run path stamps it too — see the dry-run terminal describe above).
+    assert.ok("comments" in probe.data, "comments stamped on live run");
   });
 });
 

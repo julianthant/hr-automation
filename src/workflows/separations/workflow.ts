@@ -297,11 +297,14 @@ export const separationsWorkflow = defineWorkflow({
     // final snapshot always stamps it ("" when no Job Summary ran), so the
     // key is present on every success path — no populate warn.
     { key: "departmentDescription", label: "Department"                                           },
+    // Stamped on every success path: live ("" until the UCPath submit returns a
+    // number), dry-run (always "" — no submit), and the failed-no-txn snapshot.
     { key: "transactionNumber", label: "Txn #",           editable: true                          },
     // Free-form Kuali timekeeper-comments override. Edit-and-resume only —
     // not surfaced in the LogPanel detail grid. `fillTimekeeperComments` is
     // append-aware: existing field content is preserved + a newline-joined
-    // append is filled.
+    // append is filled. The final/dry-run snapshots stamp it ("" when no
+    // prefill) so it never trips the "declared but never populated" warn.
     { key: "comments",          label: "Comments",        editable: true, displayInGrid: false, multiline: true },
     // Read-only preview of the generated UCPath termination comment (incl.
     // sick/holiday clause). Stamped in dry-run so the operator can verify it
@@ -707,6 +710,13 @@ export const separationsWorkflow = defineWorkflow({
         jobDescription: jobSummaryData?.jobDescription ?? "",
         foundInNewKronos: String(newKronosFound),
         separationComment: finalComments,
+        // Stamp the last two declared detailFields so the dry-run path never
+        // trips the "declared but never populated" warn (mirrors
+        // departmentDescription). `transactionNumber` stays "" — no UCPath
+        // submit runs in dry-run; `comments` preserves any edit-and-resume
+        // prefill, "" otherwise.
+        transactionNumber: (ctx.data.transactionNumber as string) ?? "",
+        comments: (ctx.data.comments as string) ?? "",
       });
       log.success(
         `DRY RUN: reached UCPath Smart HR transaction for doc #${docId} — ` +
@@ -842,6 +852,10 @@ export const separationsWorkflow = defineWorkflow({
       foundInNewKronos: String(newKronosFound),
       separationComment: finalComments,
       transactionNumber,
+      // `comments` (the edit-and-resume timekeeper-comments override) is only
+      // ever set on the prefill path; stamp it here so a fresh live run doesn't
+      // trip the "declared but never populated" warn (mirrors the dry-run snapshot).
+      comments: (ctx.data.comments as string) ?? "",
     });
 
     // A live run that reaches this point with NO transaction number means the
