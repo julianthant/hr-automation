@@ -440,6 +440,69 @@ test("prepare fails loud (aborts the OCR run) when the oath-upload task cannot b
   }
 });
 
+// ISS-001 (e2e run 20260622): re-uploading the SAME PDF to oath-upload (full
+// mode, via /api/ocr/prepare with targetWorkflow=oath-upload) silently
+// succeeded (202) and either filed a duplicate ticket or produced no feedback —
+// the modal closed as success with no "duplicate" affordance (fail-loud
+// violation). Fix: prepare probes for a prior FILED oath-upload ticket by PDF
+// content (findPriorOathUploadTicket seam); on a hit it returns a STRUCTURED
+// duplicate response the RunModal can surface and does NOT enqueue a second
+// born-at-upload ticket.
+test("prepare with targetWorkflow=oath-upload returns a structured duplicate (not silent 202) and skips the enqueue when a prior ticket exists (ISS-001)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-op-ou-dup-"));
+  _resetSessionLockForTests();
+  try {
+    let enqueueCalled = false;
+    const handler = buildOcrPrepareHandler({
+      trackerDir: dir,
+      runOrchestrator: async () => {},
+      enqueueOathUploadAtPrepare: async () => {
+        enqueueCalled = true;
+        return { runId: "should-not-be-reached", traceId: "ou-000000-0000" };
+      },
+      // A prior FILED ticket exists for this PDF's content.
+      findPriorOathUploadTicket: () => ({
+        ticketNumber: "HRC0012345",
+        sessionId: "prior-sess",
+        pdfOriginalName: "oaths.pdf",
+      }),
+    });
+    const resp = await handler({
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "oaths.pdf",
+      pdfFileId: "file-dup-abc",
+      formType: "oath",
+      targetWorkflow: "oath-upload",
+      rosterMode: "existing",
+      rosterPath: "/tmp/roster.xlsx",
+      sessionId: "sess-ou-dup",
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // (1) Structured duplicate — NOT a silent success the modal reads as "started".
+    assert.notEqual(resp.status, 202, "duplicate must not return a bare 202 success");
+    const body = resp.body as {
+      ok: boolean;
+      duplicate?: boolean;
+      priorTicket?: string;
+      error?: string;
+    };
+    assert.equal(body.ok, false, "duplicate response must not be ok:true");
+    assert.equal(body.duplicate, true, "response carries the duplicate affordance");
+    assert.equal(body.priorTicket, "HRC0012345", "surfaces the prior ticket number");
+
+    // (2) No second born-at-upload ticket was enqueued.
+    assert.equal(enqueueCalled, false, "duplicate must not enqueue a second oath-upload ticket");
+    assert.equal(
+      readRows(dir, "oath-upload").length,
+      0,
+      "no new oath-upload row for a refused duplicate",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("approve for an oath-upload operation fans out signers only (its existing task files the ticket)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-op-oath-upload-"));
   try {

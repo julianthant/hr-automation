@@ -427,13 +427,31 @@ export async function withTrackedWorkflow<T>(
   } catch (e) {
     const error = classifyError(e);
     const cancelled = e instanceof Error && e.name === "CancelledError";
+    // ISS-007: a handler can throw a `CancelledError` whose `stepName` is a
+    // cancel SENTINEL (`cancelled` / `discarded`) when the run is terminated by
+    // something OTHER than a controller-abort — e.g. an upstream OCR discard
+    // unwinding the oath-upload `wait-approval` step. The controller is NOT
+    // aborted in that case, so the kernel's own cancel-step path never set the
+    // sentinel; without honoring it here the terminal row would freeze on the
+    // in-flight `lastStep` (e.g. `wait-approval`) and render red Failed instead
+    // of orange Cancelled. Honor the carried sentinel; any other stepName (or a
+    // non-cancel error) keeps the in-flight `lastStep` (the OCR delegated cancel
+    // throws `CancelledError("awaiting-approval")` but its terminal row is
+    // suppressed by the daemon path, so this never affects it).
+    const cancelSentinel =
+      cancelled && (e as { stepName?: string }).stepName === "discarded"
+        ? "discarded"
+        : cancelled && (e as { stepName?: string }).stepName === "cancelled"
+          ? "cancelled"
+          : undefined;
+    const terminalStep = cancelSentinel ?? lastStep;
     // Annotate the existing terminal log line with `run:terminal` (outcome =
     // cancelled|failed) so the harness can await ANY terminal outcome on one
     // event name + branch on `occasion`.
     if (cancelled) {
-      log.warn({ message: error, event: "run:terminal", occasion: "cancelled", ...(lastStep ? { step: lastStep } : {}) });
+      log.warn({ message: error, event: "run:terminal", occasion: "cancelled", ...(terminalStep ? { step: terminalStep } : {}) });
     } else {
-      log.error({ message: error, event: "run:terminal", occasion: "failed", ...(lastStep ? { step: lastStep } : {}) });
+      log.error({ message: error, event: "run:terminal", occasion: "failed", ...(terminalStep ? { step: terminalStep } : {}) });
     }
     // VQ-003: for a daemon-ORIGINATED cancel (force-shutdown / reassign), the
     // daemon's `failInFlightItem` / `reassignInFlightItem` owns the SOLE
@@ -459,7 +477,7 @@ export async function withTrackedWorkflow<T>(
     // terminal — claiming-then-not-emitting would steal the token and leave the
     // run with NO terminal row at all.
     if (!suppressCancelledRow && (opts.claimTerminalWrite?.() ?? true)) {
-      emit("failed", { error, ...(lastStep ? { step: lastStep } : {}) });
+      emit("failed", { error, ...(terminalStep ? { step: terminalStep } : {}) });
     }
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     throw e;

@@ -12,6 +12,9 @@ import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.j
 import { OPERATION_COORDINATOR_WORKFLOWS } from "./shared.js";
 import { clearOcrPrepareAbort, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
 import { runRegistry, type RunHandle } from "../../../core/run-registry.js";
+import { openControlDb } from "../../../core/control-db.js";
+import { getRegisteredFile } from "../../files/files.js";
+import { findPriorRunsForHash } from "../../../workflows/oath-upload/duplicate-check.js";
 
 const WORKFLOW = "ocr";
 
@@ -52,7 +55,19 @@ export interface PrepareResponse {
   status: 202 | 400 | 409 | 500;
   body:
     | { ok: true; sessionId: string; runId: string; parentRunId?: string }
+    // Structured duplicate refusal (ISS-001): a prior FILED oath-upload ticket
+    // already exists for this PDF's content. The RunModal surfaces `error` +
+    // `priorTicket` instead of reading a bare 202 as "started" — so a
+    // re-uploaded duplicate is never a silent success that files a 2nd ticket.
+    | { ok: false; duplicate: true; priorTicket: string; error: string }
     | { ok: false; error: string };
+}
+
+/** Summary of a prior FILED oath-upload ticket for the duplicate refusal (ISS-001). */
+export interface PriorOathUploadTicket {
+  ticketNumber: string;
+  sessionId: string;
+  pdfOriginalName: string;
 }
 
 export interface PrepareHandlerOpts {
@@ -68,6 +83,18 @@ export interface PrepareHandlerOpts {
   enqueueOathUploadAtPrepare?: (
     args: OathUploadPrepareEnqueueArgs,
   ) => Promise<{ runId: string; traceId?: string } | undefined>;
+  /**
+   * Duplicate probe for the oath-upload (full mode) born-at-upload path (ISS-001).
+   * Given the upload's `pdfFileId`, returns a prior FILED oath-upload ticket for
+   * the SAME PDF content, or undefined. The default resolves the file's content
+   * hash from the registered-file store and queries the oath-upload tracker for a
+   * filed ticket; tests stub it. When a prior ticket is found, prepare refuses the
+   * upload with a structured `duplicate` response and does NOT enqueue a second
+   * ticket.
+   */
+  findPriorOathUploadTicket?: (
+    args: { pdfFileId?: string; trackerDir?: string },
+  ) => PriorOathUploadTicket | undefined;
 }
 
 export interface OathUploadPrepareEnqueueArgs {
@@ -108,6 +135,34 @@ export function buildOcrPrepareHandler(
         status: 400,
         body: { ok: false, error: "Form requires a roster" },
       };
+    }
+
+    // ─── Oath-upload duplicate refusal (ISS-001) ────────────────────────────
+    // A full oath-upload run is born here (option A) and files a ServiceNow
+    // ticket. Re-uploading the SAME PDF used to silently succeed (a fresh
+    // sessionId dodges the handler's session-keyed idempotency probe), so the
+    // operator got NO feedback and a 2nd ticket could be filed. Refuse a
+    // duplicate UP FRONT — before the session lock / enqueue — with a
+    // structured response the RunModal surfaces (fail loud, no silent success).
+    // Skipped on reupload (an explicit operator re-prepare of the same session).
+    const isOathUploadTargetUp = !input.isReupload && input.targetWorkflow === "oath-upload";
+    if (isOathUploadTargetUp) {
+      const findPrior = opts.findPriorOathUploadTicket ?? defaultFindPriorOathUploadTicket;
+      const prior = findPrior({ pdfFileId: input.pdfFileId, trackerDir });
+      if (prior) {
+        log.warn(
+          `[ocr-http] prepare: refusing duplicate oath-upload — PDF already filed ticket ${prior.ticketNumber} (session ${prior.sessionId})`,
+        );
+        return {
+          status: 409,
+          body: {
+            ok: false,
+            duplicate: true,
+            priorTicket: prior.ticketNumber,
+            error: `This PDF was already filed under ticket ${prior.ticketNumber}. Re-uploading would file a duplicate — no new ticket was created.`,
+          },
+        };
+      }
     }
 
     const sessionId = input.sessionId ?? randomUUID();
@@ -415,6 +470,49 @@ export function buildOcrPrepareHandler(
         ...(operationRunId ? { parentRunId: operationRunId } : {}),
       },
     };
+  };
+}
+
+/** A filed (non-dry-run) oath-upload ServiceNow ticket reads `HRC…`. */
+function isFiledOathUploadTicket(ticketNumber: string | undefined): ticketNumber is string {
+  return typeof ticketNumber === "string" && /^HRC\d/i.test(ticketNumber);
+}
+
+/**
+ * Default oath-upload duplicate probe (ISS-001). Resolves the upload's full
+ * content hash from the registered-file store (the `pdfFileId` is only the
+ * first 32 hex of the sha256; the dup index keys on the full 64-hex `pdfHash`),
+ * then looks for a prior oath-upload run that already FILED a ServiceNow ticket
+ * for that same content. Returns undefined on any miss (no fileId, unregistered,
+ * no prior filed ticket) so prepare proceeds normally — fail-safe, never blocks
+ * a genuinely new upload.
+ */
+function defaultFindPriorOathUploadTicket(args: {
+  pdfFileId?: string;
+  trackerDir?: string;
+}): PriorOathUploadTicket | undefined {
+  if (!args.pdfFileId) return undefined;
+  let sha256: string | undefined;
+  let controlDb: ReturnType<typeof openControlDb> | undefined;
+  try {
+    controlDb = openControlDb({ trackerDir: args.trackerDir });
+    const registered = getRegisteredFile(controlDb.db, args.pdfFileId);
+    sha256 = registered?.sha256;
+  } catch {
+    // Registered-file store unavailable — can't resolve the hash, so we can't
+    // prove a duplicate. Let the upload proceed.
+    return undefined;
+  } finally {
+    controlDb?.close();
+  }
+  if (!sha256) return undefined;
+  const priors = findPriorRunsForHash({ hash: sha256, trackerDir: args.trackerDir });
+  const filed = priors.find((p) => isFiledOathUploadTicket(p.ticketNumber));
+  if (!filed) return undefined;
+  return {
+    ticketNumber: filed.ticketNumber!,
+    sessionId: filed.sessionId,
+    pdfOriginalName: filed.pdfOriginalName,
   };
 }
 

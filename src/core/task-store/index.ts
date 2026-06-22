@@ -64,9 +64,9 @@ export interface ControlTaskStore {
   enqueueTasks<T>(request: EnqueueTasksRequest<T>): EnqueuedTask[]
   claimNextTask(request: { workflow: string; workerId: string; now?: string; leaseMs?: number }): ClaimedTask | null
   markTaskRunning(request: { taskId: string; attemptId: string; workerId: string; now?: string }): void
-  markTaskDone(request: { taskId: string; attemptId: string; now?: string }): void
-  markTaskFailed(request: { taskId: string; attemptId: string; error: string; now?: string }): void
-  markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; now?: string }): void
+  markTaskDone(request: { taskId: string; attemptId: string; claimGeneration?: number; now?: string }): void
+  markTaskFailed(request: { taskId: string; attemptId: string; error: string; claimGeneration?: number; now?: string }): void
+  markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string }): void
   requestCancelTask(request: { taskId: string; reason?: string; now?: string }): TaskRow | null
   retryTaskFromAttempt(request: { runId: string; now?: string }): EnqueuedTask
   createDependency(request: {
