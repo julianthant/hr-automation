@@ -1,4 +1,5 @@
 import type { Ctx } from "../../core/kernel/types.js";
+import { CancelledError } from "../../core/kernel/types.js";
 import { log } from "../../utils/log.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { watchChildRuns, type ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
@@ -146,10 +147,18 @@ export async function oathUploadHandler(
         );
       } catch (err) {
         if (err instanceof OcrDiscardedError) {
-          throw new Error(
-            `oath-upload: OCR prep was discarded — NOT filing the HR ticket (${err.reason})`,
-            { cause: err },
+          // ISS-007: an upstream OCR discard is a CANCELLATION of this ticket,
+          // not a failure. Throw a kernel CancelledError carrying the
+          // `discarded` sentinel step so the terminal row classifies on the
+          // Cancel surface (orange Cancelled), not red Failed. (The controller
+          // is NOT aborted on a discard — the discard route leaves the
+          // oath-upload task to self-abort via the approval signal — so without
+          // this the kernel would freeze the row at `step=wait-approval`.) The
+          // `cause` preserves the discard reason for the terminal log line.
+          log.warn(
+            `[oath-upload] OCR prep was discarded — NOT filing the HR ticket (${err.reason})`,
           );
+          throw Object.assign(new CancelledError("discarded"), { cause: err });
         }
         if (err instanceof OcrApprovalFailedError) {
           throw new Error(
