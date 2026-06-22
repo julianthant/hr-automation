@@ -1,6 +1,8 @@
 import { readQueueTitle } from "../queue-title.js";
 import { resolveQueueRowPresentation } from "../queue-row-presentation.js";
+import type { QueueRowPresentation } from "../queue-row-presentation.js";
 import { resolveQueueRowKind } from "../queue-row-kind.js";
+import type { WorkflowPresentationConfig } from "../workflow-presentation/types.js";
 import {
   archetypeRowTypeLabel,
   hasDelegationRole,
@@ -32,6 +34,16 @@ export interface WorkflowProjectionContext {
   resolveEntrySubtitle?: (entry: TrackerEntry) => string | undefined;
   resolveEntryStatus?: (entry: TrackerEntry) => string | undefined;
   resolveGroupTitle?: (surface: TrackerQueueGroupSurface) => string | undefined;
+  /**
+   * Effective per-workflow presentation config — the merged code-default +
+   * operator override (`presentation.delegation.*` naming for member/prep rows).
+   * Supplied by Phase 4.5; until then nothing wires it, so every member/prep
+   * delegation-naming branch below is inert and the projection collapses to its
+   * pre-this-feature title/subtitle expression. Mirrors the other
+   * `resolveEntry*` resolvers (keyed by workflow id, returns `undefined` when no
+   * config applies).
+   */
+  resolvePresentation?: (workflowId: string) => WorkflowPresentationConfig | undefined;
 }
 
 interface ProjectionOverrides {
@@ -164,6 +176,48 @@ function isPrepRow(entry: TrackerEntry): boolean {
   );
 }
 
+/**
+ * Title/subtitle for a delegated **member** row from the workflow's effective
+ * `presentation.delegation` naming. Active ONLY when BOTH `memberTitle` and
+ * `memberSubtitle` are configured — an explicit, complete operator naming choice
+ * that wins over the default kind dispatch (member rows always prefer the trace
+ * id over a repeated EID, so `preferTraceIdSubtitle: true`). Returns `undefined`
+ * when the config is absent or partial, so the caller's existing precedence /
+ * `memberRow.titleSource` fallback runs unchanged. Inert for every workflow
+ * until Phase 4.5 supplies `presentation` via `context.resolvePresentation`.
+ */
+export function resolveMemberPresentation(
+  entry: { id: string; data?: Record<string, string> | null },
+  presentation?: WorkflowPresentationConfig,
+): QueueRowPresentation | undefined {
+  const delegation = presentation?.delegation;
+  if (delegation?.memberTitle && delegation?.memberSubtitle) {
+    return resolveQueueRowPresentation(entry, {
+      preferTraceIdSubtitle: true,
+      naming: { title: delegation.memberTitle, subtitle: delegation.memberSubtitle },
+    });
+  }
+  return undefined;
+}
+
+/**
+ * Title for an OCR **prep** row from the workflow's effective
+ * `presentation.delegation.prepTitle`. Prep rows have no member-subtitle scheme,
+ * so this resolves the TITLE only (subtitle keeps today's behavior). Returns
+ * `undefined` when `prepTitle` is absent, so the caller's existing precedence /
+ * `prepRow.titleSource` fallback runs unchanged. Inert until Phase 4.5.
+ */
+export function resolvePrepPresentation(
+  entry: { id: string; data?: Record<string, string> | null },
+  presentation?: WorkflowPresentationConfig,
+): QueueRowPresentation | undefined {
+  const prepTitle = presentation?.delegation?.prepTitle;
+  if (prepTitle) {
+    return resolveQueueRowPresentation(entry, { naming: { title: prepTitle } });
+  }
+  return undefined;
+}
+
 function interpolateTemplate(template: string, entry: TrackerEntry): string {
   return template.replaceAll("<last4 run id>", runIdFor(entry).slice(-4));
 }
@@ -275,13 +329,29 @@ export function buildWorkflowRunProjection(
   const presentation = resolveQueueRowPresentation(entry, {
     preferTraceIdSubtitle: overrides.preferTraceIdSubtitle,
   });
+  // Delegation-naming for member/prep rows. The effective `presentation` config
+  // is supplied by Phase 4.5 (`context.resolvePresentation`); until then it is
+  // always undefined, so `delegationTitle`/`delegationSubtitle` are undefined
+  // and the title/subtitle expressions below collapse to EXACTLY the pre-this-
+  // feature precedence (`overrides.* ?? context.resolveEntry* ?? presentation?.*
+  // ?? fallback*`). This is the load-bearing no-op invariant.
+  const effectivePresentation = context.resolvePresentation?.(entry.workflow);
+  const memberPresentation = entry.parentRunId
+    ? resolveMemberPresentation(entry, effectivePresentation)
+    : undefined;
+  const prepPresentation = isPrepRow(entry)
+    ? resolvePrepPresentation(entry, effectivePresentation)
+    : undefined;
+  // Member rows carry both title + subtitle naming; prep rows carry title only.
+  const delegationTitle = memberPresentation?.title ?? prepPresentation?.title;
+  const delegationSubtitle = memberPresentation?.subtitle;
   return {
     runId,
     workflowId: entry.workflow,
     itemId: entry.id,
     parentRunId: entry.parentRunId,
-    title: overrides.title ?? context.resolveEntryTitle?.(entry) ?? presentation?.title ?? fallbackEntryTitle(entry, policy),
-    subtitle: overrides.subtitle ?? context.resolveEntrySubtitle?.(entry)
+    title: overrides.title ?? delegationTitle ?? context.resolveEntryTitle?.(entry) ?? presentation?.title ?? fallbackEntryTitle(entry, policy),
+    subtitle: overrides.subtitle ?? delegationSubtitle ?? context.resolveEntrySubtitle?.(entry)
       ?? (presentation ? presentation.subtitle : fallbackEntrySubtitle(entry, policy)),
     status: context.resolveEntryStatus?.(entry) ?? entry.status,
     step: entry.step,
