@@ -33,4 +33,24 @@ describe("applyStepDisplay", () => {
     const out = applyStepDisplay(["transaction"], { rules: [{ step: "transaction", label: "Run transaction" }] });
     expect(out[0].label).toBe("Run transaction");
   });
+
+  it("uses an injected formatter for labels when supplied (3rd param)", () => {
+    // The dashboard injects its own `formatStepName`, which differs from the
+    // domain default (e.g. "ocr" → "OCR", "auth:ucpath" → "Auth:Ucpath"). Prove
+    // the injected formatter — not the domain `formatStepLabel` — drives labels.
+    const upper = (s: string) => s.toUpperCase();
+    const out = applyStepDisplay(["ocr", "person-lookup"], undefined, upper);
+    expect(out.map((s) => s.label)).toEqual(["OCR", "PERSON-LOOKUP"]);
+  });
+
+  it("a per-step rule.label still overrides the injected formatter", () => {
+    const upper = (s: string) => s.toUpperCase();
+    const out = applyStepDisplay(
+      ["ocr", "person-lookup"],
+      { rules: [{ step: "ocr", label: "Read & match" }] },
+      upper,
+    );
+    expect(out.find((s) => s.step === "ocr")?.label).toBe("Read & match");
+    expect(out.find((s) => s.step === "person-lookup")?.label).toBe("PERSON-LOOKUP");
+  });
 });
