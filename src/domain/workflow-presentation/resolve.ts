@@ -5,6 +5,7 @@ import type {
   NamingPartTitle,
   WorkflowPresentationConfig,
 } from "./types.js";
+import { resolveSubtitle, resolveTitle } from "./schemes.js";
 
 /**
  * The back-compat default presentation derived from a workflow's input subject.
@@ -41,6 +42,33 @@ function subjectToKind(inputSubject?: string): "person" | "file" | "catalog" {
     default:
       return "person"; // name | eid | email | kualiId | undefined
   }
+}
+
+/**
+ * Resolve a row's title + subtitle from variables and a NamingConfig.
+ * `preferTraceIdSubtitle` mirrors the queue-row-presentation flag: when the EID
+ * already shows on the title line (batch/preview anchors, members), the subtitle
+ * falls through to the trace id even under the eid-else-trace scheme.
+ *
+ * `naming.title` and `naming.subtitle` are optional; omitted parts fall back to
+ * `person-name` and `eid-else-trace` respectively — identical to today's defaults.
+ */
+export function resolveNaming(
+  vars: Record<string, string>,
+  naming: NamingConfig,
+  opts: { preferTraceIdSubtitle?: boolean } = {},
+): { title: string; subtitle?: string } {
+  const titlePart = naming.title ?? { scheme: "person-name" as const };
+  const subtitlePart = naming.subtitle ?? { scheme: "eid-else-trace" as const };
+  const title = resolveTitle(vars, titlePart);
+  let subtitle: string;
+  if (opts.preferTraceIdSubtitle && subtitlePart.scheme === "eid-else-trace") {
+    const trace = (vars.traceId ?? vars.__traceId ?? "").trim();
+    subtitle = trace || resolveSubtitle(vars, subtitlePart);
+  } else {
+    subtitle = resolveSubtitle(vars, subtitlePart);
+  }
+  return { title, subtitle: subtitle || undefined };
 }
 
 /**
