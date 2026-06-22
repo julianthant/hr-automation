@@ -86,6 +86,16 @@ export function uploadsDir(dir: string): string {
   return join(dir, UPLOADS_SUBDIR);
 }
 
+/** Git-tracked workflow presentation override store dir. Repo-rooted, NOT under `.tracker/`. */
+export function workflowPresentationDir(repoRoot: string): string {
+  return join(repoRoot, "config", "workflow-presentation");
+}
+
+/** Git-tracked workflow presentation override file for one workflow. Repo-rooted, NOT under `.tracker/`. */
+export function workflowPresentationFile(repoRoot: string, workflow: string): string {
+  return join(workflowPresentationDir(repoRoot), `${workflow}.json`);
+}
+
 /**
  * Hold-gate file for a stubbed workflow. `<workflow>.hold` parks every step of
  * every run of that workflow; `<workflow>--<step>.hold` parks only the named
