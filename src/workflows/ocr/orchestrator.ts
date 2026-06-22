@@ -1242,6 +1242,7 @@ export function operationTraceCode(operationWorkflow: string | undefined): strin
     case "oath-signature": return "os";
     case "oath-upload": return "ou";
     case "emergency-contact": return "ec";
+    case "onbase": return "ob";
     default: return undefined;
   }
 }
