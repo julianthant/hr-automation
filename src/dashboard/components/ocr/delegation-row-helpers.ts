@@ -29,20 +29,50 @@ export interface BatchElapsed {
 export type BatchAccent = "warning" | "success" | "destructive";
 
 /**
+ * Collapse retry attempts to one entry per item — the latest run. A retried
+ * member is a NEW run (new `runId`, `runOrdinal` + 1) under the SAME item `id`
+ * (retry replays the original input, so the item id is stable; `runOrdinal` is
+ * the per-item run number). Counting both attempts double-counts the operation
+ * header (ISS-003: a 4-signer doc with one retried member read "6"). This dedup
+ * affects the COUNT only — the member LIST still renders every attempt, so the
+ * failed-original and the done-retry stay visible in history.
+ */
+export function dedupeMembersByLatestRun(children: TrackerEntry[]): TrackerEntry[] {
+  const latestById = new Map<string, TrackerEntry>();
+  for (const c of children) {
+    const prev = latestById.get(c.id);
+    if (!prev || isLaterRun(c, prev)) latestById.set(c.id, c);
+  }
+  return [...latestById.values()];
+}
+
+function isLaterRun(a: TrackerEntry, b: TrackerEntry): boolean {
+  const ao = a.runOrdinal ?? 0;
+  const bo = b.runOrdinal ?? 0;
+  if (ao !== bo) return ao > bo;
+  const at = a.firstLogTs ?? a.timestamp ?? "";
+  const bt = b.firstLogTs ?? b.timestamp ?? "";
+  return at > bt;
+}
+
+/**
  * Group children by status. `skipped` is folded into `done` (terminal success).
  * A cancelled member (`failed` + `step === "cancelled"`) lands in `cancelled`,
  * consistent with `statusKeyForEntry` and the per-member chip (E2E-103).
+ * Retry attempts collapse to the latest run per item (`dedupeMembersByLatestRun`)
+ * so a retried member counts once (ISS-003).
  */
 export function aggregateBatchCounts(children: TrackerEntry[]): BatchCounts {
+  const deduped = dedupeMembersByLatestRun(children);
   const counts: BatchCounts = {
     done: 0,
     running: 0,
     queued: 0,
     failed: 0,
     cancelled: 0,
-    total: children.length,
+    total: deduped.length,
   };
-  for (const c of children) {
+  for (const c of deduped) {
     if (c.status === "done" || c.status === "skipped") counts.done += 1;
     else if (c.status === "running") counts.running += 1;
     else if (c.status === "pending") counts.queued += 1;

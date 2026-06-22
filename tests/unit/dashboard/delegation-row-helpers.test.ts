@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   aggregateBatchCounts,
+  dedupeMembersByLatestRun,
   pickPreviewChildren,
   computeBatchElapsed,
   resolveBatchAccent,
@@ -24,13 +25,15 @@ function child(over: Partial<TrackerEntry>): TrackerEntry {
 
 describe("aggregateBatchCounts", () => {
   it("counts each status bucket", () => {
+    // Distinct members have distinct ids (the item identity); aggregateBatchCounts
+    // dedupes by id, so give each member a unique id.
     const result = aggregateBatchCounts([
-      child({ status: "done" }),
-      child({ status: "done" }),
-      child({ status: "running" }),
-      child({ status: "pending" }),
-      child({ status: "pending" }),
-      child({ status: "failed" }),
+      child({ id: "a", status: "done" }),
+      child({ id: "b", status: "done" }),
+      child({ id: "c", status: "running" }),
+      child({ id: "d", status: "pending" }),
+      child({ id: "e", status: "pending" }),
+      child({ id: "f", status: "failed" }),
     ]);
     assert.deepEqual(result, {
       done: 2,
@@ -44,8 +47,8 @@ describe("aggregateBatchCounts", () => {
 
   it("treats skipped as done (terminal success)", () => {
     const result = aggregateBatchCounts([
-      child({ status: "skipped" }),
-      child({ status: "done" }),
+      child({ id: "a", status: "skipped" }),
+      child({ id: "b", status: "done" }),
     ]);
     assert.equal(result.done, 2);
   });
@@ -66,12 +69,56 @@ describe("aggregateBatchCounts", () => {
     // action — it should land in `cancelled`, not `failed`, consistent with how
     // statusKeyForEntry classifies it for the per-member chip.
     const result = aggregateBatchCounts([
-      child({ status: "failed" }),
-      child({ status: "failed", step: "cancelled" }),
+      child({ id: "a", status: "failed" }),
+      child({ id: "b", status: "failed", step: "cancelled" }),
     ]);
     assert.equal(result.failed, 1, "only the genuinely-failed member counts as failed");
     assert.equal(result.cancelled, 1, "the cancelled member lands in its own bucket");
     assert.equal(result.total, 2);
+  });
+
+  it("collapses a retried member to its latest run — counts the subject once (ISS-003)", () => {
+    // A 3-signer operation where signer "b" failed then was retried: the retry is
+    // a NEW run (runId b#2, runOrdinal 2) under the SAME item id "b". The header
+    // must read 3 members (2 done + 1 done-retry), NOT 4 with a stray failed.
+    const result = aggregateBatchCounts([
+      child({ id: "a", runId: "a#1", runOrdinal: 1, status: "done" }),
+      child({ id: "b", runId: "b#1", runOrdinal: 1, status: "failed" }),
+      child({ id: "b", runId: "b#2", runOrdinal: 2, status: "done" }),
+      child({ id: "c", runId: "c#1", runOrdinal: 1, status: "done" }),
+    ]);
+    assert.equal(result.total, 3, "three distinct signers, not four attempts");
+    assert.equal(result.done, 3, "the retried signer counts as done (latest run)");
+    assert.equal(result.failed, 0, "the superseded failed original is not counted");
+  });
+});
+
+describe("dedupeMembersByLatestRun", () => {
+  it("keeps the highest runOrdinal per item id", () => {
+    const out = dedupeMembersByLatestRun([
+      child({ id: "b", runId: "b#1", runOrdinal: 1, status: "failed" }),
+      child({ id: "b", runId: "b#2", runOrdinal: 2, status: "done" }),
+    ]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0]?.runId, "b#2");
+    assert.equal(out[0]?.status, "done");
+  });
+
+  it("is a no-op when every member is a distinct item", () => {
+    const out = dedupeMembersByLatestRun([
+      child({ id: "a", status: "done" }),
+      child({ id: "b", status: "running" }),
+    ]);
+    assert.equal(out.length, 2);
+  });
+
+  it("falls back to timestamp when runOrdinal is absent/equal", () => {
+    const out = dedupeMembersByLatestRun([
+      child({ id: "b", runId: "b#1", status: "failed", firstLogTs: "2026-05-01T09:00:00.000Z" }),
+      child({ id: "b", runId: "b#2", status: "done", firstLogTs: "2026-05-01T10:00:00.000Z" }),
+    ]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0]?.status, "done", "later timestamp wins when runOrdinal is undefined");
   });
 });
 
