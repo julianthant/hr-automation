@@ -435,3 +435,57 @@ test('runOneItem: cancel requested during a Playwright failure records cancellat
   assert.equal(failed?.step, 'cancelled')
   assert.equal(failed?.error, "Cancelled by user before step 'cancelled'")
 })
+
+// ISS-007 (e2e run 20260622): an oath-upload ticket killed by an UPSTREAM OCR
+// discard threw a plain Error from inside `ctx.step("wait-approval")`, so the
+// terminal row froze at `step=wait-approval` → red Failed (the controller is
+// NOT aborted on a discard, so the kernel's cancel-step path never set the
+// sentinel). A handler that throws a `CancelledError` carrying a cancel
+// SENTINEL step (`discarded`/`cancelled`) must terminalize the row ON THAT
+// SENTINEL — not on the in-flight `lastStep` — so `statusKeyForEntry`
+// classifies it on the Cancel surface (orange) instead of Failed (red).
+test('runOneItem: a handler-thrown CancelledError with a sentinel step terminalizes on that step (ISS-007)', async () => {
+  const dir = TMP()
+  const { CancelledError } = await import('../../../src/core/kernel/types.js')
+  const wf = defineWorkflow({
+    name: 'discard-sentinel-test',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['wait-approval'] as const,
+    schema: z.object({ n: z.string() }),
+    authSteps: false,
+    handler: async (ctx) => {
+      await ctx.step('wait-approval', async () => {
+        // Upstream discard — controller is NEVER aborted here.
+        throw new CancelledError('discarded')
+      })
+    },
+  })
+
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+
+  const result = await runOneItem({
+    wf,
+    session,
+    item: { n: 'x' },
+    itemId: 'x',
+    runId: 'run-discard-sentinel',
+    trackerDir: dir,
+    callerPreEmits: false,
+    preAssignedInstance: 'Discard Sentinel Test 1',
+    isCancelRequested: () => false,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.kind, 'cancelled', 'a CancelledError classifies as cancelled')
+  const entries = readTracker(dir, 'discard-sentinel-test')
+  const failed = entries.find((e: any) => e.status === 'failed')
+  assert.equal(
+    failed?.step,
+    'discarded',
+    'terminal row carries the discard sentinel (Cancel surface), not the in-flight wait-approval step',
+  )
+})
