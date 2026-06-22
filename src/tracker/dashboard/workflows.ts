@@ -9,6 +9,7 @@ import "../../workflows/crm-doc-download/index.js";
 import "../../workflows/emergency-contact/index.js";
 import "../../workflows/oath-signature/index.js";
 import "../../workflows/oath-upload/index.js";
+import "../../workflows/onbase/index.js";
 import "../../workflows/onboarding/index.js";
 import "../../workflows/ocr/index.js";
 import "../../workflows/person-lookup/index.js";
