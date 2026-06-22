@@ -13,7 +13,7 @@
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 
-import { resolveSearchResult, dateDigits } from "../../../../src/systems/new-kronos/navigate.js";
+import { resolveSearchResult, dateDigits, maskedDigitPrefixes } from "../../../../src/systems/new-kronos/navigate.js";
 import { log } from "../../../../src/utils/log.js";
 
 describe("resolveSearchResult", () => {
@@ -85,5 +85,51 @@ describe("dateDigits", () => {
     // The wanted value vs. the scrambled "6/05/1020" the field actually held —
     // typeMaskedDate's readback compares these and retries / fails loud (ISS-B05).
     assert.notEqual(dateDigits("6/05/1020"), dateDigits("05/10/2026"));
+  });
+});
+
+/**
+ * Pins maskedDigitPrefixes — the progressive per-keystroke digit prefixes that
+ * `typeMaskedDate` types into WFD's masked date inputs ONE digit at a time,
+ * waiting for the field to reflect each prefix before sending the next key.
+ *
+ * Regression guard for ISS-B05 (round 2): the first fix typed all 8 digits via
+ * `pressSequentially(want, { delay: 60 })` — a fixed 60ms inter-key delay that
+ * still RACED WFD's async React-controlled mask under the live 8-worker parallel
+ * separations batch. The keystrokes outran the mask and scrambled/overflowed the
+ * value: wanting "05112026", the field landed on "1120260622" (10 digits — the
+ * year segment overflowed to 6 digits, interleaving today's "0622"). Condition-
+ * based entry (type one digit → wait until the field's stripped digits EQUAL the
+ * next prefix) removes the race: the next keystroke is never sent until the mask
+ * has committed the current one.
+ */
+describe("maskedDigitPrefixes", () => {
+  it("emits one progressive prefix per keystroke", () => {
+    assert.deepEqual(maskedDigitPrefixes("05112026"), [
+      "0",
+      "05",
+      "051",
+      "0511",
+      "05112",
+      "051120",
+      "0511202",
+      "05112026",
+    ]);
+  });
+
+  it("yields no prefixes for an empty digit string", () => {
+    assert.deepEqual(maskedDigitPrefixes(""), []);
+  });
+
+  it("the live-log scramble matches NO prefix, so the per-digit settle rejects it (ISS-B05 round 2)", () => {
+    // The field scrambled "05112026" → "1120260622" under parallel-batch load.
+    // typeMaskedDate waits for the field's digits to equal each prefix before the
+    // next keystroke; the scrambled state equals none of them, so the settle wait
+    // times out and the attempt re-clears / retries instead of applying garbage.
+    const prefixes = maskedDigitPrefixes("05112026");
+    assert.equal(prefixes.includes(dateDigits("11/20/260622")), false);
+    assert.equal(prefixes.includes(dateDigits("11/20/260605")), false);
+    // And the final prefix is the full wanted value (what the verify compares).
+    assert.equal(prefixes[prefixes.length - 1], dateDigits("05/11/2026"));
   });
 });

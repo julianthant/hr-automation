@@ -517,42 +517,104 @@ export function dateDigits(dateStr: string): string {
 }
 
 /**
+ * Progressive per-keystroke digit prefixes for a masked date: "05112026" →
+ * ["0","05","051","0511","05112","051120","0511202","05112026"].
+ *
+ * `typeMaskedDate` types ONE digit then waits for the field's stripped digits to
+ * equal the next prefix before sending the next keystroke (see below). Pure +
+ * pinned by `tests/unit/systems/new-kronos/navigate.test.ts`.
+ */
+export function maskedDigitPrefixes(want: string): string[] {
+  return Array.from(want, (_char, i) => want.slice(0, i + 1));
+}
+
+const MASKED_DATE_POLL_MS = 25;
+const MASKED_DATE_SETTLE_MS = 1_500;
+
+/**
+ * Poll the masked input until its stripped digits equal `wantDigits`. Returns
+ * true on match; false on timeout OR overflow (the field already holds MORE
+ * digits than wanted — the mask can only have scrambled, so there is nothing to
+ * wait out; bail fast and let the caller re-clear + retry).
+ */
+async function waitForMaskedDigits(
+  loc: Locator,
+  wantDigits: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const current = dateDigits(await loc.inputValue());
+    if (current === wantDigits) return true;
+    if (current.length > wantDigits.length) return false; // overflowed → retry
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, MASKED_DATE_POLL_MS));
+  }
+}
+
+/**
+ * Empty a masked date input, VERIFYING it clear by readback. select-all +
+ * Delete first, then Backspace until no digits remain — the mask may keep its
+ * separators or repopulate today's date, so a single Delete is not trusted.
+ */
+async function clearMaskedInput(loc: Locator): Promise<void> {
+  await loc.press("ControlOrMeta+a");
+  await loc.press("Delete");
+  for (let i = 0; i < 16; i++) {
+    if (dateDigits(await loc.inputValue()) === "") return;
+    await loc.press("Backspace");
+  }
+}
+
+/**
+ * Type each digit, waiting for the field to reflect the running prefix before
+ * the next keystroke. Returns false the instant a digit fails to settle (the
+ * mask raced or overflowed) so the caller re-clears and retries the whole entry.
+ */
+async function typeMaskedDigits(loc: Locator, wantDigits: string): Promise<boolean> {
+  for (const prefix of maskedDigitPrefixes(wantDigits)) {
+    await loc.press(prefix[prefix.length - 1]);
+    if (!(await waitForMaskedDigits(loc, prefix, MASKED_DATE_SETTLE_MS))) return false;
+  }
+  return true;
+}
+
+/**
  * Type a date into one of WFD's masked "Select range" inputs and VERIFY it.
  *
  * These are JS-masked `<input type=text>` controls that (a) silently reject
  * Playwright `fill()` — the value reverts to today (OBS-006) — and (b)
- * auto-insert the "/" separators as digits are typed. Typing the literal
- * slashes from an "MM/DD/YYYY" string races that auto-insertion and
- * intermittently SCRAMBLES the value: a correct "05/10/2026" landed as
- * "6/05/1020", which WFD then rejected with "WFP-00889 The date is outside of
- * the valid range of dates" (ISS-B05, live separations batch 2026-06-22 — the
- * SAME code path "verified live 2026-06-18" had worked, confirming a timing
- * race, not a regression).
+ * auto-insert the "/" separators as digits are typed, on an ASYNC React-
+ * controlled re-render. A FIXED inter-key delay races that re-render under load
+ * and SCRAMBLES the value: on the live 8-worker parallel separations batch,
+ * wanting "05/11/2026" the field landed on "11/20/260622" (10 digits — the year
+ * segment overflowed, interleaving today's "0622"), which WFD rejected with
+ * "WFP-00889 The date is outside of the valid range of dates" (ISS-B05). The
+ * first fix (`pressSequentially(want, { delay: 60 })` + readback) made it fail
+ * LOUD but did not remove the race, so dates still never landed.
  *
- * So we type DIGITS ONLY (the mask supplies the separators), read the value
- * back, and retry a few times — failing loud rather than silently applying a
- * garbage range that errors deep inside WFD.
+ * So we drive it CONDITION-BASED, not on a guessed delay: clear the field
+ * (verified empty), then type DIGITS ONLY one at a time, waiting after each
+ * keystroke for the field to reflect the running prefix before sending the next.
+ * The next key is never sent until the mask has committed the current one, so
+ * there is no race to lose. Retry the whole entry a few times, then throw loud
+ * rather than apply a garbage range.
  */
 async function typeMaskedDate(
-  page: Page,
   loc: Locator,
   dateStr: string,
   label: string,
 ): Promise<void> {
   const want = dateDigits(dateStr);
   let last = "";
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
     await loc.click({ timeout: 5_000 });
-    // Clear via select-all + Delete; the digits-only retype below replaces
-    // whatever the field held (today's date on first entry).
-    await loc.press("ControlOrMeta+a");
-    await loc.press("Delete");
-    await loc.pressSequentially(want, { delay: 60 });
-    await page.waitForTimeout(250);
+    await clearMaskedInput(loc);
+    const settled = await typeMaskedDigits(loc, want);
     last = dateDigits(await loc.inputValue());
-    if (last === want) return;
+    if (settled && last === want) return;
     log.warn(
-      `[New Kronos] ${label} date readback mismatch (attempt ${attempt}/3): `
+      `[New Kronos] ${label} date readback mismatch (attempt ${attempt}/4): `
       + `wanted ${want}, got ${last || "<empty>"}`,
     );
   }
@@ -572,8 +634,9 @@ async function typeMaskedDate(
  *   1. Click "Current Pay Period" button → opens timeframe dropdown
  *   2. Click "Select range" button → opens date range inputs
  *   3. Type "Start date" and "End date" via `typeMaskedDate` — digits only,
- *      then verify the readback (these controls reject fill() AND scramble when
- *      fed the literal "/" separators; see `typeMaskedDate`).
+ *      one keystroke at a time, waiting for the field to reflect each digit
+ *      (condition-based, NOT a fixed delay: these controls reject fill() AND
+ *      race a fixed-delay multi-key type under load; see `typeMaskedDate`).
  *   4. Click "Apply" button
  *
  * After applying, the button text changes from "Current Pay Period"
@@ -601,9 +664,10 @@ export async function setDateRange(
   });
   await page.waitForTimeout(1_000);
 
-  // Step 3 & 4: Type + verify each date (digits only — the mask owns the "/").
-  await typeMaskedDate(page, timecard.startDateInput(page), startDate, "start");
-  await typeMaskedDate(page, timecard.endDateInput(page), endDate, "end");
+  // Step 3 & 4: Type + verify each date (digits only, one settled keystroke at a
+  // time — the mask owns the "/" and races a fixed-delay multi-key type).
+  await typeMaskedDate(timecard.startDateInput(page), startDate, "start");
+  await typeMaskedDate(timecard.endDateInput(page), endDate, "end");
 
   // Step 5: Click Apply
   await safeClick(timecard.applyButton(page), {
