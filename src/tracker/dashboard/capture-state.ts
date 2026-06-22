@@ -11,6 +11,10 @@ import { log } from "../../utils/log.js";
 import { PATHS } from "../../config.js";
 import { capturesDir, uploadsDir } from "../paths.js";
 import { buildOcrPrepareHandler } from "./ocr/index.js";
+import { registerLocalFile } from "../files/files.js";
+import { ensurePdfPageCache } from "../files/pdf-cache.js";
+import { openStateDb } from "../state/db.js";
+import { errorMessage } from "../../utils/errors.js";
 
 export const captureStore: CaptureSessionStore = createSessionStore();
 // Keyed off the active tracker root (HRAUTO_TRACKER_DIR via PATHS.trackerDir), NOT a
@@ -111,6 +115,45 @@ export interface MakeCaptureFinalizeOpts {
   buildPrepareHandler?: typeof buildOcrPrepareHandler;
 }
 
+/**
+ * Register the bundled capture PDF in the files projection to obtain a
+ * content-hash `pdfFileId`, mirroring what the OCR/oath-upload upload routes
+ * do (`registerLocalFile` → `pdfFileId`, then warm the page cache). The OCR
+ * orchestrator REQUIRES `pdfFileId` (legacy page-images path removed) — a
+ * capture finalize that omitted it threw "OCR: pdfFileId is required", which
+ * `onFinalize`'s catch swallowed, so NO operation/OCR-prep row appeared
+ * (ISS-009). Failures here are non-fatal: log and continue so prepare can still
+ * surface its own structured error rather than the finalize dying silently.
+ */
+function registerCapturePdf(
+  trackerDir: string,
+  pdfPath: string,
+  pdfOriginalName: string,
+  sessionId: string,
+): string | undefined {
+  try {
+    const stateDb = openStateDb(trackerDir);
+    const registered = registerLocalFile(stateDb, {
+      kind: "pdf",
+      mimeType: "application/pdf",
+      path: pdfPath,
+      originalName: pdfOriginalName,
+      source: "capture",
+      workflow: "ocr",
+      itemId: sessionId,
+    });
+    void ensurePdfPageCache(stateDb, {
+      trackerDir,
+      fileId: registered.fileId,
+      pdfPath,
+    }).catch(() => undefined);
+    return registered.fileId;
+  } catch (err) {
+    log.warn(`[capture] failed to register bundled PDF for session ${sessionId}: ${errorMessage(err)}`);
+    return undefined;
+  }
+}
+
 export function makeCaptureFinalize(trackerDir: string, opts: MakeCaptureFinalizeOpts = {}) {
   const buildPrepareHandler = opts.buildPrepareHandler ?? buildOcrPrepareHandler;
   return async (session: CaptureSession): Promise<void> => {
@@ -148,10 +191,22 @@ export function makeCaptureFinalize(trackerDir: string, opts: MakeCaptureFinaliz
       return;
     }
 
+    // Register the bundled PDF to obtain a content-hash pdfFileId — the OCR
+    // orchestrator requires it (legacy page-images path removed). Without it the
+    // prepare threw "OCR: pdfFileId is required" (swallowed by onFinalize), so no
+    // OCR-prep/operation row appeared (ISS-009). Mirrors the upload routes.
+    const pdfFileId = registerCapturePdf(
+      trackerDir,
+      session.pdfPath,
+      pdfOriginalName,
+      session.sessionId,
+    );
+
     const handler = buildPrepareHandler({ trackerDir });
     const result = await handler({
       pdfPath: session.pdfPath,
       pdfOriginalName,
+      ...(pdfFileId ? { pdfFileId } : {}),
       formType,
       rosterMode,
       rosterPath,

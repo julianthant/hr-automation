@@ -498,8 +498,15 @@ export async function handleFinalize(
       if (updated) {
         try {
           await updated.onFinalize(updated);
-        } catch {
-          // Caller's pipeline failure isn't the session's failure.
+        } catch (err) {
+          // The caller's pipeline failure isn't the session's failure (the
+          // session is still finalized with a bundled PDF on disk), but it must
+          // NOT be swallowed: a thrown onFinalize means NO OCR-prep/operation
+          // row appeared (e.g. the ISS-009 "pdfFileId is required" throw).
+          // Fail loud so the operator/logs see why the capture produced no row.
+          log.warn(
+            `capture onFinalize failed (session ${session.sessionId}): ${String(err)}`,
+          );
         }
       }
     } catch (err) {
