@@ -22,6 +22,13 @@ import {
 } from "@/lib/run-modal-registry";
 import { useRosters, refreshRosters, type RosterListing } from "@/components/hooks/useRosters";
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
+import {
+  ONBASE_DOCUMENT_TYPES,
+  ONBASE_EMERGENCY_CONTACT_DOC_TYPE,
+  isOnbaseDocTypeWired,
+  onbaseDocTypeFormType,
+  onbaseDocTypeLabel,
+} from "@/lib/onbase-document-types";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
@@ -34,6 +41,26 @@ async function sha256OfFile(file: File): Promise<string> {
   return Array.from(new Uint8Array(hashBuf))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/**
+ * Merge multiple selected PDFs into one combined PDF (page order preserved),
+ * returned as a single File. Used when a workflow sets `mergeMultipleFiles`
+ * (OnBase: one page → one person, so the whole upload is one document).
+ */
+async function mergePdfFiles(files: File[]): Promise<File> {
+  const { PDFDocument } = await import("pdf-lib");
+  const merged = await PDFDocument.create();
+  for (const f of files) {
+    const src = await PDFDocument.load(await f.arrayBuffer(), { ignoreEncryption: true });
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    for (const p of pages) merged.addPage(p);
+  }
+  const bytes = await merged.save();
+  const baseName = files[0]?.name.replace(/\.pdf$/i, "") ?? "combined";
+  return new File([new Uint8Array(bytes)], `${baseName}-combined.pdf`, {
+    type: "application/pdf",
+  });
 }
 
 /**
@@ -88,6 +115,8 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const showDryRun = config?.sections.dryRun ?? false;
   const showOathUploadMode = config?.sections.oathUploadMode ?? false;
   const showWorkers = config?.sections.workers ?? false;
+  const showOnbaseDocType = config?.sections.onbaseDocType ?? false;
+  const mergeMultipleFiles = Boolean(config?.mergeMultipleFiles);
   const allowMultipleFiles = Boolean(config?.allowMultipleFiles && !reuploadFor);
 
   const [files, setFiles] = useState<File[]>([]);
@@ -116,6 +145,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [dryRun, setDryRun] = useState(false);
   const [oathUploadMode, setOathUploadMode] = useState<"full" | "upload-only">("full");
   const [workerChoice, setWorkerChoice] = useState<WorkerChoice>(AUTO_WORKERS);
+  const [onbaseDocType, setOnbaseDocType] = useState<string>(ONBASE_EMERGENCY_CONTACT_DOC_TYPE);
   const effectiveShowRoster = showRoster && oathUploadMode === "full";
   // Workers only matter for the OCR-hub fan-out path. Upload-only oath-upload is
   // a single ServiceNow ticket row with nothing to parallelize, so the section
@@ -268,9 +298,16 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   // already locked one). Tracks `formOptions` so a late cache fill still
   // populates the radio.
   useEffect(() => {
-    if (formType || effectiveLockedFormType) return;
+    if (formType || effectiveLockedFormType || showOnbaseDocType) return;
     if (formOptions.length > 0) setFormType(formOptions[0].formType);
-  }, [formOptions, formType, effectiveLockedFormType]);
+  }, [formOptions, formType, effectiveLockedFormType, showOnbaseDocType]);
+
+  // OnBase: the document-type dropdown drives the OCR formType (only wired
+  // types have a formType, and only wired types are selectable).
+  useEffect(() => {
+    if (!showOnbaseDocType) return;
+    setFormType(onbaseDocTypeFormType(onbaseDocType) ?? null);
+  }, [showOnbaseDocType, onbaseDocType]);
 
   // Reset form state on close. Rosters cache is module-global (see
   // useRosters) so we don't reset it here — it's reused across opens.
@@ -364,10 +401,25 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
   async function handleSubmit(): Promise<void> {
     if (!config || files.length === 0 || submitting) return;
-    if (showFormType && !formType) return;
+    if ((showFormType || showOnbaseDocType) && !formType) return;
     setSubmitting(true);
     setProgress(0);
     setError(null);
+
+    // When the workflow merges multiple files (OnBase: one page → one person),
+    // combine the selection into a single PDF and submit one upload.
+    let uploadFiles = files;
+    if (mergeMultipleFiles && files.length > 1) {
+      try {
+        uploadFiles = [await mergePdfFiles(files)];
+      } catch (err) {
+        setError(
+          `Could not combine the selected PDFs: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        setSubmitting(false);
+        return;
+      }
+    }
 
     const submitUrl = config.submitUrl(ctx);
 
@@ -386,7 +438,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
-    const totalBytes = files.reduce((sum, nextFile) => sum + nextFile.size, 0);
+    const totalBytes = uploadFiles.reduce((sum, nextFile) => sum + nextFile.size, 0);
     const uploadedByIndex = new Map<number, number>();
 
     const uploadOne = (nextFile: File, index: number) =>
@@ -401,7 +453,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
               fd.append("rosterPath", latestRoster.path);
             }
           }
-          if (showFormType && formType) fd.append("formType", formType);
+          if ((showFormType || showOnbaseDocType) && formType) fd.append("formType", formType);
           // Target-workflow operation intent — lets the backend tell an
           // oath-signature PDF run from an oath-upload full run (both
           // formType=oath). The registry decides when to send it (only on the
@@ -452,21 +504,21 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
     try {
       const results: RunModalSubmitResponse[] = [];
-      for (let i = 0; i < files.length; i += 1) {
-        const result = await uploadOne(files[i]!, i);
+      for (let i = 0; i < uploadFiles.length; i += 1) {
+        const result = await uploadOne(uploadFiles[i]!, i);
         if (!result.ok) {
           setError(result.error ?? "Server error — try again or check the dashboard logs.");
           setSubmitting(false);
           return;
         }
-        uploadedByIndex.set(i, files[i]!.size);
+        uploadedByIndex.set(i, uploadFiles[i]!.size);
         results.push(result);
       }
-      const t = config.buildSuccessToast(results[0]!, files[0]!);
+      const t = config.buildSuccessToast(results[0]!, uploadFiles[0]!);
       toast.success(
-        files.length > 1 ? `${files.length} preparations started` : t.title,
-        files.length > 1
-          ? { description: files.map((nextFile) => nextFile.name).join(", ") }
+        uploadFiles.length > 1 ? `${uploadFiles.length} preparations started` : t.title,
+        uploadFiles.length > 1
+          ? { description: uploadFiles.map((nextFile) => nextFile.name).join(", ") }
           : t.description ? { description: t.description } : undefined,
       );
       onOpenChange(false);
@@ -592,6 +644,42 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
                   onClick={() => setOathUploadMode("upload-only")}
                 />
               </div>
+            </section>
+          )}
+
+          {showOnbaseDocType && !reuploadFor && (
+            <section>
+              <label
+                htmlFor="onbase-doc-type"
+                className="block text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground"
+              >
+                Document type
+              </label>
+              <select
+                id="onbase-doc-type"
+                value={onbaseDocType}
+                onChange={(e) => setOnbaseDocType(e.target.value)}
+                disabled={submitting}
+                className="w-full h-9 rounded-md border border-border bg-secondary/40 px-2.5 text-[13px] text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {(["Payroll Records", "Personnel Records"] as const).map((group) => (
+                  <optgroup key={group} label={group}>
+                    {ONBASE_DOCUMENT_TYPES.filter((d) => d.group === group).map((d) => {
+                      const wired = isOnbaseDocTypeWired(d.docType);
+                      return (
+                        <option key={d.docType} value={d.docType} disabled={!wired}>
+                          {onbaseDocTypeLabel(d.docType)}
+                          {wired ? "" : " (coming soon)"}
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Only Emergency Contact is wired today; it imports as the OnBase
+                X_HR_Emergency Contact document type.
+              </p>
             </section>
           )}
 
