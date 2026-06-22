@@ -117,21 +117,37 @@ export const search = {
 
 export const goToMenu = {
   /**
-   * Go To button (outside the search frame). Two-deep fallback for the
-   * regex + literal variants. verified 2026-04-06
-   * @tags go-to, button, page, navigation, new-kronos
+   * Employee Search panel's "Go To" dropdown (top-level page render). MUST be
+   * scoped to the Quick Find slide-out — a bare page-wide `/go to/i` ALSO matches
+   * the timecard TOOLBAR "Go to" button (`aria-label="Go to"`,
+   * `class="btn widget-button-icon"`), which is always enabled and sits BEHIND the
+   * Employee Search slide-out's `slideout__mask`, so clicking it dies with "Another
+   * element intercepted the click (modal/overlay)" (live log 2026-06-22: doc reached
+   * "Employee checkbox checked" then 5s mask-interception timeout → empty timecard).
+   * Primary = the panel's stable `#goToDropdownButton`
+   * (`ng-disabled="!quickFind.slatOptions.selectedslats.length"`); fallback = the
+   * `/go to/i` role match SCOPED to the `.quick-find-content` slide-out container
+   * (verified present in the live log) so it can never resolve the toolbar button.
+   * // NEEDS LIVE RE-VERIFY 2026-06-22 (derived from live error log + the 2026-06-18 id, not a fresh snapshot)
+   * @tags go-to, button, page, quick-find, slideout, dropdown, navigation, new-kronos
    */
   goToButtonOnPage: (page: Page): Locator =>
     page
-      .getByRole("button", { name: /go to/i })
-      .or(page.locator("button:has-text('Go To')")),
+      .locator("#goToDropdownButton")
+      .or(page.locator(".quick-find-content").getByRole("button", { name: /go to/i }))
+      .first(),
 
   /**
-   * Go To button inside the search frame. verified 2026-04-06
-   * @tags go-to, button, frame, navigation, new-kronos
+   * Employee Search panel's "Go To" dropdown (portal-frame iframe render). Same
+   * slide-out scoping as `goToButtonOnPage` — never the timecard toolbar "Go to".
+   * // NEEDS LIVE RE-VERIFY 2026-06-22
+   * @tags go-to, button, frame, quick-find, slideout, dropdown, navigation, new-kronos
    */
   goToButtonInFrame: (f: FrameLocator): Locator =>
-    f.getByRole("button", { name: /go to/i }).or(f.locator("text=Go To")),
+    f
+      .locator("#goToDropdownButton")
+      .or(f.locator(".quick-find-content").getByRole("button", { name: /go to/i }))
+      .first(),
 
   /**
    * Timecard menu item — 8-deep fallback chain. The live Dayforce Go To menu
