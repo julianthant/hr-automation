@@ -402,6 +402,7 @@ export const INSTANCE_LABELS: Record<string, string> = {
   "crm-doc-download": "CRM Doc Download",
   "oath-signature": "Oath Signature",
   "oath-upload": "Oath Upload",
+  onbase: "OnBase",
   ocr: "OCR",
   "i9-lookup": "I9 Lookup",
 };

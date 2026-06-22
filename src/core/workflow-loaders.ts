@@ -46,6 +46,12 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/oath-upload/index.js");
     return mod.oathUploadWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // OnBase imports HR documents one-per-person. Fanned out from OCR approval as
+  // operation-member rows; no typed dashboard start surface (upload run only).
+  onbase: async () => {
+    const mod = await import("../workflows/onbase/index.js");
+    return mod.onbaseWorkflow as unknown as AnyRegisteredWorkflow;
+  },
   // I9 Lookup resolves who signed Section 2 of an employee's I-9 form.
   // Delegated-only subworkflow — no dashboard start surface.
   "i9-lookup": async () => {

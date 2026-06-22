@@ -93,11 +93,25 @@ export async function ensureKeyset(
   }
 }
 
-/** Attach the file to import (the person's single-page PDF). */
-export async function chooseFile(page: Page, filePath: string): Promise<void> {
+/** An in-memory file payload for the OnBase file picker. */
+export interface OnbaseFilePayload {
+  name: string;
+  mimeType: string;
+  buffer: Buffer;
+}
+
+/**
+ * Attach the file to import (the person's single-page PDF). Accepts either a
+ * path on disk or an in-memory payload (the handler splits one page out of the
+ * combined PDF and uploads the bytes directly — no temp file).
+ */
+export async function chooseFile(
+  page: Page,
+  file: string | OnbaseFilePayload,
+): Promise<void> {
   const frame = importFrame(page);
-  await onbaseSelectors.importForm.fileInput(frame).setInputFiles(filePath);
-  log.step(`OnBase: attached file ${filePath}`);
+  await onbaseSelectors.importForm.fileInput(frame).setInputFiles(file);
+  log.step(`OnBase: attached file ${typeof file === "string" ? file : file.name}`);
 }
 
 /**
