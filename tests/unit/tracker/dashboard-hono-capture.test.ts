@@ -163,3 +163,33 @@ test("makeCaptureFinalize does not prepare when no formType can be resolved", as
   await finalize(fakeFinalizedSession({ workflow: "not-registered" }));
   assert.equal(called, false);
 });
+
+// ISS-009 (e2e run 20260622): makeCaptureFinalize handed the bundled PDF to the
+// shared OCR prepare path with NO `pdfFileId`. The OCR orchestrator now REQUIRES
+// it (legacy page-images path removed) and throws "OCR: pdfFileId is required",
+// which onFinalize's catch swallowed — so a capture finalize produced NO
+// operation/OCR-prep row at all. The RunModal upload route registers the PDF
+// (registerLocalFile → content-hash fileId) and passes pdfFileId; capture never
+// did. Fix: register the bundled PDF in makeCaptureFinalize and pass pdfFileId.
+test("makeCaptureFinalize registers the bundled PDF and passes a non-empty pdfFileId (ISS-009)", async () => {
+  // A real (tiny) PDF on disk so the production registerLocalFile path runs —
+  // it only hashes the bytes, it does not parse the PDF.
+  const pdfPath = join(dir, "bundled-capture.pdf");
+  writeFileSync(pdfPath, "%PDF-1.4\n%capture-bundle-fixture\n");
+
+  let seen: { pdfFileId?: string } = {};
+  const finalize = makeCaptureFinalize(dir, {
+    buildPrepareHandler: () => async (input) => {
+      seen = { pdfFileId: (input as { pdfFileId?: string }).pdfFileId };
+      return { status: 202, body: { ok: true, sessionId: input.sessionId ?? "", runId: "r" } };
+    },
+  });
+  await finalize(fakeFinalizedSession({ workflow: "oath-signature", pdfPath }));
+
+  assert.ok(
+    typeof seen.pdfFileId === "string" && seen.pdfFileId.length > 0,
+    `prepare input must carry a non-empty pdfFileId, got ${JSON.stringify(seen.pdfFileId)}`,
+  );
+  // registerLocalFile derives the fileId as the first 32 hex chars of the SHA-256.
+  assert.match(seen.pdfFileId!, /^[a-f0-9]{32}$/);
+});
