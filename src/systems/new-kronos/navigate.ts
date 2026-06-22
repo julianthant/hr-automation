@@ -45,6 +45,44 @@ async function resolveSearchRoot(page: Page): Promise<SearchRoot> {
 }
 
 /**
+ * Resolve a New Kronos employee search into found / not-found.
+ *
+ * Races the first-result checkbox (→ found) against the "no items" sentinel
+ * (→ not found). If NEITHER surfaces within the timeout (both waiters reject),
+ * the search is treated as **NOT FOUND** rather than thrown (ISS-B04). New Kronos
+ * is a BEST-EFFORT source for the separations Last Day Worked — the handler falls
+ * back to the Kuali LDW when New Kronos returns no punch — so a slow/empty grid
+ * must not raise a fatal-looking `✗` and burn the run; a `log.warn` keeps it
+ * visible without masquerading as a failure. (Genuinely cutting the timeout wait
+ * needs the live no-results sentinel re-mapped if it has drifted — that's why a
+ * no-record employee currently waits the full timeout before this returns false.)
+ *
+ * Exported for unit testing: it takes the two `waitFor` promises directly, so the
+ * race + timeout-as-not-found contract is pinnable without a live page.
+ */
+export async function resolveSearchResult(
+  checkboxVisible: Promise<unknown>,
+  noResultsVisible: Promise<unknown>,
+  employeeId: string,
+): Promise<boolean> {
+  const foundP = checkboxVisible.then(() => true);
+  const notFoundP = noResultsVisible.then(() => false);
+  // Handle the losing waiter's eventual rejection so it doesn't surface as an
+  // unhandled rejection; the race below still observes the winner's settlement.
+  foundP.catch(() => {});
+  notFoundP.catch(() => {});
+  try {
+    return await Promise.race([foundP, notFoundP]);
+  } catch {
+    log.warn(
+      `[New Kronos] No search results surfaced for ${employeeId} within the timeout — ` +
+      `treating as NOT FOUND (best-effort; Kuali Last Day Worked will be used).`,
+    );
+    return false;
+  }
+}
+
+/**
  * Search for an employee by ID in the new Kronos (WFD) system.
  * Clicks the "Employee Search" button in the navbar, fills the search input,
  * and checks if results are found.
@@ -108,17 +146,11 @@ export async function searchEmployee(
   const noResults = searchSelectors.noResultsText(root);
   const searchResultTimeout = 15_000;
 
-  let found: boolean;
-  try {
-    found = await Promise.race([
-      checkbox.first().waitFor({ state: "visible", timeout: searchResultTimeout }).then(() => true),
-      noResults.waitFor({ state: "visible", timeout: searchResultTimeout }).then(() => false),
-    ]);
-  } catch {
-    throw new Error(
-      `[New Kronos] Timed out waiting for search results for ${employeeId}`,
-    );
-  }
+  const found = await resolveSearchResult(
+    checkbox.first().waitFor({ state: "visible", timeout: searchResultTimeout }),
+    noResults.waitFor({ state: "visible", timeout: searchResultTimeout }),
+    employeeId,
+  );
 
   if (found) {
     log.success(`[New Kronos] Employee ${employeeId} found`);
