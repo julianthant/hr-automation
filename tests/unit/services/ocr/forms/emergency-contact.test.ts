@@ -212,7 +212,7 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
       matchConfidence: 1.0,
       selected: true,
       warnings: [],
-    });
+    }, { sessionId: "sess", runId: "run1" });
     assert.equal(input.employee.employeeId, "10123456");
     assert.equal(input.emergencyContact.name, "Pat Johnson");
   });

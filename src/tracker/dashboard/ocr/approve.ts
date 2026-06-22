@@ -20,6 +20,7 @@ import {
 } from "./shared.js";
 import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
 import type { DaemonFlags } from "../../../core/daemon/types.js";
+import type { OcrApproveRecordContext } from "../../../workflows/ocr/types.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
 
 const WORKFLOW = "ocr";
@@ -178,6 +179,23 @@ export function buildOcrApproveHandler(
     // key on this shape, not the wrapped one (BM-1 family; E2E-015).
     const logicalEnqueueInputs: unknown[] = [];
     const itemIds: string[] = [];
+    // Document-level context handed to each per-record `deriveInput` alongside
+    // the record. onbase reads `pdfFileId` off it to split each person's page
+    // out of the combined PDF; oath/EC ignore it.
+    const recordContext: OcrApproveRecordContext = {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      ...(parentRunId ? { parentRunId } : {}),
+      ...(typeof latestReviewData.pdfOriginalName === "string"
+        ? { pdfOriginalName: latestReviewData.pdfOriginalName }
+        : {}),
+      ...(typeof latestReviewData.pdfFileId === "string"
+        ? { pdfFileId: latestReviewData.pdfFileId }
+        : {}),
+      ...(typeof latestReviewData.pdfPath === "string"
+        ? { pdfPath: latestReviewData.pdfPath }
+        : {}),
+    };
     if (approveTo) {
       // Only fan out records the operator selected in the preview pane.
       // Unsigned rows / unverified rows / unknown-doc rows are kept in the
@@ -188,7 +206,7 @@ export function buildOcrApproveHandler(
       input.records.forEach((rec, index) => {
         if (!isSelectedRecord(rec)) return;
         if (approveTo.canFanOut && !approveTo.canFanOut(rec as never)) return;
-        const baseFanInput = approveTo.deriveInput(rec as never);
+        const baseFanInput = approveTo.deriveInput(rec as never, recordContext);
         const logicalFanInput =
           baseFanInput && typeof baseFanInput === "object"
             ? {
