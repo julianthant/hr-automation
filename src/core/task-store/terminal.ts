@@ -16,7 +16,7 @@ import { returnTaskToQueued } from './claim.js'
 export function markTaskDone(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; attemptId: string; now?: string },
+  request: { taskId: string; attemptId: string; claimGeneration?: number; now?: string },
 ): void {
   markTerminal(db, control, { ...request, taskState: 'done', attemptState: 'done' })
 }
@@ -24,7 +24,7 @@ export function markTaskDone(
 export function markTaskFailed(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; attemptId: string; error: string; now?: string },
+  request: { taskId: string; attemptId: string; error: string; claimGeneration?: number; now?: string },
 ): void {
   markTerminal(db, control, { ...request, taskState: 'failed', attemptState: 'failed', error: request.error })
 }
@@ -32,7 +32,7 @@ export function markTaskFailed(
 export function markTaskCancelled(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; attemptId?: string; reason?: string; now?: string },
+  request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string },
 ): void {
   const task = getTaskRaw(db, request.taskId)
   const attemptId = request.attemptId ?? task?.current_attempt_id ?? undefined
@@ -42,6 +42,7 @@ export function markTaskCancelled(
     taskState: 'cancelled',
     attemptState: 'cancelled',
     error: request.reason,
+    ...(request.claimGeneration !== undefined ? { claimGeneration: request.claimGeneration } : {}),
     now: request.now,
   })
 }
@@ -55,12 +56,23 @@ function markTerminal(
     taskState: Extract<TaskState, 'done' | 'failed' | 'cancelled'>
     attemptState: Extract<AttemptState, 'done' | 'failed' | 'cancelled'>
     error?: string
+    /**
+     * The claim lease the completing worker holds (ISS-005). When provided, the
+     * task is terminalized ONLY if its `claim_generation` still equals this
+     * value — so a worker whose item was re-pended and re-claimed by a peer
+     * (its lease now stale) cannot complete the run the peer owns. The attempt
+     * row is only stamped when the guarded task UPDATE actually fired, keeping
+     * the attempt + task in lockstep on a rejected stale write. Omitted (legacy
+     * / non-daemon callers) → unconditional, the prior behavior.
+     */
+    claimGeneration?: number
     now?: string
   },
 ): void {
   const now = request.now ?? new Date().toISOString()
   control.transaction(() => {
-    db.prepare(`
+    const generationGuard = request.claimGeneration !== undefined ? 'AND claim_generation = @claimGeneration' : ''
+    const result = db.prepare(`
       UPDATE tasks
       SET control_state = @taskState,
           terminal_error = @error,
@@ -69,7 +81,16 @@ function markTerminal(
           claim_expires_at = NULL,
           updated_at = @now
       WHERE id = @taskId
-    `).run({ ...request, error: request.error ?? null, now })
+      ${generationGuard}
+    `).run({
+      ...request,
+      error: request.error ?? null,
+      ...(request.claimGeneration !== undefined ? { claimGeneration: request.claimGeneration } : {}),
+      now,
+    })
+    // A guarded write that matched no row is a STALE completion (the lease moved
+    // on) — leave the attempt untouched so the task + attempt stay consistent.
+    if (request.claimGeneration !== undefined && result.changes === 0) return
     if (request.attemptId) {
       db.prepare(`
         UPDATE task_attempts

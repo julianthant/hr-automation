@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 12;
+export const LATEST_SCHEMA_VERSION = 13;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -549,6 +549,27 @@ ALTER TABLE tasks ADD COLUMN original_input_json TEXT;
     sql: String.raw`
 CREATE INDEX IF NOT EXISTS tasks_parent_run_idx
   ON tasks(parent_run_id) WHERE parent_run_id IS NOT NULL;
+    `,
+  },
+  {
+    // Migration 13: claim lease generation (ISS-005).
+    //
+    // Stop-All / per-instance-stop teardown re-pends an in-flight item
+    // (`returnTaskToQueued`) so a surviving peer can finish it — but the re-pend
+    // kept the same attempt + runId, so a peer re-claimed the identical attempt
+    // while the STOPPED instance was still finishing its run. When the stopped
+    // instance then completed, its `markTaskDone` landed even though the peer now
+    // owned the run: two workers each transacted the work (a duplicate oath
+    // submission outside dry-run), though the task stayed idempotent.
+    //
+    // The lease is the guard: every claim bumps this counter, so the claiming
+    // worker holds a generation. A terminal write supplied with a stale
+    // generation (the original worker's, now behind the peer's re-claim) is a
+    // no-op. NOT NULL DEFAULT 0 — existing rows start at generation 0, and the
+    // next claim advances them, so no backfill is needed.
+    version: 13,
+    sql: String.raw`
+ALTER TABLE tasks ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0;
     `,
   },
 ];

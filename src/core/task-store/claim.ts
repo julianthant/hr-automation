@@ -49,13 +49,18 @@ function claimNextTaskReturning(
           claimed_by_worker_id = @workerId,
           claimed_at = @now,
           claim_expires_at = @claimExpiresAt,
+          claim_generation = claim_generation + 1,
           updated_at = @now
       WHERE id = (SELECT id FROM next_task)
       RETURNING *
     `).get(request) as TaskDbRow | undefined
     if (!row?.current_attempt_id) return null
     markAttemptClaimed(db, row.current_attempt_id, request.workerId, request.now)
-    return claimedFromTaskRow(db, row, request.workerId)
+    // The post-increment generation is the lease this worker now holds. A
+    // re-pend + re-claim by a peer advances it again, so the original worker's
+    // (now-stale) lease no longer matches and its terminal write is rejected
+    // (ISS-005).
+    return claimedFromTaskRow(db, row, request.workerId, row.claim_generation)
   })
 }
 
@@ -160,7 +165,12 @@ export function recoverClaimsForDeadWorkers(
   })
 }
 
-function claimedFromTaskRow(db: Database, row: TaskDbRow, workerId: string): ClaimedTask {
+function claimedFromTaskRow(
+  db: Database,
+  row: TaskDbRow,
+  workerId: string,
+  claimGeneration: number,
+): ClaimedTask {
   if (!row.current_attempt_id) throw new Error(`Task ${row.id} has no current attempt`)
   const attempt = db.prepare('SELECT * FROM task_attempts WHERE id = ?').get(row.current_attempt_id) as { id: string; run_id: string } | undefined
   if (!attempt) {
@@ -174,6 +184,7 @@ function claimedFromTaskRow(db: Database, row: TaskDbRow, workerId: string): Cla
     input: parseJson(row.input_json),
     runId: attempt.run_id,
     workerId,
+    claimGeneration,
   }
   if (row.parent_run_id) result.parentRunId = row.parent_run_id
   return result
