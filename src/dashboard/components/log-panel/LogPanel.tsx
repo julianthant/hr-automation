@@ -344,6 +344,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           status={pipeline.status}
           stepDurations={runStepDurations}
           entry={entry ?? undefined}
+          stepDisplay={registered?.presentation?.steps}
         />
       ))}
 
