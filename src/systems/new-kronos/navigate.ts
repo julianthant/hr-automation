@@ -496,16 +496,84 @@ export async function getSeparationTimecardData(
 }
 
 /**
+ * The 8 calendar digits (MMDDYYYY) of a date string, normalized so padding
+ * never matters: "05/10/2026", "5/10/2026", and a readback of "6/05/2026" all
+ * resolve to a comparable 8-digit string.
+ *
+ * WFD's masked date inputs auto-insert the "/" separators themselves AND display
+ * the month without a leading zero, so keystroke entry is driven and VERIFIED on
+ * this normalized digit string rather than the formatted string. A well-formed
+ * MM/DD/YYYY is zero-padded per component; anything else falls back to a plain
+ * digit strip (a partial/placeholder readback then simply won't match → retry).
+ */
+export function dateDigits(dateStr: string): string {
+  const parts = dateStr.trim().split("/");
+  if (parts.length === 3) {
+    const [m, d, y] = parts;
+    const padded = `${m.trim().padStart(2, "0")}${d.trim().padStart(2, "0")}${y.trim().padStart(4, "0")}`;
+    if (/^\d{8}$/.test(padded)) return padded;
+  }
+  return dateStr.replace(/\D/g, "");
+}
+
+/**
+ * Type a date into one of WFD's masked "Select range" inputs and VERIFY it.
+ *
+ * These are JS-masked `<input type=text>` controls that (a) silently reject
+ * Playwright `fill()` — the value reverts to today (OBS-006) — and (b)
+ * auto-insert the "/" separators as digits are typed. Typing the literal
+ * slashes from an "MM/DD/YYYY" string races that auto-insertion and
+ * intermittently SCRAMBLES the value: a correct "05/10/2026" landed as
+ * "6/05/1020", which WFD then rejected with "WFP-00889 The date is outside of
+ * the valid range of dates" (ISS-B05, live separations batch 2026-06-22 — the
+ * SAME code path "verified live 2026-06-18" had worked, confirming a timing
+ * race, not a regression).
+ *
+ * So we type DIGITS ONLY (the mask supplies the separators), read the value
+ * back, and retry a few times — failing loud rather than silently applying a
+ * garbage range that errors deep inside WFD.
+ */
+async function typeMaskedDate(
+  page: Page,
+  loc: Locator,
+  dateStr: string,
+  label: string,
+): Promise<void> {
+  const want = dateDigits(dateStr);
+  let last = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await loc.click({ timeout: 5_000 });
+    // Clear via select-all + Delete; the digits-only retype below replaces
+    // whatever the field held (today's date on first entry).
+    await loc.press("ControlOrMeta+a");
+    await loc.press("Delete");
+    await loc.pressSequentially(want, { delay: 60 });
+    await page.waitForTimeout(250);
+    last = dateDigits(await loc.inputValue());
+    if (last === want) return;
+    log.warn(
+      `[New Kronos] ${label} date readback mismatch (attempt ${attempt}/3): `
+      + `wanted ${want}, got ${last || "<empty>"}`,
+    );
+  }
+  throw new Error(
+    `[New Kronos] Could not set ${label} date to ${dateStr} — the masked input `
+    + `scrambled the keystrokes (last readback digits: ${last || "<empty>"}). `
+    + `Aborting before applying a wrong timecard range (WFP-00889).`,
+  );
+}
+
+/**
  * Set a custom date range on the New Kronos timecard view.
  * Must be called after navigating to the Timecards page.
  *
- * Mapped via playwright-cli 2026-04-06, keystroke fix verified 2026-06-18:
+ * Mapped via playwright-cli 2026-04-06; digits-only keystroke + readback-verify
+ * rework 2026-06-22 (ISS-B05):
  *   1. Click "Current Pay Period" button → opens timeframe dropdown
  *   2. Click "Select range" button → opens date range inputs
- *   3. Type "Start date" and "End date" via real keystrokes (MM/DD/YYYY)
- *      NOTE: these <input type=text> controls silently reject Playwright
- *      fill() — the value reverts to today. Use click → CtrlOrMeta+a →
- *      pressSequentially to drive real per-char keystrokes. (OBS-006)
+ *   3. Type "Start date" and "End date" via `typeMaskedDate` — digits only,
+ *      then verify the readback (these controls reject fill() AND scramble when
+ *      fed the literal "/" separators; see `typeMaskedDate`).
  *   4. Click "Apply" button
  *
  * After applying, the button text changes from "Current Pay Period"
@@ -533,21 +601,9 @@ export async function setDateRange(
   });
   await page.waitForTimeout(1_000);
 
-  // Step 3: Type start date via real keystrokes.
-  // fill() silently reverts these inputs to today's date (OBS-006, verified 2026-06-18).
-  // Real per-char keystrokes (pressSequentially) correctly set the value.
-  const startLoc = timecard.startDateInput(page);
-  await startLoc.click({ timeout: 5_000 });
-  await startLoc.press("ControlOrMeta+a");
-  await startLoc.pressSequentially(startDate, { delay: 20 });
-  await page.waitForTimeout(300);
-
-  // Step 4: Type end date via real keystrokes (same reason as start date).
-  const endLoc = timecard.endDateInput(page);
-  await endLoc.click({ timeout: 5_000 });
-  await endLoc.press("ControlOrMeta+a");
-  await endLoc.pressSequentially(endDate, { delay: 20 });
-  await page.waitForTimeout(300);
+  // Step 3 & 4: Type + verify each date (digits only — the mask owns the "/").
+  await typeMaskedDate(page, timecard.startDateInput(page), startDate, "start");
+  await typeMaskedDate(page, timecard.endDateInput(page), endDate, "end");
 
   // Step 5: Click Apply
   await safeClick(timecard.applyButton(page), {

@@ -33,6 +33,7 @@ Call it AFTER `clickGoToTimecard` + `setDateRange` so the grid shows the right w
 - Dynamic iframe name: `iframe[name^="portal-frame-"]` (suffix changes per session)
 - Checks for "There are no items to display." message to detect no results
 - Less defensive than Old Kronos — fewer fallback strategies, lets errors propagate
+- `setDateRange` enters the custom-range dates via `typeMaskedDate` (digits only + readback verify, NOT `fill()` and NOT the literal `MM/DD/YYYY` string). The WFD inputs reject `fill()` AND auto-insert their own `/`, so typing the slashes races the mask and scrambles the value (e.g. `05/10/2026` → `6/05/1020` → `WFP-00889`). See LESSONS.md (OBS-006 / ISS-B05).
 - `navigate.ts` calls `debugScreenshot` during timecard checks (`new-kronos-timecard-01-current` / `02-previous`) — not a blanket debug logger across the whole module
 
 ## Lessons Learned
