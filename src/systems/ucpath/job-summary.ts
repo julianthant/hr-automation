@@ -306,13 +306,65 @@ export async function extractWorkLocation(
   return result;
 }
 
+/** One scan of the Job Information grid (Job Code + its Description). */
+export interface JobInfoScan {
+  jobCode: string;
+  jobDescription: string;
+}
+
+/**
+ * Production polling budget for the Job Information grid render: up to ~10s
+ * (20 × 500ms) of re-scans after the tab click before giving up.
+ */
+const JOB_INFO_POLL_ATTEMPTS = 20;
+const JOB_INFO_POLL_INTERVAL_MS = 500;
+
+/**
+ * Re-run a Job Information DOM scan until it yields a non-empty job code or the
+ * attempt budget is spent.
+ *
+ * Why poll: clicking the Job Information tab loads its grid LAZILY and does not
+ * reliably raise the PeopleSoft processing spinner, so `waitForPeopleSoftProcessing`
+ * returns on its 2s "spinner never appeared" timeout while the grid rows are
+ * still rendering. A single scan right after the click then reads a half-rendered
+ * grid, finds no 6-digit job code, and returns empty — which silently shipped a
+ * blank Payroll Title Code / Payroll Title to Kuali (separations doc 4290,
+ * 2026-06-22). The prior fixed `waitForTimeout(3_000)` (removed by 84beeef7)
+ * masked the race; this condition-based wait replaces it.
+ *
+ * Returns the first non-empty scan, or the last (still-empty) scan once the
+ * attempts are exhausted — the caller decides whether empty is fatal. `sleep` is
+ * injected so the wall-clock dependency is unit-testable.
+ */
+export async function pollForJobInfoScan(
+  scan: () => Promise<JobInfoScan>,
+  opts: {
+    attempts: number;
+    intervalMs: number;
+    sleep: (ms: number) => Promise<void>;
+  },
+): Promise<JobInfoScan> {
+  let last: JobInfoScan = { jobCode: "", jobDescription: "" };
+  for (let attempt = 0; attempt < opts.attempts; attempt++) {
+    last = await scan();
+    if (last.jobCode) return last;
+    if (attempt < opts.attempts - 1) await opts.sleep(opts.intervalMs);
+  }
+  return last;
+}
+
 /**
  * Extract job code and description from the Job Information tab.
  * Uses cell indices: cells[0] = Job Code, cells[1] = Description.
+ *
+ * The grid loads lazily on tab activation, so the DOM scan is POLLED (see
+ * `pollForJobInfoScan`) rather than run once — a single post-click scan raced
+ * the render and returned empty, shipping a blank Payroll Title to Kuali
+ * (separations doc 4290, 2026-06-22). Returns possibly-empty (symmetric with
+ * `extractWorkLocation`); `getJobSummaryIdentity` decides that empty on a found
+ * record is fatal.
  */
-export async function extractJobInfo(
-  page: Page,
-): Promise<{ jobCode: string; jobDescription: string }> {
+export async function extractJobInfo(page: Page): Promise<JobInfoScan> {
   log.step("[Job Summary] Clicking Job Information tab...");
   // Same modal-mask + re-probe pattern as extractWorkLocation — the tab
   // click can flake on the same transparent overlay.
@@ -322,34 +374,45 @@ export async function extractJobInfo(
     timeout: 10_000,
     label: "ucpath job summary job information tab",
   });
-  // Wait for the Job Information tab panel to load.
+  // Clear any PeopleSoft processing spinner from the tab click. This is NOT a
+  // sufficient gate for the grid render — the tab does not always raise a
+  // spinner, so this can return ~2s before the rows exist; the poll below is
+  // what actually waits for the grid.
   const psFrame2 = page.frameLocator("#main_target_win0"); // allow-inline-selector -- iframe FrameLocator for PS processing probe
   await waitForPeopleSoftProcessing(psFrame2, 15_000);
 
-  // Job Information grid columns: Job Code(0), Description(1), Classified Ind(2),
-  // Empl Status(3), Full/Part Time(4), Standard Hours(5), FTE(6), ...
   log.step("[Job Summary] Extracting job code...");
 
-  const result = await page.evaluate(() => {
-    const rows = document.querySelectorAll("tr");
-    for (const row of rows) {
-      const cells = row.querySelectorAll("td");
-      if (cells.length >= 2) {
-        const jobCode = cells[0]?.textContent?.trim() ?? "";
-        // Job codes are 6 digits
-        if (/^\d{6}$/.test(jobCode)) {
-          return {
-            jobCode,
-            jobDescription: cells[1]?.textContent?.trim() ?? "",
-          };
+  // Job Information grid columns: Job Code(0), Description(1), Classified Ind(2),
+  // Empl Status(3), Full/Part Time(4), Standard Hours(5), FTE(6), ...
+  const result = await pollForJobInfoScan(
+    () =>
+      page.evaluate(() => {
+        const rows = document.querySelectorAll("tr");
+        for (const row of rows) {
+          const cells = row.querySelectorAll("td");
+          if (cells.length >= 2) {
+            const jobCode = cells[0]?.textContent?.trim() ?? "";
+            // Job codes are 6 digits
+            if (/^\d{6}$/.test(jobCode)) {
+              return {
+                jobCode,
+                jobDescription: cells[1]?.textContent?.trim() ?? "",
+              };
+            }
+          }
         }
-      }
-    }
-    return { jobCode: "", jobDescription: "" };
-  });
+        return { jobCode: "", jobDescription: "" };
+      }),
+    {
+      attempts: JOB_INFO_POLL_ATTEMPTS,
+      intervalMs: JOB_INFO_POLL_INTERVAL_MS,
+      sleep: (ms) => page.waitForTimeout(ms),
+    },
+  );
 
-  log.step(`  Job Code: ${result.jobCode}`);
-  log.step(`  Description: ${result.jobDescription}`);
+  log.step(`  Job Code: ${result.jobCode || "<none>"}`);
+  log.step(`  Description: ${result.jobDescription || "<none>"}`);
   return result;
 }
 
@@ -398,6 +461,24 @@ export async function getJobSummaryIdentity(
   const name = await extractEmployeeName(page);
   const workLocation = await extractWorkLocation(page);
   const jobInfo = await extractJobInfo(page);
+
+  // A found, active employee always has a job code on the Job Information tab.
+  // An empty one after polling is a GENUINE extraction failure on a found
+  // record — the grid never rendered, or the job code isn't the expected
+  // 6-digit format. Fail loud rather than returning incomplete data: a
+  // found-but-empty result previously let separations fill only the department
+  // and ship a blank Payroll Title Code / Payroll Title to Kuali while logging
+  // success (doc 4290, 2026-06-22). Per this module's contract, only the
+  // "no matching values" state is a soft `found: false`; this is not that —
+  // it propagates through `unwrapSettled` and fails the run.
+  if (!jobInfo.jobCode) {
+    throw new Error(
+      `Workforce Job Summary found EID '${emplId}' but could not extract a Payroll Title Code `
+      + `from the Job Information tab (job code empty after polling the grid). The Job Information `
+      + `grid likely did not render in time, or the job code is not the expected 6-digit format. `
+      + `Re-run; if it recurs, re-verify the Job Information tab selector / grid layout on the live page.`,
+    );
+  }
 
   return {
     found: true,

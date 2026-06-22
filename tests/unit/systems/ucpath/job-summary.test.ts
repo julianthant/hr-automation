@@ -26,6 +26,7 @@ import type { Page } from "playwright";
 import {
   canSkipJobSummaryNavigation,
   navigateToWorkforceJobSummary,
+  pollForJobInfoScan,
 } from "../../../../src/systems/ucpath/job-summary.js";
 
 const JOB_SUMMARY_URL =
@@ -85,6 +86,68 @@ describe("canSkipJobSummaryNavigation", () => {
       false,
       "search box flag is meaningless when we're not even on the component",
     );
+  });
+});
+
+/**
+ * Regression guard for the blank Payroll Title Code/Title bug (2026-06-22,
+ * separations doc 4290): `extractJobInfo` clicked the Job Information tab, then
+ * `waitForPeopleSoftProcessing` returned on its 2s "spinner never appeared"
+ * timeout — NOT on the grid actually rendering. The single DOM scan that
+ * followed raced the lazily-loaded Job Information grid, found no 6-digit job
+ * code, and returned empty jobCode/jobDescription. Kuali then filled only the
+ * department and the run logged success. The fix replaces the single scan with
+ * a condition-based poll that re-scans until the job code appears (the prior
+ * fixed `waitForTimeout(3_000)`, removed by 84beeef7, used to mask the race).
+ *
+ * `pollForJobInfoScan` is the pure core of that fix: it takes an injected scan
+ * callback + injected sleep so the wall-clock dependency is testable.
+ */
+describe("pollForJobInfoScan", () => {
+  it("returns the first scan when the job code is already present (no extra attempts, no sleep)", async () => {
+    let scans = 0;
+    let sleeps = 0;
+    const result = await pollForJobInfoScan(
+      async () => {
+        scans++;
+        return { jobCode: "004722", jobDescription: "BLANK AST 3" };
+      },
+      { attempts: 5, intervalMs: 1, sleep: async () => { sleeps++; } },
+    );
+    assert.deepStrictEqual(result, { jobCode: "004722", jobDescription: "BLANK AST 3" });
+    assert.strictEqual(scans, 1, "non-empty on first scan — must not keep polling");
+    assert.strictEqual(sleeps, 0, "no sleep when the first scan already has the job code");
+  });
+
+  it("polls past empty scans (the grid-render race) and returns the first populated scan", async () => {
+    let scans = 0;
+    const result = await pollForJobInfoScan(
+      async () => {
+        scans++;
+        // Grid not yet rendered on the first two scans, then it populates.
+        return scans < 3
+          ? { jobCode: "", jobDescription: "" }
+          : { jobCode: "004722", jobDescription: "BLANK AST 3" };
+      },
+      { attempts: 5, intervalMs: 1, sleep: async () => {} },
+    );
+    assert.deepStrictEqual(result, { jobCode: "004722", jobDescription: "BLANK AST 3" });
+    assert.strictEqual(scans, 3, "must re-scan until the lazily-rendered grid yields the job code");
+  });
+
+  it("returns the last (empty) scan after exhausting attempts — caller decides empty is fatal", async () => {
+    let scans = 0;
+    let sleeps = 0;
+    const result = await pollForJobInfoScan(
+      async () => {
+        scans++;
+        return { jobCode: "", jobDescription: "" };
+      },
+      { attempts: 4, intervalMs: 1, sleep: async () => { sleeps++; } },
+    );
+    assert.deepStrictEqual(result, { jobCode: "", jobDescription: "" });
+    assert.strictEqual(scans, 4, "scans exactly `attempts` times when the grid never populates");
+    assert.strictEqual(sleeps, 3, "sleeps between attempts but not after the final one");
   });
 });
 
