@@ -6,6 +6,7 @@ import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domai
 import type { QueueRowKindOrResolver, InputSubjectOrResolver } from '../../domain/queue-row-kind.js'
 import type { WorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
+import type { WorkflowPresentationConfig } from '../../domain/workflow-presentation/types.js'
 
 export interface SystemConfig {
   id: string
@@ -269,6 +270,15 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
    * reuse the same classification.
    */
   queueTitle?: WorkflowQueueTitleConfig<TData>
+  /**
+   * Uniform presentation config — naming schemes (title/subtitle/trace), step
+   * display rules, and delegation naming. Undeclared parts fall back to the
+   * back-compat default derived from `inputSubject`/kind at registration
+   * (see `defaultPresentationFromMetadata`). The dashboard Workflow Modifier
+   * page edits this via the git-tracked override store; do not hand-edit at
+   * runtime expecting a hot reload of execution config.
+   */
+  presentation?: WorkflowPresentationConfig
   /**
    * Serializable dashboard/runtime policy for row projection and action
    * blast-radius rules. Workflow files own their overrides; the dashboard
@@ -568,6 +578,13 @@ export interface WorkflowMetadata {
    * synthesized client-side and never appears here.
    */
   presets?: WorkflowStepPresetMetadata[]
+  /**
+   * EFFECTIVE presentation config (always present after registry
+   * normalization): the workflow's declared `presentation` deep-merged over
+   * the back-compat default. The serve-layer further merges the override store
+   * on top before sending to the dashboard (see `effectiveMetadata`).
+   */
+  presentation: WorkflowPresentationConfig
 }
 
 export interface RegisteredWorkflow<TData, TSteps extends readonly string[]> {
