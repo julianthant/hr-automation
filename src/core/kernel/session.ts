@@ -35,19 +35,57 @@ export function formatCaptureFilename(args: {
   label: string
   system: string
   ts: number
+  /**
+   * Zero-based chunk index for a `paged` capture. When present, a zero-padded
+   * `-cNN` suffix is appended so the N chunk PNGs of one page don't collide on
+   * the shared `ts`+`system` and sort in scroll order lexically. Omitted for
+   * single-file modes (region / bounded / centerSelector / default).
+   */
+  chunk?: number
 }): string {
-  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}.png`
+  const chunkSuffix =
+    args.chunk !== undefined ? `-c${String(args.chunk + 1).padStart(2, '0')}` : ''
+  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}${chunkSuffix}.png`
 }
 
 /**
- * Fixed viewport width used by `bounded` and `region` captures. A real-world
- * desktop width: tall forms render at a readable column instead of being
- * stretched to fit off-screen chrome (the over-widening that turned the old
- * `slices` captures into 2000px+ ribbons). Tiled daemon windows are narrower
- * than this on screen, but `setViewportSize` sets the layout viewport
- * independently of the OS window, so the capture is still 1280px wide.
+ * Centralized, consistent audit-capture settings — the single source of truth
+ * for "what every screenshot should look like." Keep capture geometry here
+ * rather than scattering magic numbers across the capture routines so all
+ * modes (bounded / region / paged) render at the same readable column width.
  */
-export const BOUNDED_CAPTURE_WIDTH = 1280
+export const CAPTURE = {
+  /**
+   * Fixed layout-viewport WIDTH for every bounded / region / paged capture. A
+   * real-world desktop width: tall forms render at a readable column instead of
+   * being stretched to fit off-screen chrome (the over-widening that turned the
+   * old `slices` captures into 2000px+ ribbons). Tiled daemon windows are
+   * narrower than this on screen, but `setViewportSize` sets the LAYOUT viewport
+   * independently of the OS window, so the capture is still this many px wide.
+   */
+  width: 1280,
+  /**
+   * Height of each scroll chunk in `paged` mode — the fixed capture-viewport
+   * HEIGHT, so a chunk is the same size regardless of the tiled OS window.
+   */
+  chunkHeight: 1000,
+  /**
+   * Vertical OVERLAP (px) between consecutive chunks, so content sitting on a
+   * scroll seam stays fully readable in at least one chunk (the "scroll a bit
+   * less than a full screen each step" optimization). Must be < chunkHeight.
+   */
+  chunkOverlap: 72,
+  /** Hard cap on chunks per page — runaway guard for pathologically tall docs. */
+  maxChunks: 20,
+  /** Settle delay (ms) after each scroll before the shot — lets lazy / virtual rows paint. */
+  settleMs: 250,
+} as const
+
+/**
+ * Fixed viewport width used by `bounded`, `region`, and `paged` captures.
+ * Aliased to `CAPTURE.width` so there is one knob, not two.
+ */
+export const BOUNDED_CAPTURE_WIDTH = CAPTURE.width
 
 interface SystemSlot {
   page: Page
@@ -714,6 +752,35 @@ export class Session {
   }
 
   /**
+   * Set the layout viewport to a FIXED width AND height (for `paged` chunk
+   * capture, where each chunk must be a consistent size regardless of the
+   * quarter-screen tiled OS window) and return a best-effort restore callback.
+   * Never throws; returns a no-op restore when the page can't resize.
+   */
+  private static async setCaptureViewport(page: Page, width: number, height: number): Promise<() => Promise<void>> {
+    const maybeResize = page as unknown as {
+      setViewportSize?: (size: { width: number; height: number }) => Promise<void>
+      waitForTimeout?: (ms: number) => Promise<void>
+    }
+    if (typeof maybeResize.setViewportSize !== 'function') return async () => {}
+    try {
+      const m = await page.evaluate(() => ({
+        iw: window.innerWidth || 0,
+        ih: window.innerHeight || 0,
+      })).catch(() => null)
+      if (!m || m.iw <= 0 || m.ih <= 0) return async () => {}
+      if (m.iw === width && m.ih === height) return async () => {}
+      await maybeResize.setViewportSize({ width, height })
+      await maybeResize.waitForTimeout?.(150).catch(() => {})
+      return async () => {
+        try { await maybeResize.setViewportSize!({ width: m.iw, height: m.ih }) } catch { /* best-effort */ }
+      }
+    } catch {
+      return async () => {}
+    }
+  }
+
+  /**
    * Grow every SAME-ORIGIN iframe whose inner content overflows its rendered
    * box to its full inner content height, and return a best-effort restore
    * callback. A fixed-height iframe (the UCPath PeopleSoft content frame is
@@ -849,6 +916,86 @@ export class Session {
     } catch {
       return null
     } finally {
+      if (restoreViewport) await restoreViewport()
+      if (restoreIframes) await restoreIframes()
+      if (restoreOverflow) await restoreOverflow()
+    }
+  }
+
+  /**
+   * Capture the WHOLE page as a SEQUENCE of real viewport-sized chunk PNGs by
+   * scrolling top→bottom in `CAPTURE.chunkHeight`-step increments (minus a small
+   * `CAPTURE.chunkOverlap` seam so content on a boundary stays readable in at
+   * least one chunk). Each chunk is a plain VIEWPORT screenshot (NOT `fullPage`),
+   * so — unlike a single tall `fullPage`/`bounded` shot scaled to a ribbon — the
+   * operator gets every part of the page at a readable size for manual review,
+   * and lazy / virtual-scroll content paints because we physically scroll to it.
+   *
+   * The viewport is fixed to `CAPTURE.width`×`CAPTURE.chunkHeight` first, inner
+   * scroll containers are expanded, and overflowing iframes (the UCPath
+   * PeopleSoft content frame) are grown to their inner content height so the
+   * window scroll walks THROUGH the in-frame form too. Each chunk's path is
+   * built by `withChunkSuffix(chunk)` so the N files don't collide on the shared
+   * `ts`+`system` and sort in scroll order.
+   *
+   * Returns the chunk paths written (length ≥ 1). Best-effort: a degenerate /
+   * unmeasurable page falls back to a single plain shot (chunk 0) so the capture
+   * never silently vanishes; a per-chunk screenshot failure stops the loop but
+   * keeps the chunks captured so far.
+   */
+  static async capturePagedFullPage(
+    page: Page,
+    withChunkSuffix: (chunk: number) => string,
+  ): Promise<string[]> {
+    let restoreOverflow: (() => Promise<void>) | null = null
+    let restoreIframes: (() => Promise<void>) | null = null
+    let restoreViewport: (() => Promise<void>) | null = null
+    const written: string[] = []
+    const maybeWait = page as unknown as { waitForTimeout?: (ms: number) => Promise<void> }
+    try {
+      restoreOverflow = await Session.expandScrollContainers(page)
+      restoreIframes = await Session.growOverflowingIframes(page)
+      restoreViewport = await Session.setCaptureViewport(page, CAPTURE.width, CAPTURE.chunkHeight)
+
+      const fullHeight = await page.evaluate(() => Math.max(
+        document.documentElement?.scrollHeight ?? 0,
+        document.body?.scrollHeight ?? 0,
+      )).catch(() => 0)
+
+      if (!fullHeight) {
+        // Degenerate geometry — one plain viewport shot still beats nothing.
+        const p = withChunkSuffix(0)
+        await page.screenshot({ path: p })
+        written.push(p)
+        return written
+      }
+
+      const step = Math.max(1, CAPTURE.chunkHeight - CAPTURE.chunkOverlap)
+      for (let chunk = 0; chunk < CAPTURE.maxChunks; chunk++) {
+        const y = chunk * step
+        if (chunk > 0 && y >= fullHeight) break
+        await page.evaluate((top: number) => window.scrollTo(0, top), y).catch(() => {})
+        await maybeWait.waitForTimeout?.(CAPTURE.settleMs).catch(() => {})
+        const p = withChunkSuffix(chunk)
+        // Plain VIEWPORT shot (no fullPage): captures exactly the scrolled fold.
+        await page.screenshot({ path: p })
+        written.push(p)
+        // Stop once this chunk's bottom edge has reached the document bottom.
+        if (y + CAPTURE.chunkHeight >= fullHeight) break
+      }
+      return written
+    } catch {
+      // Best-effort: if nothing was captured, fall back to a single plain shot.
+      if (written.length === 0) {
+        try {
+          const p = withChunkSuffix(0)
+          await page.screenshot({ path: p })
+          written.push(p)
+        } catch { /* best-effort */ }
+      }
+      return written
+    } finally {
+      try { await page.evaluate(() => window.scrollTo(0, 0)) } catch { /* best-effort */ }
       if (restoreViewport) await restoreViewport()
       if (restoreIframes) await restoreIframes()
       if (restoreOverflow) await restoreOverflow()
@@ -1001,8 +1148,12 @@ export class Session {
    * Best-effort — a failure on one page never blocks siblings. Returns metadata
    * for each file successfully written.
    *
-   * Capture MODE is per-call (applies to every targeted page; ONE file per
-   * page in every mode). Precedence:
+   * Capture MODE is per-call (applies to every targeted page). Every mode
+   * writes ONE file per page EXCEPT `paged`, which writes N chunk files.
+   * Precedence:
+   * - `opts.paged` → whole-page scroll capture: N viewport-sized chunk PNGs
+   *   (`-cNN`) that together show the ENTIRE page at readable size for manual
+   *   review (Kuali finalization, UCPath submitted confirmation).
    * - `opts.region` → element/iframe-scoped clean capture (the whole form, none
    *   of the page chrome). Falls back to a bounded full-page shot if the element
    *   is missing.
@@ -1054,6 +1205,17 @@ export class Session {
       label: opts.label, system, ts: opts.ts,
     }))
     try {
+      if (opts.paged) {
+        // Whole-page scroll capture: N readable viewport chunks that together
+        // show EVERYTHING for manual review. Each chunk gets a `-cNN` filename.
+        const chunkPath = (chunk: number): string => join(outDir, formatCaptureFilename({
+          workflow: opts.workflow, itemId: opts.itemId, kind: opts.kind,
+          label: opts.label, system, ts: opts.ts, chunk,
+        }))
+        const paths = await Session.capturePagedFullPage(page, chunkPath)
+        for (const written of paths) await fileMeta(written)
+        return out
+      }
       if (opts.region) {
         // Element/iframe-scoped: the whole form, none of the page chrome.
         // Falls back to a bounded full-page shot if the element is missing, so

@@ -89,6 +89,42 @@ export function findOriginalInputForRunId(db: Database, runId: string): unknown 
   return parseJson(row.original_input_json)
 }
 
+export interface ActiveTaskRef {
+  taskId: string
+  controlState: string
+  runId: string | null
+}
+
+/**
+ * List the non-terminal ROOT (non-delegated) daemon tasks for one
+ * `(workflow, itemId)`, oldest-first.
+ *
+ * Backs the enqueue "supersede" path that enforces ONE active run per queue
+ * row: a fresh dashboard input run cancels any prior queued/in-flight run for
+ * the same item before its own row is written. Scoping to `parent_run_id IS
+ * NULL` deliberately excludes delegated children (OCR / batch fan-out) so a
+ * re-issued root run never disturbs an operation's members. `runId` is the
+ * CURRENT attempt's run id (via `current_attempt_id`), so callers can hand it
+ * straight to the cancel handlers' `getTaskByRunId` lookup.
+ */
+export function listActiveRootTasksForItem(
+  db: Database,
+  request: { workflow: string; itemId: string },
+): ActiveTaskRef[] {
+  const rows = db.prepare(`
+    SELECT t.id AS taskId, t.control_state AS controlState, a.run_id AS runId
+    FROM tasks t
+    LEFT JOIN task_attempts a ON a.id = t.current_attempt_id
+    WHERE t.workflow = @workflow
+      AND t.item_id = @itemId
+      AND t.task_kind = 'workflow_item'
+      AND t.parent_run_id IS NULL
+      AND t.control_state NOT IN ('done', 'failed', 'cancelled')
+    ORDER BY COALESCE(t.enqueued_at, t.created_at) ASC, t.rowid ASC
+  `).all(request) as Array<{ taskId: string; controlState: string; runId: string | null }>
+  return rows.map((r) => ({ taskId: r.taskId, controlState: r.controlState, runId: r.runId ?? null }))
+}
+
 export function listTasksForWorkflow(db: Database, workflow: string): TaskRow[] {
   const rows = db.prepare(`
     SELECT *

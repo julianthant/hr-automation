@@ -48,6 +48,57 @@ test('withBatchLifecycle: happy path emits one workflow_start + one workflow_end
   assert.equal(ends[0].finalStatus, 'done')
 })
 
+test('withBatchLifecycle: trackerStub suppresses ALL session events (no phantom dashboard card)', async () => {
+  const dir = TMP()
+  await withBatchLifecycle(
+    {
+      workflow: 'stubtest',
+      archetype: 'single',
+      perItem: [{ item: {}, itemId: 'i1', runId: 'r1' }],
+      trackerDir: dir,
+      trackerStub: true,
+    },
+    async ({ instance, makeObserver, markTerminated }) => {
+      // The observer must still record auth timings (auth-gating contract is
+      // unchanged) even though it emits nothing.
+      const { observer, getAuthTimings } = makeObserver('1')
+      observer.onAuthStart?.('sys', 'b1')
+      observer.onBrowserLaunch?.('sys', 'b1', 123)
+      observer.onAuthComplete?.('sys', 'b1')
+      assert.equal(getAuthTimings().length, 1, 'auth timings still recorded under stub')
+      assert.ok(instance.startsWith('stubtest'))
+      markTerminated('r1')
+    },
+  )
+
+  // Nothing should have been written to the (temp) tracker dir — the real bug
+  // was these landing in the DEFAULT .tracker/sessions/ and surfacing a
+  // phantom "authenticating" card in a live dashboard.
+  assert.equal(readSessions(dir).length, 0, 'no session events emitted under trackerStub')
+})
+
+test('withBatchLifecycle: trackerStub suppresses the throw-path failed-row fanout', async () => {
+  const dir = TMP()
+  await assert.rejects(
+    withBatchLifecycle(
+      {
+        workflow: 'stubthrow',
+        archetype: 'single',
+        systems: [{ id: 'sys', login: async () => {} }],
+        perItem: [{ item: {}, itemId: 'i1', runId: 'r1' }],
+        trackerDir: dir,
+        trackerStub: true,
+      },
+      async () => {
+        throw new Error('boom')
+      },
+    ),
+    /boom/,
+  )
+  assert.equal(readSessions(dir).length, 0, 'no session events under stub')
+  assert.equal(readTracker(dir, 'stubthrow').length, 0, 'no failed rows under stub')
+})
+
 test('withBatchLifecycle: body throws before any markTerminated → fans out failed rows with auth step', async () => {
   const dir = TMP()
   let caught: unknown

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDownToLine, Check, ChevronDown, Eye, ExternalLink, Image as ImageIcon, Maximize2, Minimize2, Network, ScrollText, Search, SquarePen, X } from "lucide-react";
+import { ChevronsDown, Check, ChevronDown, Eye, ExternalLink, Image as ImageIcon, Maximize2, Minimize2, Network, ScrollText, Search, SquarePen, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
@@ -725,7 +725,7 @@ export function LogStream({
                       : "bg-secondary text-muted-foreground border-border hover:text-foreground hover:border-border/80",
                   )}
                 >
-                  <ArrowDownToLine className="h-3.5 w-3.5" />
+                  <ChevronsDown className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={4}>

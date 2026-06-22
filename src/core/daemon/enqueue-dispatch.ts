@@ -43,6 +43,23 @@ export interface EnqueueFromHttpOptions {
    * `src/domain/run-options.ts`.
    */
   runOptions?: RunOptions;
+  /**
+   * Control-plane callback that enforces "one active run per queue row":
+   * cancel any prior non-terminal run for the items about to be enqueued. Fired
+   * from the kernel's `onPreparedItems` hook — after stable itemIds/runIds are
+   * assigned but BEFORE the new pending row and task are written, so it sees
+   * only prior runs (`exceptRunIds` carries the new runIds as belt-and-braces).
+   *
+   * Injected (not implemented here) because the cancellation reaches into the
+   * control layer (`src/control/ops/supersede.ts`), which `src/core/` must not
+   * import. The dashboard `/api/enqueue` route supplies it; delegated /
+   * batch-fan-out enqueue paths that call `ensureDaemonsAndEnqueue` directly do
+   * NOT, so an operation's members are never superseded. Best-effort: a throw
+   * here is logged and the new run proceeds regardless.
+   */
+  supersedePriorRuns?: (
+    items: Array<{ itemId: string; runId: string }>,
+  ) => Promise<void> | void;
 }
 
 export interface EnqueueValidateResult {
@@ -199,6 +216,10 @@ export async function enqueueFromHttp(
     typeof trackerDirOrOptions === "object" && trackerDirOrOptions
       ? trackerDirOrOptions.runOptions
       : undefined;
+  const supersedePriorRuns =
+    typeof trackerDirOrOptions === "object" && trackerDirOrOptions
+      ? trackerDirOrOptions.supersedePriorRuns
+      : undefined;
   const daemonFlags = runOptionsToDaemonFlags(runOptions);
 
   if (!Array.isArray(inputs) || inputs.length === 0) {
@@ -269,6 +290,28 @@ export async function enqueueFromHttp(
         trackerDir,
         ...(effectiveParentRunId ? { parentRunId: effectiveParentRunId } : {}),
         ...(deriveItemId ? { deriveItemId } : {}),
+        // Enforce "one active run per queue row": cancel prior non-terminal
+        // runs for these items before the new pending row / task are written.
+        // Fires here (after stable itemIds/runIds, before pre-emit + enqueue)
+        // so the supersede query sees only prior runs. Best-effort — a failure
+        // must not block the new run, so swallow + log and continue.
+        ...(supersedePriorRuns
+          ? {
+              onPreparedItems: async (prepared) => {
+                try {
+                  await supersedePriorRuns(
+                    prepared.map((p) => ({ itemId: p.itemId, runId: p.runId })),
+                  );
+                } catch (err) {
+                  log.warn(
+                    `enqueueFromHttp(${workflowName}): supersedePriorRuns failed (continuing): ${
+                      err instanceof Error ? err.message : String(err)
+                    }`,
+                  );
+                }
+              },
+            }
+          : {}),
         onPreEmitPending: (item, runId, passedParentRunId, itemId) => {
           /** Pending + spawn-failure rows share stamp; `??` tolerates enqueue-client vs HTTP-option drift. */
           const stampedParentRunId = passedParentRunId ?? effectiveParentRunId;
