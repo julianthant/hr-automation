@@ -677,7 +677,7 @@ export function App() {
     <TerminalDrawerProvider>
     <div className="flex flex-col h-screen">
       <Toaster
-        position="bottom-right"
+        position="top-right"
         toastOptions={{
           style: {
             background: "var(--card)",
