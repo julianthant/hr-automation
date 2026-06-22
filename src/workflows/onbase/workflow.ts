@@ -45,7 +45,7 @@ export const ONBASE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
  */
 export const onbaseWorkflow = defineWorkflow({
   name: WORKFLOW,
-  label: "OnBase",
+  label: "OnBase Import",
   archetype: "batch",
   inputSubject: "eid",
   code: "ob",
