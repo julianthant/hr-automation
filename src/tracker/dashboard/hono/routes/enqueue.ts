@@ -6,6 +6,7 @@ import {
   enqueueFromHttp,
   validateEnqueueRequest,
 } from "../../../../core/daemon/enqueue-dispatch.js";
+import { buildSupersedePriorRunsHandler } from "../../../../control/ops/supersede.js";
 import { loadWorkflow } from "../../../../core/workflow-loaders.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
@@ -117,10 +118,22 @@ export function registerEnqueueRoute(app: Hono, deps: DashboardHonoDeps): void {
               };
             })
           : input.inputs;
+      // One active run per queue row: a fresh input run cancels any prior
+      // queued/in-flight run for the same item (the retry path already guards
+      // this via ACTIVE_STATES_BLOCKING_RETRY; the enqueue path didn't). Lives
+      // in src/control/; the route stays a thin adapter that injects it.
+      const supersede = buildSupersedePriorRunsHandler(deps.dir);
       void enqueueFromHttp(workflow, enqueueInputs, {
         trackerDir: deps.dir,
         ...(parentRunId ? { parentRunId } : {}),
         ...(runOptions.parallelWorkers !== undefined ? { runOptions } : {}),
+        supersedePriorRuns: async (items) => {
+          await supersede({
+            workflow,
+            itemIds: items.map((i) => i.itemId),
+            exceptRunIds: items.map((i) => i.runId),
+          });
+        },
       }).catch((err) => {
         log.error(`[POST /api/enqueue] background task failed: ${errorMessage(err)}`);
       });

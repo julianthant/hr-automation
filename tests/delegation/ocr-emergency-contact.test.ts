@@ -298,10 +298,11 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   // No count drift: exactly 3 distinct EC child runs surfaced (no orphan/double).
   assert.equal(new Set(ecKids.map((k) => k.runId)).size, 3, "no duplicate EC child runs in projection");
 
-  // The fixture is expected to render headlessly; surface a clear signal if it
-  // fell back to the synthetic one-pager (records come from the override either
-  // way, so this is informational, not a hard failure).
-  assert.equal(ocr.usedFixture, true, "emergency-contacts.pdf rendered headlessly (no synthetic fallback)");
+  // The records come from the stub override regardless of which PDF renders
+  // (registerOcrPdf falls back to a synthetic one-pager when the real fixture
+  // can't render headlessly — e.g. CI's headless environment). usedFixture is
+  // therefore environment-dependent and NOT asserted; every projection above
+  // holds identically for the synthetic fallback.
 
   await rt.cleanup();
 

@@ -13,7 +13,7 @@ import {
   findExistingTerminationTransaction,
   scrollToTransactionReadbackArea,
 } from "../../../systems/ucpath/index.js";
-import { ssSmartHRTransactions, UCPATH_CONTENT_FRAME_SELECTOR } from "../../../systems/ucpath/selectors.js";
+import { ssSmartHRTransactions } from "../../../systems/ucpath/selectors.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
 
@@ -155,12 +155,14 @@ export async function runUcpathTransaction(
       // drop it from the tracker entry's data.
       ctx.updateData({ transactionNumber });
       log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
-      // Capture the WHOLE UCPath transaction confirmation as ONE clean image of
-      // ONLY the PeopleSoft content iframe. `region` grows the fixed-height
-      // iframe to its full inner content height first, so the shot includes the
-      // entire form (Position → Last Date Worked → Comments → Transaction ID) at
-      // a readable width — not the old over-widened 2239px ribbon slices.
-      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], region: UCPATH_CONTENT_FRAME_SELECTOR });
+      // Capture the WHOLE UCPath transaction confirmation as a SEQUENCE of
+      // readable chunk images (scroll top→bottom, one viewport PNG per chunk).
+      // `paged` grows the fixed-height PeopleSoft content iframe to its inner
+      // content height first so the window scroll walks through the entire
+      // in-frame form (Position → Last Date Worked → Comments → Transaction ID);
+      // the operator reviews every chunk with next/back instead of one tall
+      // image the viewer can only shrink to a ribbon.
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], paged: true });
     } catch (e) {
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
       // the run fails with the clear message (its own screenshot already fired)

@@ -76,13 +76,12 @@ export async function runKualiFinalize(
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
   await clickSave(kualiPage);
-  // Capture the ENTIRE Kuali finalization form as ONE clean image of ONLY the
-  // Kuali page. `bounded` takes a fixed-width (1280px) full-page shot clipped to
-  // that width, so the tall form reads top-to-bottom at a normal column width
-  // instead of the old over-widened ribbon slices (the promo footer blew the
-  // width to ~2038px → 3 unreadable 6.3:1 ribbons). No stable selector exists
-  // for the Kuali finalization document container yet; if one is mapped live,
-  // switch this to `region` to also drop the surrounding page chrome.
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], bounded: true });
+  // Capture the ENTIRE Kuali finalization page as a SEQUENCE of readable chunk
+  // images (scroll top→bottom, one viewport PNG per chunk). `paged` shows
+  // everything for manual review at a readable size — the lightbox steps through
+  // the chunks with next/back — instead of a single tall image the viewer can
+  // only shrink to an unreadable ribbon. Capture geometry (width / chunk height
+  // / overlap) is centralized in `CAPTURE` (src/core/kernel/session.ts).
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], paged: true });
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

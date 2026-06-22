@@ -51,6 +51,7 @@ export async function runWorkflowSharedContextPool<TData, TSteps extends readonl
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       })),
       trackerDir: opts.trackerDir,
+      trackerStub: opts.trackerStub,
     },
     async ({ instance, markTerminated, makeObserver }) => {
       const { observer, getAuthTimings } = makeObserver('1')
