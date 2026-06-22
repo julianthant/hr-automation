@@ -22,6 +22,16 @@ import type { Page, Locator, FrameLocator } from "playwright";
 // ─── Iframe root ───────────────────────────────────────────────────────────
 
 /**
+ * CSS selector for the PeopleSoft content iframe ELEMENT (the host of the
+ * Classic-mode form). UCPath wraps content in #main_target_win0 (not the older
+ * #ptifrmtgtframe). Use with `getContentFrame` for in-frame interaction, or as
+ * an audit-screenshot `region` to capture the whole in-frame form cleanly (the
+ * kernel grows the iframe to its inner content height first). verified 2026-03-16
+ * @tags iframe, frame, content, peoplesoft, screenshot-region
+ */
+export const UCPATH_CONTENT_FRAME_SELECTOR = "#main_target_win0";
+
+/**
  * Returns the PeopleSoft content iframe FrameLocator.
  * UCPath wraps Classic content in #main_target_win0 (not #ptifrmtgtframe).
  * Every form interaction after initial navigation must go through this frame.
@@ -29,7 +39,7 @@ import type { Page, Locator, FrameLocator } from "playwright";
  * @tags iframe, frame, content, peoplesoft
  */
 export function getContentFrame(page: Page): FrameLocator {
-  return page.frameLocator("#main_target_win0");
+  return page.frameLocator(UCPATH_CONTENT_FRAME_SELECTOR);
 }
 
 // ─── Smart HR Transactions (sidebar + template setup + controls) ──────────

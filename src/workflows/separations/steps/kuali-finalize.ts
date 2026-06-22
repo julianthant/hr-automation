@@ -76,10 +76,13 @@ export async function runKualiFinalize(
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
   await clickSave(kualiPage);
-  // Capture the ENTIRE Kuali finalization form as 3 vertical slices of ONLY the
-  // Kuali page. A single `fullPage` shot of the tall form rendered as an
-  // unreadable narrow ribbon on the quarter-screen tiled viewport, and without
-  // `systems:["kuali"]` the event captured all 4 systems mixed together.
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], slices: 3 });
+  // Capture the ENTIRE Kuali finalization form as ONE clean image of ONLY the
+  // Kuali page. `bounded` takes a fixed-width (1280px) full-page shot clipped to
+  // that width, so the tall form reads top-to-bottom at a normal column width
+  // instead of the old over-widened ribbon slices (the promo footer blew the
+  // width to ~2038px → 3 unreadable 6.3:1 ribbons). No stable selector exists
+  // for the Kuali finalization document container yet; if one is mapped live,
+  // switch this to `region` to also drop the surrounding page chrome.
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], bounded: true });
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

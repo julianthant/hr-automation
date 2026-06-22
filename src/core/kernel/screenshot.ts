@@ -36,8 +36,9 @@ export function makeScreenshotFn(deps: ScreenshotDeps): ScreenshotFn {
       ts,
       systems: opts.systems,
       pages: opts.pages,
-      ...(opts.slices !== undefined ? { slices: opts.slices } : {}),
+      ...(opts.region !== undefined ? { region: opts.region } : {}),
       ...(opts.centerSelector !== undefined ? { centerSelector: opts.centerSelector } : {}),
+      ...(opts.bounded !== undefined ? { bounded: opts.bounded } : {}),
     })
     const files = rawFiles.map(({ system, path }) => ({ system, path }))
     const capture: ScreenshotCapture = {

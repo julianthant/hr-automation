@@ -639,22 +639,38 @@ export interface ScreenshotOpts {
   systems?: string[]
   pages?: import('playwright').Page[]
   /**
-   * Capture each targeted page as N equal vertical slices (literal PNG files,
-   * `{label}-1of{N}`, …) instead of one `fullPage` shot. Use for tall forms
-   * whose `fullPage` capture is an unreadable narrow ribbon on a quarter-screen
-   * tiled viewport (Kuali finalization → 3, UCPath confirmation → 2). Routes to
-   * `Session.capturePageInSlices`. Ignored (treated as 1) when ≤1.
+   * Capture ONLY the element matching this top-level CSS selector (one clean PNG
+   * via `locator.screenshot()`), after expanding inner-scroll overflow and
+   * growing any overflowing iframe to its full content height. Use to showcase a
+   * single tall form/dialog without the surrounding page chrome (nav banner,
+   * modal backdrop, promo footer) — the failure mode that made the old `slices`
+   * captures unreadable. When the selector IS an iframe (e.g. the UCPath
+   * PeopleSoft content frame `#main_target_win0`), the iframe is grown first so
+   * the shot includes the full in-frame form, not just the visible fold. Routes
+   * to `Session.captureRegion`. Highest precedence. Best-effort — a missing
+   * element falls back to a bounded full-page shot so the capture never silently
+   * vanishes. Verified against synthetic Kuali-modal / UCPath-iframe pages.
    */
-  slices?: number
+  region?: string
   /**
    * Scroll the element matching this CSS selector to the vertical CENTER of the
    * viewport and capture the VIEWPORT (not `fullPage`). Use for virtual-scroll
    * grids (Kronos timecards) where `fullPage` only captures the DOM-rendered
-   * rows. Routes to `Session.captureViewportCenteredOnElement`. Mutually
-   * exclusive with `slices` (center wins if both are set). Best-effort scroll —
-   * a missing element still captures whatever is shown.
+   * rows. Routes to `Session.captureViewportCenteredOnElement`. Best-effort
+   * scroll — a missing element still captures whatever is shown.
    */
   centerSelector?: string
+  /**
+   * Capture the WHOLE page as one full-page PNG at a FIXED readable width
+   * (`BOUNDED_CAPTURE_WIDTH`), clipped to that width so horizontal overflow
+   * (wide promo footers, off-screen grids) can't stretch the shot into an
+   * unreadable wide ribbon, and WITHOUT the aggressive viewport-widening the
+   * default `fullPage` path applies. Use for a tall form whose container has no
+   * stable selector to target with `region` (today: the Kuali finalization
+   * document). Routes to `Session.captureBoundedFullPage`. Ignored when `region`
+   * or `centerSelector` is set.
+   */
+  bounded?: boolean
 }
 export interface ScreenshotCapture {
   kind: 'form' | 'error' | 'manual'
@@ -674,8 +690,10 @@ export interface CaptureFileOpts {
   ts: number
   systems?: string[]
   pages?: Page[]
-  /** N equal vertical slices per targeted page (see ScreenshotOpts.slices). */
-  slices?: number
+  /** Element/iframe-scoped capture selector (see ScreenshotOpts.region). */
+  region?: string
   /** Center-on-element viewport capture (see ScreenshotOpts.centerSelector). */
   centerSelector?: string
+  /** Fixed-width whole-page capture (see ScreenshotOpts.bounded). */
+  bounded?: boolean
 }
