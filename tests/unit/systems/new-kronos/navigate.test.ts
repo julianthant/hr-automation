@@ -13,7 +13,7 @@
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 
-import { resolveSearchResult } from "../../../../src/systems/new-kronos/navigate.js";
+import { resolveSearchResult, dateDigits } from "../../../../src/systems/new-kronos/navigate.js";
 import { log } from "../../../../src/utils/log.js";
 
 describe("resolveSearchResult", () => {
@@ -48,5 +48,42 @@ describe("resolveSearchResult", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+/**
+ * Pins dateDigits — the separator-stripped digit string that `typeMaskedDate`
+ * types into and verifies against WFD's masked date inputs. The inputs
+ * auto-insert "/" themselves and may drop the month's leading zero on display,
+ * so entry + readback are compared on digits only. Regression guard for ISS-B05
+ * (a correct "05/10/2026" got scrambled to "6/05/1020" when the literal slashes
+ * were typed into the auto-masking field, tripping WFP-00889).
+ */
+describe("dateDigits", () => {
+  it("normalizes a zero-padded MM/DD/YYYY date to MMDDYYYY", () => {
+    assert.equal(dateDigits("05/10/2026"), "05102026");
+  });
+
+  it("pads each component, so input padding never matters", () => {
+    // The caller (computeKronosDateRange) zero-pads, but a non-padded month/day
+    // must still type the same 8 digits into the 2-slot mask.
+    assert.equal(dateDigits("5/10/2026"), "05102026");
+    assert.equal(dateDigits("6/5/2026"), "06052026");
+  });
+
+  it("matches a WFD readback that drops the month's leading zero", () => {
+    // WFD displays/returns the month non-padded ("6/05/2026"); the verify path
+    // compares it to the zero-padded wanted value via dateDigits on both sides.
+    assert.equal(dateDigits("6/05/2026"), dateDigits("06/05/2026"));
+  });
+
+  it("ignores surrounding whitespace", () => {
+    assert.equal(dateDigits(" 06 / 05 / 2026 "), "06052026");
+  });
+
+  it("exposes the scramble that motivated the fix as a digit mismatch", () => {
+    // The wanted value vs. the scrambled "6/05/1020" the field actually held —
+    // typeMaskedDate's readback compares these and retries / fails loud (ISS-B05).
+    assert.notEqual(dateDigits("6/05/1020"), dateDigits("05/10/2026"));
   });
 });
