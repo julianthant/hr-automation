@@ -151,17 +151,34 @@ function stubEidForName(name: string): string {
   return `1${String(hash % 10_000_000).padStart(7, "0")}`;
 }
 
+/**
+ * Deterministic fake resolved name for an EID-keyed stub lookup. The REAL
+ * person-lookup handler resolves the UCPath name and stamps it onto
+ * `searchName` (the searching step) — so an EID-only row titles on a person
+ * name, not the bare EID. The stub must do the same: an EID-only input has no
+ * caller-supplied name, so synthesize a stable one from the EID. Without this,
+ * the searching step left `searchName` = the bare EID and `name` unset, and the
+ * person-kind title resolver titled the finished row "10514074" (ISS-008).
+ */
+function stubNameForEid(emplId: string): string {
+  return `E2E Person ${emplId}`;
+}
+
 /** person-lookup: steps ["searching", "cross-verification", "active-status", "crm-dates"]. */
 const personLookupScript: StepDataFn = (input) => {
   const r = rec(input);
   const emplId = str(r.emplId) ?? stubEidForName(str(r.name) ?? "unknown");
+  // Echo a resolved name back onto the row. Name inputs keep the typed name;
+  // EID-only inputs synthesize one from the EID (mirrors the real handler
+  // stamping the UCPath-resolved name onto `searchName`).
+  const resolvedName = str(r.name) ?? stubNameForEid(emplId);
   return {
     searching: compact({
-      searchName: str(r.name) ?? emplId,
+      searchName: resolvedName,
     }),
     "cross-verification": compact({
       emplId,
-      name: str(r.name),
+      name: resolvedName,
       department: "E2E Department",
       payrollTitle: "E2E Analyst",
     }),
