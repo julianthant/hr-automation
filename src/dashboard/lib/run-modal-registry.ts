@@ -75,6 +75,12 @@ export interface RunModalSections {
   dryRun?: boolean;
   oathUploadMode?: boolean;
   workers?: boolean;
+  /**
+   * OnBase document-type picker: a dropdown mirroring OnBase's Import Document
+   * "Document Types" list. The selected type drives the OCR `formType` (only
+   * wired types are selectable). Sent on the OCR-prepare path like `formType`.
+   */
+  onbaseDocType?: boolean;
 }
 
 export interface RunModalConfig {
@@ -98,6 +104,13 @@ export interface RunModalConfig {
   buildSuccessToast: (resp: RunModalSubmitResponse, file: File) => RunModalToast;
   /** Allow selecting and submitting multiple PDFs as grouped single-file runs. */
   allowMultipleFiles?: boolean;
+  /**
+   * When multiple files are selected, MERGE them into one combined PDF (page
+   * order preserved) and submit a SINGLE upload, instead of firing one
+   * independent run per file. OnBase imports map one page → one person, so the
+   * whole upload is one operation over one combined document.
+   */
+  mergeMultipleFiles?: boolean;
   /**
    * Opt this workflow into the in-modal "Capture photos" upload method — a
    * mobile-photo → PDF → OCR-prepare flow that produces the same OCR prep row
@@ -199,6 +212,25 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       title: resp.sessionId
         ? `Oath upload queued — session ${resp.sessionId.slice(0, 8)}`
         : "Oath upload queued",
+      description: file.name,
+    }),
+  },
+  onbase: {
+    title: () => "Run OnBase Import",
+    srDescription: () =>
+      "Pick the OnBase document type, upload one or more PDFs (combined into one document, one page per person), choose roster source, optionally enable dry run, then submit to start OCR preparation. On approve, OCR fans out one OnBase import per person.",
+    submitUrl: ({ reuploadFor }) =>
+      reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
+    targetWorkflow: () => "onbase",
+    // Document-type dropdown drives the formType (only Emergency Contact is
+    // wired today). Roster matches OCR'd names → EIDs; workers parallelize the
+    // per-person import fan-out.
+    sections: { onbaseDocType: true, roster: true, dryRun: true, workers: true },
+    // Many PDFs → one combined document (one page per person) → one operation.
+    allowMultipleFiles: true,
+    mergeMultipleFiles: true,
+    buildSuccessToast: (_resp, file) => ({
+      title: "OnBase preparation started",
       description: file.name,
     }),
   },

@@ -13,6 +13,7 @@ export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [
   "ocr",
   "oath-upload",
   "oath-signature",
+  "onbase",
 ] as const;
 
 export const RETIRED_DASHBOARD_WORKFLOWS = [
