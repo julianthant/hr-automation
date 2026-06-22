@@ -55,14 +55,46 @@ async function getFormRoot(page: Page): Promise<Locator> {
 }
 
 /**
+ * Decide whether `navigateToWorkforceJobSummary` may skip re-navigation.
+ *
+ * Skipping is safe ONLY when BOTH hold: the URL is on the Workforce Job Summary
+ * component AND the Empl ID search box is present. The URL alone is NOT enough —
+ * after a prior document drills into the Work Location / Job Information detail
+ * tabs, PeopleSoft keeps `WF_JOB_SUMMARY` in the URL (same component) but the
+ * search form is gone. A URL-only check therefore wedged every 2nd+ document of
+ * a sequential separations batch on a detail view, so the next `searchJobSummary`
+ * Empl ID fill timed out (ISS-B02, 2026-06-22). There is no ucpath `resetUrl`
+ * that restores the search page between docs, so the step must detect the
+ * missing search box and re-navigate itself.
+ */
+export function canSkipJobSummaryNavigation(state: {
+  urlOnComponent: boolean;
+  searchBoxPresent: boolean;
+}): boolean {
+  return state.urlOnComponent && state.searchBoxPresent;
+}
+
+/**
  * Navigate directly to Workforce Job Summary via URL.
  * No sidebar clicking needed.
  */
 export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
-  // Check current URL — skip nav if already there
-  if (page.url().includes("WF_JOB_SUMMARY")) {
-    log.step("[Job Summary] Already on Workforce Job Summary page");
-    return;
+  // Skip nav only when we are on a USABLE search page — URL on the component AND
+  // the Empl ID search box actually present. URL alone is a trap across docs in
+  // a batch (see canSkipJobSummaryNavigation / ISS-B02).
+  const urlOnComponent = page.url().includes("WF_JOB_SUMMARY");
+  if (urlOnComponent) {
+    const root = await getFormRoot(page);
+    const searchBoxPresent =
+      (await jobSummary.emplIdInput(root).count().catch(() => 0)) > 0;
+    if (canSkipJobSummaryNavigation({ urlOnComponent, searchBoxPresent })) {
+      log.step("[Job Summary] Already on Workforce Job Summary search page");
+      return;
+    }
+    log.step(
+      "[Job Summary] On WF_JOB_SUMMARY but the Empl ID search box is absent "
+      + "(detail view left by a prior document) — re-navigating to reset search state",
+    );
   }
 
   log.step("[Job Summary] Navigating via direct URL...");
