@@ -1,0 +1,10 @@
+open import document screen
+select document type emergency contact
+select file type pdf
+choose file to import
+employee lookup keyset autofill
+enter ucpath id and tab
+set document name keyword
+read required keyword fields
+click import button
+main menu nine squares launcher
