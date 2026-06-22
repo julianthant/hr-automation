@@ -729,8 +729,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
                   }
                 } else if (r.ok) {
-                  await markItemDone(wf.config.name, item.id, runId, trackerDir)
-                  if (item.taskId) {
+                  // Stale-completion guard (ISS-005): pass the lease this worker
+                  // captured at claim time. If a Stop-All / per-instance-stop
+                  // teardown re-pended this item and a peer re-claimed it, the
+                  // task's `claim_generation` has advanced past `item.claimGeneration`
+                  // — so this (stopped) instance's completion is a no-op in
+                  // SQLite, and the peer's terminal is the single real one. The
+                  // dependency settle is then skipped when the guarded mark did
+                  // not actually terminalize this task.
+                  await markItemDone(wf.config.name, item.id, runId, trackerDir, item.claimGeneration)
+                  if (item.taskId && taskStore.getTask(item.taskId)?.state === 'done') {
                     const released = taskStore.markDependencyFromChildTerminal({
                       childTaskId: item.taskId,
                       childState: 'done',
@@ -742,8 +750,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     void wakeDaemonsForReleasedParents(released, trackerDir)
                   }
                 } else {
-                  await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir)
-                  if (item.taskId) {
+                  await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir, item.claimGeneration)
+                  if (item.taskId && taskStore.getTask(item.taskId)?.state === 'failed') {
                     const released = taskStore.markDependencyFromChildTerminal({
                       childTaskId: item.taskId,
                       childState: 'failed',

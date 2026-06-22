@@ -196,6 +196,7 @@ export async function claimNextItem(
       attemptId: claimed.attemptId,
       claimedBy: instanceId,
       claimedAt: ts,
+      claimGeneration: claimed.claimGeneration,
       runId: claimed.runId,
       ...(claimed.parentRunId ? { parentRunId: claimed.parentRunId } : {}),
     }
@@ -211,25 +212,34 @@ async function markTaskTerminal(
   status: TerminalStatus,
   payload: { error?: string; reason?: string },
   trackerDir: string | undefined,
+  claimGeneration?: number,
 ): Promise<void> {
   const store = openQueueTaskStore(trackerDir)
   store.control.transaction(() => {
     const ts = nowIso()
     const task = store.findTaskByIdentity({ workflow, itemId, runId })
     const attemptId = task ? resolveCurrentAttemptId(store, task, runId, ts) : undefined
+    // Stale-completion guard (ISS-005): only enforce the lease when the worker
+    // captured one at claim time AND the task still has its attempt. A
+    // re-pended-and-reclaimed task advanced its `claim_generation`, so a stale
+    // worker's terminal write matches no row and becomes a no-op below — but we
+    // still emit the audit event with the runId it knew (the queue JSONL is
+    // audit-only and the SQLite state is authoritative).
+    const gen = claimGeneration
 
     if (task) {
       if (status === 'done') {
-        if (attemptId) store.markTaskDone({ taskId: task.taskId, attemptId, now: ts })
+        if (attemptId) store.markTaskDone({ taskId: task.taskId, attemptId, ...(gen !== undefined ? { claimGeneration: gen } : {}), now: ts })
         else markTaskTerminalWithoutAttempt(store, task.taskId, 'done', ts)
       } else if (status === 'failed') {
-        if (attemptId) store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '', now: ts })
+        if (attemptId) store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '', ...(gen !== undefined ? { claimGeneration: gen } : {}), now: ts })
         else markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', ts, payload.error)
       } else {
         store.markTaskCancelled({
           taskId: task.taskId,
           ...(attemptId ? { attemptId } : {}),
           reason: payload.reason ?? '',
+          ...(gen !== undefined ? { claimGeneration: gen } : {}),
           now: ts,
         })
       }
@@ -249,8 +259,9 @@ export async function markItemDone(
   itemId: string,
   runId: string,
   trackerDir?: string,
+  claimGeneration?: number,
 ): Promise<void> {
-  return markTaskTerminal(workflow, itemId, runId, 'done', {}, trackerDir)
+  return markTaskTerminal(workflow, itemId, runId, 'done', {}, trackerDir, claimGeneration)
 }
 
 export async function markItemFailed(
@@ -259,8 +270,9 @@ export async function markItemFailed(
   error: string,
   runId: string,
   trackerDir?: string,
+  claimGeneration?: number,
 ): Promise<void> {
-  return markTaskTerminal(workflow, itemId, runId, 'failed', { error }, trackerDir)
+  return markTaskTerminal(workflow, itemId, runId, 'failed', { error }, trackerDir, claimGeneration)
 }
 
 export async function markItemCancelled(
@@ -269,8 +281,9 @@ export async function markItemCancelled(
   reason: string,
   runId: string,
   trackerDir?: string,
+  claimGeneration?: number,
 ): Promise<void> {
-  return markTaskTerminal(workflow, itemId, runId, 'cancelled', { reason }, trackerDir)
+  return markTaskTerminal(workflow, itemId, runId, 'cancelled', { reason }, trackerDir, claimGeneration)
 }
 
 export async function unclaimItem(

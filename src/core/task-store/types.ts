@@ -60,6 +60,13 @@ export interface ClaimedTask {
   input: unknown
   runId: string
   workerId: string
+  /**
+   * The claim lease this worker holds (ISS-005). Bumped on every claim; a peer
+   * re-claiming a re-pended task advances it again, so the original worker's
+   * stale lease no longer matches and its terminal write is rejected. Thread
+   * this through to `markTaskDone`/`markTaskFailed` to guard the completion.
+   */
+  claimGeneration: number
   parentRunId?: string
 }
 
@@ -101,6 +108,7 @@ export interface TaskDbRow {
   enqueued_at: string | null
   claimed_at: string | null
   claim_expires_at: string | null
+  claim_generation: number
   terminal_at: string | null
   terminal_error: string | null
 }
