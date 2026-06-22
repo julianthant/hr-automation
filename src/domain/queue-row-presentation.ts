@@ -1,5 +1,7 @@
 import { resolveQueueRowKind } from "./queue-row-kind.js";
 import { readQueueTitle } from "./queue-title.js";
+import { resolveNaming } from "./workflow-presentation/resolve.js";
+import type { NamingConfig } from "./workflow-presentation/types.js";
 
 /**
  * Single source of truth for a queue row's **title + subtitle**, dispatched on
@@ -40,6 +42,12 @@ export interface QueueRowPresentationOptions {
    * id, so the flag is a no-op there.
    */
   preferTraceIdSubtitle?: boolean;
+  /**
+   * Effective naming config for this row's workflow. When present, title +
+   * subtitle are resolved through the scheme library instead of the built-in
+   * kind dispatch. Absent → legacy kind-based behavior (back-compat).
+   */
+  naming?: NamingConfig;
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string {
@@ -85,6 +93,15 @@ export function resolveQueueRowPresentation(
   const kind = resolveQueueRowKind(entry);
   if (!kind) return undefined;
   const data = entry.data ?? {};
+
+  if (options.naming) {
+    const vars: Record<string, string> = { ...data, traceId: data.__traceId ?? "" };
+    const { title, subtitle } = resolveNaming(vars, options.naming, {
+      preferTraceIdSubtitle: options.preferTraceIdSubtitle,
+    });
+    return { title: title || firstNonBlank(data.searchName, data.__subject, data.__name) || entry.id, subtitle };
+  }
+
   const traceId = firstNonBlank(data.__traceId) || undefined;
 
   if (kind === "person") {

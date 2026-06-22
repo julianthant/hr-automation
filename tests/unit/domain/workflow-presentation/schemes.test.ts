@@ -25,3 +25,9 @@ describe("SCHEME_LIBRARY", () => {
     expect(SCHEME_LIBRARY.title.every((s) => s.label.length > 0)).toBe(true);
   });
 });
+
+describe("resolveTitle — readQueueTitle precedence", () => {
+  it("catalog-label: readQueueTitle wins over label when __queueTitle is set", () => {
+    expect(resolveTitle({ __queueTitle: "QT", label: "L" }, { scheme: "catalog-label" })).toBe("QT");
+  });
+});

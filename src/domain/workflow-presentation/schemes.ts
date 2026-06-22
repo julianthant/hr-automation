@@ -1,6 +1,7 @@
 // src/domain/workflow-presentation/schemes.ts
 import { renderTemplate } from "./template.js";
 import type { NamingPartSubtitle, NamingPartTitle, NamingPartTrace } from "./types.js";
+import { readQueueTitle } from "../queue-title.js";
 
 export interface SchemeMeta {
   id: string;
@@ -30,9 +31,9 @@ export function resolveTitle(vars: Record<string, string>, part: NamingPartTitle
     case "person-name":
       return personName(vars);
     case "pdf-filename":
-      return firstNonBlank(vars.pdfOriginalName, vars.__name);
+      return firstNonBlank(vars.pdfOriginalName, vars.__name, readQueueTitle(vars) ?? "");
     case "catalog-label":
-      return firstNonBlank(vars.label, vars.__name);
+      return firstNonBlank(readQueueTitle(vars) ?? "", vars.__name, vars.label);
     case "batch-anchor":
       return "";
     case "custom-template":
