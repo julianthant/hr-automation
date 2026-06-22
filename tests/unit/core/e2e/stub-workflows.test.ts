@@ -8,6 +8,8 @@ import { E2EScriptedFailError } from "../../../../src/core/e2e/gates.js";
 import { loadWorkflow, type AnyRegisteredWorkflow } from "../../../../src/core/workflow-loaders.js";
 import { e2eGatesDir, e2eGateHoldPath, e2eGateFailPath } from "../../../../src/tracker/paths.js";
 import { oathSignatureWorkflow } from "../../../../src/workflows/oath-signature/index.js";
+import { personLookupWorkflow } from "../../../../src/workflows/person-lookup/index.js";
+import { resolveQueueRowPresentation } from "../../../../src/domain/queue-row-presentation.js";
 
 /**
  * HRAUTO_E2E_STUBS bridge: `loadWorkflow` wraps mapped workflows with
@@ -170,6 +172,39 @@ test("loadWorkflow wraps only when HRAUTO_E2E_STUBS=1", async () => {
   assert.ok(stub);
   assert.equal(stub.config.systems.length, 0);
   assert.equal(stub.config.name, "oath-signature");
+});
+
+test("person-lookup EID-only stub echoes a resolved name so the row title is not the bare EID (ISS-008)", async () => {
+  // RED pin: an EID-only person-lookup row finishes `done` but, in stub mode,
+  // never gets a resolved name echoed onto its data — so `data.name` is unset
+  // and `data.searchName` stays the bare EID. The person-kind title resolver
+  // then falls through to that EID, titling the row "10514074" instead of a
+  // person name. The REAL handler stamps `searchName = result.name` (the
+  // UCPath-resolved name), so the stub is the layer that must echo a name.
+  const dir = mkdtempSync(join(tmpdir(), "e2e-stub-pl-eid-"));
+  try {
+    const stub = maybeWrapE2EStub(
+      "person-lookup",
+      personLookupWorkflow as unknown as AnyRegisteredWorkflow,
+    );
+    const { ctx, data } = makeFakeCtx(dir);
+    await stub.config.handler(ctx as never, { emplId: "10514074" } as never);
+
+    // Project the finished row's data through the single title/subtitle resolver
+    // as a person-kind row (what an EID person-lookup row renders as).
+    const presentation = resolveQueueRowPresentation({
+      id: "row-1",
+      data: { ...data, queueRowKind: "person" },
+    });
+    assert.ok(presentation, "person-kind row should resolve a presentation");
+    assert.notEqual(
+      presentation.title,
+      "10514074",
+      "an EID-only person-lookup row must title on a resolved name, not the bare EID",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("oath-upload stub runs the REAL handler with ServiceNow legs stubbed (upload-only path)", async () => {

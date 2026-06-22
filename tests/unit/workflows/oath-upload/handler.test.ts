@@ -340,14 +340,22 @@ test("oathUploadHandler born-at-upload: approval with zero signer rows THROWS an
   }
 });
 
-test("oathUploadHandler born-at-upload: a discarded OCR prep THROWS and never files the ticket", async () => {
+// ISS-007 (e2e run 20260622): an upstream OCR discard must terminalize the
+// born-at-upload oath-upload ticket on the CANCEL surface (orange Cancelled),
+// not red Failed. The handler used to throw a plain Error, so the kernel froze
+// the terminal row at `step=wait-approval` (red). It now throws a kernel
+// `CancelledError("discarded")` → `kind:"cancelled"` + a `discarded` sentinel
+// step that `statusKeyForEntry` classifies as Cancelled.
+test("oathUploadHandler born-at-upload: a discarded OCR prep throws a CancelledError(discarded) and never files the ticket (ISS-007)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oath-upload-born-discard-"));
   try {
     const { ctx, stepCalls } = makeFakeCtx();
     let submitCalled = false;
+    const { CancelledError } = await import("../../../../src/core/kernel/types.js");
 
-    await assert.rejects(
-      oathUploadHandler(ctx as never, {
+    let thrown: unknown;
+    try {
+      await oathUploadHandler(ctx as never, {
         pdfFileId: "file-1",
         pdfOriginalName: "oaths.pdf",
         sessionId: "sess-discard",
@@ -363,10 +371,17 @@ test("oathUploadHandler born-at-upload: a discarded OCR prep THROWS and never fi
         },
         _loginOverride: async () => true,
         _submitOverride: async () => { submitCalled = true; return "HRC-NOPE"; },
-      }),
-      /OCR prep was discarded.*NOT filing/,
-    );
+      });
+    } catch (err) {
+      thrown = err;
+    }
 
+    assert.ok(thrown instanceof CancelledError, "discard surfaces a kernel CancelledError (Cancel surface)");
+    assert.equal(
+      (thrown as InstanceType<typeof CancelledError>).stepName,
+      "discarded",
+      "the CancelledError carries the `discarded` sentinel step → orange Cancelled, not red Failed",
+    );
     assert.equal(submitCalled, false, "no ticket on discard");
     assert.ok(stepCalls.includes("wait-approval"));
     assert.ok(!stepCalls.includes("wait-signatures"));

@@ -42,6 +42,13 @@ export interface RunModalSubmitResponse {
   sessionId?: string;
   runId?: string;
   error?: string;
+  /**
+   * Structured duplicate refusal (ISS-001): set when an oath-upload PDF was
+   * already filed. `handleSubmit` surfaces `error` (which names `priorTicket`)
+   * and keeps the modal open instead of closing it as a silent success.
+   */
+  duplicate?: boolean;
+  priorTicket?: string;
 }
 
 export interface RunModalToast {

@@ -116,6 +116,13 @@ export interface QueueItem {
   attemptId?: string
   claimedBy?: string
   claimedAt?: string
+  /**
+   * The claim lease this worker holds (ISS-005). Threaded from `claimNextItem`
+   * to the terminal `markItem*` calls so a worker whose item was re-pended and
+   * re-claimed by a peer (its lease now stale) cannot complete the run the peer
+   * owns. Present only on a freshly claimed item.
+   */
+  claimGeneration?: number
   completedAt?: string
   failedAt?: string
   runId?: string

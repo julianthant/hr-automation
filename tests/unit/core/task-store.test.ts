@@ -243,6 +243,63 @@ test('parent cancellation cascades to queued children', () => {
   }
 })
 
+test('a stale worker cannot complete a task a peer re-claimed after re-pend (ISS-005)', () => {
+  // Stop-All / per-instance-stop teardown re-pends an in-flight item via
+  // `returnTaskToQueued` so a surviving peer can finish it. Before the claim
+  // lease, the re-pend kept the SAME `current_attempt_id` + runId, so the peer
+  // re-claimed the identical attempt — and the ORIGINAL (stopped) worker, still
+  // finishing its run, could then call `markTaskDone` for that attempt and have
+  // it land. The task-store stayed idempotent (one `done` row), but TWO workers
+  // each transacted the work → a duplicate oath submission outside dry-run.
+  //
+  // The lease (`claimGeneration`) is the guard: each claim hands the worker a
+  // monotonically increasing generation; a terminal write supplied with a stale
+  // generation is a no-op. So the original worker's completion must NOT win
+  // after the peer re-claims.
+  const { dir, store } = openTempStore()
+  try {
+    const [q] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+
+    // Worker w1 claims + runs the item, capturing its lease.
+    const c1 = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c1)
+    store.markTaskRunning({ taskId: q.taskId, attemptId: c1.attemptId, workerId: 'w1', now: iso(2) })
+
+    // Teardown re-pends w1's in-flight item back to the queue (reassign).
+    store.returnTaskToQueued({ taskId: q.taskId, now: iso(3) })
+
+    // Peer w2 re-claims it — a NEW lease generation.
+    const c2 = store.claimNextTask({ workflow: 'wf', workerId: 'w2', now: iso(4) })
+    assert.ok(c2)
+    assert.notEqual(
+      c2.claimGeneration,
+      c1.claimGeneration,
+      'a re-claim after re-pend must advance the lease generation',
+    )
+
+    // w1 (the stopped instance) finally finishes its run and completes the task
+    // with its STALE lease. This must NOT terminalize the task — w2 holds it now.
+    store.markTaskDone({ taskId: q.taskId, attemptId: c1.attemptId, claimGeneration: c1.claimGeneration, now: iso(5) })
+    assert.notEqual(
+      store.getTask(q.taskId)?.state,
+      'done',
+      'a stale-lease completion must be a no-op — the peer still owns the run',
+    )
+
+    // w2 completing with its CURRENT lease succeeds (the single real terminal).
+    store.markTaskDone({ taskId: q.taskId, attemptId: c2.attemptId, claimGeneration: c2.claimGeneration, now: iso(6) })
+    assert.equal(store.getTask(q.taskId)?.state, 'done', 'the owning peer completes the task')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('parseJson throws a clear error for malformed JSON', () => {
   assert.throws(
     () => parseJson('not-json'),
