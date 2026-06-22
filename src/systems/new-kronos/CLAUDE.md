@@ -33,7 +33,7 @@ Call it AFTER `clickGoToTimecard` + `setDateRange` so the grid shows the right w
 - Dynamic iframe name: `iframe[name^="portal-frame-"]` (suffix changes per session)
 - Checks for "There are no items to display." message to detect no results
 - Less defensive than Old Kronos — fewer fallback strategies, lets errors propagate
-- `setDateRange` enters the custom-range dates via `typeMaskedDate` (digits only + readback verify, NOT `fill()` and NOT the literal `MM/DD/YYYY` string). The WFD inputs reject `fill()` AND auto-insert their own `/`, so typing the slashes races the mask and scrambles the value (e.g. `05/10/2026` → `6/05/1020` → `WFP-00889`). See LESSONS.md (OBS-006 / ISS-B05).
+- `setDateRange` enters the custom-range dates via `typeMaskedDate` — **digits only, one settled keystroke at a time** (condition-based), NOT `fill()`, NOT the literal `MM/DD/YYYY` string, and NOT a fixed-delay `pressSequentially`. The WFD inputs reject `fill()` (revert to today) AND are async React-masked, so ANY multi-key type at a fixed delay races the mask and scrambles/overflows the value under the parallel batch (`05112026` → `1120260622`, 10 digits → `WFP-00889`). `typeMaskedDate` clears the field (verified empty by readback), then types each digit and waits for the field to reflect the running prefix (`maskedDigitPrefixes`/`waitForMaskedDigits`) before the next key — so the next key never outruns the mask. Do not revert to a fixed delay. See LESSONS.md (OBS-006 / ISS-B05).
 - `navigate.ts` calls `debugScreenshot` during timecard checks (`new-kronos-timecard-01-current` / `02-previous`) — not a blanket debug logger across the whole module
 
 ## Lessons Learned
