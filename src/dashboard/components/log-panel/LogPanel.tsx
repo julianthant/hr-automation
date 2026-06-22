@@ -181,7 +181,18 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   const runStep = isViewingLiveRun
     ? (entry?.step || activeRun?.step || null)
     : (activeRun?.step || null);
-  const runStepDurations = activeRun?.stepDurations ?? entry?.stepDurations;
+  // Step durations follow the SAME live-vs-historical preference as
+  // status/step above. For the LIVE run, prefer the SSE `entry` — `activeRun`
+  // is a one-shot `/api/runs` snapshot taken when the row was opened
+  // (`useRunsForMergedEntry` only refetches when runId/id/date change, not as
+  // the run progresses), so its `stepDurations` freezes at open time. The SSE
+  // entry refreshes whenever a step closes or the run goes terminal (both
+  // change `step`/`status`, which are in the entry hash), which is exactly when
+  // durations change — so the timeline now updates live instead of only after a
+  // remount (tab switch). Historical runs keep using the run's own snapshot.
+  const runStepDurations = isViewingLiveRun
+    ? (entry?.stepDurations ?? activeRun?.stepDurations)
+    : (activeRun?.stepDurations ?? entry?.stepDurations);
   // OCR rows drop the `verification` (always) and "Review"/`awaiting-approval`
   // (standalone only) chips cosmetically — see `computeOcrPipelineView`. The
   // helper also remaps currentStep/status so a run parked on a hidden step
