@@ -7,6 +7,7 @@ import type {
   RunOpts,
   BatchResult,
 } from './types.js'
+import { defaultPresentationFromMetadata, mergePresentation } from '../../domain/workflow-presentation/resolve.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
 import { queueRowKindFromInputSubject } from '../../domain/queue-row-kind.js'
@@ -122,6 +123,13 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     hasOperatorSubject: Boolean(config.operatorSubject),
     ...(config.runtimePolicy ? { runtimePolicy: config.runtimePolicy } : {}),
     ...(presetsMetadata && presetsMetadata.length > 0 ? { presets: presetsMetadata } : {}),
+    presentation: mergePresentation(
+      defaultPresentationFromMetadata({
+        inputSubject: typeof config.inputSubject === 'string' ? config.inputSubject : undefined,
+        archetype: metadataArchetype,
+      }),
+      config.presentation,
+    ),
   }
   if (config.runtimePolicy) {
     setWorkflowRuntimePolicy(config.name, config.runtimePolicy)
