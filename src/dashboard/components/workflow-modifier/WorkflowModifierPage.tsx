@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWorkflowPresentation } from "./useWorkflowPresentation.js";
 import type { WorkflowOverride } from "./useWorkflowPresentation.js";
 import { NamingEditor } from "./NamingEditor.js";
@@ -9,6 +9,18 @@ import { SampleRowPreview } from "./SampleRowPreview.js";
 export function WorkflowModifierPage(): JSX.Element {
   const wp = useWorkflowPresentation();
   const [draft, setDraft] = useState<WorkflowOverride>({});
+
+  // Seed draft from the persisted override whenever a workflow's data loads (or
+  // reloads after a save/revert). Using wp.data.override (the partial saved file
+  // content) — NOT wp.data.effective (the full default⊕override merge) — avoids
+  // baking default values into the override and pinning them forever. The effect
+  // runs on the wp.data object reference, which changes only when load() resolves:
+  // on workflow select, after save (hook refetches), and after revert (override
+  // becomes null → draft resets to {}). This ensures untouched sections round-trip
+  // through Save and are never silently destroyed.
+  useEffect(() => {
+    setDraft(wp.data?.override ?? {});
+  }, [wp.data]);
 
   return (
     <div className="flex h-full flex-1 overflow-hidden">
