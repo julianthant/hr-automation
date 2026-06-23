@@ -106,6 +106,20 @@ export const search = {
     root.getByRole("menuitemradio").or(root.locator('[role="row"]')).first(),
 
   /**
+   * First result SLAT — a "somebody showed up" signal for found-detection. The
+   * live WFD result renders as a `menuitemradio` ("Item Name <name> not
+   * checked"); its presence means the search returned an employee. Kept TIGHT
+   * (no `[role=row]` fallback, unlike `firstResultRow`) so a header/placeholder
+   * row can never false-positive a not-found search into found. Used to detect a
+   * present result INDEPENDENTLY of the "Select Item" checkbox, whose backing
+   * native input is visually hidden — see `searchEmployee`.
+   * @tags first, result, slat, menuitemradio, found, probe, search, new-kronos
+   */
+  // NEEDS LIVE RE-VERIFY 2026-06-22
+  firstResultSlat: (root: SearchRoot): Locator =>
+    root.getByRole("menuitemradio").first(),
+
+  /**
    * Close the sidebar. verified 2026-06-18
    * @tags close, sidebar, button, search, new-kronos
    */
@@ -202,18 +216,51 @@ export const timecard = {
     page.getByRole("button", { name: "Select range" }),
 
   /**
-   * Start date input (custom range). verified 2026-06-18
-   * @tags start, date, input, range, timecard, new-kronos
+   * Start date input (custom range) — NATIVE `<input type=date>`, value held as
+   * ISO `YYYY-MM-DD` (NOT a masked text field). Targeted by id. verified 2026-06-22
+   * @tags start, date, input, range, timecard, native, new-kronos
    */
-  startDateInput: (page: Page): Locator =>
-    page.getByRole("textbox", { name: "Start date" }),
+  startDateInput: (page: Page): Locator => page.locator("#startDateTimeInput"),
 
   /**
-   * End date input (custom range). verified 2026-06-18
-   * @tags end, date, input, range, timecard, new-kronos
+   * End date input (custom range) — NATIVE `<input type=date>` (ISO value).
+   * Targeted by id. verified 2026-06-22
+   * @tags end, date, input, range, timecard, native, new-kronos
    */
-  endDateInput: (page: Page): Locator =>
-    page.getByRole("textbox", { name: "End date" }),
+  endDateInput: (page: Page): Locator => page.locator("#endDateTimeInput"),
+
+  /**
+   * Moment-picker month/year header (e.g. "Jun 2026") — read to know which way
+   * to step the calendar. verified 2026-06-22
+   * @tags calendar, month, header, range, timecard, new-kronos
+   */
+  calendarMonthHeader: (page: Page): Locator =>
+    page.locator("th.js-moment-picker-parent-view").first(),
+
+  /**
+   * Moment-picker "Previous month" arrow. verified 2026-06-22
+   * @tags calendar, previous, month, arrow, range, timecard, new-kronos
+   */
+  calendarPrevMonth: (page: Page): Locator =>
+    page.getByRole("button", { name: "Previous month" }).first(),
+
+  /**
+   * Moment-picker "Next month" arrow. verified 2026-06-22
+   * @tags calendar, next, month, arrow, range, timecard, new-kronos
+   */
+  calendarNextMonth: (page: Page): Locator =>
+    page.getByRole("button", { name: "Next month" }).first(),
+
+  /**
+   * Moment-picker day cell for a specific date. `name` matches the cell's
+   * full-date aria-label ("Monday, June 11, 2026"); `:not(.out-of-month)` keeps
+   * an adjacent-month trailing day from being hit. verified 2026-06-22
+   * @tags calendar, day, cell, gridcell, range, timecard, new-kronos
+   */
+  calendarDayCell: (page: Page, name: string | RegExp): Locator =>
+    page
+      .getByRole("gridcell", { name })
+      .and(page.locator("td.js-moment-picker-item:not(.out-of-month)")),
 
   /**
    * Apply button (custom range). verified 2026-06-18
