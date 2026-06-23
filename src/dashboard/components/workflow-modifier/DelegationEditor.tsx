@@ -1,11 +1,10 @@
 import type {
   DelegationDisplayConfig,
-  NamingPartTitle,
-  NamingPartSubtitle,
   TitleSchemeId,
   SubtitleSchemeId,
 } from "../../../domain/workflow-presentation/types.js";
 import type { WorkflowPresentationDetail, WorkflowOverride } from "./useWorkflowPresentation.js";
+import { SchemePartSelect } from "./SchemePartSelect.js";
 
 interface Props {
   data: WorkflowPresentationDetail;
@@ -25,160 +24,64 @@ export function DelegationEditor({ data, draft, onChange }: Props): JSX.Element 
     <section className="rounded-md border border-border p-4">
       <h3 className="text-sm font-semibold mb-3">Delegation Display</h3>
 
-      {/* memberTitle */}
-      {(() => {
-        const cur: NamingPartTitle | undefined = del.memberTitle;
-        return (
-          <div className="mb-3">
-            <label
-              htmlFor="delegation-member-title"
-              className="block text-xs uppercase text-muted-foreground mb-1"
-            >
-              Member title
-            </label>
-            <select
-              id="delegation-member-title"
-              value={cur?.scheme ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBlock({
-                  ...del,
-                  memberTitle: v
-                    ? { scheme: v as TitleSchemeId, template: cur?.template }
-                    : undefined,
-                });
-              }}
-              className="border border-border rounded px-2 py-1 w-full bg-background text-foreground"
-            >
-              <option value="">— Default (no override) —</option>
-              {lib.title.map((s) => (
-                <option key={s.id} value={s.id} title={s.description}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-            {cur?.scheme === "custom-template" && (
-              <input
-                aria-label="member title custom template"
-                value={cur.template ?? ""}
-                placeholder="e.g. {name} ({emplId})"
-                onChange={(e) =>
-                  setBlock({
-                    ...del,
-                    memberTitle: { scheme: "custom-template", template: e.target.value },
-                  })
-                }
-                className="mt-1 border border-border rounded px-2 py-1 w-full font-mono text-sm bg-background text-foreground"
-              />
-            )}
-          </div>
-        );
-      })()}
+      <div className="mb-3">
+        <SchemePartSelect
+          id="delegation-member-title"
+          label="Member title"
+          options={lib.title}
+          value={del.memberTitle}
+          allowUnset={true}
+          placeholder="e.g. {name} ({emplId})"
+          templateAriaLabel="member title custom template"
+          onChange={(next) =>
+            setBlock({
+              ...del,
+              memberTitle: next ? { scheme: next.scheme as TitleSchemeId, template: next.template } : undefined,
+            })
+          }
+        />
+      </div>
 
-      {/* memberSubtitle */}
-      {(() => {
-        const cur: NamingPartSubtitle | undefined = del.memberSubtitle;
-        return (
-          <div className="mb-3">
-            <label
-              htmlFor="delegation-member-subtitle"
-              className="block text-xs uppercase text-muted-foreground mb-1"
-            >
-              Member subtitle
-            </label>
-            <select
-              id="delegation-member-subtitle"
-              value={cur?.scheme ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBlock({
-                  ...del,
-                  memberSubtitle: v
-                    ? { scheme: v as SubtitleSchemeId, template: cur?.template }
-                    : undefined,
-                });
-              }}
-              className="border border-border rounded px-2 py-1 w-full bg-background text-foreground"
-            >
-              <option value="">— Default (no override) —</option>
-              {lib.subtitle.map((s) => (
-                <option key={s.id} value={s.id} title={s.description}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-            {cur?.scheme === "custom-template" && (
-              <input
-                aria-label="member subtitle custom template"
-                value={cur.template ?? ""}
-                placeholder="e.g. {eid} · {code}"
-                onChange={(e) =>
-                  setBlock({
-                    ...del,
-                    memberSubtitle: { scheme: "custom-template", template: e.target.value },
-                  })
-                }
-                className="mt-1 border border-border rounded px-2 py-1 w-full font-mono text-sm bg-background text-foreground"
-              />
-            )}
-          </div>
-        );
-      })()}
+      <div className="mb-3">
+        <SchemePartSelect
+          id="delegation-member-subtitle"
+          label="Member subtitle"
+          options={lib.subtitle}
+          value={del.memberSubtitle}
+          allowUnset={true}
+          placeholder="e.g. {eid} · {code}"
+          templateAriaLabel="member subtitle custom template"
+          onChange={(next) =>
+            setBlock({
+              ...del,
+              memberSubtitle: next ? { scheme: next.scheme as SubtitleSchemeId, template: next.template } : undefined,
+            })
+          }
+        />
+      </div>
 
       {/* Hint: member naming requires both fields */}
       <p className="mb-3 text-xs text-muted-foreground">
         Member naming only takes effect when <em>both</em> Member title and Member subtitle are set.
       </p>
 
-      {/* prepTitle */}
-      {(() => {
-        const cur: NamingPartTitle | undefined = del.prepTitle;
-        return (
-          <div className="mb-3">
-            <label
-              htmlFor="delegation-prep-title"
-              className="block text-xs uppercase text-muted-foreground mb-1"
-            >
-              Prep title
-            </label>
-            <select
-              id="delegation-prep-title"
-              value={cur?.scheme ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                setBlock({
-                  ...del,
-                  prepTitle: v
-                    ? { scheme: v as TitleSchemeId, template: cur?.template }
-                    : undefined,
-                });
-              }}
-              className="border border-border rounded px-2 py-1 w-full bg-background text-foreground"
-            >
-              <option value="">— Default (no override) —</option>
-              {lib.title.map((s) => (
-                <option key={s.id} value={s.id} title={s.description}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-            {cur?.scheme === "custom-template" && (
-              <input
-                aria-label="prep title custom template"
-                value={cur.template ?? ""}
-                placeholder="e.g. {name} — Prep"
-                onChange={(e) =>
-                  setBlock({
-                    ...del,
-                    prepTitle: { scheme: "custom-template", template: e.target.value },
-                  })
-                }
-                className="mt-1 border border-border rounded px-2 py-1 w-full font-mono text-sm bg-background text-foreground"
-              />
-            )}
-          </div>
-        );
-      })()}
+      <div className="mb-3">
+        <SchemePartSelect
+          id="delegation-prep-title"
+          label="Prep title"
+          options={lib.title}
+          value={del.prepTitle}
+          allowUnset={true}
+          placeholder="e.g. {name} — Prep"
+          templateAriaLabel="prep title custom template"
+          onChange={(next) =>
+            setBlock({
+              ...del,
+              prepTitle: next ? { scheme: next.scheme as TitleSchemeId, template: next.template } : undefined,
+            })
+          }
+        />
+      </div>
 
       {/* coordinatorLabelSuffix */}
       <div className="mb-1">
