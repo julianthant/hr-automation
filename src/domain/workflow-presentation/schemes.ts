@@ -57,6 +57,7 @@ export function resolveSubtitle(vars: Record<string, string>, part: NamingPartSu
   }
 }
 
+// Not wired into pre-emit trace stamping — display/preview only in v1 (see src/core/CLAUDE.md "Trace-scheme override caveat").
 export function resolveTrace(vars: Record<string, string>, part: NamingPartTrace): string {
   switch (part.scheme) {
     case "code-time-runid":

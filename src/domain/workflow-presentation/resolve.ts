@@ -14,7 +14,7 @@ import { resolveSubtitle, resolveTitle } from "./schemes.js";
  */
 export function defaultPresentationFromMetadata(args: {
   inputSubject?: string;
-  archetype: string;
+  archetype: string; // archetype: reserved for future archetype-aware default presentation; unused today.
 }): WorkflowPresentationConfig {
   const kind = subjectToKind(args.inputSubject);
   let title: NamingPartTitle;
