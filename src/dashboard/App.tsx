@@ -43,10 +43,11 @@ import { TopBarCaptureButton } from "./components/navigation/TopBarCaptureButton
 import { parsePrepareRowData, isResolvedPrepRow, isDiscardedPrepRow } from "./components/ocr/types";
 import { RunModal } from "./components/run-modal/RunModal";
 import { dateLocal, isEditableFocus } from "./lib/utils";
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Workflow } from "lucide-react";
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
 import { ColumnResizer } from "./components/shared/ColumnResizer";
 import { OverviewPanel } from "./components/overview/OverviewPanel";
+import { WorkflowModifierPage } from "./components/workflow-modifier/WorkflowModifierPage.js";
 import { NotificationSettings } from "./components/navigation/NotificationSettings";
 import {
   fireDesktopNotification,
@@ -450,10 +451,12 @@ export function App() {
   // Cross-workflow Overview landing (rail "Overview" entry). Picking any
   // workflow exits it.
   const [showOverview, setShowOverview] = useState(false);
+  const [showWorkflowModifier, setShowWorkflowModifier] = useState(false);
 
   // Clear selection when switching workflows
   const handleWorkflowChange = useCallback((wf: string) => {
     setShowOverview(false);
+    setShowWorkflowModifier(false);
     setWorkflow(wf);
     setSelectedId(null);
     setBatchQueueParentRunId(null);
@@ -712,15 +715,26 @@ export function App() {
           />
         }
         rightSlot={
-          <button
-            type="button"
-            onClick={() => setShortcutsOpen(true)}
-            aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts (?)"
-            className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Workflow configuration"
+              title="Workflow configuration"
+              onClick={() => { setShowWorkflowModifier(true); setShowOverview(false); }}
+              className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <Workflow className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label="Keyboard shortcuts"
+              title="Keyboard shortcuts (?)"
+              className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+          </div>
         }
       />
       <OcrReviewPrepProvider
@@ -745,9 +759,11 @@ export function App() {
           queuedCounts={wfQueuedCounts}
           onWorkflowChange={handleWorkflowChange}
           overviewActive={showOverview}
-          onShowOverview={() => setShowOverview(true)}
+          onShowOverview={() => { setShowOverview(true); setShowWorkflowModifier(false); }}
         />
-        {showOverview ? (
+        {showWorkflowModifier ? (
+          <WorkflowModifierPage />
+        ) : showOverview ? (
           <OverviewPanel
             workflows={workflows}
             wfCounts={wfCounts}
