@@ -221,7 +221,7 @@ export function mergeCoordinatorLogs(
   const seen = new Set<string>();
   const out: CoordinatorLogLine[] = [];
   for (const { entry } of withIndex) {
-    const key = `${entry.source}\0${entry.ts ?? ""}\0${entry.message}`;
+    const key = JSON.stringify([entry.source, entry.ts ?? "", entry.message]);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(entry);
