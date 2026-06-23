@@ -17,6 +17,8 @@ This folder is organized by dashboard area. Keep files near the UI surface that 
 | `shared/` | Cross-area components, shared display helpers, row action buttons, styles, and tracker/dashboard API types. | `EmptyState.tsx`, `RetryButton.tsx`, `RowCancelButton.tsx`, `BumpButton.tsx`, `DeleteButton.tsx`, `PdfPagePreview.tsx`, `MediaLightbox.tsx`, `types.ts`, `entry-display.ts` |
 | `hooks/` | React hooks that own client-side state, polling, SSE subscriptions, cache warming, or toast effects. Hooks should not render JSX. | `useEntries.ts`, `useLogs.ts`, `useSessions.ts`, `useRosters.ts` |
 | `ui/` | Local shadcn/HeroUI-style primitives only. These should stay generic and workflow-agnostic. | `dialog.tsx`, `popover.tsx`, `tooltip.tsx`, `calendar.tsx` |
+| `overview/` | Overview panel built from SSE `wfCounts` + `failureCounts` — no invented data splits. | `OverviewPanel.tsx` |
+| `dev/` | Dev-only UI gallery for in-browser component review (never shipped to prod). | `UiGallery.tsx` |
 
 ## Lessons Learned
 

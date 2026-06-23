@@ -70,21 +70,21 @@ log itself.)
 
 ---
 
-## Log context (what today's fix is about)
+## Log context
 
 Every log line must be stamped with **which run or daemon it belongs to**, or it
 gets thrown away before it's saved.
 
-| Keeper name | What it is | In the code today |
+| Keeper name | What it is | In the code |
 |---|---|---|
 | **log context** | The stamp on a log line saying who it belongs to. No stamp → the line is dropped, never saved. | `LogContext`, `ctx` |
-| **run log context** | A log context for one **run**. Stamps run log lines. Already exists. | `withLogContext` |
-| **daemon log context** | A log context for the **daemon**. Stamps daemon log lines. *Does not exist yet — this is the fix.* | `withDaemonLogContext` *(to add)* |
-| **daemon log line** | A line the daemon writes about itself. Stored in the **session log**. | `daemon_log` event *(to add)* |
+| **run log context** | A log context for one **run**. Stamps run log lines. | `withLogContext` (`src/utils/log-context.ts`) |
+| **daemon log context** | A log context for the **daemon**. Stamps daemon log lines. | `withDaemonLogContext` (`src/utils/log-context.ts`) |
+| **daemon log line** | A line the daemon writes about itself. Stored in the **session log**. | `daemon_log` event (`src/tracker/session-events.ts` `emitDaemonLog`) |
 
-Today the daemon has **no log context**, so every line it writes is dropped. The
-fix adds a **daemon log context** and stores its lines in the **session log** —
-the same shape the **run log context** already uses for runs.
+The daemon log context is active: `withDaemonLogContext` wraps the daemon loop and
+`emitDaemonLog` stores daemon-scoped lines as `daemon_log` entries in the session
+log — the same shape the run log context uses for per-run lines.
 
 ---
 

@@ -54,7 +54,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 - `excelOnline.coEditingBanner` can be used as a readiness probe but only fires when someone else has the workbook open. Don't depend on it for general page-ready detection; prefer `page.waitForLoadState("networkidle")` plus a small fixed wait.
 - The File button's accessible name is `"File"` (exact). There's also a `Files` ribbon tab in some Office hosts — not in Excel Online, but keep `exact: true` defensively.
 - Download triggers via a `page.on("download", ...)` event; the file streams into the Playwright CLI workspace's `.playwright-cli/` folder during CLI probing, but the real `downloadSharePointFile` helper uses `download.saveAs()` to land the bytes in `.tracker/sharepoint/`.
-- The dashboard download endpoint (`POST /api/sharepoint-download/run`, handled by `buildSharePointRosterDownloadHandler` in `src/workflows/sharepoint-download/handler.ts`) holds a module-level in-flight lock — concurrent runs get HTTP 409. Don't invoke the helper twice in parallel.
+- The dashboard download endpoint (`POST /api/sharepoint-download/run`, handled by `buildSharePointRosterDownloadHandler` in `src/workflows/sharepoint-download/handler.ts`) uses a module-level serial queue — concurrent requests are serialized; a new request that arrives while another is running or queued returns HTTP 202 with `status: "queued"` (responses are 202/400/404/500; there is no 409).
 
 ## Lessons Learned
 

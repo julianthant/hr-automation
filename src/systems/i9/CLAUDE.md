@@ -30,7 +30,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 - If no worksite matches department number, throws before saving (manual recovery needed)
 - Profile ID extracted from URL pattern `/employee/profile/{id}` after save
 - Grid parsing: last `.getByRole("grid")` in dialog is results, earlier grids are headers
-- Search button uses direct selector `#divSearchOptions` (not accessible role)
+- Search **Options** button (`dashboard.searchOptionsButton`) uses direct selector `#divSearchOptions` (not accessible role); the search *submit* (`search.submitButton`) uses `getByRole("button", { name: "Search" })`
 - Returns `I9Result` error object on validation failure (doesn't throw)
 - Summary-page signer lookup is **deterministic navigation** (2026-06-06): `page.goto('/form-I9/summary/{profileId}/{i9Id}')` built from the search hit's IDs — NOT a click-through. The old last-name-link → record-expand → Summary-tab flow was fragile (last-name cells are hrefless `<a>`, not link roles) and surfaced as a spurious "not found". Paper-imported records redirect to `/form-I9-historical/…` and lack the "Signed Section 2" audit row; detect with `page.url().includes("/form-I9-historical/")` to distinguish `historical` from genuinely `unsigned`.
 - Audit trail columns are `[Section, Date, Event, Created By]` — signer is the **last cell** (Created By) of the row whose accessible name matches `/Signed Section 2/`. Use `.first()` so amended I-9s (multiple signings) return the most recent. **Wait on `summary.auditTrailHeaderRow` before counting `signedSection2Row`** — the summary heading renders before the audit table populates, so an early `count()` reads 0 and mis-classifies a signed record as unsigned.

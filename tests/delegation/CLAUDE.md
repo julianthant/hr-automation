@@ -15,7 +15,7 @@ projection tooling `snapshot-row.ts`). Full harness API + gotchas:
 |------|-------|
 | `harness-smoke.test.ts` | The linchpin: 3-child `parentRunId` fan-out, cancel one mid-hold, siblings unaffected, projection asserts, `.tracker/` untouched. Reference pattern for all delegation tests. |
 | `ocr-oath-signature.test.ts` | **P2.9 star test** — OCR → oath-signature `approveTo` fan-out through the real daemon, under hold/cancel/release. |
-| `ocr-emergency-contact.test.ts` | **P2.10** — OCR → emergency-contact `approveTo` fan-out, same hold/cancel/release shape for a DIFFERENT form type (nested `EmergencyContactRecord` input, default delegation policy, `ec-` trace code). |
+| `ocr-emergency-contact.test.ts` | **P2.10** — OCR → emergency-contact `approveTo` fan-out, same hold/cancel/release shape for a DIFFERENT form type (nested `EmergencyContactRecord` input, default delegation policy, `oc-` trace code). |
 | `ocr-verify-lookup.test.ts` | **P2.11** — OCR `verify` → person-lookup + i9-lookup **`enrichRecords`** fan-out (NO approve fan-out; verify is read-only). Asserts the full enrichment projection + a cancel-mid-enrichment invariant. See "verify enrichment fan-out shape" below. |
 | `ocr-oath-upload.test.ts` | **P2.12** — OCR (oath form) → oath-upload **`approveDocumentTo`** once-per-document fan-out. Approving an oath OCR run fans out to TWO daemons: 1 oath-signature signer row (`approveTo`) + 1 oath-upload TICKET row (`approveDocumentTo`), both under the OCR run, sharing the `ou-` trace prefix. Asserts the doc fan-out projection (ticket row file-kind title + `signerItemIds` input) + cancel-the-ticket-leaves-signer invariant. Drove the multi-target `rt.approveOcr` generalization. See "approveDocumentTo doc fan-out shape" below. |
 | `concurrency-soak.test.ts` | **P3.13** — Concurrency/soak: 2 parents × [3+2] children in flight concurrently, children cancelled at DIFFERENT stages, looped `SOAK_ITERATIONS` times. Pins no-stall / no-orphan / no-count-drift / sibling-independence / projection / group-anchor invariants every iteration plus cross-iteration drift checks. See "Concurrency/soak (P3.13)" below. |
@@ -89,8 +89,7 @@ read the **nested** `EmergencyContactRecord` (`employee.employeeId` /
 the employee name and the subtitle to the EID. Because EC fans out **3** members
 under one parentRunId, they still group into a `batch` anchor via the count-≥2
 path in `buildTrackerQueueSurfaces` — `alwaysBatchDelegatedMembers` only matters
-for the lone-member case. EC brands `ec-` via `spec.traceCode` (F5, 2026-06-11), so the OCR root +
-every child share the `ec-…` prefix (oath brands `ou-`).
+for the lone-member case. EC has NO `traceCode` (E2E-007, reverses F5), so a standalone EC OCR upload brands the default `oc-` prefix; every child shares that `oc-…` prefix (oath brands `ou-`).
 
 **Approve payloads:** build the selected/approved records via
 `approvedOathRecordsFromStub` (oath: `selected:true` + `matchSource:"form-eid"`)

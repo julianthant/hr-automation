@@ -83,14 +83,13 @@ There are two ways a delegation can become a batch:
 
 **1. The child workflow declares its own run is a batch.**
 
-Some workflows are intrinsically batches — their single run produces N units
-of peer work internally (e.g. oath-signature with a PDF: one run, many
-signers). They declare this on the workflow definition:
+Some workflows declare their per-run archetype upfront. They declare this on the workflow definition:
 
 ```ts
 defineWorkflow({
   name: "oath-signature",
-  archetype: "batch",   // PDF run is a batch row by nature
+  archetype: "single",  // the workflow row is a single; its PDF surface is
+                        // the operation coordinator with operation-member children
 });
 
 defineWorkflow({
@@ -105,8 +104,9 @@ defineWorkflow({
 ```
 
 When a parent calls `ctx.delegateTo(oathSignature, { pdfPath })`, the result
-is one batch row in oath-signature's tab — because oath-signature is
-declared as a batch.
+is a single row in oath-signature's tab. The per-signer rows are
+`operation-member` rows stamped under the operation coordinator — not batch
+members of oath-signature itself.
 
 **2. The parent fans out N peers via `delegateToAll`.**
 
@@ -145,15 +145,16 @@ eid-lookup tab:
     └── lookup for "Sam K."    [batch member]
 
 oath-signature tab:
-└── PDF filename [batch row, delegated from oath-upload]
+└── PDF filename [operation coordinator — display only, no daemon task]
     subtitle: Oath · <last4 oath-signature PDF run id>
-    ├── Alice (12345)  [batch member]
-    ├── Bob   (67890)  [batch member]
-    └── Carol (11223)  [batch member]
+    ├── Alice (12345)  [operation member]
+    ├── Bob   (67890)  [operation member]
+    └── Carol (11223)  [operation member]
+└── oath-signature [single row, the actual daemon task]
 
 oath-upload tab:
-└── oath-upload [single row, waiting on the oath-signature batch above]
-    (then files HR ticket when batch completes)
+└── oath-upload [single row, waiting on the oath-signature run above]
+    (then files HR ticket when the operation completes)
 ```
 
 ### Case B — PDF with one person
@@ -167,17 +168,19 @@ eid-lookup tab:
     (no batch — only one person, so a single is enough)
 
 oath-signature tab:
-└── PDF filename [batch row, delegated from oath-upload]
+└── PDF filename [operation coordinator — display only, no daemon task]
     subtitle: Oath · <last4 oath-signature PDF run id>
-    └── John D. (12345) [batch member]
+    └── John D. (12345) [operation member]
+└── oath-signature [single row, the actual daemon task]
 
 oath-upload tab:
-└── oath-upload [single row, waiting on the oath-signature row above]
+└── oath-upload [single row, waiting on the oath-signature run above]
 ```
 
 Notice the EID rule: **N≥2 OCR lookup peers fan out into a batch row; N=1 stays
-as a single row.** The oath-signature PDF row is different: it is always the
-batch-shaped PDF surface, and signer rows are its batch members.
+as a single row.** The oath-signature PDF surface is the operation coordinator —
+a display-only row stamped at OCR approve time; the actual daemon run is a
+`single` row and operation-member rows are its fanned-out signer children.
 
 Every row is in its own workflow's tab. No synthesized parents in other tabs.
 No cross-tab nesting. Each workflow's queue panel shows only that workflow's
@@ -202,7 +205,7 @@ deletion or renaming as we converge on the canonical names.
 | delegated single | `RowArchetype: "single"` + `parentRunId` | Scope is parentage, not a separate archetype |
 | delegated approval | `RowArchetype: "preview"` + `parentRunId`, `runtimePolicy.preview`, OCR's approval surface | Scope is parentage, not a separate archetype |
 | delegated batch | `RowArchetype: "batch"` + `parentRunId`, with signer children stamped `batch-member` when needed | Scope is parentage, not a separate archetype |
-| operation | `RowArchetype: "operation"` (display-only coordinator) | oath-signature / emergency-contact PDF-upload coordinator; OCR run delegated under it, fan-out children stamped `operation-member`. |
+| operation | `RowArchetype: "operation"` (display-only coordinator) | oath-signature / emergency-contact / onbase PDF-upload coordinator; OCR run delegated under it, fan-out children stamped `operation-member`. |
 
 ### Terms to delete
 
