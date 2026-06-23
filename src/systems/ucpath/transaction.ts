@@ -923,6 +923,28 @@ async function checkPendingTransactionRowByEid(
   ).catch(() => false);
 }
 
+/**
+ * Pure predicate: a "Transactions in Progress" row matches the target when
+ * some cell's trimmed text exactly equals the EID **and** the full row text
+ * reads as a termination action.
+ *
+ * This encodes the same rule used inside `checkPendingTransactionRowByEid`'s
+ * `frame.evaluate(...)` browser context — extracted as a Node-side pure
+ * function so it can be unit-pinned. (The checkbox click must remain inside
+ * `evaluate` because PeopleSoft's overlay intercepts Playwright clicks; a
+ * Node-side rewire would require splitting the evaluate into two round-trips
+ * and is therefore left as-is.)
+ *
+ * Pure — unit-pinned by tests/unit/systems/ucpath/transaction.test.ts.
+ */
+export function rowMatchesTerminationEid(
+  cellTexts: readonly string[],
+  rowText: string,
+  eid: string,
+): boolean {
+  return cellTexts.some((c) => c.trim() === eid) && /Terminat/i.test(rowText);
+}
+
 export function extractSmartHrTransactionNumber(text: string): string | null {
   const normalized = text
     .replace(/\u00a0/g, " ")
