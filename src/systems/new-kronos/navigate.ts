@@ -1,4 +1,6 @@
+import { mkdirSync, writeFileSync } from "fs";
 import type { Page, Locator } from "playwright";
+import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import {
@@ -47,25 +49,29 @@ async function resolveSearchRoot(page: Page): Promise<SearchRoot> {
 /**
  * Resolve a New Kronos employee search into found / not-found.
  *
- * Races the first-result checkbox (→ found) against the "no items" sentinel
- * (→ not found). If NEITHER surfaces within the timeout (both waiters reject),
- * the search is treated as **NOT FOUND** rather than thrown (ISS-B04). New Kronos
- * is a BEST-EFFORT source for the separations Last Day Worked — the handler falls
- * back to the Kuali LDW when New Kronos returns no punch — so a slow/empty grid
- * must not raise a fatal-looking `✗` and burn the run; a `log.warn` keeps it
- * visible without masquerading as a failure. (Genuinely cutting the timeout wait
- * needs the live no-results sentinel re-mapped if it has drifted — that's why a
- * no-record employee currently waits the full timeout before this returns false.)
+ * Races a "result present" waiter (→ found) against the "no items" sentinel
+ * (→ not found). The found waiter is built by the caller as a robust signal —
+ * the result checkbox ATTACHED **or** the result slat visible — because the
+ * "Select Item" checkbox is visually hidden and waiting on its visibility never
+ * resolves (see `searchEmployee`). If NEITHER surfaces within the timeout (both
+ * waiters reject), the search is treated as **NOT FOUND** rather than thrown
+ * (ISS-B04). New Kronos is a BEST-EFFORT source for the separations Last Day
+ * Worked — the handler falls back to the Kuali LDW when New Kronos returns no
+ * punch — so a slow/empty grid must not raise a fatal-looking `✗` and burn the
+ * run; a `log.warn` keeps it visible without masquerading as a failure.
+ * (Genuinely cutting the timeout wait needs the live no-results sentinel
+ * re-mapped if it has drifted — that's why a no-record employee currently waits
+ * the full timeout before this returns false.)
  *
- * Exported for unit testing: it takes the two `waitFor` promises directly, so the
+ * Exported for unit testing: it takes the two waiter promises directly, so the
  * race + timeout-as-not-found contract is pinnable without a live page.
  */
 export async function resolveSearchResult(
-  checkboxVisible: Promise<unknown>,
+  resultPresent: Promise<unknown>,
   noResultsVisible: Promise<unknown>,
   employeeId: string,
 ): Promise<boolean> {
-  const foundP = checkboxVisible.then(() => true);
+  const foundP = resultPresent.then(() => true);
   const notFoundP = noResultsVisible.then(() => false);
   // Handle the losing waiter's eventual rejection so it doesn't surface as an
   // unhandled rejection; the race below still observes the winner's settlement.
@@ -142,12 +148,34 @@ export async function searchEmployee(
     label: "new kronos search submit button",
   });
 
+  // "Somebody showed up" must be detected ROBUSTLY: we go to the timecard for
+  // every employee who appears — the ONLY skips are a genuine no-results search
+  // ("nobody shows up") and the upstream identity-check ("the eid is incorrect").
+  //
+  // The found-signal used to wait for the "Select Item" checkbox to be VISIBLE,
+  // but that control is custom-styled — its backing native <input type=checkbox>
+  // is zero-size/visually hidden, so `waitFor({ state: "visible" })` NEVER
+  // resolves even when a result is present. A found employee (EID 10629763,
+  // "Total [1]" / "Argumedo, Zaira N") therefore raced two never-resolving
+  // waiters, timed out, and was mis-resolved as NOT FOUND — so the timecard step
+  // was skipped entirely AND the best-effort "no results surfaced" warning fired
+  // (the two symptoms are the same root cause). (2026-06-22)
+  //
+  // Fix: the result is FOUND when EITHER the checkbox is ATTACHED (present in the
+  // DOM = a result exists, regardless of its visibility) OR the result slat is
+  // visible — `selectEmployeeResult` already keys presence off `count()`, not
+  // visibility, for the same reason. Genuine no-results still settles on the
+  // "no items to display" sentinel (or the ISS-B04 timeout → NOT FOUND).
   const checkbox = searchSelectors.firstResultCheckbox(root);
+  const slat = searchSelectors.firstResultSlat(root);
   const noResults = searchSelectors.noResultsText(root);
   const searchResultTimeout = 15_000;
 
   const found = await resolveSearchResult(
-    checkbox.first().waitFor({ state: "visible", timeout: searchResultTimeout }),
+    Promise.any([
+      checkbox.waitFor({ state: "attached", timeout: searchResultTimeout }),
+      slat.waitFor({ state: "visible", timeout: searchResultTimeout }),
+    ]),
     noResults.waitFor({ state: "visible", timeout: searchResultTimeout }),
     employeeId,
   );
@@ -495,133 +523,208 @@ export async function getSeparationTimecardData(
   return { lastPunchDate, sickDates, holidayDates };
 }
 
+const MONTH_NAMES_FULL = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MONTH_NAMES_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Parsed `M/D/YYYY` components (month is 0-based to match `Date`/calendar math). */
+export interface ParsedDate {
+  year: number;
+  monthIndex: number;
+  day: number;
+}
+
 /**
- * The 8 calendar digits (MMDDYYYY) of a date string, normalized so padding
- * never matters: "05/10/2026", "5/10/2026", and a readback of "6/05/2026" all
- * resolve to a comparable 8-digit string.
- *
- * WFD's masked date inputs auto-insert the "/" separators themselves AND display
- * the month without a leading zero, so keystroke entry is driven and VERIFIED on
- * this normalized digit string rather than the formatted string. A well-formed
- * MM/DD/YYYY is zero-padded per component; anything else falls back to a plain
- * digit strip (a partial/placeholder readback then simply won't match → retry).
+ * Parse an `M/D/YYYY` (or zero-padded `MM/DD/YYYY`) date into numeric parts.
+ * Throws on a malformed string so a bad upstream date fails loud here instead
+ * of silently applying a wrong timecard window. Pure + unit-pinned.
  */
-export function dateDigits(dateStr: string): string {
-  const parts = dateStr.trim().split("/");
-  if (parts.length === 3) {
-    const [m, d, y] = parts;
-    const padded = `${m.trim().padStart(2, "0")}${d.trim().padStart(2, "0")}${y.trim().padStart(4, "0")}`;
-    if (/^\d{8}$/.test(padded)) return padded;
+export function parseMmddyyyy(dateStr: string): ParsedDate {
+  const m = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) throw new Error(`[New Kronos] malformed date "${dateStr}" (expected M/D/YYYY)`);
+  const monthIndex = Number(m[1]) - 1;
+  const day = Number(m[2]);
+  const year = Number(m[3]);
+  if (monthIndex < 0 || monthIndex > 11 || day < 1 || day > 31) {
+    throw new Error(`[New Kronos] out-of-range date "${dateStr}"`);
   }
-  return dateStr.replace(/\D/g, "");
+  return { year, monthIndex, day };
+}
+
+/** `M/D/YYYY` → ISO `YYYY-MM-DD`, the ONLY value a native `<input type=date>` accepts. */
+export function toIsoDate(dateStr: string): string {
+  const { year, monthIndex, day } = parseMmddyyyy(dateStr);
+  return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 /**
- * Progressive per-keystroke digit prefixes for a masked date: "05112026" →
- * ["0","05","051","0511","05112","051120","0511202","05112026"].
- *
- * `typeMaskedDate` types ONE digit then waits for the field's stripped digits to
- * equal the next prefix before sending the next keystroke (see below). Pure +
- * pinned by `tests/unit/systems/new-kronos/navigate.test.ts`.
+ * The calendar day cell's accessible name (its `aria-label`) is the full date
+ * with weekday, e.g. "Monday, June 11, 2026". We match on a weekday-agnostic
+ * fragment (`June 11, 2026`) anchored so "June 1, 2026" can't match "June 11".
+ * Pure + unit-pinned.
  */
-export function maskedDigitPrefixes(want: string): string[] {
-  return Array.from(want, (_char, i) => want.slice(0, i + 1));
+export function calendarDayLabelPattern(d: ParsedDate): RegExp {
+  return new RegExp(`\\b${MONTH_NAMES_FULL[d.monthIndex]} ${d.day}, ${d.year}\\b`);
 }
 
-const MASKED_DATE_POLL_MS = 25;
-const MASKED_DATE_SETTLE_MS = 1_500;
+/** Absolute month ordinal (year*12+month) for monotonic prev/next stepping. */
+function monthOrdinal(year: number, monthIndex: number): number {
+  return year * 12 + monthIndex;
+}
 
 /**
- * Poll the masked input until its stripped digits equal `wantDigits`. Returns
- * true on match; false on timeout OR overflow (the field already holds MORE
- * digits than wanted — the mask can only have scrambled, so there is nothing to
- * wait out; bail fast and let the caller re-clear + retry).
+ * Parse the moment-picker header text ("Jun 2026") to a month ordinal so the
+ * navigator knows which way (and how far) to step. Returns null on an
+ * unparseable header (caller stops navigating and lets the verify fail loud).
+ * Pure + unit-pinned.
  */
-async function waitForMaskedDigits(
-  loc: Locator,
-  wantDigits: string,
-  timeoutMs: number,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const current = dateDigits(await loc.inputValue());
-    if (current === wantDigits) return true;
-    if (current.length > wantDigits.length) return false; // overflowed → retry
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, MASKED_DATE_POLL_MS));
+export function parseCalendarHeaderOrdinal(headerText: string): number | null {
+  const m = headerText.trim().match(/^([A-Za-z]{3,})\s+(\d{4})$/);
+  if (!m) return null;
+  const idx = MONTH_NAMES_ABBR.findIndex((a) => a.toLowerCase() === m[1].slice(0, 3).toLowerCase());
+  if (idx < 0) return null;
+  return monthOrdinal(Number(m[2]), idx);
+}
+
+/**
+ * One-shot DOM inventory of the open "Select range" date picker, written to
+ * `PATHS.screenshotDir/wfd-date-picker-<ts>.json` (+ a screenshot) so the grid
+ * selectors (day cell, prev/next month, month/year header) can be authored from
+ * the REAL accessibility tree instead of a screenshot. Gated behind
+ * `DEBUG_SCREENSHOTS=1`; best-effort and never throws. Remove once the
+ * grid-pick selectors are mapped + verified.
+ */
+async function dumpDatePickerStructure(page: Page, label: string): Promise<void> {
+  if (process.env.DEBUG_SCREENSHOTS !== "1") return;
+  try {
+    const inventory = await page.evaluate(() => {
+      const interesting = Array.from(
+        document.querySelectorAll(
+          "button, [role='button'], [role='gridcell'], [role='option'], "
+            + "td, th, input, [aria-label], [class*='calendar'], [class*='datepicker'], "
+            + "[class*='date-picker'], [class*='month'], [class*='day']",
+        ),
+      ).slice(0, 600);
+      return interesting.map((el) => {
+        const e = el as HTMLElement;
+        return {
+          tag: e.tagName.toLowerCase(),
+          type: e.getAttribute("type"),
+          role: e.getAttribute("role"),
+          ariaLabel: e.getAttribute("aria-label"),
+          ariaSelected: e.getAttribute("aria-selected"),
+          ariaDisabled: e.getAttribute("aria-disabled"),
+          title: e.getAttribute("title"),
+          name: e.getAttribute("name"),
+          id: e.id || null,
+          className: typeof e.className === "string" ? e.className : null,
+          text: (e.textContent || "").trim().slice(0, 40),
+          value: (e as HTMLInputElement).value ?? null,
+          dataset: { ...e.dataset },
+        };
+      });
+    });
+    mkdirSync(PATHS.screenshotDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const path = `${PATHS.screenshotDir}/wfd-date-picker-${label}-${ts}.json`;
+    writeFileSync(path, JSON.stringify(inventory, null, 2), "utf8");
+    log.step(`[New Kronos] date-picker DOM inventory: ${path} (${inventory.length} els)`);
+    await debugScreenshot(page, `wfd-date-picker-${label}`, { fullPage: true });
+  } catch (err) {
+    log.warn(`[New Kronos] date-picker dump failed (best-effort): ${String(err)}`);
   }
 }
 
 /**
- * Empty a masked date input, VERIFYING it clear by readback. select-all +
- * Delete first, then Backspace until no digits remain — the mask may keep its
- * separators or repopulate today's date, so a single Delete is not trusted.
+ * Step the moment-picker calendar to `target`'s month/year by clicking the
+ * Previous/Next-month arrows, re-reading the header each step so it converges
+ * even if a click is dropped. Bounded (24 steps) so a stuck header can't spin
+ * forever. Best-effort: a failure here is caught by the day-cell click + the
+ * caller's readback verify.
  */
-async function clearMaskedInput(loc: Locator): Promise<void> {
-  await loc.press("ControlOrMeta+a");
-  await loc.press("Delete");
-  for (let i = 0; i < 16; i++) {
-    if (dateDigits(await loc.inputValue()) === "") return;
-    await loc.press("Backspace");
+async function navigateCalendarToMonth(page: Page, target: ParsedDate): Promise<void> {
+  const want = monthOrdinal(target.year, target.monthIndex);
+  for (let i = 0; i < 24; i++) {
+    const headerText = ((await timecard.calendarMonthHeader(page).textContent()) ?? "").trim();
+    const current = parseCalendarHeaderOrdinal(headerText);
+    if (current === want) return;
+    if (current === null) {
+      if (i < 3) { await page.waitForTimeout(300); continue; } // header not rendered yet
+      return; // genuinely unparseable — let the readback verify fail loud
+    }
+    const arrow = want < current
+      ? timecard.calendarPrevMonth(page)
+      : timecard.calendarNextMonth(page);
+    await arrow.click({ timeout: 5_000 });
+    await page.waitForTimeout(300);
   }
 }
 
 /**
- * Type each digit, waiting for the field to reflect the running prefix before
- * the next keystroke. Returns false the instant a digit fails to settle (the
- * mask raced or overflowed) so the caller re-clears and retries the whole entry.
+ * Fallback for `setRangeDate`: drive the visible moment-picker calendar instead
+ * of the native input. Focuses the field (binds the shared calendar to it),
+ * steps to the target month, then clicks the day cell by its full-date
+ * aria-label (weekday-agnostic, `:not(.out-of-month)` so an adjacent-month
+ * trailing day can't be hit). No readback here — the caller verifies.
  */
-async function typeMaskedDigits(loc: Locator, wantDigits: string): Promise<boolean> {
-  for (const prefix of maskedDigitPrefixes(wantDigits)) {
-    await loc.press(prefix[prefix.length - 1]);
-    if (!(await waitForMaskedDigits(loc, prefix, MASKED_DATE_SETTLE_MS))) return false;
-  }
-  return true;
-}
-
-/**
- * Type a date into one of WFD's masked "Select range" inputs and VERIFY it.
- *
- * These are JS-masked `<input type=text>` controls that (a) silently reject
- * Playwright `fill()` — the value reverts to today (OBS-006) — and (b)
- * auto-insert the "/" separators as digits are typed, on an ASYNC React-
- * controlled re-render. A FIXED inter-key delay races that re-render under load
- * and SCRAMBLES the value: on the live 8-worker parallel separations batch,
- * wanting "05/11/2026" the field landed on "11/20/260622" (10 digits — the year
- * segment overflowed, interleaving today's "0622"), which WFD rejected with
- * "WFP-00889 The date is outside of the valid range of dates" (ISS-B05). The
- * first fix (`pressSequentially(want, { delay: 60 })` + readback) made it fail
- * LOUD but did not remove the race, so dates still never landed.
- *
- * So we drive it CONDITION-BASED, not on a guessed delay: clear the field
- * (verified empty), then type DIGITS ONLY one at a time, waiting after each
- * keystroke for the field to reflect the running prefix before sending the next.
- * The next key is never sent until the mask has committed the current one, so
- * there is no race to lose. Retry the whole entry a few times, then throw loud
- * rather than apply a garbage range.
- */
-async function typeMaskedDate(
-  loc: Locator,
-  dateStr: string,
-  label: string,
+async function pickRangeDateViaCalendar(
+  page: Page,
+  input: Locator,
+  target: ParsedDate,
 ): Promise<void> {
-  const want = dateDigits(dateStr);
-  let last = "";
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    await loc.click({ timeout: 5_000 });
-    await clearMaskedInput(loc);
-    const settled = await typeMaskedDigits(loc, want);
-    last = dateDigits(await loc.inputValue());
-    if (settled && last === want) return;
-    log.warn(
-      `[New Kronos] ${label} date readback mismatch (attempt ${attempt}/4): `
-      + `wanted ${want}, got ${last || "<empty>"}`,
-    );
+  await input.click({ timeout: 5_000 });
+  await page.waitForTimeout(400);
+  await navigateCalendarToMonth(page, target);
+  await timecard
+    .calendarDayCell(page, calendarDayLabelPattern(target))
+    .first()
+    .click({ timeout: 5_000 });
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Set ONE of WFD's "Select range" date fields and VERIFY the readback.
+ *
+ * These are NATIVE `<input type=date>` controls (`#startDateTimeInput` /
+ * `#endDateTimeInput`, value held as ISO `YYYY-MM-DD`) — NOT the JS-masked text
+ * inputs the old code assumed. Every prior fix fed them `MM/DD/YYYY`, which a
+ * native date input silently rejects (it keeps today's value → OBS-006's "fill
+ * reverts to today", and per-key typing scrambled the segmented mask →
+ * WFP-00889 / ISS-B05). The fix is to speak the input's own language:
+ *
+ *   1. FAST PATH — `fill()` the ISO string. Playwright sets a native date
+ *      input's value directly (no segment race), and the inputValue reads back
+ *      as ISO, so the verify is exact.
+ *   2. FALLBACK — if the model didn't accept the programmatic fill, click
+ *      through the visible moment-picker calendar (`pickRangeDateViaCalendar`).
+ *   3. Re-read and FAIL LOUD if the field still doesn't equal the wanted ISO,
+ *      rather than applying a wrong timecard window.
+ */
+async function setRangeDate(page: Page, input: Locator, dateStr: string, label: string): Promise<void> {
+  const target = parseMmddyyyy(dateStr);
+  const wantIso = `${target.year}-${String(target.monthIndex + 1).padStart(2, "0")}-${String(target.day).padStart(2, "0")}`;
+
+  try {
+    await input.fill(wantIso, { timeout: 5_000 });
+  } catch {
+    // Native fill rejected outright — fall through to the calendar.
   }
+  if ((await input.inputValue().catch(() => "")) === wantIso) return;
+
+  log.warn(`[New Kronos] ${label} date fill did not stick — picking ${dateStr} via the calendar grid`);
+  await pickRangeDateViaCalendar(page, input, target);
+
+  const after = await input.inputValue().catch(() => "");
+  if (after === wantIso) return;
   throw new Error(
-    `[New Kronos] Could not set ${label} date to ${dateStr} — the masked input `
-    + `scrambled the keystrokes (last readback digits: ${last || "<empty>"}). `
-    + `Aborting before applying a wrong timecard range (WFP-00889).`,
+    `[New Kronos] Could not set ${label} date to ${dateStr} — the field reads `
+    + `"${after || "<empty>"}" (wanted ISO ${wantIso}). Aborting before applying `
+    + `a wrong timecard range (WFP-00889).`,
   );
 }
 
@@ -629,15 +732,13 @@ async function typeMaskedDate(
  * Set a custom date range on the New Kronos timecard view.
  * Must be called after navigating to the Timecards page.
  *
- * Mapped via playwright-cli 2026-04-06; digits-only keystroke + readback-verify
- * rework 2026-06-22 (ISS-B05):
- *   1. Click "Current Pay Period" button → opens timeframe dropdown
- *   2. Click "Select range" button → opens date range inputs
- *   3. Type "Start date" and "End date" via `typeMaskedDate` — digits only,
- *      one keystroke at a time, waiting for the field to reflect each digit
- *      (condition-based, NOT a fixed delay: these controls reject fill() AND
- *      race a fixed-delay multi-key type under load; see `typeMaskedDate`).
- *   4. Click "Apply" button
+ * Mapped via playwright-cli 2026-04-06; native-date-input rework 2026-06-22
+ * (ISS-B05, after a live DOM dump proved the fields are `<input type=date>`):
+ *   1. Click "Current Pay Period" button → opens the timeframe dropdown
+ *   2. Click "Select range" → reveals the native Start/End date inputs + calendar
+ *   3. `setRangeDate` each field: native ISO `fill()` (fast path) → calendar
+ *      grid click (fallback) → readback verify (fail loud), see `setRangeDate`
+ *   4. Click "Apply"
  *
  * After applying, the button text changes from "Current Pay Period"
  * to the date range string (e.g., "3/01/2026 - 4/15/2026").
@@ -664,12 +765,15 @@ export async function setDateRange(
   });
   await page.waitForTimeout(1_000);
 
-  // Step 3 & 4: Type + verify each date (digits only, one settled keystroke at a
-  // time — the mask owns the "/" and races a fixed-delay multi-key type).
-  await typeMaskedDate(timecard.startDateInput(page), startDate, "start");
-  await typeMaskedDate(timecard.endDateInput(page), endDate, "end");
+  // DEBUG (DEBUG_SCREENSHOTS=1): capture the open picker's DOM (kept while the
+  // native-input + calendar-grid path is verified live; remove once stable).
+  await dumpDatePickerStructure(page, "open");
 
-  // Step 5: Click Apply
+  // Step 3: Set + verify each native date input (ISO fill → calendar fallback).
+  await setRangeDate(page, timecard.startDateInput(page), startDate, "start");
+  await setRangeDate(page, timecard.endDateInput(page), endDate, "end");
+
+  // Step 4: Click Apply
   await safeClick(timecard.applyButton(page), {
     timeout: 5_000,
     label: "new kronos date range apply button",
