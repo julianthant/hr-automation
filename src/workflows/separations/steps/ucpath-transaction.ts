@@ -13,7 +13,7 @@ import {
   findExistingTerminationTransaction,
   scrollToTransactionReadbackArea,
 } from "../../../systems/ucpath/index.js";
-import { ssSmartHRTransactions } from "../../../systems/ucpath/selectors.js";
+import { ssSmartHRTransactions, UCPATH_CONTENT_FRAME_SELECTOR } from "../../../systems/ucpath/selectors.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
 
@@ -84,7 +84,7 @@ export async function runUcpathTransaction(
       // later, the handler exits before the final updateData at the end
       // of the body — without this inline call the dashboard detail
       // panel shows "—".
-      ctx.updateData({ transactionNumber, existingTransactionFound: "true" });
+      ctx.updateData({ transactionNumber });
       await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing', systems: ['ucpath'] });
       return { transactionNumber, submittedWithoutTxnNumber };
     }
@@ -163,6 +163,16 @@ export async function runUcpathTransaction(
       // the operator reviews every chunk with next/back instead of one tall
       // image the viewer can only shrink to a ribbon.
       await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], paged: true });
+      // Verification shot of the grabbed transaction number. `paged` above starts
+      // at the top of the page and walks down via the WINDOW scroll, which does
+      // not reach the `Transaction ID: T…` that lives BELOW the Comments fold
+      // INSIDE the PeopleSoft content frame (`growOverflowingIframes` only walks
+      // top-level iframes, so the nested `#main_target_win0` never lengthens the
+      // window) — so the submitted chunks can miss the number entirely. `region`
+      // screenshots that content frame directly, growing it to its full inner
+      // height, so the Transaction ID at the bottom of the readback form is always
+      // in the image: a clean, single-frame proof the operator can read the T# off.
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-number-verify', systems: ['ucpath'], region: UCPATH_CONTENT_FRAME_SELECTOR });
     } catch (e) {
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
       // the run fails with the clear message (its own screenshot already fired)
