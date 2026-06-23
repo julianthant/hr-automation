@@ -9,6 +9,8 @@ export interface DashboardHonoDeps {
   projectionReady?: boolean;
   screenshotsDir?: string;
   staticDir?: string;
+  /** Repo root for the workflow-presentation override store (`<root>/config/workflow-presentation/*.json`). Defaults to `process.cwd()` at the call site. */
+  repoRoot?: string;
 }
 
 export function getDefaultWorkflow(deps: DashboardHonoDeps): string {

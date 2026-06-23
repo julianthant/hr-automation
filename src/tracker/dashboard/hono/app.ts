@@ -20,6 +20,7 @@ import { registerSearchRoutes } from "./routes/search.js";
 import { registerSharePointRoutes } from "./routes/sharepoint.js";
 import { registerStaticRoutes } from "./routes/static.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
+import { registerWorkflowPresentationRoutes } from "./routes/workflow-presentation.js";
 
 export type { DashboardHonoDeps } from "./context.js";
 
@@ -47,6 +48,7 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   registerFileRoutes(app, deps);
   registerTaskRoutes(app, deps);
   registerBaseRoutes(app, deps);
+  registerWorkflowPresentationRoutes(app, deps);
   registerSearchRoutes(app, deps);
   registerScreenshotRoutes(app, deps);
   registerSharePointRoutes(app);
