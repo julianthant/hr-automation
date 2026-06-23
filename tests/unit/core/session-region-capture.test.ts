@@ -131,6 +131,47 @@ test('capturePagedFullPage: a short page yields exactly one chunk', async (t) =>
   assert.equal(shots.length, 1)
 })
 
+test('capturePagedFullPage: a page just over one viewport yields ONE chunk, not a clamped near-duplicate', async (t) => {
+  // Regression: the Kuali finalization page (le-dylan run) measured ~one
+  // viewport + a sliver of chrome (fullHeight just above chunkHeight). The OLD
+  // loop computed the 2nd chunk's scroll as the UNCLAMPED `chunk * step`, which
+  // the browser clamped back to ~the first chunk's position → the operator got
+  // "the same one twice". When the strip still below the first fold fits within
+  // the overlap seam, there must be exactly ONE chunk.
+  const dir = await fs.mkdtemp(join(tmpdir(), 'paged-'))
+  t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })
+  // fullHeight − chunkHeight = 50 ≤ chunkOverlap (72): a 2nd chunk would only
+  // re-show content already readable in the first.
+  const fullHeight = CAPTURE.chunkHeight + 50
+  const { page, shots } = makeFakePage({ fullHeight })
+  const chunkPath = (chunk: number): string => join(dir, `d-c${String(chunk + 1).padStart(2, '0')}.png`)
+  const written = await Session.capturePagedFullPage(page, chunkPath)
+  assert.equal(written.length, 1, 'one chunk — no clamped near-duplicate')
+  assert.equal(shots.length, 1)
+})
+
+test('capturePagedFullPage: never scrolls past maxScroll (clamped, distinct chunk positions)', async (t) => {
+  // A page genuinely needing a 2nd chunk (the below-fold strip exceeds the
+  // overlap seam) still must clamp the scroll target to maxScroll — the OLD
+  // loop intended `chunk * step` (928), far past this page's 200px maxScroll,
+  // so the clamped 2nd shot near-duplicated the first.
+  const dir = await fs.mkdtemp(join(tmpdir(), 'paged-'))
+  t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })
+  const fullHeight = CAPTURE.chunkHeight + 200 // maxScroll = 200 (> chunkOverlap)
+  const maxScroll = fullHeight - CAPTURE.chunkHeight
+  const { page, shots, scrolls } = makeFakePage({ fullHeight })
+  const chunkPath = (chunk: number): string => join(dir, `m-c${String(chunk + 1).padStart(2, '0')}.png`)
+  const written = await Session.capturePagedFullPage(page, chunkPath)
+  assert.equal(written.length, 2, 'two chunks: the top fold + the bottom strip')
+  assert.equal(shots.length, 2)
+  // No scroll target ever exceeds maxScroll (the browser would clamp it anyway,
+  // and the unclamped target is what produced the duplicate). The trailing 0 is
+  // the finally reset-to-top.
+  assert.ok(scrolls.every((y) => y <= maxScroll), `scrolls clamped ≤ ${maxScroll}: ${scrolls}`)
+  // The two chunks are at distinct scroll positions (top, then the bottom).
+  assert.deepEqual(scrolls.filter((y, i) => i === 0 || y !== scrolls[i - 1]).slice(0, 2), [0, maxScroll])
+})
+
 test('captureAll: paged route emits N chunk files (the whole page, in order)', async (t) => {
   const dir = await fs.mkdtemp(join(tmpdir(), 'capall-'))
   t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })

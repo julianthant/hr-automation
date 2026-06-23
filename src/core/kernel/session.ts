@@ -970,18 +970,30 @@ export class Session {
         return written
       }
 
+      // The browser CLAMPS `window.scrollTo` to `maxScroll` (= fullHeight − one
+      // viewport). The old loop used the UNCLAMPED target `chunk * step` for the
+      // scroll AND the stop check, so on a page only slightly taller than one
+      // viewport the final chunk's target overshot maxScroll, got clamped back to
+      // ~the previous chunk's position, and produced a near-DUPLICATE shot (the
+      // "same one twice" the operator saw on Kuali finalization). Clamp the target
+      // here explicitly (so the logic is testable, not reliant on the browser's
+      // silent clamp) and stop once the strip still BELOW the current fold fits
+      // within the overlap seam — another chunk would only re-show content already
+      // readable in this one. `maxScroll === 0` (page ≤ one viewport) → one chunk.
+      const maxScroll = Math.max(0, fullHeight - CAPTURE.chunkHeight)
       const step = Math.max(1, CAPTURE.chunkHeight - CAPTURE.chunkOverlap)
+      let y = 0
       for (let chunk = 0; chunk < CAPTURE.maxChunks; chunk++) {
-        const y = chunk * step
-        if (chunk > 0 && y >= fullHeight) break
         await page.evaluate((top: number) => window.scrollTo(0, top), y).catch(() => {})
         await maybeWait.waitForTimeout?.(CAPTURE.settleMs).catch(() => {})
         const p = withChunkSuffix(chunk)
         // Plain VIEWPORT shot (no fullPage): captures exactly the scrolled fold.
         await page.screenshot({ path: p })
         written.push(p)
-        // Stop once this chunk's bottom edge has reached the document bottom.
-        if (y + CAPTURE.chunkHeight >= fullHeight) break
+        // Done when the content still below this fold is ≤ the overlap seam (this
+        // chunk's bottom already covers it readably) — no clamped near-duplicate.
+        if (maxScroll - y <= CAPTURE.chunkOverlap) break
+        y = Math.min(y + step, maxScroll)
       }
       return written
     } catch {
