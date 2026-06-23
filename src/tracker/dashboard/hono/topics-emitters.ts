@@ -1,4 +1,4 @@
-import { readSessionEvents } from "../../../tracker/session-events.js";
+import { readSessionEvents, type SessionEvent } from "../../../tracker/session-events.js";
 import {
   dateLocal,
   readLogEntries,
@@ -19,6 +19,7 @@ import { buildJsonlEventsPayload } from "./routes/entries-payload.js";
 import {
   filterLiveSessionState,
   filterEventsForRun,
+  getEventSortKey,
   rebuildSessionState,
   resolveInstanceForRun,
 } from "../session-state.js";
@@ -49,16 +50,47 @@ function resolveWorkflow(
     : getDefaultWorkflow(deps);
 }
 
-function makeDeltaTopic<T>(
+/**
+ * Polls `fetcher` and streams only the entries the client has not seen yet.
+ *
+ * The first tick sends the full current array (the client REPLACES on its first
+ * batch); every later tick sends only the never-before-sent entries (the client
+ * APPENDS). Passing `keyOf` tracks sent entries by a STABLE IDENTITY KEY rather
+ * than by array position — this is resilient to mid-array insertions,
+ * reordering, and projection lag, which a positional `slice(sentCount)` would
+ * re-emit as a duplicated suffix (the source of the duplicated log/event tails).
+ * Without `keyOf` the legacy positional delta is kept for any other caller.
+ *
+ * Within one subscription a sent key is never re-sent (the client only tolerates
+ * a re-replace on a NEW subscription generation), so duplicate suppression holds
+ * even across list shrink/reorder. The sent-keys set grows with the run; that is
+ * bounded per-subscription (runs are finite, the client log window caps at 5000)
+ * so no eviction is needed.
+ */
+export function makeDeltaTopic<T>(
   fetcher: () => T[] | Promise<T[]>,
   send: (data: T[]) => void,
   intervalMs: number,
+  keyOf?: (entry: T) => string,
 ): () => void {
   let sentCount = 0;
   let firstTick = true;
+  const sentKeys = new Set<string>();
 
   const tick = async () => {
     const events = await fetcher();
+    if (keyOf) {
+      const fresh: T[] = [];
+      for (const e of events) {
+        const k = keyOf(e);
+        if (sentKeys.has(k)) continue;
+        sentKeys.add(k);
+        fresh.push(e);
+      }
+      if (firstTick) { firstTick = false; send(events); return; } // client REPLACES on first batch (even if empty)
+      if (fresh.length > 0) send(fresh);
+      return;
+    }
     if (firstTick) {
       send(events);
       sentCount = events.length;
@@ -78,6 +110,36 @@ function makeDeltaTopic<T>(
   const interval = setInterval(() => void tick(), intervalMs);
   interval.unref?.();
   return () => clearInterval(interval);
+}
+
+/**
+ * Stable per-line identity for the `logs` topic. The wire `LogEntry` carries no
+ * row id, so distinguish lines by item/run scope, timestamp, level, and message.
+ * (Two byte-identical lines at the same ms collapse — the client already
+ * collapses consecutive identical messages — but distinct lines never collide.)
+ */
+function logEntryKey(e: {
+  itemId?: string;
+  runId?: string;
+  ts: string;
+  level: string;
+  message: string;
+}): string {
+  return [e.itemId ?? "", e.runId ?? "", e.ts, e.level, e.message].join("\u0000");
+}
+
+/**
+ * Stable identity for a `runEvents` session event. Mirrors the disambiguators
+ * `buildLogStreamItemKey` uses client-side (type, run/item scope, timestamp,
+ * step/system/label) so genuinely distinct events never share a key.
+ */
+function runEventKey(e: SessionEvent): string {
+  // step/label/kind exist only on the `screenshot` variant — they disambiguate
+  // multiple shots within one run that share type+timestamp.
+  const shot = e as SessionEvent & { step?: string | null; label?: string; kind?: string };
+  const base = [e.type, e.runId ?? "", e.currentItemId ?? "", getEventSortKey(e), e.currentStep ?? "", e.system ?? "", e.sessionId ?? ""];
+  const screenshotOnly = [shot.step ?? "", shot.label ?? "", shot.kind ?? ""];
+  return [...base, ...screenshotOnly].join("\u0000");
 }
 
 // ── sessions state cache ──────────────────────────────────────────────────────
@@ -233,7 +295,7 @@ export const logsTopic: TopicEmitter<{
       );
     }
     return entries;
-  }, send, 500);
+  }, send, 500, logEntryKey);
 };
 
 registerTopic("logs", logsTopic);
@@ -327,7 +389,7 @@ export const runEventsTopic: TopicEmitter<{
     }
     const filtered = filterEventsForRun(allEvents, trackerEntries, requestedRunId);
     return filtered;
-  }, send, 500);
+  }, send, 500, runEventKey);
 };
 
 registerTopic("runEvents", runEventsTopic);
