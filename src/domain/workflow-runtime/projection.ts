@@ -329,12 +329,15 @@ export function buildWorkflowRunProjection(
   const presentation = resolveQueueRowPresentation(entry, {
     preferTraceIdSubtitle: overrides.preferTraceIdSubtitle,
   });
-  // Delegation-naming for member/prep rows. The effective `presentation` config
-  // is supplied by Phase 4.5 (`context.resolvePresentation`); until then it is
-  // always undefined, so `delegationTitle`/`delegationSubtitle` are undefined
-  // and the title/subtitle expressions below collapse to EXACTLY the pre-this-
-  // feature precedence (`overrides.* ?? context.resolveEntry* ?? presentation?.*
-  // ?? fallback*`). This is the load-bearing no-op invariant.
+  // Effective per-workflow naming config (code default ⊕ operator override),
+  // supplied by Phase 4.5 via `context.resolvePresentation`. It now drives THREE
+  // naming surfaces, gated by row scope/shape so each path is mutually exclusive:
+  //   - member rows (`parentRunId`)        → delegation.memberTitle/memberSubtitle
+  //   - prep rows  (`isPrepRow`)           → delegation.prepTitle (title only)
+  //   - top-level rows (neither, stamped)  → naming.title/subtitle (THIS task, 6.3)
+  // When no resolver is supplied (or it returns undefined), every branch is inert
+  // and the expressions collapse to the pre-feature precedence
+  // (`overrides.* ?? context.resolveEntry* ?? presentation?.* ?? fallback*`).
   const effectivePresentation = context.resolvePresentation?.(entry.workflow);
   const memberPresentation = entry.parentRunId
     ? resolveMemberPresentation(entry, effectivePresentation)
@@ -345,13 +348,29 @@ export function buildWorkflowRunProjection(
   // Member rows carry both title + subtitle naming; prep rows carry title only.
   const delegationTitle = memberPresentation?.title ?? prepPresentation?.title;
   const delegationSubtitle = memberPresentation?.subtitle;
+  // Top-level (non-delegated) naming. `presentation` truthy ⇒ the row is STAMPED
+  // (resolveQueueRowPresentation returns undefined when there is no queueRowKind),
+  // so legacy/unstamped rows keep the `context.resolveEntry*` ladder. Gated OFF
+  // for member (`parentRunId`) and prep (`isPrepRow`) rows — they consume the
+  // delegation naming above, so this term must not double-apply. With the DEFAULT
+  // naming this resolves byte-identically to `presentation` (6.1 Dimension A), and
+  // for a stamped row `context.resolveEntryTitle` == `presentation.title`, so the
+  // displaced precedence terms produce the same value — byte-identical no-op when
+  // no override is set; an operator override surfaces here on the live queue row.
+  const topLevelNaming =
+    presentation && !entry.parentRunId && !isPrepRow(entry) && effectivePresentation?.naming
+      ? resolveQueueRowPresentation(entry, {
+          naming: effectivePresentation.naming,
+          preferTraceIdSubtitle: overrides.preferTraceIdSubtitle,
+        })
+      : undefined;
   return {
     runId,
     workflowId: entry.workflow,
     itemId: entry.id,
     parentRunId: entry.parentRunId,
-    title: overrides.title ?? delegationTitle ?? context.resolveEntryTitle?.(entry) ?? presentation?.title ?? fallbackEntryTitle(entry, policy),
-    subtitle: overrides.subtitle ?? delegationSubtitle ?? context.resolveEntrySubtitle?.(entry)
+    title: overrides.title ?? delegationTitle ?? topLevelNaming?.title ?? context.resolveEntryTitle?.(entry) ?? presentation?.title ?? fallbackEntryTitle(entry, policy),
+    subtitle: overrides.subtitle ?? delegationSubtitle ?? topLevelNaming?.subtitle ?? context.resolveEntrySubtitle?.(entry)
       ?? (presentation ? presentation.subtitle : fallbackEntrySubtitle(entry, policy)),
     status: context.resolveEntryStatus?.(entry) ?? entry.status,
     step: entry.step,
