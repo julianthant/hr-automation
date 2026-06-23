@@ -97,6 +97,8 @@ Workflow rail badges are backend-authoritative: React consumes SSE `wfCounts` as
 
 **Row lifecycle debug logs:** `.tracker/debug/row-lifecycle-{YYYY-MM-DD}.{jsonl,json}` — regenerated every 60s; full per-row status/surface/cause history. Useful when diagnosing surface mis-classification or stuck retries. See `src/tracker/CLAUDE.md`.
 
+**Workflow Modifier page** (`components/workflow-modifier/`) — UI for overriding per-workflow naming, step display, and delegation naming without code changes; overrides persist to the git-tracked `config/workflow-presentation/<workflow>.json` store and apply hot at serve-time via `effectiveMetadata`.
+
 ## Docs
 
 What’s canonical vs ephemeral: `docs/README.md`. Full reference docs in `docs/engineering/`. Workflow behavior and delegation docs live in `docs/workflow/`. Session handoffs/plans in `docs/superpowers/` (ephemeral). Frozen snapshots in `docs/historical/`.
