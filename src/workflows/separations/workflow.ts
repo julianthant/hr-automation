@@ -32,6 +32,7 @@ import {
   isVoluntaryTermination,
   fillTimekeeperTasks,
   updateLastDayWorked,
+  updateSeparationDate,
   updateEmployeeName,
 } from "../../systems/kuali/index.js";
 import type { KualiSeparationData } from "../../systems/kuali/index.js";
@@ -43,14 +44,19 @@ import {
 } from "../../systems/new-kronos/index.js";
 import type { SeparationTimecardData } from "../../systems/new-kronos/index.js";
 
-// UCPath (used for jobSummary result resolution + identity-check re-fetch)
+// UCPath (Job Summary fetch for the identity gate + identity-check re-fetch)
 import { getJobSummaryIdentity } from "../../systems/ucpath/index.js";
-import type { JobSummaryData, JobSummaryIdentity } from "../../systems/ucpath/index.js";
+import type { JobSummaryData } from "../../systems/ucpath/index.js";
 
 import {
   computeTerminationEffDate,
+  computeSeparationDate,
   computeKronosDateRange,
   buildTerminationComments,
+  buildDuplicateTerminationComment,
+  getInitials,
+  joinComments,
+  todayMmDdYyyy,
   mapReasonCode,
   validateLastDayWorked,
 } from "./schema.js";
@@ -63,8 +69,9 @@ import { UCPATH_SMART_HR_URL } from "../../config.js";
 
 // Step functions
 import { runKualiExtract } from "./steps/kuali-extract.js";
-import { runKronosSearch, runNewKronosTimecard } from "./steps/kronos-search.js";
-import { logSettledRejection, unwrapSettled } from "./settled.js";
+import { runKronosSearch } from "./steps/kronos-search.js";
+import { runTransactionCheck } from "./steps/transaction-check.js";
+import { logSettledRejection } from "./settled.js";
 import { runUcpathJobSummary } from "./steps/ucpath-job-summary.js";
 import { runUcpathTransaction } from "./steps/ucpath-transaction.js";
 import { runKualiFinalize } from "./steps/kuali-finalize.js";
@@ -89,8 +96,9 @@ export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
 const separationsSteps = [
   "kuali-extraction",
-  "kronos-search",
   "identity-check",
+  "transaction-check",
+  "kronos-search",
   "ucpath-job-summary",
   "ucpath-transaction",
   "kuali-finalization",
@@ -123,12 +131,6 @@ export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  * between docs, which navigates each system's `resetUrl` so the next doc starts
  * from a clean page state.
  */
-
-export function resolveJobSummaryResult(
-  result: PromiseSettledResult<JobSummaryIdentity>,
-): JobSummaryIdentity {
-  return unwrapSettled("UCPath Job Summary extraction", result);
-}
 
 /**
  * The "very different name" / "EID not found" arm of the `identity-check` step:
@@ -407,7 +409,11 @@ export const separationsWorkflow = defineWorkflow({
     validateLastDayWorked(kualiData.separationDate, "Separation Date");
 
     const isVol = isVoluntaryTermination(kualiData.terminationType);
-    const termEffDate = computeTerminationEffDate(kualiData.separationDate);
+    // Provisional term-eff from the Kuali-claimed separation date — for the
+    // extraction logs only. The authoritative term-eff is recomputed below from
+    // the reconciled separation date (LDW + sick/holiday leave), which can
+    // differ from what Kuali entered.
+    const kualiTermEffDate = computeTerminationEffDate(kualiData.separationDate);
     const ucpathReason = mapReasonCode(kualiData.terminationType);
     const template = isVol ? UC_VOL_TERM_TEMPLATE : UC_INVOL_TERM_TEMPLATE;
     const timekeeperName = getTimekeeperName();
@@ -415,105 +421,49 @@ export const separationsWorkflow = defineWorkflow({
     log.step(`Kuali extraction: Employee="${kualiData.employeeName}", EID="${kualiData.eid}", SepDate="${kualiData.separationDate}", Type="${kualiData.terminationType}"`);
     log.step(`Template: "${template}" — ${isVol ? "voluntary termination" : "involuntary termination"}`);
     log.step(`Reason code: Kuali type "${kualiData.terminationType}" → UCPath reason "${ucpathReason}"`);
-    log.step(`Termination effective date: ${termEffDate} (separation date ${kualiData.separationDate} + 1 day)`);
+    log.step(`Termination effective date (provisional): ${kualiTermEffDate} (Kuali separation date ${kualiData.separationDate} + 1 day)`);
     log.step(`Employee: ${kualiData.employeeName} | EID: ${kualiData.eid}`);
-    log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${termEffDate}`);
+    log.step(`Type: ${kualiData.terminationType} (${isVol ? "VOL" : "INVOL"}) | Eff: ${kualiTermEffDate}`);
 
-    // ─── Step 4: kronos-search (3-way parallel) ───
+    // ─── kronos date range — computed from the Kuali dates, which are stable
+    // across EID verification, so it's safe to compute up front. kronos-search
+    // itself runs LATER (after identity-check + transaction-check), with the
+    // verified EID. ───
     const { startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(
       kualiData.lastDayWorked, kualiData.separationDate,
     );
     log.step(`[New Kronos] Date range: ${kronosStart} – ${kronosEnd}`);
 
-    // ─── Process Phase 1 results (preserve PromiseSettledResult fallback semantics) ───
     // New Kronos separation timecard: last physical punch + sick/holiday days.
-    // Empty default when kronos-search is skipped (prefill / preset paths).
+    // Empty default when kronos-search is skipped (prefill / preset paths) and
+    // until the kronos-search step below fills it.
     let timecard: SeparationTimecardData = {
       lastPunchDate: null,
       sickDates: [],
       holidayDates: [],
     };
     let newKronosFound = false;
-    let jobSummaryData: JobSummaryData | undefined;
-    // Workforce Job Summary identity (fetched inside the kronos-search parallel
-    // block): whether the EID resolved + the detail-page name. These GATE the
-    // conditional identity-check below (a name mismatch / not-found-short-EID
-    // triggers person-lookup; a clean name match skips it).
-    let jobSummaryFound = false;
-    let jobSummaryName = "";
 
-    // Two reasons to skip kronos-search converge here:
+    // Two reasons converge to skip kronos-search — computed UP FRONT because the
+    // Job-Summary fetch + identity-check below skip on the same conditions:
     //   1. Edit-and-resume prefilled `lastDayWorked` (existing path).
-    //   2. Operator selected the "Transactions only" preset from the
-    //      InputRunPanel gear menu (asserts the Kuali form is already correct).
-    // In both cases the handler falls back to `kualiData.lastDayWorked` (which
-    // kuali-extraction just read from the Kuali form) for the Last Day Worked,
-    // and sick/holiday stay empty — so no extra plumbing is needed. When kronos
-    // is skipped there is also no Job Summary gate, so identity-check is skipped
-    // too (the operator prefilled / asserted the data).
+    //   2. Operator selected the "Transactions only" preset (asserts the Kuali
+    //      form already has Last Day Worked / Separation Date / dept / payroll).
+    // In both cases LDW falls back to `kualiData.lastDayWorked`, sick/holiday
+    // stay empty, and the operator has asserted the data — so there's nothing to
+    // verify (identity-check + the Job Summary fetch are skipped too).
     const presetSkippedKronos = ctx.shouldSkipStep("kronos-search");
     const kronosSkipped = lastDayWorkedPrefilled || presetSkippedKronos;
-    if (kronosSkipped) {
-      ctx.skipStep("kronos-search");
-      log.step(
-        presetSkippedKronos
-          ? `[Step: kronos-search] SKIPPED — run mode 'Transactions only' ` +
-            `(operator asserts Kuali dates are correct — using kualiData.lastDayWorked='${kualiData.lastDayWorked}')`
-          : `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
-            `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`,
-      );
-      try {
-        const kp = await ctx.page("kuali");
-        await fillTimekeeperTasks(kp, timekeeperName);
-        log.success("[Kuali] Timekeeper name filled (kronos-search skip path)");
-      } catch (e) {
-        log.warn(`[Kuali] timekeeper-name fill failed during kronos-search skip: ${errorMessage(e)}`);
-      }
-    } else {
-    const phase1 = await ctx.step("kronos-search", () =>
-      runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName),
-    );
 
-    if (phase1.newK.status === "fulfilled") {
-      newKronosFound = phase1.newK.value.found;
-      timecard = {
-        lastPunchDate: phase1.newK.value.lastPunchDate,
-        sickDates: phase1.newK.value.sickDates,
-        holidayDates: phase1.newK.value.holidayDates,
-      };
-    } else {
-      logSettledRejection("New Kronos", phase1.newK);
-    }
-    logSettledRejection("UCPath Job Summary", phase1.jobSummary);
-    // resolveJobSummaryResult throws only on a GENUINE rejection (selector/nav
-    // failure — classified log emitted above). A clean "no matching values" is
-    // NOT a rejection: it returns `found: false` for the identity-check to act
-    // on. The identity (found + detail-page name) gates person-lookup below; the
-    // dept/payroll `data` feeds the ucpath-job-summary fill step.
-    const jobSummary = resolveJobSummaryResult(phase1.jobSummary);
-    jobSummaryFound = jobSummary.found;
-    jobSummaryName = jobSummary.name;
-    jobSummaryData = jobSummary.data ?? undefined;
-    logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper);
-
-    log.step(
-      `[New Kronos] ${newKronosFound ? "Found" : "Not found"} ` +
-      `(lastPunch=${timecard.lastPunchDate ?? "none"}, ` +
-      `sick=${timecard.sickDates.length}, holiday=${timecard.holidayDates.length})`,
-    );
-    log.step(
-      `[Job Summary] ${jobSummaryFound ? `Found (name="${jobSummaryName}")` : "Not found"}`,
-    );
-    } // end !kronosSkipped branch
-
-    // ─── Step: identity-check — conditional name↔EID verification ───
-    // Search by EID first (the Workforce Job Summary fetched above), then branch
-    // on how its detail-page name compares to the Kuali name
-    // (`classifyNameSimilarity`, order-insensitive token alignment). The step is
-    // SKIPPED only when there is nothing to verify/fix (the "dynamic timeline"
-    // signal). Outcomes:
-    //   · txn prefilled OR kronos skipped → SKIP (no Job Summary gate; UCPath
-    //     already accepted the EID, or the operator prefilled/asserted the data).
+    // ─── Step 2: identity-check — conditional name↔EID verification ───
+    // The Workforce Job Summary (whether the EID resolved + the detail-page
+    // name) is the gate. It USED to be fetched inside kronos-search's parallel
+    // block, with identity-check running after it; it now moves to an inline
+    // read HERE so the EID is verified/corrected BEFORE the transaction check and
+    // the timecard read use it. Only the Job Summary SOURCE moved — the
+    // skip/branch semantics are unchanged:
+    //   · txn prefilled OR kronos skipped → SKIP (operator prefilled/asserted the
+    //     data, or UCPath already accepted the EID) — no fetch, no verify.
     //   · Job Summary FOUND + name "same"     → SKIP (EID trusted, name correct).
     //   · Job Summary FOUND + name "similar"  → RUN → trust the EID, CORRECT the
     //     misspelled Kuali name in place (no person-lookup). Jaden→Jayden case.
@@ -521,15 +471,35 @@ export const separationsWorkflow = defineWorkflow({
     //     BY NAME (very different = wrong-person EID; name authoritative).
     //   · not found + short (<8) EID → RUN → delegate BY NAME.
     //   · not found + complete 8-digit EID → RUN → FAIL LOUD (no lookup).
-    // On an EID correction (the "different"/not-found delegate path) we re-fetch
-    // the Job Summary (so dept/payroll is the RIGHT person's) and re-search New
-    // Kronos (so the timecard / LDW is too). The "similar" path keeps the EID, so
-    // the already-fetched Job Summary / Kronos data stay valid — no re-fetch.
+    // On an EID correction we re-fetch the Job Summary (so dept/payroll is the
+    // RIGHT person's). The New Kronos re-search is GONE: kronos-search runs below
+    // with the corrected EID, so no re-search is needed.
+    const identitySkipped = txnNumberPrefilled || kronosSkipped;
+
+    let jobSummaryData: JobSummaryData | undefined;
+    let jobSummaryFound = false;
+    let jobSummaryName = "";
+    if (!identitySkipped) {
+      const ucpathPage = await ctx.page("ucpath");
+      log.step("[UCPath] Fetching Workforce Job Summary (identity gate)...");
+      // Identity-aware, NON-throwing on a missing EID: returns `found: false` so
+      // the branch below can act (person-lookup for a short EID, fail loud for a
+      // full-8-digit miss). Reads the detail-page NAME on a hit so the name can
+      // be compared. Genuine selector/nav failures still throw (fail loud).
+      const js = await getJobSummaryIdentity(ucpathPage, kualiData.eid);
+      jobSummaryFound = js.found;
+      jobSummaryName = js.name;
+      jobSummaryData = js.data ?? undefined;
+      log.step(
+        `[Job Summary] ${jobSummaryFound ? `Found (name="${jobSummaryName}")` : "Not found"}`,
+      );
+    }
+
     const nameTier = jobSummaryFound
       ? classifyNameSimilarity(kualiData.employeeName, jobSummaryName)
       : "different";
 
-    if (txnNumberPrefilled || kronosSkipped) {
+    if (identitySkipped) {
       ctx.skipStep("identity-check");
       log.step(
         txnNumberPrefilled
@@ -572,12 +542,13 @@ export const separationsWorkflow = defineWorkflow({
         kualiData = { ...kualiData, eid: verifiedEid };
         log.step(
           `[identity-check] EID corrected ${correctedFrom} → ${verifiedEid} — re-fetching ` +
-          `Job Summary + New Kronos for the verified person`,
+          `Job Summary for the verified person`,
         );
         // Job Summary re-fetch is CRITICAL: the dept/payroll filled into Kuali
         // must be the verified person's, not the wrong EID's. A miss now is a
         // genuine failure (person-lookup said the EID is valid but Workforce
-        // Job Summary can't find it) → fail loud.
+        // Job Summary can't find it) → fail loud. No New Kronos re-search is
+        // needed — kronos-search runs below with the corrected EID.
         const ucpathPage = await ctx.page("ucpath");
         const reJobSummary = await getJobSummaryIdentity(ucpathPage, verifiedEid);
         if (!reJobSummary.found || !reJobSummary.data) {
@@ -589,40 +560,116 @@ export const separationsWorkflow = defineWorkflow({
         jobSummaryFound = true;
         jobSummaryName = reJobSummary.name;
         jobSummaryData = reJobSummary.data;
-        // New Kronos re-search is best-effort — an empty timecard simply falls
-        // back to the Kuali Last Day Worked during reconciliation below.
-        try {
-          const newKronosPage = await ctx.page("new-kronos");
-          const reK = await runNewKronosTimecard(newKronosPage, verifiedEid, kronosStart, kronosEnd);
-          newKronosFound = reK.found;
-          timecard = {
-            lastPunchDate: reK.lastPunchDate,
-            sickDates: reK.sickDates,
-            holidayDates: reK.holidayDates,
-          };
-        } catch (e) {
-          log.warn(
-            `[identity-check] New Kronos re-search after EID correction failed (falling back to ` +
-            `Kuali LDW): ${errorMessage(e)}`,
-          );
-        }
       }
     }
 
-    // ─── Reconcile dates (NEW MODEL) ───
+    // ─── Step 3: transaction-check (AFTER identity-check, with the verified EID) ───
+    // Search SS Smart HR for an existing termination (TER) transaction:
+    //   · none      → create a new transaction downstream (normal flow).
+    //   · Approved  → reuse its T#, SKIP ucpath-transaction, and file the
+    //                 duplicate-termination comment (Image 7) in Kuali.
+    //   · Pending   → delete it (LIVE only — the dry-run path reports the intent
+    //                 but doesn't mutate), then create a fresh transaction.
+    // The DELETE is the only mutation; runTransactionCheck gates it on dryRun.
+    // Skipped only when a txn # is already prefilled (edit-resume — UCPath
+    // already has the transaction; nothing to check).
+    let approvedDuplicateTxn = "";
+    if (txnNumberPrefilled) {
+      ctx.skipStep("transaction-check");
+      log.step(
+        `[Step: transaction-check] SKIPPED — txn # prefilled (UCPath transaction already known; no check needed)`,
+      );
+    } else {
+      const checkResult = await ctx.step("transaction-check", () =>
+        runTransactionCheck(ctx, kualiData.eid, { dryRun: !!input.dryRun }),
+      );
+      if (checkResult.status === "approved") {
+        approvedDuplicateTxn = checkResult.transactionNumber;
+        // Reuse the approved transaction: stamp it + the duplicate-termination
+        // comment onto ctx.data so BOTH the dry-run preview and live
+        // kuali-finalization pick them up. The comment is newline-joined with
+        // any existing edit-resume comment (fillTimekeeperComments also
+        // preserves the form's current value).
+        const dupComment = buildDuplicateTerminationComment(
+          docId,
+          getInitials(timekeeperName),
+          todayMmDdYyyy(),
+        );
+        ctx.updateData({
+          transactionNumber: approvedDuplicateTxn,
+          comments: joinComments((ctx.data.comments as string | undefined) ?? "", dupComment),
+        });
+        log.warn(
+          `[transaction-check] Reusing APPROVED termination #${approvedDuplicateTxn} — ` +
+          `ucpath-transaction will be skipped; duplicate-termination comment queued for Kuali`,
+        );
+      }
+    }
+
+    // ─── Step 4: kronos-search (2-way parallel — New Kronos timecard + Kuali
+    // timekeeper fill; the Job Summary moved up to the identity gate above) ───
+    if (kronosSkipped) {
+      ctx.skipStep("kronos-search");
+      log.step(
+        presetSkippedKronos
+          ? `[Step: kronos-search] SKIPPED — run mode 'Transactions only' ` +
+            `(operator asserts Kuali dates are correct — using kualiData.lastDayWorked='${kualiData.lastDayWorked}')`
+          : `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
+            `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`,
+      );
+      try {
+        const kp = await ctx.page("kuali");
+        await fillTimekeeperTasks(kp, timekeeperName);
+        log.success("[Kuali] Timekeeper name filled (kronos-search skip path)");
+      } catch (e) {
+        log.warn(`[Kuali] timekeeper-name fill failed during kronos-search skip: ${errorMessage(e)}`);
+      }
+    } else {
+      const phase1 = await ctx.step("kronos-search", () =>
+        runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName),
+      );
+      if (phase1.newK.status === "fulfilled") {
+        newKronosFound = phase1.newK.value.found;
+        timecard = {
+          lastPunchDate: phase1.newK.value.lastPunchDate,
+          sickDates: phase1.newK.value.sickDates,
+          holidayDates: phase1.newK.value.holidayDates,
+        };
+      } else {
+        logSettledRejection("New Kronos", phase1.newK);
+      }
+      logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper);
+      log.step(
+        `[New Kronos] ${newKronosFound ? "Found" : "Not found"} ` +
+        `(lastPunch=${timecard.lastPunchDate ?? "none"}, ` +
+        `sick=${timecard.sickDates.length}, holiday=${timecard.holidayDates.length})`,
+      );
+    }
+
+    // ─── Reconcile dates (NEW MODEL, 2026-06-22) ───
     // Last Day Worked = New Kronos last physical punch (timecard ground truth),
     //   which OVERRIDES the Kuali LDW when they differ. Falls back to Kuali's
     //   LDW when New Kronos returned no punch or kronos-search was skipped.
-    // Separation Date = Kuali's separationDate — AUTHORITATIVE, never overridden
-    //   (it's the "last day actively employed", can be later than LDW via leave).
-    // Termination Effective Date = Separation Date + 1 day.
-    // Sick / holiday days drive the comment clause ONLY — never any date.
+    // Separation Date = the last day the employee was PAID for (worked OR on
+    //   paid leave) = max(lastDayWorked, last sick date, last holiday date).
+    //   It is DERIVED from the timecard, NOT taken verbatim from Kuali — "usually
+    //   the same as the last day worked unless the employee has sick hours or
+    //   holiday pay". With no leave it collapses to the Last Day Worked; with no
+    //   Kronos data at all it falls back (via lastDayWorked) to the Kuali LDW.
+    //   When the derived value differs from Kuali's, it is written back to the
+    //   Kuali Separation Date field with an audit comment (live runs only).
+    // Termination Effective Date = Separation Date + 1 day (recomputed here).
+    // Sick / holiday days ALSO drive the comment clause (buildTerminationComments).
     const lastDayWorked = timecard.lastPunchDate ?? kualiData.lastDayWorked;
     const ldwChanged =
       timecard.lastPunchDate != null && timecard.lastPunchDate !== kualiData.lastDayWorked;
-    // Separation Date is Kuali-authoritative; `termEffDate` (= separationDate + 1)
-    // was already computed from kualiData.separationDate above — reuse both.
-    const separationDate = kualiData.separationDate;
+    const separationDate = computeSeparationDate(
+      lastDayWorked,
+      timecard.sickDates,
+      timecard.holidayDates,
+    );
+    const separationDateChanged = separationDate !== kualiData.separationDate;
+    const termEffDate = computeTerminationEffDate(separationDate);
 
     log.step(
       `[Dates] Last Day Worked = ${lastDayWorked}` +
@@ -630,12 +677,20 @@ export const separationsWorkflow = defineWorkflow({
         ? ` (New Kronos last punch overrides Kuali '${kualiData.lastDayWorked}')`
         : ` (Kuali LDW — no Kronos override)`),
     );
-    log.step(`[Dates] Separation Date = ${separationDate} (Kuali authoritative — never overridden)`);
+    const hasLeave = timecard.sickDates.length > 0 || timecard.holidayDates.length > 0;
+    log.step(
+      `[Dates] Separation Date = ${separationDate}` +
+      (hasLeave
+        ? ` (last day paid — last day worked extended by sick/holiday leave; ` +
+          `Kuali had '${kualiData.separationDate}')`
+        : ` (= last day worked, no sick/holiday leave; Kuali had '${kualiData.separationDate}')`) +
+      (separationDateChanged ? ` — will write back to Kuali` : ` — matches Kuali`),
+    );
     log.step(`[Dates] Termination effective date = ${termEffDate} (separation date + 1 day)`);
-    if (timecard.sickDates.length || timecard.holidayDates.length) {
+    if (hasLeave) {
       log.step(
         `[Dates] Leave from timecard — sick=${timecard.sickDates.length} ` +
-        `holiday=${timecard.holidayDates.length} (comment clause only, no date change)`,
+        `holiday=${timecard.holidayDates.length} (extends separation date + drives comment clause)`,
       );
     }
 
@@ -685,13 +740,16 @@ export const separationsWorkflow = defineWorkflow({
     // separations halts before BOTH committing steps AND before the
     // pre-submit Kuali form writes (date corrections + dept/payroll fill) that
     // would otherwise start at the next line. The full READ path has already
-    // run by here — 3-system auth (3 Duos), Kuali extraction, Kronos search,
-    // UCPath Job Summary fetch, and Kronos-vs-Kuali date reconciliation — so a
-    // dry run exercises everything except the writes. Result: no UCPath
-    // transaction is created and the Kuali document is never finalized.
-    // (One benign residual: the timekeeper-name fill bundled into the
-    // `kronos-search` parallel block has already touched the UNSUBMITTED Kuali
-    // draft — it commits nothing, mirroring onboarding's pre-submit I-9 create.)
+    // run by here — 3-system auth (3 Duos), Kuali extraction, the UCPath Job
+    // Summary identity gate, the transaction-check SS Smart HR search, Kronos
+    // search, and date reconciliation — so a dry run exercises everything except
+    // the writes. Result: no UCPath transaction is created, no pending
+    // transaction is deleted (transaction-check guards its delete on dryRun), and
+    // the Kuali document is never finalized.
+    // (Two benign residuals on the UNSUBMITTED Kuali draft — neither commits:
+    // the timekeeper-name fill bundled into `kronos-search`, and the `similar`
+    // identity-check name correction — mirroring onboarding's pre-submit I-9
+    // create.)
     if (input.dryRun) {
       ctx.skipStep("ucpath-job-summary");
       ctx.skipStep("ucpath-transaction");
@@ -712,9 +770,10 @@ export const separationsWorkflow = defineWorkflow({
         separationComment: finalComments,
         // Stamp the last two declared detailFields so the dry-run path never
         // trips the "declared but never populated" warn (mirrors
-        // departmentDescription). `transactionNumber` stays "" — no UCPath
-        // submit runs in dry-run; `comments` preserves any edit-and-resume
-        // prefill, "" otherwise.
+        // departmentDescription). `transactionNumber` is usually "" — no UCPath
+        // submit runs in dry-run — but carries the reused T# when transaction-
+        // check found an APPROVED duplicate (so the preview shows it); `comments`
+        // preserves any edit-and-resume prefill + the duplicate-termination note.
         transactionNumber: (ctx.data.transactionNumber as string) ?? "",
         comments: (ctx.data.comments as string) ?? "",
       });
@@ -727,9 +786,11 @@ export const separationsWorkflow = defineWorkflow({
     }
 
     const kualiPage = await ctx.page("kuali");
-    // Only the Last Day Worked may change (New Kronos last punch overrides
-    // Kuali's). The Separation Date is Kuali-authoritative and is NEVER written
-    // back — it stays exactly what the requester entered.
+    // Both reconciled dates are written back to Kuali when they differ from what
+    // the requester entered: the Last Day Worked (New Kronos last punch override)
+    // and the Separation Date (derived from the timecard = last day worked +
+    // sick/holiday leave). Each write is gated on its own *changed flag and is
+    // accompanied by an audit comment in kuali-finalization.
     if (ldwChanged) {
       log.step(`[New Kronos] Last Day Worked differs from Kuali — updating:`);
       log.step(`  Last Day Worked: ${kualiData.lastDayWorked} → ${lastDayWorked}`);
@@ -737,22 +798,27 @@ export const separationsWorkflow = defineWorkflow({
     } else {
       log.step("[Dates] No Last Day Worked change needed");
     }
-
-    const finalTermEffDate = termEffDate;
+    if (separationDateChanged) {
+      log.step(`[Dates] Separation Date differs from Kuali — updating:`);
+      log.step(`  Separation Date: ${kualiData.separationDate} → ${separationDate}`);
+      await updateSeparationDate(kualiPage, separationDate);
+    } else {
+      log.step("[Dates] No Separation Date change needed");
+    }
 
     // ─── Step 5: ucpath-job-summary — fill Kuali department/payroll from
-    // the UCPath Job Summary data fetched in Phase 1's parallel block.
-    // The Kuali Termination Effective Date fill moved to kuali-finalization
-    // (where it belongs — it's a Kuali-side fill, not a UCPath lookup). The
-    // step is therefore skipped when no UCPath data is available, which
-    // also covers the edit-and-resume bypass path (lastDayWorkedPrefilled →
-    // kronos-search skipped → jobSummaryData undefined).
+    // the UCPath Job Summary data fetched by the identity gate above (and
+    // re-fetched there on an EID correction). The Kuali Termination Effective
+    // Date fill moved to kuali-finalization (where it belongs — it's a Kuali-
+    // side fill, not a UCPath lookup). The step is therefore skipped when no
+    // UCPath data is available, which also covers the prefill/preset paths
+    // (identitySkipped → no Job Summary fetch → jobSummaryData undefined).
     const hasUcpathFillData = !!jobSummaryData &&
       (!!jobSummaryData.departmentDescription || !!jobSummaryData.jobCode);
     // Three reasons to skip ucpath-job-summary:
-    //   1. No fillable data returned from the Phase-1 parallel fetch (existing).
-    //   2. Edit-and-resume prefilled lastDayWorked → kronos-search was
-    //      skipped above → jobSummaryData is undefined (existing).
+    //   1. No fillable data from the identity-gate Job Summary fetch (existing).
+    //   2. Edit-and-resume prefilled lastDayWorked → identity gate skipped →
+    //      jobSummaryData is undefined (existing).
     //   3. Operator selected the "Transactions only" preset (new) — they
     //      asserted dept/payroll are already in the Kuali form.
     const presetSkippedJobSummary = ctx.shouldSkipStep("ucpath-job-summary");
@@ -779,15 +845,20 @@ export const separationsWorkflow = defineWorkflow({
     // Today the reconciled lastDayWorked flows only through finalComments →
     // fillComments; the UCPath form field / override checkbox are NOT set
     // because those selectors don't exist yet (deferred — needs a live mapping).
-    // Edit-and-resume: a prefilled `transactionNumber` means UCPath already
-    // accepted the submit on a prior run and the user just wants Kuali
-    // finalization re-run (the failure was downstream). Skip the step
-    // entirely — no Smart HR navigation, no findExistingTerminationTransaction
-    // probe, no submit. The prefilled value flows straight into
+    // Two reasons the UCPath transaction step is skipped with a known number:
+    //   1. Edit-and-resume: a prefilled `transactionNumber` means UCPath already
+    //      accepted the submit on a prior run and the user just wants Kuali
+    //      finalization re-run (the failure was downstream).
+    //   2. Approved duplicate: transaction-check found an ALREADY-APPROVED
+    //      termination (`approvedDuplicateTxn`) — reuse it instead of creating a
+    //      new one (the duplicate-termination comment was already queued onto
+    //      ctx.data.comments).
+    // Either way: no Smart HR navigation, no findExistingTerminationTransaction
+    // probe, no submit — the known number flows straight into
     // kuali-finalization's transaction-results fill.
     let transactionNumber = txnNumberPrefilled
       ? (ctx.data.transactionNumber as string)
-      : "";
+      : approvedDuplicateTxn; // "" when transaction-check found no approved dup
     // Tracks the specific "submit succeeded but no txn # extracted" case.
     // We must abort before kuali-finalization so we don't write a blank
     // transaction number back to the Kuali form. Raised outside the step's
@@ -796,11 +867,14 @@ export const separationsWorkflow = defineWorkflow({
     // (so the Kuali form gets its "left blank for manual entry" treatment).
     let submittedWithoutTxnNumber = false;
 
-    if (txnNumberPrefilled) {
+    if (txnNumberPrefilled || approvedDuplicateTxn) {
       ctx.skipStep("ucpath-transaction");
       log.step(
-        `[Step: ucpath-transaction] SKIPPED — using manual input from edit-data ` +
-        `(transactionNumber='${transactionNumber}' — UCPath submit not needed)`,
+        txnNumberPrefilled
+          ? `[Step: ucpath-transaction] SKIPPED — using manual input from edit-data ` +
+            `(transactionNumber='${transactionNumber}' — UCPath submit not needed)`
+          : `[Step: ucpath-transaction] SKIPPED — reusing APPROVED duplicate termination ` +
+            `(transactionNumber='${transactionNumber}' — UCPath create not needed)`,
       );
       ctx.updateData({ transactionNumber });
     } else {
@@ -808,7 +882,7 @@ export const separationsWorkflow = defineWorkflow({
       const result = await runUcpathTransaction(
         ctx,
         kualiData,
-        finalTermEffDate,
+        termEffDate,
         ucpathReason,
         finalComments,
         template,
@@ -833,8 +907,9 @@ export const separationsWorkflow = defineWorkflow({
         lastDayWorked,
         separationDate,
         ldwChanged,
+        separationDateChanged,
         transactionNumber,
-        finalTermEffDate,
+        finalTermEffDate: termEffDate,
         timekeeperName,
       }),
     );
@@ -844,7 +919,7 @@ export const separationsWorkflow = defineWorkflow({
       terminationType: isVol ? "Vol" : "Invol",
       separationDate,
       lastDayWorked,
-      terminationEffDate: finalTermEffDate,
+      terminationEffDate: termEffDate,
       deptId: jobSummaryData?.deptId ?? "",
       departmentDescription: jobSummaryData?.departmentDescription ?? "",
       jobCode: jobSummaryData?.jobCode ?? "",
