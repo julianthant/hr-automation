@@ -260,6 +260,45 @@ These map cleanly and just need consistent use:
 
 ---
 
+## Presentation Config
+
+These terms describe the operator-configurable display layer introduced in 2026-06.
+They are **purely presentational** — none affects workflow execution logic.
+
+### presentation config
+
+The `WorkflowPresentationConfig` block on a workflow's metadata (`WorkflowMetadata.presentation`). Carries three sub-configs: `naming` (title/subtitle/trace schemes), `steps` (display order + hide/relabel rules), and `delegation` (member and prep naming + coordinator label suffix). Always present after registry normalization — never undefined at runtime.
+
+### naming scheme
+
+The display rule for one of the three naming slots:
+
+| Slot | What it controls | Default |
+|---|---|---|
+| **title scheme** | Main row title | `person-name` (person), `pdf-filename` (file), `catalog-label` (catalog) |
+| **subtitle scheme** | Footer text beside the run number | `eid-else-trace` (person), `trace-only` (file/catalog) |
+| **trace scheme** | How new runs compose their `__traceId` | `code-time-runid` — `{code}-{HHMMSS}-{runId4}` |
+
+Each slot accepts a curated scheme id or `custom-template` (a `{token}`-interpolated string). The available scheme ids live in `SCHEME_LIBRARY` (`src/domain/workflow-presentation/schemes.ts`) and are exposed to the frontend via `GET /api/workflow-presentation/:workflow` → `schemeLibrary`. Changing a trace scheme only affects **new** runs — it never rewrites a row's frozen `data.__traceId`.
+
+### override store / effective presentation
+
+The git-tracked JSON files under `config/workflow-presentation/<workflow>.json`. Every field is optional — only set keys override the code defaults. The runtime merges overrides at serve-time: `effectiveMetadata(meta, repoRoot)` = `applyOverride(meta, readOverride(repoRoot, name))`. Display overrides (`naming`, `steps`, `delegation`, `label`) apply hot on every `/api/workflow-definitions` response with no backend restart; execution-affecting config (`presets`, `skipSteps`) applies at the next daemon spawn. Reads are fail-soft (bad file logs a warn); writes are fail-loud (validated against `WorkflowOverrideSchema`).
+
+### delegation naming
+
+The `DelegationDisplayConfig` sub-block of `WorkflowPresentationConfig`. Controls how rows produced by fan-out appear:
+
+| Field | What it controls |
+|---|---|
+| `memberTitle` / `memberSubtitle` | Naming for delegated operation-member rows (fanned-out signers / contacts) |
+| `prepTitle` | Naming for OCR prep rows delegated under this coordinator |
+| `coordinatorLabelSuffix` | Suffix appended to an operation coordinator's label (e.g. `"Operation"`) |
+
+Delegation naming does **not** affect batch member rows (those use the member workflow's own `naming` config) or standalone single rows.
+
+---
+
 ## How to use this doc
 
 When designing or describing a workflow:
