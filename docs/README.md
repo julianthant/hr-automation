@@ -34,7 +34,6 @@ Use this file to decide **what counts as maintained codebase documentation** ver
 |------|------|
 | `docs/engineering/` | Canonical — conventions + long-form architecture + module reference |
 | `docs/workflow/` | Canonical — workflow behavior, row shapes, delegation, and cancel/retry scopes |
-| `docs/historical/` | Frozen dated snapshots (e.g. old backlog lists) — not current truth |
 | `docs/superpowers/` | Specs, plans, sketches, **session handoffs** (`handoffs/`) — tool/session output — ephemeral |
 | `.superpowers/` | Brainstorm mockups — gitignored — ephemeral |
 
@@ -65,12 +64,6 @@ These should stay accurate relative to the code and are fair game for stale-doc 
 | Location | Role |
 |----------|------|
 | `docs/superpowers/handoffs/` | `/handoff` briefs, paste-ready resume notes, review-fix summaries, other continuity markdown |
-
-## Frozen historical snapshots (exclude from default documentation review)
-
-| Location | Role |
-|----------|------|
-| `docs/historical/` | Dated backlog/snapshot files preserved as-is (see `docs/historical/README.md`) |
 
 ## Other Superpowers tool output (exclude from default documentation review)
 

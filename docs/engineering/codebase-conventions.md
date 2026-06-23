@@ -124,7 +124,7 @@ Avoid new catch-all names such as `helpers.ts` or `misc.ts`. Prefer a **verb or 
 
 ## Tests
 
-- Use `node:test` and `node:assert/strict`.
+- Use **vitest** (`import { describe, it, expect } from "vitest"`). The test runner is `vitest` (not `node:test`).
 - Unit tests mirror `src/` paths.
 - Shared primitives need focused tests before migration.
 - Architecture conventions that can be checked statically should have tests in `tests/unit/architecture/`.

@@ -27,6 +27,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 - `navigateToSection` regex doesn't escape special chars in section names
 - `CRM_SECTION_URLS` currently only has "UCPath Entry Sheet" — missing sections fall back to slower click navigation
 - Always waits for `networkidle` after navigation (conservative but slower)
+- `idocs-download.ts` exports `downloadCrmIdocsDocuments` and `DEFAULT_CRM_DOC_INDICES` — a direct-fetch / PDF.js-bypass path for downloading onboarding PDFs from the CRM iDocs viewer (`/iDocsForSalesforce/…`). Use this instead of navigating the PDF.js UI when you need raw PDF bytes.
 
 ## Lessons Learned
 

@@ -8,9 +8,7 @@ is NOT operator-started directly. The operator uploads PDF(s) through the OnBase
 **run modal** → `/api/ocr/prepare?formType=onbase-emergency-contact&targetWorkflow=onbase`,
 which stamps an **operation coordinator** row in the OnBase panel and delegates
 an OCR prep under it. On approve, OCR fans out **one `operation-member` row per
-person** to this workflow (one `OnbaseInput` each). So `onbase` lives in
-`WORKFLOW_LOADERS` but is **not** in the dashboard input/upload run-surface lists
-as a typed start — its only entry is the OCR approve fan-out.
+person** to this workflow (one `OnbaseInput` each). So `onbase` lives in `WORKFLOW_LOADERS` and IS in the dashboard **upload** run-surface list (`DASHBOARD_UPLOAD_RUN_WORKFLOWS`) with a `run-modal-registry` entry — the operator uploads PDF(s) through the OnBase run modal (no typed input-run start). Like emergency-contact and oath-signature, the upload run creates the operation coordinator row and delegates OCR under it; the OCR approve fan-out is the only path that enqueues executable onbase rows.
 
 `archetype: "batch"`, `inputSubject: "eid"`, `code: "ob"`. Drives the
 **onbase** system (`src/systems/onbase/`).

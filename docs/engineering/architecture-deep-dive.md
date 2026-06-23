@@ -73,10 +73,11 @@ src/
 │   ├── i9-lookup/           ← I9 signer lookup (delegated-only)
 │   ├── crm-doc-download/    ← CRM iDocs PDFs
 │   ├── sharepoint-download/ ← SharePoint roster files
+│   ├── onbase/              ← OnBase document import
 │   └── ocr/                 ← OCR engine (dashboard HTTP only)
 ├── infra/         ← Runtime infrastructure
-│   ├── infra/auth/     ← Per-system login flows + Duo polling + SSO fields
-│   └── infra/browser/  ← launchBrowser, CDP-based tiling math (kernel-internal)
+│   ├── auth/     ← Per-system login flows + Duo polling + SSO fields
+│   └── browser/  ← launchBrowser, CDP-based tiling math (kernel-internal)
 ├── services/      ← Reusable IO/stateful primitives (capture, matching, ocr)
 ├── domain/        ← Business concepts: identity, operator-subject, log-events, hdh
 ├── tracker/       ← JSONL append + SSE dashboard server + Excel export
@@ -128,7 +129,7 @@ flowchart TB
 
 `Ctx` is the **only** object your handler receives at runtime. It's the "remote control" the kernel hands you so you can drive browsers, announce step transitions, update dashboard data, and retry flaky work — without ever touching the kernel internals directly.
 
-### The shape (from `src/core/types.ts`)
+### The shape (from `src/core/kernel/types.ts`)
 
 ```ts
 export interface Ctx<TSteps extends readonly string[], TData> {
@@ -298,7 +299,7 @@ flowchart LR
 
 ### How `Ctx` is built
 
-`Ctx` is not a class — it's a plain object. One factory builds it: `makeCtx` in `src/core/ctx.ts`. All three run modes (`runWorkflow`, `runWorkflowBatch`, `runWorkflowPool`) call `makeCtx` so the handler receives an identical surface in every mode.
+`Ctx` is not a class — it's a plain object. One factory builds it: `makeCtx` in `src/core/kernel/ctx.ts`. All three run modes (`runWorkflow`, `runWorkflowBatch`, `runWorkflowPool`) call `makeCtx` so the handler receives an identical surface in every mode.
 
 ```mermaid
 flowchart LR
@@ -349,7 +350,7 @@ flowchart TB
     REG --> DASH[Dashboard<br/>/api/workflow-definitions]
 ```
 
-### `Session` — the browser + auth manager (`src/core/session.ts`)
+### `Session` — the browser + auth manager (`src/core/kernel/session.ts`)
 
 **State:**
 
@@ -379,7 +380,7 @@ interface SessionState {
 | `killChrome()`          | SIGINT force-kill path                                            |
 | `close()`               | graceful close: each context + browser closed in turn             |
 
-### `Stepper` — the state/emits manager (`src/core/stepper.ts`)
+### `Stepper` — the state/emits manager (`src/core/kernel/stepper.ts`)
 
 **State:**
 
@@ -421,7 +422,7 @@ updateData(patch) {
 
 The emitted data is the _accumulated_ dictionary, so every tracker entry carries the latest full snapshot of whatever `updateData` has been called with so far.
 
-### `registry` — workflow metadata (`src/core/registry.ts`)
+### `registry` — workflow metadata (`src/core/kernel/registry.ts`)
 
 An in-memory `Map<name, WorkflowMetadata>` populated at module-load time when `defineWorkflow` runs. The dashboard reads it via `/api/workflow-definitions`.
 
@@ -561,7 +562,7 @@ Operator submits another input run while the daemon is alive
 - Keepalive: every 15 min idle, each daemon runs `session.healthCheck(system)` per system to prevent SAML expiry.
 - Graceful drain: `:stop` scripts set a stop signal; daemons finish in-flight work and exit.
 
-Workflows registered for daemon mode: `separations`, `work-study`, `person-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `crm-doc-download`, and delegated-only `i9-lookup`.
+Workflows registered for daemon mode: `separations`, `work-study`, `person-lookup`, `onboarding`, `oath-signature`, `emergency-contact`, `oath-upload`, `crm-doc-download`, `onbase`, and delegated-only `i9-lookup`.
 
 Implementation: `src/core/daemon/` (daemon loop, queue, registry, HTTP keepalive) + `src/core/task-store/` (SQLite control plane).
 
@@ -717,13 +718,13 @@ flowchart LR
     REACT --> UI[QueuePanel / LogPanel /<br/>StepPipeline / SessionPanel]
 ```
 
-- **SSE server** (`src/tracker/dashboard.ts`) runs on port 3838.
+- **SSE server** (`src/tracker/dashboard/server.ts`) runs on port 3838. (`src/tracker/dashboard.ts` is a barrel re-export.)
 - **Vite dev server** (`npm run dashboard`) runs on port 5173 and proxies `/api` + `/events` to 3838.
 - Parsed JSONL is cached keyed by (path, mtime, size) — invalidated on any append.
 
 ### SSE enrichment
 
-Each `/events` tick enriches tracker entries with:
+The multiplexed `/events/hub` endpoint enriches tracker entries with:
 
 - `firstLogTs`, `lastLogTs` — per (itemId, runId) earliest/latest log timestamps
 - `lastLogMessage` — most recent log line
@@ -779,7 +780,7 @@ flowchart LR
 
 **Scope discipline:** `row` / `group` / `visible-view` use caller-provided targets verbatim — queue-panel buttons cannot reach batch-view-only rows. Only explicit `tree` scope walks descendant runs. Batch footer retry/delete uses projection `targetRunIds` so bulk actions stay inside the opened batch.
 
-**Adding a workflow:** spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` in `workflow.ts`, override delegation/preview rules when needed, and ensure `tests/unit/architecture/runtime-policy-coverage.test.ts` passes. See `delegation.md` → "How To Add A New Workflow".
+**Adding a workflow:** spread `DEFAULT_WORKFLOW_RUNTIME_POLICY` in `workflow.ts`, override delegation/preview rules when needed, and ensure `tests/unit/architecture/runtime-policy-coverage.test.ts` passes. See `docs/workflow/README.md` → "How To Add A New Workflow".
 
 ---
 
@@ -791,15 +792,19 @@ Each folder under `src/systems/` is a Playwright driver for one external system.
 src/systems/ucpath/
 ├── selectors.ts           ← every page.locator(...) lives here
 ├── navigate.ts            ← helpers: getContentFrame, waitForPeopleSoftProcessing, etc.
-├── login.ts               ← login flow (Duo-aware)
-├── smartHR.ts             ← Smart HR transaction driver
-├── jobSummary.ts          ← Job Summary extract
-├── personSearch.ts        ← Person Search by name/SSN
+├── ss-smart-hr.ts         ← Smart HR transaction driver
+├── job-summary.ts         ← Job Summary extract
+├── person-org-summary.ts  ← Person Org Summary extract
+├── personal-data.ts       ← Personal Data page helpers
+├── action-plan.ts         ← Action Plan page helpers
+├── transaction.ts         ← UCPath transaction driver
 ├── SELECTORS.md           ← auto-generated catalog (committed, drift-gated)
 ├── LESSONS.md             ← append-only failure notes (format-gated)
 ├── common-intents.txt     ← hand-curated intents for fuzzy search
 └── CLAUDE.md              ← per-system doc with the "map a new selector" loop
 ```
+
+(Login flow lives in `src/infra/auth/login.ts`.)
 
 ### The selector registry contract
 

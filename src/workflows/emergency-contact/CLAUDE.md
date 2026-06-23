@@ -46,13 +46,18 @@ Lives under `.tracker/emergency-contact/` (gitignored — contains PII). Each re
 
 Lives in the sibling [`sharepoint-download/`](../sharepoint-download/) workflow — see its CLAUDE.md for the full story. TL;DR: the Download dropdown in every queue-panel header fires `POST /api/sharepoint-download/run` (backed by `buildSharePointRosterDownloadHandler`), which reads `ONBOARDING_ROSTER_URL` from env and saves the xlsx to `.tracker/sharepoint/`. As of 2026-04-22 sharepoint-download IS a kernel workflow (appears in the TopBar dropdown as "SharePoint Download") so operators can see per-run logs + queue rows + session-panel progress. The HTTP endpoint is fire-and-forget (202) — progress is observed in the Sessions panel, not via the response body.
 
-## Pre-flight roster verification
+## Roster verification
 
-Optional but recommended. `--roster-url` downloads the latest roster from SharePoint (via `downloadSharePointFile` in `src/workflows/sharepoint-download/` — handles SSO + Duo); `--roster-path` uses a local xlsx you already have. Uses `verifyBatchAgainstRoster` in `src/workflows/emergency-contact/roster-verify.ts`:
+Optional but recommended before enqueuing. Two standalone scripts handle ad-hoc roster work:
 
+- **`tsx src/workflows/emergency-contact/scripts/download-roster.ts "<sharepoint-url>"`** — downloads a roster from SharePoint (via `downloadSharePointFile`; handles SSO + Duo) and saves to `.tracker/rosters/`.
+- **`tsx src/workflows/emergency-contact/scripts/verify-roster.ts <batchYaml> <rosterXlsxOrCsv>`** — verifies a batch YAML against a local roster file using `verifyBatchAgainstRoster` in `roster-verify.ts`.
+
+`verifyBatchAgainstRoster` checks:
 - Finds `Employee ID` column and `Name` column (or `First Name` + `Last Name`) in row 1 headers
 - For each batch record: checks EID exists + name words intersect (case-insensitive, tolerates "Doe, Jane" vs "Jane Doe")
-- Roster checks belong in the dashboard OCR approval path before records are enqueued.
+
+Roster checks also run in the dashboard OCR approval path before records are enqueued.
 
 ## Gotchas
 

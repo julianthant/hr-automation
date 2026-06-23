@@ -73,7 +73,7 @@ throw. After: three-tier timing-based instrumentation (quick-success →
 debug, slow-success → warn, failure → error), all three failure/slow
 branches sharing the `selector fallback triggered: <label>` anchor.
 
-Paired change: the Selector Health Panel regex in `src/tracker/dashboard.ts`
+Paired change: the Selector Health Panel regex in `src/tracker/dashboard/selector-warnings.ts`
 (`SELECTOR_FALLBACK_RE`) was updated to stop the capture at the first `(`
 so label aggregation is stable across legacy (no suffix), slow-success
 (`(click took Nms — ...)`), and failure (`(click failed after Nms — ...)`)
