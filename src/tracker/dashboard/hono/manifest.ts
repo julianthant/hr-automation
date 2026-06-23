@@ -1,5 +1,5 @@
 export interface DashboardHonoRouteManifestEntry {
-  method: "GET" | "POST" | "OPTIONS";
+  method: "GET" | "POST" | "DELETE" | "OPTIONS";
   path: string;
 }
 
@@ -14,6 +14,11 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "GET", path: "/api/files/:fileId/pages/:page" },
   { method: "GET", path: "/api/workflows" },
   { method: "GET", path: "/api/workflow-definitions" },
+  { method: "GET", path: "/api/workflow-presentation" },
+  { method: "GET", path: "/api/workflow-presentation/:workflow" },
+  { method: "POST", path: "/api/workflow-presentation/:workflow/preview" },
+  { method: "POST", path: "/api/workflow-presentation/:workflow" },
+  { method: "DELETE", path: "/api/workflow-presentation/:workflow" },
   { method: "GET", path: "/api/dates" },
   { method: "GET", path: "/api/entries" },
   { method: "GET", path: "/api/entry-data" },
