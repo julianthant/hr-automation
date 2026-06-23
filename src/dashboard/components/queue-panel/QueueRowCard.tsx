@@ -24,6 +24,14 @@ export interface QueueRowCardProps {
   /** Optional 3px left accent (batch cards). Omit for flat rows. */
   accent?: RowAccent;
   selected?: boolean;
+  /**
+   * Selection-ring strength. Top-level rows use the bright `"primary"` ring so
+   * a selected card pops against its neighbours. Nested member rows (inside an
+   * operation/batch coordinator card) use the dimmer `"muted"` tone — a full
+   * `border-primary/25` outline that traces the whole card (footer included)
+   * and reads clearly subordinate to the parent's bright ring.
+   */
+  selectionTone?: "primary" | "muted";
   /** Hover affordance + cursor (default true). */
   interactive?: boolean;
   /** Spread onto the outer card (onClick / role / tabIndex / aria / data-*). */
@@ -37,11 +45,13 @@ export interface QueueRowCardProps {
 export function QueueRowCard({
   accent,
   selected,
+  selectionTone = "primary",
   interactive = true,
   rootProps,
   children,
   footer,
 }: QueueRowCardProps) {
+  const muted = selectionTone === "muted";
   return (
     <div className="px-3 pt-2 first:pt-3">
       <div
@@ -55,8 +65,16 @@ export function QueueRowCard({
           !interactive && "cursor-default",
           // Selection ring is universal; the border/shadow shift is for flat
           // rows only (accent cards keep their colored left border intact).
-          selected && "ring-2 ring-primary",
-          selected && !accent && "border-primary/50 shadow-lg shadow-black/20",
+          // Top-level rows get the bright primary ring; nested member rows get
+          // a dimmer INSET ring so it sits a step below the parent's ring and
+          // traces the full card outline without being clipped by the
+          // coordinator's overflow box.
+          selected && !muted && "ring-2 ring-primary",
+          selected && !muted && !accent && "border-primary/50 shadow-lg shadow-black/20",
+          // Nested member rows: a dim full border (not an outset ring) so the
+          // highlight traces the whole card — footer included — and reads
+          // clearly subordinate to the parent's bright ring.
+          selected && muted && "border-primary/25",
           rootProps?.className,
         )}
       >
