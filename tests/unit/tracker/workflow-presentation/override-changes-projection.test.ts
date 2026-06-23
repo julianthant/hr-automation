@@ -8,9 +8,12 @@
  * Flow: writeOverride → effectiveMetadata → buildWorkflowRunProjection
  *       → deleteOverride → effectiveMetadata → reverts to baseline.
  *
- * Two cases:
+ * Three cases:
  *   - Member (oath-signature): overrides both memberTitle + memberSubtitle
  *   - Prep (ocr): overrides prepTitle only (subtitle unchanged)
+ *   - Top-level (work-study): overrides naming.title + naming.subtitle on a
+ *     NON-member, NON-prep stamped row — the surface that was SHADOWED until
+ *     Task 6.3 wired effective top-level naming into the projection.
  */
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
@@ -233,6 +236,110 @@ describe("override-changes-projection (Task 6.2)", () => {
       });
 
       assert.equal(reverted.title, baseline.title, "reverted title == baseline title");
+    });
+  });
+
+  describe("top-level case — work-study naming (Task 6.3, the SHADOWED surface)", () => {
+    it("write naming override → top-level projection CHANGES; delete → REVERTS to baseline", (t) => {
+      const dir = mkdtempSync(join(tmpdir(), "wfpres-toplevel-"));
+      t.onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+
+      const all = getAll();
+      const wsMeta = all.find((m) => m.name === "work-study");
+      assert.ok(wsMeta, "work-study must be registered");
+
+      // A flat, top-level person row: NO parentRunId (not a member), NOT a prep
+      // row, and STAMPED (queueRowKind:"person"). This is exactly the surface
+      // whose operator naming override was shadowed before Task 6.3.
+      const row = entry({
+        workflow: "work-study",
+        id: "ws-person-001",
+        runId: "ws-run-001",
+        status: "running",
+        data: {
+          archetype: "single",
+          queueRowKind: "person",
+          name: "Doe, Jane",
+          emplId: "20001234",
+          __traceId: "ws-140000-9f3a",
+        },
+      });
+
+      // ─── BASELINE (no override) ───────────────────────────────────────────
+      // Default person kind: title = name, subtitle = EID (eid-else-trace).
+      const baseline = buildWorkflowRunProjection(row, {});
+      assert.equal(baseline.title, "Doe, Jane", "baseline title = person name");
+      assert.equal(baseline.subtitle, "20001234", "baseline subtitle = EID (eid-else-trace default)");
+
+      // ─── WRITE OVERRIDE ───────────────────────────────────────────────────
+      // naming.title: custom-template → a value ONLY reachable via the naming
+      //   path (default person-name yields the bare "Doe, Jane").
+      // naming.subtitle: trace-only → swaps the subtitle off the EID to the
+      //   trace id — also ONLY reachable via the naming path (default is
+      //   eid-else-trace, which returns the EID here).
+      writeOverride(dir, "work-study", {
+        presentation: {
+          naming: {
+            title: { scheme: "custom-template", template: "{name} · Work-Study" },
+            subtitle: { scheme: "trace-only" },
+          },
+        },
+      });
+
+      // ─── effectiveMetadata reflects the override ──────────────────────────
+      const eff = effectiveMetadata(wsMeta, dir);
+      assert.deepEqual(
+        eff.presentation?.naming?.title,
+        { scheme: "custom-template", template: "{name} · Work-Study" },
+        "effectiveMetadata.presentation.naming.title == override",
+      );
+      assert.deepEqual(
+        eff.presentation?.naming?.subtitle,
+        { scheme: "trace-only" },
+        "effectiveMetadata.presentation.naming.subtitle == override",
+      );
+
+      // ─── PROJECTION CHANGES — the previously-shadowed surface ─────────────
+      const overridden = buildWorkflowRunProjection(row, {
+        resolvePresentation: () => eff.presentation,
+      });
+
+      // Custom-template rendered: "{name} · Work-Study" with name="Doe, Jane".
+      // This value is reachable ONLY through the top-level naming path — no
+      // other precedence term (delegationTitle/resolveEntryTitle/presentation/
+      // fallback) can produce it for this row.
+      assert.equal(
+        overridden.title,
+        "Doe, Jane · Work-Study",
+        "overridden title = top-level custom template rendered",
+      );
+      // trace-only subtitle = the __traceId value, NOT the EID — only the naming
+      // path yields this (the default eid-else-trace returns "20001234").
+      assert.equal(
+        overridden.subtitle,
+        "ws-140000-9f3a",
+        "overridden subtitle = trace id (only reachable via naming)",
+      );
+
+      // Load-bearing change assertions: both must differ from baseline — i.e.
+      // the override is no longer SHADOWED, it reaches the live top-level row.
+      assert.notEqual(overridden.title, baseline.title, "title CHANGED from baseline (was shadowed)");
+      assert.notEqual(overridden.subtitle, baseline.subtitle, "subtitle CHANGED from baseline (was shadowed)");
+
+      // ─── DELETE OVERRIDE → REVERT ─────────────────────────────────────────
+      const deleted = deleteOverride(dir, "work-study");
+      assert.ok(deleted, "deleteOverride returned true (file existed)");
+
+      const eff2 = effectiveMetadata(wsMeta, dir);
+      const reverted = buildWorkflowRunProjection(row, {
+        resolvePresentation: () => eff2.presentation,
+      });
+
+      assert.deepEqual(
+        { title: reverted.title, subtitle: reverted.subtitle },
+        { title: baseline.title, subtitle: baseline.subtitle },
+        "reverted top-level projection equals baseline (default naming round-trips byte-identical)",
+      );
     });
   });
 });
