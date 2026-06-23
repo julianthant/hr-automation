@@ -9,6 +9,7 @@ import { clear } from '../../../src/core/kernel/registry.js'
 import {
   computeSpawnPlan,
   ensureDaemonsAndEnqueue,
+  ensureDaemonsAvailable,
   __setSpawnDaemonImplForTests,
   __resetDaemonSpawnLocksForTests,
 } from '../../../src/core/daemon/client.js'
@@ -362,6 +363,90 @@ test('ensureDaemonsAndEnqueue: concurrent same-workflow enqueues spawn only ONE 
 
     const state = await readQueueState('race-wf', dir)
     assert.equal(state.queued.length, 2, 'both items enqueued onto the shared queue')
+  } finally {
+    __setSpawnDaemonImplForTests(null)
+    __resetDaemonSpawnLocksForTests()
+    for (const close of servers) await close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureDaemonsAvailable: spawns a fresh daemon when the only alive lockfile reports shuttingDown:true (2026-06-22 zombie)', async () => {
+  // Repro of the wedged-queue bug: a daemon whose browser disconnected set
+  // `state.shuttingDown` and exited its claim loop, but the process hung
+  // without unlinking its lockfile. Its PID is alive and /whoami answers, so
+  // findAliveDaemons counts it — pre-fix, computeSpawnPlan(1) → 0 and retried
+  // tasks sat `queued` forever. The not-shutting-down filter must drop it so a
+  // fresh daemon spawns.
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-client-zombie-'))
+  const servers: Array<() => Promise<void>> = []
+  let spawnCalls = 0
+  try {
+    const { createServer } = await import('node:http')
+    const { writeLockfile, lockfilePath, ensureDaemonsDir, invalidateAliveDaemonsCache } =
+      await import('../../../src/core/daemon/registry.js')
+    ensureDaemonsDir(dir)
+
+    // The zombie: /whoami matches its lockfile identity but reports shuttingDown.
+    const zombie = createServer((req, res) => {
+      if (req.url === '/whoami' && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ workflow: 'zombie-wf', instanceId: 'zomb-01', pid: process.pid, shuttingDown: true, version: 1 }))
+        return
+      }
+      if (req.url === '/wake' && req.method === 'POST') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{"ok":true}')
+        return
+      }
+      res.writeHead(404); res.end()
+    })
+    await new Promise<void>((r) => zombie.listen(0, '127.0.0.1', () => r()))
+    servers.push(() => new Promise<void>((r) => zombie.close(() => r())))
+    const zaddr = zombie.address()
+    const zport = typeof zaddr === 'object' && zaddr ? zaddr.port : 0
+    writeLockfile(
+      { workflow: 'zombie-wf', instanceId: 'zomb-01', pid: process.pid, port: zport, startedAt: new Date(Date.now() - 60_000).toISOString(), hostname: 'host', version: 1 },
+      lockfilePath('zombie-wf', 'zomb-01', dir),
+    )
+
+    // Fake spawn: a healthy fresh daemon (shuttingDown:false) + matching lockfile.
+    __setSpawnDaemonImplForTests(async (workflow, trackerDir) => {
+      spawnCalls++
+      const instanceId = `fresh-0${spawnCalls}`
+      const server = createServer((req, res) => {
+        if (req.url === '/whoami' && req.method === 'GET') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ workflow, instanceId, pid: process.pid, shuttingDown: false, version: 1 }))
+          return
+        }
+        if (req.url === '/wake' && req.method === 'POST') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end('{"ok":true}')
+          return
+        }
+        res.writeHead(404); res.end()
+      })
+      await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+      servers.push(() => new Promise<void>((r) => server.close(() => r())))
+      const addr = server.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+      const startedAt = new Date().toISOString()
+      const lp = lockfilePath(workflow, instanceId, trackerDir)
+      writeLockfile({ workflow, instanceId, pid: process.pid, port, startedAt, hostname: 'host', version: 1 }, lp)
+      return { workflow, instanceId, pid: process.pid, port, startedAt, lockfilePath: lp }
+    })
+
+    invalidateAliveDaemonsCache('zombie-wf', dir)
+    const daemons = await ensureDaemonsAvailable('zombie-wf', {}, { trackerDir: dir, quiet: true })
+
+    assert.equal(spawnCalls, 1, 'spawned a fresh daemon past the shutting-down zombie')
+    assert.deepEqual(
+      daemons.map((d) => d.instanceId),
+      ['fresh-01'],
+      'the returned/woken set excludes the zombie and contains the fresh daemon',
+    )
   } finally {
     __setSpawnDaemonImplForTests(null)
     __resetDaemonSpawnLocksForTests()

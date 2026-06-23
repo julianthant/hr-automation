@@ -250,6 +250,42 @@ export async function filterPeersAvailableForHandoff(
   return results.filter((d): d is Daemon => d !== null)
 }
 
+/**
+ * Filter an alive-daemon set down to daemons that can still CLAIM queued work:
+ * drop only those that POSITIVELY report `/whoami.shuttingDown: true`. Such a
+ * daemon has already exited its claim loop (`while (!state.shuttingDown)`) and
+ * will never pick up another queued item — but `findAliveDaemons` still counts
+ * it (PID alive + `/whoami` answers), so `computeSpawnPlan` sees ≥1 "alive" and
+ * spawns ZERO, and the orphan sweep sees ≥1 alive and fails NOTHING. The result
+ * is retried/enqueued tasks wedged `queued` forever behind a zombie (observed
+ * 2026-06-22: a separations daemon whose UCPath browser disconnected set
+ * `shuttingDown` then hung for 30+ min without unlinking its lockfile).
+ *
+ * Unlike `filterPeersAvailableForHandoff` / `filterResponsiveDaemons` (which
+ * require a positive `/whoami` MATCH), this KEEPS an unreachable-but-PID-alive
+ * daemon — `probeWhoami` reports `unreachable` with `shuttingDown: false`, so a
+ * momentarily-busy-but-healthy daemon (sync write during keepalive, mid-Playwright
+ * RPC) is NOT excluded and does not trigger a duplicate spawn. The same lenient
+ * trust `findAliveDaemons` applies; only a POSITIVE `shuttingDown: true` removes a
+ * daemon from the claimable set.
+ */
+export async function filterDaemonsNotShuttingDown(
+  daemons: Daemon[],
+  timeoutMs = 1500,
+): Promise<Daemon[]> {
+  const results = await Promise.all(
+    daemons.map(async (d) => {
+      const probe = await probeWhoami(
+        d.port,
+        { workflow: d.workflow, instanceId: d.instanceId },
+        timeoutMs,
+      )
+      return probe.result === 'match' && probe.shuttingDown ? null : d
+    }),
+  )
+  return results.filter((d): d is Daemon => d !== null)
+}
+
 function safeUnlink(path: string): void {
   try {
     unlinkSync(path)
