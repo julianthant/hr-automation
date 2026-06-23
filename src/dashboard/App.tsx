@@ -311,6 +311,15 @@ export function App() {
     [registered],
   );
 
+  const presentationByWorkflow = useMemo(
+    () => new Map(registered.map((m) => [m.name, m.presentation])),
+    [registered],
+  );
+  const resolvePresentation = useCallback(
+    (workflowId: string) => presentationByWorkflow.get(workflowId),
+    [presentationByWorkflow],
+  );
+
   /** Matches QueuePanel group cards + flat rows (not strip-collapse primaries). */
   const queuePanelTopLevelCount = useMemo(
     () =>
@@ -755,6 +764,7 @@ export function App() {
           workflow={workflow}
           workflowLabel={wfLabel}
           runtimePolicies={runtimePolicies}
+          resolvePresentation={resolvePresentation}
           displayNames={displayNames}
           selectedId={selectedId}
           onSelect={handleSelectEntry}
