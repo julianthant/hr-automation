@@ -118,6 +118,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     projectionReady,
     staticDir,
     screenshotsDir: opts.screenshotsDir,
+    repoRoot: process.cwd(),
   });
   const requestListener = getRequestListener(honoApp.fetch);
 
