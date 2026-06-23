@@ -2,11 +2,15 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   computeTerminationEffDate,
+  computeSeparationDate,
   buildTerminationComments,
   mapReasonCode,
   getInitials,
   computeKronosDateRange,
   buildDateChangeComments,
+  buildSeparationDateChangeComment,
+  buildDuplicateTerminationComment,
+  todayMmDdYyyy,
 } from "../../../../src/workflows/separations/schema.js";
 
 describe("computeTerminationEffDate", () => {
@@ -41,6 +45,67 @@ describe("computeTerminationEffDate", () => {
 
   it("handles April 30 → May 1 (30-day month boundary)", () => {
     assert.equal(computeTerminationEffDate("04/30/2026"), "05/01/2026");
+  });
+});
+
+describe("computeSeparationDate", () => {
+  // Separation Date = the last day the employee was PAID for (worked OR on paid
+  // leave) = max(lastDayWorked, last sick date, last holiday date).
+  it("equals the last day worked when there is no sick/holiday leave", () => {
+    assert.equal(computeSeparationDate("06/12/2026", [], []), "06/12/2026");
+  });
+
+  it("equals the last day worked when leave arrays are omitted", () => {
+    assert.equal(computeSeparationDate("06/12/2026"), "06/12/2026");
+  });
+
+  it("moves forward to the latest sick date when sick leave extends past the last punch", () => {
+    // Lydia Li (#3949): lastPunch 04/23, sick 04/27→04/30 → Sep 04/30.
+    assert.equal(
+      computeSeparationDate("04/23/2026", ["04/27/2026", "04/28/2026", "04/30/2026"], []),
+      "04/30/2026",
+    );
+  });
+
+  it("moves forward to the holiday date when holiday pay extends past the last punch", () => {
+    // Kou Nathan (#4016): lastPunch 06/12, holiday 06/19 → Sep 06/19.
+    assert.equal(computeSeparationDate("06/12/2026", [], ["06/19/2026"]), "06/19/2026");
+  });
+
+  it("takes the latest across BOTH sick and holiday dates", () => {
+    assert.equal(
+      computeSeparationDate("04/23/2026", ["04/27/2026", "04/28/2026"], ["04/30/2026"]),
+      "04/30/2026",
+    );
+  });
+
+  it("keeps the last day worked when it is later than every leave date", () => {
+    // Defensive: a stray earlier leave date never pulls the separation backwards.
+    assert.equal(
+      computeSeparationDate("06/20/2026", ["06/10/2026"], ["06/05/2026"]),
+      "06/20/2026",
+    );
+  });
+
+  it("crosses a month boundary when leave runs into the next month", () => {
+    assert.equal(computeSeparationDate("05/30/2026", ["06/01/2026"], []), "06/01/2026");
+  });
+});
+
+describe("buildSeparationDateChangeComment", () => {
+  it("returns an empty string when the Separation Date did not change", () => {
+    assert.equal(buildSeparationDateChangeComment("06/12/2026", "06/12/2026", "JZ"), "");
+  });
+
+  it("produces the Separation Date audit line when it changed", () => {
+    assert.equal(
+      buildSeparationDateChangeComment("06/11/2026", "06/19/2026", "JZ"),
+      "Updated Separation Date from 06/11/2026 to 06/19/2026 per Kronos timesheet. -JZ",
+    );
+  });
+
+  it("embeds the initials verbatim (no case change, no prefix)", () => {
+    assert.ok(buildSeparationDateChangeComment("06/11/2026", "06/19/2026", "maS").endsWith("-maS"));
   });
 });
 
@@ -292,7 +357,9 @@ describe("buildDateChangeComments", () => {
     );
   });
 
-  it("never mentions the Separation Date (Kuali-authoritative, never changed)", () => {
+  it("never mentions the Separation Date (that audit line has its own builder)", () => {
+    // buildDateChangeComments is LDW-only; the Separation Date change line is
+    // produced by buildSeparationDateChangeComment and joined in kuali-finalize.
     const result = buildDateChangeComments("03/14/2026", "03/20/2026", "JZ");
     assert.equal(result.includes("Separation Date"), false);
   });
@@ -300,5 +367,41 @@ describe("buildDateChangeComments", () => {
   it("embeds the initials verbatim (no case change, no prefix)", () => {
     const result = buildDateChangeComments("03/14/2026", "03/20/2026", "maS");
     assert.ok(result.endsWith("-maS"));
+  });
+});
+
+describe("buildDuplicateTerminationComment", () => {
+  it("produces the two-line Image-7 comment with form #, initials, and today", () => {
+    const result = buildDuplicateTerminationComment("4222", "JR", "02/22/2026");
+    assert.equal(
+      result,
+      "Duplicate termination. Re Kuali Form #4222. -JR 02/22/2026\n" +
+        "EE termination approved on UCPath. -JR 02/22/2026",
+    );
+  });
+
+  it("is exactly two newline-joined lines", () => {
+    const lines = buildDuplicateTerminationComment("4290", "MAS", "06/22/2026").split("\n");
+    assert.equal(lines.length, 2);
+    assert.ok(lines[0].startsWith("Duplicate termination. Re Kuali Form #4290."));
+    assert.ok(lines[1].startsWith("EE termination approved on UCPath."));
+  });
+
+  it("stamps the initials and date verbatim on both lines", () => {
+    const result = buildDuplicateTerminationComment("100", "jr", "12/31/2026");
+    for (const line of result.split("\n")) {
+      assert.ok(line.endsWith("-jr 12/31/2026"), `line should end with the stamp: ${line}`);
+    }
+  });
+});
+
+describe("todayMmDdYyyy", () => {
+  it("formats an injected date as zero-padded MM/DD/YYYY", () => {
+    assert.equal(todayMmDdYyyy(new Date(2026, 1, 5)), "02/05/2026");
+    assert.equal(todayMmDdYyyy(new Date(2026, 11, 31)), "12/31/2026");
+  });
+
+  it("defaults to the current date (MM/DD/YYYY shape)", () => {
+    assert.match(todayMmDdYyyy(), /^\d{2}\/\d{2}\/\d{4}$/);
   });
 });

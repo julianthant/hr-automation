@@ -134,6 +134,17 @@ export const smartHR = {
    */
   errorBanner: (f: FrameLocator): Locator =>
     f.locator(".PSERROR, #ALERTMSG, .ps_alert-error"),
+
+  /**
+   * "Delete Selected Transactions" button under the Smart HR Transactions page's
+   * "Transactions in Progress" grid — deletes the rows whose Select checkbox is
+   * ticked (used to remove a pending termination before recreating it).
+   * NEEDS LIVE VERIFY — mapped from the live screenshot, not playwright-cli.
+   * verified 2026-06-22
+   * @tags delete, selected, transactions, in-progress, button, smart-hr
+   */
+  deleteSelectedTransactionsButton: (f: FrameLocator): Locator =>
+    f.getByRole("button", { name: "Delete Selected Transactions" }),
 };
 
 // ─── Personal Data tab (inside transaction form) ───────────────────────────

@@ -38,6 +38,14 @@ Position number fill in `fillJobData` triggers a page refresh that **changes gri
 9. `clickEarnsDistTab` / `clickEmployeeExperienceTab` — visit only (no fill)
 10. `clickSaveAndSubmit` — after confirmation OK, reopens the Smart HR row, scrolls to the lower readback area, and extracts the `T...` transaction number
 
+## SS Smart HR Transactions search + pending-delete (ss-smart-hr.ts, transaction.ts)
+
+Used by separations' `transaction-check` step (see `src/workflows/separations/CLAUDE.md`).
+
+- `findTerminationTransactionStatus(page, eid)` (`ss-smart-hr.ts`) — navigates to **SS Smart HR Transactions** (the self-service search page, distinct from the standard Smart HR Transactions create page), searches by Empl ID, scans the results grid (header-keyed columns: Transaction ID / Action / Approval Status), and returns the **TER (termination)** row's `{ found, transactionId, approvalStatus }`. Pure `pickTerminationRow(rows)` does the TER pick (unit-tested). Best-effort: a parse failure degrades to `found:false`.
+- `deletePendingTransaction(page, eid)` (`transaction.ts`) — on the standard Smart HR "Transactions in Progress" grid, matches the EID + "Terminat" row, ticks its Select checkbox (clicked **inside `frame.evaluate`** — PeopleSoft overlay intercepts Playwright clicks, same escape hatch as `#ICOK`), clicks `smartHR.deleteSelectedTransactionsButton`, and confirms the `#ICOK` dialog. Returns whether a row was deleted.
+- **NEEDS LIVE VERIFY:** both were authored from the live screenshots, not `playwright-cli` — confirm the results-grid layout, the in-progress checkbox, and the delete-confirm dialog against the real pages.
+
 ## Gotchas
 
 - Sidebar overlay intercepts clicks on iframe buttons — must collapse via "Navigation Area" button
@@ -61,7 +69,7 @@ When an upstream record has the wrong EID (Kuali Build, Salesforce, etc.), the c
 
 1. The workflow errors with a legible message naming the offending EID.
 2. The user opens the upstream record and corrects it.
-3. The workflow is re-run. Separations' pre-submit existence check (`findExistingTerminationTransaction`, scans the Smart HR Transactions list for an existing row matching `(employeeName, effectiveDate, template)`) prevents duplicate submits on re-run. Other workflows rely on their own live-page probes where applicable — there is no tracker-side idempotency cache as of 2026-04-23.
+3. The workflow is re-run. Separations' pre-submit existence check (`findExistingTerminationTransaction`, scans the Smart HR Transactions list for an existing row matching `(employeeId, effectiveDate, termination action)`) prevents duplicate submits on re-run. Other workflows rely on their own live-page probes where applicable — there is no tracker-side idempotency cache as of 2026-04-23.
 
 Auto-correction via cross-source name matching is a correctness risk: names aren't unique, variants can match different employees, and a silent match produces a wrong-employee transaction. Transient-error retries (Playwright timeouts, auth flakes) still go through `loginWithRetry` / `ctx.retry` — that's retrying the same operation, not substituting data.
 
