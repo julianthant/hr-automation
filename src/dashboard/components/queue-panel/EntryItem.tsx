@@ -143,6 +143,13 @@ interface EntryItemProps {
   displayNames?: Map<string, string>;
   selected: boolean;
   /**
+   * Selection-ring strength forwarded to {@link QueueRowCard}. Defaults to the
+   * bright `"primary"` ring for top-level rows; pass `"muted"` for member rows
+   * nested inside a coordinator card so the selection ring reads as subordinate
+   * to the parent's and is never clipped (see QueueRowCard).
+   */
+  selectionTone?: "primary" | "muted";
+  /**
    * Stable selection callback — receives `entry.id`. EntryItem composes the
    * call internally so parents can pass a useCallback-stable handler without
    * minting a fresh inline closure per row each render. Pairs with the
@@ -164,6 +171,7 @@ function EntryItemImpl({
   actions,
   displayNames,
   selected,
+  selectionTone,
   onSelect,
   date,
   onDelete,
@@ -224,6 +232,7 @@ function EntryItemImpl({
   return (
     <QueueRowCard
       selected={selected}
+      selectionTone={selectionTone}
       rootProps={{
         onClick: () => onSelect(entry.id),
         role: "button",
@@ -347,6 +356,7 @@ function EntryItemImpl({
  */
 export const EntryItem = memo(EntryItemImpl, (prev, next) => {
   if (prev.selected !== next.selected) return false;
+  if (prev.selectionTone !== next.selectionTone) return false;
   if (prev.onSelect !== next.onSelect) return false;
   if (prev.onDelete !== next.onDelete) return false;
   if (prev.date !== next.date) return false;
