@@ -1,11 +1,16 @@
 /**
- * E2E-106: Operation coordinator chip must show its OWN lifecycle status,
- * not a worst-member rollup.
+ * E2E-106: Operation coordinator chip must NOT show a worst-member rollup.
  *
  * After OCR approval the coordinator row is `status:"running"/step:"approved"`.
- * Members fan out and some may fail. The coordinator chip must stay
- * `"running"` (or `"approved"` / `"done"` when it reaches those steps on its
- * own) — it must NOT flip to `"failed"` just because one member failed.
+ * Members fan out and some may fail. The coordinator chip must NEVER flip to
+ * `"failed"` just because one member failed — a partly-failed fan-out reads
+ * "done" at the coordinator level, with the failures visible in the member
+ * tally (StatusCounts).
+ *
+ * The coordinator's lifecycle also COMPLETES when the fan-out completes: while
+ * members are still in flight the chip stays `"running"`, and once every member
+ * is terminal it flips to `"done"` (the coordinator is a display-only row with
+ * no daemon task, so the member rollup is the only completion signal).
  *
  * The rule must be identical across all three operation workflows:
  * oath-signature, emergency-contact, and oath-upload.
@@ -90,9 +95,12 @@ function buildOperationProjection(
 // Pin red: coordinator with done+failed members must show ITS OWN status
 // ---------------------------------------------------------------------------
 
-describe("E2E-106: operation coordinator chip reflects its own lifecycle, not worst-member", () => {
+describe("E2E-106: operation coordinator chip never shows a worst-member 'failed' rollup", () => {
   const COORDINATOR_STATUS: TrackerEntry["status"] = "running";
   const COORDINATOR_STEP = "approved";
+  // All members terminal (2 done + 1 failed): the fan-out is complete, so the
+  // coordinator flips to "done" — and crucially NOT "failed" from the failed
+  // member (the failure stays in the StatusCounts tally).
   const MIXED_MEMBERS: TrackerEntry["status"][] = ["done", "done", "failed"];
 
   for (const workflow of [
@@ -100,7 +108,7 @@ describe("E2E-106: operation coordinator chip reflects its own lifecycle, not wo
     "emergency-contact",
     "oath-upload",
   ] as const) {
-    test(`${workflow}: coordinator with 2 done + 1 failed member keeps its OWN status (not "failed")`, () => {
+    test(`${workflow}: all-terminal fan-out with a failed member reads "done", never "failed"`, () => {
       const rows = buildOperationProjection(
         workflow,
         COORDINATOR_STATUS,
@@ -112,10 +120,15 @@ describe("E2E-106: operation coordinator chip reflects its own lifecycle, not wo
       assert.equal(rows.groupRows.length, 1, "expected one operation group row");
       const proj = rows.groupRows[0]?.projection;
       assert.ok(proj, "projection must exist");
+      assert.notEqual(
+        proj.status,
+        "failed",
+        `${workflow} coordinator chip must NOT be "failed" from a worst-member rollup`,
+      );
       assert.equal(
         proj.status,
-        COORDINATOR_STATUS,
-        `${workflow} coordinator chip should be "${COORDINATOR_STATUS}" (its own lifecycle), not "failed" (worst-member rollup)`,
+        "done",
+        `${workflow} coordinator chip should be "done" once every member is terminal`,
       );
     });
   }
@@ -152,7 +165,7 @@ describe("E2E-106: operation coordinator chip reflects its own lifecycle, not wo
     }
   });
 
-  test("coordinator still correctly shows 'running' when it has only running/queued members (no regression)", () => {
+  test("coordinator still shows 'running' while members are in flight (running/queued)", () => {
     for (const workflow of ["oath-signature", "emergency-contact", "oath-upload"] as const) {
       const rows = buildOperationProjection(workflow, "running", "approved", ["running", "pending"]);
       const proj = rows.groupRows[0]?.projection;
@@ -161,16 +174,23 @@ describe("E2E-106: operation coordinator chip reflects its own lifecycle, not wo
     }
   });
 
-  test("coordinator with all-done members shows 'done' (no regression: happy path)", () => {
+  test("coordinator flips to 'done' once the whole fan-out is terminal (all members done)", () => {
     for (const workflow of ["oath-signature", "emergency-contact", "oath-upload"] as const) {
       const rows = buildOperationProjection(workflow, "running", "approved", ["done", "done", "done"]);
       const proj = rows.groupRows[0]?.projection;
       assert.ok(proj, `${workflow}: projection must exist`);
-      // When all members succeed, coordinator OWN status is "running/approved" —
-      // the chip should reflect that, not "done" from the member aggregate.
-      // (The coordinator transitions to done via its own emitted row, not via
-      // member inference.)
-      assert.equal(proj.status, "running");
+      // The coordinator has no daemon task to emit its own terminal row, so the
+      // member rollup is the completion signal: every member terminal → "done".
+      assert.equal(proj.status, "done");
+    }
+  });
+
+  test("a single completed member flips the coordinator to 'done' (matches the rendered fan-out)", () => {
+    for (const workflow of ["oath-signature", "emergency-contact", "oath-upload"] as const) {
+      const rows = buildOperationProjection(workflow, "running", "approved", ["done"]);
+      const proj = rows.groupRows[0]?.projection;
+      assert.ok(proj, `${workflow}: projection must exist`);
+      assert.equal(proj.status, "done");
     }
   });
 });
