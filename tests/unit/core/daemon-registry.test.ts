@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   findAliveDaemons,
+  filterDaemonsNotShuttingDown,
   invalidateAliveDaemonsCache,
   writeLockfile,
   readLockfile,
@@ -14,7 +15,50 @@ import {
   isProcessAlive,
   randomInstanceId,
 } from '../../../src/core/daemon/registry.js'
-import type { DaemonLockfile } from '../../../src/core/daemon/types.js'
+import type { Daemon, DaemonLockfile } from '../../../src/core/daemon/types.js'
+
+/**
+ * Stand up a stub `/whoami` server reporting the given identity + shuttingDown
+ * flag, and return a `Daemon` pointing at it plus a close fn.
+ */
+async function startWhoamiStub(opts: {
+  workflow: string
+  instanceId: string
+  shuttingDown: boolean
+}): Promise<{ daemon: Daemon; close: () => Promise<void> }> {
+  const { createServer } = await import('node:http')
+  const server = createServer((req, res) => {
+    if (req.url === '/whoami' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          workflow: opts.workflow,
+          instanceId: opts.instanceId,
+          pid: process.pid,
+          shuttingDown: opts.shuttingDown,
+          version: 1,
+        }),
+      )
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const addr = server.address()
+  const port = typeof addr === 'object' && addr ? addr.port : 0
+  return {
+    daemon: {
+      workflow: opts.workflow,
+      instanceId: opts.instanceId,
+      pid: process.pid,
+      port,
+      startedAt: new Date().toISOString(),
+      lockfilePath: 'unused',
+    },
+    close: () => new Promise<void>((r) => server.close(() => r())),
+  }
+}
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-reg-'))
 
@@ -239,6 +283,38 @@ test('findAliveDaemons filters by workflow name', async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('filterDaemonsNotShuttingDown drops a daemon reporting shuttingDown:true', async () => {
+  const live = await startWhoamiStub({ workflow: 'wftest', instanceId: 'live', shuttingDown: false })
+  const zombie = await startWhoamiStub({ workflow: 'wftest', instanceId: 'zombie', shuttingDown: true })
+  try {
+    const claimable = await filterDaemonsNotShuttingDown([live.daemon, zombie.daemon])
+    assert.deepEqual(
+      claimable.map((d) => d.instanceId),
+      ['live'],
+      'a positively-shutting-down daemon is excluded; the live one is kept',
+    )
+  } finally {
+    await live.close()
+    await zombie.close()
+  }
+})
+
+test('filterDaemonsNotShuttingDown KEEPS an unreachable-but-PID-alive daemon (no duplicate spawn)', async () => {
+  // Port 1 fails HTTP connect → probe `unreachable` → shuttingDown defaults
+  // false → the daemon is NOT excluded (a momentarily-busy healthy daemon must
+  // not be dropped, or callers spawn a duplicate).
+  const unreachable: Daemon = {
+    workflow: 'wftest',
+    instanceId: 'busy',
+    pid: process.pid,
+    port: 1,
+    startedAt: new Date().toISOString(),
+    lockfilePath: 'unused',
+  }
+  const claimable = await filterDaemonsNotShuttingDown([unreachable])
+  assert.deepEqual(claimable.map((d) => d.instanceId), ['busy'])
 })
 
 test('randomInstanceId produces workflow-prefixed short hex', () => {
