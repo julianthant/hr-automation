@@ -41,7 +41,7 @@ export function SchemePartSelect({
       </label>
       <select
         id={id}
-        value={allowUnset ? (value?.scheme ?? "") : effective.scheme}
+        value={effective.scheme}
         onChange={(e) => {
           const v = e.target.value;
           if (allowUnset && v === "") {
