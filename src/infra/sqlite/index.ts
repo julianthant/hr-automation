@@ -110,29 +110,23 @@ export function openDatabase(path: string, opts: OpenDatabaseOpts = {}): Databas
  * The wrapper is thin (just intercepts `prepare`); other methods pass through.
  */
 function wrapDatabase(raw: DatabaseSync): Database {
-  // Cache compiled statements by SQL text for the connection's lifetime.
-  // node:sqlite (unlike better-sqlite3) does NOT cache internally, so the hot
-  // paths (the daemon claim loop re-preparing the same claim/countQueued/
-  // terminal statements every iteration) re-compiled identical SQL on each
-  // call. Prepared StatementSync objects are safe to reuse across .run/.get/
-  // .all with different params, so cache + reuse. The Map is dropped with the
-  // wrapper when the connection is GC'd; close() finalizes the statements.
-  const stmtCache = new Map<string, Statement>();
+  // NOTE: deliberately NOT caching prepared statements by SQL text. It was
+  // tried (2026-06-24) to save re-compilation on hot paths, but a memoized
+  // connection (openStateDb) can outlive a `.tracker/state.db` deletion +
+  // recreation (tracker/CLAUDE.md: "resolve DB handles at request/tick time"),
+  // and a cached StatementSync then points at the stale handle → an
+  // order-dependent INSERT/transaction failure across test files. Re-preparing
+  // per call is the safe behavior; the compile cost is not worth the staleness.
   return {
     prepare(sql: string): Statement {
-      const cached = stmtCache.get(sql);
-      if (cached) return cached;
       const stmt = raw.prepare(sql);
       stmt.setAllowUnknownNamedParameters(true);
-      const wrapped = stmt as unknown as Statement;
-      stmtCache.set(sql, wrapped);
-      return wrapped;
+      return stmt as unknown as Statement;
     },
     exec(sql: string): void {
       raw.exec(sql);
     },
     close(): void {
-      stmtCache.clear();
       raw.close();
     },
   };
