@@ -10,13 +10,15 @@ const SESSION_LOOKBACK_DAYS = 7;
  * in their own panel when launched from a PDF upload — created at OCR prepare,
  * with the OCR run delegated under it. `oath-upload` is intentionally NOT in
  * this set: it is a real daemon task born at upload as a `single` row, not a
- * display coordinator. A standalone OCR run (no targetWorkflow) gets none.
+ * display coordinator. `onbase` IS a coordinator: the combined-PDF upload row
+ * tracks the whole document, with per-person imports fanned out as
+ * operation-members. A standalone OCR run (no targetWorkflow) gets none.
  *
  * The single source of truth for "does this OCR run have a coordinator row?" —
  * shared by `prepare` (creates the row) and `approve` (mirrors `approved` onto
  * it). Discard reaches the same rows via its own parent-mirror path.
  */
-export const OPERATION_COORDINATOR_WORKFLOWS = new Set(["oath-signature", "emergency-contact"]);
+export const OPERATION_COORDINATOR_WORKFLOWS = new Set(["oath-signature", "emergency-contact", "onbase"]);
 
 export function isOperationCoordinatorWorkflow(workflow: string | undefined): boolean {
   return workflow !== undefined && OPERATION_COORDINATOR_WORKFLOWS.has(workflow);

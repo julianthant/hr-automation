@@ -113,10 +113,15 @@ export function resolveOcrConfigForEntry(entry: {
     // verify is read-only — no force-research overlay.
     return getOcrDownstream("verify");
   }
-  if (formType !== "oath" && formType !== "emergency-contact") {
+  if (
+    formType !== "oath" &&
+    formType !== "emergency-contact" &&
+    formType !== "onbase-emergency-contact"
+  ) {
     console.warn(`resolveOcrConfigForEntry: unknown formType "${String(formType)}" — returning null`);
     return null;
   }
+  // onbase-emergency-contact records are EC-shaped — render with EC's view.
   const key = formType === "oath" ? "oath-signature" : "emergency-contact";
   if (!hasOcrDownstream(key)) return null;
   const base = getOcrDownstream(key);

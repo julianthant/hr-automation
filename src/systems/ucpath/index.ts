@@ -25,12 +25,19 @@ export {
   clickSaveAndSubmit,
   readLatestTransactionNumber,
   findExistingTerminationTransaction,
+  deletePendingTransaction,
   extractSmartHrTransactionNumber,
   scrollToTransactionReadbackArea,
   parsePayRate,
   buildCommentsText,
 } from "./transaction.js";
 export type { PersonalDataInput, JobDataInput, ExistingTerminationResult } from "./transaction.js";
+export {
+  navigateToSsSmartHrTransactions,
+  findTerminationTransactionStatus,
+  pickTerminationRow,
+} from "./ss-smart-hr.js";
+export type { SsSmartHrRow, TerminationTransactionStatus } from "./ss-smart-hr.js";
 export {
   navigateToWorkforceJobSummary,
   searchJobSummary,

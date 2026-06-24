@@ -1,6 +1,6 @@
 # Workflow Delegation Map
 
-Last checked: 2026-06-02
+Last checked: 2026-06-23
 
 This directory describes what each workflow does, which row archetype it emits, and how delegation appears in the dashboard after the workflow runtime migration.
 
@@ -14,6 +14,7 @@ Queue rows render from `WorkflowRunProjection` plus per-workflow `runtimePolicy`
 | Oath Upload | [oath-upload.md](oath-upload.md) | Single ticket row that waits for signer rows |
 | OCR | [ocr.md](ocr.md) | Preview |
 | Emergency Contact | [emergency-contact.md](emergency-contact.md) | OCR preview into final contact rows |
+| OnBase Import | [onbase.md](onbase.md) | OCR preview into per-person import rows |
 | Person Lookup | [person-lookup.md](person-lookup.md) | Single direct row; delegated utility rows group even when one |
 | I9 Lookup | [i9-lookup.md](i9-lookup.md) | Delegated-only utility lookup |
 | CRM Doc Download | [crm-doc-download.md](crm-doc-download.md) | Single utility download |
@@ -130,10 +131,11 @@ Workflow rail badges use backend `wfCounts` as the source of truth. The selected
 | OCR | `preview` | OCR upload run, Oath/Emergency upload run, retry/reupload. | Preview/approval row. | SharePoint roster download, Person Lookup, then target workflow after approval. | OCR records and utility children depending stage. | OCR is not a batch row; delegated Person Lookup children batch even when only one lookup exists. |
 | Emergency Contact | `batch` | Emergency Contact upload run through OCR approval. | OCR preview row first; final rows are emergency-contact daemon rows. | OCR preview, EID/verification utilities, final emergency-contact rows. | Contact/person rows after approval. | Final rows use editable contact detail fields. |
 | Person Lookup | `single` | Input run, OCR utility child. | Normal row if direct. | None. | If OCR-created, delegated lookup rows group as a batch surface even for one lookup. | Resolves EID/person data and derives active status. Retired `eid-lookup` and `active-check` rows are hidden from dashboard workflow lists/counts. |
-| I9 Lookup | `single` | Delegated only. | No dashboard start surface. | None. | Delegated signer-lookup rows, grouped even when one. | Category is `Utils`; resolves who signed I-9 Section 2. |
+| I9 Lookup | `single` | Delegated only. | No dashboard start surface. | None. | Delegated signer-lookup rows, grouped even when one. | Category is `Search`; resolves who signed I-9 Section 2. |
 | CRM Doc Download | `single` | Input run, daemon loader. | Normal row. | None. | Usually none. | Retry uses normal retry path. |
 | SharePoint Download | `single` | SharePoint UI/API, OCR roster-download child. | Normal/in-process row if direct. | None. | If OCR-created, delegated utility member under OCR preview. | Retry is special-cased by sharepoint download spec id. |
-| Separations | `batch` | Input run, daemon loader. | Normal rows per separation/doc/person; multiple inputs can group as daemon batch. | None. | Separation rows. | Has editable detail fields and edit-and-resume. |
-| Onboarding | `batch` | Daemon loader/API. | Normal rows per onboarding record; multiple inputs can group as daemon batch. | None. | Onboarding rows. | Multi-system workflow: CRM, UCPath, I-9. |
+| Separations | `single` (declared archetype); multi-doc input runs render as a *batch surface* via `rowShape` | Input run, daemon loader. | Normal rows per separation/doc/person; multiple inputs can group as daemon batch. | None. | Separation rows. | Has editable detail fields and edit-and-resume. |
+| OnBase Import | `batch` | Upload run (OCR approve fan-out). | OCR preview row (operation coordinator) first; per-person import rows after approval. | OCR preview, EID lookup utilities, final onbase import rows. | Import rows, one per person/page. | `inputSubject: eid`, `code: ob`. Multiple PDFs merged into one combined document. |
+| Onboarding | `batch` | Input run, daemon loader/API. | Normal rows per onboarding record; multiple inputs can group as daemon batch. | None. | Onboarding rows. | Multi-system workflow: CRM, UCPath, I-9. |
 | Work Study | `single` | Daemon loader/API. | Normal row. | None. | None unless launched in a batch. | Direct UCPath transaction workflow. |
 | Kronos Reports | `batch` | Workflow exists; not in generic dashboard loader. | Normal/batch rows when run by its own path. | None. | Kronos report rows. | Not currently exposed by upload-run or input-run registries. |

@@ -40,9 +40,11 @@ import {
   findTaskByIdentity,
   findInputForRunId,
   findOriginalInputForRunId,
+  listActiveRootTasksForItem,
   listTasksForWorkflow,
   listAttemptsForTask,
   countQueued,
+  type ActiveTaskRef,
 } from './queries.js'
 
 export type {
@@ -55,6 +57,7 @@ export type {
   EnqueuedTask,
   EnqueueTasksRequest,
   ReleasedParentTask,
+  ActiveTaskRef,
 }
 
 export interface ControlTaskStore {
@@ -90,6 +93,8 @@ export interface ControlTaskStore {
   findInputForRunId(runId: string): unknown | null
   /** Contract 2 (Uniform Retry): pristine first-enqueue input; `null` for legacy rows. */
   findOriginalInputForRunId(runId: string): unknown | null
+  /** Non-terminal root (non-delegated) tasks for one item — backs enqueue supersede. */
+  listActiveRootTasksForItem(request: { workflow: string; itemId: string }): ActiveTaskRef[]
   listTasksForWorkflow(workflow: string): TaskRow[]
   listAttemptsForTask(taskId: string): AttemptRow[]
   returnTaskToQueued(request: { taskId: string; now?: string }): void
@@ -129,6 +134,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     findTaskByIdentity: bindDb(findTaskByIdentity),
     findInputForRunId: bindDb(findInputForRunId),
     findOriginalInputForRunId: bindDb(findOriginalInputForRunId),
+    listActiveRootTasksForItem: bindDb(listActiveRootTasksForItem),
     listTasksForWorkflow: bindDb(listTasksForWorkflow),
     listAttemptsForTask: bindDb(listAttemptsForTask),
     returnTaskToQueued: bindControl(returnTaskToQueued),

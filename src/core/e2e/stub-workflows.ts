@@ -199,6 +199,31 @@ const personLookupScript: StepDataFn = (input) => {
   };
 };
 
+/**
+ * onbase: steps ["authenticate", "prepare-import", "fill-keywords", "import"].
+ *
+ * The real handler stamps ucpathId / employeeName / documentType / sourcePage
+ * upfront (before the first step) via ctx.updateData. The stub mirrors this by
+ * emitting those fields on "authenticate" (the first step where the patch
+ * lands). "fill-keywords" stamps keysetAutofilled (always "true" in the stub —
+ * the Employee Lookup keyset succeeds in normal operation). "import" stamps the
+ * dry-run or success status, matching the real handler exactly.
+ */
+const onbaseScript: StepDataFn = (input) => {
+  const r = rec(input);
+  return {
+    authenticate: compact({
+      ucpathId: str(r.ucpathId),
+      employeeName: str(r.employeeName),
+      documentType: str(r.documentType),
+      sourcePage: typeof r.sourcePage === "number" ? String(r.sourcePage) : str(r.sourcePage),
+    }),
+    "prepare-import": {},
+    "fill-keywords": { keysetAutofilled: "true" },
+    import: compact(r.dryRun === true ? { status: "Dry Run Complete" } : { status: "Imported" }),
+  };
+};
+
 /** i9-lookup: steps ["lookup"]. */
 const i9LookupScript: StepDataFn = (input) => {
   const r = rec(input);
@@ -260,6 +285,7 @@ function cloneOathUploadWithStubbedServiceNow(wf: AnyRegisteredWorkflow): AnyReg
 const STUB_WRAPPERS: Record<string, (wf: AnyRegisteredWorkflow) => AnyRegisteredWorkflow> = {
   "oath-signature": (wf) => cloneWithScriptedSteps(wf, oathSignatureScript),
   "emergency-contact": (wf) => cloneWithScriptedSteps(wf, emergencyContactScript),
+  "onbase": (wf) => cloneWithScriptedSteps(wf, onbaseScript),
   "person-lookup": (wf) => cloneWithScriptedSteps(wf, personLookupScript),
   "i9-lookup": (wf) => cloneWithScriptedSteps(wf, i9LookupScript),
   "oath-upload": (wf) => cloneOathUploadWithStubbedServiceNow(wf),

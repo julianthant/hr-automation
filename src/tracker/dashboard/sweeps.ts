@@ -11,7 +11,7 @@ import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype
 import { log } from "../../utils/log.js";
 import { detectFailurePattern } from "../alerts/failure-detector.js";
 import { notify } from "../alerts/notify.js";
-import { findAliveDaemons } from "../../core/daemon/registry.js";
+import { filterDaemonsNotShuttingDown, findAliveDaemons } from "../../core/daemon/registry.js";
 import { wakeDaemonsForReleasedParents } from "../../core/daemon/client.js";
 import { readQueueState, markItemFailed } from "../../core/daemon/queue.js";
 import { buildTrackerDataForInput } from "../../core/daemon/enqueue-dispatch.js";
@@ -170,10 +170,15 @@ export async function scanOrphanedQueueItems(dir = DEFAULT_DIR): Promise<void> {
         return nowMs - enqMs >= ORPHAN_QUEUE_GRACE_MS;
       });
       if (stale.length === 0) continue;
-      const alive = await findAliveDaemons(wf, dir);
+      // Only daemons that can still CLAIM count here — a daemon stuck
+      // `/whoami.shuttingDown` (hung teardown, browser-disconnect that never
+      // exited) keeps its lockfile but never claims, so it must NOT block
+      // orphan recovery, or items sit `queued` forever behind it (2026-06-22).
+      const aliveRaw = await findAliveDaemons(wf, dir);
+      const alive = await filterDaemonsNotShuttingDown(aliveRaw);
       if (alive.length > 0) continue;
       log.warn(
-        `[orphan-sweep] ${wf}: ${stale.length} queued item(s) past grace with 0 alive daemons; marking failed`,
+        `[orphan-sweep] ${wf}: ${stale.length} queued item(s) past grace with 0 claimable daemons; marking failed`,
       );
       const nowIso = new Date().toISOString();
       const failError =

@@ -5,7 +5,7 @@ Full reference for `src/tracker/`. For invariants, critical gotchas, and lessons
 ## Files
 
 - `jsonl.ts` — compatibility barrel for the tracker JSONL surface; keep public imports stable here
-- `jsonl-io.ts` — JSONL append/read helpers (`trackEvent`, `appendLogEntry`, `readEntries*`, `readLogEntries*`), parse cache, type guards, PII-aware `serializeValue` + `toTypedValue`
+- `jsonl-io.ts` — JSONL append/read helpers (`trackEvent` **@deprecated** — use `emitTrackerRow`; `appendLogEntry`, `readEntries*`, `readLogEntries*`), parse cache, type guards, PII-aware `serializeValue` + `toTypedValue`
 - `tracked-workflow.ts` — `withTrackedWorkflow` lifecycle wrapper, `SessionContext`, `WithTrackedWorkflowOpts`, kernel-owned SIGINT/SIGTERM handling
 - `jsonl-cleanup.ts` — `cleanOldTrackerFiles`, `cleanOldSessionFiles`, `cleanOldScreenshots`
 - `dashboard/server.ts` — creates the HTTP server (port 3838): JSONL-only startup prune (unless `noClean`), projection rebuild, periodic sweeps. Serves `/api/*`, multiplexed `GET /events/hub`, and static prod assets when configured — routing lives under `dashboard/hono/`
@@ -76,6 +76,7 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `GET /api/failures` — `FailureRow[]` for failed entries on a given date across all workflows (`buildFailuresHandler`). Same latest-run-per-`(workflow,id)` dedup pattern; takes optional `?date=YYYY-MM-DD` (default today).
 - `GET /api/preflight` — startup checks + cleanedFiles count
 - `GET /api/rosters` — list xlsx rosters in `.tracker/rosters/` + `.tracker/sharepoint/`, newest first (consumer: `RunModal`)
+- `POST /api/enqueue` — JSON `{workflow, input}`; validates input against the workflow schema, inserts a task row into the SQLite task store, and auto-spawns a daemon if none is alive. Returns `{ok, runId}`.
 - `POST /api/ocr/prepare` — multipart/form-data; fire-and-forgets `runWorkflow(ocrWorkflow)` and returns `{ok, sessionId, pdfPath}`. Body cap: 50MB.
 - `POST /api/ocr/approve-batch` — JSON `{sessionId, records[]}`; expands to N kernel queue items via `enqueueFromHttp` for the downstream form-type daemon.
 - `POST /api/ocr/discard` — JSON `{sessionId, reason?}`; emits `failed` step `discarded`.

@@ -114,6 +114,22 @@ export async function navigateToWorkforceJobSummary(page: Page): Promise<void> {
     });
     // networkidle guards the redirect after campus selection.
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+    // Selecting the campus redirects to the campus UCPath portal HOME, not the
+    // deep-linked Workforce Job Summary component — so the Empl ID search box is
+    // absent and the next `searchJobSummary` fill times out. EVERY doc that hit
+    // campus discovery in the 2026-06-22 live separations batch failed this way
+    // (9/9, ISS-B04). Re-navigate to the deep link now that the campus cookie is
+    // set; this second goto resolves the component without redirecting back to
+    // discovery.
+    if (!page.url().includes("WF_JOB_SUMMARY")) {
+      log.step("[Job Summary] Re-navigating to Job Summary after campus selection...");
+      await page.goto(JOB_SUMMARY_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    }
   }
   log.success("[Job Summary] Page loaded");
 }
@@ -470,7 +486,7 @@ export async function getJobSummaryIdentity(
   // and ship a blank Payroll Title Code / Payroll Title to Kuali while logging
   // success (doc 4290, 2026-06-22). Per this module's contract, only the
   // "no matching values" state is a soft `found: false`; this is not that —
-  // it propagates through `unwrapSettled` and fails the run.
+  // it throws directly (the inline getJobSummaryIdentity caller fails loud).
   if (!jobInfo.jobCode) {
     throw new Error(
       `Workforce Job Summary found EID '${emplId}' but could not extract a Payroll Title Code `

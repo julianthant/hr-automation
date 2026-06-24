@@ -10,6 +10,7 @@ import {
 } from "../row-archetype.js";
 import { runIdFragment, tracePrefix } from "../queue-trace-id.js";
 import type { TrackerEntry } from "../../tracker/jsonl.js";
+import { rollupOperationStatus } from "../operation-status.js";
 import { classifyTrackerRow } from "../../tracker/queue-surfaces.js";
 import type { TrackerQueueGroupSurface } from "../../tracker/queue-surfaces.js";
 import {
@@ -415,9 +416,24 @@ function memberAggregateStatus(members: readonly TrackerEntry[]): string {
  * `memberAggregateStatus`.
  */
 function operationSurfaceStatus(surface: Extract<TrackerQueueGroupSurface, { kind: "operation" }>): string {
-  // When members exist, always return the coordinator's own row status.
-  // Member outcomes are shown in the mini-badge, not the coordinator chip.
-  if (surface.members.length > 0) return surface.parent.status || "running";
+  if (surface.members.length > 0) {
+    // Shared rollup: the coordinator's OWN terminal status wins (e.g. a
+    // failed/discarded mirror); else the coordinator's lifecycle COMPLETES when
+    // the fan-out completes — once every member is terminal there is no more
+    // work to coordinate, so the chip flips to "done" (the coordinator is a
+    // display-only row with no daemon task of its own, so it never emits its own
+    // terminal row — the rollup is the only signal). Per-member failures stay in
+    // the StatusCounts mini-badge and never promote the coordinator chip to
+    // "failed" (E2E-106) — a partly-failed fan-out still reads "done" at the
+    // coordinator level. Members still in flight → the coordinator's own status
+    // (running/approved), falling back to "running" if it is empty.
+    return (
+      rollupOperationStatus(
+        surface.parent.status,
+        surface.members.map((member) => member.status),
+      ) || "running"
+    );
+  }
   // No members yet (pre-fan-out): use the coordinator's own status first.
   if (surface.parent.status === "failed" || surface.parent.status === "done") {
     return surface.parent.status;

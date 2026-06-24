@@ -8,10 +8,18 @@ import { ExportMenu } from "./ExportMenu";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
+import { BatchScreenshotsPanel } from "./BatchScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
 import { useLogs, type CollapsedLogEntry } from "@/components/hooks/useLogs";
 import { useCoordinatorAggregatedLogs } from "@/components/hooks/useCoordinatorAggregatedLogs";
-import { COORDINATOR_LOG_SOURCE_LABEL, type CoordinatorLogLine } from "./coordinator-logs";
+import {
+  COORDINATOR_LOG_SOURCE_LABEL,
+  computeOperationPipelineView,
+  isOperationCoordinatorWorkflow,
+  operationCoordinatorEffectiveStatus,
+  type CoordinatorLogLine,
+} from "./coordinator-logs";
+import { resolveEntryName } from "@/components/shared/entry-display";
 import { useRunEvents } from "@/components/hooks/useRunEvents";
 import { useRunsForMergedEntry } from "@/components/hooks/useRunsForMergedEntry";
 import { cn } from "@/lib/utils";
@@ -73,7 +81,7 @@ export function deriveDelegationLabel(
   return "Standalone";
 }
 
-export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
+export function LogPanel({ entry, workflow, date, allEntries, displayNames, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
   const effectiveWorkflow = entry?.workflow ?? workflow;
   const registered = useWorkflow(effectiveWorkflow);
   const [maximized, setMaximized] = useState(false);
@@ -88,6 +96,9 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         ? allEntries.filter((e) => e.parentRunId === entry.runId && e.id !== entry.id)
         : [],
     [allEntries, entry?.id, entry?.runId],
+  );
+  const isOperationCoordinator = Boolean(
+    entry && isOperationCoordinatorWorkflow(entry.workflow) && entry.data?.archetype === "operation",
   );
   const registeredSteps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
@@ -175,8 +186,11 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   // first step, leaving the timeline stuck even though the entry is terminal.
   const activeRun = runs.find((r) => r.runId === activeRunId);
   const isViewingLiveRun = !activeRunId || activeRunId === entry?.runId;
+  const liveEntryStatus = entry
+    ? operationCoordinatorEffectiveStatus(entry, childEntries)
+    : undefined;
   const runStatus = isViewingLiveRun
-    ? (entry?.status || activeRun?.status || "pending")
+    ? (liveEntryStatus || entry?.status || activeRun?.status || "pending") // || entry?.status only reached when entry is null (liveEntryStatus is undefined)
     : (activeRun?.status || entry?.status || "pending");
   const runStep = isViewingLiveRun
     ? (entry?.step || activeRun?.step || null)
@@ -198,6 +212,12 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
   // helper also remaps currentStep/status so a run parked on a hidden step
   // still renders the visible chips as complete. Non-OCR rows pass through.
   const pipeline = useMemo(() => {
+    // Operation coordinators show their OWN lifecycle (Prepare → Review →
+    // Fan-out) instead of the target workflow's member steps — see
+    // `computeOperationPipelineView`.
+    if (isOperationCoordinator && entry) {
+      return computeOperationPipelineView(entry, childEntries);
+    }
     if (entry?.workflow === "ocr") {
       return computeOcrPipelineView(
         registeredSteps,
@@ -207,7 +227,7 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
       );
     }
     return { steps: registeredSteps, currentStep: runStep, status: runStatus };
-  }, [entry, registeredSteps, runStep, runStatus]);
+  }, [entry, isOperationCoordinator, childEntries, registeredSteps, runStep, runStatus]);
 
   const allDetailFields = useMemo(
     () => detailFields.filter((f) => f.displayInGrid !== false),
@@ -263,8 +283,10 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
 
   // Show skeleton while logs are loading and we have no data yet
   const showSkeleton = logsLoading && displayedLogs.length === 0;
-  const hideDetailGrid = Boolean(previewAvailable) || hasDelegationRole(entry, "dispatch");
-
+  const hideDetailGrid =
+    Boolean(previewAvailable) ||
+    hasDelegationRole(entry, "dispatch") ||
+    isOperationCoordinator;
   // Run-level failure banner — elevates `entry.error` above the log wall with a
   // Retry. A cancelled run (failed + step="cancelled") is operator-stopped, not
   // a failure, so it gets no banner.
@@ -326,8 +348,10 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         </div>
       )}
 
-      {/* Step pipeline */}
-      {(showSkeleton ? (
+      {/* Step pipeline — every row, including the operation coordinator, shows
+          its own lifecycle timeline (Prepare → Review → Fan-out for
+          coordinators, whose steps are derived in `computeOperationPipelineView`). */}
+      {showSkeleton ? (
         <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex items-center">
@@ -342,11 +366,11 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
           steps={pipeline.steps}
           currentStep={pipeline.currentStep}
           status={pipeline.status}
-          stepDurations={runStepDurations}
+          stepDurations={isOperationCoordinator ? undefined : runStepDurations}
           entry={entry ?? undefined}
           stepDisplay={registered?.presentation?.steps}
         />
-      ))}
+      )}
 
       </>)}
 
@@ -361,14 +385,22 @@ export function LogPanel({ entry, workflow, date, allEntries, siblings, defaultT
         sourceLabelOf={sourceLabelOf}
         delegatedChildren={childEntries.length > 0 ? (childEntries as DelegatedChild[]) : undefined}
         screenshotsSlot={
-          <ScreenshotsPanel
-            workflow={logSourceWorkflow}
-            itemId={activeItemId}
-            screenshotEventCount={screenshotEventCount}
-            runId={activeRunId}
-          />
+          isOperationCoordinator ? (
+            <BatchScreenshotsPanel
+              members={childEntries}
+              displayNames={displayNames}
+              title={resolveEntryName(entry, displayNames) || entry.id}
+            />
+          ) : (
+            <ScreenshotsPanel
+              workflow={logSourceWorkflow}
+              itemId={activeItemId}
+              screenshotEventCount={screenshotEventCount}
+              runId={activeRunId}
+            />
+          )
         }
-        editDataAvailable={detailFields.some((f) => f.editable)}
+        editDataAvailable={!isOperationCoordinator && detailFields.some((f) => f.editable)}
         editDataSlot={
           <EditDataTab
             workflow={logSourceWorkflow}

@@ -54,6 +54,7 @@ export async function runWorkflowPool<TData, TSteps extends readonly string[]>(
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       })),
       trackerDir: opts.trackerDir,
+      trackerStub: opts.trackerStub,
     },
     async ({ instance, markTerminated, makeObserver }) => {
       const queue: PoolItem<TData>[] = [...perItem]

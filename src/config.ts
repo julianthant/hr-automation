@@ -80,6 +80,9 @@ export const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
 export const CRM_ENTRY_URL = "https://crm.ucsd.edu/hr";
 
+/** OnBase (Hyland) document management — UCSD Shibboleth SSO entry point. */
+export const ONBASE_URL = "https://ucsd.hylandcloud.com/251ids/NavPanel.aspx";
+
 // --- CRM ---
 
 /** ACT CRM onboarding search page (accepts ?q= email param). */

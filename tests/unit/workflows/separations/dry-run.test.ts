@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => {
     runKualiExtract: vi.fn(),
     runKronosSearch: vi.fn(),
     runNewKronosTimecard: vi.fn(),
+    runTransactionCheck: vi.fn(),
     runUcpathJobSummary: vi.fn(),
     runUcpathTransaction: vi.fn(),
     runKualiFinalize: vi.fn(),
@@ -48,6 +49,9 @@ const mocks = vi.hoisted(() => {
     // Kuali name write the identity-check "similar" branch makes (real fn drives
     // a live Kuali form — stub it).
     updateEmployeeName: vi.fn(),
+    // Separation Date write-back (real fn drives a live Kuali form — stub it).
+    // Live runs now write the derived Separation Date back when it differs.
+    updateSeparationDate: vi.fn(),
   };
 });
 
@@ -67,6 +71,9 @@ vi.mock("../../../../src/workflows/separations/steps/kronos-search.js", () => ({
   // The handler also imports runNewKronosTimecard for the identity-check
   // re-fetch — without this the mocked module would export it as undefined.
   runNewKronosTimecard: mocks.runNewKronosTimecard,
+}));
+vi.mock("../../../../src/workflows/separations/steps/transaction-check.js", () => ({
+  runTransactionCheck: mocks.runTransactionCheck,
 }));
 vi.mock("../../../../src/workflows/separations/steps/ucpath-job-summary.js", () => ({
   runUcpathJobSummary: mocks.runUcpathJobSummary,
@@ -96,6 +103,7 @@ vi.mock("../../../../src/systems/ucpath/index.js", async (importOriginal) => ({
 vi.mock("../../../../src/systems/kuali/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/systems/kuali/index.js")>()),
   updateEmployeeName: mocks.updateEmployeeName,
+  updateSeparationDate: mocks.updateSeparationDate,
 }));
 
 import { INPUT_RUN_REGISTRY } from "../../../../src/dashboard/lib/input-run-registry.js";
@@ -129,22 +137,24 @@ const KUALI_FIXTURE = {
   location: "",
 };
 
-// Default New Kronos / Job Summary phase-1 result. New Kronos not-found
-// (`lastPunchDate: null`) makes the handler fall back to the Kuali LDW. Job
-// Summary is FOUND with a name MATCHING KUALI_FIXTURE so identity-check skips
-// (no lookup), and `data: null` so ucpath-job-summary self-skips — leaving the
-// two mutating steps as the only writes the test gates on. (Old Kronos is gone.)
+// Default New Kronos phase-1 result. New Kronos not-found
+// (`lastPunchDate: null`) makes the handler fall back to the Kuali LDW. The
+// Job Summary is no longer part of this result — it's fetched via
+// `getJobSummaryIdentity` (mocked separately in beforeEach), now a 2-way
+// parallel block (New Kronos + Kuali timekeeper). (Old Kronos is gone.)
 const KRONOS_NOT_FOUND = {
   newK: {
     status: "fulfilled" as const,
     value: { found: false, lastPunchDate: null, sickDates: [], holidayDates: [] },
   },
-  jobSummary: {
-    status: "fulfilled" as const,
-    value: { found: true, name: "Test Employee", data: null },
-  },
   kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
 };
+
+// Job Summary identity fixtures (the primary fetch now lives in
+// getJobSummaryIdentity, before identity-check). The default (beforeEach) is a
+// FOUND record whose name matches KUALI_FIXTURE so identity-check skips.
+const JS_NAME_MISMATCH = { found: true, name: "Totally Different Person", data: null };
+const JS_SIMILAR = { found: true, name: "Jayden Balmaceda", data: null };
 
 const fakePage = { bringToFront: async () => {}, isClosed: () => false } as unknown;
 
@@ -217,24 +227,29 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.runKualiExtract.mockResolvedValue(KUALI_FIXTURE);
   mocks.runKronosSearch.mockResolvedValue(KRONOS_NOT_FOUND);
+  // transaction-check: default to "no existing termination" (create normally).
+  mocks.runTransactionCheck.mockResolvedValue({ status: "none" });
   mocks.runUcpathJobSummary.mockResolvedValue(undefined);
   mocks.runUcpathTransaction.mockResolvedValue({
     transactionNumber: "T999",
     submittedWithoutTxnNumber: false,
   });
   mocks.runKualiFinalize.mockResolvedValue(undefined);
-  // Defaults for the identity-check EID-correction re-fetch (only exercised by
-  // the mismatch test below): Job Summary re-fetch resolves cleanly; New Kronos
-  // re-search finds nothing (LDW falls back to Kuali's).
   mocks.runNewKronosTimecard.mockResolvedValue({
     found: false, lastPunchDate: null, sickDates: [], holidayDates: [],
   });
+  // getJobSummaryIdentity is now the PRIMARY Job Summary fetch (inline, before
+  // identity-check) AND the EID-correction re-fetch. Default: a FOUND record
+  // whose name MATCHES KUALI_FIXTURE so identity-check skips on a clean match.
+  // Tests that need a mismatch/similar override the FIRST call with
+  // mockResolvedValueOnce; the catch-all default then serves the re-fetch.
   mocks.getJobSummaryIdentity.mockResolvedValue({
     found: true,
     name: "Test Employee",
     data: { deptId: "", departmentDescription: "", jobCode: "", jobDescription: "" },
   });
   mocks.updateEmployeeName.mockResolvedValue(undefined);
+  mocks.updateSeparationDate.mockResolvedValue(undefined);
 });
 
 describe("SeparationInputSchema (separationsWorkflow.config.schema)", () => {
@@ -335,17 +350,40 @@ describe("separations handler — dry-run terminal", () => {
     assert.equal(mocks.runKualiExtract.mock.calls.length, 1);
   });
 
-  it("stamps separationDate = Kuali's (authoritative — never the Kronos value)", async () => {
+  it("derives separationDate = last day worked when there's no leave (NOT Kuali's value)", async () => {
+    // Default fixture: Kuali LDW 01/15, Kuali sep 01/16, no Kronos punch/leave.
+    // New model: separation date falls back (via lastDayWorked) to the Kuali LDW
+    // 01/15 — the last day worked — NOT Kuali's separation date 01/16.
     const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
-    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate);
+    assert.equal(probe.data.separationDate, "01/15/2026");
+    assert.notEqual(probe.data.separationDate, KUALI_FIXTURE.separationDate);
   });
 
-  it("stamps terminationEffDate = Kuali separationDate + 1 day", async () => {
+  it("stamps terminationEffDate = reconciled separationDate + 1 day", async () => {
     const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
-    // KUALI_FIXTURE.separationDate = 01/16/2026 → 01/17/2026
-    assert.equal(probe.data.terminationEffDate, "01/17/2026");
+    // Reconciled separation date 01/15/2026 (= last day worked) → 01/16/2026.
+    assert.equal(probe.data.terminationEffDate, "01/16/2026");
+  });
+
+  it("extends separationDate to the latest sick/holiday date when leave is present", async () => {
+    // New Kronos: last punch 01/20, holiday pay 01/26 → separation date 01/26.
+    // (Job Summary name matches via the getJobSummaryIdentity default → identity
+    // -check skips, keeping the focus on dates.)
+    mocks.runKronosSearch.mockResolvedValueOnce({
+      newK: {
+        status: "fulfilled" as const,
+        value: { found: true, lastPunchDate: "01/20/2026", sickDates: [], holidayDates: ["01/26/2026"] },
+      },
+      kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
+    });
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(probe.data.lastDayWorked, "01/20/2026");
+    assert.equal(probe.data.separationDate, "01/26/2026");
+    // Term eff = separation date + 1.
+    assert.equal(probe.data.terminationEffDate, "01/27/2026");
   });
 
   it("no longer stamps foundInOldKronos (Old Kronos removed from separations)", async () => {
@@ -356,23 +394,21 @@ describe("separations handler — dry-run terminal", () => {
 
   it("New Kronos last physical punch overrides the Kuali Last Day Worked", async () => {
     // New Kronos found a later last punch (01/20) than the Kuali LDW (01/15).
+    // (Job Summary name matches via the getJobSummaryIdentity default → identity
+    // -check skipped, focus stays on dates.)
     mocks.runKronosSearch.mockResolvedValueOnce({
       newK: {
         status: "fulfilled" as const,
         value: { found: true, lastPunchDate: "01/20/2026", sickDates: [], holidayDates: [] },
-      },
-      // Found + matching name → identity-check skipped (focus stays on dates).
-      jobSummary: {
-        status: "fulfilled" as const,
-        value: { found: true, name: "Test Employee", data: null },
       },
       kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
     });
     const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
     assert.equal(probe.data.lastDayWorked, "01/20/2026");
-    // Separation date stays Kuali's — only LDW moves.
-    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate);
+    // No leave → separation date = the last day worked (the overriding punch),
+    // not Kuali's separation date.
+    assert.equal(probe.data.separationDate, "01/20/2026");
   });
 
   it("falls back to the Kuali Last Day Worked when New Kronos has no punch", async () => {
@@ -423,6 +459,38 @@ describe("separations handler — live (non-dry-run) gates the writes", () => {
   });
 });
 
+describe("separations handler — live Separation Date write-back to Kuali", () => {
+  it("writes the derived Separation Date back to Kuali when it differs from Kuali's", async () => {
+    // Default fixture: Kuali sep 01/16, no Kronos punch/leave → derived sep 01/15
+    // (the Kuali LDW) → CHANGED → write-back.
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.updateSeparationDate.mock.calls.length, 1, "Separation Date written back once");
+    assert.equal(mocks.updateSeparationDate.mock.calls[0][1], "01/15/2026", "wrote the derived date");
+  });
+
+  it("does NOT write the Separation Date back when the derived value matches Kuali's", async () => {
+    // No punch (LDW stays Kuali's 01/15, so no LDW write either) + holiday pay on
+    // 01/16 → derived sep = max(01/15, 01/16) = 01/16 == Kuali sep 01/16 → no write.
+    mocks.runKronosSearch.mockResolvedValueOnce({
+      newK: {
+        status: "fulfilled" as const,
+        value: { found: true, lastPunchDate: null, sickDates: [], holidayDates: ["01/16/2026"] },
+      },
+      kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
+    });
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.updateSeparationDate.mock.calls.length, 0, "no write-back when unchanged");
+  });
+
+  it("does NOT write the Separation Date back in dry-run (no Kuali writes at all)", async () => {
+    const { ctx } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(mocks.updateSeparationDate.mock.calls.length, 0, "dry-run writes nothing");
+  });
+});
+
 describe("separations handler — empty transaction number fails the run", () => {
   // Regression for the silent-Done bug: a live run whose UCPath Smart HR submit
   // soft-failed (create/submit rejected, or threw and was caught) returns an
@@ -451,7 +519,8 @@ describe("separations handler — empty transaction number fails the run", () =>
     mocks.runUcpathTransaction.mockResolvedValueOnce(EMPTY_TXN);
     const { ctx, probe } = makeFakeCtx({ docId: "4131" });
     await assert.rejects(() => runHandler(ctx, { docId: "4131" }));
-    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate);
+    // Reconciled separation date (= last day worked, no leave), not Kuali's.
+    assert.equal(probe.data.separationDate, "01/15/2026");
     assert.equal(probe.data.transactionNumber, "");
   });
 
@@ -463,23 +532,13 @@ describe("separations handler — empty transaction number fails the run", () =>
 });
 
 describe("separations handler — identity-check (conditional, Job-Summary-gated)", () => {
-  // A Job Summary result whose name does NOT match the Kuali fixture
-  // ("Test Employee") — so the handler RUNS the identity-check step and
-  // delegates to person-lookup (vs. skipping on a clean name match).
-  const JOB_SUMMARY_NAME_MISMATCH = {
-    newK: {
-      status: "fulfilled" as const,
-      value: { found: false, lastPunchDate: null, sickDates: [], holidayDates: [] },
-    },
-    jobSummary: {
-      status: "fulfilled" as const,
-      value: { found: true, name: "Totally Different Person", data: null },
-    },
-    kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
-  };
+  // The Job Summary name now comes from the inline getJobSummaryIdentity fetch
+  // (before identity-check), NOT from kronos-search. A test forces a name that
+  // does NOT match the Kuali fixture ("Test Employee") via mockResolvedValueOnce
+  // so the handler RUNS identity-check and delegates to person-lookup.
 
   it("SKIPS identity-check (no person-lookup) when the Job Summary name matches", async () => {
-    // Default fixture: Job Summary found + name "Test Employee" matches Kuali.
+    // Default getJobSummaryIdentity: found + name "Test Employee" matches Kuali.
     const { ctx, probe } = makeFakeCtx({ docId: "4131" });
     await runHandler(ctx, { docId: "4131" });
     assert.ok(probe.skipped.includes("identity-check"), "identity-check skipped on a clean name match");
@@ -487,7 +546,7 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
   });
 
   it("fails the run when person-lookup cannot verify a mismatched EID (never reaches the UCPath submit)", async () => {
-    mocks.runKronosSearch.mockResolvedValueOnce(JOB_SUMMARY_NAME_MISMATCH);
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_NAME_MISMATCH);
     const { ctx } = makeFakeCtx({ docId: "4131" }, { delegateResult: { status: "failed" } });
     await assert.rejects(
       () => runHandler(ctx, { docId: "4131" }),
@@ -497,18 +556,23 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
   });
 
   it("corrects the EID from the name on a Job Summary name mismatch, re-fetches, then submits", async () => {
-    mocks.runKronosSearch.mockResolvedValueOnce(JOB_SUMMARY_NAME_MISMATCH);
+    // Primary fetch returns a mismatched name; the catch-all default serves the
+    // re-fetch for the corrected EID.
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_NAME_MISMATCH);
     const { ctx, probe } = makeFakeCtx(
       { docId: "4131" },
       { delegateResult: { status: "done", data: { emplId: "10999999" } } },
     );
     await runHandler(ctx, { docId: "4131" });
     assert.equal(probe.data.eid, "10999999", "name-derived EID persisted to ctx.data");
+    // getJobSummaryIdentity is called TWICE now: the primary identity-gate fetch
+    // (Kuali EID) + the re-fetch after the EID correction.
     assert.equal(
-      mocks.getJobSummaryIdentity.mock.calls.length, 1,
-      "Job Summary re-fetched for the verified EID",
+      mocks.getJobSummaryIdentity.mock.calls.length, 2,
+      "primary Job Summary fetch + re-fetch for the verified EID",
     );
-    assert.equal(mocks.getJobSummaryIdentity.mock.calls[0][1], "10999999", "re-fetched with the corrected EID");
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls[0][1], KUALI_FIXTURE.eid, "primary fetch used the Kuali EID");
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls[1][1], "10999999", "re-fetched with the corrected EID");
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "still submits, with the corrected EID");
   });
 
@@ -531,23 +595,13 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
 describe("separations handler — identity-check (similar name → correct in place)", () => {
   // Kuali name is a close spelling variant of the Job Summary name — the EID is
   // trusted and the Kuali name is corrected in place (no person-lookup, no EID
-  // change, no re-fetch). The Jaden/Jayden regression.
+  // change, no re-fetch). The Jaden/Jayden regression. The Job Summary name
+  // comes from the inline getJobSummaryIdentity fetch (JS_SIMILAR).
   const KUALI_MISSPELLED = { ...KUALI_FIXTURE, employeeName: "Balmaceda, Jaden" };
-  const JOB_SUMMARY_SIMILAR = {
-    newK: {
-      status: "fulfilled" as const,
-      value: { found: false, lastPunchDate: null, sickDates: [], holidayDates: [] },
-    },
-    jobSummary: {
-      status: "fulfilled" as const,
-      value: { found: true, name: "Jayden Balmaceda", data: null },
-    },
-    kualiTimekeeper: { status: "fulfilled" as const, value: undefined },
-  };
 
   it("LIVE: corrects the Kuali name, keeps the EID, never delegates, and submits", async () => {
     mocks.runKualiExtract.mockResolvedValueOnce(KUALI_MISSPELLED);
-    mocks.runKronosSearch.mockResolvedValueOnce(JOB_SUMMARY_SIMILAR);
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_SIMILAR);
     const delegateSpy = vi.fn();
     const { ctx, probe } = makeFakeCtx({ docId: "4126" });
     (ctx as { delegateTo: unknown }).delegateTo = async (...args: unknown[]) => {
@@ -563,13 +617,14 @@ describe("separations handler — identity-check (similar name → correct in pl
     assert.equal(mocks.updateEmployeeName.mock.calls[0][1], "Balmaceda, Jayden", "corrected spelling, Kuali format preserved");
     assert.equal(probe.data.name, "Balmaceda, Jayden", "corrected name persisted to ctx.data");
     assert.equal(probe.data.eid, undefined, "EID never changed via ctx.data (trusted as-is)");
-    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 0, "no Job Summary re-fetch (EID unchanged)");
+    // Only the primary identity-gate fetch — no re-fetch, since the EID is unchanged.
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 1, "primary fetch only; no re-fetch (EID unchanged)");
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "proceeds to submit with the trusted EID");
   });
 
   it("DRY-RUN: still corrects the name on the unsubmitted Kuali draft (like the timekeeper fill)", async () => {
     mocks.runKualiExtract.mockResolvedValueOnce(KUALI_MISSPELLED);
-    mocks.runKronosSearch.mockResolvedValueOnce(JOB_SUMMARY_SIMILAR);
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_SIMILAR);
     const { ctx, probe } = makeFakeCtx({ docId: "4126", dryRun: true });
 
     await runHandler(ctx, { docId: "4126", dryRun: true });
@@ -580,6 +635,79 @@ describe("separations handler — identity-check (similar name → correct in pl
     // The doc is still never finalized — the dry-run terminal skips kuali-finalization.
     assert.ok(probe.skipped.includes("kuali-finalization"));
     assert.equal(probe.data.status, "Dry Run Complete");
+  });
+});
+
+describe("separations handler — transaction-check (existing-termination branch)", () => {
+  it("runs transaction-check with the verified EID (after identity-check)", async () => {
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 1, "transaction-check ran once");
+    assert.equal(
+      mocks.runTransactionCheck.mock.calls[0][1], KUALI_FIXTURE.eid,
+      "searched SS Smart HR with the (verified) Kuali EID",
+    );
+  });
+
+  it("passes dryRun through to transaction-check (the delete is guarded there)", async () => {
+    const { ctx } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.deepEqual(mocks.runTransactionCheck.mock.calls[0][2], { dryRun: true });
+  });
+
+  it("creates a new transaction when there is no existing TER (status none)", async () => {
+    // Default mock returns { status: "none" } → normal flow.
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "creates the transaction normally");
+    assert.equal(probe.skipped.includes("ucpath-transaction"), false, "ucpath-transaction NOT skipped");
+  });
+
+  it("proceeds to create a fresh transaction after a pending one is deleted", async () => {
+    mocks.runTransactionCheck.mockResolvedValueOnce({ status: "pending-deleted", transactionId: "T002168945" });
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "creates a fresh transaction after the delete");
+  });
+
+  it("reuses an APPROVED duplicate: skips ucpath-transaction, files the duplicate-termination comment", async () => {
+    mocks.runTransactionCheck.mockResolvedValueOnce({ status: "approved", transactionNumber: "T002168945" });
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.ok(probe.skipped.includes("ucpath-transaction"), "ucpath-transaction skipped on an approved dup");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "no UCPath create on an approved dup");
+    assert.equal(probe.data.transactionNumber, "T002168945", "reused the approved transaction number");
+    const comments = probe.data.comments as string;
+    assert.ok(comments.includes("Duplicate termination"), "duplicate-termination comment queued");
+    assert.ok(comments.includes("Re Kuali Form #4131"), "comment names the Kuali form");
+    assert.ok(comments.includes("EE termination approved on UCPath"), "comment notes UCPath approval");
+    // Reusing the approved txn # means the run does NOT fail on an empty number.
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 1, "still finalizes Kuali with the reused number");
+  });
+
+  it("previews the approved duplicate transaction number in dry-run (no writes)", async () => {
+    mocks.runTransactionCheck.mockResolvedValueOnce({ status: "approved", transactionNumber: "T002168945" });
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(probe.data.status, "Dry Run Complete");
+    assert.equal(probe.data.transactionNumber, "T002168945", "dry-run preview shows the reused txn #");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0);
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0, "dry-run finalizes nothing");
+  });
+
+  it("skips transaction-check on the txn-prefilled resume path", async () => {
+    const { ctx, probe } = makeFakeCtx({
+      docId: "4131",
+      name: "Test Employee",
+      eid: "10772489",
+      rawTerminationType: "Resign",
+      separationDate: "01/16/2026",
+      lastDayWorked: "01/15/2026",
+      transactionNumber: "T123",
+    });
+    await runHandler(ctx, { docId: "4131" });
+    assert.ok(probe.skipped.includes("transaction-check"), "transaction-check skipped when txn # prefilled");
+    assert.equal(mocks.runTransactionCheck.mock.calls.length, 0, "transaction-check not invoked");
   });
 });
 

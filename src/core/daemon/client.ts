@@ -1,5 +1,5 @@
 import { randomUUID, type UUID } from 'node:crypto'
-import { findAliveDaemons, invalidateAliveDaemonsCache, killOrphanedChromiumProcesses, spawnDaemon } from './registry.js'
+import { filterDaemonsNotShuttingDown, findAliveDaemons, invalidateAliveDaemonsCache, killOrphanedChromiumProcesses, spawnDaemon } from './registry.js'
 import { enqueueItems } from './queue.js'
 import { deriveItemId, splitPrefilled } from '../kernel/workflow.js'
 import { log } from '../../utils/log.js'
@@ -202,7 +202,14 @@ export async function ensureDaemonsAvailable(
   const { trackerDir, quiet, skipWake = false } = opts
   const daemons = await withDaemonSpawnLock(workflow, trackerDir, async () => {
     invalidateAliveDaemonsCache(workflow, trackerDir)
-    const alive = await findAliveDaemons(workflow, trackerDir)
+    const aliveRaw = await findAliveDaemons(workflow, trackerDir)
+    // A daemon that POSITIVELY reports `/whoami.shuttingDown` has exited its
+    // claim loop and will never pick up another queued item — counting it as a
+    // live worker makes computeSpawnPlan skip the spawn, so retried/enqueued
+    // tasks wedge `queued` forever behind a zombie (2026-06-22). Plan and wake
+    // against the claimable subset only; an unreachable-but-PID-alive daemon is
+    // KEPT (no duplicate spawn for a momentarily-busy healthy daemon).
+    const alive = await filterDaemonsNotShuttingDown(aliveRaw)
     const spawnCount = computeSpawnPlan(alive.length, flags)
 
     if (spawnCount > 0) {

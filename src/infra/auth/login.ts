@@ -3,7 +3,7 @@ import { log } from "../../utils/log.js";
 import { pollDuoApproval } from "./duo-poll.js";
 import { requestDuoApproval } from "../../tracker/sessions/duo-queue.js";
 import { validateEnv } from "../../utils/env.js";
-import { UKG_URL } from "../../config.js";
+import { UKG_URL, ONBASE_URL } from "../../config.js";
 import { fillSsoCredentials, clickSsoSubmit, isSsoFormReady, waitForSsoForm } from "./sso-fields.js";
 import { gotoWithRetry } from "../browser/launch.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
@@ -289,6 +289,72 @@ async function loginToACTCrmFlow(
 export const loginToACTCrm = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
   id: "CRM",
   submit: loginToACTCrmFlow,
+});
+
+/**
+ * Authenticate to OnBase (Hyland) via UCSD Shibboleth SSO with Duo MFA.
+ *
+ * Flow: Navigate to the OnBase NavPanel → it redirects straight to the
+ *       a5.ucsd.edu SSO form (Active Directory, no campus-discovery hop) →
+ *       fill credentials → submit → wait for Duo → land back on
+ *       ucsd.hylandcloud.com.
+ *
+ * Same `fillSsoCredentials` path as every other UCSD system (reuses
+ * UCPATH_USER_ID / UCPATH_PASSWORD), so the hands-off WebAuthn Duo path
+ * covers it identically. Mirrors `loginToACTCrm` minus the Salesforce
+ * Active-Directory dropdown (OnBase has no login-type picker).
+ */
+async function loginToOnBaseFlow(
+  page: Page,
+  instance?: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
+  log.step("Navigating to OnBase...");
+  await page.goto(ONBASE_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: 15_000,
+  });
+
+  // Already authenticated? OnBase keeps us on hylandcloud.com when a live
+  // session exists; an expired session bounces to a5.ucsd.edu for SSO.
+  const currentUrl = page.url();
+  if (currentUrl.includes("hylandcloud.com")) {
+    log.success("OnBase already authenticated");
+    return true;
+  }
+
+  // Wait for the Shibboleth SSO form to paint (the SAML redirect chain may
+  // still be in flight), then fill + submit.
+  await waitForSsoForm(page);
+  if (!(await isSsoFormReady(page))) {
+    log.error("OnBase SSO form did not render");
+    return false;
+  }
+  await fillSsoCredentials(page);
+  await clickSsoSubmit(page, { abortSignal });
+
+  const duoOptions = {
+    timeoutSeconds: 180,
+    successUrlMatch: (url: string) => url.includes("hylandcloud.com"),
+    systemLabel: "OnBase",
+    abortSignal,
+  };
+  const approved = instance
+    ? await requestDuoApproval(page, { ...duoOptions, system: "OnBase", instance })
+    : await pollDuoApproval(page, duoOptions);
+
+  if (!approved) {
+    log.error("OnBase Duo approval timed out");
+    return false;
+  }
+
+  log.success("OnBase authenticated");
+  return true;
+}
+
+export const loginToOnBase = defineSsoLogin<[instance?: string, abortSignal?: AbortSignal]>({
+  id: "OnBase",
+  submit: loginToOnBaseFlow,
 });
 
 /**

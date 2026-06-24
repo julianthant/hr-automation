@@ -7,7 +7,7 @@ import {
   clickSave,
 } from "../../../systems/kuali/index.js";
 import { finalTransactions } from "../../../systems/kuali/selectors.js";
-import { buildDateChangeComments, getInitials } from "../schema.js";
+import { buildDateChangeComments, buildSeparationDateChangeComment, getInitials, joinComments } from "../schema.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
 
@@ -16,10 +16,12 @@ export interface KualiFinalizationArgs {
   kualiData: KualiSeparationData;
   /** Reconciled Last Day Worked (New Kronos last punch override, else Kuali's). */
   lastDayWorked: string;
-  /** Kuali-authoritative separation date (never overridden by Kronos). */
+  /** Reconciled separation date (last day worked + sick/holiday leave). */
   separationDate: string;
   /** True when `lastDayWorked` differs from the Kuali-extracted LDW. */
   ldwChanged: boolean;
+  /** True when `separationDate` differs from the Kuali-extracted separation date. */
+  separationDateChanged: boolean;
   transactionNumber: string;
   finalTermEffDate: string;
   timekeeperName: string;
@@ -34,7 +36,7 @@ export async function runKualiFinalize(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
   args: KualiFinalizationArgs,
 ): Promise<void> {
-  const { kualiPage, kualiData, lastDayWorked, ldwChanged, transactionNumber, finalTermEffDate, timekeeperName } = args;
+  const { kualiPage, kualiData, lastDayWorked, separationDate, ldwChanged, separationDateChanged, transactionNumber, finalTermEffDate, timekeeperName } = args;
   const t0 = Date.now();
   log.debug(`[Step: kuali-finalization] START txnNumber='${transactionNumber || "<empty>"}'`);
   log.step("=== PHASE 3: Kuali finalization ===");
@@ -55,20 +57,22 @@ export async function runKualiFinalize(
   }
 
   const initials = getInitials(timekeeperName);
-  // Only the Last Day Worked can change (New Kronos last punch overrides Kuali's
-  // LDW); the Separation Date is Kuali-authoritative. Emit the date-change note
-  // only when the LDW actually moved.
-  const dateChangeComments = ldwChanged
-    ? buildDateChangeComments(kualiData.lastDayWorked, lastDayWorked, initials)
-    : "";
+  // Both reconciled dates can move: the Last Day Worked (New Kronos last punch
+  // override) and the Separation Date (last day worked + sick/holiday leave).
+  // Emit an audit line for each that actually changed, newline-joined.
+  const dateChangeComments = joinComments(
+    ldwChanged ? buildDateChangeComments(kualiData.lastDayWorked, lastDayWorked, initials) : "",
+    separationDateChanged
+      ? buildSeparationDateChangeComment(kualiData.separationDate, separationDate, initials)
+      : "",
+  );
   // User-supplied free-form Kuali timekeeper-comments override (set
   // via the dashboard's EditDataTab → prefilledData channel). Joined
   // with auto-generated date-change comments using a newline. The
   // combined string is then handed to `fillTimekeeperComments`, which
   // reads the form's existing value and prepends it (also newline-
   // joined) so nothing the user / prior run wrote gets clobbered.
-  const userComments = ((ctx.data.comments as string | undefined) ?? "").trim();
-  const newComments = [dateChangeComments, userComments].filter(Boolean).join("\n");
+  const newComments = joinComments(dateChangeComments, (ctx.data.comments as string | undefined) ?? "");
   if (newComments) {
     log.step(`[Kuali] Comments to add: ${newComments}`);
     await fillTimekeeperComments(kualiPage, newComments);
@@ -76,13 +80,12 @@ export async function runKualiFinalize(
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
   await clickSave(kualiPage);
-  // Capture the ENTIRE Kuali finalization form as ONE clean image of ONLY the
-  // Kuali page. `bounded` takes a fixed-width (1280px) full-page shot clipped to
-  // that width, so the tall form reads top-to-bottom at a normal column width
-  // instead of the old over-widened ribbon slices (the promo footer blew the
-  // width to ~2038px → 3 unreadable 6.3:1 ribbons). No stable selector exists
-  // for the Kuali finalization document container yet; if one is mapped live,
-  // switch this to `region` to also drop the surrounding page chrome.
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], bounded: true });
+  // Capture the ENTIRE Kuali finalization page as a SEQUENCE of readable chunk
+  // images (scroll top→bottom, one viewport PNG per chunk). `paged` shows
+  // everything for manual review at a readable size — the lightbox steps through
+  // the chunks with next/back — instead of a single tall image the viewer can
+  // only shrink to an unreadable ribbon. Capture geometry (width / chunk height
+  // / overlap) is centralized in `CAPTURE` (src/core/kernel/session.ts).
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], paged: true });
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

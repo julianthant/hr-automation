@@ -267,6 +267,31 @@ export async function fillTimekeeperTasks(
  * Fill the Final Transactions section in the Kuali form.
  * Skips any field with an empty string value — allows partial fills.
  */
+/**
+ * Pick the index of the best-matching department `<option>` for a UCPath
+ * department description. Case-insensitive substring match against the option
+ * text (internal whitespace collapsed), skipping the placeholder `"- - -"`
+ * row. Returns -1 when nothing matches.
+ *
+ * Why an INDEX rather than the option label (ISS-B05, 2026-06-22 live batch):
+ * the live UCSD department combobox renders options with irregular internal
+ * whitespace — e.g. `"000719 -  Supply Chain Services"` (a DOUBLE space after
+ * the code dash). `selectOption({ label })` matches the option's normalized
+ * label exactly, so the raw `allTextContents()` string never matched and the
+ * select timed out at 5s for those departments (5/23 docs failed this way:
+ * `"000412 - Housing/Dining/Hospitality"` with a single space succeeded,
+ * `"000719 -  Supply Chain Services"` did not). Selecting by index sidesteps
+ * all label/whitespace matching.
+ */
+export function pickDepartmentOptionIndex(options: string[], department: string): number {
+  const needle = department.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!needle) return -1;
+  return options.findIndex((opt) => {
+    const norm = opt.trim().toLowerCase().replace(/\s+/g, " ");
+    return norm !== "- - -" && norm.includes(needle);
+  });
+}
+
 export async function fillFinalTransactions(
   page: Page,
   opts: {
@@ -293,12 +318,14 @@ export async function fillFinalTransactions(
     log.step(`  Department: ${opts.department}`);
     const deptCombo = finalTransactions.department(page);
     const allOptions = await deptCombo.locator("option").allTextContents(); // allow-inline-selector -- enumerating option elements of a combobox
-    const bestMatch = allOptions.find((opt) =>
-      opt.toLowerCase().includes(opts.department!.toLowerCase()),
-    );
-    log.step(`Department: searching for "${opts.department}" — best match: "${bestMatch || "NONE"}"`);
-    if (bestMatch && bestMatch !== "- - -") {
-      await deptCombo.selectOption({ label: bestMatch }, { timeout: 5_000 });
+    const matchIdx = pickDepartmentOptionIndex(allOptions, opts.department);
+    const bestMatch = matchIdx >= 0 ? allOptions[matchIdx].trim() : "NONE";
+    log.step(`Department: searching for "${opts.department}" — best match: "${bestMatch}"`);
+    if (matchIdx >= 0) {
+      // Select by INDEX, not { label }: live UCSD dept options carry irregular
+      // internal whitespace that never matches Playwright's exact label compare
+      // (see pickDepartmentOptionIndex / ISS-B05). Index avoids label matching.
+      await deptCombo.selectOption({ index: matchIdx }, { timeout: 5_000 });
       log.step(`  Selected department: ${bestMatch}`);
     } else {
       log.error(`  No matching department found for: ${opts.department}`);

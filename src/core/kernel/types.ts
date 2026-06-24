@@ -670,6 +670,21 @@ export interface ScreenshotOpts {
    */
   region?: string
   /**
+   * Capture the WHOLE page as a SEQUENCE of real viewport-sized chunk PNGs by
+   * scrolling top→bottom (one `-cNN` file per chunk, with a small seam overlap).
+   * Unlike a single tall `bounded`/`region` shot — which the lightbox can only
+   * fit-to-height into a hard-to-read ribbon — every part of the page is shown
+   * at readable size for manual verification, and lazy / virtual-scroll content
+   * paints because the page is physically scrolled to it. The viewport is fixed
+   * to `CAPTURE.width`×`CAPTURE.chunkHeight` and overflowing iframes (the UCPath
+   * PeopleSoft content frame) are grown first so the scroll walks through the
+   * in-frame form too. Routes to `Session.capturePagedFullPage`. HIGHEST
+   * precedence — ignored fields below it when set. Use for tall audit forms the
+   * operator must review top-to-bottom (Kuali finalization, UCPath submitted
+   * confirmation).
+   */
+  paged?: boolean
+  /**
    * Scroll the element matching this CSS selector to the vertical CENTER of the
    * viewport and capture the VIEWPORT (not `fullPage`). Use for virtual-scroll
    * grids (Kronos timecards) where `fullPage` only captures the DOM-rendered
@@ -707,6 +722,8 @@ export interface CaptureFileOpts {
   ts: number
   systems?: string[]
   pages?: Page[]
+  /** Whole-page scroll capture → N chunk files (see ScreenshotOpts.paged). */
+  paged?: boolean
   /** Element/iframe-scoped capture selector (see ScreenshotOpts.region). */
   region?: string
   /** Center-on-element viewport capture (see ScreenshotOpts.centerSelector). */

@@ -187,9 +187,11 @@ test(
       originalName: PDF_NAME,
       parentRunId: PARENT_RUN,
     });
-    // The fixture is expected to render headlessly; the records come from the
-    // override either way, so this is informational, not a hard failure.
-    assert.equal(ocr.usedFixture, true, "single-oath.pdf rendered headlessly (no synthetic fallback)");
+    // The records come from the stub override regardless of which PDF renders
+    // (registerOcrPdf falls back to a synthetic one-pager when the real fixture
+    // can't render headlessly — e.g. CI's headless environment). usedFixture is
+    // therefore environment-dependent and NOT asserted; every projection below
+    // holds identically for the synthetic fallback.
     await rt.waitForEvent("ocr:awaiting-approval", { runId: ocr.runId });
 
     // 3. Drive the REAL approve fan-out onto BOTH gated daemons via the new

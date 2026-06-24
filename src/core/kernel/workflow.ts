@@ -178,6 +178,7 @@ export async function runWorkflowBatch<TData, TSteps extends readonly string[]>(
         ...(opts.parentRunId ? { parentRunId: opts.parentRunId } : {}),
       })),
       trackerDir: opts.trackerDir,
+      trackerStub: opts.trackerStub,
     },
     async ({ instance, markTerminated, makeObserver }) => {
       const { observer, getAuthTimings } = makeObserver('1')

@@ -41,6 +41,7 @@ const PREFERRED_CATEGORY_ORDER: readonly string[] = [
   "Separations",
   "Work Study",
   "Timekeeping",
+  "Search",
   "Utils",
 ];
 

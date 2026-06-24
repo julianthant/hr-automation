@@ -530,7 +530,7 @@ export const personLookupWorkflow = defineWorkflow({
   inputSubject: (input) => ("emplId" in input ? "eid" : "name"),
   statusExtensions: personLookupStatusExtensions,
   code: "pl",
-  category: "Utils",
+  category: "Search",
   iconName: "Search",
   systems: [
     {

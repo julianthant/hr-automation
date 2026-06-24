@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import {
   COORDINATOR_LOG_SOURCE_LABEL,
   buildMemberSummaryLines,
+  computeOperationPipelineView,
   isOperationCoordinatorWorkflow,
   mergeCoordinatorLogs,
+  operationCoordinatorEffectiveStatus,
   selectKeyOcrLogLines,
   type CoordinatorLogLine,
 } from "../../../src/dashboard/components/log-panel/coordinator-logs.js";
+import { OPERATION_COORDINATOR_WORKFLOWS as CANONICAL_OPERATION_COORDINATOR_WORKFLOWS } from "../../../src/tracker/dashboard/ocr/shared.js";
 import type { CollapsedLogEntry, } from "../../../src/dashboard/components/hooks/useLogs.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
@@ -29,13 +32,163 @@ function eventLog(ts: string, message: string, event: string): CollapsedLogEntry
   return { ...log({ ts, message }), event } as CollapsedLogEntry;
 }
 
+describe("operationCoordinatorEffectiveStatus", () => {
+  it("returns done when every fanned-out member is terminal", () => {
+    const parent: TrackerEntry = {
+      workflow: "emergency-contact",
+      id: "ocr-prep-s1",
+      runId: "op-run-1",
+      timestamp: "2026-06-22T15:00:00.000Z",
+      status: "running",
+      step: "approved",
+      data: { archetype: "operation", ocrRunId: "ocr-run-1" },
+    };
+    const children: TrackerEntry[] = [
+      {
+        workflow: "emergency-contact",
+        id: "10884227",
+        runId: "member-run-1",
+        parentRunId: "op-run-1",
+        timestamp: "2026-06-22T15:17:00.000Z",
+        status: "done",
+        data: { archetype: "operation-member", name: "Onika Miller" },
+      },
+    ];
+    assert.equal(operationCoordinatorEffectiveStatus(parent, children), "done");
+  });
+
+  it("stays running while any member is still in flight", () => {
+    const parent: TrackerEntry = {
+      workflow: "emergency-contact",
+      id: "ocr-prep-s1",
+      runId: "op-run-1",
+      timestamp: "2026-06-22T15:00:00.000Z",
+      status: "running",
+      step: "approved",
+      data: { archetype: "operation", ocrRunId: "ocr-run-1" },
+    };
+    const children: TrackerEntry[] = [
+      {
+        workflow: "emergency-contact",
+        id: "10884227",
+        runId: "member-run-1",
+        parentRunId: "op-run-1",
+        timestamp: "2026-06-22T15:17:00.000Z",
+        status: "done",
+        data: { archetype: "operation-member" },
+      },
+      {
+        workflow: "emergency-contact",
+        id: "10884228",
+        runId: "member-run-2",
+        parentRunId: "op-run-1",
+        timestamp: "2026-06-22T15:18:00.000Z",
+        status: "running",
+        data: { archetype: "operation-member" },
+      },
+    ];
+    assert.equal(operationCoordinatorEffectiveStatus(parent, children), "running");
+  });
+});
+
 describe("isOperationCoordinatorWorkflow", () => {
   it("matches the canonical coordinator set and nothing else", () => {
     assert.equal(isOperationCoordinatorWorkflow("oath-signature"), true);
     assert.equal(isOperationCoordinatorWorkflow("emergency-contact"), true);
+    assert.equal(isOperationCoordinatorWorkflow("onbase"), true);
     assert.equal(isOperationCoordinatorWorkflow("oath-upload"), false);
     assert.equal(isOperationCoordinatorWorkflow("ocr"), false);
     assert.equal(isOperationCoordinatorWorkflow(undefined), false);
+  });
+
+  it("client mirror matches the canonical OPERATION_COORDINATOR_WORKFLOWS set", () => {
+    // Every canonical coordinator workflow must return true via the client mirror.
+    for (const workflow of CANONICAL_OPERATION_COORDINATOR_WORKFLOWS) {
+      assert.equal(
+        isOperationCoordinatorWorkflow(workflow),
+        true,
+        `client mirror missing canonical workflow: ${workflow}`,
+      );
+    }
+    // A known non-member must stay false so the test detects over-inclusion too.
+    assert.equal(isOperationCoordinatorWorkflow("oath-upload"), false);
+  });
+});
+
+describe("computeOperationPipelineView", () => {
+  const coordinator = (over: Partial<TrackerEntry>): TrackerEntry => ({
+    workflow: "emergency-contact",
+    id: "ocr-prep-s1",
+    runId: "op-run-1",
+    timestamp: "2026-06-22T15:00:00.000Z",
+    status: "running",
+    step: "ocr-prep",
+    data: { archetype: "operation", ocrRunId: "ocr-run-1" },
+    ...over,
+  });
+  const member = (over: Partial<TrackerEntry>): TrackerEntry => ({
+    workflow: "emergency-contact",
+    id: "10884227",
+    runId: "member-run-1",
+    parentRunId: "op-run-1",
+    timestamp: "2026-06-22T15:17:00.000Z",
+    status: "done",
+    data: { archetype: "operation-member" },
+    ...over,
+  });
+
+  it("always exposes the three coordinator stages", () => {
+    const view = computeOperationPipelineView(coordinator({}), []);
+    assert.deepEqual(view.steps, ["prepare", "review", "fan-out"]);
+  });
+
+  it("running · preparing → active on prepare", () => {
+    const view = computeOperationPipelineView(
+      coordinator({ data: { archetype: "operation", ocrStatus: "running" } }),
+      [],
+    );
+    assert.deepEqual(view, { steps: ["prepare", "review", "fan-out"], currentStep: "prepare", status: "running" });
+  });
+
+  it("awaiting-review → active on review", () => {
+    const view = computeOperationPipelineView(
+      coordinator({ data: { archetype: "operation", ocrStatus: "awaiting-review" } }),
+      [],
+    );
+    assert.equal(view.currentStep, "review");
+    assert.equal(view.status, "running");
+  });
+
+  it("approved with members still in flight → active on fan-out", () => {
+    const view = computeOperationPipelineView(
+      coordinator({ step: "approved", data: { archetype: "operation", ocrStatus: "approved" } }),
+      [member({ status: "running" })],
+    );
+    assert.deepEqual(view, { steps: ["prepare", "review", "fan-out"], currentStep: "fan-out", status: "running" });
+  });
+
+  it("all members terminal → whole pipeline done (even with a failed member)", () => {
+    const view = computeOperationPipelineView(
+      coordinator({ step: "approved", data: { archetype: "operation", ocrStatus: "approved" } }),
+      [member({ id: "a", runId: "m1", status: "done" }), member({ id: "b", runId: "m2", status: "failed" })],
+    );
+    assert.deepEqual(view, { steps: ["prepare", "review", "fan-out"], currentStep: "fan-out", status: "done" });
+  });
+
+  it("OCR prep failure surfaces failed on the prepare stage", () => {
+    const view = computeOperationPipelineView(
+      coordinator({ status: "failed", step: "ocr-prep-failed", data: { archetype: "operation", ocrStatus: "running" } }),
+      [],
+    );
+    assert.deepEqual(view, { steps: ["prepare", "review", "fan-out"], currentStep: "prepare", status: "failed" });
+  });
+
+  it("a cancelled/discarded coordinator marks the reached stage as the failure point", () => {
+    const view = computeOperationPipelineView(
+      coordinator({ status: "failed", step: "cancelled", data: { archetype: "operation", ocrStatus: "awaiting-review" } }),
+      [],
+    );
+    assert.deepEqual(view, { steps: ["prepare", "review", "fan-out"], currentStep: "review", status: "failed" });
   });
 });
 
