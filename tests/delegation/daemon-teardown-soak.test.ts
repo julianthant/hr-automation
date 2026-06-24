@@ -364,6 +364,18 @@ test(
             "failed",
             `[iter ${i}] orphaned-candidate ${q.itemId} must terminalize FAILED (red), got ${s}`,
           );
+          // EXACTLY ONE terminal row — not just "reaches failed". Both daemons
+          // die simultaneously and each elects itself the queue owner; the
+          // cross-process SQLite guard (markTaskFailedIfActive, terminal_at IS
+          // NULL) must let exactly one win so the item isn't double-terminalized
+          // in the JSONL/queue audit. Without it, both dying daemons emit a
+          // `failed` row for the same runId.
+          const terms = terminalRows(rt.trackerDir, q.runId);
+          assert.equal(
+            terms.length,
+            1,
+            `[iter ${i}] queued-orphan ${q.itemId} (run ${q.runId}) must have EXACTLY ONE terminal row, got ${terms.length}`,
+          );
         }
         // And the in-flight ones still fail (the existing correct behavior).
         for (const c of inFlight) {

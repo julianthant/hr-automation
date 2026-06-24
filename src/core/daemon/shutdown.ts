@@ -5,14 +5,13 @@ import { log } from '../../utils/log.js'
 import { runRegistry } from '../run-registry.js'
 import {
   findAliveDaemons,
-  filterResponsiveDaemons,
   filterPeersAvailableForHandoff,
 } from './registry.js'
 import { wakeDaemonsForReleasedParents } from './client.js'
 import {
   readQueueState,
   markItemCancelled,
-  markItemFailed,
+  markItemFailedIfActive,
 } from './queue.js'
 import {
   emitTrackerRow,
@@ -278,7 +277,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
       // never come). Only probe when reassign was actually requested.
       const responsivePeers =
         state.reassignInFlight && otherAlive.length > 0 && inFlightSnapshot.taskId
-          ? await filterResponsiveDaemons(otherAlive)
+          ? await filterPeersAvailableForHandoff(otherAlive)
           : []
       // Normalized identity for the shared reassign/fail helpers.
       const shutdownItem = {
@@ -454,17 +453,32 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
             continue
           }
           const runId = item.runId ?? randomUUID()
+          // Cross-process single-terminal (E2E-105): on a simultaneous stop-all
+          // several dying daemons each reach this sweep and each elect
+          // themselves the queue owner (the run-registry terminal-write token is
+          // per-process, so it can't dedupe across daemon processes). The
+          // guarded SQLite mark (terminal_at IS NULL) is the only cross-process
+          // authority — only the daemon that WINS the transition settles
+          // dependencies and emits the row; the losers skip, so the item gets
+          // exactly ONE terminal row. A genuine mark ERROR (not a lost race)
+          // falls back to emitting the row, as the prior unconditional sweep did.
+          let won: boolean
           try {
-            await markItemFailed(wf.config.name, item.id, failReason, runId, trackerDir)
-            if (item.taskId) {
+            won = await markItemFailedIfActive(wf.config.name, item.id, failReason, runId, trackerDir)
+          } catch {
+            won = true
+          }
+          if (!won) continue
+          if (item.taskId) {
+            try {
               const released = taskStore.markDependencyFromChildTerminal({
                 childTaskId: item.taskId,
                 childState: 'failed',
               })
               void wakeDaemonsForReleasedParents(released, trackerDir)
+            } catch {
+              /* best-effort */
             }
-          } catch {
-            /* best-effort — queue event append; tracker row below is the user-visible signal */
           }
           try {
             // Reuse the same data-shape helper that `onPreEmitPending`

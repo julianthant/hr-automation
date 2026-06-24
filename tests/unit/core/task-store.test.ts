@@ -371,6 +371,52 @@ test('markTaskRunning will not stomp a task a peer re-claimed (running stomp gua
   }
 })
 
+test('markTaskFailedIfActive: exactly ONE caller wins the transition (cross-process queued-orphan dedup, E2E-105)', () => {
+  // On a simultaneous stop-all, several dying daemons each elect themselves the
+  // queue owner and each try to fail the same never-claimed item. The
+  // run-registry single-terminal-write token is per-PROCESS, so SQLite is the
+  // only cross-process authority: the guarded mark (terminal_at IS NULL) must
+  // let exactly one win so the item gets exactly one terminal row.
+  const { dir, store } = openTempStore()
+  try {
+    const [q] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+    const first = store.markTaskFailedIfActive({ taskId: q.taskId, error: 'no daemon', now: iso(1) })
+    const second = store.markTaskFailedIfActive({ taskId: q.taskId, error: 'no daemon', now: iso(2) })
+    assert.equal(first, true, 'the first caller wins the transition')
+    assert.equal(second, false, 'a second caller on an already-terminal task loses (no duplicate terminal)')
+    assert.equal(store.getTask(q.taskId)?.state, 'failed')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('markTaskFailedIfActive: returns false for an already-done task (never resurrects a terminal)', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [q] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+    const c = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c)
+    store.markTaskDone({ taskId: q.taskId, attemptId: c.attemptId, now: iso(2) })
+    const won = store.markTaskFailedIfActive({ taskId: q.taskId, error: 'late', now: iso(3) })
+    assert.equal(won, false, 'a terminal (done) task is never re-failed')
+    assert.equal(store.getTask(q.taskId)?.state, 'done')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('parseJson throws a clear error for malformed JSON', () => {
   assert.throws(
     () => parseJson('not-json'),
