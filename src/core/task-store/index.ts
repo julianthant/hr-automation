@@ -29,7 +29,6 @@ import {
   createDependency,
   markDependencyFromChildTerminal,
   releaseParentsIfDependenciesSatisfied,
-  waitForDependencies,
   type ReleasedParentTask,
 } from './child-state.js'
 import { retryTaskFromAttempt } from './retry.js'
@@ -85,7 +84,6 @@ export interface ControlTaskStore {
   /** Returns parents flipped waiting_dependencies→queued — callers wake those workflows' daemons (E2E-017). */
   releaseParentsIfDependenciesSatisfied(request: { childTaskId: string; now?: string }): ReleasedParentTask[]
   requestCancelParentAndChildren(request: { parentTaskId: string; reason?: string; now?: string }): void
-  waitForDependencies(request: { parentTaskId: string; timeoutMs?: number; pollMs?: number }): Promise<void>
   getTask(taskId: string): TaskRow | null
   getAttempt(attemptId: string): AttemptRow | null
   getTaskByRunId(runId: string): TaskRow | null
@@ -127,7 +125,6 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     markDependencyFromChildTerminal: bindControl(markDependencyFromChildTerminal),
     releaseParentsIfDependenciesSatisfied: bindControl(releaseParentsIfDependenciesSatisfied),
     requestCancelParentAndChildren: bindControl(requestCancelParentAndChildren),
-    waitForDependencies: bindDb(waitForDependencies),
     getTask: bindDb(getTask),
     getAttempt: bindDb(getAttempt),
     getTaskByRunId: bindDb(getTaskByRunId),

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { setTimeout as sleep } from 'node:timers/promises'
 
 import { type Database } from '../../infra/sqlite/index.js'
 
@@ -8,7 +7,6 @@ import {
   type TaskState,
   type ChildFailurePolicy,
   getTaskRaw,
-  normalizeTaskState,
 } from './types.js'
 
 export function createDependency(
@@ -140,34 +138,6 @@ export function releaseParentsIfDependenciesSatisfied(
   return control.transaction(() => releaseParentsForChildren(db, [request.childTaskId], now))
 }
 
-export async function waitForDependencies(
-  db: Database,
-  request: { parentTaskId: string; timeoutMs?: number; pollMs?: number },
-): Promise<void> {
-  const started = Date.now()
-  const timeoutMs = request.timeoutMs ?? 60_000
-  const pollMs = request.pollMs ?? 500
-  for (;;) {
-    const parent = getTaskRaw(db, request.parentTaskId)
-    if (!parent) throw new Error(`Parent task ${request.parentTaskId} not found`)
-    const parentState = normalizeTaskState(parent)
-    if (parentState === 'cancelled' || parentState === 'failed' || parentState === 'blocked') {
-      throw new Error(`Parent task ${request.parentTaskId} is ${parentState}`)
-    }
-    const row = db.prepare(`
-      SELECT COUNT(*) AS n
-      FROM task_dependencies
-      WHERE parent_task_id = ?
-        AND status NOT IN ('satisfied', 'cancelled')
-    `).get(request.parentTaskId) as { n: number }
-    if (row.n === 0) return
-    if (Date.now() - started > timeoutMs) {
-      throw new Error(`Timed out waiting for dependencies for task ${request.parentTaskId}`)
-    }
-    await sleep(pollMs)
-  }
-}
-
 function markParentTerminal(
   db: Database,
   parentTaskId: string,
@@ -216,50 +186,61 @@ function releaseParentsForChildren(
   childTaskIds: string[],
   now: string,
 ): ReleasedParentTask[] {
+  if (childTaskIds.length === 0) return []
   const released: ReleasedParentTask[] = []
-  for (const childTaskId of childTaskIds) {
-    const parents = db.prepare(`
+  // ONE grouped query for the releasable set: candidate parents of ANY of these
+  // children whose dependencies are now ALL settled and that are still waiting.
+  // This replaces the old per-child × per-parent loop (DISTINCT parents, then a
+  // COUNT-pending per parent, then a workflow/task_kind SELECT per parent) — an
+  // N+1 that, under a wide fan-out burst (OCR approving many signers settling
+  // near-simultaneously), ran 3 uncorrelated queries per parent inside the
+  // BEGIN IMMEDIATE settle transaction, lengthening the held write-lock. The
+  // NOT EXISTS replaces the COUNT; folding workflow/task_kind into the same
+  // SELECT drops the per-parent lookup; DISTINCT-via-IN dedupes shared parents.
+  const placeholders = childTaskIds.map(() => '?').join(', ')
+  const candidates = db.prepare(`
+    SELECT t.id AS parent_task_id, t.workflow, t.task_kind
+    FROM tasks t
+    WHERE t.id IN (
       SELECT DISTINCT parent_task_id
       FROM task_dependencies
-      WHERE child_task_id = ?
-    `).all(childTaskId) as Array<{ parent_task_id: string }>
-    for (const parent of parents) {
-      const pending = db.prepare(`
-        SELECT COUNT(*) AS n
-        FROM task_dependencies
-        WHERE parent_task_id = ?
-          AND status NOT IN ('satisfied', 'cancelled')
-      `).get(parent.parent_task_id) as { n: number }
-      if (pending.n !== 0) continue
-      const row = db.prepare(`SELECT workflow, task_kind FROM tasks WHERE id = ?`)
-        .get(parent.parent_task_id) as { workflow: string; task_kind: string | null } | undefined
-      if (!row) continue
-      // A task_kind=ocr parent is a dependency ANCHOR, not daemon work — no
-      // daemon ever claims an "ocr" task, so flipping it to queued strands a
-      // zombie (E2E-003). Its job ends when the last dependency settles:
-      // terminalize it here, at the flip site, because this generic settle
-      // path usually wins the race against the OCR scheduler's own tick.
-      if (row.task_kind === 'ocr') {
-        db.prepare(`
-          UPDATE tasks
-          SET control_state = 'done',
-              terminal_at = COALESCE(terminal_at, @now),
-              updated_at = @now
-          WHERE id = @parentTaskId
-            AND control_state = 'waiting_dependencies'
-        `).run({ parentTaskId: parent.parent_task_id, now })
-        continue
-      }
-      const result = db.prepare(`
+      WHERE child_task_id IN (${placeholders})
+    )
+      AND t.control_state = 'waiting_dependencies'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM task_dependencies d
+        WHERE d.parent_task_id = t.id
+          AND d.status NOT IN ('satisfied', 'cancelled')
+      )
+  `).all(...childTaskIds) as Array<{ parent_task_id: string; workflow: string; task_kind: string | null }>
+
+  for (const parent of candidates) {
+    // A task_kind=ocr parent is a dependency ANCHOR, not daemon work — no
+    // daemon ever claims an "ocr" task, so flipping it to queued strands a
+    // zombie (E2E-003). Its job ends when the last dependency settles:
+    // terminalize it here, at the flip site, because this generic settle
+    // path usually wins the race against the OCR scheduler's own tick.
+    if (parent.task_kind === 'ocr') {
+      db.prepare(`
         UPDATE tasks
-        SET control_state = 'queued',
+        SET control_state = 'done',
+            terminal_at = COALESCE(terminal_at, @now),
             updated_at = @now
         WHERE id = @parentTaskId
           AND control_state = 'waiting_dependencies'
       `).run({ parentTaskId: parent.parent_task_id, now })
-      if (result.changes === 0) continue
-      released.push({ taskId: parent.parent_task_id, workflow: row.workflow })
+      continue
     }
+    const result = db.prepare(`
+      UPDATE tasks
+      SET control_state = 'queued',
+          updated_at = @now
+      WHERE id = @parentTaskId
+        AND control_state = 'waiting_dependencies'
+    `).run({ parentTaskId: parent.parent_task_id, now })
+    if (result.changes === 0) continue
+    released.push({ taskId: parent.parent_task_id, workflow: parent.workflow })
   }
   return released
 }
