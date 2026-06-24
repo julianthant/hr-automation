@@ -27,6 +27,7 @@ import {
   SHUTDOWN_NO_DAEMON_FAIL_REASON,
   SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
 } from './in-flight-shutdown.js'
+import { resolveTeardownTransition } from './teardown-transition.js'
 import type { DaemonLockfile } from './types.js'
 import {
   emitItemStart,
@@ -623,8 +624,6 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     state.reassignInFlight && peers.length > 0 && Boolean(item.taskId)
                       ? await filterPeersAvailableForHandoff(peers)
                       : []
-                  const reassign =
-                    state.reassignInFlight && responsivePeers.length > 0 && Boolean(item.taskId)
                   // Normalized identity for the shared reassign/fail helpers.
                   const shutdownItem = {
                     itemId: item.id,
@@ -633,7 +632,16 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     input: item.input,
                     ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                   }
-                  if (reassign && item.taskId) {
+                  // ONE decision authority shared with the shutdown sweep — see
+                  // `teardown-transition.ts`. The bodies below stay per-site.
+                  const action = resolveTeardownTransition({
+                    reassignInFlight: state.reassignInFlight,
+                    forceShutdown: state.forceShutdown,
+                    hasTaskId: Boolean(item.taskId),
+                    responsivePeerCount: responsivePeers.length,
+                    pidAlivePeerCount: peers.length,
+                  })
+                  if (action.kind === 'reassign' && item.taskId) {
                     // Per-instance stop with a RESPONSIVE peer → hand the item
                     // back to the queue and wake the peers so an idle one
                     // finishes it. The attempt (and thus runId) is preserved by
@@ -648,34 +656,30 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       trackerDir,
                       logTag: `Daemon ${instanceId}`,
                     })
-                  } else if (state.reassignInFlight && peers.length > 0) {
-                    // Reassign requested, a peer LOOKS alive (PID + lockfile),
-                    // but none answered `/whoami` — wedged/zombie. Fail the item
-                    // loudly (red, retriable) rather than requeue it to a daemon
-                    // that will never claim it. Same fail shape as a no-peer
-                    // force-stop (F5 fail-loud).
-                    log.warn(
-                      `[Daemon ${instanceId}] per-instance stop — ${peers.length} peer(s) appeared alive but none responded to /whoami; failing in-flight item ${item.id} instead of parking it`,
-                    )
+                  } else if (action.kind === 'fail') {
+                    if (action.reason === 'no-responsive-peer') {
+                      // Reassign requested, a peer LOOKS alive (PID + lockfile),
+                      // but none answered `/whoami` — wedged/zombie. Fail the item
+                      // loudly (red, retriable) rather than requeue it to a daemon
+                      // that will never claim it. Same fail shape as a no-peer
+                      // force-stop (F5 fail-loud).
+                      log.warn(
+                        `[Daemon ${instanceId}] per-instance stop — ${peers.length} peer(s) appeared alive but none responded to /whoami; failing in-flight item ${item.id} instead of parking it`,
+                      )
+                    }
+                    // no-daemon: force-stop with no spare to absorb the item
+                    // (stop-all, SIGINT/SIGTERM, or the last daemon stopped
+                    // per-instance). Either way the operator asked to SEE these
+                    // fail, so emit a real failed row (NO step:"cancelled"
+                    // sentinel → red Failed badge, retriable), not the orange
+                    // Cancelled used for a deliberate per-item cancel.
                     await failInFlightItem({
                       wf,
                       item: shutdownItem,
-                      failReason: SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
-                      taskStore,
-                      trackerDir,
-                      claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),
-                    })
-                  } else if (state.forceShutdown) {
-                    // Force-stop with no spare to absorb the item (stop-all,
-                    // SIGINT/SIGTERM, or the last daemon stopped per-instance).
-                    // The operator asked to SEE these fail, so emit a real
-                    // failed row (NO step:"cancelled" sentinel → red Failed
-                    // badge, retriable), not the orange Cancelled used for a
-                    // deliberate per-item cancel.
-                    await failInFlightItem({
-                      wf,
-                      item: shutdownItem,
-                      failReason: SHUTDOWN_NO_DAEMON_FAIL_REASON,
+                      failReason:
+                        action.reason === 'no-responsive-peer'
+                          ? SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON
+                          : SHUTDOWN_NO_DAEMON_FAIL_REASON,
                       taskStore,
                       trackerDir,
                       claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),

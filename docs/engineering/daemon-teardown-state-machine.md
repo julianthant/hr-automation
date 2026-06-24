@@ -1,10 +1,17 @@
 # Daemon teardown state machine — map, gap analysis, and the root-fix plan
 
-**Status:** analysis + proposed refactor (NOT yet executed). This is the "#6"
-deliverable from the e2e-testing improvement pass — the deepest root fix, kept
-as a planned effort of its own rather than bundled with test/skill changes
-because the subsystem stabilized on 2026-06-13 (VS-003 / VQ-003 / ISS-001) and a
-core refactor in the same pass would risk reintroducing exactly those bugs.
+**Status:** decision layer DONE (2026-06-24) — the rest stays analysis/history.
+The `resolveTeardownTransition` pure function (item #1 + #4 below) now exists in
+`src/core/daemon/teardown-transition.ts` and is the single decision authority
+shared by the claim loop (`daemon.ts`) and the outer-finally sweep
+(`shutdown.ts`); each site keeps its own BODY (the sweep's `bestEffort`/
+`settleDependency:false`, each site's distinct cancel) and `shutdown.ts`'s
+`skipShutdownEmit` pre-gate. Landed as its own gated effort (NOT bundled with the
+2026-06-13 stabilization), proven behavior-preserving by `daemon.test.ts`
+(VS-003 / VQ-003 / F5 / E2E-101 / reassign / ISS-006) + the cranked 50×
+`daemon-teardown-soak.test.ts` + a dedicated `teardown-transition.test.ts`. The
+terminal-write guard + queued-sweep (items #2/#3) were already minimal-fixed
+on 2026-06-15 (see below) and were intentionally left out of this extraction.
 
 ## Why this doc exists
 
@@ -190,10 +197,17 @@ explicit so invalid/duplicate transitions are unrepresentable or assertable in
 ONE place:
 
 1. **A single `resolveTeardownTransition(state, intent, peers)` pure function**
-   returning a typed `TerminalAction` (`{kind:'cancel-row'} | {kind:'fail-row',
-   reason} | {kind:'requeue'} | {kind:'none'}`). Both the claim-loop branch and
-   the outer-finally net call it — the decision logic stops being duplicated; the
-   2026-06-07 "two paths must agree" hazard becomes structural.
+   returning a typed `TerminalAction`. **DONE (2026-06-24)** — shipped as
+   `src/core/daemon/teardown-transition.ts` returning `{kind:'reassign'} |
+   {kind:'fail', reason:'no-responsive-peer'|'no-daemon'} | {kind:'cancel'}`.
+   Inputs are the booleans/peer-counts the two sites already compute
+   (`reassignInFlight`, `forceShutdown`, `hasTaskId`, `responsivePeerCount` from
+   `filterPeersAvailableForHandoff`, `pidAlivePeerCount`). Both the claim-loop
+   branch and the outer-finally net call it — the decision logic is no longer
+   duplicated; the 2026-06-07 "two paths must agree" hazard is now structural. The
+   per-site BODIES (reassign/fail args, each site's cancel) stay at the call
+   sites; `cancel` is the deliberate `/cancel-current` in the claim loop and the
+   browser-disconnect/crash case in the sweep.
 2. **A terminal-write guard keyed by runId.** A run that already produced a
    terminal row in this teardown cannot produce a second (invariant #1 enforced
    structurally, not via the suppression seam — which can then be simplified or
