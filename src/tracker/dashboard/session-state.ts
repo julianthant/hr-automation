@@ -146,6 +146,16 @@ export interface BrowserState {
   browserId: string;
   system: string;
   authState: "idle" | "authenticating" | "authed" | "duo_waiting" | "failed";
+  /**
+   * Per-browser health, orthogonal to `authState` — bound to THIS browser by
+   * `browserId`, so the tile reflects its own browser's state regardless of
+   * tile order. Undefined until the first `browser_health` event (the tile then
+   * shows auth state alone). `refreshing` = an auto/operator reload is in
+   * flight; `failed` = a hard fault (a refresh can't heal it — see `lastError`).
+   */
+  health?: "healthy" | "unhealthy" | "refreshing" | "failed";
+  /** Reason for the latest `unhealthy`/`failed` health transition, if any. */
+  lastError?: string;
 }
 
 export interface SessionInfo {
@@ -277,6 +287,22 @@ export function rebuildSessionState(dir?: string): SessionState {
       if (wf) {
         for (const sess of wf.sessions) {
           sess.browsers = sess.browsers.filter((b) => b.browserId !== e.browserId);
+        }
+      }
+    }
+    // Per-browser health — bound by browserId (NEVER by array position). An
+    // event without a browserId is dropped, never applied positionally, so a
+    // tile can't pick up a sibling's state.
+    if (e.type === "browser_health" && e.browserId) {
+      const b = findBrowser(wfMap, inst, e.browserId);
+      const status = e.data?.status as BrowserState["health"] | undefined;
+      if (b && status) {
+        b.health = status;
+        if (status === "unhealthy" || status === "failed") {
+          if (e.data?.reason) b.lastError = e.data.reason;
+        } else {
+          // healthy / refreshing → clear a stale error
+          delete b.lastError;
         }
       }
     }
