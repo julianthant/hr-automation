@@ -28,6 +28,32 @@ interface IdleRefreshState {
   reloadInFlight: boolean
 }
 
+/**
+ * Per-browser health status surfaced to the dashboard session tiles. Mirrors
+ * `BrowserHealthStatus` in `tracker/session-events.ts` (kept as a local literal
+ * so the kernel proper doesn't import the tracker layer).
+ */
+type BrowserHealthStatus = 'healthy' | 'unhealthy' | 'refreshing' | 'failed'
+
+/** Per-system health-monitor bookkeeping, keyed by systemId. */
+interface HealthMonitorState {
+  /** Last status emitted, so the monitor only emits on transitions (no spam). */
+  lastStatus: BrowserHealthStatus
+  /** Consecutive auto-refresh attempts since the last `healthy` — bounds the
+   * "refresh-only" recovery so a permanently-broken soft fault eventually
+   * surfaces as `failed` instead of reloading forever. */
+  autoRefreshCount: number
+  /** A `refreshSystem` reload is in flight — serializes operator + monitor refreshes. */
+  reloadInFlight: boolean
+  /** A monitor tick is mid-probe for this system — prevents overlapping ticks. */
+  monitorBusy: boolean
+}
+
+/** How often the health monitor probes every launched browser (ms). */
+const HEALTH_MONITOR_TICK_MS = 30_000
+/** Max consecutive auto-refreshes before a soft fault is surfaced as `failed`. */
+const HEALTH_MONITOR_MAX_AUTO_REFRESH = 10
+
 export function formatCaptureFilename(args: {
   workflow: string
   itemId: string
@@ -147,6 +173,12 @@ export interface LaunchOpts {
    */
   idleRefreshOverride?: { thresholdMs: number; tickMs: number }
   /**
+   * Health-monitor cadence override (primarily for tests) — `tickMs` is the
+   * probe interval; `maxAutoRefreshes` bounds the auto-refresh recovery before
+   * a soft fault is surfaced as `failed`.
+   */
+  healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number }
+  /**
    * Output directory for `screenshotAll` / `captureAll` PNGs. Stored on the
    * session state and honored over `PATHS.screenshotDir` (and inherited by
    * `forWorker` children). The daemon threads `screenshotsDir(trackerDir)` here
@@ -171,6 +203,14 @@ export class Session {
   /** Set by `Session.launch` — observability for the idle-refresh ring UI. */
   private idleTouchCb?: (systemId: string) => void
   private idleRefreshCb?: (systemId: string, phase: 'start' | 'end') => void
+  /** Set by `Session.launch` — per-browser health lifecycle for the session tiles. */
+  private healthCb?: (systemId: string, status: BrowserHealthStatus, reason?: string) => void
+  /** Per-system health-monitor state, keyed by systemId. */
+  private healthStates = new Map<string, HealthMonitorState>()
+  /** The health-monitor interval (root session only). */
+  private healthTimer: ReturnType<typeof setInterval> | null = null
+  /** Health-monitor cadence override (tests). */
+  private healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number }
 
   /**
    * True while the auth chain (`Session.launch` → `loginWithRetry` →
@@ -220,6 +260,10 @@ export class Session {
     session.idleRefreshOverride = parent.idleRefreshOverride
     session.idleTouchCb = parent.idleTouchCb
     session.idleRefreshCb = parent.idleRefreshCb
+    session.healthCb = parent.healthCb
+    // The health monitor runs on the ROOT only — the parent owns the browsers
+    // and the disconnect listeners; a worker view shares those pages and must
+    // not double-monitor them.
     session.startIdleRefreshIfNeeded()
     return session
   }
@@ -240,6 +284,10 @@ export class Session {
     session.idleRefreshCb = (systemId: string, phase: 'start' | 'end'): void => {
       opts.observer?.onIdleRefresh?.(systemId, phase)
     }
+    session.healthCb = (systemId: string, status: BrowserHealthStatus, reason?: string): void => {
+      opts.observer?.onBrowserHealth?.(systemId, status, reason)
+    }
+    session.healthMonitorOverride = opts.healthMonitorOverride
     opts.onReady?.(session)
     throwIfAborted(abortSignal)
 
@@ -261,6 +309,18 @@ export class Session {
       const slot = browsers.get(s.id)
       opts.observer?.onBrowserLaunch?.(s.id, s.id, slot?.chromiumPid)
     }
+
+    // Surface a HARD browser failure (Chromium process gone / window closed /
+    // OS-killed) as a per-browser `failed` health event. A refresh cannot heal
+    // a dead process — by operator policy we never relaunch — so this is the
+    // terminal "this browser died" signal the session tile shows. Registered
+    // here on the root so it fires for every run, independent of whether the
+    // daemon also wires its own disconnect→shutdown handler.
+    session.onBrowserDisconnect((systemId) => {
+      const st = session.ensureHealthState(systemId)
+      st.lastStatus = 'failed'
+      session.emitHealth(systemId, 'failed', 'browser disconnected')
+    })
 
     // Parallel prepare: for any system that declares a `prepareLogin`, run
     // it concurrently across all browsers BEFORE the Duo chain starts. Each
@@ -433,6 +493,7 @@ export class Session {
 
     session.applyIdleRefreshOverride(opts.idleRefreshOverride)
     session.startIdleRefreshIfNeeded()
+    session.startHealthMonitor()
     return session
   }
 
@@ -525,6 +586,7 @@ export class Session {
 
   async close(): Promise<void> {
     this.stopIdleRefreshTimers()
+    this.stopHealthMonitor()
     for (const slot of this.state.browsers.values()) {
       await slot.context.close()
       if (slot.browser) await slot.browser.close()
@@ -538,6 +600,7 @@ export class Session {
    */
   async closeWorkerPages(): Promise<void> {
     this.stopIdleRefreshTimers()
+    this.stopHealthMonitor()
     for (const slot of this.state.browsers.values()) {
       try {
         if (!slot.page.isClosed()) await slot.page.close()
@@ -611,6 +674,185 @@ export class Session {
       for (const { browser, listener } of registered) {
         try { browser.off('disconnected', listener) } catch { /* ignore */ }
       }
+    }
+  }
+
+  // ── Per-browser health + operator controls ──────────────────────────────
+  //
+  // The session-card tiles are bound to a browser by `systemId` (=== browserId
+  // today), so every health emit and every control below routes by id — never
+  // by tile order. A tile shows the state of ITS browser regardless of where it
+  // sits or which sibling failed.
+
+  private ensureHealthState(systemId: string): HealthMonitorState {
+    let st = this.healthStates.get(systemId)
+    if (!st) {
+      st = { lastStatus: 'healthy', autoRefreshCount: 0, reloadInFlight: false, monitorBusy: false }
+      this.healthStates.set(systemId, st)
+    }
+    return st
+  }
+
+  /** Emit a per-browser health transition (best-effort; never breaks automation). */
+  private emitHealth(systemId: string, status: BrowserHealthStatus, reason?: string): void {
+    try {
+      this.healthCb?.(systemId, status, reason)
+    } catch {
+      /* observability must not break automation */
+    }
+  }
+
+  /**
+   * Reload a system's page — the "refresh-only" recovery (operator-triggered
+   * from the panel, or auto-triggered by the health monitor). Emits
+   * `refreshing` then `healthy`/`unhealthy`/`failed` so the tile reflects the
+   * outcome. Serialized per system via `reloadInFlight` so an operator refresh
+   * and a monitor tick never reload the same page concurrently. Returns true
+   * when the page passed a liveness probe after the reload.
+   *
+   * A closed/dead page is NOT refreshable (the process is gone) — by operator
+   * policy we never relaunch, so it surfaces as `failed`.
+   */
+  async refreshSystem(id: string): Promise<boolean> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) return false
+    const st = this.ensureHealthState(id)
+    if (st.reloadInFlight) return false
+    st.reloadInFlight = true
+    try {
+      let closed = false
+      try { closed = slot.page.isClosed() } catch { closed = true }
+      if (closed) {
+        this.emitHealth(id, 'failed', 'browser page closed')
+        st.lastStatus = 'failed'
+        return false
+      }
+      this.emitHealth(id, 'refreshing')
+      st.lastStatus = 'refreshing'
+      try {
+        await slot.page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 })
+      } catch (err) {
+        log.warn(`[Session: ${id}] refresh reload failed: ${errorMessage(err)}`)
+      }
+      if (this.idleStates.has(id)) this.noteIdleActivity(id)
+      const ok = await this.healthCheck(id)
+      if (ok) {
+        this.emitHealth(id, 'healthy')
+        st.lastStatus = 'healthy'
+        st.autoRefreshCount = 0
+      } else {
+        this.emitHealth(id, 'unhealthy', 'page did not recover after refresh')
+        st.lastStatus = 'unhealthy'
+      }
+      return ok
+    } finally {
+      st.reloadInFlight = false
+    }
+  }
+
+  /**
+   * Bring a system's Chromium window to the front — the operator's "which
+   * browser is this?" control. Routes by systemId, so the right physical window
+   * surfaces regardless of tile order.
+   */
+  async focusSystem(id: string): Promise<void> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) throw new Error(`no browser for system: ${id}`)
+    await slot.page.bringToFront()
+  }
+
+  /**
+   * Probe a system once and emit its health (operator "check now" + the
+   * monitor's per-tick probe). Reports `healthy`/`failed` so a manual check
+   * always lands a fresh tile state. Does NOT auto-refresh — that's the
+   * monitor's job (and `refreshSystem` for the explicit refresh control).
+   */
+  async probeSystemHealth(id: string): Promise<boolean> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) return false
+    const st = this.ensureHealthState(id)
+    const ok = await this.healthCheck(id)
+    if (ok) {
+      this.emitHealth(id, 'healthy')
+      st.lastStatus = 'healthy'
+      st.autoRefreshCount = 0
+    } else {
+      this.emitHealth(id, 'unhealthy', 'liveness probe failed')
+      st.lastStatus = 'unhealthy'
+    }
+    return ok
+  }
+
+  /**
+   * Start the per-browser health monitor on the ROOT session. Every `tickMs`
+   * it probes each launched browser; a soft (refreshable) fault auto-refreshes
+   * up to `maxAutoRefreshes` times before surfacing as `failed`; a healthy
+   * probe after a fault emits the recovery. Idempotent; unref'd so it never
+   * keeps the process alive.
+   */
+  private startHealthMonitor(): void {
+    if (this.healthTimer) return
+    const tickMs = this.healthMonitorOverride?.tickMs ?? HEALTH_MONITOR_TICK_MS
+    this.healthTimer = setInterval(() => {
+      for (const systemId of this.state.browsers.keys()) {
+        void this.tickHealthMonitor(systemId)
+      }
+    }, tickMs)
+    this.healthTimer.unref()
+  }
+
+  private stopHealthMonitor(): void {
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer)
+      this.healthTimer = null
+    }
+  }
+
+  /**
+   * One health-monitor probe for a system. Skipped while auth is in progress
+   * (never probe/reload mid-Duo) or while a `ctx.step` body owns the page
+   * (`idleGuard` — the handler's own `gotoWithRetry` covers in-step nav faults).
+   * So auto-refresh recovery only fires between steps / when the session is
+   * parked — exactly the session-expiry window it's meant for.
+   */
+  private async tickHealthMonitor(systemId: string): Promise<void> {
+    const slot = this.state.browsers.get(systemId)
+    if (!slot) return
+    if (this.isAuthInProgress()) return
+    if (this.idleGuard()) return
+    const st = this.ensureHealthState(systemId)
+    if (st.monitorBusy || st.reloadInFlight) return
+    st.monitorBusy = true
+    try {
+      let closed = false
+      try { closed = slot.page.isClosed() } catch { closed = true }
+      if (closed) {
+        if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', 'browser page closed')
+        st.lastStatus = 'failed'
+        return
+      }
+      const healthy = await this.healthCheck(systemId)
+      if (healthy) {
+        if (st.lastStatus !== 'healthy') this.emitHealth(systemId, 'healthy')
+        st.lastStatus = 'healthy'
+        st.autoRefreshCount = 0
+        return
+      }
+      // Soft fault — auto-refresh recovery, bounded. Once exhausted, surface
+      // `failed` and stop reloading until it recovers or the operator acts.
+      const maxRefreshes = this.healthMonitorOverride?.maxAutoRefreshes ?? HEALTH_MONITOR_MAX_AUTO_REFRESH
+      if (st.autoRefreshCount >= maxRefreshes) {
+        if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', 'auto-refresh exhausted')
+        st.lastStatus = 'failed'
+        return
+      }
+      st.autoRefreshCount++
+      // refreshSystem emits `refreshing` → `healthy`/`unhealthy` and updates lastStatus.
+      await this.refreshSystem(systemId)
+    } catch {
+      /* best-effort — a monitor failure must never break the run */
+    } finally {
+      st.monitorBusy = false
     }
   }
 

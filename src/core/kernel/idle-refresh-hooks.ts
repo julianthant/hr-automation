@@ -1,4 +1,4 @@
-import { emitIdleSignal } from '../../tracker/session-events.js'
+import { emitIdleSignal, emitBrowserHealth } from '../../tracker/session-events.js'
 import type { SessionObserver } from './types.js'
 
 /**
@@ -17,6 +17,24 @@ export function buildIdleRefreshHooks(
     },
     onIdleRefresh: (systemId, phase) => {
       emitIdleSignal(instance, trackerDir, systemId, phase === 'start' ? 'refresh_start' : 'refresh_end')
+    },
+  }
+}
+
+/**
+ * Build the per-browser health observer hook: bridge the kernel `Session`'s
+ * health monitor / refresh / disconnect lifecycle into `browser_health`
+ * session-JSONL events. The event is keyed by `browserId` (=== systemId today)
+ * so the dashboard binds it to the right tile regardless of tile order. Shared
+ * by `buildSessionObserver` and the batch observer so both paths emit identically.
+ */
+export function buildBrowserHealthHooks(
+  instance: string,
+  trackerDir?: string,
+): Pick<SessionObserver, 'onBrowserHealth'> {
+  return {
+    onBrowserHealth: (systemId, status, reason) => {
+      emitBrowserHealth(instance, systemId, systemId, status, reason, trackerDir)
     },
   }
 }

@@ -20,6 +20,7 @@ export type SessionEventType =
   | "workflow_start" | "workflow_end"
   | "session_create" | "session_close"
   | "browser_launch" | "browser_close"
+  | "browser_health"
   | "auth_start" | "auth_complete" | "auth_failed"
   | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
   | "item_start" | "item_complete" | "item_cancelled"
@@ -261,6 +262,45 @@ export function emitBrowserLaunch(
 
 export function emitBrowserClose(instance: string, browserId: string, system: string, dir?: string): void {
   emitSessionEvent({ type: "browser_close", workflowInstance: instance, browserId, system }, dir);
+}
+
+/**
+ * Per-browser health lifecycle, bound to `browserId` (NOT array position) so a
+ * tile always reflects the state of its own browser regardless of how the
+ * session card orders them:
+ *
+ *  - `healthy`    — the system's page passed a liveness probe (also the
+ *                   "recovered" signal after an auto-refresh succeeds).
+ *  - `unhealthy`  — a liveness probe failed; a soft (refreshable) fault.
+ *  - `refreshing` — an auto- or operator-triggered page reload is in flight.
+ *  - `failed`     — a hard fault that a refresh cannot heal (the Chromium
+ *                   process disconnected / the page object is gone), OR a soft
+ *                   fault that survived the bounded auto-refresh attempts. The
+ *                   operator-facing surface; carries a `reason`.
+ *
+ * `reason` is a short human string for `unhealthy`/`failed` (e.g. "page closed",
+ * "execution context destroyed", "auto-refresh exhausted").
+ */
+export type BrowserHealthStatus = "healthy" | "unhealthy" | "refreshing" | "failed";
+
+export function emitBrowserHealth(
+  instance: string,
+  browserId: string,
+  system: string,
+  status: BrowserHealthStatus,
+  reason?: string,
+  dir?: string,
+): void {
+  emitSessionEvent(
+    {
+      type: "browser_health",
+      workflowInstance: instance,
+      browserId,
+      system,
+      data: { status, ...(reason ? { reason } : {}) },
+    },
+    dir,
+  );
 }
 
 export function emitAuthStart(instance: string, browserId: string, system: string, dir?: string): void {
