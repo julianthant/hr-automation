@@ -286,6 +286,43 @@ export async function markItemCancelled(
   return markTaskTerminal(workflow, itemId, runId, 'cancelled', { reason }, trackerDir, claimGeneration)
 }
 
+/**
+ * Fail a never-claimed QUEUED item only if it has not already been
+ * terminalized, returning whether THIS call won the cross-process transition.
+ * For the queued-orphan sweep (E2E-105): the SQLite `terminal_at IS NULL` guard
+ * (in `markTaskFailedIfActive`) is the only authority that dedupes two dying
+ * daemons that each elect themselves the queue owner on a simultaneous
+ * stop-all. The audit `failed` event is appended ONLY on a win, and the caller
+ * emits the tracker row + settles dependencies only when this returns `true` —
+ * so the losers don't double-write. A JSONL-only item (no SQLite task) has
+ * nothing to race on and returns `true`.
+ */
+export async function markItemFailedIfActive(
+  workflow: string,
+  itemId: string,
+  error: string,
+  runId: string,
+  trackerDir?: string,
+): Promise<boolean> {
+  const store = openQueueTaskStore(trackerDir)
+  const ts = nowIso()
+  const task = store.findTaskByIdentity({ workflow, itemId, runId })
+  if (!task) {
+    appendEvent(workflow, { type: 'failed', id: itemId, failedAt: ts, runId, error }, trackerDir)
+    return true
+  }
+  const won = store.markTaskFailedIfActive({
+    taskId: task.taskId,
+    ...(task.currentAttemptId ? { attemptId: task.currentAttemptId } : {}),
+    error,
+    now: ts,
+  })
+  if (won) {
+    appendEvent(workflow, { type: 'failed', id: itemId, failedAt: ts, runId, error }, trackerDir)
+  }
+  return won
+}
+
 export async function unclaimItem(
   workflow: string,
   itemId: string,

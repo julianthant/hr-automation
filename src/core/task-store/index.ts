@@ -21,6 +21,7 @@ import {
 import {
   markTaskDone,
   markTaskFailed,
+  markTaskFailedIfActive,
   markTaskCancelled,
   requestCancelTask,
   requestCancelParentAndChildren,
@@ -68,6 +69,8 @@ export interface ControlTaskStore {
   markTaskRunning(request: { taskId: string; attemptId: string; workerId: string; now?: string }): void
   markTaskDone(request: { taskId: string; attemptId: string; claimGeneration?: number; now?: string }): void
   markTaskFailed(request: { taskId: string; attemptId: string; error: string; claimGeneration?: number; now?: string }): void
+  /** Fail only if not already terminal (terminal_at IS NULL); returns whether THIS call won. Cross-process queued-orphan dedup (E2E-105). */
+  markTaskFailedIfActive(request: { taskId: string; attemptId?: string; error: string; now?: string }): boolean
   markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string }): void
   requestCancelTask(request: { taskId: string; reason?: string; now?: string }): TaskRow | null
   retryTaskFromAttempt(request: { runId: string; now?: string }): EnqueuedTask
@@ -118,6 +121,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     markTaskRunning: bindControl(markTaskRunning),
     markTaskDone: bindControl(markTaskDone),
     markTaskFailed: bindControl(markTaskFailed),
+    markTaskFailedIfActive: bindControl(markTaskFailedIfActive),
     markTaskCancelled: bindControl(markTaskCancelled),
     requestCancelTask: bindControl(requestCancelTask),
     retryTaskFromAttempt: bindControl(retryTaskFromAttempt),

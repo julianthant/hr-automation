@@ -29,6 +29,52 @@ export function markTaskFailed(
   markTerminal(db, control, { ...request, taskState: 'failed', attemptState: 'failed', error: request.error })
 }
 
+/**
+ * Fail a task ONLY if it is not already terminal, returning whether THIS call
+ * won the transition (the guarded UPDATE changed a row). For the cross-process
+ * queued-orphan sweep (E2E-105): on a simultaneous workflow-scoped stop-all,
+ * several dying daemons can each elect themselves the queue owner, but the
+ * run-registry single-terminal-write token is per-PROCESS and can't dedupe
+ * across daemon processes. SQLite `control_state` is the only cross-process
+ * authority — the `terminal_at IS NULL` guard lets exactly ONE daemon transition
+ * the task; the losers get `false` and skip their duplicate audit/tracker rows.
+ * (Distinct from the `markTask*` family's COALESCE(terminal_at) idempotency,
+ * which keeps the WHERE matching the row — so changes>0 can't tell winner from
+ * loser.)
+ */
+export function markTaskFailedIfActive(
+  db: Database,
+  control: ControlDb,
+  request: { taskId: string; attemptId?: string; error: string; now?: string },
+): boolean {
+  const now = request.now ?? new Date().toISOString()
+  return control.transaction(() => {
+    const result = db.prepare(`
+      UPDATE tasks
+      SET control_state = 'failed',
+          terminal_error = @error,
+          terminal_at = @now,
+          claimed_by_worker_id = NULL,
+          claim_expires_at = NULL,
+          updated_at = @now
+      WHERE id = @taskId AND terminal_at IS NULL
+    `).run({ taskId: request.taskId, error: request.error, now })
+    if (result.changes === 0) return false
+    if (request.attemptId) {
+      db.prepare(`
+        UPDATE task_attempts
+        SET control_state = 'failed',
+            failed_at = COALESCE(failed_at, @now),
+            terminal_at = COALESCE(terminal_at, @now),
+            error = @error,
+            updated_at = @now
+        WHERE id = @attemptId
+      `).run({ attemptId: request.attemptId, error: request.error, now })
+    }
+    return true
+  })
+}
+
 export function markTaskCancelled(
   db: Database,
   control: ControlDb,

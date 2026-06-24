@@ -11,7 +11,7 @@ import {
   writeLockfile,
   ensureDaemonsDir,
   findAliveDaemons,
-  filterResponsiveDaemons,
+  filterPeersAvailableForHandoff,
   scanAliveDaemonInstanceNames,
 } from './registry.js'
 import {
@@ -611,12 +611,17 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   // item. `findAliveDaemons` deliberately trusts an
                   // unreachable-but-PID-alive lockfile (a wedged/zombie daemon
                   // whose event loop never wakes), so requeuing to one parks
-                  // the item `queued` forever. Probe `/whoami` and only reassign
-                  // to a peer that POSITIVELY responds; otherwise fail loud
+                  // the item `queued` forever. Use the SAME authority the queued
+                  // sweep does (`filterPeersAvailableForHandoff`): responsive
+                  // `/whoami` MATCH **and** not itself shutting down. A peer that
+                  // already received `/stop` answers `/whoami` but will NOT claim
+                  // new work, so two concurrent per-instance stops must not
+                  // reassign to each other (it would park the item until this
+                  // daemon's own queued sweep re-fails it). Otherwise fail loud
                   // below (F5). Only probe when reassign is actually requested.
                   const responsivePeers =
                     state.reassignInFlight && peers.length > 0 && Boolean(item.taskId)
-                      ? await filterResponsiveDaemons(peers)
+                      ? await filterPeersAvailableForHandoff(peers)
                       : []
                   const reassign =
                     state.reassignInFlight && responsivePeers.length > 0 && Boolean(item.taskId)
