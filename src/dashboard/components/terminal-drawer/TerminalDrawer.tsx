@@ -5,6 +5,7 @@ import type { WorkflowInstanceState } from "@/components/shared/types";
 import { useClock } from "@/components/hooks/useClock";
 import { useSessions } from "@/components/hooks/useSessions";
 import { useTerminalDrawer } from "@/components/hooks/useTerminalDrawer";
+import { AddWorkerButton } from "./AddWorkerButton";
 import { LiveIndicator } from "./LiveIndicator";
 import { WorkflowBox } from "./WorkflowBox";
 
@@ -141,6 +142,17 @@ export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts
   // a red "failed" dot draws the eye before the operator expands the drawer.
   const { running, authenticating, idle, failed } = bucketDaemonCounts(active);
 
+  // Alive worker count per workflow, surfaced in the add-worker picker so the
+  // operator sees current capacity ("separations: 1 worker") before adding one.
+  // An entry in `active` with !crashedOnLaunch is pidAlive && active — a live
+  // working daemon.
+  const workerCounts: Record<string, number> = {};
+  for (const w of active) {
+    if (w.workflow && !w.crashedOnLaunch) {
+      workerCounts[w.workflow] = (workerCounts[w.workflow] ?? 0) + 1;
+    }
+  }
+
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
 
@@ -174,42 +186,47 @@ export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts
         transition: "height 180ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
-      {/* Bar — clickable surface, full width. Chevron flips on toggle.
-           A top border in the accent colour visually separates the bar from
-           the main dashboard content above, and a subtle bg tint distinguishes
-           it from the drawer body below. */}
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-controls="terminal-drawer-body"
+      {/* Bar. A top border in the accent colour visually separates the bar
+           from the main dashboard content above. The left/centre is the
+           toggle button (clicking it flips the drawer); the right-edge
+           cluster (add-worker "+", Live pill, clock) is a SIBLING of the
+           toggle — interactive controls must not nest inside a <button>. */}
+      <div
         className={cn(
-          "h-9 w-full flex items-center justify-between pl-4 pr-6",
+          "h-9 w-full flex items-center justify-between pl-4 pr-6 shrink-0",
           "border-accent-foreground/40",
           open ? "border-b" : "border-t",
-          "text-[12px] text-muted-foreground",
-          "hover:bg-foreground/5 transition-colors",
-          "outline-none focus-visible:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring",
-          "select-none cursor-pointer",
-          "shrink-0",
         )}
       >
-        <span className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-controls="terminal-drawer-body"
+          className={cn(
+            "flex items-center gap-3 min-w-0 flex-1 h-full rounded-sm",
+            "text-[12px] text-muted-foreground",
+            "hover:bg-foreground/5 transition-colors",
+            "outline-none focus-visible:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring",
+            "select-none cursor-pointer",
+          )}
+        >
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
           <SessionSummary count={count} running={running} authenticating={authenticating} idle={idle} failed={failed} />
-        </span>
-        {/* Right edge: Live pill, then the clock. Live sits before the
-            clock so the operator's eye lands on connection state first
-            when scanning the screen's bottom-right corner — the clock is
-            ambient and only checked on demand. */}
-        <span className="flex items-center gap-3 shrink-0">
+        </button>
+        {/* Right edge: add-worker "+", then the Live pill, then the clock.
+            Live sits before the clock so the operator's eye lands on
+            connection state first when scanning the screen's bottom-right
+            corner — the clock is ambient and only checked on demand. */}
+        <span className="flex items-center gap-3 shrink-0 pl-3">
+          <AddWorkerButton workerCounts={workerCounts} queuedCounts={queuedCounts} />
           <LiveIndicator connected={connected} viewingHistory={viewingHistory} />
           <span className="font-mono text-[12px] text-muted-foreground font-medium tabular-nums leading-none">
             {clock}
           </span>
         </span>
-      </button>
+      </div>
 
       {/* Body — horizontal strip of WorkflowBox cards. Border-t intentionally
           omitted to honour the dashboard's border-b/border-r convention; the
