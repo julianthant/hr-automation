@@ -24,7 +24,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 ## Gotchas
 
-- Login detects success via domain change: `stse.i9complete.com` → `wwwe.i9complete.com`
+- Login detects success via domain change: `stse.i9complete.com` → `wwwe.i9complete.com`. A **rejected** login (e.g. stale `I9_PASSWORD`) bounces back to `stse.i9complete.com/Account/Login` with "username or password … incorrect" — `loginToI9` races the success redirect against `login.loginError` and fails LOUD via `classifyI9LoginResult` (clear ".env credential" message) instead of an opaque `waitForURL: Timeout`. See LESSONS.md 2026-06-24.
 - Training notification popup appears post-login — must dismiss with 2-step click (gracefully handles if absent)
 - Worksite dropdown options formatted as `6-{deptNum} DESCRIPTION` — matched via regex
 - If no worksite matches department number, throws before saving (manual recovery needed)
