@@ -26,9 +26,9 @@ import {
   ONBASE_DOCUMENT_TYPES,
   ONBASE_EMERGENCY_CONTACT_DOC_TYPE,
   isOnbaseDocTypeWired,
-  onbaseDocTypeFormType,
   onbaseDocTypeLabel,
 } from "@/lib/onbase-document-types";
+import { resolveOnbaseModalFormType } from "@/components/run-modal/onbase-form-type";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
@@ -302,12 +302,16 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     if (formOptions.length > 0) setFormType(formOptions[0].formType);
   }, [formOptions, formType, effectiveLockedFormType, showOnbaseDocType]);
 
-  // OnBase: the document-type dropdown drives the OCR formType (only wired
-  // types have a formType, and only wired types are selectable).
+  // OnBase: the document-type dropdown drives the OCR formType. Keyed on `open`
+  // (ISS-001, 2026-06-24) — the close-reset effect nulls formType and also runs
+  // on initial mount while open=false; without re-deriving on open the modal
+  // reopens with formType=null and handleSubmit's `!formType` guard makes Run a
+  // silent no-op (the whole OnBase workflow was unstartable). The gating +
+  // derivation live in `resolveOnbaseModalFormType` so they are unit-pinned.
   useEffect(() => {
-    if (!showOnbaseDocType) return;
-    setFormType(onbaseDocTypeFormType(onbaseDocType) ?? null);
-  }, [showOnbaseDocType, onbaseDocType]);
+    const resolved = resolveOnbaseModalFormType({ open, showOnbaseDocType, onbaseDocType });
+    if (resolved.apply) setFormType(resolved.formType);
+  }, [open, showOnbaseDocType, onbaseDocType]);
 
   // Reset form state on close. Rosters cache is module-global (see
   // useRosters) so we don't reset it here — it's reused across opens.
