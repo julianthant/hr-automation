@@ -4,6 +4,8 @@ import {
   OCR_CANONICAL_STEP_ORDER as _OCR_CANONICAL_STEP_ORDER,
   OCR_RETIRED_STEP_FOLD as _OCR_RETIRED_STEP_FOLD,
 } from "../../../domain/ocr-steps.js";
+import { applyStepDisplay } from "../../../domain/workflow-presentation/step-display.js";
+import type { StepDisplayConfig } from "../../../domain/workflow-presentation/types.js";
 import {
   Tooltip,
   TooltipTrigger,
@@ -19,6 +21,19 @@ interface StepPipelineProps {
   stepDurations?: Record<string, number>;
   /** Full tracker entry for the active run. Reserved for future decoration. */
   entry?: TrackerEntry;
+  /**
+   * The workflow's effective `presentation.steps` config (from
+   * `/api/workflow-definitions`). Drives the displayed step ORDER, visibility
+   * (hide), and per-step label overrides via `applyStepDisplay`. Generic
+   * plumbing for the Workflow Modifier — no workflow declares it yet, so today
+   * this is always undefined and the timeline renders the declared steps in
+   * order with default (`formatStepName`) labels, byte-identical to before.
+   * (NOT OCR's `matching`/`disambiguating` fold — that is the backend `ocrSteps`
+   * drop + the run-conditional `computeOcrPipelineView` remap, not this config.)
+   * Phase-5 caveat: hiding a step a run is actively parked at would orphan the
+   * `currentStep` highlight (all chips read pending); guard when that ships.
+   */
+  stepDisplay?: StepDisplayConfig;
 }
 
 // ── Auth-step grouping ────────────────────────────────────────────────────────
@@ -99,13 +114,23 @@ function normalizeStepName(step: string): string {
  * so it carries `parentRunId` and a real operator-approval gate. A STANDALONE
  * OCR run (no `parentRunId`) is inspect-and-discard: nothing downstream awaits
  * approval, so its terminal phase reads "Review" instead. Mirrors the
- * `OcrReviewPane` Approve-button gate (approval ≡ delegation). Every other step
- * falls through to `formatStepName`. (`awaiting-approval` is unique to OCR's
- * step list, so this never affects another workflow's timeline.)
+ * `OcrReviewPane` Approve-button gate (approval ≡ delegation). This
+ * run-conditional override stays in the component (config can't express it).
+ *
+ * The static base label comes from `displayLabels` (built by `applyStepDisplay`
+ * over the workflow's `presentation.steps`, formatted with `formatStepName`):
+ * a config `rule.label` wins, else `formatStepName(step)` — byte-identical to
+ * the prior direct `formatStepName` call when no override is declared.
+ * (`awaiting-approval` is unique to OCR's step list, so the Review override
+ * never affects another workflow's timeline.)
  */
-function pipelineStepLabel(step: string, entry?: TrackerEntry): string {
+function pipelineStepLabel(
+  step: string,
+  entry: TrackerEntry | undefined,
+  displayLabels: Map<string, string>,
+): string {
   if (step === "awaiting-approval" && !entry?.parentRunId) return "Review";
-  return formatStepName(step);
+  return displayLabels.get(step) ?? formatStepName(step);
 }
 
 /** Build a hover title string summarizing per-system auth status + timing. */
@@ -490,11 +515,22 @@ export function computeOcrPipelineView(
  *     "Authenticating (N)" super-chip. Hover reveals per-system detail
  *     (Radix popover), no click / expansion state.
  */
-export function StepPipeline({ steps, currentStep, status, stepDurations, entry }: StepPipelineProps) {
+export function StepPipeline({ steps, currentStep, status, stepDurations, entry, stepDisplay }: StepPipelineProps) {
   if (steps.length === 0) return null;
 
+  // presentation.steps drives the displayed step ORDER, visibility (hidden), and
+  // labels; formatStepName is injected as the base formatter so labels stay
+  // byte-identical to today when no override is declared. No config →
+  // applyStepDisplay returns the steps in declared order unchanged (no-op). The
+  // RUN-CONDITIONAL currentStep/status remap + standalone awaiting-approval hide
+  // stay upstream in computeOcrPipelineView.
+  const displaySteps = applyStepDisplay(steps, stepDisplay, formatStepName);
+  const displayLabels = new Map(displaySteps.map((d) => [d.step, d.label]));
+
   // Group auth steps into super-chips
-  const nodes = groupAuthSteps(computeStepViews(steps, currentStep, status, stepDurations));
+  const nodes = groupAuthSteps(
+    computeStepViews(displaySteps.map((d) => d.step), currentStep, status, stepDurations),
+  );
 
   return (
     <div className="border-b border-border">
@@ -519,6 +555,8 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
 
           const durationLabel =
             typeof durationMs === "number" ? formatStepDuration(durationMs) : "";
+
+          const stepLabel = pipelineStepLabel(step, entry, displayLabels);
 
           return (
             <div
@@ -545,9 +583,9 @@ export function StepPipeline({ steps, currentStep, status, stepDurations, entry 
                   isCancelledStep && "text-warning font-semibold",
                   isPending && "text-muted-foreground/50 font-medium",
                 )}
-                title={pipelineStepLabel(step, entry)}
+                title={stepLabel}
               >
-                {pipelineStepLabel(step, entry)}
+                {stepLabel}
               </span>
 
               <div

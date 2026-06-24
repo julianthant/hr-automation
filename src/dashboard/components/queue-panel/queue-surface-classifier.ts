@@ -13,6 +13,7 @@ import {
 } from "../../../tracker/queue-surfaces.js";
 import type { TrackerEntry as TrackerEntryJsonl } from "../../../tracker/jsonl.js";
 import type { WorkflowRuntimePolicyLookup } from "../../../domain/workflow-runtime/registry.js";
+import type { WorkflowPresentationConfig } from "../../../domain/workflow-presentation/types.js";
 
 /**
  * Identity cast. `TrackerEntry` (dashboard) is a structural superset of
@@ -108,6 +109,7 @@ export interface BuildQueueSurfacesInput {
   workflowLabel: string;
   displayNames?: Map<string, string>;
   runtimePolicies?: WorkflowRuntimePolicyLookup;
+  resolvePresentation?: (workflowId: string) => WorkflowPresentationConfig | undefined;
 }
 
 export interface QueueSurfaces {
@@ -150,6 +152,7 @@ function projectionContext(input: BuildQueueSurfacesInput): WorkflowProjectionCo
       ? (entry) => resolveEntryName(toDashboardEntry(entry), input.displayNames)
       : undefined,
     runtimePolicies: input.runtimePolicies,
+    resolvePresentation: input.resolvePresentation,
   };
 }
 
