@@ -1,6 +1,6 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { pickTerminationRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
+import { pickTerminationRow, parseSsSmartHrRows } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 import type { SsSmartHrRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 
 const row = (action: string, transactionId: string, approvalStatus: string): SsSmartHrRow => ({
@@ -61,5 +61,69 @@ describe("pickTerminationRow", () => {
 
   it("returns null on an empty grid", () => {
     assert.equal(pickTerminationRow([]), null);
+  });
+});
+
+/**
+ * Grid parse from a cell-text matrix. The live failure (EID 10759273, "Ava
+ * Tolles", 2026-06-24): SS Smart HR showed an APPROVED TER, but the header-only
+ * scan returned nothing, so transaction-check wrongly created a duplicate that
+ * UCPath then rejected. The dual-pass parse must find the TER both with AND
+ * without a clean header row.
+ */
+describe("parseSsSmartHrRows", () => {
+  // Image #3 layout: Transaction ID | Template Sequence | Name | Empl ID | Action | Approval Status | Business Unit
+  const HEADER = ["Transaction ID", "Template Sequence", "Name", "Empl ID", "Action", "Approval Status", "Business Unit"];
+  const tollesData = [
+    ["T002168976", "2176494", "Ava Tolles", "10759273", "TER", "Approved", "SDCMP"],
+    ["T002161023", "2168535", "Ava Tolles", "10759273", "TER", "Approved", "SDCMP"],
+    ["T002161009", "2168521", "Ava Tolles", "10759273", "TER", "Approved", "SDCMP"],
+    ["T002027497", "2035007", "Ava Tolles", "10759273", "HIR", "Approved", "SDCMP"],
+    ["T001707018", "1714466", "Ava Tolles", "10759273", "HIR", "Approved", "SDCMP"],
+  ];
+
+  it("header-keyed: parses the Tolles grid and finds the APPROVED TER (the live duplicate-create bug)", () => {
+    const parsed = parseSsSmartHrRows([HEADER, ...tollesData]);
+    assert.equal(parsed.length, 5);
+    const ter = pickTerminationRow(parsed);
+    assert.ok(ter, "must find a TER row");
+    assert.equal(ter.transactionId, "T002168976");
+    assert.equal(ter.approvalStatus, "Approved");
+  });
+
+  it("pattern fallback: still finds the APPROVED TER when the header row is missing/merged", () => {
+    // No header row at all — the nested/split-table case the header-only scan missed.
+    const parsed = parseSsSmartHrRows(tollesData);
+    const ter = pickTerminationRow(parsed);
+    assert.ok(ter, "pattern pass must recover the TER without a header");
+    assert.equal(ter.transactionId, "T002168976");
+    assert.equal(ter.action, "TER");
+    assert.equal(ter.approvalStatus, "Approved");
+  });
+
+  it("does not mistake the 5-letter Business Unit (SDCMP) for the 3-letter action code", () => {
+    const parsed = parseSsSmartHrRows([["T002168976", "2176494", "Ava Tolles", "10759273", "TER", "Approved", "SDCMP"]]);
+    assert.equal(parsed[0].action, "TER");
+    assert.equal(parsed[0].transactionId, "T002168976", "the 7-digit template seq / EID are not the T-id");
+  });
+
+  it("is order-independent in the pattern pass (columns shuffled, no header)", () => {
+    const parsed = parseSsSmartHrRows([["Pending", "Some Name", "TER", "10759273", "T002168945"]]);
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0].transactionId, "T002168945");
+    assert.equal(parsed[0].action, "TER");
+    assert.equal(parsed[0].approvalStatus, "Pending");
+  });
+
+  it("dedupes a transaction id that both passes would emit (header + pattern overlap)", () => {
+    const parsed = parseSsSmartHrRows([HEADER, tollesData[0]]);
+    assert.equal(parsed.length, 1, "the single data row appears once, not twice");
+  });
+
+  it("skips rows without a transaction id or without a status; empty matrix → []", () => {
+    assert.deepEqual(parseSsSmartHrRows([]), []);
+    assert.deepEqual(parseSsSmartHrRows([["just", "some", "chrome", "row"]]), []);
+    // A T-id with no recognizable status is not a transaction row.
+    assert.deepEqual(parseSsSmartHrRows([["T002168976", "no status here", "SDCMP"]]), []);
   });
 });
