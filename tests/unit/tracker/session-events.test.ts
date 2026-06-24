@@ -217,6 +217,40 @@ describe("rebuildSessionState — workflows", () => {
     );
   });
 
+  it("binds browser_health to the right browser by id (not array order) + clears lastError on recovery", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
+    emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);
+    // Two browsers in one session — UCPath launched first, CRM second.
+    emitSessionEvent({ type: "browser_launch", workflowInstance: "Sep 1", sessionId: "S1", browserId: "ucpath", system: "UCPath" }, dir);
+    emitSessionEvent({ type: "browser_launch", workflowInstance: "Sep 1", sessionId: "S1", browserId: "crm", system: "CRM" }, dir);
+
+    // Fail CRM (the SECOND browser) — health must land on CRM, never UCPath.
+    emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", browserId: "crm", system: "CRM", data: { status: "failed", reason: "browser disconnected" } }, dir);
+    const after = rebuildSessionState(dir).workflows[0].sessions[0].browsers;
+    const uc = after.find((b) => b.browserId === "ucpath")!;
+    const crm = after.find((b) => b.browserId === "crm")!;
+    assert.equal(crm.health, "failed");
+    assert.equal(crm.lastError, "browser disconnected");
+    assert.equal(uc.health, undefined, "UCPath must be untouched — health is bound by id, not position");
+
+    // CRM recovers → healthy clears the stale error.
+    emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", browserId: "crm", system: "CRM", data: { status: "healthy" } }, dir);
+    const recovered = rebuildSessionState(dir).workflows[0].sessions[0].browsers.find((b) => b.browserId === "crm")!;
+    assert.equal(recovered.health, "healthy");
+    assert.equal(recovered.lastError, undefined);
+  });
+
+  it("drops a browser_health event with no browserId (no positional fallback)", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
+    emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);
+    emitSessionEvent({ type: "browser_launch", workflowInstance: "Sep 1", sessionId: "S1", browserId: "ucpath", system: "UCPath" }, dir);
+    // Malformed: no browserId — must NOT be applied to any browser.
+    emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", system: "UCPath", data: { status: "failed", reason: "stray" } }, dir);
+    const b = rebuildSessionState(dir).workflows[0].sessions[0].browsers[0];
+    assert.equal(b.health, undefined);
+    assert.equal(b.lastError, undefined);
+  });
+
   it("removes browser on browser_close", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
     emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);

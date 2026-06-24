@@ -34,7 +34,9 @@ import {
   buildCancelQueuedHandler,
   buildCancelRunningHandler,
   buildDrainWorkerHandler,
+  buildFocusBrowserHandler,
   buildKillBrowserHandler,
+  buildRefreshBrowserHandler,
   buildQueueBumpHandler,
   buildSaveDataHandler,
   buildStopDaemonInstanceHandler,
@@ -1343,6 +1345,71 @@ describe("dashboard worker command helpers", () => {
     assert.equal(workerStore.getCommand(result.commandId)?.commandType, "kill_browser");
     assert.equal(workerStore.findBrowserProcessById(browser.browserProcessId)?.status, "kill_requested");
     workerStore.close();
+  });
+
+  it("refresh/focus browser resolve (workflow, instance, systemId) → a worker command on the live daemon", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const workerStore = createWorkerStore(control);
+    const daemonPid = 424242;
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: daemonPid,
+      hostname: "test-host",
+      phase: "idle",
+    });
+    const browser = workerStore.upsertBrowserProcess({
+      workerId: "sep-worker",
+      workflow: "separations",
+      systemId: "ucpath",
+      browserId: "ucpath",
+      pid: 987655,
+    });
+    // The session-drawer instance → daemon pid mapping comes from workflow_start.
+    writeFileSync(
+      sessionFilePath(dateLocal(), tmp),
+      JSON.stringify({
+        type: "workflow_start",
+        timestamp: new Date().toISOString(),
+        workflowInstance: "Separation 1",
+        pid: daemonPid,
+      }) + "\n",
+    );
+
+    const refreshed = await buildRefreshBrowserHandler(tmp)({
+      workflow: "separations",
+      instance: "Separation 1",
+      systemId: "ucpath",
+    });
+    assert.equal(refreshed.ok, true);
+    const rcmd = workerStore.getCommand((refreshed as { commandId: string }).commandId)!;
+    assert.equal(rcmd.commandType, "refresh_browser");
+    assert.equal(rcmd.targetWorkerId, "sep-worker");
+    assert.equal(rcmd.targetBrowserProcessId, browser.browserProcessId);
+    assert.equal((rcmd.payload as { systemId?: string }).systemId, "ucpath");
+
+    const focused = await buildFocusBrowserHandler(tmp)({
+      workflow: "separations",
+      instance: "Separation 1",
+      systemId: "ucpath",
+    });
+    assert.equal(focused.ok, true);
+    assert.equal(
+      workerStore.getCommand((focused as { commandId: string }).commandId)?.commandType,
+      "focus_browser",
+    );
+
+    workerStore.close();
+  });
+
+  it("refresh browser fails loud when no daemon start event exists for the instance", async () => {
+    const result = await buildRefreshBrowserHandler(tmp)({
+      workflow: "separations",
+      instance: "Separation 9",
+      systemId: "ucpath",
+    });
+    assert.equal(result.ok, false);
   });
 
   it("stop and drain worker write queued worker commands", async () => {

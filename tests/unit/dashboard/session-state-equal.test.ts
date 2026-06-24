@@ -64,6 +64,35 @@ test("browsersEqual detects length change", () => {
   assert.equal(browsersEqual(a, b), false);
 });
 
+test("browsersEqual is order-independent (same set, different order → equal)", () => {
+  const x = makeBrowser("authed", "ucpath");
+  const y = makeBrowser("authed", "crm");
+  // The binding is by browserId, not position — a reorder is NOT a change.
+  assert.equal(browsersEqual([x, y], [y, x]), true);
+});
+
+test("browsersEqual compares each browser to its OWN id, not a positional neighbour", () => {
+  // ucpath authed, crm failed. Swapping array order must NOT make them look
+  // equal to a same-order pair where the states are crossed.
+  const aUc = makeBrowser("authed", "ucpath");
+  const aCrm = makeBrowser("failed", "crm");
+  const bUc = makeBrowser("failed", "ucpath"); // ucpath now failed
+  const bCrm = makeBrowser("authed", "crm"); // crm now authed
+  assert.equal(browsersEqual([aUc, aCrm], [bCrm, bUc]), false);
+});
+
+test("browsersEqual detects a health transition", () => {
+  const before: BrowserState[] = [{ browserId: "ucpath", system: "ucpath", authState: "authed", health: "healthy" }];
+  const after: BrowserState[] = [{ browserId: "ucpath", system: "ucpath", authState: "authed", health: "failed", lastError: "browser disconnected" }];
+  assert.equal(browsersEqual(before, after), false);
+});
+
+test("browsersEqual detects a lastError change at equal health", () => {
+  const before: BrowserState[] = [{ browserId: "ucpath", system: "ucpath", authState: "authed", health: "failed", lastError: "page closed" }];
+  const after: BrowserState[] = [{ browserId: "ucpath", system: "ucpath", authState: "authed", health: "failed", lastError: "auto-refresh exhausted" }];
+  assert.equal(browsersEqual(before, after), false);
+});
+
 test("sessionsEqual detects sessionId change", () => {
   const a = [{ sessionId: "1", browsers: [makeBrowser("authed")] }];
   const b = [{ sessionId: "2", browsers: [makeBrowser("authed")] }];
