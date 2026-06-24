@@ -51,6 +51,17 @@ export const login = {
    */
   confirmYesButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Yes" }),
+
+  /**
+   * Login validation error shown on /Account/Login when the submit is refused
+   * (e.g. "The username or password provided was incorrect."). Anchored on the
+   * credential-rejection message text observed live. Lets `loginToI9` fail FAST
+   * and LOUD on a bad credential instead of waiting out the post-login
+   * navigation timeout. verified 2026-06-24
+   * @tags login, error, validation, incorrect, invalid, credentials, i9
+   */
+  loginError: (page: Page): Locator =>
+    page.getByText(/username or password.*(incorrect|invalid)/i).first(),
 };
 
 // ─── Dashboard → Create new employee ──────────────────────────────────────

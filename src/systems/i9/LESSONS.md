@@ -67,3 +67,15 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Use `validateI9Env()` for `loginToI9`. It reads `I9_USER_ID` and `I9_PASSWORD` when either I-9-specific credential is configured, requires both to avoid mixing credential pairs, and falls back to the UCPath pair only when both I-9 vars are absent. Keep `.env.example` documenting the optional override.
 
 **Tags:** i9, auth, credentials, env, daemon, login, verify, signer
+
+## 2026-06-24 — i9 login `waitForURL(wwwe)` masked a stale password as an opaque nav timeout
+
+**Tried:** `loginToI9` detected success by waiting ONLY for the post-login redirect — `page.waitForURL(url => url.hostname.includes("wwwe.i9complete.com"), { timeout: 15_000 })` — with no branch for a rejected login.
+
+**Failed because:** When the standalone `I9_PASSWORD` in `.env` was stale (i9 Complete passwords rotate independently of UCPath — see the 2026-06-04 entry), the submit was refused and the page bounced back to `https://stse.i9complete.com/Account/Login` showing "The username or password provided was incorrect." The success host never appeared, so `waitForURL` ran out its full 15s on each of 3 auth attempts and surfaced an opaque `page.waitForURL: Timeout 15000ms exceeded` at `login.ts:50` — blaming "navigation" when the real cause was a bad credential. An e2e handoff even hypothesized a `wwwe→stse` domain migration; a live probe disproved it (both hosts resolve to the same server `52.143.80.80`, and the login simply failed with a visible error).
+
+**Fix:** After the Log in click, RACE the success redirect against the credential-rejection error (`login.loginError` = `getByText(/username or password.*(incorrect|invalid)/i)`), then feed `{ url, errorText }` to the pure `classifyI9LoginResult` helper. It throws a loud, actionable error ("I9 Complete rejected the login: …. Check I9_USER_ID / I9_PASSWORD in .env …") on a rejection or a `/Account/Login` bounce, and a precise "did not reach wwwe… still at <url>" on a genuine nav timeout. The `wwwe` success predicate is deliberately UNCHANGED (no blind URL swap) — if a real post-login host migration ever happens, the new timeout message names the actual landing host so the next session sees it immediately. Pure classifier pinned by `tests/unit/systems/i9/login.test.ts`.
+
+**Selector:** `login.loginError` in `selectors.ts`; consumed from `login.ts::loginToI9` / `classifyI9LoginResult`.
+**References:** Diagnosed live 2026-06-24 via a throwaway `loginToI9` probe (reused the real selectors + browser launcher, observed the actual post-login URL instead of waiting for `wwwe`). Root data cause is the 2026-06-04 "I-9 credentials can differ from UCPath credentials" entry.
+**Tags:** i9, login, waitforurl, timeout, credentials, password, fail-loud, account-login, rejected, classify

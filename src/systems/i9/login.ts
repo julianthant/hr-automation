@@ -46,8 +46,26 @@ export async function loginToI9(page: Page): Promise<boolean> {
   });
   log.step("Password entered, clicking Log in...");
 
-  // Wait for post-login navigation (domain changes to wwwe.i9complete.com)
-  await page.waitForURL((url) => url.hostname.includes("wwwe.i9complete.com"), { timeout: 15_000 });
+  // Wait for EITHER the post-login redirect (success → wwwe.i9complete.com) OR a
+  // visible credential-rejection error (failure → bounces back to /Account/Login).
+  // Racing the two makes a bad credential fail FAST and LOUD instead of silently
+  // waiting out the full navigation timeout and surfacing an opaque
+  // `waitForURL: Timeout` — which masked a stale I9_PASSWORD as a "nav" bug
+  // (i9 ISS-006, diagnosed live 2026-06-24).
+  const loginError = loginSelectors.loginError(page);
+  await Promise.race([
+    page
+      .waitForURL((url) => url.hostname.includes("wwwe.i9complete.com"), { timeout: 15_000 })
+      .catch(() => {}),
+    loginError.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {}),
+  ]);
+
+  const errorText = (await loginError.innerText().catch(() => "")).trim() || null;
+  const result = classifyI9LoginResult({ url: page.url(), errorText });
+  if (!result.ok) {
+    log.error(result.message);
+    throw new Error(result.message);
+  }
   log.step(`Logged in | URL: ${page.url()}`);
 
   // Dismiss training notification if present
@@ -55,6 +73,51 @@ export async function loginToI9(page: Page): Promise<boolean> {
 
   log.success("I9 Complete authenticated");
   return true;
+}
+
+/**
+ * Classify the page state after submitting the i9 login form. Pure decision
+ * logic (no Playwright) so the success / rejected / timeout branches are
+ * unit-testable without a live browser.
+ *
+ * - **Success:** the authenticated app host (`wwwe.i9complete.com`).
+ * - **Rejected:** a visible validation error, or a bounce back to the sign-in
+ *   route (`/Account/Login`). Almost always a stale `I9_PASSWORD`, which rotates
+ *   independently of UCPath (see `src/systems/i9/LESSONS.md` 2026-06-04).
+ * - **Timeout:** neither — the post-login redirect never arrived.
+ */
+export function classifyI9LoginResult(input: {
+  url: string;
+  errorText: string | null;
+}): { ok: true } | { ok: false; message: string } {
+  const { url, errorText } = input;
+  let hostname = "";
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    // malformed URL — fall through to the non-success branches below
+  }
+
+  if (hostname.includes("wwwe.i9complete.com")) return { ok: true };
+
+  const credentialHint =
+    "Check I9_USER_ID / I9_PASSWORD in .env — the i9 Complete password rotates " +
+    "independently of UCPath, so a working UCPath password does not imply a working i9 one.";
+
+  const detail = errorText?.trim();
+  if (detail) {
+    return { ok: false, message: `I9 Complete rejected the login: "${detail}". ${credentialHint}` };
+  }
+  if (url.includes("/Account/Login")) {
+    return {
+      ok: false,
+      message: `I9 Complete rejected the login (returned to the sign-in page). ${credentialHint}`,
+    };
+  }
+  return {
+    ok: false,
+    message: `I9 Complete login did not reach wwwe.i9complete.com within 15s (still at ${url}).`,
+  };
 }
 
 /**
