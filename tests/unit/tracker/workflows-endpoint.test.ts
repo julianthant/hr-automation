@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { defineWorkflow } from '../../../src/core/kernel/workflow.js'
 import { clear, register } from '../../../src/core/kernel/registry.js'
 import { buildWorkflowsHandler } from '../../../src/tracker/dashboard.js'
+import { defaultPresentationFromMetadata } from '../../../src/domain/workflow-presentation/resolve.js'
 
 test('GET /api/workflow-definitions returns registered metadata', () => {
   clear()
@@ -145,6 +146,7 @@ test('GET /api/workflow-definitions returns metadata registered via register()',
       { key: 'employee', label: 'Employee' },
       { key: 'id', label: 'ID' },
     ],
+    presentation: defaultPresentationFromMetadata({ archetype: 'batch' }),
   })
   const handler = buildWorkflowsHandler()
   const result = handler()

@@ -16,6 +16,7 @@ import { trackEventForDate, trackEvent, emitScreenshotEvent, dateLocal } from ".
 import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { clear, register } from "../../../src/core/kernel/registry.js";
 import { defineWorkflow } from "../../../src/core/kernel/workflow.js";
+import { defaultPresentationFromMetadata } from "../../../src/domain/workflow-presentation/resolve.js";
 
 test("Hono /api/v2/projection/health returns projection metadata", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hono-state-"));
@@ -133,6 +134,7 @@ test("Hono /api/workflow-definitions returns registered workflow metadata", asyn
       archetype: "single",
       code: "lh",
       detailFields: [],
+      presentation: defaultPresentationFromMetadata({ archetype: "single" }),
     });
     const db = openStateDb(dir);
     const app = createDashboardHonoApp({ dir, stateDb: db });

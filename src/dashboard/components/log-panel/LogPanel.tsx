@@ -368,6 +368,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
           status={pipeline.status}
           stepDurations={isOperationCoordinator ? undefined : runStepDurations}
           entry={entry ?? undefined}
+          stepDisplay={registered?.presentation?.steps}
         />
       )}
 

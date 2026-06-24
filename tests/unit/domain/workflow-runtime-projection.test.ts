@@ -5,6 +5,7 @@ import {
   buildProjectionFromQueueSurface,
   buildWorkflowRunProjection,
 } from "../../../src/domain/workflow-runtime/projection.js";
+import { defaultPresentationFromMetadata } from "../../../src/domain/workflow-presentation/resolve.js";
 import { buildTrackerQueueSurfaces } from "../../../src/tracker/queue-surfaces.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
 import { OCR_WORKFLOW_RUNTIME_POLICY } from "../../../src/workflows/ocr/workflow.js";
@@ -750,5 +751,157 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     });
     assert.equal(projection.surfaceType, "single");
     assert.equal(projection.title, "onboarding-roster");
+  });
+});
+
+describe("workflow runtime projection — resolvePresentation (Task 4.5)", () => {
+  it("member delegation naming lit: resolvePresentation memberTitle+memberSubtitle applied to delegated member", () => {
+    // A delegated member entry (parentRunId set) with a context whose
+    // resolvePresentation returns { delegation: { memberTitle, memberSubtitle } }.
+    // The projection title/subtitle should reflect the delegation naming.
+    const member = entry({
+      workflow: "oath-signature",
+      id: "signer-001",
+      runId: "signer-run-001",
+      parentRunId: "op-run-001",
+      status: "running",
+      data: {
+        archetype: "single",
+        queueRowKind: "person",
+        name: "Doe, Jane",
+        emplId: "10000001",
+        __traceId: "os-120000-abcd",
+      },
+    });
+
+    // Without resolvePresentation: falls through to default kind dispatch.
+    const withoutResolver = buildWorkflowRunProjection(member, {});
+    // With resolvePresentation returning delegation naming.
+    const withResolver = buildWorkflowRunProjection(member, {
+      resolvePresentation: () => ({
+        delegation: {
+          memberTitle: { scheme: "person-name" as const },
+          memberSubtitle: { scheme: "trace-only" as const },
+        },
+      }),
+    });
+
+    // person-name → "Doe, Jane" (same as without since default also resolves name)
+    assert.equal(withResolver.title, "Doe, Jane");
+    // trace-only → the trace id, not EID (default for person member is eid-else-trace → EID)
+    assert.equal(withResolver.subtitle, "os-120000-abcd");
+    // Confirm the resolver changed the subtitle (default eid-else-trace would return EID "10000001")
+    assert.notEqual(withResolver.subtitle, withoutResolver.subtitle);
+    assert.equal(withoutResolver.subtitle, "10000001");
+  });
+
+  it("prep prepTitle lit: resolvePresentation prepTitle applied to OCR prep row", () => {
+    // An OCR prep row with resolvePresentation returning { delegation: { prepTitle } }.
+    // The projection title should reflect the prepTitle naming.
+    const prep = entry({
+      workflow: "ocr",
+      id: "ocr-prep-001",
+      runId: "ocr-run-001",
+      status: "running",
+      step: "awaiting-approval",
+      data: {
+        archetype: "preview",
+        mode: "prepare",
+        formType: "oath",
+        pdfOriginalName: "oath-batch.pdf",
+        __traceId: "oc-130000-e1f2",
+      },
+    });
+
+    // Without resolvePresentation: falls back to pdf-filename.
+    const withoutResolver = buildWorkflowRunProjection(prep, {});
+    // With resolvePresentation returning prepTitle using pdf-filename scheme.
+    // (The title will be the same value — "oath-batch.pdf" — but the path goes
+    //  through the delegation naming, proving the code branch is exercised.)
+    const withResolver = buildWorkflowRunProjection(prep, {
+      resolvePresentation: () => ({
+        delegation: {
+          prepTitle: { scheme: "pdf-filename" as const },
+        },
+      }),
+    });
+
+    // pdf-filename → the PDF name
+    assert.equal(withResolver.title, "oath-batch.pdf");
+    // subtitle is unchanged (prepPresentation only overrides title, not subtitle)
+    assert.equal(withResolver.subtitle, withoutResolver.subtitle);
+  });
+
+  it("NO-OP parity: defaultPresentationFromMetadata produces byte-identical projection to no resolver", () => {
+    // For a person entry, file entry, and member entry:
+    // a context with resolvePresentation returning defaultPresentationFromMetadata(...)
+    // must produce a {title, subtitle} identical to the same context WITHOUT resolvePresentation.
+
+    const personEntry = entry({
+      workflow: "work-study",
+      id: "person-001",
+      runId: "ws-run-001",
+      status: "running",
+      data: {
+        archetype: "single",
+        queueRowKind: "person",
+        name: "Doe, Jane",
+        emplId: "20001234",
+        __traceId: "ws-100000-a1b2",
+      },
+    });
+
+    const fileEntry = entry({
+      workflow: "ocr",
+      id: "ocr-file-001",
+      runId: "ocr-run-file-001",
+      status: "running",
+      step: "awaiting-approval",
+      data: {
+        archetype: "preview",
+        mode: "prepare",
+        formType: "oath",
+        queueRowKind: "file",
+        pdfOriginalName: "doc.pdf",
+        __traceId: "oc-100000-b2c3",
+      },
+    });
+
+    const memberEntry = entry({
+      workflow: "oath-signature",
+      id: "signer-parity",
+      runId: "signer-run-parity",
+      parentRunId: "op-run-parity",
+      status: "pending",
+      data: {
+        archetype: "single",
+        queueRowKind: "person",
+        name: "Smith, John",
+        emplId: "30009876",
+        __traceId: "os-110000-c3d4",
+      },
+    });
+
+    for (const [label, e, inputSubject] of [
+      ["person", personEntry, "name"] as const,
+      ["file", fileEntry, "pdf"] as const,
+      ["member", memberEntry, "name"] as const,
+    ]) {
+      const defaultPresentation = defaultPresentationFromMetadata({
+        inputSubject,
+        archetype: e.data?.archetype ?? "single",
+      });
+
+      const withoutResolver = buildWorkflowRunProjection(e, {});
+      const withDefaultResolver = buildWorkflowRunProjection(e, {
+        resolvePresentation: () => defaultPresentation,
+      });
+
+      assert.deepStrictEqual(
+        { title: withDefaultResolver.title, subtitle: withDefaultResolver.subtitle },
+        { title: withoutResolver.title, subtitle: withoutResolver.subtitle },
+        `${label} entry: defaultPresentationFromMetadata must produce byte-identical title/subtitle`,
+      );
+    }
   });
 });

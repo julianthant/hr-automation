@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js"
+import type { WorkflowPresentationConfig } from "../../domain/workflow-presentation/types.js"
 
 export interface WorkflowMetadata {
   name: string
@@ -44,6 +45,13 @@ export interface WorkflowMetadata {
    * icon. Source: `defineWorkflow({ presets: [...] })`.
    */
   presets?: Array<{ id: string; label: string; skipSteps: string[]; description?: string }>
+  /**
+   * Effective presentation config (naming/steps/delegation), server-derived
+   * from `defineWorkflow.presentation` deep-merged over the metadata defaults.
+   * `presentation.steps` drives the StepPipeline's config-based step folding
+   * and per-step label overrides. Source: `/api/workflow-definitions`.
+   */
+  presentation?: WorkflowPresentationConfig
 }
 
 const WorkflowsContext = createContext<WorkflowMetadata[] | null>(null)
@@ -78,6 +86,10 @@ function isWorkflowMetadata(item: unknown): item is WorkflowMetadata {
       if (p.description !== undefined && typeof p.description !== "string") return false
     }
   }
+  if (
+    o.presentation !== undefined &&
+    (!o.presentation || typeof o.presentation !== "object" || Array.isArray(o.presentation))
+  ) return false
   return true
 }
 

@@ -105,6 +105,20 @@ Recurring escape hatches should become first-class kernel features.
 
 Every per-item row carries `runId` + `workflowInstance`; `filterEventsForRun` trusts `runId` first. Orphan auth/browser events without `runId` are attributed only when `workflowInstance` matches and timestamps fall inside the run window. `itemInFlight` from daemon events is the live-state signal; do not infer live state from tracker rows.
 
+## Workflow Presentation Override System
+
+`WorkflowMetadata.presentation` (`WorkflowPresentationConfig`) is the **effective** presentation for a workflow — always present after registry normalization (`defineWorkflow` → `mergePresentation(defaultPresentationFromMetadata(...), config.presentation)`). The default mirrors today's kind-dispatch behavior so unconfigured workflows round-trip unchanged.
+
+The serve layer merges a second override layer on top via `effectiveMetadata(meta, repoRoot)` (`src/tracker/workflow-presentation/effective.ts`), which calls `applyOverride(meta, readOverride(repoRoot, name))` → `mergePresentation`. This means `WorkflowMetadata.presentation` from `/api/workflow-definitions` is the code-default-merged value; the dashboard's Workflow Modifier page POSTs to `/api/workflow-presentation/:workflow` to write a JSON override file that `effectiveMetadata` layers on every request.
+
+**Override store contract:** `config/workflow-presentation/<workflow>.json` — git-tracked (the directory is intentionally checked in via `.gitkeep`). Reads are fail-soft (bad JSON logs a warn and returns `null`; the dashboard keeps working). Writes are fail-loud (`WorkflowOverrideSchema.parse` throws on invalid). File location built via `workflowPresentationDir` / `workflowPresentationFile` in `src/tracker/paths.ts`.
+
+**Apply-time semantics:**
+- **Display overrides** (`naming`, `steps`, `delegation`, `label`, `category`, `iconName`, `detailFields`) apply at serve-time: `effectiveMetadata` re-reads the JSON on every `/api/workflow-definitions` request — no backend restart needed for naming/label/step-display changes.
+- **Execution-affecting config** (`presets`, `skipSteps`) applies at the **next daemon spawn** — an alive daemon reads workflow config at launch, not per-item.
+
+**Trace-scheme override caveat:** changing a workflow's `presentation.naming.trace` scheme is display/preview only in the Modifier page's `SampleRowPreview`. It changes how NEW runs compose their `__traceId` (stamped once at pre-emit), but **never recomputes an existing row's frozen `data.__traceId`** — that field is written once and never overwritten even on retry or cancel.
+
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Merge dated migration notes into current invariants whenever possible.
