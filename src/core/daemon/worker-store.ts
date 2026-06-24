@@ -12,6 +12,8 @@ export type WorkerCommandType =
   | 'drain_worker'
   | 'stop_worker'
   | 'kill_browser'
+  | 'refresh_browser'
+  | 'focus_browser'
   | 'force_kill_worker'
   | 'health_check'
 export type WorkerCommandState = 'queued' | 'acknowledged' | 'completed' | 'failed' | 'cancelled'
