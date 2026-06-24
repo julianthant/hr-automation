@@ -289,8 +289,20 @@ export async function ensureDaemonsAvailable(
  * two near-simultaneous enqueues for the same workflow can't both observe
  * "0 alive" and each spawn a daemon (the duplicate "<Workflow> 1 / 2" bug).
  * The second caller waits for the first's spawn to register, re-discovers,
- * and reuses it — spawnCount drops to 0. Spawns within a single call are
- * likewise serial: Duo cannot be approved in parallel.
+ * and reuses it — spawnCount drops to 0.
+ *
+ * Spawns within a single call iterate serially, but `spawnDaemonImpl` resolves
+ * once the child's lockfile + `/whoami` are up — which happens BEFORE the child
+ * authenticates (lockfile is written pre-auth, daemon.ts). So the loop
+ * serializes only lockfile REGISTRATION (the happens-before edge VS-003 needs
+ * for instance-name allocation), NOT Duo: the N daemons authenticate in
+ * PARALLEL — which is what keeps a multi-worker start near max(auth) instead of
+ * sum(auth). Concurrent Duo is safe: in production each daemon shows its own
+ * phone-push prompt (approved one at a time on the phone), and hands-off
+ * WebAuthn (`HR_AUTOMATION_DUO_WEBAUTHN=1`) is cross-process-serialized by
+ * `acquireDuoWebAuthnLock` (`.auth/duo-webauthn.lock`) so the shared signCount
+ * file never races. Do NOT "fix" this by serializing on auth — that would make
+ * an N-worker cold start take N×(Duo time).
  */
 export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,

@@ -18,7 +18,18 @@ export interface KeepaliveOpts {
 export async function runKeepaliveTick(opts: KeepaliveOpts): Promise<void> {
   const { instanceId, session, systems, recoverOrphanedClaims } = opts
 
-  await recoverOrphanedClaims()
+  // Best-effort, like the health checks below: a transient SQLite hiccup during
+  // orphan recovery on an idle tick must NOT throw out of the claim-loop body
+  // and tear down an otherwise-healthy idle daemon.
+  try {
+    await recoverOrphanedClaims()
+  } catch (e) {
+    log.warn(
+      `[Daemon ${instanceId}] keepalive orphan recovery failed: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+  }
 
   // Per-system healthChecks are independent — parallelize. Sequential
   // (the previous shape) made the daemon's "phase=keepalive" window
