@@ -257,10 +257,10 @@ export function WorkflowModifierPage(): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  disabled={wp.saving}
-                  aria-disabled={wp.saving}
+                  disabled={wp.saving || !dirty}
+                  aria-disabled={wp.saving || !dirty}
                   onClick={() => { void handleSave(); }}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
                 >
                   {wp.saving && (
                     <Loader2
@@ -272,10 +272,10 @@ export function WorkflowModifierPage(): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  disabled={reverting}
-                  aria-disabled={reverting}
+                  disabled={reverting || !wp.data?.override}
+                  aria-disabled={reverting || !wp.data?.override}
                   onClick={() => { void handleRevert(); }}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {reverting && (
                     <Loader2

@@ -55,7 +55,10 @@ export function useWorkflowPresentation(): {
   const [saving, setSaving] = useState(false);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
 
-  useEffect(() => {
+  // Refetch the workflow list (carries each workflow's `hasOverride` flag for the
+  // picker dot). Called on mount AND after a successful save/revert, so the dot
+  // appears/disappears immediately instead of staying stale until a page reload.
+  const refreshList = useCallback(() => {
     fetch("/api/workflow-presentation")
       .then((r) => r.json())
       .then((b: { ok?: boolean; workflows?: WorkflowListEntry[] }) => {
@@ -63,6 +66,10 @@ export function useWorkflowPresentation(): {
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    refreshList();
+  }, [refreshList]);
 
   const load = useCallback((name: string) => {
     setSelected(name);
@@ -103,7 +110,10 @@ export function useWorkflowPresentation(): {
           body: JSON.stringify(ov),
         });
         const b: { ok?: boolean } = await r.json();
-        if (b.ok) load(selected);
+        if (b.ok) {
+          load(selected);
+          refreshList();
+        }
         return Boolean(b.ok);
       } catch {
         return false;
@@ -111,7 +121,7 @@ export function useWorkflowPresentation(): {
         setSaving(false);
       }
     },
-    [selected, load],
+    [selected, load, refreshList],
   );
 
   const revert = useCallback(async (): Promise<boolean> => {
@@ -119,12 +129,15 @@ export function useWorkflowPresentation(): {
     try {
       const r = await fetch(`/api/workflow-presentation/${selected}`, { method: "DELETE" });
       const ok = r.ok;
-      if (ok) load(selected);
+      if (ok) {
+        load(selected);
+        refreshList();
+      }
       return ok;
     } catch {
       return false;
     }
-  }, [selected, load]);
+  }, [selected, load, refreshList]);
 
   return { list, selected, load, data, saving, save, preview, previewResult, revert };
 }
