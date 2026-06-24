@@ -215,6 +215,20 @@ export async function isDaemonAvailableForHandoff(
 }
 
 /**
+ * Probe every daemon in parallel and keep those for which `keep` holds. The
+ * three exported filters below share this scaffold and differ ONLY in the
+ * predicate (their distinct trust levels are deliberately NOT merged — see each
+ * JSDoc). Factored out so a future change to the probe fan-out lands once.
+ */
+async function filterDaemonsBy(
+  daemons: Daemon[],
+  keep: (d: Daemon) => Promise<boolean>,
+): Promise<Daemon[]> {
+  const results = await Promise.all(daemons.map(async (d) => ((await keep(d)) ? d : null)))
+  return results.filter((d): d is Daemon => d !== null)
+}
+
+/**
  * Filter a peer set down to daemons that POSITIVELY respond to `/whoami`
  * right now (probed in parallel). Built for the shutdown reassign decision:
  * the candidate must be reachable AND identity-matched, not merely PID-alive.
@@ -223,10 +237,7 @@ export async function filterResponsiveDaemons(
   daemons: Daemon[],
   timeoutMs = 1500,
 ): Promise<Daemon[]> {
-  const results = await Promise.all(
-    daemons.map(async (d) => ((await isDaemonResponsive(d, timeoutMs)) ? d : null)),
-  )
-  return results.filter((d): d is Daemon => d !== null)
+  return filterDaemonsBy(daemons, (d) => isDaemonResponsive(d, timeoutMs))
 }
 
 /**
@@ -244,10 +255,7 @@ export async function filterPeersAvailableForHandoff(
   daemons: Daemon[],
   timeoutMs = 1500,
 ): Promise<Daemon[]> {
-  const results = await Promise.all(
-    daemons.map(async (d) => ((await isDaemonAvailableForHandoff(d, timeoutMs)) ? d : null)),
-  )
-  return results.filter((d): d is Daemon => d !== null)
+  return filterDaemonsBy(daemons, (d) => isDaemonAvailableForHandoff(d, timeoutMs))
 }
 
 /**
@@ -273,17 +281,14 @@ export async function filterDaemonsNotShuttingDown(
   daemons: Daemon[],
   timeoutMs = 1500,
 ): Promise<Daemon[]> {
-  const results = await Promise.all(
-    daemons.map(async (d) => {
-      const probe = await probeWhoami(
-        d.port,
-        { workflow: d.workflow, instanceId: d.instanceId },
-        timeoutMs,
-      )
-      return probe.result === 'match' && probe.shuttingDown ? null : d
-    }),
-  )
-  return results.filter((d): d is Daemon => d !== null)
+  return filterDaemonsBy(daemons, async (d) => {
+    const probe = await probeWhoami(
+      d.port,
+      { workflow: d.workflow, instanceId: d.instanceId },
+      timeoutMs,
+    )
+    return !(probe.result === 'match' && probe.shuttingDown)
+  })
 }
 
 function safeUnlink(path: string): void {
@@ -535,6 +540,12 @@ export async function spawnDaemon(workflow: string, trackerDir?: string): Promis
         `daemon process exited (code ${child.exitCode}) before ready — check ${logPath}`,
       )
     }
+    // Bypass THIS process's 2s alive-daemon cache on every poll: the spawned
+    // child writes its lockfile in a SEPARATE process, so it can only
+    // invalidate its OWN in-memory cache — the spawner's stale "no match" would
+    // otherwise survive its full 2s TTL, adding up to ~2s of dead time per
+    // spawn before a daemon that's actually ready in ~600ms is detected.
+    invalidateAliveDaemonsCache(workflow, trackerDir)
     const candidates = await findAliveDaemons(workflow, trackerDir)
     const ours = candidates.find(
       (d) => d.pid === child.pid || d.parentPid === child.pid,
