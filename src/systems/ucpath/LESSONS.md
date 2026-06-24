@@ -168,3 +168,12 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `jobSummary.resultDrillLinks` (added) + `ensureJobSummaryDetailPage`/`waitForDetailPage` in `job-summary.ts`
 **Tags:** job-summary, work-location, detail-page, drill-in, multi-row, search-results, tab-timeout, emplid, fail-loud
 **References:** `tests/unit/systems/ucpath/job-summary.test.ts`
+
+## 2026-06-24 — Transaction-check must verify the TER's effective date, not just its existence
+
+**Tried:** `findTerminationTransactionStatus` picked the first TER row from the SS Smart HR results grid and reused it (Approved) / deleted it (Pending) on existence alone.
+**Failed because:** An employee can be terminated for a PRIOR job, leaving an old TER on the list that is NOT this separation. Reusing/skipping on that prior TER means the current separation's transaction never gets created (the screenshot case: a 2023-10-08 TER for "Megan Pateno" vs a 2026 separation).
+**Fix:** When a Kuali separation date is supplied, drill into the newest TER (`ssSmartHRTransactions.transactionResultLink`), read its effective date from the Transaction Details page (`Effdt: YYYY-MM-DD` strip, `Start Date` cell fallback — via page-text regex, not an exact cell selector), and compare with the pure `isWithinSeparationWindow` (±`SEPARATION_TERMINATION_WINDOW_DAYS` = 14). Outside the window → `found:false`/`priorTerminationSkipped` → create a fresh transaction. The newest TER suffices; `ucpath-transaction`'s EID+effdt existence check backstops the rare newer-unrelated-TER case. Unreadable effdt → legacy reuse + `log.warn`.
+**Selector:** `ssSmartHRTransactions.transactionResultLink` (added) + `findTerminationTransactionStatus`/`readTerminationEffectiveDate`/`isWithinSeparationWindow` in `ss-smart-hr.ts`
+**Tags:** ss-smart-hr, transaction, termination, ter, effective-date, effdt, prior-termination, separation, window
+**References:** `src/workflows/separations/CLAUDE.md` "Transaction check"; `tests/unit/systems/ucpath/ss-smart-hr.test.ts`

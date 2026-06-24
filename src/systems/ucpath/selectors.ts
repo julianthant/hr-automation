@@ -1300,6 +1300,20 @@ export const ssSmartHRTransactions = {
    */
   clearButton: (f: FrameLocator): Locator =>
     f.getByRole("button", { name: "Clear", exact: true }),
+
+  /**
+   * Drill into a specific transaction from the results grid by its Transaction
+   * ID — opens the Transaction Details page (where the effective date / "Effdt:"
+   * is shown). PeopleSoft renders the Transaction ID column as a hyperlink;
+   * fall back to any link whose accessible name carries the id.
+   * NEEDS LIVE VERIFY 2026-06-24 (authored from the SS Smart HR results + detail screenshots)
+   * @tags transaction, drill-in, link, result, detail, effdt, ss-smart-hr
+   */
+  transactionResultLink: (f: FrameLocator, transactionId: string): Locator =>
+    f
+      .getByRole("link", { name: transactionId, exact: true })
+      .or(f.getByRole("link", { name: new RegExp(transactionId, "i") }))
+      .first(),
 };
 
 // ─── Smart HR Transaction Status (filter + results dashboard) ─────────────

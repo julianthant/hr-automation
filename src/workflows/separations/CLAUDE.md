@@ -32,7 +32,11 @@ In batch mode (`runWorkflowBatch`) or daemon mode, all three systems authenticat
 
 ## Transaction check (2026-06-22 — READ THIS)
 
-The `transaction-check` step runs **AFTER `identity-check`** (so it searches with the verified EID — person-lookup runs only inside `identity-check`) and **BEFORE `kronos-search`**. It opens **SS Smart HR Transactions** (`src/systems/ucpath/ss-smart-hr.ts` — `findTerminationTransactionStatus`, reusing the `ssSmartHRTransactions.*` search selectors mapped 2026-04-24), searches by EID, and finds the row whose Action = **TER**. It then branches on that row's Approval Status:
+The `transaction-check` step runs **AFTER `identity-check`** (so it searches with the verified EID — person-lookup runs only inside `identity-check`) and **BEFORE `kronos-search`**. It opens **SS Smart HR Transactions** (`src/systems/ucpath/ss-smart-hr.ts` — `findTerminationTransactionStatus`, reusing the `ssSmartHRTransactions.*` search selectors mapped 2026-04-24), searches by EID, and finds the row whose Action = **TER**.
+
+**Effective-date gating (2026-06-24 — READ THIS):** an employee can be terminated for a PRIOR job, leaving an old TER that is NOT this separation. So the newest TER is **drilled into** (`transactionResultLink` → Transaction Details), its **effective date** read (`Effdt: YYYY-MM-DD` strip, `Start Date` cell fallback), and compared to the **Kuali separation date** (passed in from the handler): only a TER within **`SEPARATION_TERMINATION_WINDOW_DAYS` (14, "a week or two")** counts as THIS separation. A TER outside the window is a prior termination → the step returns `found:false` (`priorTerminationSkipped`) → a **fresh transaction is created**. The newest TER suffices (if this separation is already in UCPath it IS the newest TER with a matching effdt; if not, the newest TER is a prior one with a different effdt → create new — `ucpath-transaction`'s own EID+effdt existence check backstops the rare newer-unrelated-TER case). The window decision is the pure, unit-pinned `isWithinSeparationWindow`; if the effdt can't be READ, it falls back to legacy behavior (reuse the TER) with a `log.warn`. **NEEDS LIVE VERIFY:** the TER drill-in link + the `Effdt:`/`Start Date` read (authored from screenshots).
+
+On a TER that IS within the window, it branches on its Approval Status:
 
 | TER row | Action |
 |---|---|

@@ -44,14 +44,20 @@ export type TransactionCheckResult =
 export async function runTransactionCheck(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
   eid: string,
-  opts: { dryRun: boolean },
+  opts: { dryRun: boolean; separationDate?: string },
 ): Promise<TransactionCheckResult> {
   const t0 = Date.now();
-  log.debug(`[Step: transaction-check] START eid='${eid}' dryRun=${opts.dryRun}`);
+  log.debug(`[Step: transaction-check] START eid='${eid}' dryRun=${opts.dryRun} sepDate='${opts.separationDate ?? ""}'`);
   try {
     log.step("=== Transaction Check (SS Smart HR) ===");
     const ucpathPage = await ctx.page("ucpath");
-    const ter = await findTerminationTransactionStatus(ucpathPage, eid);
+    // Pass the Kuali separation date so an existing TER is only reused/deleted
+    // when its effective date is close to THIS separation — a prior termination
+    // for a different job (far-off effdt) is ignored and a fresh transaction is
+    // created. See findTerminationTransactionStatus.
+    const ter = await findTerminationTransactionStatus(ucpathPage, eid, {
+      separationDate: opts.separationDate,
+    });
 
     // Best-effort audit shot of the SS Smart HR search results so the operator
     // can see exactly what the check found (the TER row + its status).
@@ -60,7 +66,12 @@ export async function runTransactionCheck(
     } catch { /* best-effort */ }
 
     if (!ter.found) {
-      log.step("[transaction-check] No existing termination — proceeding to create one");
+      log.step(
+        ter.priorTerminationSkipped
+          ? `[transaction-check] The only existing termination (effdt ${ter.effectiveDate}) is a PRIOR ` +
+            `termination for a different job — not this separation; proceeding to create a fresh transaction`
+          : "[transaction-check] No existing termination — proceeding to create one",
+      );
       return { status: "none" };
     }
 

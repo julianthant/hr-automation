@@ -1,5 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import {
   navigateToSmartHR,
   collapseSidebar,
@@ -41,13 +42,27 @@ export interface SsSmartHrRow {
 
 /** Result of a termination-transaction status lookup. */
 export interface TerminationTransactionStatus {
-  /** True when a TER (termination) row exists for the searched EID. */
+  /** True when a RELEVANT TER (termination for THIS separation) exists. */
   found: boolean;
-  /** Transaction number of the TER row (empty when not found). */
+  /** Transaction number of the relevant TER (empty when not found). */
   transactionId: string;
-  /** Approval status of the TER row (empty when not found). */
+  /** Approval status of the relevant TER (empty when not found). */
   approvalStatus: string;
+  /** The TER's effective date as read from its detail page ("" if unread). */
+  effectiveDate: string;
+  /**
+   * True when a TER existed but its effective date was OUTSIDE the separation
+   * window — a prior termination for a DIFFERENT job, deliberately not reused.
+   */
+  priorTerminationSkipped?: boolean;
 }
+
+/**
+ * How close (in days) a TER's effective date must be to the Kuali separation
+ * date for the TER to count as THIS separation rather than a prior termination
+ * for a different job. "A week or two max apart" (operator, 2026-06-24).
+ */
+export const SEPARATION_TERMINATION_WINDOW_DAYS = 14;
 
 /**
  * Pick the termination (Action = "TER") row from a parsed results grid. When
@@ -57,6 +72,39 @@ export interface TerminationTransactionStatus {
  */
 export function pickTerminationRow(rows: SsSmartHrRow[]): SsSmartHrRow | null {
   return rows.find((r) => r.action.trim().toUpperCase() === "TER") ?? null;
+}
+
+/** Parse `YYYY-MM-DD` (ISO) or `MM/DD/YYYY` (US) to a UTC day number, else null. */
+function toDayNumber(dateStr: string): number | null {
+  const s = dateStr.trim();
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  let y: number, m: number, d: number;
+  if (iso) { y = +iso[1]; m = +iso[2]; d = +iso[3]; }
+  else if (us) { m = +us[1]; d = +us[2]; y = +us[3]; }
+  else return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
+}
+
+/**
+ * Is a TER's effective date close enough to the Kuali separation date to be THIS
+ * separation (vs a prior termination for a different job)? True when the two
+ * dates are within `toleranceDays` (default `SEPARATION_TERMINATION_WINDOW_DAYS`).
+ * Accepts the TER effdt in ISO (`2023-10-08`, the detail-page "Effdt:" form) or
+ * US (`10/08/2023`, the grid "Start Date" form) and the Kuali date in US form.
+ * Returns false on an unparseable date — the caller treats that as "not a
+ * confident match". Pure + unit-pinned.
+ */
+export function isWithinSeparationWindow(
+  terEffdt: string,
+  kualiSeparationDate: string,
+  toleranceDays: number = SEPARATION_TERMINATION_WINDOW_DAYS,
+): boolean {
+  const a = toDayNumber(terEffdt);
+  const b = toDayNumber(kualiSeparationDate);
+  if (a === null || b === null) return false;
+  return Math.abs(a - b) <= toleranceDays;
 }
 
 /**
@@ -92,6 +140,20 @@ export async function navigateToSsSmartHrTransactions(page: Page): Promise<void>
  * termination (TER) transaction status. Returns `found: false` when no TER row
  * exists (the employee has no existing termination — proceed to create one).
  *
+ * **Effective-date gating (2026-06-24):** an employee can be terminated for a
+ * PRIOR job, leaving an old TER on the list that is NOT this separation. When
+ * `opts.separationDate` is supplied, the newest TER is drilled into, its
+ * effective date read, and compared to the Kuali separation date: only a TER
+ * within `SEPARATION_TERMINATION_WINDOW_DAYS` ("a week or two") counts as THIS
+ * separation (reuse/delete). A TER outside the window is a prior termination →
+ * `found: false` (+ `priorTerminationSkipped`) so the caller creates a fresh
+ * transaction. The newest TER is sufficient: if this separation is already in
+ * UCPath it IS the newest TER with a matching effdt; if it isn't, the newest TER
+ * is some prior termination with a different effdt → create new (and
+ * `ucpath-transaction`'s own EID+effdt existence check backstops the rare
+ * newer-unrelated-TER edge case). Without `opts.separationDate` (legacy callers)
+ * the newest TER is used as-is.
+ *
  * Best-effort scan: a parse failure degrades to `found: false` (the separations
  * `ucpath-transaction` step's own `findExistingTerminationTransaction` is the
  * backstop against duplicate submits) rather than throwing.
@@ -99,6 +161,7 @@ export async function navigateToSsSmartHrTransactions(page: Page): Promise<void>
 export async function findTerminationTransactionStatus(
   page: Page,
   eid: string,
+  opts: { separationDate?: string; toleranceDays?: number } = {},
 ): Promise<TerminationTransactionStatus> {
   await navigateToSsSmartHrTransactions(page);
   const frame = getContentFrame(page);
@@ -127,13 +190,80 @@ export async function findTerminationTransactionStatus(
       `[SS Smart HR] No TER (termination) transaction found for EID ${eid} ` +
       `(${rows.length} row(s) scanned) — no existing transaction`,
     );
-    return { found: false, transactionId: "", approvalStatus: "" };
+    return { found: false, transactionId: "", approvalStatus: "", effectiveDate: "" };
   }
   log.step(
     `[SS Smart HR] Existing TER transaction for EID ${eid}: ` +
     `txn='${ter.transactionId}' status='${ter.approvalStatus}'`,
   );
-  return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus };
+
+  // No Kuali separation date to compare against → legacy behavior (use the TER).
+  if (!opts.separationDate) {
+    return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus, effectiveDate: "" };
+  }
+
+  const tol = opts.toleranceDays ?? SEPARATION_TERMINATION_WINDOW_DAYS;
+  const effectiveDate = await readTerminationEffectiveDate(page, frame, ter.transactionId);
+  if (!effectiveDate) {
+    // Couldn't read the effdt → fall back to legacy (use the TER) so we never do
+    // WORSE than before, but flag it so a live run surfaces the gap.
+    log.warn(
+      `[SS Smart HR] Could not read TER ${ter.transactionId}'s effective date — ` +
+      `treating it as the current separation (could not verify it isn't a prior termination)`,
+    );
+    return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus, effectiveDate: "" };
+  }
+  if (isWithinSeparationWindow(effectiveDate, opts.separationDate, tol)) {
+    log.step(
+      `[SS Smart HR] TER ${ter.transactionId} effdt ${effectiveDate} is within ${tol} days of the ` +
+      `Kuali separation date ${opts.separationDate} — this IS the current separation`,
+    );
+    return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus, effectiveDate };
+  }
+  log.warn(
+    `[SS Smart HR] TER ${ter.transactionId} effdt ${effectiveDate} is NOT within ${tol} days of the ` +
+    `Kuali separation date ${opts.separationDate} — this is a PRIOR termination for a different job; ` +
+    `a fresh transaction is needed`,
+  );
+  return { found: false, transactionId: "", approvalStatus: "", effectiveDate, priorTerminationSkipped: true };
+}
+
+/**
+ * Drill into a TER transaction from the results grid and read its effective
+ * date. The detail page's approval strip reads `… Effdt: 2023-10-08, …` (ISO);
+ * the Hire Details grid shows a `Start Date` cell (`MM/DD/YYYY`) as a fallback.
+ * Read via page text + regex so it doesn't hinge on an exact cell selector.
+ * Read-only (drilling into a detail view) — safe in dry-run. Returns "" if the
+ * transaction couldn't be opened or no date was found.
+ *
+ * NEEDS LIVE VERIFY: the results-grid Transaction ID link (`transactionResultLink`)
+ * and that the detail page exposes the `Effdt:`/`Start Date` text — authored from
+ * the live screenshots, not `playwright-cli`.
+ */
+async function readTerminationEffectiveDate(
+  page: Page,
+  frame: FrameLocator,
+  transactionId: string,
+): Promise<string> {
+  try {
+    await safeClick(ssSmartHRTransactions.transactionResultLink(frame, transactionId), {
+      timeout: 10_000,
+      label: "ss smart hr transaction drill-in link",
+    });
+    await page.waitForTimeout(2_000);
+    await waitForPeopleSoftProcessing(frame, 10_000);
+    const text = await frame
+      .locator("body") // allow-inline-selector -- body text read for the TER detail effdt
+      .evaluate((b) => (b as HTMLElement).innerText ?? "")
+      .catch(() => "");
+    const iso = text.match(/Effdt:\s*(\d{4}-\d{1,2}-\d{1,2})/i);
+    if (iso) return iso[1];
+    const us = text.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
+    return us ? us[1] : "";
+  } catch (e) {
+    log.warn(`[SS Smart HR] Could not open TER ${transactionId} to read its effective date: ${errorMessage(e)}`);
+    return "";
+  }
 }
 
 /** PeopleSoft transaction id, e.g. "T002168976". */
