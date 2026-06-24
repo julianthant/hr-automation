@@ -93,6 +93,14 @@ export interface SessionObserver {
   /** Idle-refresh observability (per system) — wired to session JSONL for the dashboard countdown ring. */
   onIdleTouch?: (systemId: string) => void
   onIdleRefresh?: (systemId: string, phase: 'start' | 'end') => void
+  /**
+   * Per-browser health lifecycle (per system) — wired to session JSONL so the
+   * session-card tiles can render each browser's own health state and surface
+   * failures. `status` mirrors `BrowserHealthStatus` in session-events.ts
+   * (`healthy` | `unhealthy` | `refreshing` | `failed`); `reason` is a short
+   * human string for the non-healthy states.
+   */
+  onBrowserHealth?: (systemId: string, status: 'healthy' | 'unhealthy' | 'refreshing' | 'failed', reason?: string) => void
 }
 
 export interface BatchConfig {

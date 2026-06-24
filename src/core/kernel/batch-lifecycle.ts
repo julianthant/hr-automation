@@ -17,7 +17,7 @@ import {
   emitAuthComplete,
   emitAuthFailed,
 } from '../../tracker/session-events.js'
-import { buildIdleRefreshHooks } from './idle-refresh-hooks.js'
+import { buildIdleRefreshHooks, buildBrowserHealthHooks } from './idle-refresh-hooks.js'
 import { log } from '../../utils/log.js'
 
 /**
@@ -113,6 +113,7 @@ export function createBatchObserver(
       emitAuthFailed(instance, browserId, systemId, trackerDir)
     },
     ...(suppressEvents ? {} : buildIdleRefreshHooks(instance, trackerDir)),
+    ...(suppressEvents ? {} : buildBrowserHealthHooks(instance, trackerDir)),
   }
 
   return {
