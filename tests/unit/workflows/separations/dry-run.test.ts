@@ -741,6 +741,28 @@ describe("separations handler — department gate (skip Kronos for non-HDH)", ()
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1);
   });
 
+  it("keeps the Kuali Separation Date (no change, no write-back, no 'per Kronos' comment) when kronos is skipped for non-HDH", async () => {
+    // Bookstore "Nakagawa, Matthew K" symptom: non-HDH, Kronos never read, but
+    // the date model used to re-derive the separation date from the LDW — so a
+    // Kuali sep (01/16) ≠ LDW (01/15) produced a bogus "Updated Separation Date
+    // 06/15 → 06/14 per Kronos timesheet" comment. With no timecard read, keep
+    // Kuali's separation date verbatim: no change, no write-back, no comment.
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Qualcomm Institute"));
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.ok(probe.skipped.includes("kronos-search"), "kronos-search skipped for non-HDH");
+    assert.equal(probe.data.separationDate, KUALI_FIXTURE.separationDate, "Kuali separation date kept as-is");
+    assert.equal(mocks.updateSeparationDate.mock.calls.length, 0, "no separation-date write-back when Kronos was skipped");
+    // The finalization step receives separationDateChanged=false → it builds no
+    // separation-date-change comment.
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 1);
+    assert.equal(
+      mocks.runKualiFinalize.mock.calls[0][1].separationDateChanged,
+      false,
+      "no separation-date-change comment is generated on the non-HDH skip path",
+    );
+  });
+
   it("RUNS kronos-search for an HDH department", async () => {
     mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Housing/Dining/Hospitality"));
     const { ctx, probe } = makeFakeCtx({ docId: "4131" });
