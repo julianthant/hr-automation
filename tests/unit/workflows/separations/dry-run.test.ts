@@ -711,6 +711,89 @@ describe("separations handler — transaction-check (existing-termination branch
   });
 });
 
+describe("separations handler — department gate (skip Kronos for non-HDH)", () => {
+  // Only Housing/Dining/Hospitality (HDH) employees are timekept in New Kronos.
+  // Once the Workforce Job Summary (getJobSummaryIdentity, inline before
+  // identity-check) resolves the department, a NON-HDH department skips
+  // kronos-search and the dates fall back to the Kuali form. ucpath-job-summary
+  // (the Kuali dept/payroll fill) now runs BEFORE kronos-search so its
+  // department can gate the timecard read. The FIRST getJobSummaryIdentity call
+  // is overridden per-test (name still "Test Employee" so identity-check skips
+  // and the focus stays on the department gate).
+  const JS_FOUND = (departmentDescription: string) => ({
+    found: true,
+    name: "Test Employee",
+    data: { deptId: "000123", departmentDescription, jobCode: "001234", jobDescription: "Analyst" },
+  });
+
+  it("SKIPS kronos-search for a non-HDH department (not timekept in New Kronos)", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Qualcomm Institute"));
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.ok(probe.skipped.includes("kronos-search"), "kronos-search skipped for a non-HDH dept");
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 0, "New Kronos timecard search never ran");
+    // Dates fall back to the Kuali form (no timecard) — LDW = Kuali LDW.
+    assert.equal(probe.data.lastDayWorked, KUALI_FIXTURE.lastDayWorked);
+    // The department is STILL filled into Kuali for non-HDH (only the timecard
+    // read is skipped) — ucpath-job-summary ran on this live path.
+    assert.equal(mocks.runUcpathJobSummary.mock.calls.length, 1, "department still filled for non-HDH");
+    // The run still completes (UCPath submit + finalization on the live path).
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1);
+  });
+
+  it("RUNS kronos-search for an HDH department", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Housing/Dining/Hospitality"));
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(probe.skipped.includes("kronos-search"), false, "kronos-search ran for an HDH dept");
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1, "New Kronos timecard search ran");
+  });
+
+  it("matches HDH case-insensitively on a department-description keyword (On Campus Housing)", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("ON CAMPUS HOUSING"));
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1, "the 'housing' keyword counts as HDH → kronos runs");
+  });
+
+  it("RUNS kronos-search when the department is unknown (fail-safe — empty Job Summary dept)", async () => {
+    // Default getJobSummaryIdentity returns an EMPTY department, so we cannot
+    // positively classify it as non-HDH → we still run kronos. Skipping an
+    // actual HDH employee's timecard on a missing dept read would silently
+    // produce wrong dates.
+    const { ctx, probe } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(probe.skipped.includes("kronos-search"), false, "kronos-search ran for an unknown dept");
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1);
+  });
+
+  it("runs ucpath-job-summary BEFORE kronos-search (the department gates the timecard read)", async () => {
+    // HDH so kronos-search also runs — then their invocation order can be compared.
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Housing/Dining/Hospitality"));
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runUcpathJobSummary.mock.calls.length, 1);
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1);
+    assert.ok(
+      mocks.runUcpathJobSummary.mock.invocationCallOrder[0] <
+        mocks.runKronosSearch.mock.invocationCallOrder[0],
+      "the Kuali dept fill ran before the New Kronos timecard read",
+    );
+  });
+
+  it("does NOT fill the Kuali department in dry-run, even with HDH data (read path still runs kronos)", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Housing/Dining/Hospitality"));
+    const { ctx, probe } = makeFakeCtx({ docId: "4131", dryRun: true });
+    await runHandler(ctx, { docId: "4131", dryRun: true });
+    assert.equal(mocks.runUcpathJobSummary.mock.calls.length, 0, "no Kuali dept fill on the dry-run path");
+    assert.ok(probe.skipped.includes("ucpath-job-summary"), "ucpath-job-summary skipped in dry-run");
+    // The department gate read the dept regardless, and the HDH timecard read is
+    // part of the dry-run READ path.
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 1, "HDH timecard read still runs in dry-run");
+    assert.equal(probe.data.status, "Dry Run Complete");
+  });
+});
+
 describe("INPUT_RUN_REGISTRY dry-run exposure", () => {
   it("enables the dry-run toggle for separations", () => {
     assert.equal(INPUT_RUN_REGISTRY.separations.supportsDryRun, true);

@@ -7,12 +7,16 @@ test('separations effective step list is auth:<systems> + work steps', () => {
   // Import of separationsWorkflow triggers defineWorkflow which auto-registers.
   const meta = getByName('separations')
   assert.ok(meta, 'separations workflow must be registered')
-  // identity-check now sits BEFORE kronos-search (and before transaction-check):
+  // identity-check sits BEFORE kronos-search (and before transaction-check):
   // the EID must be verified/corrected (person-lookup runs ONLY inside
   // identity-check) before the transaction check + timecard read use it. The
-  // Workforce Job Summary that gates identity-check is now fetched inline just
-  // before the step rather than inside kronos-search. transaction-check follows
-  // identity-check and precedes kronos-search.
+  // Workforce Job Summary that gates identity-check is fetched inline just
+  // before the step rather than inside kronos-search.
+  //
+  // ucpath-job-summary now sits BEFORE kronos-search (2026-06-24): the Workforce
+  // Job Summary department is filled into Kuali first, and its department gates
+  // kronos-search — non-HDH employees aren't timekept in New Kronos, so the
+  // timecard read is skipped for them.
   assert.deepEqual(meta.steps, [
     'auth:kuali',
     'auth:new-kronos',
@@ -20,8 +24,8 @@ test('separations effective step list is auth:<systems> + work steps', () => {
     'kuali-extraction',
     'identity-check',
     'transaction-check',
-    'kronos-search',
     'ucpath-job-summary',
+    'kronos-search',
     'ucpath-transaction',
     'kuali-finalization',
   ])

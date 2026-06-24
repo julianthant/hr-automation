@@ -8,7 +8,7 @@ import {
 /** Ordered reference of every dashboard keyboard shortcut. */
 const SHORTCUTS: { keys: string[]; desc: string }[] = [
   { keys: ["↑", "↓"], desc: "Move selection between queue rows" },
-  { keys: ["r"], desc: "Retry the selected row" },
+  { keys: ["Ctrl", "Shift", "R"], desc: "Retry the selected row" },
   { keys: ["x"], desc: "Cancel the selected row" },
   { keys: ["/"], desc: "Focus the search bar" },
   { keys: ["[", "]"], desc: "Previous / next workflow" },
