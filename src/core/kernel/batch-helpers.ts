@@ -66,10 +66,18 @@ export function callerPreEmitsPending<TData, TSteps extends readonly string[]>(
 }
 
 /**
- * Wait for every system's auth-ready promise to resolve. Auth failures
- * are swallowed — the failure path is owned by the observer / batch
- * lifecycle helper, which surfaces it via auth-failure tracker rows
- * and does not need this loop to throw.
+ * Wait for every system's auth-ready promise to resolve. Per-system auth
+ * failures are swallowed by default — that failure path is owned by the
+ * observer / batch lifecycle helper, which surfaces it via auth-failure
+ * tracker rows and does not need this loop to throw.
+ *
+ * `throwIfAllFailed` (pool callers): when EVERY system failed for this session,
+ * rethrow the first failure instead of swallowing. A pool worker whose every
+ * system is unauthenticated would otherwise loop running items against dead
+ * pages (N per-item failures); throwing lets `runPooledBatch` fail that worker
+ * cleanly (and, when all workers fail, fan out a single batch-level auth
+ * failure). A PARTIAL failure (some systems up) still swallows so the workflow
+ * can proceed on the systems it has.
  *
  * Must be called BEFORE snapshotting authTimings via the observer's
  * `getAuthTimings()` — `Session.launch` returns once every system has its
@@ -79,12 +87,12 @@ export function callerPreEmitsPending<TData, TSteps extends readonly string[]>(
 export async function awaitAllSystemsReady(
   session: Session,
   systems: readonly SystemConfig[],
+  opts: { throwIfAllFailed?: boolean } = {},
 ): Promise<void> {
-  await Promise.all(systems.map(async (sys) => {
-    try {
-      await session.page(sys.id)
-    } catch {
-      // intentional swallow — see JSDoc above
-    }
-  }))
+  const results = await Promise.allSettled(systems.map((sys) => session.page(sys.id)))
+  if (opts.throwIfAllFailed && systems.length > 0 && results.every((r) => r.status === 'rejected')) {
+    const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')!
+    throw first.reason
+  }
+  // else: per-system failures stay swallowed — see JSDoc.
 }

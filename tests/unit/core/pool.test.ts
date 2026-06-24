@@ -64,6 +64,45 @@ test('runWorkflowPool: distributes items across N workers, each with own Session
   assert.equal(launchCalls, 2, 'should launch once per worker')
 })
 
+test('runWorkflowPool: one worker Session.launch failure does NOT abandon the surviving worker\'s items', async () => {
+  // Worker-failure isolation — the reason the pools use Promise.allSettled, not
+  // Promise.all. If worker B's Session.launch throws (e.g. Duo denied), worker
+  // A's in-flight items must still complete: a PARTIAL worker death is logged,
+  // not propagated. Before allSettled this rejected the whole batch and fanned
+  // out the surviving worker's (succeeding) items as failed.
+  let launchCalls = 0
+  const wf = defineWorkflow({
+    name: 'pool-worker-isolation',
+    systems: [{ id: 'ukg', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({ n: z.number() }),
+    batch: { mode: 'pool', poolSize: 2 },
+    handler: async (ctx, data) => {
+      await ctx.step('s1', async () => {
+        await new Promise((r) => setTimeout(r, 5))
+        void data
+      })
+    },
+  })
+  const result = await runWorkflowPool(
+    wf,
+    [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }],
+    {
+      launchFn: () => {
+        launchCalls++
+        if (launchCalls === 2) return Promise.reject(new Error('duo denied (worker 2)'))
+        return Promise.resolve(fakeSlot())
+      },
+      trackerStub: true,
+    },
+  )
+  // The surviving worker drained the whole queue (work-stealing) — the batch did
+  // NOT reject, and no item was abandoned mid-handler.
+  assert.equal(result.total, 4)
+  assert.equal(result.succeeded, 4, 'surviving worker completed all items despite the peer launch failure')
+  assert.equal(result.failed, 0)
+})
+
 test('runWorkflowPool emits per-item tracker entries', async (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'pool-tracker-'))
   t.onTestFinished(() => cleanupDir(tmp))

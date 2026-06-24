@@ -74,7 +74,7 @@ Rules (these mirror the hard realities of live testing):
 
 ## What belongs here
 
-Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifiers, worker-pool queueing, JSONL I/O, grid layout math, small string helpers.
+Pure-logic modules: schemas, date math, mapping tables, reducers, regex classifiers, queue/claim logic, JSONL I/O, grid layout math, small string helpers.
 
 ## What does NOT belong here
 
