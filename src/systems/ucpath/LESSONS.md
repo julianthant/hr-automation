@@ -125,3 +125,20 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** after the campus link click + networkidle, if the URL is not on `WF_JOB_SUMMARY`, re-`goto(JOB_SUMMARY_URL)` — the campus cookie is now set, so the second goto resolves the component (the search box is present) without bouncing to discovery again. Pinned by `tests/unit/systems/ucpath/job-summary.test.ts` (stateful fake page: 1st goto → discovery, campus click → portal home, asserts a 2nd goto to the deep link and ends on WF_JOB_SUMMARY). **NEEDS LIVE UCPATH RE-VERIFY** of the multi-doc batch path — confirm the post-campus re-navigation lands on the search form and that discovery isn't re-triggered a third time.
 **Selector:** `jobSummary.campusDiscoveryUcsdLink`, `jobSummary.emplIdInput` in `selectors.ts` (consumed by `navigateToWorkforceJobSummary`/`searchJobSummary` in `job-summary.ts`)
 **Tags:** job-summary, campus, discovery, ucpathdiscovery, navigate, deep-link, empl-id, separations
+
+## 2026-06-24 — Workforce Job Summary sub-tabs are anchor LINKS, not `role="tab"`
+
+**Tried:** Clicking the Work Location / Job Information sub-tabs with `getByRole("tab", { name: "Work Location" })` only.
+**Failed because:** PeopleSoft renders these Job-Information sub-tabs as anchor links styled as tabs — they are not true `role="tab"` widgets — so on some loads the role-only selector matched nothing and `safeClick` timed out the full 15s (live separations run: `click failed after 15073ms … getByRole('tab', { name: 'Work Location' })`, retried, failed again). It worked on other docs only when PeopleSoft happened to expose the tab role.
+**Fix:** `workLocationTab` / `jobInformationTab` fall through `role=tab` → `role=link` → `a:has-text(...)` (`.first()`). Additive — never worse than the role-only selector, and resolves the link rendering.
+**Selector:** `jobSummary.workLocationTab`, `jobSummary.jobInformationTab` in `selectors.ts`
+**Tags:** job-summary, work-location, job-information, tab, link, anchor, role, timeout
+
+## 2026-06-24 — Work Location department must be the row in effect AS OF the separation date
+
+**Tried:** `extractWorkLocation` returned the FIRST Position-Number row's Dept ID/Description (cells[+3]/[+4]), ignoring Effective Date.
+**Failed because:** Workforce Job Summary's Work Location grid lists one row PER effective-dated job state (hire, transfers, …). The first/most-recent row is the wrong department for a transferred employee, and it skews the separations HDH/non-HDH kronos-skip gate (an employee who left an HDH job months ago but whose latest row is non-HDH, or vice-versa).
+**Fix:** Scan ALL Position-Number rows with their Effective Date (read in-row; a count-exact zip recovers dates from a frozen left-column table when they aren't in-row), then pick the row with the LATEST Effective Date at-or-before the separation date via the pure `pickWorkLocationRow` (unit-pinned). Separation date is threaded `getJobSummaryIdentity(page, eid, { separationDate })` → `extractWorkLocation`. No separation date → latest row (current dept). No readable dates → first row (legacy fallback, no regression).
+**Selector:** `jobSummary.workLocationTab` + `extractWorkLocation`/`pickWorkLocationRow` in `job-summary.ts`
+**Tags:** job-summary, work-location, department, effective-date, separation, transfer, kronos-gate
+**References:** `src/workflows/separations/CLAUDE.md` "Department gate"; `tests/unit/systems/ucpath/job-summary.test.ts`

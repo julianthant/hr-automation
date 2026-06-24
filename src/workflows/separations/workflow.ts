@@ -506,7 +506,9 @@ export const separationsWorkflow = defineWorkflow({
       // the branch below can act (person-lookup for a short EID, fail loud for a
       // full-8-digit miss). Reads the detail-page NAME on a hit so the name can
       // be compared. Genuine selector/nav failures still throw (fail loud).
-      const js = await getJobSummaryIdentity(ucpathPage, kualiData.eid);
+      const js = await getJobSummaryIdentity(ucpathPage, kualiData.eid, {
+        separationDate: kualiData.separationDate,
+      });
       jobSummaryFound = js.found;
       jobSummaryName = js.name;
       jobSummaryData = js.data ?? undefined;
@@ -570,7 +572,9 @@ export const separationsWorkflow = defineWorkflow({
         // Job Summary can't find it) → fail loud. No New Kronos re-search is
         // needed — kronos-search runs below with the corrected EID.
         const ucpathPage = await ctx.page("ucpath");
-        const reJobSummary = await getJobSummaryIdentity(ucpathPage, verifiedEid);
+        const reJobSummary = await getJobSummaryIdentity(ucpathPage, verifiedEid, {
+          separationDate: kualiData.separationDate,
+        });
         if (!reJobSummary.found || !reJobSummary.data) {
           throw new Error(
             `Workforce Job Summary still found no record after correcting the EID to "${verifiedEid}" ` +

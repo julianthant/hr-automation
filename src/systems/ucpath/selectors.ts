@@ -463,18 +463,33 @@ export const jobSummary = {
     root.getByRole("button", { name: "Search", exact: true }),
 
   /**
-   * Work Location tab. verified 2026-04-01
-   * @tags work, location, tab, job-summary
+   * Work Location tab. PeopleSoft renders these Job-Information sub-tabs as
+   * anchor LINKS styled as tabs, not true `role="tab"` widgets — so a
+   * `getByRole("tab", …)`-only selector times out (live separations run
+   * 2026-06-24: `click failed after 15073ms … getByRole('tab', { name: 'Work
+   * Location' })`). Fall back through the link role and an anchor with the tab
+   * text. verified 2026-04-01; link/anchor fallbacks added 2026-06-24
+   * @tags work, location, tab, link, job-summary
    */
   workLocationTab: (root: Locator): Locator =>
-    root.getByRole("tab", { name: "Work Location" }),
+    root
+      .getByRole("tab", { name: "Work Location" })
+      .or(root.getByRole("link", { name: "Work Location" }))
+      .or(root.locator('a:has-text("Work Location")'))
+      .first(),
 
   /**
-   * Job Information tab. verified 2026-04-01
-   * @tags job, information, tab, job-summary
+   * Job Information tab. Same link-vs-tab caveat as `workLocationTab` — anchor
+   * link styled as a tab, so the role fallback chain is required.
+   * verified 2026-04-01; link/anchor fallbacks added 2026-06-24
+   * @tags job, information, tab, link, job-summary
    */
   jobInformationTab: (root: Locator): Locator =>
-    root.getByRole("tab", { name: "Job Information" }),
+    root
+      .getByRole("tab", { name: "Job Information" })
+      .or(root.getByRole("link", { name: "Job Information" }))
+      .or(root.locator('a:has-text("Job Information")'))
+      .first(),
 
   /**
    * Employee display name on the Workforce Job Summary detail page. PeopleSoft

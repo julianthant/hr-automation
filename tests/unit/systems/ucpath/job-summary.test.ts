@@ -27,7 +27,21 @@ import {
   canSkipJobSummaryNavigation,
   navigateToWorkforceJobSummary,
   pollForJobInfoScan,
+  pickWorkLocationRow,
+  workLocationDateKey,
+  type WorkLocationRow,
 } from "../../../../src/systems/ucpath/job-summary.js";
+
+/** Build a Work Location row with sensible defaults for the picker tests. */
+function wlRow(partial: Partial<WorkLocationRow>): WorkLocationRow {
+  return {
+    effectiveDate: "",
+    deptId: "000000",
+    departmentDescription: "Dept",
+    positionNumber: "40000000",
+    ...partial,
+  };
+}
 
 const JOB_SUMMARY_URL =
   "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/ADMINISTER_WORKFORCE_(GBL).WF_JOB_SUMMARY.GBL";
@@ -148,6 +162,100 @@ describe("pollForJobInfoScan", () => {
     assert.deepStrictEqual(result, { jobCode: "", jobDescription: "" });
     assert.strictEqual(scans, 4, "scans exactly `attempts` times when the grid never populates");
     assert.strictEqual(sleeps, 3, "sleeps between attempts but not after the final one");
+  });
+});
+
+/**
+ * Department-by-effective-date pick (Work Location grid). The separations
+ * department must come from the Work Location row in effect AS OF the separation
+ * date — the latest Effective Date that is at-or-before it — so a department
+ * change (transfer) resolves to the dept of the job actually being separated,
+ * and the HDH/non-HDH kronos-skip gate is decided on the right department.
+ */
+describe("workLocationDateKey", () => {
+  it("maps MM/DD/YYYY to a monotonic YYYYMMDD key", () => {
+    assert.strictEqual(workLocationDateKey("06/10/2026"), 20260610);
+    assert.strictEqual(workLocationDateKey("6/1/2026"), 20260601, "accepts non-padded M/D");
+    assert.ok(workLocationDateKey("06/11/2026")! > workLocationDateKey("06/10/2026")!);
+    assert.ok(workLocationDateKey("01/01/2026")! > workLocationDateKey("12/31/2025")!, "year dominates");
+  });
+  it("returns null for malformed input", () => {
+    assert.strictEqual(workLocationDateKey(""), null);
+    assert.strictEqual(workLocationDateKey("2026-06-10"), null);
+    assert.strictEqual(workLocationDateKey("June 10, 2026"), null);
+  });
+});
+
+describe("pickWorkLocationRow", () => {
+  it("returns null for no rows", () => {
+    assert.strictEqual(pickWorkLocationRow([]), null);
+  });
+
+  it("picks the latest effective date AT-OR-BEFORE the separation date", () => {
+    // The Image #9 scenario: 11 rows up to 06/11/2026, separation 06/10/2026.
+    // 06/11/2026 is AFTER the separation, so the in-effect row is 12/21/2025.
+    const rows = [
+      wlRow({ effectiveDate: "09/04/2024", departmentDescription: "Bookstore" }),
+      wlRow({ effectiveDate: "12/21/2025", departmentDescription: "Bookstore" }),
+      wlRow({ effectiveDate: "06/11/2026", departmentDescription: "Bookstore" }),
+    ];
+    const picked = pickWorkLocationRow(rows, "06/10/2026");
+    assert.strictEqual(picked?.effectiveDate, "12/21/2025", "06/11 is after the sep date, so 12/21 wins");
+  });
+
+  it("resolves a transfer to the OLD department when the new one is effective after separation", () => {
+    const rows = [
+      wlRow({ effectiveDate: "01/01/2025", departmentDescription: "Housing Services" }),
+      wlRow({ effectiveDate: "07/01/2026", departmentDescription: "Bookstore" }),
+    ];
+    // Separation 06/15/2026: the Bookstore transfer (07/01) hasn't taken effect.
+    const picked = pickWorkLocationRow(rows, "06/15/2026");
+    assert.strictEqual(picked?.departmentDescription, "Housing Services");
+  });
+
+  it("includes a row whose effective date EQUALS the separation date", () => {
+    const rows = [
+      wlRow({ effectiveDate: "01/01/2026", departmentDescription: "Old" }),
+      wlRow({ effectiveDate: "06/10/2026", departmentDescription: "Same-day" }),
+    ];
+    const picked = pickWorkLocationRow(rows, "06/10/2026");
+    assert.strictEqual(picked?.departmentDescription, "Same-day", "at-or-before includes equality");
+  });
+
+  it("falls back to the FIRST row when no row carries a usable date (legacy behavior)", () => {
+    const rows = [
+      wlRow({ effectiveDate: "", departmentDescription: "First" }),
+      wlRow({ effectiveDate: "", departmentDescription: "Second" }),
+    ];
+    assert.strictEqual(pickWorkLocationRow(rows, "06/10/2026")?.departmentDescription, "First");
+  });
+
+  it("picks the latest effective date when NO separation date is supplied (current dept)", () => {
+    const rows = [
+      wlRow({ effectiveDate: "01/01/2025", departmentDescription: "Old" }),
+      wlRow({ effectiveDate: "01/01/2026", departmentDescription: "Current" }),
+    ];
+    assert.strictEqual(pickWorkLocationRow(rows)?.departmentDescription, "Current");
+  });
+
+  it("uses the EARLIEST row when every row is after the separation date", () => {
+    const rows = [
+      wlRow({ effectiveDate: "09/01/2026", departmentDescription: "Earliest-after" }),
+      wlRow({ effectiveDate: "10/01/2026", departmentDescription: "Later" }),
+    ];
+    assert.strictEqual(
+      pickWorkLocationRow(rows, "06/10/2026")?.departmentDescription,
+      "Earliest-after",
+      "separation precedes all job states — earliest is the best available match",
+    );
+  });
+
+  it("ignores undated rows when other rows have dates", () => {
+    const rows = [
+      wlRow({ effectiveDate: "", departmentDescription: "Undated" }),
+      wlRow({ effectiveDate: "01/01/2026", departmentDescription: "Dated" }),
+    ];
+    assert.strictEqual(pickWorkLocationRow(rows, "06/10/2026")?.departmentDescription, "Dated");
   });
 });
 
