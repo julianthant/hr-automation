@@ -137,6 +137,97 @@ export function buildStopWorkerHandler(dir: string) {
     enqueueWorkerLifecycleCommand(dir, req.workerId, "stop_worker");
 }
 
+// ── Per-browser controls (session-panel Refresh / Focus) ───────────────────
+//
+// The session tile knows `(workflow, instance, systemId)`; we resolve that to
+// the owning daemon's worker + browser-process row (the SAME instance→pid→worker
+// path stop-instance + kill-browser use), then enqueue a worker command keyed
+// by systemId. The daemon's command handler calls `session.refreshSystem` /
+// `focusSystem` on the LIVE session. No SQLite schema change — `systemId` rides
+// the command payload like `kill_browser`'s does.
+
+export interface BrowserControlRequest {
+  workflow: string;
+  /** Session-drawer instance label of the daemon owning the browser (e.g. "Separation 1"). */
+  instance: string;
+  /** Which system's browser to act on (e.g. "ucpath", "crm"). */
+  systemId: string;
+}
+
+export type BrowserControlResult =
+  | { ok: true; commandId: string }
+  | { ok: false; error: string; status?: number };
+
+/** Resolve the daemon Node pid for a session-drawer instance from session events. */
+function resolveInstanceDaemonPid(dir: string, workflow: string, instance: string): number | null {
+  const events = readSessionEvents(dir);
+  let pid: number | null = null;
+  for (const event of events) {
+    if (event.workflowInstance !== instance) continue;
+    if (workflowNameFromInstance(event.workflowInstance) !== workflow) continue;
+    if (event.type === "workflow_start") pid = event.pid; // last start wins
+  }
+  return pid;
+}
+
+async function enqueueBrowserControlCommand(
+  dir: string,
+  req: BrowserControlRequest,
+  commandType: "refresh_browser" | "focus_browser",
+): Promise<BrowserControlResult> {
+  const workflow = req.workflow?.trim();
+  const instance = req.instance?.trim();
+  const systemId = req.systemId?.trim();
+  if (!workflow) return { ok: false, error: "workflow is required", status: 400 };
+  if (!instance) return { ok: false, error: "instance is required", status: 400 };
+  if (!systemId) return { ok: false, error: "systemId is required", status: 400 };
+
+  const pid = resolveInstanceDaemonPid(dir, workflow, instance);
+  if (pid == null) {
+    return { ok: false, error: `no daemon start event found for instance '${instance}'`, status: 404 };
+  }
+
+  const stores = openControlStores(dir);
+  try {
+    const worker = stores.workerStore.listWorkers(workflow).find((w) => w.pid === pid);
+    if (!worker) {
+      return { ok: false, error: `no live worker for instance '${instance}' (pid=${pid})`, status: 404 };
+    }
+    // The browser-process row gives parity with kill (targetBrowserProcessId);
+    // it's optional — a just-launched daemon may not have registered browsers
+    // yet, and the daemon resolves systemId from the payload regardless.
+    const browser = stores.workerStore
+      .listBrowserProcessesForWorker(worker.workerId)
+      .find((b) => b.systemId === systemId);
+    const commandId = stores.workerStore.enqueueWorkerCommand({
+      commandType,
+      workflow,
+      targetWorkerId: worker.workerId,
+      ...(browser ? { targetBrowserProcessId: browser.browserProcessId } : {}),
+      payload: { systemId },
+    });
+    return { ok: true, commandId };
+  } finally {
+    try {
+      stores.taskStore.close();
+    } catch {
+      /* best-effort — taskStore + workerStore share one control DB */
+    }
+  }
+}
+
+/** Refresh (reload) one system's browser page on a running daemon — the panel's Refresh button. */
+export function buildRefreshBrowserHandler(dir: string) {
+  return (req: BrowserControlRequest): Promise<BrowserControlResult> =>
+    enqueueBrowserControlCommand(dir, req, "refresh_browser");
+}
+
+/** Bring one system's Chromium window to the front — the panel's Focus button. */
+export function buildFocusBrowserHandler(dir: string) {
+  return (req: BrowserControlRequest): Promise<BrowserControlResult> =>
+    enqueueBrowserControlCommand(dir, req, "focus_browser");
+}
+
 /** Probe a single daemon's /status endpoint with a short timeout. */
 async function probeDaemonStatus(
   daemon: Daemon,

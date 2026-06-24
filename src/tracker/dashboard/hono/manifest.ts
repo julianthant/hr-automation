@@ -49,6 +49,8 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/cancel-running" },
   { method: "POST", path: "/api/cancel-active-bulk" },
   { method: "POST", path: "/api/browser/kill" },
+  { method: "POST", path: "/api/browser/refresh" },
+  { method: "POST", path: "/api/browser/focus" },
   { method: "POST", path: "/api/worker/drain" },
   { method: "POST", path: "/api/worker/stop" },
   { method: "POST", path: "/api/queue/bump" },

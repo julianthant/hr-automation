@@ -10,8 +10,10 @@ import {
   buildDrainWorkerHandler,
   buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
+  buildFocusBrowserHandler,
   buildKillBrowserHandler,
   buildQueueBumpHandler,
+  buildRefreshBrowserHandler,
   buildSaveDataHandler,
   buildStopWorkerHandler,
   readQueueDepth,
@@ -371,6 +373,26 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       browserProcessId: body.browserProcessId ? String(body.browserProcessId) : undefined,
       pid: typeof body.pid === "number" ? body.pid : undefined,
     }), buildKillBrowserHandler(deps.dir), 202);
+  });
+
+  // Per-browser session-panel controls: reload one system's page on a running
+  // daemon (the "refresh-only" recovery, operator-triggered) and bring its
+  // Chromium window to front ("which browser is this?"). Both target the live
+  // browser by (workflow, instance, systemId).
+  app.post("/api/browser/refresh", async (c) => {
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      instance: String(body.instance ?? ""),
+      systemId: String(body.systemId ?? ""),
+    }), buildRefreshBrowserHandler(deps.dir), 202);
+  });
+
+  app.post("/api/browser/focus", async (c) => {
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      instance: String(body.instance ?? ""),
+      systemId: String(body.systemId ?? ""),
+    }), buildFocusBrowserHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/drain", async (c) => {

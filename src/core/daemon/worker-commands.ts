@@ -2,8 +2,25 @@ import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
 import { findAliveDaemons } from './registry.js'
 import { recoverOrphanedClaims } from './queue.js'
-import type { WorkerCommandRow } from './worker-store.js'
+import type { ControlWorkerStore, WorkerCommandRow } from './worker-store.js'
 import type { DaemonInFlight, DaemonState } from './daemon-types.js'
+
+/**
+ * Resolve the target systemId for a per-browser command (`refresh_browser` /
+ * `focus_browser` / scoped `health_check`). The dashboard enqueues `systemId`
+ * in the command payload; fall back to the browser-process row keyed by
+ * `targetBrowserProcessId` (the same row `kill_browser` targets). Returns null
+ * when neither resolves — the handler then fails the command loudly.
+ */
+function resolveCommandSystemId(workerStore: ControlWorkerStore, command: WorkerCommandRow): string | null {
+  const fromPayload = command.payload?.['systemId']
+  if (typeof fromPayload === 'string' && fromPayload) return fromPayload
+  if (command.targetBrowserProcessId) {
+    const browser = workerStore.findBrowserProcessById(command.targetBrowserProcessId)
+    if (browser?.systemId) return browser.systemId
+  }
+  return null
+}
 
 export interface WorkerCommandContext<TData, TSteps extends readonly string[]> {
   wf: RegisteredWorkflow<TData, TSteps>
@@ -202,11 +219,43 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
         }
         return
       }
+      if (command.commandType === 'refresh_browser') {
+        workerStore.acknowledgeCommand(command.commandId, instanceId)
+        const systemId = resolveCommandSystemId(workerStore, command)
+        if (!systemId) {
+          workerStore.failCommand(command.commandId, 'systemId not resolved for refresh_browser')
+          return
+        }
+        if (!state.activeSession) throw new Error('session not ready')
+        // Operator-triggered refresh (the panel's Refresh button) — reload this
+        // ONE system's page through the same guarded path the auto-recovery
+        // uses; emits the browser_health lifecycle so the tile reflects it.
+        await state.activeSession.refreshSystem(systemId)
+        workerStore.completeCommand(command.commandId)
+        return
+      }
+      if (command.commandType === 'focus_browser') {
+        workerStore.acknowledgeCommand(command.commandId, instanceId)
+        const systemId = resolveCommandSystemId(workerStore, command)
+        if (!systemId) {
+          workerStore.failCommand(command.commandId, 'systemId not resolved for focus_browser')
+          return
+        }
+        if (!state.activeSession) throw new Error('session not ready')
+        // "Which browser is this?" — bring the system's Chromium window to front.
+        await state.activeSession.focusSystem(systemId)
+        workerStore.completeCommand(command.commandId)
+        return
+      }
       if (command.commandType === 'health_check') {
         workerStore.acknowledgeCommand(command.commandId, instanceId)
         if (!state.activeSession) throw new Error('session not ready')
+        // Probe every system and EMIT each result (browser_health) so a manual
+        // "check now" lands fresh tile state — the old loop probed silently.
+        const targetSystem = resolveCommandSystemId(workerStore, command)
         for (const sys of wf.config.systems) {
-          await state.activeSession.healthCheck(sys.id)
+          if (targetSystem && sys.id !== targetSystem) continue
+          await state.activeSession.probeSystemHealth(sys.id)
         }
         workerStore.completeCommand(command.commandId)
         return
