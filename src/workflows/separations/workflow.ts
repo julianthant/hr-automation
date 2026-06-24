@@ -766,11 +766,21 @@ export const separationsWorkflow = defineWorkflow({
     const lastDayWorked = timecard.lastPunchDate ?? kualiData.lastDayWorked;
     const ldwChanged =
       timecard.lastPunchDate != null && timecard.lastPunchDate !== kualiData.lastDayWorked;
-    const separationDate = computeSeparationDate(
-      lastDayWorked,
-      timecard.sickDates,
-      timecard.holidayDates,
-    );
+    // Separation Date: only DERIVE it (last day paid = last day worked +
+    // sick/holiday leave) when a New Kronos timecard was actually READ. When
+    // kronos-search was SKIPPED — non-HDH employees (not timekept in New Kronos),
+    // or the prefill / "Transactions only" paths — there is NO timecard to derive
+    // from, so keep the Kuali Separation Date VERBATIM. Re-deriving it from the
+    // LDW in that case produced a spurious "Updated Separation Date … per Kronos
+    // timesheet" comment + write-back for non-HDH employees whose Kuali separation
+    // date legitimately differs from their LDW, even though Kronos was never read
+    // (live: Bookstore "Nakagawa, Matthew K", 06/15 → 06/14 "per Kronos"). No
+    // timecard read → no timecard-derived change → no comment. (Note: an HDH
+    // employee whose timecard RAN but returned no punch still derives via the
+    // LDW — that path read the timecard; only the skip paths keep Kuali's date.)
+    const separationDate = kronosSkipped
+      ? kualiData.separationDate
+      : computeSeparationDate(lastDayWorked, timecard.sickDates, timecard.holidayDates);
     const separationDateChanged = separationDate !== kualiData.separationDate;
     const termEffDate = computeTerminationEffDate(separationDate);
 
@@ -783,10 +793,12 @@ export const separationsWorkflow = defineWorkflow({
     const hasLeave = timecard.sickDates.length > 0 || timecard.holidayDates.length > 0;
     log.step(
       `[Dates] Separation Date = ${separationDate}` +
-      (hasLeave
-        ? ` (last day paid — last day worked extended by sick/holiday leave; ` +
-          `Kuali had '${kualiData.separationDate}')`
-        : ` (= last day worked, no sick/holiday leave; Kuali had '${kualiData.separationDate}')`) +
+      (kronosSkipped
+        ? ` (Kuali Separation Date kept as-is — New Kronos not read, no timecard to derive from)`
+        : hasLeave
+          ? ` (last day paid — last day worked extended by sick/holiday leave; ` +
+            `Kuali had '${kualiData.separationDate}')`
+          : ` (= last day worked, no sick/holiday leave; Kuali had '${kualiData.separationDate}')`) +
       (separationDateChanged ? ` — will write back to Kuali` : ` — matches Kuali`),
     );
     log.step(`[Dates] Termination effective date = ${termEffDate} (separation date + 1 day)`);
