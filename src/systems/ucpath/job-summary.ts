@@ -376,8 +376,11 @@ export async function extractWorkLocation(
   log.step("[Job Summary] Extracting department (all Work Location rows)...");
 
   const rows: WorkLocationRow[] = await page.evaluate(() => {
-    const norm = (s: string | null | undefined): string =>
-      (s ?? "").replace(/\s+/g, " ").trim();
+    // NOTE: do NOT define a `const norm = (...) => ...` helper in here — tsx's
+    // esbuild keepNames instruments named functions with `__name(...)`, which is
+    // undefined in the browser page context → "ReferenceError: __name is not
+    // defined" at runtime. Inline the whitespace-collapse instead (anonymous
+    // callbacks passed to .map/.find are fine — only NAMED bindings get __name).
     const POS = /^\d{7,8}$/;
     const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
 
@@ -389,7 +392,9 @@ export async function extractWorkLocation(
       positionNumber: string;
     }> = [];
     for (const tr of Array.from(document.querySelectorAll("tr"))) {
-      const cells = Array.from(tr.querySelectorAll("td")).map((td) => norm(td.textContent));
+      const cells = Array.from(tr.querySelectorAll("td")).map((td) =>
+        (td.textContent ?? "").replace(/\s+/g, " ").trim(),
+      );
       const p = cells.findIndex((c) => POS.test(c));
       if (p < 0 || cells.length < p + 5) continue;
       let effectiveDate = "";
@@ -416,13 +421,15 @@ export async function extractWorkLocation(
         const trs = Array.from((table as HTMLTableElement).rows);
         let col = -1;
         for (const tr of trs) {
-          const idx = Array.from(tr.cells).findIndex((c) => /effective date/i.test(norm(c.textContent)));
+          const idx = Array.from(tr.cells).findIndex((c) =>
+            /effective date/i.test((c.textContent ?? "").replace(/\s+/g, " ").trim()),
+          );
           if (idx >= 0) { col = idx; break; }
         }
         if (col < 0) continue;
         const dates: string[] = [];
         for (const tr of trs) {
-          const t = tr.cells[col] ? norm(tr.cells[col].textContent) : "";
+          const t = tr.cells[col] ? (tr.cells[col].textContent ?? "").replace(/\s+/g, " ").trim() : "";
           if (DATE.test(t)) dates.push(t);
         }
         if (dates.length === jobRows.length) {
