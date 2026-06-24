@@ -300,6 +300,77 @@ test('a stale worker cannot complete a task a peer re-claimed after re-pend (ISS
   }
 })
 
+test('a stale worker cannot complete a re-pended item BEFORE a peer re-claims it (ISS-005 window)', () => {
+  // The companion to the test above: the lease is bumped at the per-claim site,
+  // but the dangerous window is between `returnTaskToQueued` (re-pend) and the
+  // peer's NEXT claim — if the bump only happened at re-claim, a stale-but-alive
+  // worker that finishes in that gap would still match its original generation
+  // and land a `done` on a task deliberately returned to the queue. The bump now
+  // happens AT re-pend, so the stale completion no-ops even before any peer claim.
+  const { dir, store } = openTempStore()
+  try {
+    const [q] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+    const c1 = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c1)
+    store.markTaskRunning({ taskId: q.taskId, attemptId: c1.attemptId, workerId: 'w1', now: iso(2) })
+
+    // Re-pend (reassign / dead-worker recovery). NO peer re-claim yet.
+    store.returnTaskToQueued({ taskId: q.taskId, now: iso(3) })
+
+    // The stopped/stale w1 finishes and completes with its ORIGINAL lease.
+    store.markTaskDone({ taskId: q.taskId, attemptId: c1.attemptId, claimGeneration: c1.claimGeneration, now: iso(4) })
+    assert.equal(
+      store.getTask(q.taskId)?.state,
+      'queued',
+      're-pend bumped the lease, so a stale completion in the pre-reclaim window must no-op (task stays queued for a peer)',
+    )
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('markTaskRunning will not stomp a task a peer re-claimed (running stomp guard)', () => {
+  // A stale worker whose item was re-pended and re-claimed by a peer must not be
+  // able to overwrite `claimed_by_worker_id` / `current_attempt_id` via a late
+  // markTaskRunning — that would mis-attribute the in-flight item and confuse
+  // dead-worker recovery (which keys on claimed_by_worker_id).
+  const { dir, store } = openTempStore()
+  try {
+    const [q] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+    const c1 = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c1)
+    store.markTaskRunning({ taskId: q.taskId, attemptId: c1.attemptId, workerId: 'w1', now: iso(2) })
+    store.returnTaskToQueued({ taskId: q.taskId, now: iso(3) })
+
+    // Peer w2 re-claims — it now owns the task.
+    const c2 = store.claimNextTask({ workflow: 'wf', workerId: 'w2', now: iso(4) })
+    assert.ok(c2)
+    assert.equal(store.getTask(q.taskId)?.claimedByWorkerId, 'w2')
+
+    // Stale w1's late markTaskRunning must be a no-op — w2 still owns the claim.
+    store.markTaskRunning({ taskId: q.taskId, attemptId: c1.attemptId, workerId: 'w1', now: iso(5) })
+    assert.equal(
+      store.getTask(q.taskId)?.claimedByWorkerId,
+      'w2',
+      'a stale worker must not stomp claimed_by_worker_id of a peer-reclaimed task',
+    )
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('parseJson throws a clear error for malformed JSON', () => {
   assert.throws(
     () => parseJson('not-json'),
