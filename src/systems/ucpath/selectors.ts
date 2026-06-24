@@ -563,6 +563,24 @@ export const jobSummary = {
       .getByRole("link", { name: /drill in/i })
       .or(row.locator('a[id*="EMPLID"]'))
       .or(row.getByRole("link").first()),
+
+  /**
+   * GRID-INDEPENDENT drill-in links for the Workforce Job Summary search-results
+   * page — the EMPLID hyperlink PeopleSoft renders in each result row, found at
+   * the ROOT (not scoped to a `searchResultRows` match). Used as a fallback when
+   * the `searchResultsGrid`/`searchResultRows` id/class probes miss the live
+   * results layout, leaving us on a tab-less results list whose Work Location tab
+   * click then timed out 15s ("Detail-page name: <none>", EID 10641172,
+   * 2026-06-24). Anchored to the EMPLID/SRCH id fragments PeopleSoft uses for the
+   * clickable result column.
+   * NEEDS LIVE VERIFY 2026-06-24
+   * @tags multi-row, drill-in, emplid, link, root, fallback, job-summary
+   */
+  resultDrillLinks: (root: Locator): Locator =>
+    root
+      .locator('a[id*="EMPLID"]')
+      .or(root.locator('a[id*="SRCHRSLT"]'))
+      .or(root.locator('a[id*="SEARCH_RESULT"]')),
 };
 
 // ─── HR Tasks navigation (top-level page before iframe interactions) ──────
