@@ -526,6 +526,65 @@ async function failDirectKilledInstanceClaim(
   }
 }
 
+/**
+ * Grace window for a gracefully-stopped daemon to emit its OWN `workflow_end`
+ * before the per-instance stop synthesizes a fallback one. The daemon emits its
+ * end a few tens of ms after acknowledging `/stop` (observed ~64ms), but its
+ * teardown can lag — poll across this window so the common case returns fast and
+ * a genuine lag still suppresses the synthesis.
+ */
+const DAEMON_OWN_END_GRACE_MS = 1_000;
+const DAEMON_OWN_END_POLL_MS = 50;
+
+/**
+ * Decide whether a per-instance stop must SYNTHESIZE a `workflow_end(failed)` to
+ * close the session card, or whether the daemon's OWN `workflow_end` will (or
+ * already did) close it (ISS-004).
+ *
+ * - **Already ended** — the card is closed; never synthesize.
+ * - **Graceful `/stop` path** (`daemonWillEmitOwnEnd`) — the daemon emits its own
+ *   `workflow_end(done)` shortly after acknowledging `/stop`. Poll for it within
+ *   the grace window and DON'T synthesize if it lands: the stop was clean +
+ *   reassigned, so the daemon's `done` is the CORRECT event and a synthesized
+ *   `failed` was a spurious, conflicting second end. Only synthesize as a
+ *   fallback when the daemon's own end never arrives (crashed teardown / lag).
+ * - **Direct-kill / unreachable** — the daemon can't emit its own end; synthesize
+ *   immediately (the phantom-card guard the synthesis exists for).
+ *
+ * Pure but for the injected `hasInstanceEnded` (re-reads session events) and
+ * `sleep`, so the branch logic is unit-testable without a live daemon.
+ */
+export async function shouldSynthesizeStopInstanceEnd(opts: {
+  alreadyEnded: boolean;
+  daemonWillEmitOwnEnd: boolean;
+  hasInstanceEnded: () => boolean;
+  graceMs?: number;
+  pollMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<boolean> {
+  const {
+    alreadyEnded,
+    daemonWillEmitOwnEnd,
+    hasInstanceEnded,
+    graceMs = DAEMON_OWN_END_GRACE_MS,
+    pollMs = DAEMON_OWN_END_POLL_MS,
+    sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+  } = opts;
+
+  if (alreadyEnded) return false;
+  if (!daemonWillEmitOwnEnd) return true;
+
+  // Graceful path — wait briefly for the daemon's own end before falling back.
+  if (hasInstanceEnded()) return false;
+  let waited = 0;
+  while (waited < graceMs) {
+    await sleep(pollMs);
+    waited += pollMs;
+    if (hasInstanceEnded()) return false;
+  }
+  return true;
+}
+
 export function buildStopDaemonInstanceHandler(dir: string) {
   return async (req: StopDaemonInstanceRequest): Promise<StopDaemonInstanceResult> => {
     const workflow = req.workflow?.trim();
@@ -615,9 +674,22 @@ export function buildStopDaemonInstanceHandler(dir: string) {
       }
     }
 
-    // Close the session card now — the daemon's own workflow_end can lag its
-    // teardown, and a phantom card would otherwise linger.
-    if (!alreadyEnded) {
+    // Close the session card. In the graceful path the daemon emits its OWN
+    // workflow_end(done) shortly after acknowledging /stop — wait briefly for it
+    // and DON'T synthesize a conflicting workflow_end(failed) if it arrives
+    // (ISS-004: the stop was clean + reassigned, so the daemon's `done` is the
+    // correct event; the synthesized `failed` was a spurious second end ~64ms
+    // earlier). Synthesize only as a fallback when the daemon's own end never
+    // lands (direct-kill, crashed teardown, or lag) — the phantom-card guard.
+    const daemonWillEmitOwnEnd = Boolean(target);
+    const hasInstanceEnded = (): boolean =>
+      readSessionEvents(dir).some(
+        (event) =>
+          event.type === "workflow_end" &&
+          event.workflowInstance === instance &&
+          workflowNameFromInstance(event.workflowInstance) === workflow,
+      );
+    if (await shouldSynthesizeStopInstanceEnd({ alreadyEnded, daemonWillEmitOwnEnd, hasInstanceEnded })) {
       try {
         emitWorkflowEnd(instance, "failed", dir);
       } catch (err) {

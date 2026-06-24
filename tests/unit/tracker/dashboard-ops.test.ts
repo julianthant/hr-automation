@@ -38,6 +38,7 @@ import {
   buildQueueBumpHandler,
   buildSaveDataHandler,
   buildStopDaemonInstanceHandler,
+  shouldSynthesizeStopInstanceEnd,
   buildStopWorkerHandler,
   buildDaemonsListHandler,
   buildRetryBulkHandler,
@@ -1509,6 +1510,91 @@ describe("dashboard worker command helpers", () => {
       (r) => r.id === "held-doc" && r.runId === claimed.runId && r.status === "failed",
     );
     assert.ok(failedRow, "expected a failed tracker row for the direct-killed in-flight item");
+  });
+
+  // ISS-004 — a per-instance stop (reassign) must NOT synthesize a
+  // workflow_end(failed) when the gracefully-stopped daemon emits its OWN
+  // workflow_end(done) ~64ms later. Before this guard the handler always
+  // synthesized (computing `alreadyEnded` BEFORE the stop, never re-checking),
+  // so the card got two conflicting `workflow_end` events. The graceful path
+  // needs a live daemon + real /stop HTTP, which a unit test can't fake — and
+  // the teardown soak harness both bypasses this handler (it POSTs /stop
+  // directly) and uses a `td-child` workflow that doesn't round-trip
+  // `INSTANCE_LABELS`, so the decision logic is pinned here at its seam.
+  describe("shouldSynthesizeStopInstanceEnd (ISS-004 double workflow_end)", () => {
+    const noSleep = async (): Promise<void> => {};
+
+    it("does NOT synthesize when the instance already ended (card already closed)", async () => {
+      const synth = await shouldSynthesizeStopInstanceEnd({
+        alreadyEnded: true,
+        daemonWillEmitOwnEnd: true,
+        hasInstanceEnded: () => false,
+        sleep: noSleep,
+      });
+      assert.equal(synth, false);
+    });
+
+    it("synthesizes immediately on the direct-kill path without polling for a daemon end", async () => {
+      let polls = 0;
+      const synth = await shouldSynthesizeStopInstanceEnd({
+        alreadyEnded: false,
+        daemonWillEmitOwnEnd: false,
+        hasInstanceEnded: () => {
+          polls += 1;
+          return false;
+        },
+        sleep: noSleep,
+      });
+      assert.equal(synth, true);
+      assert.equal(polls, 0, "direct-kill must not wait for a daemon end it will never get");
+    });
+
+    it("does NOT synthesize when the daemon emits its OWN end within the grace window (the fix)", async () => {
+      let checks = 0;
+      const synth = await shouldSynthesizeStopInstanceEnd({
+        alreadyEnded: false,
+        daemonWillEmitOwnEnd: true,
+        hasInstanceEnded: () => {
+          checks += 1;
+          return checks >= 3; // daemon's own workflow_end(done) lands on the 3rd check
+        },
+        graceMs: 1_000,
+        pollMs: 10,
+        sleep: noSleep,
+      });
+      assert.equal(synth, false, "daemon's own end must suppress the synthesized failed end");
+    });
+
+    it("returns false with zero sleeps when the daemon's end is already present", async () => {
+      const synth = await shouldSynthesizeStopInstanceEnd({
+        alreadyEnded: false,
+        daemonWillEmitOwnEnd: true,
+        hasInstanceEnded: () => true,
+        graceMs: 1_000,
+        pollMs: 10,
+        sleep: async () => {
+          throw new Error("must not sleep when the daemon end is already on disk");
+        },
+      });
+      assert.equal(synth, false);
+    });
+
+    it("falls back to synthesis when the daemon's own end never arrives (phantom-card guard)", async () => {
+      let checks = 0;
+      const synth = await shouldSynthesizeStopInstanceEnd({
+        alreadyEnded: false,
+        daemonWillEmitOwnEnd: true,
+        hasInstanceEnded: () => {
+          checks += 1;
+          return false; // never ends
+        },
+        graceMs: 100,
+        pollMs: 20,
+        sleep: noSleep,
+      });
+      assert.equal(synth, true, "no own-end within the window → synthesize the fallback close");
+      assert.ok(checks >= 2, "should have polled across the grace window before falling back");
+    });
   });
 
   it("daemon list omits terminal dead workers that no longer have a live lockfile", async () => {
