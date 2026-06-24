@@ -665,7 +665,10 @@ export class Session {
   onBrowserDisconnect(handler: (systemId: string) => void): () => void {
     const registered: Array<{ browser: Browser; listener: () => void }> = []
     for (const [systemId, slot] of this.state.browsers) {
-      if (!slot.browser) continue
+      // `browser: null` is a worker slot (parent owns lifetime). Guard `.on`
+      // too so a stub Browser (tests) can't break the launch wiring that now
+      // registers this internally.
+      if (!slot.browser || typeof slot.browser.on !== 'function') continue
       const listener = (): void => handler(systemId)
       slot.browser.on('disconnected', listener)
       registered.push({ browser: slot.browser, listener })
