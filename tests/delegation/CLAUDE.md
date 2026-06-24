@@ -351,6 +351,15 @@ CLOSED) + the `src/core/CLAUDE.md` 2026-06-15 lesson.
 
 ## Not yet asserted here
 
+- **ISS-004 double `workflow_end` on per-instance stop** — pinned NOT here but at
+  the decision-helper seam (`shouldSynthesizeStopInstanceEnd`) in
+  `tests/unit/tracker/dashboard-ops.test.ts`. This soak's `rt.stopInstance` POSTs
+  `/stop` directly to the daemon (bypassing the dashboard's
+  `buildStopDaemonInstanceHandler`, which owns the synthesis), and `td-child` is
+  absent from `INSTANCE_LABELS` (so the handler's `workflowNameFromInstance`
+  resolution returns null) — so a faithful soak leg would need a real-named
+  workflow + routing through the handler. See the `src/control/CLAUDE.md`
+  2026-06-24 lesson.
 - **Retry-after-cancel** — P2.9–P3.13 do NOT assert it; `tests/integration/
   retry-original-input.test.ts` is kept until a Tier-1 test owns it.
 - **Idle-wake (ISS-001) + parallel spawn/reuse/no-overspawn** — the teardown

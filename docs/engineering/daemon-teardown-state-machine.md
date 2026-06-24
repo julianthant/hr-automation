@@ -20,6 +20,7 @@ the daemon claim / force-stop / reassign / stop-all / shutdown logic:
 | 2026-06-13 | VS-003 session-label collision | two daemons both allocated `"<wf> 1"` |
 | 2026-06-13 | ISS-001 enqueue-before-wake | idle daemon woken before the task row existed → missed the claim |
 | 2026-06-13 (this pass) | queued-orphan on simultaneous stop-all | a never-claimed task left `queued` with zero daemons alive (candidate — see below) |
+| 2026-06-24 | ISS-004 double `workflow_end` on per-instance stop | the dashboard handler synthesized `workflow_end(failed)` to close the card while the gracefully-stopped daemon emitted its OWN `workflow_end(done)` ~64ms later — two conflicting session-end events. Fixed by `shouldSynthesizeStopInstanceEnd` (`control/ops/worker-control.ts`): on the graceful path, poll for the daemon's own end within a grace window and synthesize only as a fallback. |
 
 Every one of these is a **state-transition defect**: a terminal transition fired
 from the wrong place, fired twice, or never fired. They keep recurring because
