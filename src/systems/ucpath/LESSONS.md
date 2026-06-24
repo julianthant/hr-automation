@@ -159,3 +159,12 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Fix:** Do NOT declare named helpers (`const x = (...) => …`, `function x(){}`) inside an `evaluate`/`evaluateHandle`/`$eval` body — INLINE the logic instead. Anonymous callbacks passed directly to `.map`/`.find`/`.findIndex`/`.some` are safe (no name binding → no `__name`). Verify a body is clean with: `npx esbuild <file>.ts --keep-names --format=esm --platform=node | <inspect the .evaluate(() => {…}) body for "__name">`.
 **Selector:** `extractWorkLocation` in `job-summary.ts` (and any `page.evaluate` body)
 **Tags:** page.evaluate, __name, tsx, esbuild, keep-names, browser-context, named-function, reference-error, runtime
+
+## 2026-06-24 — Work Location tab times out because we never reached the DETAIL page (grid-id probe missed the results layout)
+
+**Tried:** After a non-empty Job Summary search, `handleMultiRowGrid` decided "are we on a results grid?" via `searchResultsGrid` (`[id*="SEARCH_RESULT"]`/`.PSLEVEL1GRID`). Count 0 → assume PeopleSoft auto-redirected to the detail page; proceed to click the Work Location / Job Information tabs.
+**Failed because:** For some live result layouts that grid probe returned 0 even though we were STILL on a search-results list (not the detail page), so we never drilled in. The detail page never loaded → `extractEmployeeName` read `<none>` and the Work Location tab click timed out 15s (the tab doesn't exist on a results list — no selector fallback can help). Live: EID 10641172 ("Results loaded" → "Detail-page name: <none>" → 15s tab timeout), recurring across the 2026-06-24 batch.
+**Fix:** Replaced the grid-id probe with a DETAIL-PAGE-driven `ensureJobSummaryDetailPage`: gate on the person-name header OR Work Location tab being present in the SAME `getFormRoot` the extraction uses (so the gate exactly tracks extraction success — no false-negative regression). If the detail page isn't up: drill into the first non-terminated `searchResultRows` row; if the scoped probe also missed (count 0), drill via a GRID-INDEPENDENT `resultDrillLinks` (`a[id*="EMPLID"]`); then fail LOUD with a precise "could not reach the detail page (scoped rows=…, EMPLID links=…)" message instead of the opaque tab timeout.
+**Selector:** `jobSummary.resultDrillLinks` (added) + `ensureJobSummaryDetailPage`/`waitForDetailPage` in `job-summary.ts`
+**Tags:** job-summary, work-location, detail-page, drill-in, multi-row, search-results, tab-timeout, emplid, fail-loud
+**References:** `tests/unit/systems/ucpath/job-summary.test.ts`

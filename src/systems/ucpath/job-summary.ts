@@ -184,57 +184,110 @@ export async function searchJobSummary(page: Page, emplId: string): Promise<bool
   }
   log.success(`[Job Summary] Results loaded for ${emplId}`);
 
-  await handleMultiRowGrid(page, root, emplId);
+  await ensureJobSummaryDetailPage(page, root, emplId);
   return true;
 }
 
 /**
- * Multi-row grid branch. Runs after a non-empty search. If PeopleSoft rendered
- * the search-results grid (2+ rows) rather than auto-redirecting to the
- * detail page, pick the first non-terminated row and drill in. If the grid
- * is not present, the search auto-redirected — nothing to do.
+ * Is the Workforce Job Summary DETAIL page up? Signalled by the person-name
+ * header OR the Work Location tab being present in `root` (the SAME getFormRoot
+ * the extraction uses, so this gate exactly tracks extraction success — a doc
+ * whose `extractEmployeeName` would read a real name passes here too, and a doc
+ * that would read `<none>` does not; no false-negative regression).
  */
-async function handleMultiRowGrid(
+async function isOnJobSummaryDetailPage(root: Locator): Promise<boolean> {
+  const [nameCount, tabCount] = await Promise.all([
+    jobSummary.personName(root).count().catch(() => 0),
+    jobSummary.workLocationTab(root).count().catch(() => 0),
+  ]);
+  return nameCount > 0 || tabCount > 0;
+}
+
+/** Poll `isOnJobSummaryDetailPage`, re-probing getFormRoot (iframe can load late). */
+async function waitForDetailPage(page: Page, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await isOnJobSummaryDetailPage(await getFormRoot(page))) return true;
+    if (Date.now() >= deadline) return false;
+    await page.waitForTimeout(400);
+  }
+}
+
+/**
+ * Ensure we're on the Workforce Job Summary DETAIL page after a non-empty
+ * search, so the downstream tab clicks (Work Location / Job Information) have a
+ * detail page to act on. Driven by detail-page PRESENCE, not a grid-id probe:
+ *
+ * A single unambiguous result auto-redirects to the detail page; multiple rows
+ * (rehires / concurrent jobs) stay on a search-results grid that must be drilled
+ * into. The old `handleMultiRowGrid` decided "are we on a grid?" via
+ * `searchResultsGrid`'s id/class probe, which returned 0 for some live result
+ * layouts — so it assumed auto-redirect, never drilled in, and the later Work
+ * Location tab click timed out 15s on a tab-less results page ("Detail-page
+ * name: <none>", EID 10641172, 2026-06-24). This version drills whenever the
+ * detail page ISN'T up, trying the scoped rows first, then a grid-independent
+ * EMPLID link, then failing LOUD with a precise message (vs the opaque tab
+ * timeout). NEEDS LIVE VERIFY: the grid-independent EMPLID drill on the real
+ * multi-row results page.
+ */
+async function ensureJobSummaryDetailPage(
   page: Page,
   root: Locator,
   emplId: string,
 ): Promise<void> {
-  const gridCount = await jobSummary
-    .searchResultsGrid(root)
-    .count()
-    .catch(() => 0);
-  if (gridCount === 0) {
-    // Auto-redirected to detail page; caller proceeds with tab clicks.
-    return;
+  // Single-result auto-redirect (the common case): already on the detail page.
+  if (await waitForDetailPage(page, 3_000)) return;
+
+  // Not on the detail page → drill into the first non-terminated result row.
+  const scopedRows = jobSummary.searchResultRows(root);
+  const scopedTotal = await scopedRows.count().catch(() => 0);
+  if (scopedTotal > 0) {
+    log.step(`[Job Summary] Search-results grid for EID ${emplId} (${scopedTotal} row(s)) — drilling into the first non-terminated row`);
+    let drilled = false;
+    for (let i = 0; i < scopedTotal; i++) {
+      const row = scopedRows.nth(i);
+      const statusText = (
+        await jobSummary.rowHrStatusCell(row).textContent({ timeout: 2_000 }).catch(() => "")
+      )?.trim() ?? "";
+      if (/terminat/i.test(statusText)) {
+        log.debug(`[Job Summary] Row ${i + 1}/${scopedTotal} terminated — skipping`);
+        continue;
+      }
+      log.step(`[Job Summary] Drilling into row ${i + 1}/${scopedTotal} (status='${statusText || "unknown"}')`);
+      await safeClick(jobSummary.rowDrillInLink(row), {
+        timeout: 10_000,
+        label: "ucpath job summary row drill-in link",
+      });
+      drilled = true;
+      break;
+    }
+    if (!drilled) {
+      throw new Error(
+        `[Job Summary] Multi-row grid for EID ${emplId}: all ${scopedTotal} rows were Terminated — no actionable row to drill into. Verify the EID in Kuali Build, or the employee may already be fully separated.`,
+      );
+    }
+    if (await waitForDetailPage(page, 10_000)) return;
   }
 
-  const rows = jobSummary.searchResultRows(root);
-  const total = await rows.count();
-  log.step(`[Job Summary] Multi-row grid detected (${total} rows) for EID ${emplId} — filtering for non-terminated`);
-
-  for (let i = 0; i < total; i++) {
-    const row = rows.nth(i);
-    const statusText = (
-      await jobSummary
-        .rowHrStatusCell(row)
-        .textContent({ timeout: 2_000 })
-        .catch(() => "")
-    )?.trim() ?? "";
-    const isTerminated = /terminat/i.test(statusText);
-    log.debug(`[Job Summary] Row ${i + 1}/${total}: status='${statusText}' terminated=${isTerminated}`);
-    if (isTerminated) continue;
-
-    log.step(`[Job Summary] Drilling into row ${i + 1}/${total} (status='${statusText || "unknown"}')`);
-    await safeClick(jobSummary.rowDrillInLink(row), {
+  // The scoped grid probe missed the layout (count 0) but we're still not on the
+  // detail page → grid-independent drill via the EMPLID hyperlink each result row
+  // carries. Click the first and wait for the detail page.
+  const drillLinks = jobSummary.resultDrillLinks(root);
+  const linkCount = await drillLinks.count().catch(() => 0);
+  if (linkCount > 0) {
+    log.step(`[Job Summary] Results layout not matched by the grid probe — drilling via the first of ${linkCount} EMPLID link(s) for EID ${emplId}`);
+    await safeClick(drillLinks.first(), {
       timeout: 10_000,
-      label: "ucpath job summary row drill-in link",
+      label: "ucpath job summary results emplid drill link",
     });
-    await page.waitForTimeout(2_000);
-    return;
+    if (await waitForDetailPage(page, 10_000)) return;
   }
 
   throw new Error(
-    `[Job Summary] Multi-row grid for EID ${emplId}: all ${total} rows were Terminated — no actionable row to drill into. Verify the EID in Kuali Build, or the employee may already be fully separated.`,
+    `[Job Summary] Could not reach the Workforce Job Summary detail page for EID ${emplId} after searching — ` +
+    `the search returned results but neither the detail header/tabs nor a drillable result row resolved ` +
+    `(scoped rows=${scopedTotal}, EMPLID links=${linkCount}). The live results layout likely needs its ` +
+    `grid / drill-in selectors re-mapped against the real page.`,
   );
 }
 
