@@ -267,29 +267,76 @@ export async function fillTimekeeperTasks(
  * Fill the Final Transactions section in the Kuali form.
  * Skips any field with an empty string value — allows partial fills.
  */
+/** Normalize a department string for comparison: lowercase, collapse whitespace. */
+function normDept(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * The NAME part of a Kuali department option — strip a leading numeric code
+ * prefix like `"000412 - "` (PeopleSoft/Kuali options render `"CODE - Name"`).
+ * Returns the whole option (normalized) when there's no code prefix.
+ */
+function departmentOptionName(opt: string): string {
+  return normDept(opt.replace(/^\s*\d+\s*-\s*/, ""));
+}
+
 /**
  * Pick the index of the best-matching department `<option>` for a UCPath
- * department description. Case-insensitive substring match against the option
- * text (internal whitespace collapsed), skipping the placeholder `"- - -"`
- * row. Returns -1 when nothing matches.
+ * department description. Returns -1 when nothing confidently matches (the
+ * caller then leaves the field blank for manual entry — fail-safe, never a
+ * guess).
+ *
+ * Two tiers, both case-insensitive with collapsed whitespace, skipping the
+ * placeholder `"- - -"` row:
+ *   1. The UCPath description is a substring of the option (the original,
+ *      highest-confidence match — e.g. "Housing/Dining/Hospitality" ⊆
+ *      "000412 - Housing/Dining/Hospitality").
+ *   2. The option's NAME (after the "CODE - " prefix) is a substring of the
+ *      UCPath description. This handles UCPath descriptions that carry a
+ *      DIVISION PREFIX the Kuali label lacks — live: UCPath "VCSA-CL ASSOCIATED
+ *      STUDENTS" / "VCSA CAMPUS RECREATION" never matched the Kuali "… Associated
+ *      Students" / "… Campus Recreation" option under tier 1 ("No matching
+ *      department found", 2026-06-24). To stay safe, tier 2 only considers a
+ *      "specific" option name (≥2 words OR ≥8 chars — a short generic word like
+ *      "Admin" can't mis-match) and picks the LONGEST matching name (most
+ *      specific) when several qualify.
  *
  * Why an INDEX rather than the option label (ISS-B05, 2026-06-22 live batch):
  * the live UCSD department combobox renders options with irregular internal
  * whitespace — e.g. `"000719 -  Supply Chain Services"` (a DOUBLE space after
  * the code dash). `selectOption({ label })` matches the option's normalized
  * label exactly, so the raw `allTextContents()` string never matched and the
- * select timed out at 5s for those departments (5/23 docs failed this way:
- * `"000412 - Housing/Dining/Hospitality"` with a single space succeeded,
- * `"000719 -  Supply Chain Services"` did not). Selecting by index sidesteps
+ * select timed out at 5s for those departments. Selecting by index sidesteps
  * all label/whitespace matching.
  */
 export function pickDepartmentOptionIndex(options: string[], department: string): number {
-  const needle = department.trim().toLowerCase().replace(/\s+/g, " ");
+  const needle = normDept(department);
   if (!needle) return -1;
-  return options.findIndex((opt) => {
-    const norm = opt.trim().toLowerCase().replace(/\s+/g, " ");
+
+  // Tier 1 — UCPath description ⊆ option text.
+  const tier1 = options.findIndex((opt) => {
+    const norm = normDept(opt);
     return norm !== "- - -" && norm.includes(needle);
   });
+  if (tier1 >= 0) return tier1;
+
+  // Tier 2 — option name ⊆ UCPath description (handles a UCPath division prefix
+  // the Kuali label lacks). Specific names only; pick the longest match.
+  let best = -1;
+  let bestLen = 0;
+  options.forEach((opt, i) => {
+    const norm = normDept(opt);
+    if (norm === "- - -" || !norm) return;
+    const name = departmentOptionName(opt);
+    if (!name) return;
+    const specific = name.split(" ").length >= 2 || name.length >= 8;
+    if (specific && needle.includes(name) && name.length > bestLen) {
+      best = i;
+      bestLen = name.length;
+    }
+  });
+  return best;
 }
 
 export async function fillFinalTransactions(
