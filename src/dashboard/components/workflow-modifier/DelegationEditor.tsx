@@ -15,8 +15,12 @@ interface Props {
 
 export function DelegationEditor({ data, draft, onChange }: Props): JSX.Element {
   const lib = data.schemeLibrary;
-  const del: DelegationDisplayConfig =
-    draft.presentation?.delegation ?? data.effective.presentation?.delegation ?? {};
+  // Sparse DRAFT delegation (only overridden fields) — mutate + display from
+  // this, never the full effective config, so one edit doesn't mark every field
+  // "Modified" or bake unset defaults into the saved override. Delegation fields
+  // are unset-by-default (no base delegation block), so an un-overridden field
+  // resolves to undefined → the "— Default —" option.
+  const del: DelegationDisplayConfig = draft.presentation?.delegation ?? {};
   const baseDel: DelegationDisplayConfig =
     data.base.presentation?.delegation ?? {};
 

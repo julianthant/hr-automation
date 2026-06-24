@@ -11,22 +11,25 @@ interface Props {
 
 export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
   const lib = data.schemeLibrary;
-  // Current displayed value = draft ?? effective (base ⊕ saved override)
-  const naming: NamingConfig =
-    draft.presentation?.naming ?? data.effective.presentation?.naming ?? {};
-  // Base defaults (code defaults)
+  // The DRAFT override is sparse — only the leaves the operator has actually
+  // overridden. Mutating from this (not the full effective naming) keeps a
+  // single edit from spreading every leaf into the draft, which would both
+  // mark unchanged fields "Modified" and bake defaults into the saved override.
+  const draftNaming: NamingConfig = draft.presentation?.naming ?? {};
+  // Base defaults (code defaults) — the displayed value falls back to these for
+  // any leaf the operator hasn't overridden, and they drive the "Default:" hint.
   const baseNaming: NamingConfig = data.base.presentation?.naming ?? {};
 
   const setPart = (
     part: "title" | "subtitle" | "trace",
     value: NamingConfig["title"] | NamingConfig["subtitle"] | NamingConfig["trace"],
   ) => {
-    const next: NamingConfig = { ...naming, [part]: value };
+    const next: NamingConfig = { ...draftNaming, [part]: value };
     onChange({ ...draft, presentation: { ...(draft.presentation ?? {}), naming: next } });
   };
 
   const resetPart = (part: "title" | "subtitle" | "trace") => {
-    const next: NamingConfig = { ...naming };
+    const next: NamingConfig = { ...draftNaming };
     delete next[part];
     const hasMeaningful = Object.keys(next).length > 0;
     const nextPresentation = { ...(draft.presentation ?? {}), naming: hasMeaningful ? next : undefined };
@@ -56,7 +59,7 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
           id="naming-title"
           label=""
           options={lib.title}
-          value={naming.title}
+          value={draftNaming.title ?? baseNaming.title}
           allowUnset={false}
           placeholder="e.g. {name} ({emplId})"
           templateAriaLabel="title custom template"
@@ -77,7 +80,7 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
           id="naming-subtitle"
           label=""
           options={lib.subtitle}
-          value={naming.subtitle}
+          value={draftNaming.subtitle ?? baseNaming.subtitle}
           allowUnset={false}
           placeholder="e.g. Oath · {runId4}"
           templateAriaLabel="subtitle custom template"
@@ -98,7 +101,7 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
           id="naming-trace"
           label=""
           options={lib.trace}
-          value={naming.trace}
+          value={draftNaming.trace ?? baseNaming.trace}
           allowUnset={false}
           placeholder="e.g. {code}-{runId4}"
           templateAriaLabel="trace custom template"
