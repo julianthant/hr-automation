@@ -47,7 +47,7 @@ export function useWorkflowPresentation(): {
   save: (ov: WorkflowOverride) => Promise<boolean>;
   preview: (ov: WorkflowOverride) => Promise<void>;
   previewResult: PreviewResult | null;
-  revert: () => Promise<void>;
+  revert: () => Promise<boolean>;
 } {
   const [list, setList] = useState<WorkflowListEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -114,13 +114,15 @@ export function useWorkflowPresentation(): {
     [selected, load],
   );
 
-  const revert = useCallback(async () => {
-    if (!selected) return;
+  const revert = useCallback(async (): Promise<boolean> => {
+    if (!selected) return false;
     try {
-      await fetch(`/api/workflow-presentation/${selected}`, { method: "DELETE" });
-      load(selected);
+      const r = await fetch(`/api/workflow-presentation/${selected}`, { method: "DELETE" });
+      const ok = r.ok;
+      if (ok) load(selected);
+      return ok;
     } catch {
-      // ignore
+      return false;
     }
   }, [selected, load]);
 
