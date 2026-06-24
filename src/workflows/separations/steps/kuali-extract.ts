@@ -6,6 +6,7 @@ import {
   extractSeparationData,
   isVoluntaryTermination,
 } from "../../../systems/kuali/index.js";
+import { displayPersonName } from "../../../domain/identity/person-name.js";
 import type { Ctx } from "../../../core/kernel/types.js";
 
 /**
@@ -31,6 +32,15 @@ export async function runKualiExtract(
     await openActionList(kualiPage);
     await clickDocument(kualiPage, docId);
     const result = await extractSeparationData(kualiPage);
+    // Kuali stores the name ALL-CAPS "LAST,FIRST M" (e.g. "NAKAGAWA,MATTHEW K").
+    // Normalize to the standard "Last, First M" display convention used
+    // everywhere else (dashboard header, comments, identity-check name compare).
+    // `displayPersonName` is idempotent + order-preserving (keeps "Last, First"),
+    // so doing it here means `kualiData.employeeName` and every downstream
+    // consumer carry the normalized name — not the raw caps. The identity-check
+    // comparator (`classifyNameSimilarity`) is order/case-insensitive, so this
+    // does not change its same/similar/different verdicts.
+    result.employeeName = displayPersonName(result.employeeName);
     // Write extracted fields onto the tracker row BEFORE the step returns.
     // Anything that throws downstream (validateLastDayWorked, Kronos, Kuali
     // finalize, etc.) still leaves a populated detail grid instead of a row

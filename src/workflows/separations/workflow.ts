@@ -7,6 +7,7 @@ import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/d
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import type { Ctx } from "../../core/kernel/types.js";
 import { isUcpathEmployeeId, normalizeEid } from "../../domain/identity/eid.js";
+import { displayPersonName } from "../../domain/identity/person-name.js";
 import {
   classifyNameSimilarity,
   correctNameSpelling,
@@ -392,7 +393,9 @@ export const separationsWorkflow = defineWorkflow({
         (txnNumberPrefilled ? `; txn # prefilled — rawTerminationType not required)` : `)`),
       );
       kualiData = {
-        employeeName: ctx.data.name as string,
+        // Normalize the prefilled name too — an operator typing in Edit Data may
+        // enter ALL-CAPS or "First Last"; keep the standard display convention.
+        employeeName: displayPersonName(ctx.data.name as string),
         eid: ctx.data.eid as string,
         // Fall back chain: raw Kuali string → display-only "Vol"/"Invol" → empty.
         // The empty fallback is only reachable on the txnNumberPrefilled path
