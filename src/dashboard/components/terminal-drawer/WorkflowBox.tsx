@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -7,8 +7,11 @@ import {
   KeyRound,
   Loader2,
   Hourglass,
+  RotateCw,
+  Crosshair,
+  AlertTriangle,
 } from "lucide-react";
-import type { AuthState, WorkflowInstanceState } from "@/components/shared/types";
+import type { AuthState, BrowserHealth, WorkflowInstanceState } from "@/components/shared/types";
 import { useConfirm } from "@/components/shared/useConfirm";
 import { formatStepName } from "@/components/shared/types";
 import { useElapsed } from "@/components/hooks/useElapsed";
@@ -49,6 +52,36 @@ const authLabel: Record<AuthState, string> = {
   duo_waiting: "Duo",
   failed: "Failed",
 };
+
+// Health is orthogonal to auth and OVERRIDES the tile look when non-healthy
+// (a failed browser reads red regardless of its auth state). `healthy` is no
+// override — the auth maps drive the tile.
+const NON_HEALTHY: ReadonlyArray<BrowserHealth> = ["unhealthy", "refreshing", "failed"];
+
+const healthTone: Record<Exclude<BrowserHealth, "healthy">, string> = {
+  refreshing: "bg-info/10 border-info/40",
+  unhealthy: "bg-warning/10 border-warning/40",
+  failed: "bg-destructive/10 border-destructive/50",
+};
+
+const healthColor: Record<Exclude<BrowserHealth, "healthy">, string> = {
+  refreshing: "text-info",
+  unhealthy: "text-warning",
+  failed: "text-destructive",
+};
+
+const healthLabel: Record<Exclude<BrowserHealth, "healthy">, string> = {
+  refreshing: "Refreshing",
+  unhealthy: "Unhealthy",
+  failed: "Failed",
+};
+
+function HealthIcon({ health, className }: { health: Exclude<BrowserHealth, "healthy">; className?: string }) {
+  if (health === "refreshing") {
+    return <Loader2 className={cn("animate-spin motion-reduce:animate-none", className)} />;
+  }
+  return <AlertTriangle className={className} />;
+}
 
 /**
  * Operator-facing daemon label. The instance identity stays numbered
@@ -350,6 +383,103 @@ function StopPill({
   );
 }
 
+/**
+ * Per-browser tile controls — Focus ("which browser is this?", brings the
+ * Chromium window to front) and Refresh (reload the page — the operator's
+ * manual "refresh-only" recovery). Both target THIS browser by
+ * `(workflow, instance, systemId)`, so the action always hits the right
+ * browser regardless of tile order. Hover/focus-revealed to keep the tile clean.
+ */
+function BrowserTileControls({
+  workflow,
+  instance,
+  systemId,
+}: {
+  workflow: string;
+  instance: string;
+  systemId: string;
+}) {
+  const [busy, setBusy] = useState<null | "refresh" | "focus">(null);
+
+  const post = async (action: "refresh" | "focus") => {
+    setBusy(action);
+    const toastId = toast.loading(
+      action === "refresh" ? `Refreshing ${systemId}…` : `Focusing ${systemId}…`,
+    );
+    try {
+      const res = await fetch(`/api/browser/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workflow, instance, systemId }),
+      });
+      const json = (await res.json()) as { ok: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        toast.error(`Couldn't ${action} the ${systemId} browser`, {
+          id: toastId,
+          description: json.error ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      toast.success(
+        action === "refresh"
+          ? `Reloading the ${systemId} page`
+          : `Bringing the ${systemId} window to front`,
+        { id: toastId },
+      );
+    } catch (err) {
+      toast.error(`Couldn't ${action} the ${systemId} browser`, {
+        id: toastId,
+        description: (err as Error).message,
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const btn =
+    "p-0.5 rounded inline-flex items-center justify-center text-muted-foreground " +
+    "hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait";
+
+  return (
+    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-within:opacity-100 transition-opacity">
+      <button
+        type="button"
+        disabled={busy !== null}
+        title={`Bring the ${systemId} browser window to front`}
+        aria-label={`Bring the ${systemId} browser window to front`}
+        className={btn}
+        onClick={(e) => {
+          e.stopPropagation();
+          void post("focus");
+        }}
+      >
+        {busy === "focus" ? (
+          <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
+        ) : (
+          <Crosshair className="w-3 h-3" />
+        )}
+      </button>
+      <button
+        type="button"
+        disabled={busy !== null}
+        title={`Refresh (reload) the ${systemId} browser page`}
+        aria-label={`Refresh the ${systemId} browser page`}
+        className={btn}
+        onClick={(e) => {
+          e.stopPropagation();
+          void post("refresh");
+        }}
+      >
+        {busy === "refresh" ? (
+          <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
+        ) : (
+          <RotateCw className="w-3 h-3" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 interface WorkflowBoxProps {
   workflow: WorkflowInstanceState;
   reassignable?: boolean;
@@ -427,6 +557,31 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
   const browsers = sessions.flatMap((s) => s.browsers);
   const totalBrowsers = browsers.length;
   const authedBrowsers = browsers.filter((b) => b.authState === "authed").length;
+
+  // Notify ONCE per browser that transitions to `failed` (a hard fault a refresh
+  // can't heal). Keyed by browserId so re-renders (the 1s elapsed tick) don't
+  // re-fire; a recovery clears the key so a later failure notifies again. The
+  // health signature is the only reactive dep — `browsersRef` feeds the latest
+  // data without making the array identity a dep.
+  const browsersRef = useRef(browsers);
+  browsersRef.current = browsers;
+  const notifiedFailuresRef = useRef<Set<string>>(new Set());
+  const healthSig = browsers.map((b) => `${b.browserId}:${b.health ?? ""}`).join("|");
+  useEffect(() => {
+    const seen = notifiedFailuresRef.current;
+    for (const b of browsersRef.current) {
+      if (b.health === "failed") {
+        if (!seen.has(b.browserId)) {
+          seen.add(b.browserId);
+          toast.error(`${b.system} browser failed`, {
+            description: b.lastError ?? "The browser stopped responding.",
+          });
+        }
+      } else if (b.health === "healthy") {
+        seen.delete(b.browserId);
+      }
+    }
+  }, [healthSig]);
   const { subline, footerStep } = deriveSessionCardCopy({
     active: !!active,
     finalStatus: finalStatus ?? null,
@@ -555,54 +710,83 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
         <div className="min-h-[43px]">
           {browsers.length > 0 && (
             <div className="grid grid-cols-2 gap-1">
-              {browsers.map((b) => (
-                <div
-                  key={b.browserId}
-                  className={cn(
-                    "rounded-md border px-1.5 py-1 min-w-0 transition-colors",
-                    authBg[b.authState],
-                  )}
-                  title={
-                    isIdleRefreshSystem(b.system) &&
-                    b.authState === "authed" &&
-                    idleBySystem?.[b.system]?.lastTouchAt
-                      ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
-                      : `${b.system} · ${authLabel[b.authState]}`
-                  }
-                >
-                  <div className="flex items-center gap-1 min-w-0 justify-between">
-                    <div className="flex items-center gap-1 min-w-0">
-                      <AuthIcon
-                        state={b.authState}
-                        className={cn("w-3 h-3 shrink-0", authColor[b.authState])}
-                      />
-                      <span className="text-[11px] font-mono text-foreground truncate leading-none">
-                        {b.system}
-                      </span>
-                    </div>
-                    {isIdleRefreshSystem(b.system) &&
+              {browsers.map((b) => {
+                // Health overrides the tile look when non-healthy; otherwise the
+                // auth state drives it. Both are bound to THIS browser by id.
+                const badHealth = b.health && b.health !== "healthy" ? b.health : undefined;
+                const tone = badHealth ? healthTone[badHealth] : authBg[b.authState];
+                const labelColor = badHealth ? healthColor[badHealth] : authColor[b.authState];
+                const stateLabel = badHealth ? healthLabel[badHealth] : authLabel[b.authState];
+                const tip = badHealth
+                  ? `${b.system} · ${healthLabel[badHealth]}${b.lastError ? ` — ${b.lastError}` : ""}`
+                  : isIdleRefreshSystem(b.system) &&
                       b.authState === "authed" &&
-                      !itemInFlight &&
-                      idleBySystem?.[b.system]?.lastTouchAt != null &&
-                      idleBySystem[b.system].lastTouchAt.length > 0 && (
-                        <IdleCountdownRing
-                          systemId={b.system}
-                          lastTouchAt={idleBySystem[b.system].lastTouchAt}
-                          refreshing={!!idleBySystem[b.system].refreshing}
-                          cycling={active && !itemInFlight}
+                      idleBySystem?.[b.system]?.lastTouchAt
+                    ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
+                    : `${b.system} · ${authLabel[b.authState]}`;
+                return (
+                  <div
+                    key={b.browserId}
+                    className={cn(
+                      "group/tile rounded-md border px-1.5 py-1 min-w-0 transition-colors",
+                      tone,
+                    )}
+                    title={tip}
+                  >
+                    <div className="flex items-center gap-1 min-w-0 justify-between">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <AuthIcon
+                          state={b.authState}
+                          className={cn("w-3 h-3 shrink-0", authColor[b.authState])}
+                        />
+                        <span className="text-[11px] font-mono text-foreground truncate leading-none">
+                          {b.system}
+                        </span>
+                      </div>
+                      {/* Idle ring shows only when healthy + idle-refresh; a
+                          non-healthy tile shows its health icon instead. */}
+                      {!badHealth &&
+                        isIdleRefreshSystem(b.system) &&
+                        b.authState === "authed" &&
+                        !itemInFlight &&
+                        idleBySystem?.[b.system]?.lastTouchAt != null &&
+                        idleBySystem[b.system].lastTouchAt.length > 0 && (
+                          <IdleCountdownRing
+                            systemId={b.system}
+                            lastTouchAt={idleBySystem[b.system].lastTouchAt}
+                            refreshing={!!idleBySystem[b.system].refreshing}
+                            cycling={active && !itemInFlight}
+                          />
+                        )}
+                      {badHealth && (
+                        <HealthIcon
+                          health={badHealth}
+                          className={cn("w-3 h-3 shrink-0", healthColor[badHealth])}
                         />
                       )}
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-1 min-w-0">
+                      <span
+                        className={cn(
+                          "text-[9.5px] uppercase tracking-wider font-semibold leading-none truncate",
+                          labelColor,
+                        )}
+                      >
+                        {stateLabel}
+                      </span>
+                      {/* Focus / Refresh — only when there's a live daemon to
+                          target. Hover/focus-revealed via group/tile. */}
+                      {active && pidAlive && workflowName && (
+                        <BrowserTileControls
+                          workflow={workflowName}
+                          instance={instance}
+                          systemId={b.system}
+                        />
+                      )}
+                    </div>
                   </div>
-                  <div
-                    className={cn(
-                      "mt-0.5 text-[9.5px] uppercase tracking-wider font-semibold leading-none",
-                      authColor[b.authState],
-                    )}
-                  >
-                    {authLabel[b.authState]}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

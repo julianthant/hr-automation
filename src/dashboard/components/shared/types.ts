@@ -253,10 +253,18 @@ export function isMonospaceKey(key: string): boolean {
 
 export type AuthState = "idle" | "authenticating" | "authed" | "duo_waiting" | "failed";
 
+/** Per-browser health, orthogonal to auth (mirrors backend `BrowserState.health`). */
+export type BrowserHealth = "healthy" | "unhealthy" | "refreshing" | "failed";
+
 export interface BrowserState {
   browserId: string;
   system: string;
   authState: AuthState;
+  /** Bound to THIS browser by browserId — the tile reflects its own browser's
+   * health regardless of tile order. Undefined until the first health event. */
+  health?: BrowserHealth;
+  /** Reason for the latest unhealthy/failed transition, if any. */
+  lastError?: string;
 }
 
 export interface SessionInfo {

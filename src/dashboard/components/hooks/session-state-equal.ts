@@ -63,11 +63,19 @@ export function sessionsEqual(a: SessionInfo[], b: SessionInfo[]): boolean {
 
 export function browsersEqual(a: BrowserState[], b: BrowserState[]): boolean {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
+  // Compare as a map keyed by browserId — order is cosmetic; the binding is what
+  // matters. A reorder of the same set of browsers is NOT a change, and each
+  // tile's auth/health is compared against ITS OWN browser, never a positional
+  // neighbour.
+  const byId = new Map(b.map((x) => [x.browserId, x]));
+  for (const x of a) {
+    const y = byId.get(x.browserId);
     if (
-      a[i].browserId !== b[i].browserId ||
-      a[i].system !== b[i].system ||
-      a[i].authState !== b[i].authState
+      !y ||
+      x.system !== y.system ||
+      x.authState !== y.authState ||
+      x.health !== y.health ||
+      x.lastError !== y.lastError
     ) {
       return false;
     }
