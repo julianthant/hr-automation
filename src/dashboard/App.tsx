@@ -720,8 +720,9 @@ export function App() {
               type="button"
               aria-label="Workflow configuration"
               title="Workflow configuration"
-              onClick={() => { setShowWorkflowModifier(true); setShowOverview(false); }}
-              className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-pressed={showWorkflowModifier}
+              onClick={() => { setShowWorkflowModifier((v) => !v); setShowOverview(false); }}
+              className={`h-8 w-8 rounded-md border border-border flex items-center justify-center cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary ${showWorkflowModifier ? "bg-accent text-foreground" : "bg-secondary text-muted-foreground hover:bg-accent hover:text-foreground"}`}
             >
               <Workflow className="w-4 h-4" />
             </button>
@@ -752,15 +753,21 @@ export function App() {
         }}
       >
       <div className="flex flex-1 overflow-hidden">
-        <WorkflowRail
-          workflow={workflow}
-          workflows={workflows}
-          entryCounts={entryCounts}
-          queuedCounts={wfQueuedCounts}
-          onWorkflowChange={handleWorkflowChange}
-          overviewActive={showOverview}
-          onShowOverview={() => { setShowOverview(true); setShowWorkflowModifier(false); }}
-        />
+        {/* The workflow rail is hidden in Workflow-Modifier mode — the modifier
+            is a full-page surface with its own workflow picker. The navbar
+            "Workflow configuration" button (a toggle, active-state shown) is the
+            single way in and out. */}
+        {!showWorkflowModifier && (
+          <WorkflowRail
+            workflow={workflow}
+            workflows={workflows}
+            entryCounts={entryCounts}
+            queuedCounts={wfQueuedCounts}
+            onWorkflowChange={handleWorkflowChange}
+            overviewActive={showOverview}
+            onShowOverview={() => { setShowOverview(true); setShowWorkflowModifier(false); }}
+          />
+        )}
         {showWorkflowModifier ? (
           <WorkflowModifierPage />
         ) : showOverview ? (
