@@ -61,4 +61,50 @@ describe("pickDepartmentOptionIndex", () => {
     const dupes = ["- - -", "001 - Services East", "002 - Services West"];
     assert.strictEqual(pickDepartmentOptionIndex(dupes, "Services"), 1);
   });
+
+  // Tier 2 (2026-06-24): a UCPath description can carry a DIVISION PREFIX the
+  // Kuali label lacks — e.g. UCPath "VCSA-CL ASSOCIATED STUDENTS" vs Kuali
+  // "Associated Students". Match the option NAME (after the code) as a substring
+  // of the UCPath description when tier-1 (desc ⊆ option) misses.
+  describe("tier 2 — UCPath division prefix the Kuali label lacks", () => {
+    const opts = [
+      "- - -",
+      "000601 - Associated Students",
+      "000777 - Campus Recreation",
+      "000414 - Bookstore",
+    ];
+
+    it("matches 'VCSA-CL ASSOCIATED STUDENTS' to 'Associated Students'", () => {
+      assert.strictEqual(pickDepartmentOptionIndex(opts, "VCSA-CL ASSOCIATED STUDENTS"), 1);
+    });
+
+    it("matches 'VCSA CAMPUS RECREATION' to 'Campus Recreation'", () => {
+      assert.strictEqual(pickDepartmentOptionIndex(opts, "VCSA CAMPUS RECREATION"), 2);
+    });
+
+    it("prefers the LONGEST (most specific) option name when several are contained", () => {
+      const o = ["- - -", "001 - Recreation", "002 - Campus Recreation Services"];
+      // "vcsa campus recreation services" contains both "recreation" and
+      // "campus recreation services" — the longer, more specific one wins.
+      assert.strictEqual(pickDepartmentOptionIndex(o, "VCSA CAMPUS RECREATION SERVICES"), 2);
+    });
+
+    it("does NOT match a short generic one-word option name (avoids mis-match)", () => {
+      // "Aid" (3 chars, one word) is not 'specific' → no tier-2 match → -1.
+      assert.strictEqual(
+        pickDepartmentOptionIndex(["- - -", "001 - Aid"], "VCSA-CL FINANCIAL AID OFFICE"),
+        -1,
+      );
+    });
+
+    it("still returns -1 when no option name is contained in the description", () => {
+      assert.strictEqual(pickDepartmentOptionIndex(opts, "VCSA-CL STUDENT HEALTH"), -1);
+    });
+
+    it("tier 1 still wins over tier 2 when the description is a full substring", () => {
+      // Exact desc ⊆ option must take precedence over a prefix-stripped match.
+      const o = ["- - -", "000414 - Bookstore", "000999 - Campus Bookstore Annex"];
+      assert.strictEqual(pickDepartmentOptionIndex(o, "Bookstore"), 1);
+    });
+  });
 });
