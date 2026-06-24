@@ -3,6 +3,7 @@ import {
   searchEmployee as searchNewKronos,
   selectEmployeeResult as selectNewKronosResult,
   clickGoToTimecard as clickNewKronosGoToTimecard,
+  verifyTimecardEmployee as verifyNewKronosTimecardEmployee,
   setDateRange as setNewKronosDateRange,
   getSeparationTimecardData,
 } from "../../../systems/new-kronos/index.js";
@@ -59,6 +60,22 @@ export async function runNewKronosTimecard(
       `[New Kronos] EID ${eid} was found but the Go To → Timecard navigation failed — ` +
       `could not open the timecard to read the last punch / sick / holiday days. ` +
       `Not silently using the Kuali dates for a found HDH employee.`,
+    );
+  }
+  // Confirm the timecard that opened is THIS employee's — Go To → Timecard can
+  // leave the PREVIOUS employee's timecard on screen (stale selection), and
+  // reading that grid would attribute the wrong person's punches to this
+  // separation (live bug: search 10603110 → Yang/10832819 still displayed,
+  // 2026-06-24). Fail loud on a positive wrong-person signal. This throw is
+  // logged + non-fatal in the settled parallel block (the run completes on the
+  // Kuali fallback) but is now VISIBLE, not silently wrong.
+  const idCheck = await verifyNewKronosTimecardEmployee(page, eid);
+  if (!idCheck.ok) {
+    throw new Error(
+      `[New Kronos] EID ${eid}: the open timecard does not show this employee` +
+      (idCheck.shownEid ? ` (it shows EID ${idCheck.shownEid})` : "") +
+      ` — Go To → Timecard left a stale / wrong-person timecard up. ` +
+      `Not reading the wrong person's punches.`,
     );
   }
   await page.waitForTimeout(3_000);

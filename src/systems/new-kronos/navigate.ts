@@ -330,6 +330,58 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
   return false;
 }
 
+/** Result of confirming the open timecard belongs to the searched employee. */
+export interface TimecardEmployeeCheck {
+  /** True when the searched EID is shown on the open timecard header. */
+  ok: boolean;
+  /** A DIFFERENT 8-digit id visible on the timecard when `ok` is false (else null). */
+  shownEid: string | null;
+}
+
+/**
+ * Confirm the OPEN timecard belongs to the searched employee.
+ *
+ * The WFD timecard header shows the selected employee's EID (e.g. "10832819"
+ * next to the name dropdown). When Go To → Timecard doesn't actually switch
+ * employees, the PREVIOUS employee's timecard stays on screen — the live bug
+ * where a search for 10603110 (Lua-Sandoval) left Yang / 10832819 displayed
+ * (2026-06-24). Reading that stale grid would attribute the wrong person's
+ * punches/sick/holiday to this separation.
+ *
+ * The search slide-out is closed FIRST so its "Results for <eid>" text can't
+ * false-pass the check, then the top-level timecard text is polled for the
+ * searched EID (the grid + header render top-level — `getSeparationTimecardData`
+ * reads them via `page.evaluate`, not the iframe). On a miss it reports any other
+ * 8-digit id found (the wrong employee) so the caller can fail loud with detail.
+ *
+ * NEEDS LIVE VERIFY: confirm the searched EID renders as visible text in the WFD
+ * timecard employee header (the basis of this check).
+ */
+export async function verifyTimecardEmployee(
+  page: Page,
+  eid: string,
+): Promise<TimecardEmployeeCheck> {
+  await closeEmployeeSearch(page);
+  await page.waitForTimeout(500);
+  const deadline = Date.now() + 8_000;
+  let shownEid: string | null = null;
+  while (Date.now() < deadline) {
+    const probe = await page
+      .evaluate((searchedEid) => {
+        const text = document.body?.innerText ?? "";
+        if (text.includes(searchedEid)) return { match: true, otherEid: null as string | null };
+        // A different 8-digit id on the timecard is a positive wrong-person signal.
+        const m = text.match(/\b\d{8}\b/);
+        return { match: false, otherEid: m ? m[0] : null };
+      }, eid)
+      .catch(() => ({ match: true as boolean, otherEid: null as string | null }));
+    if (probe.match) return { ok: true, shownEid: eid };
+    shownEid = probe.otherEid;
+    await page.waitForTimeout(500);
+  }
+  return { ok: false, shownEid };
+}
+
 /**
  * Switch the pay period dropdown to previous pay period.
  */
