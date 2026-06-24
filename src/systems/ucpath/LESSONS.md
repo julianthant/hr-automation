@@ -151,3 +151,11 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `ssSmartHRTransactions.*` + `parseSsSmartHrRows`/`scanSsSmartHrResults` in `ss-smart-hr.ts`
 **Tags:** ss-smart-hr, transaction, termination, ter, grid, scan, header, nested-table, approval-status
 **References:** `src/workflows/separations/CLAUDE.md` "Transaction check"; `tests/unit/systems/ucpath/ss-smart-hr.test.ts`
+
+## 2026-06-24 — `__name is not defined` in page.evaluate (tsx keepNames instruments named helpers)
+
+**Tried:** Defining a `const norm = (s) => (s ?? "").replace(/\s+/g," ").trim()` helper INSIDE a `page.evaluate(() => { ... })` body (the rewritten `extractWorkLocation` Work Location scan).
+**Failed because:** The runtime is `tsx`, whose esbuild has `keepNames` on by default — it wraps every NAMED function/arrow binding with `__name(fn, "name")` and defines `var __name = …` at MODULE scope. When Playwright serializes the evaluate callback (`fn.toString()`) and runs it in the browser, the body references `__name`, which does not exist in the page context → `page.evaluate: ReferenceError: __name is not defined` at runtime (passes typecheck + unit tests; fails only live — surfaced on a live Job Summary fetch for EID 10797079, "Roye, Micah").
+**Fix:** Do NOT declare named helpers (`const x = (...) => …`, `function x(){}`) inside an `evaluate`/`evaluateHandle`/`$eval` body — INLINE the logic instead. Anonymous callbacks passed directly to `.map`/`.find`/`.findIndex`/`.some` are safe (no name binding → no `__name`). Verify a body is clean with: `npx esbuild <file>.ts --keep-names --format=esm --platform=node | <inspect the .evaluate(() => {…}) body for "__name">`.
+**Selector:** `extractWorkLocation` in `job-summary.ts` (and any `page.evaluate` body)
+**Tags:** page.evaluate, __name, tsx, esbuild, keep-names, browser-context, named-function, reference-error, runtime
