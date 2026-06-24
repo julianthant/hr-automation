@@ -164,24 +164,30 @@ export const goToMenu = {
       .first(),
 
   /**
-   * Timecard menu item — 8-deep fallback chain. The live Dayforce Go To menu
-   * renders Timecard as role="option" (not "menuitem") — option variants are
-   * tried first. Covers both frame- and page-level renderings plus
-   * "Timecards" plural / "Timecard" singular variants.
-   * verified 2026-06-18
-   * @tags timecard, menu, item, option, fallback, navigation, new-kronos
+   * Timecard menu item in the open Go To dropdown — role-scoped to the option
+   * ITSELF. The live Dayforce Go To menu renders Timecard as role="option"
+   * (menuitem kept as a fallback); both frame- and page-level renderings plus
+   * the "Timecards" plural variant are covered.
+   *
+   * The name is ANCHORED `^timecards?$` (was a bare `/timecard/i` substring) and
+   * the old bare `text=Timecard`/`text=Timecards` `.or()` branches are REMOVED:
+   * once a timecard is loaded behind the slide-out, "Employee timecards" (the
+   * page title) and other chrome CONTAIN "timecard", so a substring match
+   * resolved `count()` to stale, non-actionable elements — clicking them failed
+   * and every employee after the first in a batch reported "Timecard option not
+   * found in Go To menu" (2026-06-24). Anchored role-name match can only hit the
+   * dropdown option.
+   * verified 2026-06-18 (role=option Timecard); anchoring + drop-text 2026-06-24
+   * @tags timecard, menu, item, option, navigation, new-kronos
    */
   timecardItem: (page: Page): Locator => {
     const f = searchFrame(page);
+    const name = /^\s*timecards?\s*$/i;
     return f
-      .getByRole("option", { name: /timecard/i })
-      .or(page.getByRole("option", { name: /timecard/i }))
-      .or(f.getByRole("menuitem", { name: /timecard/i }))
-      .or(f.locator("text=Timecards").first())
-      .or(f.locator("text=Timecard").first())
-      .or(page.getByRole("menuitem", { name: /timecard/i }))
-      .or(page.locator("text=Timecards").first())
-      .or(page.locator("text=Timecard").first());
+      .getByRole("option", { name })
+      .or(page.getByRole("option", { name }))
+      .or(f.getByRole("menuitem", { name }))
+      .or(page.getByRole("menuitem", { name }));
   },
 };
 
