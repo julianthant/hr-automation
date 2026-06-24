@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 13;
+export const LATEST_SCHEMA_VERSION = 14;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -570,6 +570,65 @@ CREATE INDEX IF NOT EXISTS tasks_parent_run_idx
     version: 13,
     sql: String.raw`
 ALTER TABLE tasks ADD COLUMN claim_generation INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    // Migration 14: widen the worker_commands.command_type CHECK to admit the
+    // per-browser session-panel controls `refresh_browser` (reload the page —
+    // the refresh-only recovery) and `focus_browser` (bring the window to
+    // front). SQLite can't ALTER a CHECK in place, so rebuild the table with
+    // the expanded list. worker_commands is a LEAF (nothing references it), so
+    // the drop/rename is safe even with foreign_keys ON; existing rows already
+    // satisfy the (unchanged) FK references they carry. Indexes are recreated.
+    version: 14,
+    sql: String.raw`
+CREATE TABLE worker_commands_v14 (
+  command_id TEXT PRIMARY KEY,
+  command_type TEXT NOT NULL CHECK (
+    command_type IN (
+      'cancel_task',
+      'retry_task',
+      'drain_worker',
+      'stop_worker',
+      'force_stop_task',
+      'kill_browser',
+      'refresh_browser',
+      'focus_browser',
+      'force_kill_worker',
+      'health_check'
+    )
+  ),
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'queued',
+      'acknowledged',
+      'completed',
+      'failed',
+      'cancelled'
+    )
+  ),
+  workflow TEXT,
+  target_worker_id TEXT REFERENCES workers(worker_id) ON DELETE SET NULL,
+  target_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  target_attempt_id TEXT REFERENCES task_attempts(id) ON DELETE SET NULL,
+  target_browser_process_id TEXT REFERENCES browser_processes(browser_process_id) ON DELETE SET NULL,
+  requested_by TEXT NOT NULL DEFAULT 'dashboard',
+  requested_at TEXT NOT NULL,
+  acknowledged_at TEXT,
+  completed_at TEXT,
+  error TEXT,
+  payload_json TEXT
+);
+
+INSERT INTO worker_commands_v14 SELECT * FROM worker_commands;
+DROP TABLE worker_commands;
+ALTER TABLE worker_commands_v14 RENAME TO worker_commands;
+
+CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
+  ON worker_commands(target_worker_id, state, requested_at);
+
+CREATE INDEX IF NOT EXISTS worker_commands_task_state_idx
+  ON worker_commands(target_task_id, state, requested_at);
     `,
   },
 ];
