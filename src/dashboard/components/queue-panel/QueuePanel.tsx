@@ -428,7 +428,7 @@ export function QueuePanel({
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
-  // Keyboard row actions (r = retry, x = cancel) reuse the exact dispatch +
+  // Keyboard row actions (Ctrl+Shift+R = retry, x = cancel) reuse the exact dispatch +
   // status-gating the footer buttons use — refs keep the [] keydown effect
   // stable while still seeing the latest rows / date / dispatcher.
   const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
@@ -459,13 +459,21 @@ export function QueuePanel({
       if (e.defaultPrevented) return;
       if (isEditableFocus(e.target)) return;
 
-      // r = retry, x = cancel — act on the selected top-level row, reusing the
-      // footer buttons' dispatch + gating (no-op when the action isn't enabled).
-      if ((e.key === "r" || e.key === "x") && selectedIdRef.current && !inBatchQueueRef.current) {
+      // Ctrl+Shift+R = retry, x = cancel — act on the selected top-level row,
+      // reusing the footer buttons' dispatch + gating (no-op when the action
+      // isn't enabled). Retry is a Ctrl+Shift chord (not bare `r`, and never
+      // with Cmd) so the browser's Cmd+R / Ctrl+R page-refresh stays untouched;
+      // cancel stays bare `x` but is guarded against modifier chords for the
+      // same reason. `e.code === "KeyR"` is shift/layout-independent.
+      const isRetryChord =
+        e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.code === "KeyR";
+      const isCancelKey =
+        e.key === "x" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+      if ((isRetryChord || isCancelKey) && selectedIdRef.current && !inBatchQueueRef.current) {
         const row = rowsByIdRef.current.get(selectedIdRef.current);
         if (!row) return;
         const actions = row.projection.actions;
-        if (e.key === "r") {
+        if (isRetryChord) {
           const retry = findEnabledAction(actions, "retry");
           if (!retry) return;
           e.preventDefault();

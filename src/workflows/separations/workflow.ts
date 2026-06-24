@@ -11,6 +11,7 @@ import {
   classifyNameSimilarity,
   correctNameSpelling,
 } from "../../services/matching/match.js";
+import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import { personLookupWorkflow } from "../person-lookup/index.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
@@ -98,8 +99,12 @@ const separationsSteps = [
   "kuali-extraction",
   "identity-check",
   "transaction-check",
-  "kronos-search",
+  // ucpath-job-summary now runs BEFORE kronos-search (2026-06-24): the
+  // Workforce Job Summary department is resolved + filled first, and its
+  // department gates kronos-search — non-HDH employees aren't timekept in New
+  // Kronos, so the timecard read is skipped for them. See the handler.
   "ucpath-job-summary",
+  "kronos-search",
   "ucpath-transaction",
   "kuali-finalization",
 ] as const;
@@ -117,15 +122,20 @@ export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  * `ctx.page(id)` awaits each system's ready promise, so phase-1 tasks start as
  * soon as their individual Duo clears (in approval order, not click order).
  *
- * Phase 1 (`kronos-search`) runs 3 tasks in parallel via `ctx.parallel`:
- *   - New Kronos timecard search (last physical punch + sick/holiday days)
- *   - UCPath Job Summary lookup
- *   - Kuali timekeeper name fill
- * Each task `await ctx.page(id)` first to block on its system's auth.
- *
- * Phase 2 (`ucpath-job-summary`): Kuali dept/payroll fill from the Job Summary.
- * Phase 3 (`ucpath-transaction`): Smart HR UC_VOL_TERM or UC_INVOL_TERM.
- * Phase 4 (`kuali-finalization`): write txn number back, fill date-change comments, save.
+ * Work-step order: `kuali-extraction → identity-check → transaction-check →
+ * ucpath-job-summary → kronos-search → ucpath-transaction → kuali-finalization`.
+ * The Workforce Job Summary is fetched inline before `identity-check` (it gates
+ * the identity verification AND resolves the department). `ucpath-job-summary`
+ * (Kuali dept/payroll fill) now runs BEFORE `kronos-search` (2026-06-24) so the
+ * department can gate the timecard read:
+ *   - `ucpath-job-summary`: Kuali dept/payroll fill from the Job Summary data.
+ *   - DEPARTMENT GATE: only Housing/Dining/Hospitality (HDH) employees are
+ *     timekept in New Kronos, so a non-HDH department SKIPS `kronos-search`
+ *     (dates fall back to the Kuali form).
+ *   - `kronos-search` (HDH only, 2-way `ctx.parallel`): New Kronos timecard
+ *     search (last physical punch + sick/holiday days) + Kuali timekeeper fill.
+ *   - `ucpath-transaction`: Smart HR UC_VOL_TERM or UC_INVOL_TERM.
+ *   - `kuali-finalization`: write txn number back, fill date-change comments, save.
  *
  * Batch mode (`runWorkflowBatch` sequential): the kernel calls `session.reset(id)`
  * between docs, which navigates each system's `resetUrl` so the next doc starts
@@ -427,8 +437,9 @@ export const separationsWorkflow = defineWorkflow({
 
     // ─── kronos date range — computed from the Kuali dates, which are stable
     // across EID verification, so it's safe to compute up front. kronos-search
-    // itself runs LATER (after identity-check + transaction-check), with the
-    // verified EID. ───
+    // itself runs LATER (after identity-check + transaction-check +
+    // ucpath-job-summary), with the verified EID — and only when the department
+    // gate didn't skip it (HDH employees only). ───
     const { startDate: kronosStart, endDate: kronosEnd } = computeKronosDateRange(
       kualiData.lastDayWorked, kualiData.separationDate,
     );
@@ -444,7 +455,7 @@ export const separationsWorkflow = defineWorkflow({
     };
     let newKronosFound = false;
 
-    // Two reasons converge to skip kronos-search — computed UP FRONT because the
+    // INPUT-based reasons to skip kronos-search — computed UP FRONT because the
     // Job-Summary fetch + identity-check below skip on the same conditions:
     //   1. Edit-and-resume prefilled `lastDayWorked` (existing path).
     //   2. Operator selected the "Transactions only" preset (asserts the Kuali
@@ -452,8 +463,14 @@ export const separationsWorkflow = defineWorkflow({
     // In both cases LDW falls back to `kualiData.lastDayWorked`, sick/holiday
     // stay empty, and the operator has asserted the data — so there's nothing to
     // verify (identity-check + the Job Summary fetch are skipped too).
+    //
+    // A THIRD, department-based reason is decided LATER (after the Job Summary
+    // fetch resolves the department): a NON-HDH employee isn't timekept in New
+    // Kronos, so there's no timecard to read — see the "Department gate" below.
+    // `identitySkipped` depends only on the input-based reasons here; the Job
+    // Summary fetch must still run to discover the department.
     const presetSkippedKronos = ctx.shouldSkipStep("kronos-search");
-    const kronosSkipped = lastDayWorkedPrefilled || presetSkippedKronos;
+    const kronosSkippedByInput = lastDayWorkedPrefilled || presetSkippedKronos;
 
     // ─── Step 2: identity-check — conditional name↔EID verification ───
     // The Workforce Job Summary (whether the EID resolved + the detail-page
@@ -474,7 +491,7 @@ export const separationsWorkflow = defineWorkflow({
     // On an EID correction we re-fetch the Job Summary (so dept/payroll is the
     // RIGHT person's). The New Kronos re-search is GONE: kronos-search runs below
     // with the corrected EID, so no re-search is needed.
-    const identitySkipped = txnNumberPrefilled || kronosSkipped;
+    const identitySkipped = txnNumberPrefilled || kronosSkippedByInput;
 
     let jobSummaryData: JobSummaryData | undefined;
     let jobSummaryFound = false;
@@ -606,16 +623,95 @@ export const separationsWorkflow = defineWorkflow({
       }
     }
 
-    // ─── Step 4: kronos-search (2-way parallel — New Kronos timecard + Kuali
+    // ─── Department gate: skip New Kronos for non-HDH employees (2026-06-24) ───
+    // Only Housing/Dining/Hospitality (HDH) employees are timekept in New
+    // Kronos, so there is no timecard to read for anyone else. Now that the
+    // Workforce Job Summary (fetched by the identity gate above) has resolved
+    // the department, a NON-HDH department means kronos-search is skipped and the
+    // dates fall back to the Kuali form — the SAME date model as the other
+    // kronos-skip paths (sep date derives to the Kuali Last Day Worked).
+    //
+    // FAIL-SAFE: we only skip on a POSITIVE non-HDH determination — Job Summary
+    // found the person AND returned a non-empty department AND it isn't HDH. When
+    // the department is unknown (no Job Summary fetch ran — prefill/preset/txn
+    // paths — or it came back empty) we still RUN kronos: silently skipping an
+    // actual HDH employee's timecard would produce wrong dates. HDH membership
+    // uses the canonical `isAcceptedHdhDepartment` (department-description keyword
+    // match), the same matcher person-lookup uses for HDH disposition.
+    const departmentDescription = jobSummaryData?.departmentDescription ?? "";
+    const departmentKnown = departmentDescription.trim().length > 0;
+    const departmentIsHdh =
+      departmentKnown && isAcceptedHdhDepartment(departmentDescription);
+    const nonHdhSkipsKronos = departmentKnown && !departmentIsHdh;
+    if (nonHdhSkipsKronos) {
+      log.step(
+        `[Dept gate] "${departmentDescription}" is not HDH (Housing/Dining/` +
+        `Hospitality) — skipping New Kronos timecard verification; dates fall ` +
+        `back to the Kuali form`,
+      );
+    } else if (departmentIsHdh) {
+      log.step(
+        `[Dept gate] "${departmentDescription}" is HDH — running New Kronos timecard verification`,
+      );
+    }
+    const kronosSkipped = kronosSkippedByInput || nonHdhSkipsKronos;
+
+    // ─── Step 4: ucpath-job-summary (now BEFORE kronos-search) — fill Kuali
+    // department/payroll from the UCPath Job Summary data fetched by the identity
+    // gate above (and re-fetched there on an EID correction). Moved AHEAD of
+    // kronos-search (2026-06-24) so the Workforce Job Summary department is
+    // resolved + filled before the timecard read, and so its department can gate
+    // kronos-search (the non-HDH skip above). The Kuali Termination Effective
+    // Date fill stays in kuali-finalization (a Kuali-side fill, not a UCPath
+    // lookup). The dept FILL is also robust to the later Kuali writes (the
+    // timekeeper-name fill + date write-backs that now follow it) — the same
+    // dropdown already survives kuali-finalization's edits today.
+    // Skipped when:
+    //   1. dryRun — the dept fill is a Kuali draft write we deliberately keep out
+    //      of dry-run (the dry-run terminal below already halts before the UCPath
+    //      submit + Kuali finalization). The department gate above already read
+    //      the department, so skipping the FILL here doesn't affect kronos.
+    //   2. No fillable Job Summary data — prefill / preset / identity-skipped
+    //      paths leave `jobSummaryData` undefined or empty.
+    //   3. Operator selected the "Transactions only" preset (asserted dept/payroll
+    //      are already in the Kuali form).
+    const hasUcpathFillData =
+      !!jobSummaryData &&
+      (!!jobSummaryData.departmentDescription || !!jobSummaryData.jobCode);
+    const presetSkippedJobSummary = ctx.shouldSkipStep("ucpath-job-summary");
+    if (input.dryRun || !hasUcpathFillData || presetSkippedJobSummary) {
+      ctx.skipStep("ucpath-job-summary");
+      log.step(
+        input.dryRun
+          ? `[Step: ucpath-job-summary] SKIPPED — dry run (no Kuali department fill)`
+          : presetSkippedJobSummary
+            ? `[Step: ucpath-job-summary] SKIPPED — run mode 'Transactions only' ` +
+              `(operator asserts Kuali form has dept/payroll filled)`
+            : lastDayWorkedPrefilled
+              ? `[Step: ucpath-job-summary] SKIPPED — manual input from edit-data ` +
+                `(lastDayWorked prefilled, no UCPath fetch ran)`
+              : `[Step: ucpath-job-summary] SKIPPED — UCPath Job Summary returned no fillable data`,
+      );
+    } else {
+      const kualiPageForDept = await ctx.page("kuali");
+      await ctx.step("ucpath-job-summary", () =>
+        runUcpathJobSummary(kualiPageForDept, jobSummaryData!, kualiData.eid),
+      );
+    }
+
+    // ─── Step 5: kronos-search (2-way parallel — New Kronos timecard + Kuali
     // timekeeper fill; the Job Summary moved up to the identity gate above) ───
     if (kronosSkipped) {
       ctx.skipStep("kronos-search");
       log.step(
-        presetSkippedKronos
-          ? `[Step: kronos-search] SKIPPED — run mode 'Transactions only' ` +
-            `(operator asserts Kuali dates are correct — using kualiData.lastDayWorked='${kualiData.lastDayWorked}')`
-          : `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
-            `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`,
+        lastDayWorkedPrefilled
+          ? `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
+            `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`
+          : presetSkippedKronos
+            ? `[Step: kronos-search] SKIPPED — run mode 'Transactions only' ` +
+              `(operator asserts Kuali dates are correct — using kualiData.lastDayWorked='${kualiData.lastDayWorked}')`
+            : `[Step: kronos-search] SKIPPED — department "${departmentDescription}" is not HDH ` +
+              `(not timekept in New Kronos — using Kuali dates, lastDayWorked='${kualiData.lastDayWorked}')`,
       );
       try {
         const kp = await ctx.page("kuali");
@@ -738,20 +834,23 @@ export const separationsWorkflow = defineWorkflow({
     // finalization save (`runKualiFinalize`, inside `kuali-finalization`).
     // Onboarding's dry-run only had to guard its single final UCPath submit;
     // separations halts before BOTH committing steps AND before the
-    // pre-submit Kuali form writes (date corrections + dept/payroll fill) that
-    // would otherwise start at the next line. The full READ path has already
-    // run by here — 3-system auth (3 Duos), Kuali extraction, the UCPath Job
-    // Summary identity gate, the transaction-check SS Smart HR search, Kronos
-    // search, and date reconciliation — so a dry run exercises everything except
-    // the writes. Result: no UCPath transaction is created, no pending
-    // transaction is deleted (transaction-check guards its delete on dryRun), and
-    // the Kuali document is never finalized.
+    // pre-submit Kuali date write-backs that would otherwise start at the next
+    // line. The full READ path has already run by here — 3-system auth (3 Duos),
+    // Kuali extraction, the UCPath Job Summary identity gate, the
+    // transaction-check SS Smart HR search, the department gate, Kronos search,
+    // and date reconciliation — so a dry run exercises everything except the
+    // writes. Result: no UCPath transaction is created, no pending transaction is
+    // deleted (transaction-check guards its delete on dryRun), and the Kuali
+    // document is never finalized.
+    // `ucpath-job-summary` (the Kuali dept/payroll fill) now runs BEFORE this
+    // terminal — it skips itself on the dryRun branch above, so the dry-run path
+    // still does no department fill; the terminal only needs to skip the two
+    // remaining steps.
     // (Two benign residuals on the UNSUBMITTED Kuali draft — neither commits:
     // the timekeeper-name fill bundled into `kronos-search`, and the `similar`
     // identity-check name correction — mirroring onboarding's pre-submit I-9
     // create.)
     if (input.dryRun) {
-      ctx.skipStep("ucpath-job-summary");
       ctx.skipStep("ucpath-transaction");
       ctx.skipStep("kuali-finalization");
       await ctx.screenshot({ kind: "form", label: "separations-dry-run-before-submit" });
@@ -806,38 +905,9 @@ export const separationsWorkflow = defineWorkflow({
       log.step("[Dates] No Separation Date change needed");
     }
 
-    // ─── Step 5: ucpath-job-summary — fill Kuali department/payroll from
-    // the UCPath Job Summary data fetched by the identity gate above (and
-    // re-fetched there on an EID correction). The Kuali Termination Effective
-    // Date fill moved to kuali-finalization (where it belongs — it's a Kuali-
-    // side fill, not a UCPath lookup). The step is therefore skipped when no
-    // UCPath data is available, which also covers the prefill/preset paths
-    // (identitySkipped → no Job Summary fetch → jobSummaryData undefined).
-    const hasUcpathFillData = !!jobSummaryData &&
-      (!!jobSummaryData.departmentDescription || !!jobSummaryData.jobCode);
-    // Three reasons to skip ucpath-job-summary:
-    //   1. No fillable data from the identity-gate Job Summary fetch (existing).
-    //   2. Edit-and-resume prefilled lastDayWorked → identity gate skipped →
-    //      jobSummaryData is undefined (existing).
-    //   3. Operator selected the "Transactions only" preset (new) — they
-    //      asserted dept/payroll are already in the Kuali form.
-    const presetSkippedJobSummary = ctx.shouldSkipStep("ucpath-job-summary");
-    if (!hasUcpathFillData || presetSkippedJobSummary) {
-      ctx.skipStep("ucpath-job-summary");
-      log.step(
-        presetSkippedJobSummary
-          ? `[Step: ucpath-job-summary] SKIPPED — run mode 'Transactions only' ` +
-            `(operator asserts Kuali form has dept/payroll filled)`
-          : lastDayWorkedPrefilled
-            ? `[Step: ucpath-job-summary] SKIPPED — manual input from edit-data ` +
-              `(lastDayWorked prefilled, no UCPath fetch ran)`
-            : `[Step: ucpath-job-summary] SKIPPED — UCPath Job Summary returned no fillable data`,
-      );
-    } else {
-      await ctx.step("ucpath-job-summary", () =>
-        runUcpathJobSummary(kualiPage, jobSummaryData!, kualiData.eid),
-      );
-    }
+    // (ucpath-job-summary — the Kuali department/payroll fill — already ran
+    // above, BEFORE kronos-search; see "Step 4". Its department also gated the
+    // kronos-search skip. Nothing to do here.)
 
     // ─── Step 6: UCPath Smart HR Transaction ───
     // TODO(separations): explicitly set UCPath Last Date Worked = lastDayWorked

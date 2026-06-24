@@ -689,25 +689,25 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
           {showFormType && !effectiveLockedFormType && !reuploadFor && formOptions.length > 0 && (
             <section>
-              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
+              <label
+                htmlFor="ocr-form-type"
+                className="block text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground"
+              >
                 Form type
-              </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              </label>
+              <select
+                id="ocr-form-type"
+                value={formType ?? ""}
+                onChange={(e) => setFormType(e.target.value)}
+                disabled={submitting}
+                className="w-full h-9 rounded-md border border-border bg-secondary/40 px-2.5 text-[13px] text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 {formOptions.map((opt) => (
-                  <label key={opt.formType} className="flex shrink-0 items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="formType"
-                      value={opt.formType}
-                      checked={formType === opt.formType}
-                      onChange={() => setFormType(opt.formType)}
-                      disabled={submitting}
-                      className="accent-primary"
-                    />
-                    <span className="text-[13px] font-medium">{opt.label}</span>
-                  </label>
+                  <option key={opt.formType} value={opt.formType}>
+                    {opt.label}
+                  </option>
                 ))}
-              </div>
+              </select>
             </section>
           )}
           <section>
