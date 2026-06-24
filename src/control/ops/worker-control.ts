@@ -1,13 +1,21 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { request as httpRequest } from "http";
 import { join } from "path";
+import { randomUUID } from "node:crypto";
+
 import {
   findAliveDaemons,
+  filterPeersAvailableForHandoff,
   spawnDaemon,
   daemonsDir,
   invalidateAliveDaemonsCache,
 } from "../../core/daemon/registry.js";
-import { queueFilePath, markItemFailed } from "../../core/daemon/queue.js";
+import {
+  queueFilePath,
+  markItemFailed,
+  markItemFailedIfActive,
+  readQueueState,
+} from "../../core/daemon/queue.js";
 import { stopDaemons, stopDaemon } from "../../core/daemon/client.js";
 import type { Daemon } from "../../core/daemon/types.js";
 import type { BrowserProcessRow, WorkerRow } from "../../core/daemon/worker-store.js";
@@ -618,6 +626,58 @@ async function failDirectKilledInstanceClaim(
 }
 
 /**
+ * After a direct-kill stop with NO peer available to absorb them, fail the
+ * workflow's never-claimed QUEUED items too. The direct kill bypassed the
+ * daemon's own graceful queued sweep, so without this they sit `queued` until
+ * the dashboard's ~5-min orphan sweep (E2E-105 for the no-daemon-process path).
+ * Cross-process-safe via `markItemFailedIfActive` (terminal_at IS NULL guard),
+ * so a concurrent dead-worker recovery can't double-terminalize. Best-effort;
+ * returns the number of queued items it terminalized. Caller must have already
+ * confirmed no peer is available for hand-off.
+ */
+async function failDirectKilledInstanceQueue(
+  dir: string,
+  workflow: string,
+): Promise<number> {
+  const failReason =
+    "No daemon available to run this item — the instance was stopped (direct kill, no peer to absorb the queue).";
+  let failed = 0;
+  try {
+    const queueState = await readQueueState(workflow, dir);
+    for (const item of queueState.queued) {
+      const runId = item.runId ?? randomUUID();
+      let won: boolean;
+      try {
+        won = await markItemFailedIfActive(workflow, item.id, failReason, runId, dir);
+      } catch {
+        won = true;
+      }
+      if (!won) continue;
+      try {
+        emitInheritedRow({
+          workflow,
+          trackerDir: dir,
+          id: item.id,
+          runId,
+          status: "failed",
+          error: failReason,
+          ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+        });
+      } catch {
+        // PriorTrackerRowNotFoundError — the queue-audit fail above is still the
+        // authoritative signal.
+      }
+      failed += 1;
+    }
+  } catch (err) {
+    log.warn(
+      `[stop-instance] failed to sweep queued items after direct kill for '${workflow}': ${errorMessage(err)}`,
+    );
+  }
+  return failed;
+}
+
+/**
  * Grace window for a gracefully-stopped daemon to emit its OWN `workflow_end`
  * before the per-instance stop synthesizes a fallback one. The daemon emits its
  * end a few tens of ms after acknowledging `/stop` (observed ~64ms), but its
@@ -742,6 +802,22 @@ export function buildStopDaemonInstanceHandler(dir: string) {
         log.step(
           `[stop-instance] direct kill of '${instance}' (pid=${pid}) — failed orphaned in-flight item '${failedItemId}'`,
         );
+      }
+      // The direct kill also bypassed the daemon's own queued sweep. If NO peer
+      // survives to absorb them, terminalize this workflow's never-claimed
+      // queued items here too (E2E-105 for the no-process path) instead of
+      // leaving them queued until the ~5-min dashboard orphan sweep. A genuinely
+      // surviving peer (responsive AND not shutting down) is left to claim them.
+      const survivors = alive.filter((d) => d.pid !== pid);
+      const handoffPeers =
+        survivors.length > 0 ? await filterPeersAvailableForHandoff(survivors) : [];
+      if (handoffPeers.length === 0) {
+        const failedQueued = await failDirectKilledInstanceQueue(dir, workflow);
+        if (failedQueued > 0) {
+          log.step(
+            `[stop-instance] direct kill of '${instance}' — also failed ${failedQueued} never-claimed queued item(s) (no peer to absorb them)`,
+          );
+        }
       }
     }
 
