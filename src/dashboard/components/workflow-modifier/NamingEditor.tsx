@@ -1,6 +1,7 @@
 import type { NamingConfig, TitleSchemeId, SubtitleSchemeId, TraceSchemeId } from "../../../domain/workflow-presentation/types.js";
 import type { WorkflowPresentationDetail, WorkflowOverride } from "./useWorkflowPresentation.js";
 import { SchemePartSelect } from "./SchemePartSelect.js";
+import { OverrideField } from "./OverrideField.js";
 
 interface Props {
   data: WorkflowPresentationDetail;
@@ -10,8 +11,11 @@ interface Props {
 
 export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
   const lib = data.schemeLibrary;
+  // Current displayed value = draft ?? effective (base ⊕ saved override)
   const naming: NamingConfig =
     draft.presentation?.naming ?? data.effective.presentation?.naming ?? {};
+  // Base defaults (code defaults)
+  const baseNaming: NamingConfig = data.base.presentation?.naming ?? {};
 
   const setPart = (
     part: "title" | "subtitle" | "trace",
@@ -21,14 +25,36 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
     onChange({ ...draft, presentation: { ...(draft.presentation ?? {}), naming: next } });
   };
 
-  return (
-    <section className="rounded-md border border-border p-4">
-      <h3 className="text-sm font-semibold mb-3">Naming</h3>
+  const resetPart = (part: "title" | "subtitle" | "trace") => {
+    const next: NamingConfig = { ...naming };
+    delete next[part];
+    const hasMeaningful = Object.keys(next).length > 0;
+    const nextPresentation = { ...(draft.presentation ?? {}), naming: hasMeaningful ? next : undefined };
+    onChange({ ...draft, presentation: nextPresentation });
+  };
 
-      <div className="mb-3">
+  // Modified ⟺ the leaf is present in draft
+  const titleModified = draft.presentation?.naming?.title !== undefined;
+  const subtitleModified = draft.presentation?.naming?.subtitle !== undefined;
+  const traceModified = draft.presentation?.naming?.trace !== undefined;
+
+  const schemeLabel = (scheme: string | undefined, pool: { id: string; label: string }[]): string | undefined => {
+    if (!scheme) return undefined;
+    return pool.find((s) => s.id === scheme)?.label ?? scheme;
+  };
+
+  return (
+    <div className="space-y-5">
+      <OverrideField
+        label="Title"
+        htmlFor="naming-title"
+        modified={titleModified}
+        defaultHint={schemeLabel(baseNaming.title?.scheme, lib.title)}
+        onReset={() => resetPart("title")}
+      >
         <SchemePartSelect
           id="naming-title"
-          label="Title"
+          label=""
           options={lib.title}
           value={naming.title}
           allowUnset={false}
@@ -38,12 +64,18 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
             setPart("title", next ? { scheme: next.scheme as TitleSchemeId, template: next.template } : undefined)
           }
         />
-      </div>
+      </OverrideField>
 
-      <div className="mb-3">
+      <OverrideField
+        label="Subtitle"
+        htmlFor="naming-subtitle"
+        modified={subtitleModified}
+        defaultHint={schemeLabel(baseNaming.subtitle?.scheme, lib.subtitle)}
+        onReset={() => resetPart("subtitle")}
+      >
         <SchemePartSelect
           id="naming-subtitle"
-          label="Subtitle"
+          label=""
           options={lib.subtitle}
           value={naming.subtitle}
           allowUnset={false}
@@ -53,12 +85,18 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
             setPart("subtitle", next ? { scheme: next.scheme as SubtitleSchemeId, template: next.template } : undefined)
           }
         />
-      </div>
+      </OverrideField>
 
-      <div className="mb-1">
+      <OverrideField
+        label="Trace id"
+        htmlFor="naming-trace"
+        modified={traceModified}
+        defaultHint={schemeLabel(baseNaming.trace?.scheme, lib.trace)}
+        onReset={() => resetPart("trace")}
+      >
         <SchemePartSelect
           id="naming-trace"
-          label="Trace id"
+          label=""
           options={lib.trace}
           value={naming.trace}
           allowUnset={false}
@@ -69,7 +107,7 @@ export function NamingEditor({ data, draft, onChange }: Props): JSX.Element {
             setPart("trace", next ? { scheme: next.scheme as TraceSchemeId, template: next.template } : undefined)
           }
         />
-      </div>
-    </section>
+      </OverrideField>
+    </div>
   );
 }
