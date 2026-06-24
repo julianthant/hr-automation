@@ -142,3 +142,12 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `jobSummary.workLocationTab` + `extractWorkLocation`/`pickWorkLocationRow` in `job-summary.ts`
 **Tags:** job-summary, work-location, department, effective-date, separation, transfer, kronos-gate
 **References:** `src/workflows/separations/CLAUDE.md` "Department gate"; `tests/unit/systems/ucpath/job-summary.test.ts`
+
+## 2026-06-24 — SS Smart HR results grid: header-only scan misses the row under PeopleSoft nesting
+
+**Tried:** `scanSsSmartHrResults` located the data table by a header row carrying "Transaction ID" + "Action" + "Approval Status", then mapped data columns by that header's positions.
+**Failed because:** PeopleSoft can split the header and data into separate tables / nest cells, so the single-table header+data assumption found no rows. Live: an APPROVED TER for EID 10759273 ("Ava Tolles") was present (5 results visible) but returned empty, so separations' transaction-check fell through to "none", created a duplicate termination, and UCPath rejected the Empl ID ("UCPath did not recognize Empl ID").
+**Fix:** The DOM step now only collects a cell-text matrix (each `<tr>`'s direct `:scope > td/th`); the parse is the pure `parseSsSmartHrRows` (unit-pinned) running TWO passes deduped by T-id — (A) header-keyed when a clean header exists, then (B) a header-INDEPENDENT pattern pass: any row with a T-id cell (`^T\d{4,}$`) + a status keyword, plus a 3-letter action code when present (so 5-letter BU "SDCMP" is never mistaken for the action). A debug log lists every scanned `T#=action/status` for live verification.
+**Selector:** `ssSmartHRTransactions.*` + `parseSsSmartHrRows`/`scanSsSmartHrResults` in `ss-smart-hr.ts`
+**Tags:** ss-smart-hr, transaction, termination, ter, grid, scan, header, nested-table, approval-status
+**References:** `src/workflows/separations/CLAUDE.md` "Transaction check"; `tests/unit/systems/ucpath/ss-smart-hr.test.ts`

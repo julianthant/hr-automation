@@ -22,10 +22,11 @@ import { safeClick, safeFill } from "../common/index.js";
  * whether to create a new UCPath transaction, delete a pending one, or reuse an
  * already-approved one.
  *
- * NEEDS LIVE VERIFY: the results-grid scan (`scanSsSmartHrResults`) and the
- * post-search settle were authored against the screenshots of the live page;
- * the header-keyed column mapping must be confirmed against the real grid
- * (PeopleSoft nests tables and can split header/data rows).
+ * NEEDS LIVE VERIFY: the post-search settle timing was authored against the
+ * screenshots of the live page. The results-grid PARSE is now dual-pass and
+ * tolerant of PeopleSoft's nested/split tables — header-keyed first, then a
+ * header-independent pattern pass (T-id + action + status within a row) — and
+ * the parse half is pure + unit-pinned (`parseSsSmartHrRows`).
  */
 
 /** One parsed row of the SS Smart HR Transactions search-results grid. */
@@ -116,6 +117,10 @@ export async function findTerminationTransactionStatus(
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
   const rows = await scanSsSmartHrResults(frame);
+  log.debug(
+    `[SS Smart HR] Scanned ${rows.length} transaction row(s): ` +
+    (rows.map((r) => `${r.transactionId}=${r.action}/${r.approvalStatus}`).join(", ") || "<none>"),
+  );
   const ter = pickTerminationRow(rows);
   if (!ter) {
     log.step(
@@ -131,48 +136,89 @@ export async function findTerminationTransactionStatus(
   return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus };
 }
 
+/** PeopleSoft transaction id, e.g. "T002168976". */
+const SS_TXN_ID_RE = /^T\d{4,}$/i;
+/** A 3-letter action code (TER / HIR / REH / XFR …) — excludes BU "SDCMP" (5). */
+const SS_ACTION_RE = /^[A-Z]{3}$/;
+/** Approval-status keywords seen on the SS Smart HR grid. */
+const SS_STATUS_RE =
+  /^(approved|pending|denied|cancel(?:l?ed)?|error|pushed\s*back|manually\s*processed|processed|saved|recycled|needs?\s*(?:review|correction))$/i;
+
 /**
- * Scan the SS Smart HR Transactions results grid into parsed rows. Locates the
- * data table by its header (a row carrying "Transaction ID", "Action", and
- * "Approval Status" cells), then maps those columns by header position so the
- * parse survives column reordering. Returns `[]` on any failure.
+ * Parse the SS Smart HR Transactions results grid (collected as a cell-text
+ * matrix — one inner array per `<tr>`) into transaction rows. PURE + unit-pinned
+ * so the parse is testable without a browser.
+ *
+ * Two passes, deduped by transaction id (first occurrence wins — the grid lists
+ * newest first):
+ *   A. HEADER-KEYED — find the header row (cells carrying "Transaction ID",
+ *      "Action", "Approval Status"), map those columns by position, read the
+ *      data rows whose mapped Transaction ID column looks like a real T-id.
+ *   B. PATTERN (header-independent) — any row carrying a T-id cell + a status
+ *      keyword (and, when present, a 3-letter action code), regardless of column
+ *      order or a missing/merged header. This is what makes the parse survive
+ *      PeopleSoft nesting/splitting that broke the header-only scan (an APPROVED
+ *      TER for EID 10759273 was missed live → transaction-check wrongly created a
+ *      duplicate that UCPath then rejected, 2026-06-24).
+ */
+export function parseSsSmartHrRows(rows: string[][]): SsSmartHrRow[] {
+  const norm = (s: string): string => (s ?? "").replace(/\s+/g, " ").trim();
+  const out: SsSmartHrRow[] = [];
+  const seen = new Set<string>();
+
+  // Pass A — header-keyed.
+  let headerIdx = -1, txIdx = -1, actIdx = -1, statIdx = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const cells = rows[i].map(norm);
+    const tx = cells.findIndex((t) => /transaction id/i.test(t));
+    const act = cells.findIndex((t) => /^action$/i.test(t));
+    const st = cells.findIndex((t) => /approval\s*status/i.test(t));
+    if (tx >= 0 && act >= 0 && st >= 0) {
+      headerIdx = i; txIdx = tx; actIdx = act; statIdx = st;
+      break;
+    }
+  }
+  if (headerIdx >= 0) {
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const cells = rows[i].map(norm);
+      if (cells.length <= Math.max(txIdx, actIdx, statIdx)) continue;
+      const transactionId = cells[txIdx] ?? "";
+      if (!SS_TXN_ID_RE.test(transactionId) || seen.has(transactionId)) continue;
+      seen.add(transactionId);
+      out.push({ transactionId, action: cells[actIdx] ?? "", approvalStatus: cells[statIdx] ?? "" });
+    }
+  }
+
+  // Pass B — pattern fallback (header-independent).
+  for (const raw of rows) {
+    const cells = raw.map(norm);
+    const transactionId = cells.find((c) => SS_TXN_ID_RE.test(c)) ?? "";
+    if (!transactionId || seen.has(transactionId)) continue;
+    const approvalStatus = cells.find((c) => SS_STATUS_RE.test(c)) ?? "";
+    if (!approvalStatus) continue;
+    const action = cells.find((c) => SS_ACTION_RE.test(c)) ?? "";
+    seen.add(transactionId);
+    out.push({ transactionId, action, approvalStatus });
+  }
+
+  return out;
+}
+
+/**
+ * Scan the SS Smart HR Transactions results grid. The DOM step only collects a
+ * cell-text matrix (each `<tr>`'s direct cells); the dual-pass parse is the pure
+ * `parseSsSmartHrRows`. Returns `[]` on any failure.
  */
 async function scanSsSmartHrResults(frame: FrameLocator): Promise<SsSmartHrRow[]> {
-  return await frame.locator("body").evaluate((body) => { // allow-inline-selector -- body scan for SS Smart HR results grid
-    const norm = (s: string | null): string => (s ?? "").replace(/\s+/g, " ").trim();
-    const tables = Array.from(body.querySelectorAll("table"));
-    for (const table of tables) {
-      const rows = Array.from((table as HTMLTableElement).rows);
-      let headerIdx = -1;
-      let txIdx = -1;
-      let actIdx = -1;
-      let statIdx = -1;
-      for (let i = 0; i < rows.length; i++) {
-        const cells = Array.from(rows[i].cells).map((c) => norm(c.textContent));
-        const tx = cells.findIndex((t) => /transaction id/i.test(t));
-        const act = cells.findIndex((t) => /^action$/i.test(t));
-        const st = cells.findIndex((t) => /approval\s*status/i.test(t));
-        if (tx >= 0 && act >= 0 && st >= 0) {
-          headerIdx = i;
-          txIdx = tx;
-          actIdx = act;
-          statIdx = st;
-          break;
-        }
-      }
-      if (headerIdx < 0) continue;
-      const out: Array<{ transactionId: string; action: string; approvalStatus: string }> = [];
-      for (let i = headerIdx + 1; i < rows.length; i++) {
-        const cells = Array.from(rows[i].cells).map((c) => norm(c.textContent));
-        if (cells.length <= Math.max(txIdx, actIdx, statIdx)) continue;
-        const transactionId = cells[txIdx] ?? "";
-        const action = cells[actIdx] ?? "";
-        const approvalStatus = cells[statIdx] ?? "";
-        if (!transactionId && !action && !approvalStatus) continue;
-        out.push({ transactionId, action, approvalStatus });
-      }
-      if (out.length) return out;
+  const matrix = await frame.locator("body").evaluate((body) => { // allow-inline-selector -- body scan for SS Smart HR results grid
+    const out: string[][] = [];
+    for (const tr of Array.from(body.querySelectorAll("tr"))) {
+      const cells = Array.from(tr.querySelectorAll(":scope > th, :scope > td")).map(
+        (c) => (c.textContent ?? "").replace(/\s+/g, " ").trim(),
+      );
+      if (cells.length) out.push(cells);
     }
-    return [];
-  }).catch(() => []);
+    return out;
+  }).catch(() => [] as string[][]);
+  return parseSsSmartHrRows(matrix);
 }
