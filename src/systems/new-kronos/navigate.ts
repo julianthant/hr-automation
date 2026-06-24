@@ -270,20 +270,63 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
     return false;
   }
 
-  await gotoButton.click({ timeout: 5_000 });
-  await page.waitForTimeout(2_000);
-
-  // Click Timecard/Timecards in the dropdown menu (6-deep fallback)
+  // Open the dropdown, then WAIT for the Timecard option to actually render
+  // before clicking — do NOT sleep a fixed 2s and check once. The old fixed
+  // `waitForTimeout(2000)` + one-shot `clickIfPresent` raced the Angular
+  // dropdown render: the FIRST found employee in a session rendered within 2s
+  // (worked), but every SUBSEQUENT employee in a batch — heavier, already-loaded
+  // WFD session — rendered the option slower, so `timecardItem.count()` was 0 at
+  // the fixed checkpoint, `clickIfPresent` returned false in ~0.1s, and the run
+  // silently fell back to the Kuali dates with the dropdown left open over the
+  // PREVIOUS employee's timecard (2026-06-24). Condition-based waiting + one
+  // dropdown re-open (the open click can be swallowed mid-render) fixes it.
   const timecardItem = goToMenu.timecardItem(page);
+  await gotoButton.click({ timeout: 5_000 });
 
-  if (await clickIfPresent(timecardItem, { timeout: 5_000, label: "new kronos timecard menu item" })) {
-    // Wait for the Timecard view to render (reduced from 5s).
+  const totalDeadline = Date.now() + 15_000;
+  let reopened = false;
+  while (Date.now() < totalDeadline) {
+    try {
+      // Wait for the option to be present AND visible (not just attached) so we
+      // never click a stale/hidden element. First window is generous; if it
+      // elapses with no option, re-open the dropdown once and wait longer.
+      await timecardItem
+        .first()
+        .waitFor({ state: "visible", timeout: reopened ? 6_000 : 5_000 });
+    } catch {
+      if (!reopened) {
+        log.warn("[New Kronos] Timecard option not visible yet — re-opening the Go To dropdown");
+        reopened = true;
+        try {
+          await gotoButton.click({ timeout: 5_000 });
+        } catch {
+          // best-effort re-open; the next waitFor decides success/failure
+        }
+        await page.waitForTimeout(500);
+        continue;
+      }
+      break;
+    }
+
+    // Option is rendered — click it. A failure here is real (not a missing
+    // element), so fall through to the error return rather than spin.
+    try {
+      await safeClick(timecardItem.first(), {
+        timeout: 5_000,
+        label: "new kronos timecard menu item",
+      });
+    } catch {
+      break;
+    }
+    // Wait for the Timecard view to render.
     await page.waitForTimeout(2_500);
     log.success("[New Kronos] Navigated to Timecard");
     return true;
   }
 
-  log.error("[New Kronos] Timecard option not found in Go To menu");
+  log.error(
+    "[New Kronos] Timecard option never rendered in the Go To menu — could not open the timecard",
+  );
   return false;
 }
 

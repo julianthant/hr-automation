@@ -44,7 +44,23 @@ export async function runNewKronosTimecard(
   if (!found) return { found: false, ...EMPTY_TIMECARD };
   await selectNewKronosResult(page);
   const okTimecard = await clickNewKronosGoToTimecard(page);
-  if (!okTimecard) return { found: true, ...EMPTY_TIMECARD };
+  if (!okTimecard) {
+    // The employee WAS found in New Kronos but the Go To → Timecard navigation
+    // failed — a MECHANICAL failure, NOT "this person has no Kronos timecard".
+    // Returning an empty timecard here used to SILENTLY fall the handler back to
+    // the Kuali Last Day Worked for an HDH employee who DOES have a timecard (the
+    // timecard is ground truth for the LDW), while the browser stayed on the
+    // PREVIOUS employee's timecard. Fail loud instead so the operator sees it,
+    // rather than masquerading as "no punches found". New Kronos runs in a
+    // settled `ctx.parallel` block, so this throw is logged + non-fatal (the run
+    // still completes on the Kuali fallback) — but it is now VISIBLE, not
+    // swallowed. (2026-06-24)
+    throw new Error(
+      `[New Kronos] EID ${eid} was found but the Go To → Timecard navigation failed — ` +
+      `could not open the timecard to read the last punch / sick / holiday days. ` +
+      `Not silently using the Kuali dates for a found HDH employee.`,
+    );
+  }
   await page.waitForTimeout(3_000);
   await setNewKronosDateRange(page, kronosStart, kronosEnd);
   const timecard = await getSeparationTimecardData(page);
