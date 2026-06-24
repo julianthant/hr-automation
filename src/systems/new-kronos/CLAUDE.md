@@ -27,6 +27,8 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 Call it AFTER `clickGoToTimecard` + `setDateRange` so the grid shows the right window. Separations consumes `lastPunchDate` for the LDW and `sickDates` / `holidayDates` for the termination-comment clause only (they never change a date). See `src/workflows/separations/CLAUDE.md` "Date model".
 
+**Verify the employee before reading.** `verifyTimecardEmployee(page, eid)` (call right after `clickGoToTimecard`, before `getSeparationTimecardData`) confirms the OPEN timecard belongs to the searched EID — Go To → Timecard can leave the previous employee's timecard on screen (stale selection). It closes the search slide-out, then polls the top-level timecard text for the searched EID. Separations throws on a miss (visible, non-fatal). See LESSONS.md (2026-06-24, stale timecard).
+
 ## Gotchas
 
 - Uses modern `getByRole()` API (more maintainable than CSS selectors)

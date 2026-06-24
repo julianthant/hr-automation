@@ -3,6 +3,7 @@ export {
   closeEmployeeSearch,
   selectEmployeeResult,
   clickGoToTimecard,
+  verifyTimecardEmployee,
   switchToPreviousPayPeriod,
   setDateRange,
   getTimecardLastDate,
@@ -11,6 +12,6 @@ export {
   scrollTimecardToDate as scrollNewKronosTimecardToDate,
   NEW_KRONOS_URL,
 } from "./navigate.js";
-export type { SeparationTimecardData } from "./navigate.js";
+export type { SeparationTimecardData, TimecardEmployeeCheck } from "./navigate.js";
 
 export { newKronosSelectors } from "./selectors.js";
