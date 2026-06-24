@@ -44,6 +44,38 @@ export function computeTerminationEffDate(separationDate: string): string {
 }
 
 /**
+ * Compute the Separation Date from the New Kronos timecard.
+ *
+ * Separation Date = the last day the employee was PAID for — worked OR on paid
+ * leave = `max(lastDayWorked, last sick date, last holiday date)`. With no
+ * sick/holiday leave the result collapses to `lastDayWorked` ("usually the same
+ * as the last day worked"); leave moves it forward to the latest leave date.
+ *
+ * `lastDayWorked` is the already-reconciled Last Day Worked (New Kronos last
+ * physical punch, falling back to Kuali's LDW when Kronos has no punch / was
+ * skipped), so the no-Kronos path naturally yields the Kuali Last Day Worked.
+ *
+ * All dates are MM/DD/YYYY. The result is never earlier than `lastDayWorked`
+ * (it seeds the max), so a stray earlier leave date can't pull it backwards.
+ */
+export function computeSeparationDate(
+  lastDayWorked: string,
+  sickDates: string[] = [],
+  holidayDates: string[] = [],
+): string {
+  let latest = lastDayWorked;
+  let latestTime = parseDate(lastDayWorked).getTime();
+  for (const d of [...sickDates, ...holidayDates]) {
+    const t = parseDate(d).getTime();
+    if (t > latestTime) {
+      latest = d;
+      latestTime = t;
+    }
+  }
+  return latest;
+}
+
+/**
  * Build the comments text for the UCPath termination transaction.
  *
  * Base form: `Termination eff <eff>. Last Day Worked <ldw>.` then, when present,
@@ -186,6 +218,15 @@ function formatMmDdYyyy(d: Date): string {
 }
 
 /**
+ * Today's date as zero-padded MM/DD/YYYY (local time). Used for the
+ * duplicate-termination comment's date stamp. `now` is injectable so tests can
+ * pin a fixed date — handlers call it argument-less.
+ */
+export function todayMmDdYyyy(now: Date = new Date()): string {
+  return formatMmDdYyyy(now);
+}
+
+/**
  * Compute the Kronos date range for timecard search.
  * Start = min(lastDayWorked, separationDate) - 1 month
  * End   = max(lastDayWorked, separationDate) + 1 month
@@ -211,12 +252,11 @@ export function computeKronosDateRange(
 }
 
 /**
- * Build the date-change comment for the Timekeeper/Approver Comments field.
- *
- * Only the Last Day Worked can change now (the New Kronos last physical punch
- * overrides Kuali's LDW). The Separation Date is Kuali-authoritative and is
- * never overridden, so there is no separation-date branch. Returns an empty
- * string when the LDW did not change.
+ * Build the Last-Day-Worked date-change comment for the Timekeeper/Approver
+ * Comments field. The New Kronos last physical punch overrides Kuali's LDW;
+ * this records that change. Returns an empty string when the LDW did not
+ * change. The Separation Date change has its own builder
+ * (`buildSeparationDateChangeComment`) — the two are joined in kuali-finalize.
  */
 export function buildDateChangeComments(
   originalLastDay: string,
@@ -225,6 +265,58 @@ export function buildDateChangeComments(
 ): string {
   if (originalLastDay === newLastDay) return "";
   return `Updated Last Day Worked from ${originalLastDay} to ${newLastDay} per Kronos timesheet. -${initials}`;
+}
+
+/**
+ * Build the Separation-Date date-change comment for the Timekeeper/Approver
+ * Comments field. The Separation Date is now derived from the New Kronos
+ * timecard (last day worked, extended by sick/holiday leave) rather than taken
+ * verbatim from Kuali, so it can differ from the requester's entry; this
+ * records that change. Returns an empty string when it did not change.
+ */
+export function buildSeparationDateChangeComment(
+  originalSeparationDate: string,
+  newSeparationDate: string,
+  initials: string,
+): string {
+  if (originalSeparationDate === newSeparationDate) return "";
+  return `Updated Separation Date from ${originalSeparationDate} to ${newSeparationDate} per Kronos timesheet. -${initials}`;
+}
+
+/**
+ * Build the two-line "duplicate termination" comment for the Kuali
+ * Timekeeper/Approver Comments field, filed when the `transaction-check` step
+ * finds an ALREADY-APPROVED UCPath termination (TER) transaction for this
+ * employee. The UCPath termination is reused (no new transaction is created),
+ * so the Kuali form is finalized with the existing transaction number plus this
+ * audit note. Format (operator-provided, Image 7):
+ *
+ *   Duplicate termination. Re Kuali Form #<docId>. -<initials> <today>
+ *   EE termination approved on UCPath. -<initials> <today>
+ *
+ * `today` is MM/DD/YYYY (pass `todayMmDdYyyy()`); `initials` are the operator's
+ * (pass `getInitials(timekeeperName)`); `docId` is the Kuali form number.
+ */
+export function buildDuplicateTerminationComment(
+  docId: string,
+  initials: string,
+  today: string,
+): string {
+  return (
+    `Duplicate termination. Re Kuali Form #${docId}. -${initials} ${today}\n` +
+    `EE termination approved on UCPath. -${initials} ${today}`
+  );
+}
+
+/**
+ * Join non-empty comment parts with a newline, trimming each part first.
+ * Use this wherever two or more comment fragments are merged:
+ *   - the duplicate-termination comment + any existing edit-resume override
+ *   - date-change audit lines (LDW + separation date)
+ *   - the combined date-change block + user-supplied override
+ */
+export function joinComments(...parts: string[]): string {
+  return parts.map((p) => p.trim()).filter(Boolean).join("\n");
 }
 
 /**

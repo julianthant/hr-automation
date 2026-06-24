@@ -15,9 +15,19 @@ flowchart TD
   C --> D["OCR approval"]
   D --> E["Oath Signature signer rows<br/>{ one EID row each }"]
   D --> F["Oath Upload ticket row<br/>{ waits on signer itemIds }"]
+
+  A2["Oath PDF upload<br/>{ Oath Signature dedicated upload }"] --> B2["OCR preview<br/>{ formType: oath,<br/>operationWorkflow: oath-signature }"]
+  B2 --> C2["Person Lookup"]
+  C2 --> D2["OCR approval"]
+  D2 --> E2["Oath Signature signer rows<br/>{ one EID row each }"]
 ```
 
-The two approval targets run on different daemons: Oath Signature performs the per-EID UCPath work, and Oath Upload waits for those signer item ids before filing the ServiceNow ticket. Do not reintroduce a PDF branch that delegates to `oath-signature` from inside `oath-signature`; that self-fan-out deadlocked the single-worker daemon.
+The two upload paths fan out differently at approve time:
+
+- **Oath Upload full process** (`operationWorkflow: "oath-upload"`): fans out both signer rows (via `approveTo`) AND one Oath Upload ticket row (via `approveDocumentTo`) that waits for all signer item ids before filing the ServiceNow ticket.
+- **Oath Signature dedicated upload** (`operationWorkflow: "oath-signature"`): fans out signer rows only — `approveDocumentTo` is suppressed (set to `undefined`) at approve time. No ticket row is created.
+
+The two signer fan-out targets run on different daemons from the ticket row: Oath Signature performs the per-EID UCPath work; Oath Upload waits on those item ids. Do not reintroduce a PDF branch that delegates to `oath-signature` from inside `oath-signature`; that self-fan-out deadlocked the single-worker daemon.
 
 ## Queue Behavior
 
@@ -37,5 +47,5 @@ The two approval targets run on different daemons: Oath Signature performs the p
 
 - Input subject is `eid`; the workflow no longer accepts PDFs.
 - Runtime policy sets `alwaysBatchInputRun` and `alwaysBatchDelegatedMembers`, so even a single signer appears as a one-member batch surface.
-- OCR approval uses the oath form spec's `approveTo` to enqueue signer rows here and `approveDocumentTo` to enqueue the Oath Upload ticket row.
+- OCR approval uses the oath form spec's `approveTo` to enqueue signer rows here. The `approveDocumentTo` ticket fan-out (Oath Upload ticket) applies **only to the Oath Upload full-process path** (`operationWorkflow: "oath-upload"`); a dedicated Oath Signature upload (`operationWorkflow: "oath-signature"`) suppresses `approveDocumentTo` — no ticket row is created.
 - The paper-roster flow belongs to OCR/Oath Upload, not to Oath Signature.

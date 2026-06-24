@@ -60,6 +60,23 @@ export async function collapseSidebar(
   }
 }
 
+/** Click the PeopleSoft modal OK button (#ICOK) in whichever frame holds it.
+ *  Playwright can't click behind the PS modal mask, so we JS-click by id.
+ *  (The live button's id literally contains '#'.)
+ *  verified 2026-04-01 (button is <input id="#ICOK" onclick="closeMsg(this)">)
+ */
+export async function dismissPeopleSoftDialog(page: Page): Promise<boolean> {
+  for (const f of page.frames()) {
+    const clicked = await f.evaluate(() => {
+      const btn = document.getElementById("#ICOK");
+      if (btn) { btn.click(); return true; }
+      return false;
+    }).catch(() => false);
+    if (clicked) return true;
+  }
+  return false;
+}
+
 export interface PersonSearchResult {
   found: boolean;
   matches?: Array<{ emplId: string; firstName: string; lastName: string }>;
@@ -144,25 +161,8 @@ export async function searchPerson(
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   await debugScreenshot(page, "debug-ps-after-magnify", { fullPage: true });
 
-  // Helper: dismiss PeopleSoft modal dialog (#ICOK button) via JS.
-  // Playwright locator.click() cannot bypass PeopleSoft's modal mask overlay,
-  // so we use frame.evaluate() to call .click() directly on the #ICOK button.
-  // This is a JS eval path — not a Playwright locator — so it stays inline.
-  // verified 2026-04-01 (button is <input id="#ICOK" onclick="closeMsg(this)">)
-  const dismissDialog = async (): Promise<boolean> => {
-    for (const f of page.frames()) {
-      const clicked = await f.evaluate(() => {
-        const btn = document.getElementById("#ICOK");
-        if (btn) { btn.click(); return true; }
-        return false;
-      }).catch(() => false);
-      if (clicked) return true;
-    }
-    return false;
-  };
-
   // Dismiss dialog if present after magnifying glass (just a step to get through)
-  const magnifyDialogDismissed = await dismissDialog();
+  const magnifyDialogDismissed = await dismissPeopleSoftDialog(page);
   if (magnifyDialogDismissed) {
     log.step("Dismissed National Id dialog");
     // Short settle after JS dialog dismiss — no networkidle signal available.
@@ -181,7 +181,7 @@ export async function searchPerson(
   await debugScreenshot(page, "debug-ps-after-search", { fullPage: true });
 
   // Determination: dialog after Search = new hire, results table = rehire.
-  const searchDialogDismissed = await dismissDialog();
+  const searchDialogDismissed = await dismissPeopleSoftDialog(page);
   if (searchDialogDismissed) {
     // Short settle after JS dialog dismiss; no networkidle signal available.
     await page.waitForTimeout(1_000);

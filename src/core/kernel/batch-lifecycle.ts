@@ -55,11 +55,18 @@ export interface BatchObserverHandle {
  *
  * Note: `SessionObserver.onBrowserLaunch` emits the session event but has no
  * timing component — the observer only pairs auth lifecycles.
+ *
+ * `suppressEvents` (test-only, set from `trackerStub`) keeps the timing
+ * bookkeeping intact — so `getAuthTimings()` and the auth-gating contract are
+ * unchanged — but skips every session-event emit, so a `runWorkflowBatch`/
+ * `runWorkflowPool` test never writes `auth_*`/`browser_launch` lines into the
+ * shared `.tracker/sessions/` file and leaks a phantom card into a live dashboard.
  */
 export function createBatchObserver(
   instance: string,
   sessionId: string,
   trackerDir?: string,
+  suppressEvents = false,
 ): BatchObserverHandle {
   const timings: AuthTiming[] = []
   // Pending starts keyed by systemId (since there's at most one in-flight auth
@@ -79,6 +86,7 @@ export function createBatchObserver(
   const observer: SessionObserver = {
     instance,
     onBrowserLaunch: (systemId, browserId, chromiumPid) => {
+      if (suppressEvents) return
       if (!registeredSession) {
         emitSessionCreate(instance, sessionId, trackerDir)
         registeredSession = true
@@ -87,21 +95,24 @@ export function createBatchObserver(
     },
     onAuthStart: (systemId, browserId) => {
       pendingStart.set(systemId, Date.now())
+      if (suppressEvents) return
       emitAuthStart(instance, browserId, systemId, trackerDir)
     },
     onAuthComplete: (systemId, browserId) => {
       const startTs = pendingStart.get(systemId) ?? Date.now()
       pendingStart.delete(systemId)
       timings.push({ systemId, startTs, endTs: Date.now() })
+      if (suppressEvents) return
       emitAuthComplete(instance, browserId, systemId, trackerDir)
     },
     onAuthFailed: (systemId, browserId) => {
       const startTs = pendingStart.get(systemId) ?? Date.now()
       pendingStart.delete(systemId)
       timings.push({ systemId, startTs, endTs: Date.now() })
+      if (suppressEvents) return
       emitAuthFailed(instance, browserId, systemId, trackerDir)
     },
-    ...buildIdleRefreshHooks(instance, trackerDir),
+    ...(suppressEvents ? {} : buildIdleRefreshHooks(instance, trackerDir)),
   }
 
   return {
@@ -161,6 +172,18 @@ export interface BatchLifecycleOpts<TData = unknown> {
    * from session events.
    */
   preAssignedInstance?: string
+  /**
+   * Test-only (threaded from `RunOpts.trackerStub`): suppress every tracker
+   * side effect this shell would otherwise emit — `workflow_start`/
+   * `workflow_end`/`session_create` session events, the observer's
+   * `auth_*`/`browser_launch` events, and the SIGINT/throw `failed`-row
+   * fanout. `runOneItem` already stubs its per-item rows under `trackerStub`;
+   * without this the batch shell still wrote session events to the DEFAULT
+   * `.tracker/` dir, so a `runWorkflowBatch`/`runWorkflowPool` unit test run
+   * concurrently with a live dashboard surfaced a phantom session card. Auth
+   * timings are still recorded (the auth-gating contract is unchanged).
+   */
+  trackerStub?: boolean
 }
 
 export interface BatchLifecycleCtx {
@@ -208,9 +231,12 @@ export async function withBatchLifecycle<TData, R>(
   opts: BatchLifecycleOpts<TData>,
   body: (ctx: BatchLifecycleCtx) => Promise<R>,
 ): Promise<R> {
+  const stub = opts.trackerStub === true
   const instance = opts.preAssignedInstance ?? generateInstanceName(opts.workflow, opts.trackerDir)
-  emitWorkflowStart(instance, opts.trackerDir)
-  emitSessionCreate(instance, '1', opts.trackerDir)
+  if (!stub) {
+    emitWorkflowStart(instance, opts.trackerDir)
+    emitSessionCreate(instance, '1', opts.trackerDir)
+  }
 
   const terminated = new Set<string>()
   const markTerminated = (runId: string): void => {
@@ -221,7 +247,7 @@ export async function withBatchLifecycle<TData, R>(
   const closeWorkflow = (status: 'done' | 'failed'): void => {
     if (workflowClosed) return
     workflowClosed = true
-    emitWorkflowEnd(instance, status, opts.trackerDir)
+    if (!stub) emitWorkflowEnd(instance, status, opts.trackerDir)
   }
 
   // Build a rich data record for each synthetic failed row so the dashboard
@@ -263,6 +289,11 @@ export async function withBatchLifecycle<TData, R>(
     }
   }
   const fanoutFailed = (errorMessage: string, step?: string): void => {
+    if (stub) {
+      // Still mark terminated so the throw path doesn't loop, but write no rows.
+      for (const { runId } of opts.perItem) terminated.add(runId)
+      return
+    }
     const now = new Date().toISOString()
     for (const { item, itemId, runId, parentRunId } of opts.perItem) {
       if (terminated.has(runId)) continue
@@ -295,7 +326,7 @@ export async function withBatchLifecycle<TData, R>(
   if (sigintHandler) process.on('SIGINT', sigintHandler)
 
   const makeObserver = (sessionId: string): BatchObserverHandle =>
-    createBatchObserver(instance, sessionId, opts.trackerDir)
+    createBatchObserver(instance, sessionId, opts.trackerDir, stub)
 
   try {
     const result = await body({ instance, markTerminated, makeObserver })

@@ -414,6 +414,7 @@ export function OperationRowUnified({
                       projection={memberProjectionById.get(member.id)}
                       displayNames={displayNames}
                       selected={selectedId === member.id}
+                      selectionTone="muted"
                       onSelect={onSelect}
                       date={date}
                       onDelete={onDelete}

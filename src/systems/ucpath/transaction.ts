@@ -5,6 +5,7 @@ import {
   waitForPeopleSoftProcessing,
   navigateToSmartHR,
   collapseSidebar,
+  dismissPeopleSoftDialog,
 } from "./navigate.js";
 import {
   smartHR,
@@ -820,6 +821,128 @@ export async function findExistingTerminationTransaction(
     log.warn(`[Txn Lookup] Lookup threw (treating as no match): ${e instanceof Error ? e.message : String(e)}`);
     return { txnNumber: null, alreadyAtSmartHR: false };
   }
+}
+
+/**
+ * Delete a PENDING termination transaction for an employee from the Smart HR
+ * Transactions page's "Transactions in Progress" grid.
+ *
+ * Used by separations' `transaction-check` step: when SS Smart HR shows a
+ * PENDING TER transaction, it must be removed before a fresh termination is
+ * created. Navigates to Smart HR Transactions, finds the in-progress row whose
+ * Person ID cell equals `employeeId` AND whose row text contains "Terminat"
+ * (the same EID + termination match used by `findExistingTerminationTransaction`
+ * — names/transaction-id columns aren't shown on this grid), ticks that row's
+ * Select checkbox, clicks "Delete Selected Transactions", and confirms the
+ * PeopleSoft dialog (#ICOK).
+ *
+ * Returns `true` when a matching row was found and the delete was submitted,
+ * `false` when no matching row was found or the delete failed (best-effort — a
+ * failure here is logged, not thrown; the caller can re-evaluate). The checkbox
+ * is clicked inside `frame.evaluate` because PeopleSoft's overlay can intercept
+ * a Playwright click — the same escape hatch used for the #ICOK dialog.
+ *
+ * NEEDS LIVE VERIFY: the checkbox match + the delete-confirm dialog shape were
+ * authored from the live screenshot, not playwright-cli.
+ */
+export async function deletePendingTransaction(
+  page: Page,
+  employeeId: string,
+): Promise<boolean> {
+  try {
+    log.step(`[Txn Delete] Deleting pending termination for eid='${employeeId}'`);
+    if (!employeeId) {
+      log.warn(`[Txn Delete] Empty EID — skipping delete`);
+      return false;
+    }
+    await navigateToSmartHR(page);
+    await clickSmartHRTransactions(page);
+    const frame = getContentFrame(page);
+
+    const checked = await checkPendingTransactionRowByEid(frame, employeeId);
+    if (!checked) {
+      log.warn(
+        `[Txn Delete] No in-progress Terminatn row found for eid=${employeeId} — nothing deleted`,
+      );
+      return false;
+    }
+    await page.waitForTimeout(1_000);
+
+    await safeClick(smartHR.deleteSelectedTransactionsButton(frame), {
+      timeout: 10_000,
+      label: "ucpath delete selected transactions button",
+    });
+    await page.waitForTimeout(2_000);
+    await waitForPeopleSoftProcessing(frame, 15_000);
+
+    // Confirm the PeopleSoft "Delete this transaction?" dialog (OK = #ICOK).
+    if (await dismissPeopleSoftDialog(page)) log.step("[Txn Delete] Confirmed delete dialog");
+    await page.waitForTimeout(2_000);
+    await waitForPeopleSoftProcessing(frame, 15_000);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+
+    log.success(`[Txn Delete] Pending termination deleted for eid=${employeeId}`);
+    return true;
+  } catch (e) {
+    log.warn(`[Txn Delete] Delete threw (treating as not deleted): ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+
+/**
+ * Scan the "Transactions in Progress" grid for the row whose Person ID cell
+ * equals `employeeId` and whose text contains "Terminat", and click that row's
+ * Select checkbox. Returns `true` if a checkbox was clicked. The click happens
+ * inside `frame.evaluate` (PeopleSoft overlay can intercept Playwright clicks).
+ */
+async function checkPendingTransactionRowByEid(
+  frame: FrameLocator,
+  employeeId: string,
+): Promise<boolean> {
+  return await frame.locator("body").evaluate( // allow-inline-selector -- body scan + checkbox click on transactions-in-progress grid
+    (body, eid: string) => {
+      const tables = body.querySelectorAll("table");
+      for (const table of Array.from(tables)) {
+        for (const row of Array.from((table as HTMLTableElement).rows)) {
+          const rowText = row.textContent ?? "";
+          if (!/Terminat/i.test(rowText)) continue;
+          const hasEidCell = Array.from(row.cells).some(
+            (c) => (c.textContent ?? "").trim() === eid,
+          );
+          if (!hasEidCell) continue;
+          const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]');
+          if (checkbox) {
+            checkbox.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    },
+    employeeId,
+  ).catch(() => false);
+}
+
+/**
+ * Pure predicate: a "Transactions in Progress" row matches the target when
+ * some cell's trimmed text exactly equals the EID **and** the full row text
+ * reads as a termination action.
+ *
+ * This encodes the same rule used inside `checkPendingTransactionRowByEid`'s
+ * `frame.evaluate(...)` browser context — extracted as a Node-side pure
+ * function so it can be unit-pinned. (The checkbox click must remain inside
+ * `evaluate` because PeopleSoft's overlay intercepts Playwright clicks; a
+ * Node-side rewire would require splitting the evaluate into two round-trips
+ * and is therefore left as-is.)
+ *
+ * Pure — unit-pinned by tests/unit/systems/ucpath/transaction.test.ts.
+ */
+export function rowMatchesTerminationEid(
+  cellTexts: readonly string[],
+  rowText: string,
+  eid: string,
+): boolean {
+  return cellTexts.some((c) => c.trim() === eid) && /Terminat/i.test(rowText);
 }
 
 export function extractSmartHrTransactionNumber(text: string): string | null {

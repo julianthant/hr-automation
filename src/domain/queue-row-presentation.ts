@@ -67,7 +67,11 @@ function firstNonBlank(...values: Array<string | undefined>): string {
  * keeps a regression from reaching the subtitle.
  */
 function resolveEid(data: Record<string, string>): string {
-  const candidate = firstNonBlank(data.emplId, data.eid, data.employeeId);
+  // `ucpathId` is the canonical EID field for the onbase workflow (its schema,
+  // getId, and deriveItemId all key on it, never emplId) — without it onbase
+  // operation-member subtitles fall through to the trace id (ISS-003, e2e
+  // 2026-06-24). The numeric guard below still rejects any non-EID value.
+  const candidate = firstNonBlank(data.emplId, data.eid, data.employeeId, data.ucpathId);
   return /^\d+$/.test(candidate) ? candidate : "";
 }
 

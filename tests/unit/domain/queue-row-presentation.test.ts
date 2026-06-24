@@ -86,6 +86,23 @@ describe("resolveQueueRowPresentation — person kind, subtitle rule (EID else t
     assert.equal(result.subtitle, "ws-130000-cd34");
   });
 
+  it("uses data.ucpathId as the EID subtitle for onbase members (ISS-003) — not the trace id", () => {
+    // OnBase stamps the EID only as `ucpathId` (its schema/getId/deriveItemId
+    // never use emplId); without ucpathId in resolveEid the subtitle fell
+    // through to the trace id for every onbase operation-member row.
+    const result = resolveQueueRowPresentation({
+      id: "item-1",
+      data: {
+        queueRowKind: "person",
+        name: "Coleman, Renee",
+        ucpathId: "10706431",
+        __traceId: "ob-004859-61b0",
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.subtitle, "10706431");
+  });
+
   it("accepts data.eid as the EID field", () => {
     const result = resolveQueueRowPresentation({
       id: "item-1",

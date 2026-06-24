@@ -2,22 +2,23 @@
 
 ## What It Does
 
-OCR turns uploaded PDFs into operator-approved structured records. It loads any needed roster data, renders and OCRs the PDF, matches records, runs lookup/verification utilities, then pauses for operator approval. Approved records fan out into the target workflow, such as Oath Signature or Emergency Contact.
+OCR turns uploaded PDFs into operator-approved structured records. It loads any needed roster data, renders and OCRs the PDF (including matching and disambiguating as sub-phases of the `ocr` step), runs person-lookup enrichment, then pauses for operator approval. Approved records fan out into the target workflow: Oath Signature, Emergency Contact, or OnBase Import. A standalone OCR run (no `parentRunId`) completes `done` after `person-lookup` — it has no downstream consumer so it does not pause for approval.
 
 OCR is the only `preview` row archetype so far. It is not a batch row.
+
+Form types registered in `FORM_SPECS` (`src/services/ocr/forms/registry.ts`): `oath`, `emergency-contact`, `onbase-emergency-contact`, and `verify`. The `verify` type is read-only (no approve fan-out).
 
 ## Delegation Model
 
 ```mermaid
 flowchart LR
-  A["loading-roster"] --> B["ocr"]
-  B --> C["matching"]
-  C --> D["disambiguating"]
-  D --> E["person-lookup<br/>{ resolves EID + active status }"]
-  E --> F["verification"]
-  F --> G["awaiting-approval<br/>{ operator approves/discards }"]
-  G --> H["target workflow fan-out<br/>{ oath-signature or emergency-contact }"]
+  A["loading-roster"] --> B["ocr<br/>{ render + OCR + match + disambiguate }"]
+  B --> C["person-lookup<br/>{ resolves EID + active status }"]
+  C --> D["awaiting-approval<br/>{ operator approves/discards }"]
+  D --> E["target workflow fan-out<br/>{ oath-signature, emergency-contact, or onbase }"]
 ```
+
+A standalone run (no `parentRunId`) completes terminal `done` at `person-lookup` — the `awaiting-approval` step and fan-out are skipped.
 
 OCR utility Person Lookup children use delegated-batch grouping:
 

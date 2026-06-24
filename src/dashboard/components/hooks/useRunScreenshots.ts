@@ -55,7 +55,17 @@ export function useRunScreenshots(
         if (!res.ok) return;
         const data = (await res.json()) as ScreenshotEntry[];
         if (myGen !== fetchGeneration.current) return;
-        setEntries(data);
+        // Normalize chunk order WITHIN each entry: a `paged` capture is one
+        // entry with several `-cNN` chunk files that must read top→bottom. The
+        // backend (SQLite group-by-event) doesn't guarantee file order, so sort
+        // by path — the zero-padded chunk suffix sorts into scroll order and
+        // single-file entries are unaffected. The card, panel, and lightbox all
+        // consume this order.
+        const ordered = data.map((e) => ({
+          ...e,
+          files: [...e.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+        }));
+        setEntries(ordered);
       } catch {
         // Network or parse errors — next screenshotEventCount tick retries.
       }

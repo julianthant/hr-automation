@@ -151,6 +151,66 @@ describe("pollForJobInfoScan", () => {
   });
 });
 
+/**
+ * Stateful fake `Page` for the campus-discovery re-navigation path (ISS-B04).
+ * Models the live redirect chain: the first `goto(JOB_SUMMARY_URL)` lands on the
+ * `ucpathdiscovery` campus picker; clicking the UCSD link redirects to the
+ * campus portal HOME (still NOT the deep-linked component); a second
+ * `goto(JOB_SUMMARY_URL)` finally resolves the Workforce Job Summary component.
+ */
+function makeCampusFakePage() {
+  const gotoCalls: unknown[][] = [];
+  let campusLinkClicks = 0;
+  let url = "https://ucphrprdpub.universityofcalifornia.edu/psp/ucphrprd/EMPLOYEE/HRMS/h/?tab=DEFAULT";
+  const linkLocator = {
+    click: async () => {
+      campusLinkClicks++;
+      // Campus selection redirects to the campus portal home — NOT the deep link.
+      url = "https://ucpath.universityofcalifornia.edu/peoplesoft-native";
+    },
+  };
+  const bodyLocator = { getByRole: () => ({ count: async () => 0 }) };
+  const page = {
+    url: () => url,
+    getByRole: () => linkLocator,
+    locator: (sel: string) =>
+      sel === "#main_target_win0" ? { count: async () => 0 } : bodyLocator,
+    goto: async (...args: unknown[]) => {
+      gotoCalls.push(args);
+      // 1st goto → campus discovery; 2nd goto (post-campus) → the component.
+      url = gotoCalls.length === 1
+        ? "https://ucpathdiscovery.universityofcalifornia.edu/"
+        : JOB_SUMMARY_URL;
+    },
+    waitForLoadState: async () => {},
+    _gotoCalls: gotoCalls,
+    get _campusLinkClicks() { return campusLinkClicks; },
+  };
+  return page;
+}
+
+describe("navigateToWorkforceJobSummary (campus discovery re-navigation, ISS-B04)", () => {
+  it("re-navigates to the deep link after selecting the campus (discovery redirect drops the search form)", async () => {
+    const page = makeCampusFakePage();
+    await navigateToWorkforceJobSummary(page as unknown as Page);
+    assert.strictEqual(page._campusLinkClicks, 1, "must click the UCSD campus-discovery link once");
+    assert.strictEqual(
+      page._gotoCalls.length,
+      2,
+      "must goto twice: initial (→ discovery) then re-navigate to the deep link after campus select",
+    );
+    assert.strictEqual(
+      page._gotoCalls[1][0],
+      JOB_SUMMARY_URL,
+      "the post-campus re-navigation must target the Workforce Job Summary deep link",
+    );
+    assert.ok(
+      page.url().includes("WF_JOB_SUMMARY"),
+      "ends on the Workforce Job Summary component with the Empl ID search form",
+    );
+  });
+});
+
 describe("navigateToWorkforceJobSummary (re-navigation wiring)", () => {
   it("skips goto when on the component AND the search box is present", async () => {
     const page = makeFakePage({ url: JOB_SUMMARY_URL, searchBoxCount: 1 });

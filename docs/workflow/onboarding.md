@@ -14,4 +14,4 @@ Onboarding does not currently delegate to another workflow. It is batch-capable 
 
 | Source | Queue row | Title | Footer/subtitle | Batch view | Actions |
 |---|---|---|---|---|---|
-| Daemon loader/API | Normal row per onboarding record; multiple records can show as daemon batch. | Email/person/input subject. | Normal footer. | Member rows for each onboarding record. | Cancel/retry/delete per row; group retry/delete for grouped members. |
+| Dashboard input run or daemon loader/API | Normal row per onboarding record; multiple records can show as daemon batch. | Email/person/input subject. | Normal footer. | Member rows for each onboarding record. | Cancel/retry/delete per row; group retry/delete for grouped members. |

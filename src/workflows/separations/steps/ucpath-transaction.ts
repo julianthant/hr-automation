@@ -84,7 +84,7 @@ export async function runUcpathTransaction(
       // later, the handler exits before the final updateData at the end
       // of the body — without this inline call the dashboard detail
       // panel shows "—".
-      ctx.updateData({ transactionNumber, existingTransactionFound: "true" });
+      ctx.updateData({ transactionNumber });
       await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing', systems: ['ucpath'] });
       return { transactionNumber, submittedWithoutTxnNumber };
     }
@@ -155,12 +155,24 @@ export async function runUcpathTransaction(
       // drop it from the tracker entry's data.
       ctx.updateData({ transactionNumber });
       log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
-      // Capture the WHOLE UCPath transaction confirmation as ONE clean image of
-      // ONLY the PeopleSoft content iframe. `region` grows the fixed-height
-      // iframe to its full inner content height first, so the shot includes the
-      // entire form (Position → Last Date Worked → Comments → Transaction ID) at
-      // a readable width — not the old over-widened 2239px ribbon slices.
-      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], region: UCPATH_CONTENT_FRAME_SELECTOR });
+      // Capture the WHOLE UCPath transaction confirmation as a SEQUENCE of
+      // readable chunk images (scroll top→bottom, one viewport PNG per chunk).
+      // `paged` grows the fixed-height PeopleSoft content iframe to its inner
+      // content height first so the window scroll walks through the entire
+      // in-frame form (Position → Last Date Worked → Comments → Transaction ID);
+      // the operator reviews every chunk with next/back instead of one tall
+      // image the viewer can only shrink to a ribbon.
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], paged: true });
+      // Verification shot of the grabbed transaction number. `paged` above starts
+      // at the top of the page and walks down via the WINDOW scroll, which does
+      // not reach the `Transaction ID: T…` that lives BELOW the Comments fold
+      // INSIDE the PeopleSoft content frame (`growOverflowingIframes` only walks
+      // top-level iframes, so the nested `#main_target_win0` never lengthens the
+      // window) — so the submitted chunks can miss the number entirely. `region`
+      // screenshots that content frame directly, growing it to its full inner
+      // height, so the Transaction ID at the bottom of the readback form is always
+      // in the image: a clean, single-frame proof the operator can read the T# off.
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-number-verify', systems: ['ucpath'], region: UCPATH_CONTENT_FRAME_SELECTOR });
     } catch (e) {
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
       // the run fails with the clear message (its own screenshot already fired)

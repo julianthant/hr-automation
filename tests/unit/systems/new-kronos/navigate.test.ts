@@ -13,7 +13,13 @@
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 
-import { resolveSearchResult, dateDigits } from "../../../../src/systems/new-kronos/navigate.js";
+import {
+  resolveSearchResult,
+  parseMmddyyyy,
+  toIsoDate,
+  calendarDayLabelPattern,
+  parseCalendarHeaderOrdinal,
+} from "../../../../src/systems/new-kronos/navigate.js";
 import { log } from "../../../../src/utils/log.js";
 
 describe("resolveSearchResult", () => {
@@ -52,38 +58,65 @@ describe("resolveSearchResult", () => {
 });
 
 /**
- * Pins dateDigits — the separator-stripped digit string that `typeMaskedDate`
- * types into and verifies against WFD's masked date inputs. The inputs
- * auto-insert "/" themselves and may drop the month's leading zero on display,
- * so entry + readback are compared on digits only. Regression guard for ISS-B05
- * (a correct "05/10/2026" got scrambled to "6/05/1020" when the literal slashes
- * were typed into the auto-masking field, tripping WFP-00889).
+ * Pins the native-date-input helpers that replaced the masked-keystroke entry
+ * (ISS-B05, after a live DOM dump proved the WFD "Select range" fields are
+ * NATIVE `<input type=date>` — value held as ISO `YYYY-MM-DD`, not a masked text
+ * field). `toIsoDate` is what `setRangeDate` fills (the input rejects MM/DD/YYYY,
+ * which is why every prior fill "reverted to today"); `parseMmddyyyy`,
+ * `calendarDayLabelPattern`, and `parseCalendarHeaderOrdinal` drive the calendar
+ * grid FALLBACK (day-cell aria-label match + month-nav stepping).
  */
-describe("dateDigits", () => {
-  it("normalizes a zero-padded MM/DD/YYYY date to MMDDYYYY", () => {
-    assert.equal(dateDigits("05/10/2026"), "05102026");
+describe("toIsoDate", () => {
+  it("converts M/D/YYYY to the ISO value a native date input accepts", () => {
+    assert.equal(toIsoDate("5/11/2026"), "2026-05-11");
+    assert.equal(toIsoDate("05/11/2026"), "2026-05-11");
+    assert.equal(toIsoDate("12/1/2026"), "2026-12-01");
   });
 
-  it("pads each component, so input padding never matters", () => {
-    // The caller (computeKronosDateRange) zero-pads, but a non-padded month/day
-    // must still type the same 8 digits into the 2-slot mask.
-    assert.equal(dateDigits("5/10/2026"), "05102026");
-    assert.equal(dateDigits("6/5/2026"), "06052026");
+  it("throws loud on a malformed date instead of applying a wrong window", () => {
+    assert.throws(() => toIsoDate("2026-05-11"));
+    assert.throws(() => toIsoDate("13/40/2026"));
+  });
+});
+
+describe("parseMmddyyyy", () => {
+  it("parses to 0-based month for calendar math", () => {
+    assert.deepEqual(parseMmddyyyy("6/11/2026"), { year: 2026, monthIndex: 5, day: 11 });
+    assert.deepEqual(parseMmddyyyy("01/01/2026"), { year: 2026, monthIndex: 0, day: 1 });
+  });
+});
+
+describe("calendarDayLabelPattern", () => {
+  it("matches the day cell's full-date aria-label, weekday-agnostic", () => {
+    const re = calendarDayLabelPattern({ year: 2026, monthIndex: 5, day: 11 });
+    assert.ok(re.test("Monday, June 11, 2026"));
+    assert.ok(re.test("June 11, 2026"));
   });
 
-  it("matches a WFD readback that drops the month's leading zero", () => {
-    // WFD displays/returns the month non-padded ("6/05/2026"); the verify path
-    // compares it to the zero-padded wanted value via dateDigits on both sides.
-    assert.equal(dateDigits("6/05/2026"), dateDigits("06/05/2026"));
+  it("does not let a single-digit day match a two-digit day (June 1 vs June 11)", () => {
+    const re = calendarDayLabelPattern({ year: 2026, monthIndex: 5, day: 1 });
+    assert.ok(re.test("Monday, June 1, 2026"));
+    assert.equal(re.test("Thursday, June 11, 2026"), false);
+  });
+});
+
+describe("parseCalendarHeaderOrdinal", () => {
+  it("parses the moment-picker header ('Jun 2026') to a comparable month ordinal", () => {
+    const jun = parseCalendarHeaderOrdinal("Jun 2026");
+    const may = parseCalendarHeaderOrdinal("May 2026");
+    const jul = parseCalendarHeaderOrdinal("Jul 2026");
+    assert.equal(jun, 2026 * 12 + 5);
+    assert.equal(may! < jun!, true, "May steps backward from Jun");
+    assert.equal(jul! > jun!, true, "Jul steps forward from Jun");
   });
 
-  it("ignores surrounding whitespace", () => {
-    assert.equal(dateDigits(" 06 / 05 / 2026 "), "06052026");
+  it("tolerates trailing whitespace and full month names", () => {
+    assert.equal(parseCalendarHeaderOrdinal("Jun 2026 "), 2026 * 12 + 5);
+    assert.equal(parseCalendarHeaderOrdinal("June 2026"), 2026 * 12 + 5);
   });
 
-  it("exposes the scramble that motivated the fix as a digit mismatch", () => {
-    // The wanted value vs. the scrambled "6/05/1020" the field actually held —
-    // typeMaskedDate's readback compares these and retries / fails loud (ISS-B05).
-    assert.notEqual(dateDigits("6/05/1020"), dateDigits("05/10/2026"));
+  it("returns null on an unparseable header (caller stops navigating)", () => {
+    assert.equal(parseCalendarHeaderOrdinal(""), null);
+    assert.equal(parseCalendarHeaderOrdinal("loading…"), null);
   });
 });

@@ -8,6 +8,7 @@ import { E2EScriptedFailError } from "../../../../src/core/e2e/gates.js";
 import { loadWorkflow, type AnyRegisteredWorkflow } from "../../../../src/core/workflow-loaders.js";
 import { e2eGatesDir, e2eGateHoldPath, e2eGateFailPath } from "../../../../src/tracker/paths.js";
 import { oathSignatureWorkflow } from "../../../../src/workflows/oath-signature/index.js";
+import { onbaseWorkflow } from "../../../../src/workflows/onbase/workflow.js";
 import { personLookupWorkflow } from "../../../../src/workflows/person-lookup/index.js";
 import { resolveQueueRowPresentation } from "../../../../src/domain/queue-row-presentation.js";
 
@@ -202,6 +203,64 @@ test("person-lookup EID-only stub echoes a resolved name so the row title is not
       "10514074",
       "an EID-only person-lookup row must title on a resolved name, not the bare EID",
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("onbase scripted stub is registered, walks all four steps, and stamps operator data from the input", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "e2e-stub-ob-"));
+  try {
+    const stub = maybeWrapE2EStub("onbase", onbaseWorkflow as unknown as AnyRegisteredWorkflow);
+    // Metadata preserved; systems dropped.
+    assert.equal(stub.config.name, "onbase");
+    assert.deepEqual([...stub.config.steps], ["authenticate", "prepare-import", "fill-keywords", "import"]);
+    assert.deepEqual(stub.config.systems, []);
+
+    const { ctx, calls, data } = makeFakeCtx(dir);
+    await stub.config.handler(
+      ctx as never,
+      {
+        ucpathId: "10001234",
+        sourcePage: 3,
+        pdfFileId: "file-abc",
+        documentType: "X_HR_Emergency Contact",
+        employeeName: "Smith, Jane",
+        dryRun: true,
+      } as never,
+    );
+
+    const steps = calls.filter((c) => c.kind === "step").map((c) => c.step);
+    assert.deepEqual(steps, ["authenticate", "prepare-import", "fill-keywords", "import"]);
+
+    // Upfront fields (mirroring real handler's pre-step ctx.updateData).
+    assert.equal(data.e2eStub, "true");
+    assert.equal(data.ucpathId, "10001234");
+    assert.equal(data.employeeName, "Smith, Jane");
+    assert.equal(data.documentType, "X_HR_Emergency Contact");
+    assert.equal(data.sourcePage, "3");
+
+    // fill-keywords stamps keysetAutofilled.
+    assert.equal(data.keysetAutofilled, "true");
+
+    // import stamps dry-run status.
+    assert.equal(data.status, "Dry Run Complete");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("onbase scripted stub stamps 'Imported' status on a non-dry-run", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "e2e-stub-ob-live-"));
+  try {
+    const stub = maybeWrapE2EStub("onbase", onbaseWorkflow as unknown as AnyRegisteredWorkflow);
+    const { ctx, data } = makeFakeCtx(dir);
+    await stub.config.handler(
+      ctx as never,
+      { ucpathId: "10009999", sourcePage: 1, pdfFileId: "file-xyz", documentType: "X_HR_Emergency Contact" } as never,
+    );
+    assert.equal(data.status, "Imported");
+    assert.equal(data.keysetAutofilled, "true");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -7,9 +7,7 @@ import {
   getSeparationTimecardData,
 } from "../../../systems/new-kronos/index.js";
 import type { SeparationTimecardData } from "../../../systems/new-kronos/index.js";
-import { getJobSummaryIdentity } from "../../../systems/ucpath/index.js";
 import { fillTimekeeperTasks } from "../../../systems/kuali/index.js";
-import type { JobSummaryIdentity } from "../../../systems/ucpath/index.js";
 import type { KualiSeparationData } from "../../../systems/kuali/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
 import type { Page } from "playwright";
@@ -19,7 +17,6 @@ export type NewKronosResult = { found: boolean } & SeparationTimecardData;
 
 export type KronosSearchResult = {
   newK: PromiseSettledResult<NewKronosResult>;
-  jobSummary: PromiseSettledResult<JobSummaryIdentity>;
   kualiTimekeeper: PromiseSettledResult<void>;
 };
 
@@ -56,9 +53,14 @@ export async function runNewKronosTimecard(
 
 /**
  * Body of the `kronos-search` step.
- * Runs a 3-way parallel fetch: New Kronos timecard (last physical punch +
- * sick/holiday days), UCPath Job Summary, and Kuali timekeeper name fill.
- * Returns the ctx.parallel result for the caller to process.
+ * Runs a 2-way parallel fetch: New Kronos timecard (last physical punch +
+ * sick/holiday days) and Kuali timekeeper name fill. Returns the ctx.parallel
+ * result for the caller to process.
+ *
+ * The UCPath Job Summary fetch is NOT here — it moved to an inline read before
+ * the `identity-check` step (which now runs BEFORE this one), so identity
+ * verification + EID correction happen before the timecard is read with the
+ * verified EID. See the separations handler.
  */
 export async function runKronosSearch(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
@@ -69,24 +71,14 @@ export async function runKronosSearch(
 ): Promise<KronosSearchResult> {
   const t0 = Date.now();
   log.debug(`[Step: kronos-search] START eid='${kualiData.eid}'`);
-  log.step("=== PHASE 1: New Kronos + Job Summary + Kuali fill (parallel) ===");
+  log.step("=== PHASE 1: New Kronos + Kuali timekeeper fill (parallel) ===");
   const result = await ctx.parallel({
     newK: async (): Promise<NewKronosResult> => {
       const page = await ctx.page("new-kronos");
       // New Kronos: search by ID, go to timecard, set the date range (from the
       // Kuali separation date), parse the separation timecard — last physical
-      // punch + sick / holiday days. Shared with the identity-check re-fetch.
+      // punch + sick / holiday days.
       return runNewKronosTimecard(page, kualiData.eid, kronosStart, kronosEnd);
-    },
-    jobSummary: async (): Promise<JobSummaryIdentity> => {
-      const page = await ctx.page("ucpath");
-      log.step("[UCPath] Starting Job Summary lookup...");
-      // Identity-aware, NON-throwing on a missing EID: returns `found: false`
-      // so the handler's identity-check can branch (fall back to person-lookup
-      // for a short EID, or fail loud for a full-8-digit miss). Reads the
-      // detail-page NAME on a hit so the handler can confirm the EID resolved
-      // to the expected person. Genuine selector/nav failures still throw.
-      return getJobSummaryIdentity(page, kualiData.eid);
     },
     kualiTimekeeper: async () => {
       const page = await ctx.page("kuali");
@@ -98,7 +90,6 @@ export async function runKronosSearch(
   log.step(
     `[Step: kronos-search] END took=${Date.now() - t0}ms `
     + `newK found=${result.newK.status === "fulfilled"} `
-    + `jobSummary ok=${result.jobSummary.status === "fulfilled"} `
     + `kualiTimekeeper ok=${result.kualiTimekeeper.status === "fulfilled"}`,
   );
   return result as KronosSearchResult;

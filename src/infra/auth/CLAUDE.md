@@ -1,6 +1,6 @@
 # Auth Module
 
-Five independent login flows for UCSD systems. Each system uses different SSO/auth — never share browser sessions between them.
+Seven independent login flows for UCSD systems. Each system uses different SSO/auth — never share browser sessions between them.
 
 Kernel workflows invoke these via `SystemConfig.login` in `defineWorkflow({ systems: [...] })`:
 
@@ -29,7 +29,7 @@ The ≥2-system parallel-staggered path is exercised live (real concurrent Duos,
 
 ## Login Flows
 
-Six UCSD Shibboleth SSO flows, all gated by Duo MFA and all sharing one auth
+Seven UCSD Shibboleth SSO flows, all gated by Duo MFA and all sharing one auth
 path: `fillSsoCredentials` → `clickSsoSubmit` → `pollDuoApproval` /
 `requestDuoApproval`. They land on the same `a5.ucsd.edu` Duo prompt, so the
 hands-off WebAuthn path (below) covers every one of them identically.
@@ -42,6 +42,7 @@ hands-off WebAuthn path (below) covers every one of them identically.
 | `loginToKuali` | Kuali Build | Yes (180s) | No | 10s nav |
 | `loginToNewKronos` | WFD Kronos | Yes (180s) | No | 10s nav |
 | `loginToServiceNow` | ServiceNow HR (support.ucsd.edu) | Yes (300s) | No | 15s nav |
+| `loginToOnBase` | OnBase (Hyland) | Yes (180s) | No | 15s nav |
 
 **Not Duo:** `loginToI9` (`src/systems/i9/login.ts`) authenticates to i9 Complete
 (third-party Mitratech vendor) with plain email/password — no Shibboleth, no Duo,

@@ -20,13 +20,14 @@ describe("shared OCR forms", () => {
     assert.equal(parsed.state, "verified");
   });
 
-  it("lists oath, emergency contact, and verify specs from the shared registry", () => {
+  it("lists oath, emergency contact, onbase, and verify specs from the shared registry", () => {
     assert.deepEqual(
       listFormTypes().map((f) => f.formType).sort(),
-      ["emergency-contact", "oath", "verify"],
+      ["emergency-contact", "oath", "onbase-emergency-contact", "verify"],
     );
     assert.equal(getFormSpec("oath")?.formType, "oath");
     assert.equal(getFormSpec("emergency-contact")?.formType, "emergency-contact");
+    assert.equal(getFormSpec("onbase-emergency-contact")?.formType, "onbase-emergency-contact");
     assert.equal(getFormSpec("verify")?.formType, "verify");
   });
 

@@ -106,6 +106,20 @@ export const search = {
     root.getByRole("menuitemradio").or(root.locator('[role="row"]')).first(),
 
   /**
+   * First result SLAT — a "somebody showed up" signal for found-detection. The
+   * live WFD result renders as a `menuitemradio` ("Item Name <name> not
+   * checked"); its presence means the search returned an employee. Kept TIGHT
+   * (no `[role=row]` fallback, unlike `firstResultRow`) so a header/placeholder
+   * row can never false-positive a not-found search into found. Used to detect a
+   * present result INDEPENDENTLY of the "Select Item" checkbox, whose backing
+   * native input is visually hidden — see `searchEmployee`.
+   * @tags first, result, slat, menuitemradio, found, probe, search, new-kronos
+   */
+  // NEEDS LIVE RE-VERIFY 2026-06-22
+  firstResultSlat: (root: SearchRoot): Locator =>
+    root.getByRole("menuitemradio").first(),
+
+  /**
    * Close the sidebar. verified 2026-06-18
    * @tags close, sidebar, button, search, new-kronos
    */
@@ -117,21 +131,37 @@ export const search = {
 
 export const goToMenu = {
   /**
-   * Go To button (outside the search frame). Two-deep fallback for the
-   * regex + literal variants. verified 2026-04-06
-   * @tags go-to, button, page, navigation, new-kronos
+   * Employee Search panel's "Go To" dropdown (top-level page render). MUST be
+   * scoped to the Quick Find slide-out — a bare page-wide `/go to/i` ALSO matches
+   * the timecard TOOLBAR "Go to" button (`aria-label="Go to"`,
+   * `class="btn widget-button-icon"`), which is always enabled and sits BEHIND the
+   * Employee Search slide-out's `slideout__mask`, so clicking it dies with "Another
+   * element intercepted the click (modal/overlay)" (live log 2026-06-22: doc reached
+   * "Employee checkbox checked" then 5s mask-interception timeout → empty timecard).
+   * Primary = the panel's stable `#goToDropdownButton`
+   * (`ng-disabled="!quickFind.slatOptions.selectedslats.length"`); fallback = the
+   * `/go to/i` role match SCOPED to the `.quick-find-content` slide-out container
+   * (verified present in the live log) so it can never resolve the toolbar button.
+   * // NEEDS LIVE RE-VERIFY 2026-06-22 (derived from live error log + the 2026-06-18 id, not a fresh snapshot)
+   * @tags go-to, button, page, quick-find, slideout, dropdown, navigation, new-kronos
    */
   goToButtonOnPage: (page: Page): Locator =>
     page
-      .getByRole("button", { name: /go to/i })
-      .or(page.locator("button:has-text('Go To')")),
+      .locator("#goToDropdownButton")
+      .or(page.locator(".quick-find-content").getByRole("button", { name: /go to/i }))
+      .first(),
 
   /**
-   * Go To button inside the search frame. verified 2026-04-06
-   * @tags go-to, button, frame, navigation, new-kronos
+   * Employee Search panel's "Go To" dropdown (portal-frame iframe render). Same
+   * slide-out scoping as `goToButtonOnPage` — never the timecard toolbar "Go to".
+   * // NEEDS LIVE RE-VERIFY 2026-06-22
+   * @tags go-to, button, frame, quick-find, slideout, dropdown, navigation, new-kronos
    */
   goToButtonInFrame: (f: FrameLocator): Locator =>
-    f.getByRole("button", { name: /go to/i }).or(f.locator("text=Go To")),
+    f
+      .locator("#goToDropdownButton")
+      .or(f.locator(".quick-find-content").getByRole("button", { name: /go to/i }))
+      .first(),
 
   /**
    * Timecard menu item — 8-deep fallback chain. The live Dayforce Go To menu
@@ -186,18 +216,51 @@ export const timecard = {
     page.getByRole("button", { name: "Select range" }),
 
   /**
-   * Start date input (custom range). verified 2026-06-18
-   * @tags start, date, input, range, timecard, new-kronos
+   * Start date input (custom range) — NATIVE `<input type=date>`, value held as
+   * ISO `YYYY-MM-DD` (NOT a masked text field). Targeted by id. verified 2026-06-22
+   * @tags start, date, input, range, timecard, native, new-kronos
    */
-  startDateInput: (page: Page): Locator =>
-    page.getByRole("textbox", { name: "Start date" }),
+  startDateInput: (page: Page): Locator => page.locator("#startDateTimeInput"),
 
   /**
-   * End date input (custom range). verified 2026-06-18
-   * @tags end, date, input, range, timecard, new-kronos
+   * End date input (custom range) — NATIVE `<input type=date>` (ISO value).
+   * Targeted by id. verified 2026-06-22
+   * @tags end, date, input, range, timecard, native, new-kronos
    */
-  endDateInput: (page: Page): Locator =>
-    page.getByRole("textbox", { name: "End date" }),
+  endDateInput: (page: Page): Locator => page.locator("#endDateTimeInput"),
+
+  /**
+   * Moment-picker month/year header (e.g. "Jun 2026") — read to know which way
+   * to step the calendar. verified 2026-06-22
+   * @tags calendar, month, header, range, timecard, new-kronos
+   */
+  calendarMonthHeader: (page: Page): Locator =>
+    page.locator("th.js-moment-picker-parent-view").first(),
+
+  /**
+   * Moment-picker "Previous month" arrow. verified 2026-06-22
+   * @tags calendar, previous, month, arrow, range, timecard, new-kronos
+   */
+  calendarPrevMonth: (page: Page): Locator =>
+    page.getByRole("button", { name: "Previous month" }).first(),
+
+  /**
+   * Moment-picker "Next month" arrow. verified 2026-06-22
+   * @tags calendar, next, month, arrow, range, timecard, new-kronos
+   */
+  calendarNextMonth: (page: Page): Locator =>
+    page.getByRole("button", { name: "Next month" }).first(),
+
+  /**
+   * Moment-picker day cell for a specific date. `name` matches the cell's
+   * full-date aria-label ("Monday, June 11, 2026"); `:not(.out-of-month)` keeps
+   * an adjacent-month trailing day from being hit. verified 2026-06-22
+   * @tags calendar, day, cell, gridcell, range, timecard, new-kronos
+   */
+  calendarDayCell: (page: Page, name: string | RegExp): Locator =>
+    page
+      .getByRole("gridcell", { name })
+      .and(page.locator("td.js-moment-picker-item:not(.out-of-month)")),
 
   /**
    * Apply button (custom range). verified 2026-06-18

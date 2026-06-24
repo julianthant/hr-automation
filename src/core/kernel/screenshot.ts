@@ -36,6 +36,7 @@ export function makeScreenshotFn(deps: ScreenshotDeps): ScreenshotFn {
       ts,
       systems: opts.systems,
       pages: opts.pages,
+      ...(opts.paged !== undefined ? { paged: opts.paged } : {}),
       ...(opts.region !== undefined ? { region: opts.region } : {}),
       ...(opts.centerSelector !== undefined ? { centerSelector: opts.centerSelector } : {}),
       ...(opts.bounded !== undefined ? { bounded: opts.bounded } : {}),

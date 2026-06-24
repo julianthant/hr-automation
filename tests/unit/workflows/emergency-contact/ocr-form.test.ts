@@ -129,7 +129,7 @@ test("approveTo.deriveInput returns RecordSchema-compatible shape", async () => 
     emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, cellPhone: "(555) 123-4567" },
     notes: [],
   } as any;
-  const input = approveTo.deriveInput(r);
+  const input = approveTo.deriveInput(r, { sessionId: "sess", runId: "run1" });
   assert.equal(input.employee.employeeId, "10001234");
   assert.equal(input.emergencyContact.name, "Sara Garcia");
 });

@@ -66,7 +66,7 @@ Rules (these mirror the hard realities of live testing):
 
 - Dashboard queue/rail counts: backend `wfCounts` regressions belong in `tests/unit/tracker/state-queries.test.ts` and pure count helpers under `tests/unit/tracker/` or `tests/unit/dashboard/`. Pin that counts are backend-authoritative, independent of the selected workflow, and use the same queue-surface model as the rendered rail badges. OCR prep rows that still render in the queue must remain counted until the queue no longer renders them.
 - Person lookup dates: tests under `tests/unit/workflows/person-lookup/` should keep UCPath Last Hire/startDate separate from assignment EFFDT/effectiveDate. Dashboard detail fields should show `startDate`; retain `effdt` only as backend context.
-- Workflow categories/start surfaces: when a workflow moves category or start-surface eligibility, pin both the workflow config and the loader/surface arrays. Example: delegated utilities such as `i9-lookup` are `category: "Utils"` but are not dashboard input/upload starts.
+- Workflow categories/start surfaces: when a workflow moves category or start-surface eligibility, pin both the workflow config and the loader/surface arrays. Example: delegated utilities such as `i9-lookup` are `category: "Search"` but are not dashboard input/upload starts.
 
 ## Lessons Learned
 

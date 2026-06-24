@@ -26,6 +26,7 @@ import "../../../src/workflows/emergency-contact/workflow.js";
 import "../../../src/workflows/i9-lookup/workflow.js";
 import "../../../src/workflows/oath-signature/workflow.js";
 import "../../../src/workflows/oath-upload/workflow.js";
+import "../../../src/workflows/onbase/workflow.js";
 import "../../../src/workflows/ocr/workflow.js";
 import "../../../src/workflows/onboarding/workflow.js";
 import "../../../src/workflows/old-kronos-reports/workflow.js";

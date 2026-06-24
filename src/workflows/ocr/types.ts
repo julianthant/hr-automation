@@ -25,6 +25,29 @@ export interface RosterRow {
 export type LookupKind = "name" | "verify" | "verify-only" | null;
 
 /**
+ * Document-level context passed to `approveTo.deriveInput` alongside each
+ * record. The record carries per-person fields; this carries the shared
+ * document context (PDF identity, session/run ids) the approve route reads off
+ * the OCR review row. Most specs ignore it (oath/EC derive their input from the
+ * record alone); `onbase` needs `pdfFileId` so each per-person import can split
+ * its page out of the combined PDF.
+ */
+export interface OcrApproveRecordContext {
+  /** OCR session id (stable across the run). */
+  sessionId: string;
+  /** OCR run id (the `id`/`runId` of the approved OCR row). */
+  runId: string;
+  /** The delegating parent/operation run id, when delegated. */
+  parentRunId?: string;
+  /** Original uploaded PDF filename (display). */
+  pdfOriginalName?: string;
+  /** Registered file id for the uploaded (combined) PDF. */
+  pdfFileId?: string;
+  /** Absolute path to the uploaded PDF on disk, when known. */
+  pdfPath?: string;
+}
+
+/**
  * The per-document context handed to `approveDocumentTo.deriveInput`. Built by
  * the approve route after the per-record (`approveTo`) fan-out so the
  * once-per-document target can wait on exactly the rows that were enqueued.
@@ -108,7 +131,7 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
    */
   approveTo?: {
     workflow: string;                                              // "oath-signature", "emergency-contact"
-    deriveInput: (record: TPreview) => TFanOut;
+    deriveInput: (record: TPreview, ctx: OcrApproveRecordContext) => TFanOut;
     deriveItemId: (record: TPreview, parentRunId: string, index: number) => string;
     /**
      * Optional guard: when present, only selected records for which this
