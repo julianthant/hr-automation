@@ -605,7 +605,10 @@ export const separationsWorkflow = defineWorkflow({
       );
     } else {
       const checkResult = await ctx.step("transaction-check", () =>
-        runTransactionCheck(ctx, kualiData.eid, { dryRun: !!input.dryRun }),
+        runTransactionCheck(ctx, kualiData.eid, {
+          dryRun: !!input.dryRun,
+          separationDate: kualiData.separationDate,
+        }),
       );
       if (checkResult.status === "approved") {
         approvedDuplicateTxn = checkResult.transactionNumber;

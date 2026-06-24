@@ -1,6 +1,11 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { pickTerminationRow, parseSsSmartHrRows } from "../../../../src/systems/ucpath/ss-smart-hr.js";
+import {
+  pickTerminationRow,
+  parseSsSmartHrRows,
+  isWithinSeparationWindow,
+  SEPARATION_TERMINATION_WINDOW_DAYS,
+} from "../../../../src/systems/ucpath/ss-smart-hr.js";
 import type { SsSmartHrRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 
 const row = (action: string, transactionId: string, approvalStatus: string): SsSmartHrRow => ({
@@ -125,5 +130,50 @@ describe("parseSsSmartHrRows", () => {
     assert.deepEqual(parseSsSmartHrRows([["just", "some", "chrome", "row"]]), []);
     // A T-id with no recognizable status is not a transaction row.
     assert.deepEqual(parseSsSmartHrRows([["T002168976", "no status here", "SDCMP"]]), []);
+  });
+});
+
+/**
+ * An employee can be terminated for a PRIOR job, leaving an old TER on the SS
+ * Smart HR list that is NOT this separation. The TER's effective date must be
+ * close to the Kuali separation date ("a week or two max") for it to be reused;
+ * a far-off effdt is a prior termination and a fresh transaction must be made.
+ */
+describe("isWithinSeparationWindow", () => {
+  it("treats the SAME date (either format) as within the window", () => {
+    assert.equal(isWithinSeparationWindow("2026-06-17", "06/17/2026"), true);
+    assert.equal(isWithinSeparationWindow("06/17/2026", "06/17/2026"), true);
+  });
+
+  it("treats term-eff = separation + 1 day (the normal case) as within the window", () => {
+    assert.equal(isWithinSeparationWindow("2026-06-18", "06/17/2026"), true);
+  });
+
+  it("accepts up to the tolerance and rejects beyond it (default 14 days)", () => {
+    assert.equal(SEPARATION_TERMINATION_WINDOW_DAYS, 14);
+    assert.equal(isWithinSeparationWindow("2026-07-01", "06/17/2026"), true, "14 days → within");
+    assert.equal(isWithinSeparationWindow("2026-07-02", "06/17/2026"), false, "15 days → outside");
+    assert.equal(isWithinSeparationWindow("2026-06-03", "06/17/2026"), true, "14 days before → within");
+  });
+
+  it("rejects a PRIOR termination for a different job (the Megan Pateno screenshot)", () => {
+    // TER effdt 2023-10-08 vs a 2026 separation → years apart → not this one.
+    assert.equal(isWithinSeparationWindow("2023-10-08", "06/17/2026"), false);
+  });
+
+  it("honors a custom tolerance", () => {
+    assert.equal(isWithinSeparationWindow("2026-06-24", "06/17/2026", 7), true, "exactly 7 days");
+    assert.equal(isWithinSeparationWindow("2026-06-25", "06/17/2026", 7), false, "8 days > 7");
+  });
+
+  it("returns false on an unparseable date (treated as not a confident match)", () => {
+    assert.equal(isWithinSeparationWindow("", "06/17/2026"), false);
+    assert.equal(isWithinSeparationWindow("Effdt unknown", "06/17/2026"), false);
+    assert.equal(isWithinSeparationWindow("2026-06-17", "not a date"), false);
+  });
+
+  it("handles month/year boundaries correctly", () => {
+    assert.equal(isWithinSeparationWindow("2026-01-05", "12/28/2025"), true, "8 days across year end");
+    assert.equal(isWithinSeparationWindow("2026-03-01", "02/20/2026"), true, "9 days across month end");
   });
 });

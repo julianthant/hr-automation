@@ -649,10 +649,16 @@ describe("separations handler — transaction-check (existing-termination branch
     );
   });
 
-  it("passes dryRun through to transaction-check (the delete is guarded there)", async () => {
+  it("passes dryRun + the Kuali separation date through to transaction-check", async () => {
+    // The separation date lets transaction-check verify an existing TER's effdt
+    // is close to THIS separation (vs a prior termination for a different job);
+    // the delete is guarded behind dryRun inside the step.
     const { ctx } = makeFakeCtx({ docId: "4131", dryRun: true });
     await runHandler(ctx, { docId: "4131", dryRun: true });
-    assert.deepEqual(mocks.runTransactionCheck.mock.calls[0][2], { dryRun: true });
+    assert.deepEqual(mocks.runTransactionCheck.mock.calls[0][2], {
+      dryRun: true,
+      separationDate: KUALI_FIXTURE.separationDate,
+    });
   });
 
   it("creates a new transaction when there is no existing TER (status none)", async () => {
