@@ -238,12 +238,87 @@ async function handleMultiRowGrid(
   );
 }
 
+/** One effective-dated row of the Workforce Job Summary Work Location grid. */
+export interface WorkLocationRow {
+  /** Effective Date as MM/DD/YYYY, or "" when it could not be read in-row. */
+  effectiveDate: string;
+  /** Dept ID, e.g. "000414". */
+  deptId: string;
+  /** Department Description, e.g. "Bookstore". */
+  departmentDescription: string;
+  /** Position number that anchored the row (logging/debug only). */
+  positionNumber: string;
+}
+
+/** MM/DD/YYYY → comparable YYYYMMDD integer, or null when malformed. Pure. */
+export function workLocationDateKey(mmddyyyy: string): number | null {
+  const m = mmddyyyy.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  return Number(m[3]) * 10000 + Number(m[1]) * 100 + Number(m[2]);
+}
+
 /**
- * Extract department from the Work Location tab.
- * Uses cell indices: cells[3] = Dept ID, cells[4] = Department Description.
+ * Pick the Work Location row that describes the job state in effect AS OF the
+ * separation date: the row with the LATEST Effective Date that is at-or-before
+ * the separation date. This is the department for the job actually being
+ * separated — more accurate than "the current/first row" when the employee
+ * changed departments (it also makes the HDH/non-HDH kronos-skip gate correct
+ * for a transfer). Pure + unit-pinned so the selection logic is testable
+ * independent of the live PeopleSoft grid.
+ *
+ * Fallbacks (in order):
+ *   - No rows                       → null.
+ *   - No row carries a usable date  → the FIRST row (legacy behavior; the in-row
+ *     date scan found nothing — see `extractWorkLocation`'s frozen-column note).
+ *   - No `separationDate` supplied  → the row with the LATEST effective date
+ *     (= the current department), for non-separations callers.
+ *   - Every row is AFTER the sep date → the EARLIEST row (sep date precedes the
+ *     first job state — unusual; the earliest is the best available match).
+ */
+export function pickWorkLocationRow(
+  rows: WorkLocationRow[],
+  separationDate?: string,
+): WorkLocationRow | null {
+  if (rows.length === 0) return null;
+  const dated = rows
+    .map((r) => ({ r, key: workLocationDateKey(r.effectiveDate) }))
+    .filter((x): x is { r: WorkLocationRow; key: number } => x.key !== null);
+
+  if (dated.length === 0) return rows[0];
+
+  const sepKey = separationDate ? workLocationDateKey(separationDate) : null;
+  if (sepKey === null) {
+    return dated.reduce((a, b) => (b.key >= a.key ? b : a)).r;
+  }
+
+  const atOrBefore = dated.filter((x) => x.key <= sepKey);
+  if (atOrBefore.length > 0) {
+    return atOrBefore.reduce((a, b) => (b.key >= a.key ? b : a)).r;
+  }
+  return dated.reduce((a, b) => (b.key <= a.key ? b : a)).r;
+}
+
+/**
+ * Extract department from the Work Location tab, selecting the row for the job
+ * state in effect AS OF `opts.separationDate` (latest Effective Date ≤ the
+ * separation date) — see `pickWorkLocationRow`. Without a separation date it
+ * returns the current (latest effective-dated) row.
+ *
+ * Cell offsets relative to the Position Number cell (proven on the live grid):
+ * Dept ID = +3, Department Description = +4. The Effective Date is read in-row
+ * when present; if the grid renders its left columns (Effective Date) in a
+ * parallel frozen table — common in PeopleSoft — a count-exact zip recovers the
+ * dates, and if neither yields dates the picker falls back to the first row
+ * (today's behavior — no regression).
+ *
+ * NEEDS LIVE VERIFY: confirm the Effective Date is read (logs show a non-empty
+ * date per row). If every row logs effectiveDate="" on a live multi-state
+ * employee, the dates live in a frozen column that neither the in-row read nor
+ * the count-exact zip recovered — map that column explicitly then.
  */
 export async function extractWorkLocation(
   page: Page,
+  opts: { separationDate?: string } = {},
 ): Promise<{ deptId: string; departmentDescription: string }> {
   const root = await getFormRoot(page);
 
@@ -293,33 +368,91 @@ export async function extractWorkLocation(
   // Wait for the tab panel to load after click.
   await waitForPeopleSoftProcessing(psFrame, 15_000);
 
-  // Extract first data row using PeopleSoft grid IDs
-  // Work Location grid columns: Position Number(0), Description(1), Company(2),
-  // Dept ID(3), Department Description(4), Location(5), Business Unit(6), ...
-  log.step("[Job Summary] Extracting department...");
+  // Scan EVERY effective-dated row of the Work Location grid (not just the
+  // first), so we can pick the one in effect as of the separation date. Each
+  // job row is anchored by its Position Number cell; Dept ID = +3, Dept
+  // Description = +4 (proven offsets). The Effective Date is read in-row, with a
+  // count-exact frozen-column zip as a fallback (see extractWorkLocation docs).
+  log.step("[Job Summary] Extracting department (all Work Location rows)...");
 
-  const result = await page.evaluate(() => {
-    // Find all rows that contain a position number (8-digit pattern)
-    const rows = document.querySelectorAll("tr");
-    for (const row of rows) {
-      const cells = row.querySelectorAll("td");
-      if (cells.length >= 5) {
-        const posNum = cells[0]?.textContent?.trim() ?? "";
-        // Position numbers are 8 digits
-        if (/^\d{7,8}$/.test(posNum)) {
-          return {
-            deptId: cells[3]?.textContent?.trim() ?? "",
-            departmentDescription: cells[4]?.textContent?.trim() ?? "",
-          };
+  const rows: WorkLocationRow[] = await page.evaluate(() => {
+    const norm = (s: string | null | undefined): string =>
+      (s ?? "").replace(/\s+/g, " ").trim();
+    const POS = /^\d{7,8}$/;
+    const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
+
+    // Pass 1 — job rows (Position Number anchored), capturing an in-row date.
+    const jobRows: Array<{
+      effectiveDate: string;
+      deptId: string;
+      departmentDescription: string;
+      positionNumber: string;
+    }> = [];
+    for (const tr of Array.from(document.querySelectorAll("tr"))) {
+      const cells = Array.from(tr.querySelectorAll("td")).map((td) => norm(td.textContent));
+      const p = cells.findIndex((c) => POS.test(c));
+      if (p < 0 || cells.length < p + 5) continue;
+      let effectiveDate = "";
+      if (p - 2 >= 0 && DATE.test(cells[p - 2])) effectiveDate = cells[p - 2];
+      else {
+        const d = cells.find((c) => DATE.test(c));
+        if (d) effectiveDate = d;
+      }
+      jobRows.push({
+        effectiveDate,
+        deptId: cells[p + 3] ?? "",
+        departmentDescription: cells[p + 4] ?? "",
+        positionNumber: cells[p],
+      });
+    }
+
+    // Pass 2 — frozen-column fallback. If no job row carried an in-row date,
+    // PeopleSoft likely rendered the left columns (incl. Effective Date) in a
+    // parallel, row-aligned table. Read an "Effective Date" column and zip by
+    // index — but ONLY when its date count EXACTLY matches the job-row count, so
+    // a mismatched/unrelated table can never produce a wrong date↔dept pairing.
+    if (jobRows.length > 0 && !jobRows.some((r) => r.effectiveDate)) {
+      for (const table of Array.from(document.querySelectorAll("table"))) {
+        const trs = Array.from((table as HTMLTableElement).rows);
+        let col = -1;
+        for (const tr of trs) {
+          const idx = Array.from(tr.cells).findIndex((c) => /effective date/i.test(norm(c.textContent)));
+          if (idx >= 0) { col = idx; break; }
+        }
+        if (col < 0) continue;
+        const dates: string[] = [];
+        for (const tr of trs) {
+          const t = tr.cells[col] ? norm(tr.cells[col].textContent) : "";
+          if (DATE.test(t)) dates.push(t);
+        }
+        if (dates.length === jobRows.length) {
+          for (let i = 0; i < jobRows.length; i++) jobRows[i].effectiveDate = dates[i];
+          break;
         }
       }
     }
-    return { deptId: "", departmentDescription: "" };
+
+    return jobRows;
   });
 
-  log.step(`  Dept ID: ${result.deptId}`);
-  log.step(`  Department: ${result.departmentDescription}`);
-  return result;
+  for (const r of rows) {
+    log.debug(
+      `[Job Summary]   Work Location row: eff=${r.effectiveDate || "<none>"} ` +
+      `deptId=${r.deptId || "<none>"} dept="${r.departmentDescription || "<none>"}" pos=${r.positionNumber}`,
+    );
+  }
+
+  const picked = pickWorkLocationRow(rows, opts.separationDate);
+  if (!picked) {
+    log.warn("[Job Summary] No Work Location rows found — department blank");
+    return { deptId: "", departmentDescription: "" };
+  }
+  log.step(
+    `  Picked Work Location row (eff ${picked.effectiveDate || "<no date>"}` +
+    (opts.separationDate ? `, latest ≤ separation ${opts.separationDate}` : ", latest") +
+    `): Dept ID ${picked.deptId}, Department "${picked.departmentDescription}"`,
+  );
+  return { deptId: picked.deptId, departmentDescription: picked.departmentDescription };
 }
 
 /** One scan of the Job Information grid (Job Code + its Description). */
@@ -467,6 +600,7 @@ export async function extractEmployeeName(page: Page): Promise<string> {
 export async function getJobSummaryIdentity(
   page: Page,
   emplId: string,
+  opts: { separationDate?: string } = {},
 ): Promise<JobSummaryIdentity> {
   await navigateToWorkforceJobSummary(page);
   const found = await searchJobSummary(page, emplId);
@@ -475,7 +609,11 @@ export async function getJobSummaryIdentity(
   }
 
   const name = await extractEmployeeName(page);
-  const workLocation = await extractWorkLocation(page);
+  // Pass the separation date so Work Location resolves to the job state in
+  // effect AS OF the separation (latest Effective Date ≤ separation date) — see
+  // pickWorkLocationRow. Drives the correct department for the separated job and
+  // therefore the correct HDH/non-HDH kronos-skip decision.
+  const workLocation = await extractWorkLocation(page, { separationDate: opts.separationDate });
   const jobInfo = await extractJobInfo(page);
 
   // A found, active employee always has a job code on the Job Information tab.
