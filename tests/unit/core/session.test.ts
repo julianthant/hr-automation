@@ -753,6 +753,154 @@ test('session: idle reload is suppressed while auth in progress, fires after aut
   }
 })
 
+// ── Per-browser health: refresh / focus + the auto-recovery monitor ────────
+//
+// All use Session.launch (not forTesting) so the real observer wiring
+// (launch → healthCb → observer.onBrowserHealth) is exercised end-to-end.
+
+function healthFakeLaunch(page: import('playwright').Page) {
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+  const browser = { close: async () => {} } as unknown as import('playwright').Browser
+  return async () => ({ page, context, browser })
+}
+
+test('session.focusSystem: brings the system window to front (which-browser-is-this)', async () => {
+  let fronted = 0
+  const page = {
+    close: async () => {},
+    bringToFront: async () => { fronted++ },
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/x',
+    reload: async () => {},
+    evaluate: async () => 1,
+  } as unknown as import('playwright').Page
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], { launchFn: healthFakeLaunch(page) })
+  try {
+    fronted = 0 // launch's fast path also calls bringToFront once; reset to isolate focusSystem
+    await s.focusSystem('a')
+    assert.equal(fronted, 1)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session.refreshSystem: reloads + emits refreshing → healthy when the page recovers', async () => {
+  const statuses: string[] = []
+  let reloaded = false
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/x',
+    reload: async () => { reloaded = true },
+    evaluate: async () => { if (!reloaded) throw new Error('ctx destroyed'); return 1 },
+  } as unknown as import('playwright').Page
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunch(page),
+    observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
+  })
+  try {
+    const ok = await s.refreshSystem('a')
+    assert.equal(ok, true)
+    assert.equal(reloaded, true)
+    assert.deepEqual(statuses, ['refreshing', 'healthy'])
+  } finally {
+    await s.close()
+  }
+})
+
+test('session.refreshSystem: a closed page is a hard fault → emits failed, no reload (no relaunch)', async () => {
+  const statuses: string[] = []
+  let reloads = 0
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => true,
+    url: () => 'https://example.test/x',
+    reload: async () => { reloads++ },
+    evaluate: async () => 1,
+  } as unknown as import('playwright').Page
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunch(page),
+    observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
+  })
+  try {
+    const ok = await s.refreshSystem('a')
+    assert.equal(ok, false)
+    assert.equal(reloads, 0)
+    assert.deepEqual(statuses, ['failed'])
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: health monitor auto-refreshes a soft fault and emits recovery (refresh-only)', async () => {
+  const statuses: string[] = []
+  let reloaded = false
+  let reloads = 0
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/x',
+    reload: async () => { reloaded = true; reloads++ },
+    evaluate: async () => { if (!reloaded) throw new Error('ctx destroyed'); return 1 },
+  } as unknown as import('playwright').Page
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunch(page),
+    observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
+    healthMonitorOverride: { tickMs: 20 },
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 200))
+    assert.ok(reloads >= 1, `expected ≥1 auto-refresh, got ${reloads}`)
+    assert.equal(statuses[statuses.length - 1], 'healthy', `last status should be healthy: ${statuses.join(',')}`)
+    assert.ok(statuses.includes('refreshing'), `should have emitted a refreshing phase: ${statuses.join(',')}`)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: health monitor surfaces a permanent soft fault as failed after bounded auto-refresh', async () => {
+  const emits: Array<{ status: string; reason?: string }> = []
+  let reloads = 0
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://example.test/x',
+    reload: async () => { reloads++ },
+    evaluate: async () => { throw new Error('ctx destroyed') }, // never recovers
+  } as unknown as import('playwright').Page
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunch(page),
+    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
+    healthMonitorOverride: { tickMs: 20, maxAutoRefreshes: 2 },
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 250))
+    assert.equal(reloads, 2, `should auto-refresh exactly maxAutoRefreshes(=2) times, got ${reloads}`)
+    const failed = emits.find((e) => e.status === 'failed')
+    assert.ok(failed, `expected a failed emit: ${JSON.stringify(emits)}`)
+    assert.match(failed!.reason ?? '', /exhausted/)
+  } finally {
+    await s.close()
+  }
+})
+
 test('session: idle reload does NOT fire for a non-registry system (crm)', async () => {
   const reloads: number[] = []
   const page = {
