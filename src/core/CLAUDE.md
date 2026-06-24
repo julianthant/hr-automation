@@ -75,6 +75,15 @@ Long-lived daemon sessions sit idle between queued items. Systems with server-si
 3. **`daemon.ts`** — after each successful auth (`Session.launch`) and after each `item_complete`, emits a `touch` idle signal for every system in `wf.config.systems` that `isIdleRefreshSystem`, resetting the per-system countdown.
 4. **Dashboard `WorkflowBox`** — imports `idleRefreshCadence` / `isIdleRefreshSystem` / `DEFAULT_IDLE_REFRESH_CADENCE` from the domain to render a per-system SVG countdown ring (`IdleCountdownRing`) on each system tile in the session card. The ring drains from full (just touched) to empty (reload due) over `thresholdMs`, then turns amber; a `Loader2` spinner replaces it while a reload is in progress.
 
+## Per-Browser Health Monitor + Controls
+
+Each system browser has a health lifecycle, bound to the dashboard tile by `browserId` (=== systemId today) — NOT by tile order — so a tile always reflects its own browser's state regardless of which sibling failed.
+
+- **`Session` health monitor** — a root-session timer (`HEALTH_MONITOR_TICK_MS`, default 30s; `LaunchOpts.healthMonitorOverride` for tests) probes every launched browser via `healthCheck`. It is skipped while auth is in progress or while a `ctx.step` body owns the page (`idleGuard`) — so it only acts between steps / when parked. A **soft** (refreshable) fault auto-refreshes up to `HEALTH_MONITOR_MAX_AUTO_REFRESH` (10) times, then surfaces `failed`; a recovery emits `healthy`. A **hard** fault (page closed / `onBrowserDisconnect`) emits `failed` immediately — **a refresh can't heal a dead process and by operator policy we never relaunch** (so hard faults surface + notify; the run fails as before).
+- **`Session.refreshSystem(id)`** — the refresh-only recovery (operator Refresh button + the monitor's auto-refresh), serialized per system; emits `refreshing` → `healthy`/`unhealthy`/`failed`. **`focusSystem(id)`** — `bringToFront`, the "which browser is this?" control. **`probeSystemHealth(id)`** — emit a one-shot health probe (operator "check now").
+- **Emission** — `SessionObserver.onBrowserHealth(systemId, status, reason?)` → `buildBrowserHealthHooks` → `emitBrowserHealth` writes a `browser_health` session event (wired into BOTH `buildSessionObserver` and the batch observer, like the idle-refresh hooks). `rebuildSessionState` routes it to the bound `BrowserState` by `browserId` (drops a browserId-less event — no positional fallback).
+- **Controls path** — `refresh_browser` / `focus_browser` worker commands (systemId rides the command payload, no schema change beyond migration 14 widening the `command_type` CHECK) → `buildRefreshBrowserHandler` / `buildFocusBrowserHandler` (`control/ops/worker-control.ts`) resolve `(workflow, instance, systemId)` → worker via `workflow_start.pid` → `POST /api/browser/{refresh,focus}`.
+
 ## Invariants
 
 - Every run mode constructs `Ctx` via `makeCtx`; never hand-roll a Ctx literal.
