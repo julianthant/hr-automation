@@ -41,7 +41,15 @@ function claimNextTaskReturning(
             WHERE d.parent_task_id = tasks.id
               AND d.status NOT IN ('satisfied', 'cancelled')
           )
-        ORDER BY priority DESC, COALESCE(enqueued_at, created_at) ASC, rowid ASC
+        -- Plain enqueued_at (NOT COALESCE(enqueued_at, created_at)): daemon
+        -- workflow_item rows ALWAYS stamp enqueued_at at enqueue (enqueue.ts)
+        -- and re-pend preserves it, so the COALESCE is dead here — and the
+        -- wrapper defeated tasks_control_claimable_idx, forcing a TEMP B-TREE
+        -- sort of the whole queued set on every claim (held under the write
+        -- lock). Plain enqueued_at + the implicit-rowid tail let the index serve
+        -- the full ORDER BY → LIMIT 1 first-row seek. Keep COALESCE on the
+        -- display/list queries (queue.ts/queries.ts), which can see non-daemon rows.
+        ORDER BY priority DESC, enqueued_at ASC, rowid ASC
         LIMIT 1
       )
       UPDATE tasks
@@ -82,14 +90,25 @@ export function markTaskRunning(
 ): void {
   const now = request.now ?? new Date().toISOString()
   control.transaction(() => {
-    db.prepare(`
+    // Stomp guard: only the worker that still holds the claim (or an unclaimed
+    // task — the in-process path enqueues then marks running with claimed_by
+    // NULL) may flip to running. A STALE worker whose item was re-pended and
+    // re-claimed by a PEER (claimed_by_worker_id now = the peer) matches no row,
+    // so it can't overwrite claimed_by_worker_id / current_attempt_id and
+    // mislead recoverClaimsForDeadWorkers. The terminal write is lease-guarded
+    // (ISS-005); this guards the running transition.
+    const result = db.prepare(`
       UPDATE tasks
       SET control_state = 'running',
           claimed_by_worker_id = @workerId,
           current_attempt_id = @attemptId,
           updated_at = @now
       WHERE id = @taskId
+        AND (claimed_by_worker_id IS NULL OR claimed_by_worker_id = @workerId)
     `).run({ ...request, now })
+    // No-op task UPDATE = a peer superseded this claim; leave the attempt row
+    // untouched too so task + attempt stay in lockstep.
+    if (result.changes === 0) return
     db.prepare(`
       UPDATE task_attempts
       SET control_state = 'running',
@@ -101,6 +120,15 @@ export function markTaskRunning(
   })
 }
 
+/**
+ * Un-claim an in-flight item back to `queued` (reassign / dead-worker recovery),
+ * KEEPING the same attempt + runId so the run continues on a peer. The
+ * `claim_generation` bump (ISS-005) is the important part: it advances the lease
+ * AT re-pend time, not only at the peer's next claim, so a stale-but-alive
+ * original worker that calls `markTask*({claimGeneration})` in the window
+ * BEFORE a peer re-claims now matches no row and no-ops — closing the
+ * re-pend-before-reclaim gap the per-claim bump alone left open.
+ */
 export function returnTaskToQueued(
   db: Database,
   control: ControlDb,
@@ -116,6 +144,7 @@ export function returnTaskToQueued(
           claimed_by_worker_id = NULL,
           claimed_at = NULL,
           claim_expires_at = NULL,
+          claim_generation = claim_generation + 1,
           updated_at = @now
       WHERE id = @taskId AND control_state IN ('claimed', 'running')
     `).run({ taskId: request.taskId, now })
