@@ -156,6 +156,9 @@ export interface BrowserState {
   health?: "healthy" | "unhealthy" | "refreshing" | "failed";
   /** Reason for the latest `unhealthy`/`failed` health transition, if any. */
   lastError?: string;
+  /** The browser's current page URL (from the latest health event) — lets the
+   * operator see where each browser is (e.g. stuck on the SSO login page). */
+  url?: string;
 }
 
 export interface SessionInfo {
@@ -298,6 +301,7 @@ export function rebuildSessionState(dir?: string): SessionState {
       const status = e.data?.status as BrowserState["health"] | undefined;
       if (b && status) {
         b.health = status;
+        if (e.data?.url) b.url = e.data.url;
         if (status === "unhealthy" || status === "failed") {
           if (e.data?.reason) b.lastError = e.data.reason;
         } else {
