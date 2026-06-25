@@ -15,6 +15,11 @@ function iso(n: number): string {
   return `2026-05-04T12:00:${String(n).padStart(2, '0')}.000Z`
 }
 
+/** ISO timestamp `seconds` after a fixed base — spans past 60s (unlike `iso`). */
+function isoAt(seconds: number): string {
+  return new Date(Date.parse('2026-05-04T12:00:00.000Z') + seconds * 1000).toISOString()
+}
+
 function openTempStore(): { dir: string; store: ControlTaskStore } {
   const dir = mkdtempSync(join(tmpdir(), 'task-store-'))
   const ctl = openControlDb({ path: join(dir, 'control.sqlite') })
@@ -93,6 +98,81 @@ test('recoverClaimsForDeadWorkers recovers expired claims even when worker is al
       claimed_by_worker_id: string | null
     }
     assert.equal(row.claimed_by_worker_id, null)
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('renewClaim extends a live worker lease so recovery does not steal an in-flight item', () => {
+  // The multi-worker bug (adding a worker mid-run stole the busy worker's item):
+  // the claim lease was set to claim-time + 60s and never renewed, so any item
+  // running longer than the lease looked "expired" to a peer's recovery sweep —
+  // which re-pended it even though the original worker was alive and working it.
+  // The fix renews the lease on each worker heartbeat; this proves a renewed,
+  // still-held claim survives a recovery sweep run past the ORIGINAL lease.
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: isoAt(0),
+    })
+    // Worker A claims at t=1 with a 60s lease (expires t=61) and starts running.
+    const claimed = store.claimNextTask({ workflow: 'wf', workerId: 'A', now: isoAt(1), leaseMs: 60_000 })
+    assert.equal(claimed?.itemId, 'a')
+    store.markTaskRunning({ taskId: queued.taskId, attemptId: queued.attemptId, workerId: 'A', now: isoAt(2) })
+
+    // A's heartbeat renews the lease partway through the long item (t=30 → expires t=90).
+    const renewed = store.renewClaim({ taskId: queued.taskId, workerId: 'A', now: isoAt(30), leaseMs: 60_000 })
+    assert.equal(renewed, true, 'the owning worker renews its own in-flight claim')
+
+    // A peer (e.g. a freshly added worker's startup recovery, or an idle peer's
+    // keepalive tick) sweeps at t=61 — PAST the original lease but inside the
+    // renewed one. A is alive and heartbeating, so its claim must NOT be stolen.
+    const recovered = store.recoverClaimsForDeadWorkers({
+      workflow: 'wf',
+      aliveWorkerIds: new Set(['A']),
+      now: isoAt(61),
+    })
+
+    assert.deepEqual(recovered, [], 'a renewed, still-held claim is not recovered while the worker is alive')
+    assert.equal(store.getTask(queued.taskId)?.state, 'running')
+    const row = store.db.prepare('SELECT claimed_by_worker_id FROM tasks WHERE id = ?').get(queued.taskId) as {
+      claimed_by_worker_id: string | null
+    }
+    assert.equal(row.claimed_by_worker_id, 'A')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('renewClaim only renews the owning worker non-terminal claim', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: isoAt(0),
+    })
+    store.claimNextTask({ workflow: 'wf', workerId: 'A', now: isoAt(1), leaseMs: 60_000 })
+
+    // A peer that does NOT own the claim cannot renew it (no-op, returns false).
+    const stranger = store.renewClaim({ taskId: queued.taskId, workerId: 'B', now: isoAt(5), leaseMs: 60_000 })
+    assert.equal(stranger, false, 'a non-owning worker cannot renew the lease')
+    const afterStranger = store.db.prepare('SELECT claim_expires_at FROM tasks WHERE id = ?').get(queued.taskId) as {
+      claim_expires_at: string
+    }
+    assert.equal(afterStranger.claim_expires_at, isoAt(61), 'a stranger renew left the original lease untouched')
+
+    // Once the task is terminal, even the owner cannot renew it.
+    store.markTaskRunning({ taskId: queued.taskId, attemptId: queued.attemptId, workerId: 'A', now: isoAt(2) })
+    store.markTaskDone({ taskId: queued.taskId, attemptId: queued.attemptId, now: isoAt(3) })
+    const afterDone = store.renewClaim({ taskId: queued.taskId, workerId: 'A', now: isoAt(10), leaseMs: 60_000 })
+    assert.equal(afterDone, false, 'a terminal task is never re-leased')
   } finally {
     store.close()
     rmSync(dir, { recursive: true, force: true })

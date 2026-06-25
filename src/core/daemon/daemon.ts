@@ -317,7 +317,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   }, opts.lockHealIntervalMs ?? DEFAULT_LOCK_HEAL_MS)
   lockHealInterval.unref()
 
-  const emitWorkerHeartbeat = createEmitWorkerHeartbeat(workerCtx)
+  const emitWorkerHeartbeat = createEmitWorkerHeartbeat(workerCtx, taskStore)
   emitWorkerHeartbeat()
 
   const browserRegistrationState = {

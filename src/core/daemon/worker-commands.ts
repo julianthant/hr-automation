@@ -2,6 +2,7 @@ import type { RegisteredWorkflow } from '../kernel/types.js'
 import { log } from '../../utils/log.js'
 import { findAliveDaemons } from './registry.js'
 import { recoverOrphanedClaims } from './queue.js'
+import type { ControlTaskStore } from '../task-store/index.js'
 import type { ControlWorkerStore, WorkerCommandRow } from './worker-store.js'
 import type { DaemonInFlight, DaemonState } from './daemon-types.js'
 
@@ -43,6 +44,7 @@ export interface WorkerCommandContext<TData, TSteps extends readonly string[]> {
 
 export function createEmitWorkerHeartbeat<TData, TSteps extends readonly string[]>(
   ctx: WorkerCommandContext<TData, TSteps>,
+  taskStore?: Pick<ControlTaskStore, 'renewClaim'>,
 ): () => void {
   const { instanceId, state } = ctx
   return (): void => {
@@ -56,6 +58,16 @@ export function createEmitWorkerHeartbeat<TData, TSteps extends readonly string[
         queueDepth: state.queueDepthCache,
         payload: { itemId: inFlight?.itemId ?? null, runId: inFlight?.runId ?? null },
       })
+      // Renew the in-flight claim's lease alongside the worker heartbeat (same
+      // cadence). Without this a live worker processing an item longer than the
+      // lease window (a separation easily exceeds 60s) looks "expired" to a
+      // peer's recoverClaimsForDeadWorkers sweep, which re-pends the item and
+      // lets a freshly added worker claim and run it concurrently. Scoped to
+      // THIS worker's current task (renewClaim's WHERE), so a reassigned or
+      // terminalized task is never kept alive here.
+      if (inFlight?.taskId) {
+        taskStore?.renewClaim({ taskId: inFlight.taskId, workerId: instanceId })
+      }
     } catch (err) {
       log.warn(
         `[Daemon ${ctx.wf.config.name}/${instanceId}] heartbeat failed: ${

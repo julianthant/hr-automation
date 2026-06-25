@@ -14,6 +14,7 @@ import {
 import { enqueueTasks } from './enqueue.js'
 import {
   claimNextTask,
+  renewClaim,
   markTaskRunning,
   returnTaskToQueued,
   recoverClaimsForDeadWorkers,
@@ -66,6 +67,8 @@ export interface ControlTaskStore {
   close(): void
   enqueueTasks<T>(request: EnqueueTasksRequest<T>): EnqueuedTask[]
   claimNextTask(request: { workflow: string; workerId: string; now?: string; leaseMs?: number }): ClaimedTask | null
+  /** Extend a still-held claim's lease (worker heartbeat); returns whether a row matched. */
+  renewClaim(request: { taskId: string; workerId: string; now?: string; leaseMs?: number }): boolean
   markTaskRunning(request: { taskId: string; attemptId: string; workerId: string; now?: string }): void
   markTaskDone(request: { taskId: string; attemptId: string; claimGeneration?: number; now?: string }): void
   markTaskFailed(request: { taskId: string; attemptId: string; error: string; claimGeneration?: number; now?: string }): void
@@ -118,6 +121,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     close: () => control.close(),
     enqueueTasks: <T>(request: EnqueueTasksRequest<T>) => enqueueTasks(db, control, request),
     claimNextTask: bindControl(claimNextTask),
+    renewClaim: bindControl(renewClaim),
     markTaskRunning: bindControl(markTaskRunning),
     markTaskDone: bindControl(markTaskDone),
     markTaskFailed: bindControl(markTaskFailed),
