@@ -515,72 +515,87 @@ export const jobSummary = {
     page.locator("#main_target_win0"),
 
   /**
-   * Multi-row search-results grid container. Zero count → PeopleSoft
-   * auto-redirected to the detail page (single-row case). Non-zero count →
-   * multiple rows returned; caller must drill into one before clicking
-   * detail-page tabs. verified 2026-04-23
-   * @tags multi-row, grid, search, results, job-summary
+   * Multi-row search-results grid container on the modern PeopleSoft Fluid
+   * "Find an Existing Value" page. Zero count → PeopleSoft auto-redirected to
+   * the detail page (single-row case). Non-zero count → multiple rows returned;
+   * caller must drill into one before clicking detail-page tabs. The live grid
+   * is `divgbrPTS_CFG_CL_STD_RSL$<n>`; the old `[id*="SEARCH_RESULT"]` /
+   * `.PSLEVEL1GRID` guesses match ZERO on the Fluid layout (kept only as
+   * classic-grid fallbacks — see LESSONS 2026-06-24). verified 2026-06-24
+   * @tags multi-row, grid, search, results, fluid, job-summary
    */
   searchResultsGrid: (root: Locator): Locator =>
     root
-      .locator('[id*="SEARCH_RESULT"]')
+      .locator('[id^="divgbrPTS_CFG_CL_STD_RSL"]')
+      .or(root.locator('[id*="SEARCH_RESULT"]'))
       .or(root.locator(".PSLEVEL1GRID")),
 
   /**
-   * Data rows inside the multi-row search-results grid. Filter by a 7+ digit
-   * pattern matches employee IDs and skips header / separator rows.
-   * verified 2026-04-23
-   * @tags multi-row, rows, grid, search, results, job-summary
+   * Data rows inside the multi-row search-results grid. On the live Fluid
+   * "Find an Existing Value" page each result row is
+   * `tr[id^="trPTS_CFG_CL_STD_RSL"]` (e.g. `trPTS_CFG_CL_STD_RSL$0_row1`) — a
+   * clickable row whose own `onclick` (`submitAction_win0(..,'#ICRow<n>')`)
+   * drills to the detail page; there is NO `<a>` drill-in link. The legacy
+   * `[id*="SEARCH_RESULT"] tr` / `.PSLEVEL1GRID tr` probes matched ZERO live rows
+   * — the direct cause of the 2026-06-24 "could not reach the detail page
+   * (scoped rows=0)" failures (see LESSONS). The 7+ digit filter keeps
+   * employee-ID rows and skips header / separator rows. verified 2026-06-24
+   * @tags multi-row, rows, grid, search, results, fluid, job-summary
    */
   searchResultRows: (root: Locator): Locator =>
     root
-      .locator('[id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr')
+      .locator('tr[id^="trPTS_CFG_CL_STD_RSL"], [id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr')
       .filter({ hasText: /\d{7,}/ }),
 
   /**
-   * HR Status / Empl Status cell inside a single row. PeopleSoft emits the
-   * literal text "Terminated" or "Active" (or "Terminated With Pay" /
-   * "Suspended"). Caller checks the textContent for the "Terminat" prefix to
-   * filter out inactive employments. verified 2026-04-23
-   * @tags multi-row, hr-status, terminated, active, cell, job-summary
+   * Payroll Status cell inside a single result row — the signal the caller tests
+   * (`/terminat/i`) to skip already-terminated employments. On the live Fluid
+   * grid this is the `PTS_CFG_CL_RSLT_NUI_SRCH13$…` span (column 13 = Payroll
+   * Status), rendering the literal "Terminated" / "Active". Targeting it by the
+   * stable `SRCH13` column prefix avoids the old `td:has-text("Active")` trap (it
+   * also substring-matched HR Status "Inactive") and the strict-mode multi-match
+   * when two cells both read "Active". `.first()` guarantees a single textContent
+   * read. verified 2026-06-24
+   * @tags multi-row, hr-status, payroll-status, terminated, active, cell, fluid, job-summary
    */
   rowHrStatusCell: (row: Locator): Locator =>
     row
-      .locator('td:has-text("Terminated")')
-      .or(row.locator('td:has-text("Active")'))
+      .locator('span[id*="PTS_CFG_CL_RSLT_NUI_SRCH13"]')
+      .or(row.locator('td:has-text("Terminated")'))
       .or(row.locator('span:has-text("Terminated")'))
-      .or(row.locator('span:has-text("Active")')),
+      .first(),
 
   /**
-   * Drill-in link that navigates from the grid to the detail page for the
-   * matching row. PeopleSoft variants: "drill in" link (Emergency Contact
-   * style), EMPLID hyperlink, or a generic first link inside the row.
-   * verified 2026-04-23
-   * @tags multi-row, drill-in, select, link, job-summary
+   * Drill-in target that navigates from the grid to the detail page for the
+   * matching row. On the live Fluid grid the ROW ITSELF is the click target — its
+   * `onclick` (`submitAction_win0(..,'#ICRow<n>')`) drills in; there is no `<a>`
+   * drill-in link, so the chain falls through to the row locator (`.or(row)` —
+   * verified 2026-06-24: a real click on the row drills to the detail page). The
+   * legacy "drill in" link role and EMPLID hyperlink stay as classic-grid
+   * fallbacks. verified 2026-06-24
+   * @tags multi-row, drill-in, select, row, fluid, job-summary
    */
   rowDrillInLink: (row: Locator): Locator =>
     row
       .getByRole("link", { name: /drill in/i })
       .or(row.locator('a[id*="EMPLID"]'))
-      .or(row.getByRole("link").first()),
+      .or(row),
 
   /**
-   * GRID-INDEPENDENT drill-in links for the Workforce Job Summary search-results
-   * page — the EMPLID hyperlink PeopleSoft renders in each result row, found at
-   * the ROOT (not scoped to a `searchResultRows` match). Used as a fallback when
-   * the `searchResultsGrid`/`searchResultRows` id/class probes miss the live
-   * results layout, leaving us on a tab-less results list whose Work Location tab
-   * click then timed out 15s ("Detail-page name: <none>", EID 10641172,
-   * 2026-06-24). Anchored to the EMPLID/SRCH id fragments PeopleSoft uses for the
-   * clickable result column.
-   * NEEDS LIVE VERIFY 2026-06-24
-   * @tags multi-row, drill-in, emplid, link, root, fallback, job-summary
+   * GRID-INDEPENDENT drill-in targets for the Workforce Job Summary results page,
+   * a fallback for when the scoped `searchResultRows` probe somehow misses. On
+   * the live Fluid page the clickable unit is the result ROW
+   * (`tr[id^="trPTS_CFG_CL_STD_RSL"]`, which drills via its own onclick); the
+   * caller clicks `.first()`. The legacy EMPLID/SRCH anchor probes — which the
+   * Fluid layout never emits, leaving us stuck on a tab-less results list (EID
+   * 10641172 / 2026-06-24) — stay as classic-grid fallbacks. verified 2026-06-24
+   * @tags multi-row, drill-in, row, emplid, root, fallback, fluid, job-summary
    */
   resultDrillLinks: (root: Locator): Locator =>
     root
-      .locator('a[id*="EMPLID"]')
-      .or(root.locator('a[id*="SRCHRSLT"]'))
-      .or(root.locator('a[id*="SEARCH_RESULT"]')),
+      .locator('tr[id^="trPTS_CFG_CL_STD_RSL"]')
+      .or(root.getByRole("link", { name: /drill in/i }))
+      .or(root.locator('a[id*="EMPLID"]')),
 };
 
 // ─── HR Tasks navigation (top-level page before iframe interactions) ──────
@@ -1304,15 +1319,21 @@ export const ssSmartHRTransactions = {
   /**
    * Drill into a specific transaction from the results grid by its Transaction
    * ID — opens the Transaction Details page (where the effective date / "Effdt:"
-   * is shown). PeopleSoft renders the Transaction ID column as a hyperlink;
-   * fall back to any link whose accessible name carries the id.
-   * NEEDS LIVE VERIFY 2026-06-24 (authored from the SS Smart HR results + detail screenshots)
-   * @tags transaction, drill-in, link, result, detail, effdt, ss-smart-hr
+   * is shown). The Transaction ID column is a DISPLAY-ONLY `<span>`
+   * (`PSEDITBOX_DISPONLY`), NOT a hyperlink — the clickable element is the
+   * result ROW `<tr id^="trPTS_CFG_CL_STD_RSL">`, which carries the row's
+   * onclick. Filter the row by the (per-row unique) Transaction ID text. Falls
+   * back to a link named after the id for any PeopleSoft view that does render
+   * the id as a hyperlink.
+   * verified 2026-06-24 (playwright-cli, live SS Smart HR EID 10797079 → row T001928408, Effdt 2025-07-01)
+   * @tags transaction, drill-in, row, result, detail, effdt, ss-smart-hr
    */
-  transactionResultLink: (f: FrameLocator, transactionId: string): Locator =>
+  transactionResultRow: (f: FrameLocator, transactionId: string): Locator =>
     f
-      .getByRole("link", { name: transactionId, exact: true })
-      .or(f.getByRole("link", { name: new RegExp(transactionId, "i") }))
+      .locator('tr[id^="trPTS_CFG_CL_STD_RSL"]')
+      .filter({ hasText: transactionId })
+      .first()
+      .or(f.getByRole("link", { name: transactionId, exact: true }))
       .first(),
 };
 

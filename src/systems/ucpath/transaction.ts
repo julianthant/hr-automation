@@ -824,47 +824,64 @@ export async function findExistingTerminationTransaction(
 }
 
 /**
- * Delete a PENDING termination transaction for an employee from the Smart HR
- * Transactions page's "Transactions in Progress" grid.
+ * Delete EVERY pending termination transaction for an employee from the Smart HR
+ * Transactions page's "Transactions in Progress" grid, REGARDLESS of effective
+ * date.
  *
- * Used by separations' `transaction-check` step: when SS Smart HR shows a
- * PENDING TER transaction, it must be removed before a fresh termination is
- * created. Navigates to Smart HR Transactions, finds the in-progress row whose
- * Person ID cell equals `employeeId` AND whose row text contains "Terminat"
- * (the same EID + termination match used by `findExistingTerminationTransaction`
- * — names/transaction-id columns aren't shown on this grid), ticks that row's
- * Select checkbox, clicks "Delete Selected Transactions", and confirms the
- * PeopleSoft dialog (#ICOK).
+ * Used by separations' `transaction-check` step before a fresh termination is
+ * created. This is the real duplicate guard: a prior run can leave a pending
+ * termination whose computed effective date DIFFERS from this run's, which both
+ * the SS-Smart-HR effdt gate (it only reuses/flags a TER within ~14 days of THIS
+ * separation) AND `findExistingTerminationTransaction`'s exact-effdt match miss —
+ * so the stale pending survives and a second create produces a visible duplicate
+ * in this grid (Erick Guzman 10779506: 06/14 + 06/20, 2026-06-24). The
+ * in-progress grid only holds UNPROCESSED transactions, so ANY "Terminat" row
+ * here for this person is a superseded prior attempt that must go before the new
+ * create. (An APPROVED prior-job termination is processed and never appears in
+ * this grid, so the date-agnostic sweep cannot touch it — the SS Smart HR effdt
+ * gate still owns the approved-reuse decision upstream.)
  *
- * Returns `true` when a matching row was found and the delete was submitted,
- * `false` when no matching row was found or the delete failed (best-effort — a
- * failure here is logged, not thrown; the caller can re-evaluate). The checkbox
- * is clicked inside `frame.evaluate` because PeopleSoft's overlay can intercept
- * a Playwright click — the same escape hatch used for the #ICOK dialog.
+ * Navigates to Smart HR Transactions, ticks the Select checkbox of EVERY
+ * in-progress row whose Person ID cell equals `employeeId` AND whose row text
+ * contains "Terminat" (names/transaction-id columns aren't shown on this grid),
+ * clicks "Delete Selected Transactions" once (it deletes all checked rows), and
+ * confirms the PeopleSoft dialog (#ICOK).
  *
- * NEEDS LIVE VERIFY: the checkbox match + the delete-confirm dialog shape were
- * authored from the live screenshot, not playwright-cli.
+ * Returns the COUNT of rows deleted (0 when no matching row was found or the
+ * delete failed — best-effort; a failure here is logged, not thrown). The
+ * checkboxes are clicked inside `frame.evaluate` because PeopleSoft's overlay
+ * can intercept a Playwright click — the same escape hatch used for the #ICOK
+ * dialog.
+ *
+ * LIVE-VERIFIED 2026-06-24 (playwright-cli, real UCPath): the EID + "Terminat"
+ * exact-cell match selects precisely the right rows (real duplicate EID 10629763
+ * selected both its rows; a single-row EID selected 1; an absent EID 0);
+ * `checkbox.click()` inside `evaluate` flips the real PeopleSoft grid checkboxes;
+ * `Delete Selected Transactions` resolves to exactly 1 button; the confirm dialog
+ * is the `#ICOK` element (`document.getElementById("#ICOK")`, value "OK", text
+ * "Select Ok to confirm deletion of this transaction…"). A real stale duplicate
+ * row was deleted and the keeper preserved.
  */
 export async function deletePendingTransaction(
   page: Page,
   employeeId: string,
-): Promise<boolean> {
+): Promise<number> {
   try {
-    log.step(`[Txn Delete] Deleting pending termination for eid='${employeeId}'`);
+    log.step(`[Txn Delete] Deleting pending termination(s) for eid='${employeeId}'`);
     if (!employeeId) {
       log.warn(`[Txn Delete] Empty EID — skipping delete`);
-      return false;
+      return 0;
     }
     await navigateToSmartHR(page);
     await clickSmartHRTransactions(page);
     const frame = getContentFrame(page);
 
-    const checked = await checkPendingTransactionRowByEid(frame, employeeId);
-    if (!checked) {
-      log.warn(
-        `[Txn Delete] No in-progress Terminatn row found for eid=${employeeId} — nothing deleted`,
+    const checkedCount = await checkPendingTransactionRowsByEid(frame, employeeId);
+    if (checkedCount === 0) {
+      log.step(
+        `[Txn Delete] No in-progress Terminatn row found for eid=${employeeId} — nothing to delete`,
       );
-      return false;
+      return 0;
     }
     await page.waitForTimeout(1_000);
 
@@ -881,26 +898,30 @@ export async function deletePendingTransaction(
     await waitForPeopleSoftProcessing(frame, 15_000);
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
-    log.success(`[Txn Delete] Pending termination deleted for eid=${employeeId}`);
-    return true;
+    log.success(`[Txn Delete] Deleted ${checkedCount} pending termination row(s) for eid=${employeeId}`);
+    return checkedCount;
   } catch (e) {
-    log.warn(`[Txn Delete] Delete threw (treating as not deleted): ${e instanceof Error ? e.message : String(e)}`);
-    return false;
+    log.warn(`[Txn Delete] Delete threw (treating as nothing deleted): ${e instanceof Error ? e.message : String(e)}`);
+    return 0;
   }
 }
 
 /**
- * Scan the "Transactions in Progress" grid for the row whose Person ID cell
- * equals `employeeId` and whose text contains "Terminat", and click that row's
- * Select checkbox. Returns `true` if a checkbox was clicked. The click happens
- * inside `frame.evaluate` (PeopleSoft overlay can intercept Playwright clicks).
+ * Scan the "Transactions in Progress" grid and tick the Select checkbox of EVERY
+ * row whose Person ID cell equals `employeeId` and whose text contains
+ * "Terminat". Returns the number of checkboxes clicked. The clicks happen inside
+ * `frame.evaluate` (PeopleSoft overlay can intercept Playwright clicks).
+ *
+ * Checks ALL matching rows (not just the first) so a single "Delete Selected
+ * Transactions" submit clears every accumulated duplicate for the EID at once.
  */
-async function checkPendingTransactionRowByEid(
+async function checkPendingTransactionRowsByEid(
   frame: FrameLocator,
   employeeId: string,
-): Promise<boolean> {
-  return await frame.locator("body").evaluate( // allow-inline-selector -- body scan + checkbox click on transactions-in-progress grid
+): Promise<number> {
+  return await frame.locator("body").evaluate( // allow-inline-selector -- body scan + checkbox clicks on transactions-in-progress grid
     (body, eid: string) => {
+      let checked = 0;
       const tables = body.querySelectorAll("table");
       for (const table of Array.from(tables)) {
         for (const row of Array.from((table as HTMLTableElement).rows)) {
@@ -911,16 +932,16 @@ async function checkPendingTransactionRowByEid(
           );
           if (!hasEidCell) continue;
           const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]');
-          if (checkbox) {
+          if (checkbox && !checkbox.checked) {
             checkbox.click();
-            return true;
+            checked++;
           }
         }
       }
-      return false;
+      return checked;
     },
     employeeId,
-  ).catch(() => false);
+  ).catch(() => 0);
 }
 
 /**
