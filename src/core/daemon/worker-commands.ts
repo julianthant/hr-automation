@@ -249,6 +249,24 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
         workerStore.completeCommand(command.commandId)
         return
       }
+      if (command.commandType === 'set_auto_recovery') {
+        workerStore.acknowledgeCommand(command.commandId, instanceId)
+        const systemId = resolveCommandSystemId(workerStore, command)
+        if (!systemId) {
+          workerStore.failCommand(command.commandId, 'systemId not resolved for set_auto_recovery')
+          return
+        }
+        if (!state.activeSession) throw new Error('session not ready')
+        // payload.paused === 'true' pauses the monitor's auto-refresh/reopen for
+        // this system (manual controls still work); anything else resumes it.
+        if (command.payload?.['paused'] === true || command.payload?.['paused'] === 'true') {
+          state.activeSession.pauseAutoRecovery(systemId)
+        } else {
+          state.activeSession.resumeAutoRecovery(systemId)
+        }
+        workerStore.completeCommand(command.commandId)
+        return
+      }
       if (command.commandType === 'focus_browser') {
         workerStore.acknowledgeCommand(command.commandId, instanceId)
         const systemId = resolveCommandSystemId(workerStore, command)

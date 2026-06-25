@@ -15,6 +15,7 @@ export type WorkerCommandType =
   | 'refresh_browser'
   | 'reopen_browser'
   | 'focus_browser'
+  | 'set_auto_recovery'
   | 'force_kill_worker'
   | 'health_check'
 export type WorkerCommandState = 'queued' | 'acknowledged' | 'completed' | 'failed' | 'cancelled'

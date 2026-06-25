@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 15;
+export const LATEST_SCHEMA_VERSION = 16;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -679,6 +679,63 @@ CREATE TABLE worker_commands_v15 (
 INSERT INTO worker_commands_v15 SELECT * FROM worker_commands;
 DROP TABLE worker_commands;
 ALTER TABLE worker_commands_v15 RENAME TO worker_commands;
+
+CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
+  ON worker_commands(target_worker_id, state, requested_at);
+
+CREATE INDEX IF NOT EXISTS worker_commands_task_state_idx
+  ON worker_commands(target_task_id, state, requested_at);
+    `,
+  },
+  {
+    // Migration 16: widen the worker_commands.command_type CHECK again to admit
+    // `set_auto_recovery` (the per-browser auto-recovery pause/resume toggle).
+    // Same leaf-table rebuild as 14/15.
+    version: 16,
+    sql: String.raw`
+CREATE TABLE worker_commands_v16 (
+  command_id TEXT PRIMARY KEY,
+  command_type TEXT NOT NULL CHECK (
+    command_type IN (
+      'cancel_task',
+      'retry_task',
+      'drain_worker',
+      'stop_worker',
+      'force_stop_task',
+      'kill_browser',
+      'refresh_browser',
+      'reopen_browser',
+      'focus_browser',
+      'set_auto_recovery',
+      'force_kill_worker',
+      'health_check'
+    )
+  ),
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'queued',
+      'acknowledged',
+      'completed',
+      'failed',
+      'cancelled'
+    )
+  ),
+  workflow TEXT,
+  target_worker_id TEXT REFERENCES workers(worker_id) ON DELETE SET NULL,
+  target_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  target_attempt_id TEXT REFERENCES task_attempts(id) ON DELETE SET NULL,
+  target_browser_process_id TEXT REFERENCES browser_processes(browser_process_id) ON DELETE SET NULL,
+  requested_by TEXT NOT NULL DEFAULT 'dashboard',
+  requested_at TEXT NOT NULL,
+  acknowledged_at TEXT,
+  completed_at TEXT,
+  error TEXT,
+  payload_json TEXT
+);
+
+INSERT INTO worker_commands_v16 SELECT * FROM worker_commands;
+DROP TABLE worker_commands;
+ALTER TABLE worker_commands_v16 RENAME TO worker_commands;
 
 CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
   ON worker_commands(target_worker_id, state, requested_at);

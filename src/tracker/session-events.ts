@@ -291,6 +291,7 @@ export function emitBrowserHealth(
   reason?: string,
   dir?: string,
   url?: string,
+  paused?: boolean,
 ): void {
   emitSessionEvent(
     {
@@ -298,7 +299,12 @@ export function emitBrowserHealth(
       workflowInstance: instance,
       browserId,
       system,
-      data: { status, ...(reason ? { reason } : {}), ...(url ? { url } : {}) },
+      data: {
+        status,
+        ...(reason ? { reason } : {}),
+        ...(url ? { url } : {}),
+        ...(paused !== undefined ? { paused: paused ? "true" : "false" } : {}),
+      },
     },
     dir,
   );

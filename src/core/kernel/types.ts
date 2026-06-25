@@ -100,7 +100,7 @@ export interface SessionObserver {
    * (`healthy` | `unhealthy` | `refreshing` | `failed`); `reason` is a short
    * human string for the non-healthy states.
    */
-  onBrowserHealth?: (systemId: string, status: 'healthy' | 'unhealthy' | 'refreshing' | 'failed', reason?: string, url?: string) => void
+  onBrowserHealth?: (systemId: string, status: 'healthy' | 'unhealthy' | 'refreshing' | 'failed', reason?: string, url?: string, paused?: boolean) => void
 }
 
 export interface BatchConfig {

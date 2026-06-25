@@ -162,6 +162,9 @@ export interface BrowserState {
   /** Recent health TRANSITIONS (oldest→newest, capped), so the operator can see
    * a flapping browser's recovery trail. Consecutive duplicates are collapsed. */
   healthHistory?: Array<{ at: string; status: NonNullable<BrowserState["health"]>; reason?: string }>;
+  /** Operator paused AUTO-recovery for this browser (manual controls still work;
+   * the monitor won't refresh/reopen it). */
+  autoRecoveryPaused?: boolean;
 }
 
 /** Cap on `BrowserState.healthHistory` length (keeps the SSE payload bounded). */
@@ -308,6 +311,7 @@ export function rebuildSessionState(dir?: string): SessionState {
       if (b && status) {
         b.health = status;
         if (e.data?.url) b.url = e.data.url;
+        if (e.data?.paused !== undefined) b.autoRecoveryPaused = e.data.paused === "true";
         if (status === "unhealthy" || status === "failed") {
           if (e.data?.reason) b.lastError = e.data.reason;
         } else {
