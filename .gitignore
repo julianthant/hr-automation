@@ -89,3 +89,6 @@ Thumbs.db
 tests/data/*.pdf
 # e2e roster identities sidecar (PII — real names+EIDs for make-e2e-roster.mjs)
 tests/data/e2e-roster-identities.json
+
+# Dashboard preview fixture (scripts/seed-session-fixture.ts)
+generated/.dashboard-preview/
