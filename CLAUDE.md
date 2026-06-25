@@ -75,7 +75,9 @@ OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr
 - **After changes:** update only the nearest relevant `CLAUDE.md` when a non-obvious pattern, gotcha, or contract changes; merge stale lessons instead of adding duplicates.
 - **Lessons (add vs. audit):** record a new gotcha with the `lesson` skill (it self-dedupes against neighbors before appending). Periodically GC the lesson stores with the `lesson-audit` skill (`.claude/skills/lesson-audit/`) — it sweeps every `LESSONS.md` + `CLAUDE.md` "Lessons Learned" section to remove duplicate/superseded/dead-reference lessons and verify each remaining lesson still maps to real code. Lessons are maintained, not append-only.
 
-## Verifying selectors (headless, standing pre-authorization)
+## Live verification — standing pre-authorization (always available, never ask)
+
+**The live environment is always available, and reaching it for verification is pre-authorized. Never ask the user whether live access is up, whether to spend the live session, or to confirm a Duo prompt — assume yes and proceed.** This covers the whole range: a read-only selector `snapshot`, a `test-login` smoke check, a `tests/live/` collector, and a **full live workflow dry-run** (real UCPath / CRM / Kuali / ServiceNow / i9). Duo is cleared hands-off by Duo Autopilot on every verification/test path (`npm run sel:browser`, `tests/live/`, the e2e live lane), so there is no phone-approval step to wait on and nothing for the user to sign off. The safety boundary for live *workflow* runs is `dryRun=true` (no UCPath transaction, no Kuali finalization) — that, not gated access, is what keeps a live run safe. If a single live system is down (e.g. i9), skip that system and proceed with the rest; don't treat one outage as "the live env is unavailable."
 
 Mapping or verifying a selector is **pre-approved** — do it whenever a fix, a selector edit, or any debugging needs it, and **never pause to ask**. A `snapshot` is a read-only view of a page; treat it like running a test, not like an action that needs sign-off.
 
@@ -115,7 +117,7 @@ Copy `.env.example` → `.env` and set:
 - `UCPATH_PASSWORD` — UCSD SSO password
 - `TIMEKEEPER_NAME` — operator timekeeper name for Kuali separation timekeeper fills (required; `src/config.ts` throws at startup if unset)
 
-Duo MFA is manual — the automation pauses and polls until you approve on your phone.
+Duo MFA for **production operator runs** (workflows launched from the dashboard for real submission) is manual — the automation pauses and polls until you approve on your phone. **Verification and test runs are different:** selector snapshots, `tests/live/`, and live dry-runs clear Duo hands-off via Duo Autopilot — see "Live verification — standing pre-authorization" above. Never ask the user to confirm live access for verification work; assume it is always available.
 
 ## Configuration
 
@@ -159,7 +161,7 @@ playwright-cli close-all
 pkill -f seed-session-fixture; pkill -f 'dashboard --prod --port 3939'
 ```
 
-Principles: `HRAUTO_TRACKER_DIR` points the dashboard (and the e2e stub lane) at an isolated root — NEVER seed into the real `.tracker/`. The session panel only shows a card whose `workflow_start.pid` is a LIVE process, which is why the seeder hangs (kill it when done). The seeder uses the **production emitters** (`emitBrowserHealth`, …) so the fixture can't drift from the event schema — extend it (or write a sibling seeder) when you add a surface. The a11y `snapshot` is more reliable to assert on than a screenshot (text/labels/`[pressed]`/aria); `Read` the PNG only for the visual gestalt. `:3838` is usually the user's own dashboard — use a fallback port and never kill it. Screenshots land in `.screenshots/` (gitignored). What this CANNOT verify: behavior that needs a real browser daemon (refresh/reopen/peek *acting*, real auth) — that's the opt-in live lane (see "Verifying selectors" above + `tests/live/`).
+Principles: `HRAUTO_TRACKER_DIR` points the dashboard (and the e2e stub lane) at an isolated root — NEVER seed into the real `.tracker/`. The session panel only shows a card whose `workflow_start.pid` is a LIVE process, which is why the seeder hangs (kill it when done). The seeder uses the **production emitters** (`emitBrowserHealth`, …) so the fixture can't drift from the event schema — extend it (or write a sibling seeder) when you add a surface. The a11y `snapshot` is more reliable to assert on than a screenshot (text/labels/`[pressed]`/aria); `Read` the PNG only for the visual gestalt. `:3838` is usually the user's own dashboard — use a fallback port and never kill it. Screenshots land in `.screenshots/` (gitignored). **ALWAYS surface the screenshots back to the user after a verification — `Read` the PNG(s) into your reply (they render inline in the conversation) and cite the saved `.screenshots/<area>/` path(s).** The user can't always re-run your verification, so showing the actual rendered result (not just asserting "it works") is mandatory: every dashboard/UI verification ends with the operator SEEING the before/after, the same images you judged from. What this CANNOT verify: behavior that needs a real browser daemon (refresh/reopen/peek *acting*, real auth) — that's the opt-in live lane (see "Live verification — standing pre-authorization" above + `tests/live/`).
 
 ## Docs
 
