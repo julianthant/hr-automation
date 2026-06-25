@@ -144,6 +144,38 @@ test("makeCaptureFinalize resolves emergency-contact formType from the registrat
   assert.equal(seen, "emergency-contact");
 });
 
+/**
+ * ISS-001 (e2e run 20260625-0332): makeCaptureFinalize omitted `targetWorkflow`,
+ * so a captured oath/EC roster landed as a STANDALONE OCR (trace `oc-`, no
+ * operation coordinator, no parentRunId) instead of the workflow operation the
+ * capture button implies. Standalone OCR has no approve flow, so the captured
+ * doc could never fan out signers/EC fills. The finalize MUST forward the
+ * registration's `targetWorkflow` into the prepare call so a captured doc
+ * becomes an operation (os-/ec-) identical to a PDF upload through the RunModal.
+ */
+function finalizeAndCaptureTargetWorkflow(session: CaptureSession): Promise<string | undefined> {
+  let seen: string | undefined;
+  const finalize = makeCaptureFinalize(dir, {
+    buildPrepareHandler: () => async (input) => {
+      seen = (input as { targetWorkflow?: string }).targetWorkflow;
+      return { status: 202, body: { ok: true, sessionId: input.sessionId ?? "", runId: "r" } };
+    },
+  });
+  return finalize(session).then(() => seen);
+}
+
+test("makeCaptureFinalize forwards targetWorkflow=oath-signature from the registration (ISS-001)", async () => {
+  assert.equal(captureRegistrations["oath-signature"].targetWorkflow, "oath-signature");
+  const seen = await finalizeAndCaptureTargetWorkflow(fakeFinalizedSession({ workflow: "oath-signature" }));
+  assert.equal(seen, "oath-signature");
+});
+
+test("makeCaptureFinalize forwards targetWorkflow=emergency-contact from the registration (ISS-001)", async () => {
+  assert.equal(captureRegistrations["emergency-contact"].targetWorkflow, "emergency-contact");
+  const seen = await finalizeAndCaptureTargetWorkflow(fakeFinalizedSession({ workflow: "emergency-contact" }));
+  assert.equal(seen, "emergency-contact");
+});
+
 test("makeCaptureFinalize falls back to session.formType for an unregistered ocr workflow", async () => {
   assert.equal(captureRegistrations["ocr"], undefined);
   const seen = await finalizeAndCaptureFormType(
