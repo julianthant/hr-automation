@@ -71,14 +71,29 @@ export interface CaptureRegistration {
   label: string;
   /** OCR form type for the bundled PDF (e.g. "oath", "emergency-contact"). */
   formType: string;
+  /**
+   * Operation intent forwarded to the OCR prepare hub as `targetWorkflow`, so a
+   * captured roster becomes the SAME operation a RunModal PDF upload produces
+   * (operation coordinator + delegated OCR review row), NOT a standalone OCR.
+   * Omitted only for capture entries that intentionally want a standalone OCR.
+   * (ISS-001, e2e 20260625-0332: a missing targetWorkflow made captured oath/EC
+   * docs land as standalone OCR with no approve flow — the capture→sign/fill
+   * flow was broken end-to-end.)
+   */
+  targetWorkflow?: string;
   contextHints?: string[];
 }
 
 export const captureRegistrations: Record<string, CaptureRegistration> = {
-  "oath-signature": { label: "Capture paper roster", formType: "oath" },
+  "oath-signature": {
+    label: "Capture paper roster",
+    formType: "oath",
+    targetWorkflow: "oath-signature",
+  },
   "emergency-contact": {
     label: "Capture emergency contact forms",
     formType: "emergency-contact",
+    targetWorkflow: "emergency-contact",
   },
 };
 
@@ -208,6 +223,12 @@ export function makeCaptureFinalize(trackerDir: string, opts: MakeCaptureFinaliz
       pdfOriginalName,
       ...(pdfFileId ? { pdfFileId } : {}),
       formType,
+      // Forward the capture registration's operation intent so the bundled PDF
+      // becomes an operation (oath-signature / emergency-contact) with a
+      // delegated OCR review row — identical to a RunModal PDF upload — instead
+      // of a standalone OCR with no approve flow (ISS-001). Absent for the
+      // unregistered `ocr` capture path, which intentionally stays standalone.
+      ...(registration?.targetWorkflow ? { targetWorkflow: registration.targetWorkflow } : {}),
       rosterMode,
       rosterPath,
       sessionId: session.sessionId,
