@@ -1,10 +1,14 @@
-import { useMemo, useState } from "react";
-import { ScreenshotCard } from "./ScreenshotCard";
+import { useEffect, useMemo, useState } from "react";
 import { ScreenshotLightbox, type LightboxItem } from "./ScreenshotLightbox";
+import { ScreenshotTile } from "./ScreenshotTile";
 import {
-  useRunScreenshots,
-  type ScreenshotEntry,
-} from "@/components/hooks/useRunScreenshots";
+  ALL_FILTER,
+  buildScreenshotFilters,
+  filterScreenshotTiles,
+  flattenScreenshotTiles,
+  type ScreenshotTileData,
+} from "./screenshot-gallery";
+import { useRunScreenshots } from "@/components/hooks/useRunScreenshots";
 
 export function ScreenshotsPanel({
   workflow,
@@ -22,29 +26,30 @@ export function ScreenshotsPanel({
   runId?: string | null;
 }) {
   const { entries } = useRunScreenshots(workflow, itemId, screenshotEventCount, runId);
+  const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
-  const { errors, others, flat } = useMemo(() => {
-    const errs = entries
-      .filter((e) => e.kind === "error")
-      .sort((a, b) => b.ts - a.ts);
-    const oth = entries
-      .filter((e) => e.kind !== "error")
-      .sort((a, b) => b.ts - a.ts);
-    // Flatten into one arrow-keyable queue. Error screenshots first (the
-    // operator typically wants to see failures before form captures), then
-    // form / manual. Within an entry, files go in declared order so the
-    // viewer's left/right always lands on a deterministic neighbor.
-    const f: LightboxItem[] = [];
-    for (const entry of [...errs, ...oth]) {
-      for (let i = 0; i < entry.files.length; i++) {
-        f.push({ entry, fileIdx: i });
-      }
-    }
-    return { errors: errs, others: oth, flat: f };
-  }, [entries]);
+  const tiles = useMemo(() => flattenScreenshotTiles(entries), [entries]);
+  const chips = useMemo(() => buildScreenshotFilters(tiles), [tiles]);
+  const visibleTiles = useMemo(
+    () => filterScreenshotTiles(tiles, filter),
+    [tiles, filter],
+  );
 
-  if (entries.length === 0) {
+  // Self-heal: if the active filter's chip disappears (errors cleared, a system
+  // no longer present after a refetch), fall back to All.
+  useEffect(() => {
+    if (!chips.some((chip) => chip.id === filter)) setFilter(ALL_FILTER);
+  }, [chips, filter]);
+
+  // The lightbox steps through the CURRENTLY VISIBLE set — what the operator
+  // sees is what arrow keys walk.
+  const flat = useMemo<LightboxItem[]>(
+    () => visibleTiles.map((tile) => ({ entry: tile.entry, fileIdx: tile.fileIdx })),
+    [visibleTiles],
+  );
+
+  if (tiles.length === 0) {
     return (
       <div className="px-6 py-4 text-sm text-muted-foreground">
         No screenshots captured for this run yet.
@@ -52,48 +57,69 @@ export function ScreenshotsPanel({
     );
   }
 
-  const openFlat = (entry: ScreenshotEntry, fileIdx: number) => {
-    const idx = flat.findIndex(
-      (item) => item.entry === entry && item.fileIdx === fileIdx,
-    );
+  const openTile = (tile: ScreenshotTileData) => {
+    const idx = visibleTiles.findIndex((item) => item.key === tile.key);
     if (idx >= 0) setLightboxIdx(idx);
   };
 
   return (
-    <div className="space-y-4 px-6 py-4 overflow-y-auto">
-      {errors.length > 0 && (
-        <section>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-destructive mb-2">
-            Errors ({errors.length})
-          </h3>
-          <div className="space-y-2">
-            {errors.map((e) => (
-              <ScreenshotCard
-                key={`${e.ts}-${e.label}`}
-                entry={e}
-                onOpen={openFlat}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+    <div>
+      <div className="sticky top-0 z-10 border-b border-border bg-card px-6 py-2.5">
+        <div
+          role="group"
+          aria-label="Filter screenshots by type or system"
+          className="flex flex-wrap items-center gap-1.5"
+        >
+          {chips.map((chip) => {
+            const active = chip.id === filter;
+            const activeClass =
+              chip.tone === "error"
+                ? "border-destructive bg-destructive text-destructive-foreground"
+                : "border-primary bg-primary text-primary-foreground";
+            const idleClass =
+              chip.tone === "error"
+                ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground";
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setFilter(chip.id)}
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  active ? activeClass : idleClass
+                }`}
+              >
+                <span>{chip.label}</span>
+                <span
+                  className={`rounded px-1 text-[10px] tabular-nums ${
+                    active ? "bg-background/25 text-current" : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {chip.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="sr-only" aria-live="polite">
+          {visibleTiles.length} {visibleTiles.length === 1 ? "screenshot" : "screenshots"} shown
+        </p>
+      </div>
 
-      {others.length > 0 && (
-        <section>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-primary mb-2">
-            Forms &amp; Manual ({others.length})
-          </h3>
-          <div className="space-y-2">
-            {others.map((e) => (
-              <ScreenshotCard
-                key={`${e.ts}-${e.label}`}
-                entry={e}
-                onOpen={openFlat}
-              />
+      <div className="px-6 py-4">
+        {visibleTiles.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
+            No screenshots match this filter.
+          </div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
+            {visibleTiles.map((tile) => (
+              <ScreenshotTile key={tile.key} tile={tile} onOpen={openTile} />
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </div>
 
       {lightboxIdx !== null && flat.length > 0 && (
         <ScreenshotLightbox
