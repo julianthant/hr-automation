@@ -28,18 +28,39 @@ export type TransactionCheckResult =
  * it searches with is the verified one (a wrong EID is corrected by
  * person-lookup inside identity-check first).
  *
- * Searches SS Smart HR Transactions by EID for an existing termination (TER)
- * row and branches on its approval status:
- *   - none      → proceed (create the transaction downstream).
- *   - Approved  → reuse the existing transaction number; the handler skips the
- *                 UCPath create and files the duplicate-termination comment.
- *   - Pending   → delete it (LIVE only; the dry-run path reports the intent),
- *                 then proceed to create a fresh transaction.
- *   - other     → log + proceed; `ucpath-transaction`'s own
- *                 `findExistingTerminationTransaction` is the duplicate backstop.
+ * Two INDEPENDENT concerns, deliberately decoupled (2026-06-24):
  *
- * The DELETE is the only mutation; it is gated behind `opts.dryRun` so a dry
- * run reports what it WOULD delete without touching UCPath.
+ *   1. **Approved-reuse** (SS Smart HR search, effdt-gated). Searches SS Smart
+ *      HR by EID for an existing termination (TER) and, when one is APPROVED and
+ *      within ~14 days of THIS separation, reuses its transaction number — the
+ *      handler then skips the UCPath create and files the duplicate-termination
+ *      comment. The effdt gate is what keeps a prior-job approved TER from being
+ *      reused for the wrong separation, so this concern KEEPS the search.
+ *
+ *   2. **Pending sweep** (in-progress grid, DATE-AGNOSTIC). On EVERY path that
+ *      leads to a fresh create, delete ANY pending "Terminat" row for this EID
+ *      from the "Transactions in Progress" grid — regardless of effective date.
+ *      This is the real duplicate guard: a prior run can leave a pending
+ *      termination whose computed effdt DIFFERS from this run's, and BOTH
+ *      date-keyed backstops miss it (the SS Smart HR effdt gate above AND
+ *      `ucpath-transaction`'s exact-effdt `findExistingTerminationTransaction`),
+ *      so a second create produces a visible duplicate (Erick Guzman 10779506:
+ *      06/14 + 06/20, 2026-06-24). The in-progress grid only holds UNPROCESSED
+ *      transactions, so any termination there for this person is a superseded
+ *      prior attempt; an approved prior-job TER is processed and not in this
+ *      grid, so the sweep can't touch it.
+ *
+ * Result status:
+ *   - approved              → reuse (concern 1); NO pending sweep (nothing to
+ *                             create, and the approved row isn't in the grid).
+ *   - pending-deleted       → the sweep removed ≥1 stale pending; proceed to create.
+ *   - pending-skipped-dryrun→ a PENDING TER was visible but the sweep was skipped
+ *                             (dry-run guards the only mutation).
+ *   - none                  → nothing approved to reuse and nothing pending to
+ *                             sweep; proceed to create.
+ *
+ * The DELETE is the only mutation; it is gated behind `opts.dryRun` so a dry run
+ * reports what it WOULD delete without touching UCPath.
  */
 export async function runTransactionCheck(
   ctx: Ctx<readonly string[], Record<string, unknown>>,
@@ -51,10 +72,10 @@ export async function runTransactionCheck(
   try {
     log.step("=== Transaction Check (SS Smart HR) ===");
     const ucpathPage = await ctx.page("ucpath");
-    // Pass the Kuali separation date so an existing TER is only reused/deleted
-    // when its effective date is close to THIS separation — a prior termination
-    // for a different job (far-off effdt) is ignored and a fresh transaction is
-    // created. See findTerminationTransactionStatus.
+    // Concern 1 — approved-reuse detection. Pass the Kuali separation date so an
+    // existing TER is only REUSED when its effective date is close to THIS
+    // separation; a prior termination for a different job (far-off effdt) is
+    // ignored. See findTerminationTransactionStatus.
     const ter = await findTerminationTransactionStatus(ucpathPage, eid, {
       separationDate: opts.separationDate,
     });
@@ -65,19 +86,9 @@ export async function runTransactionCheck(
       await ctx.screenshot({ kind: "form", label: "transaction-check-ss-smart-hr", systems: ["ucpath"] });
     } catch { /* best-effort */ }
 
-    if (!ter.found) {
-      log.step(
-        ter.priorTerminationSkipped
-          ? `[transaction-check] The only existing termination (effdt ${ter.effectiveDate}) is a PRIOR ` +
-            `termination for a different job — not this separation; proceeding to create a fresh transaction`
-          : "[transaction-check] No existing termination — proceeding to create one",
-      );
-      return { status: "none" };
-    }
+    const status = ter.found ? ter.approvalStatus.trim().toLowerCase() : "";
 
-    const status = ter.approvalStatus.trim().toLowerCase();
-
-    if (status === "approved") {
+    if (ter.found && status === "approved") {
       log.warn(
         `[transaction-check] Existing termination #${ter.transactionId} is APPROVED — ` +
         `reusing it (skipping the UCPath transaction create) and filing a duplicate-termination note`,
@@ -85,35 +96,33 @@ export async function runTransactionCheck(
       return { status: "approved", transactionNumber: ter.transactionId };
     }
 
-    if (status === "pending") {
-      if (opts.dryRun) {
-        log.warn(
-          `[transaction-check] DRY RUN — existing termination #${ter.transactionId} is PENDING; ` +
-          `would delete it (delete skipped in dry-run), then create a fresh transaction`,
-        );
-        return { status: "pending-skipped-dryrun", transactionId: ter.transactionId };
-      }
+    // Concern 2 — every remaining path creates a fresh transaction downstream, so
+    // sweep the in-progress grid of ANY stale pending termination for this EID
+    // FIRST, regardless of effective date. (Decoupled from the SS Smart HR result
+    // above: the sweep runs even when that search found nothing / flagged a
+    // prior-job termination, because the stale pending may carry a date the
+    // effdt-gated search never matched.)
+    if (opts.dryRun) {
       log.warn(
-        `[transaction-check] Existing termination #${ter.transactionId} is PENDING — deleting it, ` +
-        `then creating a fresh transaction`,
+        `[transaction-check] DRY RUN — would delete any pending termination for eid=${eid} from the ` +
+        `in-progress grid, then create a fresh transaction (delete skipped in dry-run)`,
       );
-      const deleted = await deletePendingTransaction(ucpathPage, eid);
-      if (!deleted) {
-        log.warn(
-          `[transaction-check] Could not delete pending termination #${ter.transactionId} — ` +
-          `proceeding anyway (ucpath-transaction's existence check is the duplicate backstop)`,
-        );
-      }
-      return { status: "pending-deleted", transactionId: ter.transactionId };
+      return ter.found && status === "pending"
+        ? { status: "pending-skipped-dryrun", transactionId: ter.transactionId }
+        : { status: "none" };
     }
 
-    // Any other status (Denied / Error / Pushed Back / Cancelled / Manually
-    // Processed): not one of the two handled cases. Log and proceed normally —
-    // ucpath-transaction's own existence check still guards against a duplicate
-    // submit. (Operator-confirmed: only Approved reuses, only Pending deletes.)
-    log.warn(
-      `[transaction-check] Existing termination #${ter.transactionId} has status ` +
-      `'${ter.approvalStatus}' (not Approved/Pending) — proceeding normally`,
+    const deletedCount = await deletePendingTransaction(ucpathPage, eid);
+    if (deletedCount > 0) {
+      log.warn(
+        `[transaction-check] Deleted ${deletedCount} pending termination row(s) for eid=${eid} from the ` +
+        `in-progress grid before creating a fresh transaction`,
+      );
+      return { status: "pending-deleted", transactionId: ter.found ? ter.transactionId : "" };
+    }
+    log.step(
+      `[transaction-check] No pending termination in the in-progress grid for eid=${eid} — ` +
+      `proceeding to create`,
     );
     return { status: "none" };
   } finally {
