@@ -685,6 +685,45 @@ test('session: idle reload also fires for i9 (registry-driven, not ucpath-only)'
   }
 })
 
+test('session: idle reload also fires for new-kronos (registry-driven, co-resident with ucpath in separations)', async () => {
+  const reloads: number[] = []
+  const page = {
+    close: async () => {},
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: () => false,
+    url: () => 'https://www.dayforcehcm.com/mydayforce',
+    reload: async () => {
+      reloads.push(1)
+    },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => page,
+  } as unknown as import('playwright').BrowserContext
+
+  const s = await Session.launch(
+    [{ id: 'new-kronos', login: async () => {} }],
+    {
+      launchFn: async () => ({
+        page,
+        context,
+        browser: { close: async () => {} } as import('playwright').Browser,
+      }),
+      idleRefreshOverride: { thresholdMs: 200, tickMs: 40 },
+    },
+  )
+  try {
+    await s.page('new-kronos')
+    s.setIdleRefreshGuard(() => false)
+    await new Promise((r) => setTimeout(r, 280))
+    assert.equal(reloads.length, 1)
+  } finally {
+    await s.close()
+  }
+})
+
 test('session: idle reload is suppressed while auth in progress, fires after auth completes', async () => {
   const reloads: number[] = []
   const page = {

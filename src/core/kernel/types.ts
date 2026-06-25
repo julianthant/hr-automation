@@ -664,53 +664,17 @@ export interface ScreenshotOpts {
   systems?: string[]
   pages?: import('playwright').Page[]
   /**
-   * Capture ONLY the element matching this top-level CSS selector (one clean PNG
-   * via `locator.screenshot()`), after expanding inner-scroll overflow and
-   * growing any overflowing iframe to its full content height. Use to showcase a
-   * single tall form/dialog without the surrounding page chrome (nav banner,
-   * modal backdrop, promo footer) — the failure mode that made the old `slices`
-   * captures unreadable. When the selector IS an iframe (e.g. the UCPath
-   * PeopleSoft content frame `#main_target_win0`), the iframe is grown first so
-   * the shot includes the full in-frame form, not just the visible fold. Routes
-   * to `Session.captureRegion`. Highest precedence. Best-effort — a missing
-   * element falls back to a bounded full-page shot so the capture never silently
-   * vanishes. Verified against synthetic Kuali-modal / UCPath-iframe pages.
-   */
-  region?: string
-  /**
-   * Capture the WHOLE page as a SEQUENCE of real viewport-sized chunk PNGs by
-   * scrolling top→bottom (one `-cNN` file per chunk, with a small seam overlap).
-   * Unlike a single tall `bounded`/`region` shot — which the lightbox can only
-   * fit-to-height into a hard-to-read ribbon — every part of the page is shown
-   * at readable size for manual verification, and lazy / virtual-scroll content
-   * paints because the page is physically scrolled to it. The viewport is fixed
-   * to `CAPTURE.width`×`CAPTURE.chunkHeight` and overflowing iframes (the UCPath
-   * PeopleSoft content frame) are grown first so the scroll walks through the
-   * in-frame form too. Routes to `Session.capturePagedFullPage`. HIGHEST
-   * precedence — ignored fields below it when set. Use for tall audit forms the
-   * operator must review top-to-bottom (Kuali finalization, UCPath submitted
-   * confirmation).
-   */
-  paged?: boolean
-  /**
-   * Scroll the element matching this CSS selector to the vertical CENTER of the
-   * viewport and capture the VIEWPORT (not `fullPage`). Use for virtual-scroll
-   * grids (Kronos timecards) where `fullPage` only captures the DOM-rendered
-   * rows. Routes to `Session.captureViewportCenteredOnElement`. Best-effort
-   * scroll — a missing element still captures whatever is shown.
+   * The ONE exception to the unified whole-page/form capture. Scroll the element
+   * matching this CSS selector to the vertical CENTER of the viewport and capture
+   * the VIEWPORT (not `fullPage`). Use ONLY for VIRTUAL-SCROLL grids (the Kronos
+   * timecard) where the off-screen rows aren't in the DOM, so no full-page shot
+   * can reach them — physically centering the target row and shooting what's
+   * painted is the only faithful capture. Routes to
+   * `Session.captureViewportCenteredOnElement`. Best-effort scroll — a missing
+   * element still captures whatever is shown. Every OTHER screenshot (omit this)
+   * routes to the unified `Session.captureFullPage`.
    */
   centerSelector?: string
-  /**
-   * Capture the WHOLE page as one full-page PNG at a FIXED readable width
-   * (`BOUNDED_CAPTURE_WIDTH`), clipped to that width so horizontal overflow
-   * (wide promo footers, off-screen grids) can't stretch the shot into an
-   * unreadable wide ribbon, and WITHOUT the aggressive viewport-widening the
-   * default `fullPage` path applies. Use for a tall form whose container has no
-   * stable selector to target with `region` (today: the Kuali finalization
-   * document). Routes to `Session.captureBoundedFullPage`. Ignored when `region`
-   * or `centerSelector` is set.
-   */
-  bounded?: boolean
 }
 export interface ScreenshotCapture {
   kind: 'form' | 'error' | 'manual'
@@ -730,12 +694,6 @@ export interface CaptureFileOpts {
   ts: number
   systems?: string[]
   pages?: Page[]
-  /** Whole-page scroll capture → N chunk files (see ScreenshotOpts.paged). */
-  paged?: boolean
-  /** Element/iframe-scoped capture selector (see ScreenshotOpts.region). */
-  region?: string
-  /** Center-on-element viewport capture (see ScreenshotOpts.centerSelector). */
+  /** Virtual-scroll viewport capture (the Kronos exception — see ScreenshotOpts.centerSelector). */
   centerSelector?: string
-  /** Fixed-width whole-page capture (see ScreenshotOpts.bounded). */
-  bounded?: boolean
 }
