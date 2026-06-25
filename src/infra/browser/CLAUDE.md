@@ -22,7 +22,7 @@ Returns `{ browser, context, page }`.
 
 ## `gotoWithRetry(page, url, verify?, retries?, timeout?)`
 
-Retrying navigation helper for transient network/chrome-error failures. Optional `verify` can be a locator or predicate. Keep this as infra-level navigation plumbing; workflow-specific "page is ready" semantics still belong in system/workflow code.
+Retrying navigation helper for transient "site didn't load" failures. Re-runs `page.goto` (a fresh navigation ≈ a refresh) up to `retries` times (default `DEFAULT_NAVIGATION_RETRIES` = **10**) with a ~6s pause between attempts, failing only after all attempts are exhausted (operator policy 2026-06-24: "refresh up to 10× on a 5–10s interval, only fail if it still won't load"). Retries fire on `RETRYABLE_NAVIGATION_PATTERNS` — chromium net errors, **navigation timeouts** (`page.goto … Timeout`), `chrome-error` landings, and a failed `verify` (the element may not have rendered yet). A non-loading error escapes immediately. Optional `verify` can be a locator or predicate. Keep this as infra-level navigation plumbing; workflow-specific "page is ready" semantics still belong in system/workflow code.
 
 ## Gotchas
 
@@ -34,4 +34,4 @@ Retrying navigation helper for transient network/chrome-error failures. Optional
 
 ## Lessons Learned
 
-*(Add entries here when browser launch/session bugs are fixed — document root cause and fix)*
+- **2026-06-24: `gotoWithRetry` did NOT retry navigation timeouts — one slow load failed the whole run.** `RETRYABLE_NAVIGATION_PATTERNS` only listed `ERR_NETWORK`/`chrome-error`/`ERR_CONNECTION`/`verification failed`, so a `page.goto … Timeout 15000ms exceeded` (the mapped "Page navigation timed out" message) matched nothing and was thrown on **attempt 1** with no retry — a single slow Kuali Build load failed a separation outright (doc #4322). Fix: added timeout/net patterns (`timeout`, `timed out`, `net::err`, `err_timed_out`, …, matched case-insensitively), bumped the default retries 3 → **10** (`DEFAULT_NAVIGATION_RETRIES`), and standardized the pause at ~6s — operator policy is "refresh up to 10× on a 5–10s interval, only fail if it still won't load." `src/infra/auth/login.ts`'s UKG nav keeps its **explicit** `retries=3, timeout=60_000` override (a deliberately slow SPA — 10×60s would be a 10-min hang); the new default applies to callers that don't override (Kuali, the duo-enroll script). Pinned by `tests/unit/infra/browser/launch.test.ts`.
