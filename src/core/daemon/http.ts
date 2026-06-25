@@ -101,6 +101,34 @@ export function startDaemonHttpServer(opts: DaemonHttpOpts): { server: Server; l
       )
       return
     }
+    if (req.method === 'GET' && url.startsWith('/screenshot')) {
+      // Operator "peek" — capture the current viewport of one system's page and
+      // return it inline as PNG (the dashboard proxies this). Async capture, so
+      // resolve the response in the promise.
+      const systemId = new URL(url, 'http://localhost').searchParams.get('system') ?? ''
+      const session = getActiveSession()
+      if (!session || !systemId) {
+        res.writeHead(400, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'system query param + active session required' }))
+        return
+      }
+      session
+        .screenshotSystem(systemId)
+        .then((buf) => {
+          if (!buf) {
+            res.writeHead(503, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ ok: false, error: 'no usable page to capture' }))
+            return
+          }
+          res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' })
+          res.end(buf)
+        })
+        .catch((err: unknown) => {
+          res.writeHead(500, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+        })
+      return
+    }
     if (req.method === 'POST' && url === '/wake') {
       resolveWake()
       res.writeHead(200, { 'content-type': 'application/json' })

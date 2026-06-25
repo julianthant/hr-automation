@@ -20,6 +20,7 @@ import {
   buildSetAutoRecoveryHandler,
   buildStopWorkerHandler,
   readQueueDepth,
+  resolveBrowserDaemonPort,
 } from "../../../../control/ops/index.js";
 import { performWorkflowAction } from "../../../../control/actions/perform-workflow-action.js";
 import type {
@@ -413,6 +414,31 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       instance: String(body.instance ?? ""),
       systemId: String(body.systemId ?? ""),
     }), buildHealthCheckBrowserHandler(deps.dir), 202);
+  });
+
+  // Live "peek" — proxy a synchronous viewport screenshot from the owning
+  // daemon's /screenshot endpoint so the operator sees the browser inline.
+  app.get("/api/browser/screenshot", async (c) => {
+    const workflow = c.req.query("workflow") ?? "";
+    const instance = c.req.query("instance") ?? "";
+    const systemId = c.req.query("systemId") ?? "";
+    if (!workflow || !instance || !systemId) {
+      return jsonResponse({ ok: false, error: "workflow, instance, systemId are required" }, 400);
+    }
+    const port = await resolveBrowserDaemonPort(deps.dir, workflow, instance);
+    if (port == null) {
+      return jsonResponse({ ok: false, error: `no live daemon for instance '${instance}'` }, 404);
+    }
+    try {
+      const upstream = await fetch(`http://127.0.0.1:${port}/screenshot?system=${encodeURIComponent(systemId)}`);
+      if (!upstream.ok) {
+        return jsonResponse({ ok: false, error: `daemon returned ${upstream.status}` }, 502);
+      }
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      return new Response(buf, { headers: { "content-type": "image/png", "cache-control": "no-store" } });
+    } catch (err) {
+      return jsonResponse({ ok: false, error: errorMessage(err) }, 502);
+    }
   });
 
   // Pause/resume auto-recovery for one browser (so the operator can inspect it).

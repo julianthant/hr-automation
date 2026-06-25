@@ -57,6 +57,7 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/browser/focus" },
   { method: "POST", path: "/api/browser/check" },
   { method: "POST", path: "/api/browser/auto-recovery" },
+  { method: "GET", path: "/api/browser/screenshot" },
   { method: "POST", path: "/api/worker/drain" },
   { method: "POST", path: "/api/worker/stop" },
   { method: "POST", path: "/api/queue/bump" },

@@ -968,6 +968,23 @@ export class Session {
   }
 
   /**
+   * Capture the current VIEWPORT of a system's page as a PNG buffer — the
+   * operator "peek" (see what the browser shows right now, inline, without
+   * hunting for the window). Viewport (not fullPage) keeps it fast + small.
+   * Returns null if the system has no live/usable page. Best-effort.
+   */
+  async screenshotSystem(id: string): Promise<Buffer | null> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) return null
+    try {
+      if (slot.page.isClosed()) return null
+      return await slot.page.screenshot({ type: 'png' })
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Probe a system once and emit its health (operator "check now" + the
    * monitor's per-tick probe). Reports `healthy`/`failed` so a manual check
    * always lands a fresh tile state. Does NOT auto-refresh — that's the
