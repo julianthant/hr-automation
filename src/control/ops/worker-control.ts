@@ -255,6 +255,24 @@ export function buildSetAutoRecoveryHandler(dir: string) {
     enqueueBrowserControlCommand(dir, req, "set_auto_recovery", { paused: req.paused ? "true" : "false" });
 }
 
+/**
+ * Resolve the live daemon HTTP port for a session-drawer instance (instance →
+ * `workflow_start.pid` → alive-daemon lockfile → port). Used by the dashboard's
+ * "peek" route to proxy a synchronous screenshot from the daemon's `/screenshot`
+ * endpoint. Returns null if there's no live daemon (or it has no HTTP port).
+ */
+export async function resolveBrowserDaemonPort(
+  dir: string,
+  workflow: string,
+  instance: string,
+): Promise<number | null> {
+  const pid = resolveInstanceDaemonPid(dir, workflow, instance);
+  if (pid == null) return null;
+  const alive = await findAliveDaemons(workflow, dir);
+  const target = alive.find((d) => d.pid === pid);
+  return target?.port ?? null;
+}
+
 /** Probe a single daemon's /status endpoint with a short timeout. */
 async function probeDaemonStatus(
   daemon: Daemon,

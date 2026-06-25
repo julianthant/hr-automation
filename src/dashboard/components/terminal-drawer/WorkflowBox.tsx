@@ -15,6 +15,7 @@ import {
   Pause,
   Play,
   PauseCircle,
+  Camera,
 } from "lucide-react";
 import type { AuthState, BrowserHealth, WorkflowInstanceState } from "@/components/shared/types";
 import { useConfirm } from "@/components/shared/useConfirm";
@@ -418,12 +419,15 @@ function BrowserTileControls({
   instance,
   systemId,
   paused,
+  onPeek,
 }: {
   workflow: string;
   instance: string;
   systemId: string;
   /** Whether auto-recovery is currently paused for this browser (drives the toggle). */
   paused: boolean;
+  /** Open the live "peek" screenshot modal for this browser. */
+  onPeek: () => void;
 }) {
   const [busy, setBusy] = useState<null | BrowserAction | "pause">(null);
 
@@ -489,6 +493,18 @@ function BrowserTileControls({
 
   return (
     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-within:opacity-100 transition-opacity">
+      <button
+        type="button"
+        title={`Peek at the ${systemId} browser (live screenshot)`}
+        aria-label={`Peek at the ${systemId} browser`}
+        className={btn}
+        onClick={(e) => {
+          e.stopPropagation();
+          onPeek();
+        }}
+      >
+        <Camera className="w-3 h-3" />
+      </button>
       {BROWSER_ACTIONS.map((spec) => (
         <button
           key={spec.action}
@@ -529,6 +545,89 @@ function BrowserTileControls({
           <Pause className="w-3 h-3" />
         )}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Live "peek" modal — fetches a synchronous viewport screenshot of one browser
+ * (`GET /api/browser/screenshot`) so the operator can SEE what's wrong without
+ * hunting for the physical Chromium window. Esc / click-outside / × to close.
+ */
+function BrowserPeekModal({
+  workflow,
+  instance,
+  systemId,
+  onClose,
+}: {
+  workflow: string;
+  instance: string;
+  systemId: string;
+  onClose: () => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
+  const src =
+    `/api/browser/screenshot?workflow=${encodeURIComponent(workflow)}` +
+    `&instance=${encodeURIComponent(instance)}&systemId=${encodeURIComponent(systemId)}`;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${systemId} browser live screenshot`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div
+        className="relative flex flex-col rounded-lg border border-border bg-card p-2 shadow-2xl max-w-[92vw] max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-1 pb-2 gap-3">
+          <span className="text-[12px] font-mono text-muted-foreground">{systemId} · live screenshot</span>
+          <button
+            type="button"
+            aria-label="Close screenshot"
+            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+            onClick={onClose}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        {errored ? (
+          <div className="w-[60vw] max-w-[700px] h-[160px] flex items-center justify-center text-[12px] text-destructive px-4 text-center">
+            Couldn't capture this browser — no live page, or the daemon isn't reachable.
+          </div>
+        ) : (
+          <img
+            src={src}
+            srcSet={src}
+            sizes="92vw"
+            loading="eager"
+            alt={`${systemId} browser current view`}
+            className={cn("max-w-[88vw] max-h-[80vh] object-contain rounded", !loaded && "opacity-0")}
+            onLoad={() => setLoaded(true)}
+            onError={() => setErrored(true)}
+          />
+        )}
+        {!loaded && !errored && (
+          <div className="absolute inset-0 flex items-center justify-center" aria-live="polite">
+            <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-muted-foreground" />
+            <span className="sr-only">Capturing {systemId} screenshot…</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -619,6 +718,8 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
   const browsersRef = useRef(browsers);
   browsersRef.current = browsers;
   const notifiedFailuresRef = useRef<Set<string>>(new Set());
+  // The system whose live "peek" screenshot modal is open (null = closed).
+  const [peekSystem, setPeekSystem] = useState<string | null>(null);
   const healthSig = browsers.map((b) => `${b.browserId}:${b.health ?? ""}`).join("|");
   useEffect(() => {
     const seen = notifiedFailuresRef.current;
@@ -851,6 +952,7 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
                           instance={instance}
                           systemId={b.system}
                           paused={!!b.autoRecoveryPaused}
+                          onPeek={() => setPeekSystem(b.system)}
                         />
                       )}
                     </div>
@@ -915,6 +1017,14 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
           </span>
         </div>
       </div>
+      {peekSystem && workflowName && (
+        <BrowserPeekModal
+          workflow={workflowName}
+          instance={instance}
+          systemId={peekSystem}
+          onClose={() => setPeekSystem(null)}
+        />
+      )}
     </div>
   );
 }
