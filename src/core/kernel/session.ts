@@ -230,7 +230,7 @@ export class Session {
   private idleTouchCb?: (systemId: string) => void
   private idleRefreshCb?: (systemId: string, phase: 'start' | 'end') => void
   /** Set by `Session.launch` — per-browser health lifecycle for the session tiles. */
-  private healthCb?: (systemId: string, status: BrowserHealthStatus, reason?: string) => void
+  private healthCb?: (systemId: string, status: BrowserHealthStatus, reason?: string, url?: string) => void
   /** Per-system health-monitor state, keyed by systemId. */
   private healthStates = new Map<string, HealthMonitorState>()
   /** The health-monitor interval (root session only). */
@@ -310,8 +310,8 @@ export class Session {
     session.idleRefreshCb = (systemId: string, phase: 'start' | 'end'): void => {
       opts.observer?.onIdleRefresh?.(systemId, phase)
     }
-    session.healthCb = (systemId: string, status: BrowserHealthStatus, reason?: string): void => {
-      opts.observer?.onBrowserHealth?.(systemId, status, reason)
+    session.healthCb = (systemId: string, status: BrowserHealthStatus, reason?: string, url?: string): void => {
+      opts.observer?.onBrowserHealth?.(systemId, status, reason, url)
     }
     session.healthMonitorOverride = opts.healthMonitorOverride
     opts.onReady?.(session)
@@ -675,7 +675,7 @@ export class Session {
   private async inspectSystemHealth(id: string): Promise<BrowserHealthVerdict> {
     const slot = this.state.browsers.get(id)
     if (!slot) return { kind: 'dead', reason: 'no browser for system' }
-    let closed = false
+    let closed: boolean
     try { closed = slot.page.isClosed() } catch { closed = true }
     if (closed) return classifyBrowserHealth({ closed: true, url: '', probed: false })
     let url = ''
@@ -754,10 +754,12 @@ export class Session {
     return st
   }
 
-  /** Emit a per-browser health transition (best-effort; never breaks automation). */
+  /** Emit a per-browser health transition (best-effort; never breaks automation).
+   * Auto-attaches the system's current url so the tile can show where the
+   * browser actually is (e.g. stuck on the SSO login page). */
   private emitHealth(systemId: string, status: BrowserHealthStatus, reason?: string): void {
     try {
-      this.healthCb?.(systemId, status, reason)
+      this.healthCb?.(systemId, status, reason, this.currentUrl(systemId))
     } catch {
       /* observability must not break automation */
     }
@@ -1065,37 +1067,33 @@ export class Session {
   }
 
   /**
-   * THE unified "whole page / whole form" audit capture — one `fullPage` PNG
-   * that contains the ENTIRE page or form, never a clipped portion. Every
-   * `ctx.screenshot()` routes here (no per-caller mode soup). It composes the
-   * three transforms an enterprise HR page needs before a `fullPage` shot can
-   * see all of its content, each best-effort + reversible:
+   * THE unified "whole page / whole form" audit capture. Every `ctx.screenshot()`
+   * routes here (no per-caller mode soup). It captures the ENTIRE page or form —
+   * never a clipped portion — as ONE image when the page is short, or as a
+   * sequence of readable page-height SLICES (`-cNN`) when the page is tall, so a
+   * long form is a few readable pages the operator steps through, not one tiny
+   * unreadable long strip. Returns the file path(s) written.
    *
+   * Pipeline (each step best-effort + reversible, restored in `finally`):
    *   1. `expandScrollContainers` — strip `overflow:auto/scroll` + `max-height`
    *      caps off inner scroll containers (the Kuali finalization dialog is a
-   *      fixed `max-height` + `overflow:auto` modal; `fullPage` alone only grows
-   *      the DOCUMENT height, not these inner divs).
-   *   2. `widenViewportForCapture` — `fullPage` grows HEIGHT but clamps WIDTH to
-   *      the viewport, so wide content (the PeopleSoft Person Org assignment
-   *      grid, ~1600-2200px) clips on the right in a narrow tiled window. Widen
-   *      the layout viewport to fit the widest content (top document AND inside
-   *      child frames — the grid lives in a fluid-width iframe), so the whole
-   *      grid is in frame. Done BEFORE the iframe grow so the in-frame content
-   *      reflows to its final width first.
-   *   3. `growOverflowingIframes` — the UCPath PeopleSoft content frame
-   *      (`#main_target_win0`) is a fixed `height:520px` same-origin iframe with
-   *      its OWN scroll, so a tall in-frame form (the submitted-transaction
-   *      confirmation) clips at the iframe's fold even under `fullPage`. Grow the
-   *      iframe ELEMENT to its inner `scrollHeight` so the shot walks through the
-   *      whole in-frame form. (This is what the retired `region` mode did by
-   *      hand for one selector; folding it into the default makes every page get
-   *      it for free.)
+   *      fixed `max-height` + `overflow:auto` modal) and bump body min-height for
+   *      a taller-than-page fixed modal, so the full content height is reachable.
+   *   2. `setCaptureWidth(CAPTURE.width)` — pin the layout viewport to a FIXED
+   *      readable column width (1280) so a narrow/normal form captures the SAME
+   *      width regardless of the tiled daemon window; widen BEYOND 1280 only for
+   *      genuinely wide content (PeopleSoft grids) so the whole grid stays in
+   *      frame. Done before the iframe grow so in-frame content reflows first.
+   *   3. `growOverflowingIframes` — grow the fixed-height (and nested) UCPath
+   *      PeopleSoft content frame to its inner `scrollHeight` so a tall in-frame
+   *      form is reachable by the outer-document capture.
+   *   4. measure full document height, then `computeSliceOffsets` → one
+   *      `page.screenshot({ fullPage:true, clip })` per slice. `clip` resolves
+   *      against the full-page render, so each slice is an exact pixel band of the
+   *      already-expanded page — reliable, unlike a scroll-and-measure that
+   *      collapses when the content lives in a scroll container/iframe.
    *
-   * All three restore the original inline styles / viewport in the `finally`.
-   * Restoration is best-effort; a late-failing restore still leaves the DOM
-   * visually consistent because we reset to whatever was inline before. The
-   * mutation window is short (settle waits) — fine for form-audit shots taken
-   * between discrete Playwright actions, not during active typing.
+   * `slicePath(null)` names a single-image capture; `slicePath(i)` names slice i.
    */
   static async captureFullPage(
     page: Page,
@@ -1489,15 +1487,16 @@ export class Session {
 
   /**
    * Capture all open pages as structured PNGs under `.screenshots/`, using the
-   * canonical `{workflow}-{itemId}-{kind}-{label}-{system}-{ts}.png` convention.
-   * Best-effort — a failure on one page never blocks siblings. Returns metadata
-   * for each file successfully written (ONE file per targeted page).
+   * canonical `{workflow}-{itemId}-{kind}-{label}-{system}-{ts}[-cNN].png`
+   * convention. Best-effort — a failure on one page never blocks siblings.
+   * Returns metadata for each file written — ONE per short page, or N `-cNN`
+   * page slices for a tall one.
    *
    * There is ONE capture mode for every workflow: the unified whole-page/form
-   * `captureFullPage` shot (expand inner-scroll containers + grow fixed-height
-   * iframes + content-fit widen + one `fullPage`), so the ENTIRE page or form is
-   * in frame, never a clipped portion. The lone exception is `opts.centerSelector`
-   * — a VIEWPORT shot centered on an element, for VIRTUAL-SCROLL grids (the Kronos
+   * `captureFullPage` (pin width to a readable column + grow fixed-height iframes
+   * + whole-page-or-N-readable-slices), so the ENTIRE page or form is in frame,
+   * never a clipped portion. The lone exception is `opts.centerSelector` — a
+   * VIEWPORT shot centered on an element, for VIRTUAL-SCROLL grids (the Kronos
    * timecard) whose off-screen rows aren't in the DOM and so can't be reached by
    * any full-page shot.
    */

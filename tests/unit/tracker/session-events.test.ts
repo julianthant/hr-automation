@@ -225,13 +225,15 @@ describe("rebuildSessionState — workflows", () => {
     emitSessionEvent({ type: "browser_launch", workflowInstance: "Sep 1", sessionId: "S1", browserId: "crm", system: "CRM" }, dir);
 
     // Fail CRM (the SECOND browser) — health must land on CRM, never UCPath.
-    emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", browserId: "crm", system: "CRM", data: { status: "failed", reason: "browser disconnected" } }, dir);
+    emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", browserId: "crm", system: "CRM", data: { status: "failed", reason: "browser disconnected", url: "https://crm.example/broken" } }, dir);
     const after = rebuildSessionState(dir).workflows[0].sessions[0].browsers;
     const uc = after.find((b) => b.browserId === "ucpath")!;
     const crm = after.find((b) => b.browserId === "crm")!;
     assert.equal(crm.health, "failed");
     assert.equal(crm.lastError, "browser disconnected");
+    assert.equal(crm.url, "https://crm.example/broken");
     assert.equal(uc.health, undefined, "UCPath must be untouched — health is bound by id, not position");
+    assert.equal(uc.url, undefined, "UCPath url must be untouched too");
 
     // CRM recovers → healthy clears the stale error.
     emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", browserId: "crm", system: "CRM", data: { status: "healthy" } }, dir);

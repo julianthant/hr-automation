@@ -75,7 +75,8 @@ export function browsersEqual(a: BrowserState[], b: BrowserState[]): boolean {
       x.system !== y.system ||
       x.authState !== y.authState ||
       x.health !== y.health ||
-      x.lastError !== y.lastError
+      x.lastError !== y.lastError ||
+      x.url !== y.url
     ) {
       return false;
     }

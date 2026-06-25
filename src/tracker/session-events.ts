@@ -290,6 +290,7 @@ export function emitBrowserHealth(
   status: BrowserHealthStatus,
   reason?: string,
   dir?: string,
+  url?: string,
 ): void {
   emitSessionEvent(
     {
@@ -297,7 +298,7 @@ export function emitBrowserHealth(
       workflowInstance: instance,
       browserId,
       system,
-      data: { status, ...(reason ? { reason } : {}) },
+      data: { status, ...(reason ? { reason } : {}), ...(url ? { url } : {}) },
     },
     dir,
   );

@@ -265,6 +265,8 @@ export interface BrowserState {
   health?: BrowserHealth;
   /** Reason for the latest unhealthy/failed transition, if any. */
   lastError?: string;
+  /** The browser's current page URL (from the latest health event). */
+  url?: string;
 }
 
 export interface SessionInfo {

@@ -716,13 +716,16 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
                 const tone = badHealth ? healthTone[badHealth] : authBg[b.authState];
                 const labelColor = badHealth ? healthColor[badHealth] : authColor[b.authState];
                 const stateLabel = badHealth ? healthLabel[badHealth] : authLabel[b.authState];
-                const tip = badHealth
+                const tipBase = badHealth
                   ? `${b.system} · ${healthLabel[badHealth]}${b.lastError ? ` — ${b.lastError}` : ""}`
                   : isIdleRefreshSystem(b.system) &&
                       b.authState === "authed" &&
                       idleBySystem?.[b.system]?.lastTouchAt
                     ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
                     : `${b.system} · ${authLabel[b.authState]}`;
+                // Append the browser's current url so hovering a tile (esp. a
+                // failed one) shows where it actually is — e.g. stuck on SSO.
+                const tip = b.url ? `${tipBase}\n${b.url}` : tipBase;
                 return (
                   <div
                     key={b.browserId}
