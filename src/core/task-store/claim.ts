@@ -72,6 +72,42 @@ function claimNextTaskReturning(
   })
 }
 
+/**
+ * Extend the lease of an in-flight claim this worker still holds. Called on the
+ * daemon's worker heartbeat so a LIVE worker actively processing a long item
+ * (longer than the lease window) keeps a fresh `claim_expires_at` — otherwise
+ * the lease expires mid-run and `recoverClaimsForDeadWorkers` re-pends the item
+ * (it recovers on lease expiry regardless of worker liveness), letting a peer
+ * (a freshly added worker's startup recovery, or an idle peer's keepalive tick)
+ * claim and run the SAME item. The two guards keep renewal honest:
+ *   - `claimed_by_worker_id = @workerId` — only the current owner renews; a
+ *     stale worker whose item was reassigned to a peer (claimed_by now the peer,
+ *     or NULL) matches no row and no-ops, so it can't keep a handed-off lease
+ *     alive.
+ *   - `control_state IN ('claimed','running')` — a terminalized/queued task is
+ *     never re-leased.
+ * Returns whether the lease was actually extended (a row matched).
+ */
+export function renewClaim(
+  db: Database,
+  control: ControlDb,
+  request: { taskId: string; workerId: string; now?: string; leaseMs?: number },
+): boolean {
+  const now = request.now ?? new Date().toISOString()
+  const claimExpiresAt = new Date(Date.parse(now) + (request.leaseMs ?? 60_000)).toISOString()
+  return control.transaction(() => {
+    const result = db.prepare(`
+      UPDATE tasks
+      SET claim_expires_at = @claimExpiresAt,
+          updated_at = @now
+      WHERE id = @taskId
+        AND claimed_by_worker_id = @workerId
+        AND control_state IN ('claimed', 'running')
+    `).run({ taskId: request.taskId, workerId: request.workerId, claimExpiresAt, now })
+    return result.changes > 0
+  })
+}
+
 export function markAttemptClaimed(db: Database, attemptId: string, workerId: string, now: string): void {
   db.prepare(`
     UPDATE task_attempts
