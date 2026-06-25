@@ -57,7 +57,7 @@ Steps also honor a one-shot **fail gate** (`<trackerDir>/e2e-gates/<workflow>--f
 
 ## Per-System Idle-Refresh
 
-Long-lived daemon sessions sit idle between queued items. Systems with server-side session timeouts (UCPath, I-9 Complete) need periodic page reloads to stay authenticated. The kernel handles this generically — opt a system in by listing it in `src/domain/idle-refresh.ts`; every workflow that declares that system inherits the behavior automatically.
+Long-lived daemon sessions sit idle between queued items. Systems with server-side session timeouts (UCPath, I-9 Complete, New Kronos) need periodic page reloads to stay authenticated. The kernel handles this generically — opt a system in by listing it in `src/domain/idle-refresh.ts`; every workflow that declares that system inherits the behavior automatically.
 
 ### `src/domain/idle-refresh.ts` — domain API (no Node/Playwright dependencies; safe in the client bundle)
 
