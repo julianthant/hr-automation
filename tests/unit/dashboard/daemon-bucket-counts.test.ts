@@ -12,7 +12,7 @@
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 
-import { bucketDaemonCounts } from "../../../src/dashboard/components/terminal-drawer/TerminalDrawer.js";
+import { bucketDaemonCounts, bucketBrowserHealth } from "../../../src/dashboard/components/terminal-drawer/TerminalDrawer.js";
 import type { WorkflowInstanceState } from "../../../src/dashboard/components/shared/types.js";
 
 function worker(
@@ -108,5 +108,37 @@ describe("bucketDaemonCounts", () => {
     assert.equal(result.idle, 0, "none should be idle before reaching claim loop");
     assert.equal(result.running, 0);
     assert.equal(result.failed, 0);
+  });
+});
+
+describe("bucketBrowserHealth", () => {
+  function browser(health?: "healthy" | "unhealthy" | "refreshing" | "failed") {
+    return { browserId: "ucpath", system: "ucpath", authState: "authed" as const, ...(health ? { health } : {}) };
+  }
+
+  test("rolls up per-browser health across all sessions; undefined counts healthy", () => {
+    const workers: WorkflowInstanceState[] = [
+      worker({ sessions: [{ sessionId: "1", browsers: [browser("failed"), browser("healthy")] }] }),
+      worker({ sessions: [{ sessionId: "1", browsers: [browser("unhealthy"), browser("refreshing"), browser()] }] }),
+    ];
+    const r = bucketBrowserHealth(workers);
+    assert.equal(r.total, 5);
+    assert.equal(r.failed, 1);
+    assert.equal(r.degraded, 1);
+    assert.equal(r.refreshing, 1);
+    assert.equal(r.healthy, 2, "one explicit healthy + one undefined");
+  });
+
+  test("is orthogonal to daemon lifecycle — an idle daemon can have a failed browser", () => {
+    const r = bucketBrowserHealth([
+      worker({ daemonPhase: "idle", sessions: [{ sessionId: "1", browsers: [browser("failed")] }] }),
+    ]);
+    assert.equal(r.failed, 1);
+    assert.equal(r.total, 1);
+  });
+
+  test("no sessions / no browsers → all zero", () => {
+    const r = bucketBrowserHealth([worker({ sessions: [] })]);
+    assert.deepEqual(r, { total: 0, failed: 0, degraded: 0, refreshing: 0, healthy: 0 });
   });
 });

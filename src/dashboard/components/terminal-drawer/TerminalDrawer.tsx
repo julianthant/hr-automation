@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Terminal as TerminalIcon } from "lucide-react";
+import { Terminal as TerminalIcon, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WorkflowInstanceState } from "@/components/shared/types";
 import { useClock } from "@/components/hooks/useClock";
@@ -51,6 +51,39 @@ export function bucketDaemonCounts(workers: WorkflowInstanceState[]): {
     }
   }
   return { running, authenticating, idle, failed };
+}
+
+/**
+ * Roll up per-browser HEALTH across every active session's browsers — the
+ * at-a-glance "is any browser in trouble?" signal for the collapsed drawer bar.
+ * Orthogonal to `bucketDaemonCounts` (which buckets DAEMON lifecycle): a daemon
+ * can be "idle" yet have a `failed` UCPath browser. `undefined` health (never
+ * probed) counts as healthy. Exported for unit tests.
+ */
+export function bucketBrowserHealth(workers: WorkflowInstanceState[]): {
+  total: number;
+  failed: number;
+  degraded: number;
+  refreshing: number;
+  healthy: number;
+} {
+  let total = 0;
+  let failed = 0;
+  let degraded = 0;
+  let refreshing = 0;
+  let healthy = 0;
+  for (const w of workers) {
+    for (const s of w.sessions) {
+      for (const b of s.browsers) {
+        total += 1;
+        if (b.health === "failed") failed += 1;
+        else if (b.health === "unhealthy") degraded += 1;
+        else if (b.health === "refreshing") refreshing += 1;
+        else healthy += 1;
+      }
+    }
+  }
+  return { total, failed, degraded, refreshing, healthy };
 }
 
 /**
@@ -141,6 +174,7 @@ export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts
   // Bucket active sessions so the collapsed bar shows health at a glance —
   // a red "failed" dot draws the eye before the operator expands the drawer.
   const { running, authenticating, idle, failed } = bucketDaemonCounts(active);
+  const browserHealth = bucketBrowserHealth(active);
 
   // Alive worker count per workflow, surfaced in the add-worker picker so the
   // operator sees current capacity ("separations: 1 worker") before adding one.
@@ -214,6 +248,7 @@ export function TerminalDrawer({ connected, viewingHistory = false, queuedCounts
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" strokeWidth={2} />
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">session</span>
           <SessionSummary count={count} running={running} authenticating={authenticating} idle={idle} failed={failed} />
+          <BrowserHealthSummary failed={browserHealth.failed} degraded={browserHealth.degraded} refreshing={browserHealth.refreshing} />
         </button>
         {/* Right edge: add-worker "+", then the Live pill, then the clock.
             Live sits before the clock so the operator's eye lands on
@@ -325,6 +360,48 @@ function SessionSummary({
       {running > 0 && <DotGroup tone="running" n={running} label="running" />}
       {authenticating > 0 && <DotGroup tone="authenticating" n={authenticating} label="authenticating" />}
       {idle > 0 && <DotGroup tone="idle" n={idle} label="idle" />}
+    </span>
+  );
+}
+
+/**
+ * Compact per-browser health rollup for the bar — shown ONLY when a browser is
+ * in trouble (failed / degraded / refreshing), so a healthy fleet adds no
+ * clutter. Sits beside the daemon-lifecycle dots.
+ */
+function BrowserHealthSummary({
+  failed,
+  degraded,
+  refreshing,
+}: {
+  failed: number;
+  degraded: number;
+  refreshing: number;
+}) {
+  if (failed === 0 && degraded === 0 && refreshing === 0) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-2 pl-2.5 ml-0.5 border-l border-border/60"
+      aria-label={`${failed} failed, ${degraded} degraded, ${refreshing} refreshing browsers`}
+    >
+      {failed > 0 && (
+        <span className="inline-flex items-center gap-1 text-[11px] text-destructive leading-none" title={`${failed} browser(s) failed`}>
+          <AlertTriangle aria-hidden className="w-3 h-3" />
+          <span className="font-mono tabular-nums">{failed}</span>
+        </span>
+      )}
+      {degraded > 0 && (
+        <span className="inline-flex items-center gap-1 text-[11px] text-warning leading-none" title={`${degraded} browser(s) degraded`}>
+          <AlertTriangle aria-hidden className="w-3 h-3" />
+          <span className="font-mono tabular-nums">{degraded}</span>
+        </span>
+      )}
+      {refreshing > 0 && (
+        <span className="inline-flex items-center gap-1 text-[11px] text-info leading-none" title={`${refreshing} browser(s) recovering`}>
+          <Loader2 aria-hidden className="w-3 h-3 animate-spin motion-reduce:animate-none" />
+          <span className="font-mono tabular-nums">{refreshing}</span>
+        </span>
+      )}
     </span>
   );
 }
