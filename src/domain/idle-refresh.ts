@@ -4,9 +4,10 @@
  * and at what cadence.
  *
  * Long-lived daemon sessions sit idle between queued items. Server-side
- * sessions (PeopleSoft UCPath, I-9 Complete) expire on their own idle clock,
- * so the next claimed item would otherwise hit a logged-out page and force a
- * re-auth. The kernel `Session` runs a per-system timer that reloads the page
+ * sessions (PeopleSoft UCPath, I-9 Complete, New Kronos / Workforce Dayforce)
+ * expire on their own idle clock, so the next claimed item would otherwise hit
+ * a logged-out page and force a re-auth. The kernel `Session` runs a per-system
+ * timer that reloads the page
  * once it has seen no `ctx.page(<system>)` activity for `thresholdMs`, polling
  * every `tickMs`. See `src/core/kernel/session.ts`.
  *
@@ -35,6 +36,7 @@ export const DEFAULT_IDLE_REFRESH_CADENCE: IdleRefreshCadence = {
 export const IDLE_REFRESH_SYSTEMS: Readonly<Record<string, IdleRefreshCadence>> = {
   ucpath: DEFAULT_IDLE_REFRESH_CADENCE,
   i9: DEFAULT_IDLE_REFRESH_CADENCE,
+  'new-kronos': DEFAULT_IDLE_REFRESH_CADENCE,
 }
 
 /** True when the system keeps its session warm via idle-refresh reloads. */
