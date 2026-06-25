@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Duo Autopilot</title>
+    <style>
+      /* ── System-native (Apple Settings) tokens, dark/light aware ── */
+      :root {
+        color-scheme: light dark;
+        --bg: #f2f2f7;
+        --group: #ffffff;
+        --group-hover: #f5f5f8;
+        --group-active: #ececef;
+        --separator: #e4e4e9;
+        --label: #1c1c1e;
+        --secondary: #8a8a8e;
+        --green: #34c759;
+        --blue: #007aff;
+        --red: #ff3b30;
+        --amber: #ff9500;
+        --toggle-off: #e9e9ea;
+        --chev: #c4c4c6;
+        --btn-bg: #ececef;
+        --knob: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #000000;
+          --group: #1c1c1e;
+          --group-hover: #2a2a2c;
+          --group-active: #323234;
+          --separator: #38383a;
+          --label: #f5f5f7;
+          --secondary: #98989f;
+          --green: #30d158;
+          --blue: #0a84ff;
+          --red: #ff453a;
+          --amber: #ff9f0a;
+          --toggle-off: #39393d;
+          --chev: #5a5a5e;
+          --btn-bg: #2c2c2e;
+          --knob: #ffffff;
+        }
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--label);
+        font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        padding: 28px 20px 64px;
+      }
+      .wrap { max-width: 600px; margin: 0 auto; }
+
+      /* ── header ── */
+      .app-header { margin: 4px 4px 22px; }
+      .app-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.021em; margin: 0; }
+      .app-header .subtitle { font-size: 14px; color: var(--secondary); margin: 2px 0 0; }
+
+      /* ── hero status banner ── */
+      .hero {
+        display: flex; align-items: center; gap: 14px;
+        padding: 15px 16px; border-radius: 14px; margin-bottom: 26px;
+        background: var(--hero-bg, var(--group));
+        transition: background 0.2s ease;
+      }
+      .hero-glyph {
+        width: 40px; height: 40px; border-radius: 50%; flex: none;
+        display: grid; place-items: center;
+        background: var(--hero-tint, rgba(0,0,0,0.05));
+        color: var(--state, var(--secondary));
+      }
+      .hero-glyph svg { width: 22px; height: 22px; }
+      .hero-state { font-size: 16px; font-weight: 600; color: var(--label); }
+      .hero-reason { font-size: 13px; color: var(--secondary); margin-top: 1px; }
+      .hero.armed { --state: var(--green); --hero-tint: color-mix(in srgb, var(--green) 16%, transparent); --hero-bg: color-mix(in srgb, var(--green) 9%, var(--group)); }
+      .hero.off    { --state: var(--secondary); --hero-tint: color-mix(in srgb, var(--secondary) 16%, transparent); --hero-bg: var(--group); }
+      .hero.empty  { --state: var(--amber); --hero-tint: color-mix(in srgb, var(--amber) 16%, transparent); --hero-bg: color-mix(in srgb, var(--amber) 9%, var(--group)); }
+
+      /* ── grouped lists ── */
+      .block { margin-bottom: 26px; }
+      .sec-label {
+        font-size: 13px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+        color: var(--secondary); margin: 0 0 8px 16px;
+      }
+      .group { background: var(--group); border-radius: 12px; overflow: hidden; }
+
+      .row {
+        position: relative; display: flex; align-items: center; gap: 12px;
+        min-height: 44px; padding: 11px 16px; width: 100%;
+        background: var(--group); color: var(--label);
+        border: 0; margin: 0; font: inherit; text-align: left;
+      }
+      button.row { cursor: pointer; }
+      /* hairline separator, inset to the text edge (after the 20px icon + gaps) */
+      .row::after {
+        content: ""; position: absolute; left: 48px; right: 0; bottom: 0;
+        height: 1px; background: var(--separator);
+      }
+      .group > .row:last-child::after { display: none; }
+      button.row.tap:hover { background: var(--group-hover); }
+      button.row.tap:active { background: var(--group-active); }
+      .row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
+      .ico { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--secondary); }
+      .ico svg { width: 20px; height: 20px; }
+      .row-main { flex: 1; min-width: 0; }
+      .row-title { font-size: 15px; font-weight: 450; color: var(--label); }
+      .row-desc { font-size: 13px; color: var(--secondary); margin-top: 1px; }
+      .val { font-size: 13px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+      .chev { flex: none; display: grid; place-items: center; color: var(--chev); }
+      .chev svg { width: 18px; height: 18px; }
+
+      .row.danger .row-title { color: var(--red); }
+      .row.danger .ico { color: var(--red); }
+      .row.danger.confirming { background: color-mix(in srgb, var(--red) 9%, var(--group)); }
+
+      /* ── iOS toggle ── */
+      .switch {
+        position: relative; width: 51px; height: 31px; flex: none;
+        border: 0; padding: 0; border-radius: 999px; cursor: pointer;
+        background: var(--toggle-off); -webkit-appearance: none; appearance: none;
+        transition: background 0.2s ease;
+      }
+      .switch::after {
+        content: ""; position: absolute; top: 2px; left: 2px;
+        width: 27px; height: 27px; border-radius: 50%; background: var(--knob);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(0,0,0,0.04);
+        transition: transform 0.2s ease;
+      }
+      .switch[aria-checked="true"] { background: var(--green); }
+      .switch[aria-checked="true"]::after { transform: translateX(20px); }
+      .switch:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+      /* ── paste editor ── */
+      .paste-editor { padding: 12px 16px 14px; background: var(--group); border-top: 1px solid var(--separator); }
+      .paste-editor textarea {
+        width: 100%; min-height: 116px; resize: vertical;
+        border: 1px solid var(--separator); border-radius: 8px; padding: 10px;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: var(--bg); color: var(--label);
+      }
+      .paste-editor textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+      .paste-actions { display: flex; gap: 8px; margin-top: 10px; }
+      .btn {
+        font: inherit; font-size: 14px; font-weight: 500; padding: 7px 15px;
+        border: 0; border-radius: 8px; cursor: pointer; background: var(--btn-bg); color: var(--blue);
+      }
+      .btn.primary { background: var(--blue); color: #fff; }
+      .btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+      /* ── enroll panel ── */
+      .enroll-panel { padding: 12px 16px 14px; background: var(--group); border-top: 1px solid var(--separator); }
+      .enroll-hint { font-size: 13px; color: var(--secondary); margin: 0 0 10px; }
+      .enroll-hint b { color: var(--label); }
+      .enroll-steps { margin: 2px 0 12px; padding-left: 18px; font-size: 13px; color: var(--secondary); }
+      .enroll-steps li { margin: 5px 0; }
+      .enroll-steps b { color: var(--label); }
+      .enroll-steps a { color: var(--blue); }
+
+      /* ── inline feedback ── */
+      .msg { font-size: 13px; margin: 8px 16px 0; }
+      .msg:empty { margin: 0; }
+      .msg.ok { color: var(--green); }
+      .msg.warn { color: var(--amber); }
+      .msg.err { color: var(--red); }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="app-header">
+        <h1>Duo Autopilot</h1>
+        <p class="subtitle">Hands-off UCSD Duo MFA</p>
+      </header>
+
+      <!-- Hero status banner (state filled by JS) -->
+      <section class="hero" id="hero" aria-live="polite">
+        <div class="hero-glyph" id="heroGlyph"></div>
+        <div>
+          <div class="hero-state" id="heroState">Checking…</div>
+          <div class="hero-reason" id="heroReason"></div>
+        </div>
+      </section>
+
+      <!-- Status group -->
+      <section class="block" id="credBlock" hidden>
+        <div class="sec-label">Credentials</div>
+        <div class="group" id="credGroup"></div>
+      </section>
+
+      <!-- Enrollment (primary path for a new user) -->
+      <section class="block">
+        <div class="sec-label">Set up a credential</div>
+        <div class="group">
+          <button class="row tap" id="actEnroll">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1Z"/><path d="M9.5 12h5"/><path d="M12 9.5v5"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Enroll via Duo</div>
+              <div class="row-desc">Capture a new credential from Duo’s “Add a device” page</div>
+            </div>
+            <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+
+          <div class="enroll-panel" id="enrollPanel" hidden>
+            <div id="enrollChoose">
+              <p class="enroll-hint">Which factor will you add in Duo?</p>
+              <div class="paste-actions">
+                <button class="btn primary" id="enrollInternal">Touch ID</button>
+                <button class="btn" id="enrollUsb">Security key</button>
+              </div>
+            </div>
+            <div id="enrollArmed" hidden>
+              <p class="enroll-hint"><b>Armed</b> — capturing your next <span id="enrollFactorName">Touch&nbsp;ID</span> enrollment. In another tab:</p>
+              <ol class="enroll-steps">
+                <li>Start any UCSD login and reach the Duo prompt.</li>
+                <li>Pick <b>Other options → Manage devices</b>; re-approve once with your phone.</li>
+                <li>Choose <b>Add a device</b> → the factor above. Autopilot captures it automatically.</li>
+              </ol>
+              <div class="paste-actions">
+                <button class="btn" id="enrollCancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="msg" id="enrollMsg" aria-live="polite"></p>
+      </section>
+
+      <!-- Settings group -->
+      <section class="block">
+        <div class="sec-label">Autopilot</div>
+        <div class="group">
+          <div class="row">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Autopilot</div>
+              <div class="row-desc">Answer Duo automatically</div>
+            </div>
+            <button class="switch" id="tgEnabled" role="switch" aria-checked="true" aria-label="Autopilot"></button>
+          </div>
+          <div class="row">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Trust this device</div>
+              <div class="row-desc">Auto-click “Yes, this is my device”</div>
+            </div>
+            <button class="switch" id="tgTrust" role="switch" aria-checked="true" aria-label="Trust this device"></button>
+          </div>
+          <div class="row">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.27 21a2 2 0 0 0 3.46 0"/><path d="M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Show toast</div>
+              <div class="row-desc">On-page confirmation when approved</div>
+            </div>
+            <button class="switch" id="tgToast" role="switch" aria-checked="true" aria-label="Show toast"></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Credential actions -->
+      <section class="block">
+        <div class="sec-label">Credential</div>
+        <div class="group">
+          <button class="row tap" id="actImport">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Import from packaged file</div>
+              <div class="row-desc">Loads credentials/duo-webauthn.json from the unpacked folder</div>
+            </div>
+            <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+
+          <button class="row tap" id="actPaste">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Paste JSON…</div>
+            </div>
+            <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+
+          <div class="paste-editor" id="pasteEditor" hidden>
+            <textarea id="pasteArea" placeholder='{ "credentials": [ … ] }' spellcheck="false"></textarea>
+            <div class="paste-actions">
+              <button class="btn primary" id="pasteSave">Save</button>
+              <button class="btn" id="pasteCancel">Cancel</button>
+            </div>
+          </div>
+
+          <button class="row tap" id="actResync">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title">Resync signCount</div>
+              <div class="row-desc">Bump counters to 1,000,000 if Duo stalls</div>
+            </div>
+            <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
+          </button>
+
+          <button class="row tap danger" id="actClear">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+            </span>
+            <div class="row-main">
+              <div class="row-title" id="clearLabel">Clear credentials</div>
+            </div>
+          </button>
+        </div>
+        <p class="msg" id="actMsg" aria-live="polite"></p>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

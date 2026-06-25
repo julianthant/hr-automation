@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Duo Autopilot",
+  "version": "0.1.0",
+  "description": "Hands-off UCSD Duo MFA in your own browser.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.duosecurity.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "options_page": "src/options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://*.duosecurity.com/*"],
+      "js": ["src/inpage.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://*.duosecurity.com/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": true
+    }
+  ]
+}

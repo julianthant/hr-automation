@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Duo Autopilot — pick a direction</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        background: #1b1d22;
+        color: #e8e8ea;
+        padding: 36px 28px 80px;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page-head { max-width: 1400px; margin: 0 auto 28px; }
+      .page-head h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+      .page-head p { margin: 0; color: #9a9aa2; font-size: 14px; }
+      .grid {
+        max-width: 1400px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: 26px;
+        align-items: start;
+      }
+      .col { display: flex; flex-direction: column; gap: 12px; }
+      .col-label {
+        display: flex; align-items: baseline; gap: 10px;
+        font-size: 13px; color: #b9b9c0;
+      }
+      .col-label b { color: #fff; font-size: 15px; }
+      .col-label .num {
+        width: 22px; height: 22px; border-radius: 50%;
+        background: #34e39b; color: #06281c; font-weight: 800; font-size: 12px;
+        display: grid; place-items: center; flex: none;
+      }
+      .frame {
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+      }
+      /* the "browser chrome" around each mock */
+      .chrome {
+        background: #2a2c31;
+        padding: 9px 12px;
+        display: flex; align-items: center; gap: 7px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+      }
+      .dot { width: 11px; height: 11px; border-radius: 50%; }
+      .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+      .chrome .addr {
+        margin-left: 10px; font-size: 11px; color: #8a8a92;
+        font-family: ui-monospace, Menlo, monospace;
+      }
+      .mock { height: 560px; overflow-y: auto; }
+
+      /* ============================================================ */
+      /* VARIANT 1 — COCKPIT / AUTOPILOT                              */
+      /* ============================================================ */
+      .v-cockpit {
+        --bg: #0c0e12;
+        --panel: #14171d;
+        --panel-2: #1a1e26;
+        --line: rgba(255,255,255,0.08);
+        --fg: #e9ecf2;
+        --muted: #8b93a3;
+        --accent: #34e39b;
+        --accent-dim: #1f8f63;
+        --danger: #ff6b6b;
+        background:
+          radial-gradient(900px 300px at 80% -10%, rgba(52,227,155,0.10), transparent 60%),
+          var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 -apple-system, system-ui, sans-serif;
+        padding: 22px 22px 30px;
+      }
+      .v-cockpit .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+      .v-cockpit .brand { display: flex; align-items: center; gap: 12px; }
+      .v-cockpit .led {
+        width: 12px; height: 12px; border-radius: 50%;
+        background: var(--accent); box-shadow: 0 0 0 4px rgba(52,227,155,0.16), 0 0 16px rgba(52,227,155,0.7);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+      .v-cockpit .title { font-weight: 800; letter-spacing: 0.14em; font-size: 13px; text-transform: uppercase; }
+      .v-cockpit .subtitle { color: var(--muted); font-size: 12px; margin-top: 2px; letter-spacing: 0.02em; }
+      .v-cockpit .status-pill {
+        display: inline-flex; align-items: center; gap: 8px;
+        background: rgba(52,227,155,0.12); color: var(--accent);
+        border: 1px solid rgba(52,227,155,0.35);
+        padding: 6px 12px; border-radius: 999px; font-weight: 700; font-size: 12px; letter-spacing: 0.08em;
+      }
+      .v-cockpit .status-pill .tick { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+      .v-cockpit .panel {
+        background: linear-gradient(180deg, var(--panel-2), var(--panel));
+        border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
+      }
+      .v-cockpit .panel h2 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted);
+        margin: 0 0 12px; font-weight: 700;
+      }
+      .v-cockpit .cred-row {
+        display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 10px;
+        padding: 9px 0; border-bottom: 1px solid var(--line);
+      }
+      .v-cockpit .cred-row:last-child { border-bottom: 0; }
+      .v-cockpit .cred-row .glyph { color: var(--accent); font-size: 13px; }
+      .v-cockpit .cred-row .name { font-weight: 600; }
+      .v-cockpit .cred-row .rp { color: var(--muted); font-size: 12px; }
+      .v-cockpit .cred-row .sc { font-family: ui-monospace, Menlo, monospace; color: var(--muted); font-size: 12px; }
+      .v-cockpit .switch-row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 11px 0; border-bottom: 1px solid var(--line);
+      }
+      .v-cockpit .switch-row:last-child { border-bottom: 0; }
+      .v-cockpit .switch-row .lbl { font-weight: 600; }
+      .v-cockpit .switch-row .desc { color: var(--muted); font-size: 12px; margin-top: 1px; }
+      .v-cockpit .right { display: flex; align-items: center; gap: 10px; }
+      .v-cockpit .state { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); width: 26px; text-align: right; }
+      .toggle {
+        --w: 46px; --h: 26px;
+        width: var(--w); height: var(--h); border-radius: 999px; position: relative; cursor: pointer;
+        background: #2b313c; border: 1px solid var(--line); transition: background 0.18s ease;
+        flex: none;
+      }
+      .toggle::after {
+        content: ""; position: absolute; top: 2px; left: 2px;
+        width: calc(var(--h) - 6px); height: calc(var(--h) - 6px); border-radius: 50%;
+        background: #cfd4dd; transition: transform 0.18s ease, background 0.18s ease;
+      }
+      .v-cockpit .toggle[data-on="1"] { background: rgba(52,227,155,0.25); border-color: var(--accent-dim); }
+      .v-cockpit .toggle[data-on="1"]::after { transform: translateX(calc(var(--w) - var(--h))); background: var(--accent); box-shadow: 0 0 10px rgba(52,227,155,0.8); }
+      .v-cockpit .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+      .v-cockpit .btn {
+        font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+        padding: 8px 13px; border-radius: 9px;
+      }
+      .v-cockpit .btn.primary { background: var(--accent); border-color: var(--accent); color: #06281c; }
+
+      /* ============================================================ */
+      /* VARIANT 2 — SYSTEM-NATIVE UTILITY                            */
+      /* ============================================================ */
+      .v-native {
+        --bg: #f2f2f7; --card: #ffffff; --fg: #1c1c1e; --muted: #8a8a8e;
+        --line: #e2e2e7; --accent: #0a84ff; --green: #34c759;
+        background: var(--bg); color: var(--fg);
+        font: 14px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif;
+        padding: 24px 22px 30px;
+      }
+      .v-native h1 { font-size: 21px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.02em; }
+      .v-native .sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
+      .v-native .sec-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 18px 6px 7px; }
+      .v-native .group { background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 0 rgba(0,0,0,0.03); }
+      .v-native .row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 15px; border-bottom: 1px solid var(--line); min-height: 46px;
+      }
+      .v-native .row:last-child { border-bottom: 0; }
+      .v-native .row .main { display: flex; align-items: center; gap: 11px; }
+      .v-native .row .ico { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 13px; flex: none; }
+      .v-native .ico.green { background: var(--green); } .v-native .ico.blue { background: var(--accent); } .v-native .ico.grey { background: #aeaeb2; } .v-native .ico.orange { background: #ff9f0a; }
+      .v-native .row .ttl { font-weight: 500; }
+      .v-native .row .desc { color: var(--muted); font-size: 12px; margin-top: 1px; }
+      .v-native .row .val { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+      .v-native .badge { font-size: 12px; font-weight: 600; color: var(--green); }
+      .v-native .toggle { --w: 47px; --h: 28px; background: #e9e9ea; border: none; }
+      .v-native .toggle::after { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); top: 2px; }
+      .v-native .toggle[data-on="1"] { background: var(--green); }
+      .v-native .toggle[data-on="1"]::after { transform: translateX(calc(var(--w) - var(--h))); }
+      .v-native .chev { color: #c4c4c8; font-size: 18px; }
+      .v-native .row.tap { cursor: pointer; }
+
+      /* ============================================================ */
+      /* VARIANT 3 — MINIMAL MONO / TERMINAL                          */
+      /* ============================================================ */
+      .v-mono {
+        --bg: #0b0f14; --fg: #c9d1d9; --dim: #6e7681; --line: #1c2530;
+        --green: #3fb950; --amber: #d29922; --blue: #58a6ff;
+        background: var(--bg); color: var(--fg);
+        font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        padding: 22px 22px 30px;
+      }
+      .v-mono .top { display: flex; align-items: center; justify-content: space-between; }
+      .v-mono .logo { font-weight: 700; color: var(--fg); }
+      .v-mono .logo .cursor { color: var(--green); animation: blink 1.1s steps(1) infinite; }
+      @keyframes blink { 50% { opacity: 0; } }
+      .v-mono .armed { color: var(--green); }
+      .v-mono .armed::before { content: "["; color: var(--dim); } .v-mono .armed::after { content: "]"; color: var(--dim); }
+      .v-mono .rule { color: var(--line); margin: 12px 0; letter-spacing: 1px; white-space: nowrap; overflow: hidden; }
+      .v-mono .k { color: var(--dim); }
+      .v-mono .blk { margin: 4px 0 2px; }
+      .v-mono .crow { display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; padding: 2px 0 2px 14px; }
+      .v-mono .crow .t { color: var(--blue); }
+      .v-mono .crow .rp { color: var(--fg); }
+      .v-mono .crow .sc { color: var(--dim); }
+      .v-mono .ok { color: var(--green); }
+      .v-mono .trow { display: flex; align-items: center; gap: 10px; padding: 4px 0 4px 14px; cursor: pointer; }
+      .v-mono .box { color: var(--green); }
+      .v-mono .box.off { color: var(--dim); }
+      .v-mono .tlabel { color: var(--fg); }
+      .v-mono .tnote { color: var(--dim); }
+      .v-mono .cmds { padding-left: 14px; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 16px; }
+      .v-mono .cmd { color: var(--green); cursor: pointer; }
+      .v-mono .cmd:hover { text-decoration: underline; }
+      .v-mono .cmd .arr { color: var(--dim); }
+    </style>
+  </head>
+  <body>
+    <div class="page-head">
+      <h1>Duo Autopilot — pick a direction</h1>
+      <p>Three takes on the same options page. Toggles are live — click them. Tell me a number (or mix-and-match) and I'll refine that one through the design pass.</p>
+    </div>
+
+    <div class="grid">
+      <!-- ============ VARIANT 1 ============ -->
+      <div class="col">
+        <div class="col-label"><span class="num">1</span><b>Cockpit / autopilot</b><span>— characterful control surface</span></div>
+        <div class="frame">
+          <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="addr">chrome-extension://…/options.html</span></div>
+          <div class="mock v-cockpit">
+            <div class="head">
+              <div class="brand">
+                <span class="led"></span>
+                <div>
+                  <div class="title">Duo Autopilot</div>
+                  <div class="subtitle">hands-off UCSD Duo MFA</div>
+                </div>
+              </div>
+              <span class="status-pill"><span class="tick"></span>ARMED</span>
+            </div>
+
+            <div class="panel">
+              <h2>Status</h2>
+              <div class="cred-row"><span class="glyph">◉</span><div><div class="name">Touch ID</div><div class="rp">internal · duosecurity.com</div></div><span class="sc">1,000,000</span></div>
+              <div class="cred-row"><span class="glyph">◉</span><div><div class="name">Security key</div><div class="rp">usb · duosecurity.com</div></div><span class="sc">1,000,000</span></div>
+            </div>
+
+            <div class="panel">
+              <h2>Autopilot</h2>
+              <div class="switch-row"><div><div class="lbl">Autopilot</div><div class="desc">Answer Duo automatically</div></div><div class="right"><span class="state">ON</span><div class="toggle" data-on="1"></div></div></div>
+              <div class="switch-row"><div><div class="lbl">Trust this device</div><div class="desc">Auto-click “Yes, this is my device”</div></div><div class="right"><span class="state">ON</span><div class="toggle" data-on="1"></div></div></div>
+              <div class="switch-row"><div><div class="lbl">On-page toast</div><div class="desc">Show a confirmation when approved</div></div><div class="right"><span class="state">ON</span><div class="toggle" data-on="1"></div></div></div>
+            </div>
+
+            <div class="panel">
+              <h2>Credential</h2>
+              <div class="actions">
+                <button class="btn primary">Import from file</button>
+                <button class="btn">Paste JSON</button>
+                <button class="btn">Resync counters</button>
+                <button class="btn">Clear</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ VARIANT 2 ============ -->
+      <div class="col">
+        <div class="col-label"><span class="num">2</span><b>System-native utility</b><span>— Chrome / macOS settings</span></div>
+        <div class="frame">
+          <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="addr">chrome-extension://…/options.html</span></div>
+          <div class="mock v-native">
+            <h1>Duo Autopilot</h1>
+            <p class="sub">Hands-off UCSD Duo MFA</p>
+
+            <div class="sec-label">Status</div>
+            <div class="group">
+              <div class="row"><div class="main"><span class="ico green">✓</span><div><div class="ttl">Credentials loaded</div></div></div><span class="badge">2 active</span></div>
+              <div class="row"><div class="main"><span class="ico grey">⌖</span><div><div class="ttl">Touch ID</div><div class="desc">internal · duosecurity.com</div></div></div><span class="val">1,000,000</span></div>
+              <div class="row"><div class="main"><span class="ico grey">⚷</span><div><div class="ttl">Security key</div><div class="desc">usb · duosecurity.com</div></div></div><span class="val">1,000,000</span></div>
+            </div>
+
+            <div class="sec-label">Settings</div>
+            <div class="group">
+              <div class="row"><div class="main"><span class="ico green">⏻</span><div class="ttl">Autopilot</div></div><div class="toggle" data-on="1"></div></div>
+              <div class="row"><div class="main"><span class="ico blue">✓</span><div class="ttl">Trust this device</div></div><div class="toggle" data-on="1"></div></div>
+              <div class="row"><div class="main"><span class="ico orange">◔</span><div class="ttl">Show toast</div></div><div class="toggle" data-on="1"></div></div>
+            </div>
+
+            <div class="sec-label">Credential</div>
+            <div class="group">
+              <div class="row tap"><div class="main"><div class="ttl">Import from packaged file</div></div><span class="chev">›</span></div>
+              <div class="row tap"><div class="main"><div class="ttl">Paste JSON…</div></div><span class="chev">›</span></div>
+              <div class="row tap"><div class="main"><div class="ttl">Resync signCount</div></div><span class="chev">›</span></div>
+              <div class="row tap"><div class="main"><div class="ttl" style="color:#ff3b30">Clear credentials</div></div><span class="chev">›</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ VARIANT 3 ============ -->
+      <div class="col">
+        <div class="col-label"><span class="num">3</span><b>Minimal mono / terminal</b><span>— dense, technical</span></div>
+        <div class="frame">
+          <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="addr">chrome-extension://…/options.html</span></div>
+          <div class="mock v-mono">
+            <div class="top">
+              <span class="logo">duo-autopilot<span class="cursor">▌</span></span>
+              <span class="armed">armed</span>
+            </div>
+            <div class="rule">────────────────────────────────────────────</div>
+
+            <div class="blk"><span class="k">creds</span> <span class="ok">2 loaded</span></div>
+            <div class="crow"><span class="t">internal</span><span class="rp">duosecurity.com</span><span class="sc">sc=1000000</span></div>
+            <div class="crow"><span class="t">usb</span><span class="rp">duosecurity.com</span><span class="sc">sc=1000000</span></div>
+
+            <div class="rule">────────────────────────────────────────────</div>
+
+            <div class="blk"><span class="k">settings</span></div>
+            <div class="trow"><span class="box">[x]</span><span class="tlabel">autopilot</span><span class="tnote">— answer Duo automatically</span></div>
+            <div class="trow"><span class="box">[x]</span><span class="tlabel">trust</span><span class="tnote">— auto-click “yes, this is my device”</span></div>
+            <div class="trow"><span class="box">[x]</span><span class="tlabel">toast</span><span class="tnote">— on-page confirmation</span></div>
+
+            <div class="rule">────────────────────────────────────────────</div>
+
+            <div class="blk"><span class="k">credential</span></div>
+            <div class="cmds">
+              <span class="cmd"><span class="arr">&gt;</span> import</span>
+              <span class="cmd"><span class="arr">&gt;</span> paste</span>
+              <span class="cmd"><span class="arr">&gt;</span> resync</span>
+              <span class="cmd"><span class="arr">&gt;</span> clear</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Live toggles + [x]/[ ] flips, plus the armed indicator follows the
+      // first (master) toggle in each variant — so each mock feels real.
+      document.querySelectorAll(".toggle").forEach((t) => {
+        t.addEventListener("click", () => {
+          const on = t.getAttribute("data-on") === "1" ? "0" : "1";
+          t.setAttribute("data-on", on);
+          const state = t.closest(".right")?.querySelector(".state");
+          if (state) state.textContent = on === "1" ? "ON" : "OFF";
+          syncArmed(t);
+        });
+      });
+      document.querySelectorAll(".v-mono .trow").forEach((row) => {
+        row.addEventListener("click", () => {
+          const box = row.querySelector(".box");
+          const on = box.textContent.includes("x");
+          box.textContent = on ? "[ ]" : "[x]";
+          box.classList.toggle("off", on);
+          if (row === row.parentElement.querySelector(".trow")) {
+            const armed = document.querySelector(".v-mono .armed");
+            armed.textContent = on ? "disarmed" : "armed";
+            armed.style.color = on ? "var(--amber)" : "var(--green)";
+          }
+        });
+      });
+      function syncArmed(t) {
+        // cockpit + native: master toggle is the first in the first settings group
+        const mock = t.closest(".mock");
+        if (mock.classList.contains("v-cockpit")) {
+          const master = mock.querySelectorAll(".switch-row .toggle")[0];
+          if (t !== master) return;
+          const pill = mock.querySelector(".status-pill");
+          const on = master.getAttribute("data-on") === "1";
+          pill.innerHTML = on ? '<span class="tick"></span>ARMED' : '<span class="tick" style="background:#ff6b6b;box-shadow:0 0 10px #ff6b6b"></span>OFF';
+          pill.style.color = on ? "var(--accent)" : "#ff6b6b";
+          pill.style.background = on ? "rgba(52,227,155,0.12)" : "rgba(255,107,107,0.12)";
+          pill.style.borderColor = on ? "rgba(52,227,155,0.35)" : "rgba(255,107,107,0.4)";
+        }
+      }
+    </script>
+  </body>
+</html>

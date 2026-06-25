@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "name": "duo-autopilot",
+  "version": "0.1.0",
+  "description": "Hands-off UCSD Duo MFA in your own browser (MV3 extension). No build step — package.json exists only so Node runs the ESM crypto self-test; Chrome ignores it.",
+  "scripts": {
+    "test": "node test/crypto.test.mjs"
+  }
+}

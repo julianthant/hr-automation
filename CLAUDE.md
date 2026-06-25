@@ -73,6 +73,40 @@ OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr
 - **Before commits:** `npm run test` + `npm run test:architecture` (architecture guards run here).
 - **After changes — CLAUDE.md:** update after every non-trivial fix, new pattern, or gotcha; merge/replace stale entries, don't layer duplicates.
 - **After changes:** update only the nearest relevant `CLAUDE.md` when a non-obvious pattern, gotcha, or contract changes; merge stale lessons instead of adding duplicates.
+- **Lessons (add vs. audit):** record a new gotcha with the `lesson` skill (it self-dedupes against neighbors before appending). Periodically GC the lesson stores with the `lesson-audit` skill (`.claude/skills/lesson-audit/`) — it sweeps every `LESSONS.md` + `CLAUDE.md` "Lessons Learned" section to remove duplicate/superseded/dead-reference lessons and verify each remaining lesson still maps to real code. Lessons are maintained, not append-only.
+
+## Verifying selectors (headless, standing pre-authorization)
+
+Mapping or verifying a selector is **pre-approved** — do it whenever a fix, a selector edit, or any debugging needs it, and **never pause to ask**. A `snapshot` is a read-only view of a page; treat it like running a test, not like an action that needs sign-off.
+
+`playwright-cli` runs **headless by default** — no display, no window steal, no permission prompt. `--headed` is opt-in only when *you* genuinely need to watch the page. So the autonomous loop is just: open headless → `snapshot` → read the ref IDs → confirm or repair the locator in `selectors.ts`. Use the `selector-map` skill for the full find→add→catalog loop; this section is only about *how to reach a live page headless without asking*.
+
+**Public / login pages (no auth):** open straight away.
+
+```bash
+playwright-cli -s=sel open "<url>"               # headless — just omit --headed
+playwright-cli -s=sel snapshot                   # accessibility tree + ref IDs
+playwright-cli --raw snapshot > /tmp/snap.yml    # grep-friendly dump for big pages
+playwright-cli -s=sel close
+```
+
+**Auth-gated pages (UCPath/PeopleSoft, CRM, Kuali, ServiceNow, I9, …) — use Duo Autopilot:** the `duo-autopilot/` extension answers the Duo MFA WebAuthn ceremony itself (no phone, no headed step), so an auth-gated login runs unattended. `npm run sel:browser` opens a headless `playwright-cli` session named `sel` with the extension loaded and self-armed from its packaged credential. The extension only clears **Duo** — you still fill the SSO username/password (from `.env`: `UCPATH_USER_ID` / `UCPATH_PASSWORD`).
+
+```bash
+playwright-cli install-browser chromium          # one-time: full Chromium (needed for --load-extension)
+npm run sel:browser -- "<login-url>"             # headless session 'sel', extension loaded
+playwright-cli -s=sel fill "<user-field>" "$UCPATH_USER_ID"
+playwright-cli -s=sel fill "<pass-field>" "$UCPATH_PASSWORD" --submit
+# …Duo Autopilot clears the MFA prompt automatically…
+playwright-cli -s=sel goto "<deep-url>" && playwright-cli -s=sel snapshot
+playwright-cli -s=sel close
+```
+
+How it works (verified 2026-06-24): the launcher writes a gitignored `.playwright/duo-autopilot.config.json` that loads the extension via `--load-extension` under Playwright's **full** bundled Chromium (`channel: chromium`, new headless — the lightweight `headless-shell` can't run extensions, and Google Chrome stable disabled `--load-extension` in 2024). The extension's service worker auto-imports `duo-autopilot/credentials/duo-webauthn.json` into storage on startup (no Options UI). See `duo-autopilot/README.md`. The one thing this can't do unattended is a brand-new credential enrollment — that's a one-time setup with the user.
+
+**Fallback (no extension set up):** log in **once** headed (approve Duo that single time), `state-save .auth/<system>.json`, then `state-load` + open headless thereafter. `.auth/` is gitignored (never commit auth state). The saved state dies when the PeopleSoft/CRM session times out — re-save if a snapshot comes back at the login page.
+
+**Always** `close` the session when done and sweep orphans (`playwright-cli list` → `playwright-cli close-all`) — these are real Chromium processes, not the user's Chrome. UCPath content lives inside the `#main_target_win0` iframe (`getContentFrame`, modal-mask timing, HR-Tasks-overlay) — those gotchas are in the `selector-map` skill. After verifying: bump the selector's `// verified YYYY-MM-DD` in `selectors.ts` and run `npm run selectors:catalog`.
 
 ## Environment
 
