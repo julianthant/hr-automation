@@ -159,7 +159,13 @@ export interface BrowserState {
   /** The browser's current page URL (from the latest health event) — lets the
    * operator see where each browser is (e.g. stuck on the SSO login page). */
   url?: string;
+  /** Recent health TRANSITIONS (oldest→newest, capped), so the operator can see
+   * a flapping browser's recovery trail. Consecutive duplicates are collapsed. */
+  healthHistory?: Array<{ at: string; status: NonNullable<BrowserState["health"]>; reason?: string }>;
 }
+
+/** Cap on `BrowserState.healthHistory` length (keeps the SSE payload bounded). */
+const HEALTH_HISTORY_CAP = 6;
 
 export interface SessionInfo {
   sessionId: string;
@@ -307,6 +313,14 @@ export function rebuildSessionState(dir?: string): SessionState {
         } else {
           // healthy / refreshing → clear a stale error
           delete b.lastError;
+        }
+        // Recovery trail — append only on an actual status CHANGE (so repeated
+        // Check clicks / steady-state probes don't pad it), capped.
+        const hist = (b.healthHistory ??= []);
+        const last = hist[hist.length - 1];
+        if (!last || last.status !== status) {
+          hist.push({ at: e.timestamp, status, ...(e.data?.reason ? { reason: e.data.reason } : {}) });
+          if (hist.length > HEALTH_HISTORY_CAP) hist.splice(0, hist.length - HEALTH_HISTORY_CAP);
         }
       }
     }

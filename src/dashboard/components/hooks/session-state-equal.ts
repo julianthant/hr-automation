@@ -61,6 +61,21 @@ export function sessionsEqual(a: SessionInfo[], b: SessionInfo[]): boolean {
   return true;
 }
 
+function healthHistoryEqual(
+  a: BrowserState["healthHistory"],
+  b: BrowserState["healthHistory"],
+): boolean {
+  const al = a?.length ?? 0;
+  const bl = b?.length ?? 0;
+  if (al !== bl) return false;
+  if (al === 0) return true;
+  // The trail only ever appends, so length + the last entry are a sufficient
+  // change signal (avoids walking the whole capped array every tick).
+  const la = a![al - 1];
+  const lb = b![bl - 1];
+  return la.at === lb.at && la.status === lb.status;
+}
+
 export function browsersEqual(a: BrowserState[], b: BrowserState[]): boolean {
   if (a.length !== b.length) return false;
   // Compare as a map keyed by browserId — order is cosmetic; the binding is what
@@ -76,7 +91,8 @@ export function browsersEqual(a: BrowserState[], b: BrowserState[]): boolean {
       x.authState !== y.authState ||
       x.health !== y.health ||
       x.lastError !== y.lastError ||
-      x.url !== y.url
+      x.url !== y.url ||
+      !healthHistoryEqual(x.healthHistory, y.healthHistory)
     ) {
       return false;
     }

@@ -242,6 +242,19 @@ describe("rebuildSessionState — workflows", () => {
     assert.equal(recovered.lastError, undefined);
   });
 
+  it("accumulates a recovery trail (healthHistory) on transitions, collapsing duplicates", () => {
+    emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
+    emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);
+    emitSessionEvent({ type: "browser_launch", workflowInstance: "Sep 1", sessionId: "S1", browserId: "ucpath", system: "UCPath" }, dir);
+    const seq = ["healthy", "refreshing", "refreshing", "unhealthy", "failed"]; // a dup 'refreshing'
+    for (const status of seq) {
+      emitSessionEvent({ type: "browser_health", workflowInstance: "Sep 1", browserId: "ucpath", system: "UCPath", data: { status } }, dir);
+    }
+    const b = rebuildSessionState(dir).workflows[0].sessions[0].browsers[0];
+    // The consecutive duplicate 'refreshing' collapses → 4 distinct transitions.
+    assert.deepEqual(b.healthHistory?.map((h) => h.status), ["healthy", "refreshing", "unhealthy", "failed"]);
+  });
+
   it("drops a browser_health event with no browserId (no positional fallback)", () => {
     emitSessionEvent({ type: "workflow_start", workflowInstance: "Sep 1" }, dir);
     emitSessionEvent({ type: "session_create", workflowInstance: "Sep 1", sessionId: "S1" }, dir);
