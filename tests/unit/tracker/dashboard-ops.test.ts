@@ -35,8 +35,10 @@ import {
   buildCancelRunningHandler,
   buildDrainWorkerHandler,
   buildFocusBrowserHandler,
+  buildHealthCheckBrowserHandler,
   buildKillBrowserHandler,
   buildRefreshBrowserHandler,
+  buildReopenBrowserHandler,
   buildQueueBumpHandler,
   buildSaveDataHandler,
   buildStopDaemonInstanceHandler,
@@ -1399,6 +1401,44 @@ describe("dashboard worker command helpers", () => {
       workerStore.getCommand((focused as { commandId: string }).commandId)?.commandType,
       "focus_browser",
     );
+
+    workerStore.close();
+  });
+
+  it("reopen + check browser resolve to reopen_browser / health_check worker commands", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const workerStore = createWorkerStore(control);
+    const daemonPid = 525252;
+    workerStore.registerWorker({
+      workerId: "sep-worker",
+      workflow: "separations",
+      kind: "daemon",
+      pid: daemonPid,
+      hostname: "test-host",
+      phase: "idle",
+    });
+    workerStore.upsertBrowserProcess({
+      workerId: "sep-worker",
+      workflow: "separations",
+      systemId: "ucpath",
+      browserId: "ucpath",
+      pid: 987001,
+    });
+    writeFileSync(
+      sessionFilePath(dateLocal(), tmp),
+      JSON.stringify({ type: "workflow_start", timestamp: new Date().toISOString(), workflowInstance: "Separation 1", pid: daemonPid }) + "\n",
+    );
+
+    const req = { workflow: "separations", instance: "Separation 1", systemId: "ucpath" };
+    const reopened = await buildReopenBrowserHandler(tmp)(req);
+    assert.equal(reopened.ok, true);
+    assert.equal(workerStore.getCommand((reopened as { commandId: string }).commandId)?.commandType, "reopen_browser");
+
+    const checked = await buildHealthCheckBrowserHandler(tmp)(req);
+    assert.equal(checked.ok, true);
+    const ccmd = workerStore.getCommand((checked as { commandId: string }).commandId)!;
+    assert.equal(ccmd.commandType, "health_check");
+    assert.equal((ccmd.payload as { systemId?: string }).systemId, "ucpath");
 
     workerStore.close();
   });

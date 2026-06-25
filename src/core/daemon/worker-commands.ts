@@ -234,6 +234,21 @@ export function createHandleWorkerCommand<TData, TSteps extends readonly string[
         workerStore.completeCommand(command.commandId)
         return
       }
+      if (command.commandType === 'reopen_browser') {
+        workerStore.acknowledgeCommand(command.commandId, instanceId)
+        const systemId = resolveCommandSystemId(workerStore, command)
+        if (!systemId) {
+          workerStore.failCommand(command.commandId, 'systemId not resolved for reopen_browser')
+          return
+        }
+        if (!state.activeSession) throw new Error('session not ready')
+        // Tiered-recovery escalation: open a FRESH tab on the same authenticated
+        // context and swap it in for the wedged one (no Duo). Emits the
+        // browser_health lifecycle so the tile reflects the outcome.
+        await state.activeSession.reopenSystem(systemId)
+        workerStore.completeCommand(command.commandId)
+        return
+      }
       if (command.commandType === 'focus_browser') {
         workerStore.acknowledgeCommand(command.commandId, instanceId)
         const systemId = resolveCommandSystemId(workerStore, command)

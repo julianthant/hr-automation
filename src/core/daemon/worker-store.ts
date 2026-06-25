@@ -13,6 +13,7 @@ export type WorkerCommandType =
   | 'stop_worker'
   | 'kill_browser'
   | 'refresh_browser'
+  | 'reopen_browser'
   | 'focus_browser'
   | 'force_kill_worker'
   | 'health_check'

@@ -11,9 +11,11 @@ import {
   buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
   buildFocusBrowserHandler,
+  buildHealthCheckBrowserHandler,
   buildKillBrowserHandler,
   buildQueueBumpHandler,
   buildRefreshBrowserHandler,
+  buildReopenBrowserHandler,
   buildSaveDataHandler,
   buildStopWorkerHandler,
   readQueueDepth,
@@ -393,6 +395,23 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       instance: String(body.instance ?? ""),
       systemId: String(body.systemId ?? ""),
     }), buildFocusBrowserHandler(deps.dir), 202);
+  });
+
+  // Reopen escalation (fresh tab, same auth) + on-demand health check.
+  app.post("/api/browser/reopen", async (c) => {
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      instance: String(body.instance ?? ""),
+      systemId: String(body.systemId ?? ""),
+    }), buildReopenBrowserHandler(deps.dir), 202);
+  });
+
+  app.post("/api/browser/check", async (c) => {
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      instance: String(body.instance ?? ""),
+      systemId: String(body.systemId ?? ""),
+    }), buildHealthCheckBrowserHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/drain", async (c) => {
