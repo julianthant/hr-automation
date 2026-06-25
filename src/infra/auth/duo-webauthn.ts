@@ -654,7 +654,10 @@ async function selectDuoFactor(
         }
         // List is open but none of our factors are present — brief grace, then bail.
         if (!listFirstSeenAt) listFirstSeenAt = Date.now();
-        else if (Date.now() - listFirstSeenAt > 3_000) return undefined;
+        else if (Date.now() - listFirstSeenAt > 3_000) {
+          await snapshotDuoPromptState(page, "method list open but none of our factors present");
+          return undefined;
+        }
       } else if (!revealedList) {
         // CRM auto-fires a discoverable passkey request on load; if Chrome's
         // native "insert your security key" dialog is up it blocks the DOM
@@ -694,7 +697,58 @@ async function selectDuoFactor(
     }
     await page.waitForTimeout(600);
   }
+  await snapshotDuoPromptState(page, "deadline elapsed before any factor matched (the ISS-005 first-attempt flake)");
   return undefined;
+}
+
+/**
+ * Diagnostic snapshot of the live Duo prompt at the moment `selectDuoFactor`
+ * GIVES UP (returns undefined → caller logs "factor not found" → manual
+ * fallback → ~180s stall). The intermittent first-attempt failure (ISS-005)
+ * left no evidence of WHY no matching factor was on the prompt — was the
+ * ceremony screen not yet rendered, on a different sub-screen, or showing a
+ * factor whose label didn't match the transport pattern? This captures the
+ * prompt's actual state (url + which known screens are visible + the literal
+ * link labels present) so the NEXT occurrence — in production or the looped
+ * `scripts/duo-firstattempt-soak.sh` harness — is diagnosable from the logs.
+ *
+ * Purely observational: it only reads (locator counts + innerText — NO
+ * `page.evaluate`, avoiding the `__name` keep-names browser-eval gotcha) and
+ * NEVER throws (a snapshot failure must not perturb the auth fallback path).
+ */
+async function snapshotDuoPromptState(page: Page, reason: string): Promise<void> {
+  try {
+    const url = page.url();
+    const seen = async (re: RegExp): Promise<boolean> =>
+      (await page.getByText(re).count().catch(() => 0)) > 0;
+    const [onMethodList, useTouchId, useSecurityKey, trustScreen, otherOptions] = await Promise.all([
+      seen(/other options to log in/i),
+      seen(/use touch id|verify your identity using this device/i),
+      seen(/insert your security key|use your security key/i),
+      seen(/yes, this is my device/i),
+      seen(/other options|other methods/i),
+    ]);
+    // Enumerate the literal factor/option link labels actually on the prompt so
+    // a label/transport mismatch (the leading first-attempt hypothesis) is
+    // visible. Locator-based, capped, best-effort.
+    let linkLabels: string[] = [];
+    try {
+      const links = await page.getByRole("link").all();
+      const texts = await Promise.all(links.slice(0, 25).map((l) => l.innerText().catch(() => "")));
+      linkLabels = texts.map((t) => t.split("\n")[0]?.trim() ?? "").filter(Boolean);
+    } catch {
+      /* best-effort link enumeration */
+    }
+    log.warn(
+      `Duo WebAuthn factor-detection diagnostic — ${reason} | url=${url} ` +
+        `onMethodList=${onMethodList} useTouchId=${useTouchId} useSecurityKey=${useSecurityKey} ` +
+        `trustScreen=${trustScreen} otherOptions=${otherOptions} | links=[${linkLabels.join(" | ")}]`,
+    );
+  } catch (err) {
+    log.warn(
+      `Duo WebAuthn factor-detection diagnostic failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 /** Active virtual-authenticator state for one page, established by `armDuoWebAuthn`. */
