@@ -797,6 +797,36 @@ test('session: idle reload is suppressed while auth in progress, fires after aut
 // All use Session.launch (not forTesting) so the real observer wiring
 // (launch → healthCb → observer.onBrowserHealth) is exercised end-to-end.
 
+function makeHealthPage(opts: {
+  url?: () => string
+  evaluate?: () => Promise<unknown>
+  onClose?: () => void
+  onReload?: () => void
+  isClosed?: () => boolean
+} = {}): import('playwright').Page {
+  return {
+    close: async () => { opts.onClose?.() },
+    bringToFront: async () => {},
+    goto: async () => {},
+    waitForTimeout: async () => {},
+    isClosed: opts.isClosed ?? (() => false),
+    url: opts.url ?? (() => 'https://example.test/x'),
+    reload: async () => { opts.onReload?.() },
+    evaluate: opts.evaluate ?? (async () => 1),
+  } as unknown as import('playwright').Page
+}
+
+/** Launch fake where `context.newPage()` returns a caller-controlled fresh page
+ * (distinct from the root page) — needed to exercise `reopenSystem`'s swap. */
+function healthFakeLaunchWithNewPage(rootPage: import('playwright').Page, newPageFactory: () => import('playwright').Page) {
+  const context = {
+    close: async () => {},
+    newPage: async () => newPageFactory(),
+  } as unknown as import('playwright').BrowserContext
+  const browser = { close: async () => {} } as unknown as import('playwright').Browser
+  return async () => ({ page: rootPage, context, browser })
+}
+
 function healthFakeLaunch(page: import('playwright').Page) {
   const context = {
     close: async () => {},
@@ -855,47 +885,61 @@ test('session.refreshSystem: reloads + emits refreshing → healthy when the pag
   }
 })
 
-test('session.refreshSystem: a closed page is a hard fault → emits failed, no reload (no relaunch)', async () => {
-  const statuses: string[] = []
+test('session.refreshSystem: a closed page is unhealthy (needs reopen), not a dead end', async () => {
+  const statuses: Array<{ status: string; reason?: string }> = []
   let reloads = 0
-  const page = {
-    close: async () => {},
-    bringToFront: async () => {},
-    goto: async () => {},
-    waitForTimeout: async () => {},
-    isClosed: () => true,
-    url: () => 'https://example.test/x',
-    reload: async () => { reloads++ },
-    evaluate: async () => 1,
-  } as unknown as import('playwright').Page
+  const page = makeHealthPage({ isClosed: () => true, onReload: () => { reloads++ } })
   const s = await Session.launch([{ id: 'a', login: async () => {} }], {
     launchFn: healthFakeLaunch(page),
-    observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
+    observer: { onBrowserHealth: (_id, status, reason) => statuses.push({ status, ...(reason ? { reason } : {}) }) },
   })
   try {
     const ok = await s.refreshSystem('a')
     assert.equal(ok, false)
     assert.equal(reloads, 0)
-    assert.deepEqual(statuses, ['failed'])
+    assert.equal(statuses.length, 1)
+    assert.equal(statuses[0].status, 'unhealthy')
+    assert.match(statuses[0].reason ?? '', /reopen/i)
   } finally {
     await s.close()
   }
 })
 
-test('session: health monitor auto-refreshes a soft fault and emits recovery (refresh-only)', async () => {
+test('session.reopenSystem: opens a fresh tab, swaps it in, closes the wedged one (no Duo)', async () => {
   const statuses: string[] = []
-  let reloaded = false
+  let oldClosed = false
+  let newPages = 0
+  // Wedged root page (execution context dead); the fresh tab is healthy.
+  const root = makeHealthPage({
+    evaluate: async () => { throw new Error('ctx destroyed') },
+    onClose: () => { oldClosed = true },
+  })
+  const fresh = makeHealthPage({ url: () => 'https://example.test/fresh', evaluate: async () => 1 })
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunchWithNewPage(root, () => { newPages++; return fresh }),
+    observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
+  })
+  try {
+    const ok = await s.reopenSystem('a')
+    assert.equal(ok, true)
+    assert.equal(newPages, 1, 'a fresh tab was opened on the same context')
+    assert.equal(oldClosed, true, 'the wedged tab was closed')
+    assert.deepEqual(statuses, ['refreshing', 'healthy'])
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: health monitor REFRESHES a soft (chrome-error) fault and recovers', async () => {
+  const statuses: string[] = []
+  let recovered = false
   let reloads = 0
-  const page = {
-    close: async () => {},
-    bringToFront: async () => {},
-    goto: async () => {},
-    waitForTimeout: async () => {},
-    isClosed: () => false,
-    url: () => 'https://example.test/x',
-    reload: async () => { reloaded = true; reloads++ },
-    evaluate: async () => { if (!reloaded) throw new Error('ctx destroyed'); return 1 },
-  } as unknown as import('playwright').Page
+  // chrome-error page → soft → refresh; reload clears it (url becomes good).
+  const page = makeHealthPage({
+    url: () => (recovered ? 'https://example.test/x' : 'chrome-error://chromewebdata/'),
+    onReload: () => { recovered = true; reloads++ },
+    evaluate: async () => 1,
+  })
   const s = await Session.launch([{ id: 'a', login: async () => {} }], {
     launchFn: healthFakeLaunch(page),
     observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
@@ -903,38 +947,77 @@ test('session: health monitor auto-refreshes a soft fault and emits recovery (re
   })
   try {
     await new Promise((r) => setTimeout(r, 200))
-    assert.ok(reloads >= 1, `expected ≥1 auto-refresh, got ${reloads}`)
+    assert.ok(reloads >= 1, `expected ≥1 refresh (reload), got ${reloads}`)
     assert.equal(statuses[statuses.length - 1], 'healthy', `last status should be healthy: ${statuses.join(',')}`)
-    assert.ok(statuses.includes('refreshing'), `should have emitted a refreshing phase: ${statuses.join(',')}`)
   } finally {
     await s.close()
   }
 })
 
-test('session: health monitor surfaces a permanent soft fault as failed after bounded auto-refresh', async () => {
-  const emits: Array<{ status: string; reason?: string }> = []
+test('session: health monitor ESCALATES a wedged page to reopen (fresh tab) and recovers', async () => {
+  const statuses: string[] = []
   let reloads = 0
-  const page = {
-    close: async () => {},
-    bringToFront: async () => {},
-    goto: async () => {},
-    waitForTimeout: async () => {},
-    isClosed: () => false,
-    url: () => 'https://example.test/x',
-    reload: async () => { reloads++ },
-    evaluate: async () => { throw new Error('ctx destroyed') }, // never recovers
-  } as unknown as import('playwright').Page
+  let newPages = 0
+  // Wedged root (evaluate throws, url ok) → NOT soft → skip refresh → reopen.
+  const root = makeHealthPage({ evaluate: async () => { throw new Error('ctx destroyed') }, onReload: () => { reloads++ } })
+  const fresh = makeHealthPage({ url: () => 'https://example.test/fresh', evaluate: async () => 1 })
   const s = await Session.launch([{ id: 'a', login: async () => {} }], {
-    launchFn: healthFakeLaunch(page),
-    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
-    healthMonitorOverride: { tickMs: 20, maxAutoRefreshes: 2 },
+    launchFn: healthFakeLaunchWithNewPage(root, () => { newPages++; return fresh }),
+    observer: { onBrowserHealth: (_id, status) => statuses.push(status) },
+    healthMonitorOverride: { tickMs: 20 },
   })
   try {
-    await new Promise((r) => setTimeout(r, 250))
-    assert.equal(reloads, 2, `should auto-refresh exactly maxAutoRefreshes(=2) times, got ${reloads}`)
+    await new Promise((r) => setTimeout(r, 200))
+    assert.equal(reloads, 0, 'a wedged page must NOT be reloaded — it escalates straight to reopen')
+    assert.ok(newPages >= 1, `expected ≥1 reopen (fresh tab), got ${newPages}`)
+    assert.equal(statuses[statuses.length - 1], 'healthy', `last status should be healthy: ${statuses.join(',')}`)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: health monitor surfaces failed after the reopen budget is exhausted', async () => {
+  const emits: Array<{ status: string; reason?: string }> = []
+  let newPages = 0
+  const root = makeHealthPage({ evaluate: async () => { throw new Error('ctx destroyed') } })
+  // Every fresh tab is ALSO wedged → reopen never recovers.
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunchWithNewPage(root, () => {
+      newPages++
+      return makeHealthPage({ evaluate: async () => { throw new Error('ctx destroyed') } })
+    }),
+    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
+    healthMonitorOverride: { tickMs: 20, maxReopens: 2 },
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 300))
+    assert.equal(newPages, 2, `should reopen exactly maxReopens(=2) times, got ${newPages}`)
     const failed = emits.find((e) => e.status === 'failed')
     assert.ok(failed, `expected a failed emit: ${JSON.stringify(emits)}`)
     assert.match(failed!.reason ?? '', /exhausted/)
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: health monitor surfaces an EXPIRED session (SSO url) for re-auth — no refresh/reopen', async () => {
+  const emits: Array<{ status: string; reason?: string }> = []
+  let reloads = 0
+  let newPages = 0
+  // Page sitting on the Duo/SSO host → session expired → re-auth needed.
+  const page = makeHealthPage({ url: () => 'https://api-xxx.duosecurity.com/frame/prompt', onReload: () => { reloads++ } })
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunchWithNewPage(page, () => { newPages++; return page }),
+    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
+    healthMonitorOverride: { tickMs: 20 },
+  })
+  try {
+    await new Promise((r) => setTimeout(r, 150))
+    assert.equal(reloads, 0, 'an expired session must not be refreshed (would re-land on login)')
+    assert.equal(newPages, 0, 'an expired session must not be reopened')
+    const failed = emits.find((e) => e.status === 'failed')
+    assert.ok(failed, `expected a failed emit: ${JSON.stringify(emits)}`)
+    assert.match(failed!.reason ?? '', /re-auth|expired/i)
   } finally {
     await s.close()
   }

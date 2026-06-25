@@ -9,6 +9,7 @@ import { log } from '../../utils/log.js'
 import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
 import { idleRefreshCadence } from '../../domain/idle-refresh.js'
+import { classifyBrowserHealth, isLoginLikeUrl, type BrowserHealthVerdict } from '../../domain/browser-health.js'
 
 /**
  * Per-system idle-refresh runtime state. One entry per system in this
@@ -39,11 +40,13 @@ type BrowserHealthStatus = 'healthy' | 'unhealthy' | 'refreshing' | 'failed'
 interface HealthMonitorState {
   /** Last status emitted, so the monitor only emits on transitions (no spam). */
   lastStatus: BrowserHealthStatus
-  /** Consecutive auto-refresh attempts since the last `healthy` — bounds the
-   * "refresh-only" recovery so a permanently-broken soft fault eventually
-   * surfaces as `failed` instead of reloading forever. */
+  /** Consecutive Refresh attempts since the last `healthy` — first rung of the
+   * recovery ladder (refresh → reopen → surface). */
   autoRefreshCount: number
-  /** A `refreshSystem` reload is in flight — serializes operator + monitor refreshes. */
+  /** Consecutive Reopen attempts since the last `healthy` — second rung. */
+  reopenCount: number
+  /** A `refreshSystem`/`reopenSystem` page mutation is in flight — serializes
+   * operator + monitor recoveries against each other. */
   reloadInFlight: boolean
   /** A monitor tick is mid-probe for this system — prevents overlapping ticks. */
   monitorBusy: boolean
@@ -51,8 +54,10 @@ interface HealthMonitorState {
 
 /** How often the health monitor probes every launched browser (ms). */
 const HEALTH_MONITOR_TICK_MS = 30_000
-/** Max consecutive auto-refreshes before a soft fault is surfaced as `failed`. */
+/** Max consecutive Refresh attempts (rung 1) before escalating to Reopen. */
 const HEALTH_MONITOR_MAX_AUTO_REFRESH = 10
+/** Max consecutive Reopen attempts (rung 2) before surfacing `failed`. */
+const HEALTH_MONITOR_MAX_REOPEN = 3
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -61,8 +66,77 @@ export function formatCaptureFilename(args: {
   label: string
   system: string
   ts: number
+  /**
+   * Zero-based page-slice index for a TALL capture split into readable pages.
+   * When present, a 1-based zero-padded `-cNN` suffix is appended so the N slices
+   * of one page don't collide on the shared `ts`+`system` and sort top-to-bottom
+   * lexically. Omitted for a page captured as a single image (short pages).
+   */
+  chunk?: number
 }): string {
-  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}.png`
+  const chunkSuffix =
+    args.chunk !== undefined ? `-c${String(args.chunk + 1).padStart(2, '0')}` : ''
+  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}${chunkSuffix}.png`
+}
+
+/**
+ * Centralized audit-capture geometry — one source of truth for "what every
+ * screenshot looks like." The unified capture pins width to a fixed readable
+ * column (so a form captures the same width regardless of the tiled daemon
+ * window) and splits a TALL page into page-height slices the operator steps
+ * through, instead of one tiny unreadable long image.
+ */
+export const CAPTURE = {
+  /**
+   * Fixed MINIMUM layout-viewport WIDTH for every capture. A narrow/normal form
+   * renders at this readable column width even on a quarter-tiled daemon window
+   * (`setViewportSize` sets the LAYOUT viewport independently of the OS window).
+   * Wide content (PeopleSoft grids) widens BEYOND this; it is a floor, not a cap.
+   */
+  width: 1280,
+  /** Hard cap on widening for pathologically wide content (runaway guard). */
+  maxWidth: 6000,
+  /**
+   * Height of each page slice when a tall capture is split. ~one comfortable
+   * screenful so a slice reads near 1:1 in the dashboard lightbox instead of a
+   * shrunk-to-fit ribbon.
+   */
+  sliceHeight: 1200,
+  /**
+   * Vertical OVERLAP (px) between consecutive slices, so content sitting on a
+   * slice boundary stays fully readable in at least one slice. Must be < sliceHeight.
+   */
+  sliceOverlap: 120,
+  /** Hard cap on slices per page — runaway guard for pathologically tall docs. */
+  maxSlices: 30,
+} as const
+
+/**
+ * Pure: the top Y offset of each page slice for a page `fullHeight` px tall,
+ * given a slice height + overlap seam. Returns `[0]` (one slice = the whole
+ * page) when the page fits one slice; otherwise top→bottom offsets, each clamped
+ * to `fullHeight - sliceHeight` so the last slice is a full-height band anchored
+ * to the bottom (no tiny trailing sliver, no duplicate). Capped at `maxSlices`.
+ * Exported for unit tests (the slicing logic is browser-free).
+ */
+export function computeSliceOffsets(
+  fullHeight: number,
+  sliceHeight: number,
+  overlap: number,
+  maxSlices: number,
+): number[] {
+  if (!Number.isFinite(fullHeight) || fullHeight <= 0) return [0]
+  if (fullHeight <= sliceHeight) return [0]
+  const maxY = fullHeight - sliceHeight
+  const step = Math.max(1, sliceHeight - overlap)
+  const ys: number[] = []
+  for (let y = 0; ys.length < maxSlices; y += step) {
+    const clamped = Math.min(y, maxY)
+    if (ys.length && ys[ys.length - 1] === clamped) break
+    ys.push(clamped)
+    if (clamped >= maxY) break
+  }
+  return ys
 }
 
 interface SystemSlot {
@@ -129,7 +203,7 @@ export interface LaunchOpts {
    * probe interval; `maxAutoRefreshes` bounds the auto-refresh recovery before
    * a soft fault is surfaced as `failed`.
    */
-  healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number }
+  healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number; maxReopens?: number }
   /**
    * Output directory for `screenshotAll` / `captureAll` PNGs. Stored on the
    * session state and honored over `PATHS.screenshotDir` (and inherited by
@@ -162,7 +236,7 @@ export class Session {
   /** The health-monitor interval (root session only). */
   private healthTimer: ReturnType<typeof setInterval> | null = null
   /** Health-monitor cadence override (tests). */
-  private healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number }
+  private healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number; maxReopens?: number }
 
   /**
    * True while the auth chain (`Session.launch` → `loginWithRetry` →
@@ -585,24 +659,56 @@ export class Session {
    * gate, not a diagnostic.
    */
   async healthCheck(id: string): Promise<boolean> {
+    return (await this.inspectSystemHealth(id)).kind === 'ok'
+  }
+
+  /**
+   * Classify a system's page into a recovery VERDICT (the richer form of
+   * `healthCheck`). Gathers three raw observations — closed? what url? does a
+   * trivial JS round-trip succeed? — and maps them via the pure
+   * `classifyBrowserHealth` (so the taxonomy is unit-testable without
+   * Playwright). The JS probe is SKIPPED for a login/chrome-error/blank url —
+   * the url alone already classifies those, and we don't want to evaluate into
+   * the SSO page's context. Best-effort: every probe path falls back rather
+   * than throwing.
+   */
+  private async inspectSystemHealth(id: string): Promise<BrowserHealthVerdict> {
     const slot = this.state.browsers.get(id)
-    if (!slot) return false
+    if (!slot) return { kind: 'dead', reason: 'no browser for system' }
+    let closed = false
+    try { closed = slot.page.isClosed() } catch { closed = true }
+    if (closed) return classifyBrowserHealth({ closed: true, url: '', probed: false })
+    let url = ''
+    try { url = slot.page.url() } catch { /* leave '' → wedged */ }
+    let probed = false
+    // Only spend the 5s JS round-trip when the url looks like a usable app page;
+    // a login/chrome-error/blank url is already decisive.
+    if (url && url !== 'about:blank' && !url.toLowerCase().startsWith('chrome-error') && !isLoginLikeUrl(url)) {
+      try {
+        probed = await Promise.race([
+          slot.page.evaluate(() => 1).then((v) => v === 1).catch(() => false),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
+        ])
+      } catch {
+        probed = false
+      }
+    }
+    return classifyBrowserHealth({ closed: false, url, probed })
+  }
+
+  /**
+   * The system's current page URL (best-effort) — surfaced to the dashboard tile
+   * so the operator can see where each browser actually is (e.g. stuck on login).
+   * Returns `undefined` if unavailable.
+   */
+  currentUrl(id: string): string | undefined {
+    const slot = this.state.browsers.get(id)
+    if (!slot) return undefined
     try {
-      if (slot.page.isClosed()) return false
-      // Stuck on about:blank means either un-navigated or a SAML redirect that
-      // never completed — both are reasons to abort the next item.
-      const url = slot.page.url()
-      if (!url || url === 'about:blank') return false
-      // A trivial JS roundtrip detects: hung renderer, destroyed execution
-      // context (the symptom of SAML session expiry mid-batch), and stale
-      // page handles whose underlying target is gone.
-      const probed = await Promise.race([
-        slot.page.evaluate(() => 1).then((v) => v === 1).catch(() => false),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
-      ])
-      return probed
+      const u = slot.page.url()
+      return u || undefined
     } catch {
-      return false
+      return undefined
     }
   }
 
@@ -642,7 +748,7 @@ export class Session {
   private ensureHealthState(systemId: string): HealthMonitorState {
     let st = this.healthStates.get(systemId)
     if (!st) {
-      st = { lastStatus: 'healthy', autoRefreshCount: 0, reloadInFlight: false, monitorBusy: false }
+      st = { lastStatus: 'healthy', autoRefreshCount: 0, reopenCount: 0, reloadInFlight: false, monitorBusy: false }
       this.healthStates.set(systemId, st)
     }
     return st
@@ -655,6 +761,17 @@ export class Session {
     } catch {
       /* observability must not break automation */
     }
+  }
+
+  /**
+   * Set/clear the idle-refresh `reloadInFlight` flag for a system (when it has
+   * an idle timer) so an idle reload and a health Refresh/Reopen never mutate
+   * the same page concurrently. The idle tick already bails on its own
+   * `reloadInFlight`; the health monitor bails on it too (`tickHealthMonitor`).
+   */
+  private setIdleReloadFlag(systemId: string, value: boolean): void {
+    const idle = this.idleStates.get(systemId)
+    if (idle) idle.reloadInFlight = value
   }
 
   /**
@@ -674,12 +791,16 @@ export class Session {
     const st = this.ensureHealthState(id)
     if (st.reloadInFlight) return false
     st.reloadInFlight = true
+    this.setIdleReloadFlag(id, true)
     try {
       let closed = false
       try { closed = slot.page.isClosed() } catch { closed = true }
       if (closed) {
-        this.emitHealth(id, 'failed', 'browser page closed')
-        st.lastStatus = 'failed'
+        // A closed tab can't be reloaded — Reopen (a fresh tab on the live
+        // context) is the recovery. Surface unhealthy so the monitor/operator
+        // escalates rather than treating Refresh as a dead end.
+        this.emitHealth(id, 'unhealthy', 'tab closed — needs reopen')
+        st.lastStatus = 'unhealthy'
         return false
       }
       this.emitHealth(id, 'refreshing')
@@ -695,6 +816,7 @@ export class Session {
         this.emitHealth(id, 'healthy')
         st.lastStatus = 'healthy'
         st.autoRefreshCount = 0
+        st.reopenCount = 0
       } else {
         this.emitHealth(id, 'unhealthy', 'page did not recover after refresh')
         st.lastStatus = 'unhealthy'
@@ -702,6 +824,109 @@ export class Session {
       return ok
     } finally {
       st.reloadInFlight = false
+      this.setIdleReloadFlag(id, false)
+    }
+  }
+
+  /**
+   * Reopen a system on a FRESH tab in its existing authenticated context — the
+   * escalation past Refresh for a wedged page (dead iframe context, stalled
+   * `about:blank`, or a closed tab) where the SERVER SESSION IS STILL VALID. A
+   * new page on the same `BrowserContext` inherits the auth cookies, so this is
+   * **no-Duo** (no relaunch, no re-auth). Sequence: open a new page → navigate
+   * to the system's home/reset URL (or where it was) → verify the new page is
+   * usable → swap `slot.page` and close the old one.
+   *
+   * Doubles as the expiry probe: if even the fresh tab lands on the SSO/login
+   * host, the session is genuinely gone → surface `failed` ("re-auth needed"),
+   * never loop. Serialized against Refresh + idle-refresh via `reloadInFlight`.
+   *
+   * Safe because handlers fetch `ctx.page(id)` fresh each step and the monitor
+   * only reopens between steps (guarded by `idleGuard`), so no handler holds a
+   * stale page reference across the swap.
+   */
+  async reopenSystem(id: string): Promise<boolean> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) return false
+    const st = this.ensureHealthState(id)
+    if (st.reloadInFlight) return false
+    st.reloadInFlight = true
+    this.setIdleReloadFlag(id, true)
+    try {
+      const sys = this.state.systems.find((s) => s.id === id)
+      // Prefer the system's home/reset URL; else re-navigate to where it was
+      // (unless that's a dead/login/error url). Last resort: about:blank, which
+      // the post-nav check will reject as unhealthy.
+      let target = sys?.resetUrl
+      if (!target) {
+        try {
+          const u = slot.page.url()
+          if (u && u !== 'about:blank' && !u.toLowerCase().startsWith('chrome-error') && !isLoginLikeUrl(u)) {
+            target = u
+          }
+        } catch { /* leave undefined */ }
+      }
+      target = target ?? 'about:blank'
+
+      this.emitHealth(id, 'refreshing', 'reopening browser tab')
+      st.lastStatus = 'refreshing'
+
+      let newPage: Page
+      try {
+        newPage = await slot.context.newPage()
+      } catch (err) {
+        log.warn(`[Session: ${id}] reopen: could not open a new tab: ${errorMessage(err)}`)
+        this.emitHealth(id, 'failed', 'could not open a new tab')
+        st.lastStatus = 'failed'
+        return false
+      }
+      try {
+        await newPage.goto(target, { waitUntil: 'domcontentloaded', timeout: 90_000 })
+      } catch (err) {
+        // Keep the page — the verdict check below decides if it's usable.
+        log.warn(`[Session: ${id}] reopen: navigation to ${target} failed: ${errorMessage(err)}`)
+      }
+
+      // Verify the NEW page directly (slot.page is still the old one until we swap).
+      let newUrl = ''
+      try { newUrl = newPage.url() } catch { /* leave '' */ }
+      if (isLoginLikeUrl(newUrl)) {
+        // Even a fresh tab landed on SSO — the session is actually expired.
+        try { await newPage.close() } catch { /* best-effort */ }
+        this.emitHealth(id, 'failed', 'session expired — re-auth needed')
+        st.lastStatus = 'failed'
+        return false
+      }
+      let probed = false
+      if (newUrl && newUrl !== 'about:blank' && !newUrl.toLowerCase().startsWith('chrome-error')) {
+        try {
+          probed = await Promise.race([
+            newPage.evaluate(() => 1).then((v) => v === 1).catch(() => false),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
+          ])
+        } catch { probed = false }
+      }
+      if (!probed) {
+        try { await newPage.close() } catch { /* best-effort */ }
+        this.emitHealth(id, 'unhealthy', 'reopened tab did not become usable')
+        st.lastStatus = 'unhealthy'
+        return false
+      }
+
+      // Swap: point the slot at the fresh page, then close the wedged one.
+      const oldPage = slot.page
+      slot.page = newPage
+      try { if (!oldPage.isClosed()) await oldPage.close() } catch { /* best-effort */ }
+      if (this.idleStates.has(id)) this.noteIdleActivity(id)
+      log.success(`[Session: ${id}] reopened on a fresh tab (same auth, no Duo)`)
+      this.emitHealth(id, 'healthy')
+      st.lastStatus = 'healthy'
+      st.autoRefreshCount = 0
+      st.reopenCount = 0
+      return true
+    } finally {
+      st.reloadInFlight = false
+      this.setIdleReloadFlag(id, false)
     }
   }
 
@@ -739,11 +964,12 @@ export class Session {
   }
 
   /**
-   * Start the per-browser health monitor on the ROOT session. Every `tickMs`
-   * it probes each launched browser; a soft (refreshable) fault auto-refreshes
-   * up to `maxAutoRefreshes` times before surfacing as `failed`; a healthy
-   * probe after a fault emits the recovery. Idempotent; unref'd so it never
-   * keeps the process alive.
+   * Start the per-browser health monitor on the ROOT session. Every `tickMs` it
+   * classifies each launched browser and walks the recovery LADDER — Refresh
+   * (rung 1, bounded) → Reopen on a fresh tab (rung 2, bounded) → surface
+   * `failed`. A genuinely-expired session (page on the SSO host) is surfaced
+   * for re-auth, never auto-fixed. Idempotent; unref'd so it never keeps the
+   * process alive.
    */
   private startHealthMonitor(): void {
     if (this.healthTimer) return
@@ -765,45 +991,65 @@ export class Session {
 
   /**
    * One health-monitor probe for a system. Skipped while auth is in progress
-   * (never probe/reload mid-Duo) or while a `ctx.step` body owns the page
-   * (`idleGuard` — the handler's own `gotoWithRetry` covers in-step nav faults).
-   * So auto-refresh recovery only fires between steps / when the session is
-   * parked — exactly the session-expiry window it's meant for.
+   * (never probe/reload mid-Duo), while a `ctx.step` body owns the page
+   * (`idleGuard` — the handler's own `gotoWithRetry` covers in-step nav faults),
+   * or while an idle-refresh reload is mid-flight. So recovery only fires
+   * between steps / when the session is parked.
+   *
+   * The escalation ladder, by verdict (see `classifyBrowserHealth`):
+   *   - `ok`            → emit `healthy` (recovery), reset rung counters.
+   *   - `expired`       → surface `failed` ("re-auth needed"); Refresh/Reopen
+   *                       would just re-land on login, so don't.
+   *   - `soft`          → Refresh (rung 1) up to `maxAutoRefreshes`, then Reopen.
+   *   - `wedged`/`closed` → a reload can't help (or there's no tab to reload),
+   *                       so go straight to Reopen (rung 2) up to `maxReopens`.
+   *   - exhausted both  → surface `failed` (recovery exhausted).
    */
   private async tickHealthMonitor(systemId: string): Promise<void> {
     const slot = this.state.browsers.get(systemId)
     if (!slot) return
     if (this.isAuthInProgress()) return
     if (this.idleGuard()) return
+    const idle = this.idleStates.get(systemId)
+    if (idle?.reloadInFlight) return
     const st = this.ensureHealthState(systemId)
     if (st.monitorBusy || st.reloadInFlight) return
     st.monitorBusy = true
     try {
-      let closed = false
-      try { closed = slot.page.isClosed() } catch { closed = true }
-      if (closed) {
-        if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', 'browser page closed')
-        st.lastStatus = 'failed'
-        return
-      }
-      const healthy = await this.healthCheck(systemId)
-      if (healthy) {
+      const verdict = await this.inspectSystemHealth(systemId)
+      if (verdict.kind === 'ok') {
         if (st.lastStatus !== 'healthy') this.emitHealth(systemId, 'healthy')
         st.lastStatus = 'healthy'
         st.autoRefreshCount = 0
+        st.reopenCount = 0
         return
       }
-      // Soft fault — auto-refresh recovery, bounded. Once exhausted, surface
-      // `failed` and stop reloading until it recovers or the operator acts.
-      const maxRefreshes = this.healthMonitorOverride?.maxAutoRefreshes ?? HEALTH_MONITOR_MAX_AUTO_REFRESH
-      if (st.autoRefreshCount >= maxRefreshes) {
-        if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', 'auto-refresh exhausted')
+      if (verdict.kind === 'dead' || verdict.kind === 'expired') {
+        // dead = no slot (handled above); expired = on the SSO host. Neither is
+        // auto-recoverable — surface for re-auth / inspection. (A hard process
+        // disconnect surfaces `failed` via onBrowserDisconnect separately.)
+        if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', verdict.reason)
         st.lastStatus = 'failed'
         return
       }
-      st.autoRefreshCount++
-      // refreshSystem emits `refreshing` → `healthy`/`unhealthy` and updates lastStatus.
-      await this.refreshSystem(systemId)
+      const maxRefreshes = this.healthMonitorOverride?.maxAutoRefreshes ?? HEALTH_MONITOR_MAX_AUTO_REFRESH
+      const maxReopens = this.healthMonitorOverride?.maxReopens ?? HEALTH_MONITOR_MAX_REOPEN
+      // Rung 1 — Refresh, but only for a `soft` fault (a reload can clear a
+      // chrome-error). A `wedged`/`closed` page skips straight to Reopen.
+      if (verdict.kind === 'soft' && st.autoRefreshCount < maxRefreshes) {
+        st.autoRefreshCount++
+        await this.refreshSystem(systemId)
+        return
+      }
+      // Rung 2 — Reopen on a fresh tab (same auth, no Duo).
+      if (st.reopenCount < maxReopens) {
+        st.reopenCount++
+        await this.reopenSystem(systemId)
+        return
+      }
+      // Both rungs exhausted — surface for the operator.
+      if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', `${verdict.reason ?? 'unhealthy'} (recovery exhausted)`)
+      st.lastStatus = 'failed'
     } catch {
       /* best-effort — a monitor failure must never break the run */
     } finally {
@@ -851,24 +1097,68 @@ export class Session {
    * mutation window is short (settle waits) — fine for form-audit shots taken
    * between discrete Playwright actions, not during active typing.
    */
-  static async captureFullPage(page: Page, path: string): Promise<Buffer> {
+  static async captureFullPage(
+    page: Page,
+    slicePath: (chunk: number | null) => string,
+  ): Promise<string[]> {
     let restoreFn: (() => Promise<void>) | null = null
     let restoreViewport: (() => Promise<void>) | null = null
     let restoreIframes: (() => Promise<void>) | null = null
+    const written: string[] = []
     try {
       restoreFn = await Session.expandScrollContainers(page)
       const maybeWaitForLoadState = page as unknown as {
         waitForLoadState?: (state: 'networkidle', options: { timeout: number }) => Promise<void>
       }
       await maybeWaitForLoadState.waitForLoadState?.('networkidle', { timeout: 1_000 }).catch(() => {})
-      restoreViewport = await Session.widenViewportForCapture(page)
+      const pin = await Session.setCaptureWidth(page, CAPTURE.width)
+      restoreViewport = pin.restore
       // Grow fixed-height same-origin iframes AFTER widening, so each frame's
-      // inner `scrollHeight` is measured at its final reflowed width. Without
-      // this the UCPath content frame clips a tall in-frame form at its 520px
-      // fold even though `fullPage` is set on the OUTER document.
+      // inner `scrollHeight` is measured at its final reflowed width.
       restoreIframes = await Session.growOverflowingIframes(page)
-      const buf = await page.screenshot({ path, fullPage: true })
-      return buf
+
+      const geom = await page.evaluate(() => ({
+        fullHeight: Math.max(
+          document.documentElement?.scrollHeight ?? 0,
+          document.body?.scrollHeight ?? 0,
+        ),
+        width: Math.max(
+          window.innerWidth || 0,
+          document.documentElement?.scrollWidth ?? 0,
+          document.body?.scrollWidth ?? 0,
+        ),
+      })).catch(() => ({ fullHeight: 0, width: 0 }))
+      const width = geom.width || pin.width
+      const fullHeight = geom.fullHeight
+
+      if (!fullHeight) {
+        const p = slicePath(null)
+        await page.screenshot({ path: p, fullPage: true })
+        written.push(p)
+        return written
+      }
+
+      const offsets = computeSliceOffsets(fullHeight, CAPTURE.sliceHeight, CAPTURE.sliceOverlap, CAPTURE.maxSlices)
+      const single = offsets.length === 1
+      for (let i = 0; i < offsets.length; i++) {
+        const y = offsets[i]
+        // `fullPage:true` is load-bearing WITH `clip` — it resolves the clip
+        // against the full-page image, not the viewport, so `y` can exceed one fold.
+        const height = single ? fullHeight : Math.min(CAPTURE.sliceHeight, fullHeight - y)
+        const p = single ? slicePath(null) : slicePath(i)
+        await page.screenshot({ path: p, fullPage: true, clip: { x: 0, y, width, height } })
+        written.push(p)
+      }
+      return written
+    } catch {
+      if (written.length === 0) {
+        try {
+          const p = slicePath(null)
+          await page.screenshot({ path: p, fullPage: true })
+          written.push(p)
+        } catch { /* best-effort */ }
+      }
+      return written
     } finally {
       if (restoreIframes) await restoreIframes()
       if (restoreViewport) await restoreViewport()
@@ -877,19 +1167,21 @@ export class Session {
   }
 
   /**
-   * Temporarily widen the page viewport so a `fullPage` screenshot captures
-   * horizontally-overflowing content (wide PeopleSoft grids) instead of
-   * clipping it. Returns a restore callback (no-op when no widening was needed
-   * or the page can't be resized). Best-effort — never throws.
+   * Pin the layout viewport to a FIXED width — at least `minWidth` (a readable
+   * column) so a narrow form captures the same width on any tiled window, and
+   * widened BEYOND `minWidth` to fit genuinely wide content (PeopleSoft grids,
+   * measured at the top document AND inside child frames since the grid lives in
+   * a fluid-width iframe), capped at `CAPTURE.maxWidth`. Returns the applied
+   * width + a best-effort restore. Never throws.
    */
-  private static async widenViewportForCapture(page: Page): Promise<(() => Promise<void>) | null> {
+  private static async setCaptureWidth(page: Page, minWidth: number): Promise<{ restore: () => Promise<void>; width: number }> {
+    const noop = { restore: async (): Promise<void> => {}, width: minWidth }
     const maybeResize = page as unknown as {
       setViewportSize?: (size: { width: number; height: number }) => Promise<void>
       waitForTimeout?: (ms: number) => Promise<void>
       frames?: () => Array<{ evaluate: (fn: () => number) => Promise<number> }>
     }
-    if (typeof maybeResize.setViewportSize !== 'function') return null
-
+    if (typeof maybeResize.setViewportSize !== 'function') return noop
     try {
       const metrics = await page.evaluate(() => ({
         innerWidth: window.innerWidth || 0,
@@ -899,10 +1191,8 @@ export class Session {
           document.body?.scrollWidth ?? 0,
         ),
       })).catch(() => null)
-      if (!metrics || metrics.innerWidth <= 0 || metrics.innerHeight <= 0) return null
+      if (!metrics || metrics.innerHeight <= 0) return noop
 
-      // The PeopleSoft assignment grid lives in a content iframe; the top
-      // document width often doesn't reflect it, so probe each frame too.
       let widest = Math.max(metrics.docWidth, metrics.innerWidth)
       try {
         for (const fr of maybeResize.frames?.() ?? []) {
@@ -914,22 +1204,18 @@ export class Session {
         }
       } catch { /* best-effort — frame probing is optional */ }
 
-      // Only widen when content actually overflows; cap to avoid runaway sizes.
-      if (widest <= metrics.innerWidth + 2) return null
-      const target = Math.min(widest + 24, 6_000)
-
+      const target = Math.min(Math.max(minWidth, widest + 24), CAPTURE.maxWidth)
+      if (metrics.innerWidth === target) return { restore: async () => {}, width: target }
       await maybeResize.setViewportSize({ width: target, height: metrics.innerHeight })
       await maybeResize.waitForTimeout?.(200).catch(() => {})
-      return async () => {
-        try {
-          await maybeResize.setViewportSize!({
-            width: metrics.innerWidth,
-            height: metrics.innerHeight,
-          })
-        } catch { /* best-effort */ }
+      return {
+        restore: async () => {
+          try { await maybeResize.setViewportSize!({ width: metrics.innerWidth, height: metrics.innerHeight }) } catch { /* best-effort */ }
+        },
+        width: target,
       }
     } catch {
-      return null
+      return noop
     }
   }
 
@@ -1188,15 +1474,14 @@ export class Session {
       try {
         if (slot.page.isClosed()) continue
       } catch { continue }
-      const path = join(outDir, `${prefix}-${id}-${Date.now()}.png`)
+      const base = join(outDir, `${prefix}-${id}-${Date.now()}.png`)
+      // The unified capture writes ONE file for a short page, or N `-cNN` page
+      // slices for a tall one (each a readable page band of the whole form).
+      const slicePath = (chunk: number | null): string =>
+        chunk === null ? base : base.replace(/\.png$/, `-c${String(chunk + 1).padStart(2, '0')}.png`)
       try {
-        // captureFullPage: expand inner scroll containers (Kuali modals,
-        // PeopleSoft frames) before `fullPage: true`, then restore. A
-        // plain `fullPage` shot alone clips off Final Transactions,
-        // comments, and the Save button area because those live inside
-        // overflow-auto divs.
-        await Session.captureFullPage(slot.page, path)
-        paths.push(path)
+        const written = await Session.captureFullPage(slot.page, slicePath)
+        paths.push(...written)
       } catch { /* best-effort — one failed screenshot mustn't skip siblings */ }
     }
     return paths
@@ -1269,11 +1554,16 @@ export class Session {
         if (written) await fileMeta(written)
         return out
       }
-      // The unified capture for EVERY other page: one fullPage shot that expands
-      // inner-scroll containers, grows fixed-height iframes, and content-fit
-      // widens so the ENTIRE page or form is in frame, never a clipped portion.
-      const buf = await Session.captureFullPage(page, p)
-      out.push({ system, path: p, bytes: buf.byteLength })
+      // The unified capture for EVERY other page: the whole page/form, never a
+      // clipped portion — ONE file when short, or N readable `-cNN` page slices
+      // when tall (the operator steps through them in the lightbox).
+      const slicePath = (chunk: number | null): string =>
+        chunk === null ? p : join(outDir, formatCaptureFilename({
+          workflow: opts.workflow, itemId: opts.itemId, kind: opts.kind,
+          label: opts.label, system, ts: opts.ts, chunk,
+        }))
+      const written = await Session.captureFullPage(page, slicePath)
+      for (const w of written) await fileMeta(w)
       return out
     } catch {
       // Best-effort — per-page failures don't block siblings.
