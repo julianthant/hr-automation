@@ -131,7 +131,35 @@ Workflow rail badges are backend-authoritative: React consumes SSE `wfCounts` as
 
 **Row lifecycle debug logs:** `.tracker/debug/row-lifecycle-{YYYY-MM-DD}.{jsonl,json}` — regenerated every 60s; full per-row status/surface/cause history. Useful when diagnosing surface mis-classification or stuck retries. See `src/tracker/CLAUDE.md`.
 
-**Workflow Modifier page** (`components/workflow-modifier/`) — UI for overriding per-workflow naming, step display, and delegation naming without code changes; overrides persist to the git-tracked `config/workflow-presentation/<workflow>.json` store and apply hot at serve-time via `effectiveMetadata`.
+**Workflow Modifier page** (`components/workflow-modifier/`) — an n8n-style `@xyflow/react` node-graph editor for shaping per-workflow presentation. **Dual output:** edits write the live config override (`config/workflow-presentation/<workflow>.json`, applies hot via `effectiveMetadata`) AND, via "Generate scaffold", a **design-intent scaffold** (`config/workflow-design/<workflow>.{json,md}`, git-tracked) capturing design intent beyond today's schema for a future session. The `<workflow>.md` brief is **generated — never hand-edit; edit the graph and re-generate.** Architecture + projections: `src/dashboard/CLAUDE.md` (2026-06-25 lesson).
+
+## Verifying dashboard changes (headless, with `playwright-cli`)
+
+**The dashboard has no component-render harness (jsdom/RTL) — by design** (it fights the "extract pure logic → unit-test that" pattern and is blind to layout/visual bugs). Instead, VERIFY your dashboard change by **seeding synthetic state into an isolated tracker dir, booting the REAL dashboard against it, and driving it headless with `playwright-cli`.** This is high-fidelity (real React + real CSS + real DOM) and needs no live daemon / Duo / browsers. It is the canonical "I actually saw it render" check — do this for every non-trivial dashboard change, don't just trust typecheck + build.
+
+The loop (the session-panel fixture is the worked example; copy its shape for other surfaces):
+
+```bash
+# 1. SEED a synthetic fixture (real emitters → events; STAYS ALIVE so cards stay "live")
+npx tsx scripts/seed-session-fixture.ts generated/.dashboard-preview/tracker &   # background
+#    → covers every per-browser health state (healthy/refreshing/unhealthy/failed/paused) + a trail
+
+# 2. BUILD + BOOT the dashboard against that dir (use --port if :3838 is busy)
+npm run build:dashboard
+HRAUTO_TRACKER_DIR=generated/.dashboard-preview/tracker npm run dashboard:prod -- --port 3939 &
+
+# 3. DRIVE + assert with playwright-cli (accessibility tree is the authoritative proof)
+playwright-cli -s=preview open http://localhost:3939
+playwright-cli -s=preview snapshot            # grep the a11y tree for your expected text/labels/state
+playwright-cli -s=preview screenshot --filename "$(pwd)/.screenshots/dashboard-preview/x.png"  # then Read the PNG
+#    hover/click controls by [aria-label="..."]; the bottom "session" bar toggles the drawer
+
+# 4. CLEAN UP (these are real processes — always sweep)
+playwright-cli close-all
+pkill -f seed-session-fixture; pkill -f 'dashboard --prod --port 3939'
+```
+
+Principles: `HRAUTO_TRACKER_DIR` points the dashboard (and the e2e stub lane) at an isolated root — NEVER seed into the real `.tracker/`. The session panel only shows a card whose `workflow_start.pid` is a LIVE process, which is why the seeder hangs (kill it when done). The seeder uses the **production emitters** (`emitBrowserHealth`, …) so the fixture can't drift from the event schema — extend it (or write a sibling seeder) when you add a surface. The a11y `snapshot` is more reliable to assert on than a screenshot (text/labels/`[pressed]`/aria); `Read` the PNG only for the visual gestalt. `:3838` is usually the user's own dashboard — use a fallback port and never kill it. Screenshots land in `.screenshots/` (gitignored). What this CANNOT verify: behavior that needs a real browser daemon (refresh/reopen/peek *acting*, real auth) — that's the opt-in live lane (see "Verifying selectors" above + `tests/live/`).
 
 ## Docs
 
