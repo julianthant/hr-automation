@@ -70,8 +70,16 @@ async function autoImportPackagedCredential() {
     if (!resp.ok) return; // no packaged file in this build
     const creds = extractCredentials(await resp.json());
     if (creds.length === 0) return;
+    // Resync signCount ahead of Duo's server-observed value, or Duo rejects the
+    // assertion as a cloned key and the prompt just hangs (README "signs but
+    // never completes"). A FIXED bump (e.g. 1,000,000) would collide on the next
+    // fresh profile — the counter must strictly increase across sessions. The
+    // current unix time (seconds) is monotonic across fresh loads, always ahead
+    // of Duo's view, and fits uint32 until 2106.
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const c of creds) c.signCount = Math.max(Number(c.signCount) || 0, nowSec);
     await chrome.storage.local.set({ [STORAGE_KEY]: creds });
-    console.debug("[Duo Autopilot SW] auto-imported %d packaged credential(s)", creds.length);
+    console.debug("[Duo Autopilot SW] auto-imported %d packaged credential(s), signCount synced to %d", creds.length, nowSec);
   } catch (e) {
     console.debug("[Duo Autopilot SW] auto-import skipped:", (e && e.message) || e);
   }
