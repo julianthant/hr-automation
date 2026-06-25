@@ -39,6 +39,7 @@ import {
   buildKillBrowserHandler,
   buildRefreshBrowserHandler,
   buildReopenBrowserHandler,
+  buildSetAutoRecoveryHandler,
   buildQueueBumpHandler,
   buildSaveDataHandler,
   buildStopDaemonInstanceHandler,
@@ -1439,6 +1440,30 @@ describe("dashboard worker command helpers", () => {
     const ccmd = workerStore.getCommand((checked as { commandId: string }).commandId)!;
     assert.equal(ccmd.commandType, "health_check");
     assert.equal((ccmd.payload as { systemId?: string }).systemId, "ucpath");
+
+    workerStore.close();
+  });
+
+  it("set auto-recovery resolves to a set_auto_recovery command carrying the paused flag", async () => {
+    const control = openControlDb({ trackerDir: tmp });
+    const workerStore = createWorkerStore(control);
+    const daemonPid = 626262;
+    workerStore.registerWorker({ workerId: "sep-worker", workflow: "separations", kind: "daemon", pid: daemonPid, hostname: "test-host", phase: "idle" });
+    workerStore.upsertBrowserProcess({ workerId: "sep-worker", workflow: "separations", systemId: "ucpath", browserId: "ucpath", pid: 987002 });
+    writeFileSync(
+      sessionFilePath(dateLocal(), tmp),
+      JSON.stringify({ type: "workflow_start", timestamp: new Date().toISOString(), workflowInstance: "Separation 1", pid: daemonPid }) + "\n",
+    );
+
+    const paused = await buildSetAutoRecoveryHandler(tmp)({ workflow: "separations", instance: "Separation 1", systemId: "ucpath", paused: true });
+    assert.equal(paused.ok, true);
+    const cmd = workerStore.getCommand((paused as { commandId: string }).commandId)!;
+    assert.equal(cmd.commandType, "set_auto_recovery");
+    assert.equal((cmd.payload as { systemId?: string; paused?: string }).systemId, "ucpath");
+    assert.equal((cmd.payload as { paused?: string }).paused, "true");
+
+    const resumed = await buildSetAutoRecoveryHandler(tmp)({ workflow: "separations", instance: "Separation 1", systemId: "ucpath", paused: false });
+    assert.equal((workerStore.getCommand((resumed as { commandId: string }).commandId)?.payload as { paused?: string }).paused, "false");
 
     workerStore.close();
   });

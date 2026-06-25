@@ -92,6 +92,7 @@ export function browsersEqual(a: BrowserState[], b: BrowserState[]): boolean {
       x.health !== y.health ||
       x.lastError !== y.lastError ||
       x.url !== y.url ||
+      x.autoRecoveryPaused !== y.autoRecoveryPaused ||
       !healthHistoryEqual(x.healthHistory, y.healthHistory)
     ) {
       return false;

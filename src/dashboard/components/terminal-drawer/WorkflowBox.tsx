@@ -12,6 +12,9 @@ import {
   AlertTriangle,
   ExternalLink,
   Activity,
+  Pause,
+  Play,
+  PauseCircle,
 } from "lucide-react";
 import type { AuthState, BrowserHealth, WorkflowInstanceState } from "@/components/shared/types";
 import { useConfirm } from "@/components/shared/useConfirm";
@@ -414,12 +417,15 @@ function BrowserTileControls({
   workflow,
   instance,
   systemId,
+  paused,
 }: {
   workflow: string;
   instance: string;
   systemId: string;
+  /** Whether auto-recovery is currently paused for this browser (drives the toggle). */
+  paused: boolean;
 }) {
-  const [busy, setBusy] = useState<null | BrowserAction>(null);
+  const [busy, setBusy] = useState<null | BrowserAction | "pause">(null);
 
   const post = async (spec: (typeof BROWSER_ACTIONS)[number]) => {
     setBusy(spec.action);
@@ -449,9 +455,37 @@ function BrowserTileControls({
     }
   };
 
+  // Pause/resume auto-recovery (toggle — icon + verb flip on `paused`).
+  const toggleAutoRecovery = async () => {
+    const next = !paused;
+    setBusy("pause");
+    const toastId = toast.loading(`${next ? "Pausing" : "Resuming"} ${systemId} auto-recovery…`);
+    try {
+      const res = await fetch(`/api/browser/auto-recovery`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workflow, instance, systemId, paused: next }),
+      });
+      const json = (await res.json()) as { ok: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        toast.error(`Couldn't update ${systemId} auto-recovery`, { id: toastId, description: json.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      toast.success(next ? `Auto-recovery paused for ${systemId}` : `Auto-recovery resumed for ${systemId}`, { id: toastId });
+    } catch (err) {
+      toast.error(`Couldn't update ${systemId} auto-recovery`, { id: toastId, description: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const btn =
     "p-0.5 rounded inline-flex items-center justify-center text-muted-foreground " +
     "hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait";
+
+  const pauseTitle = paused
+    ? `Resume auto-recovery for the ${systemId} browser`
+    : `Pause auto-recovery for the ${systemId} browser (so you can inspect it)`;
 
   return (
     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -475,6 +509,26 @@ function BrowserTileControls({
           )}
         </button>
       ))}
+      <button
+        type="button"
+        disabled={busy !== null}
+        title={pauseTitle}
+        aria-label={pauseTitle}
+        aria-pressed={paused}
+        className={cn(btn, paused && "text-warning")}
+        onClick={(e) => {
+          e.stopPropagation();
+          void toggleAutoRecovery();
+        }}
+      >
+        {busy === "pause" ? (
+          <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
+        ) : paused ? (
+          <Play className="w-3 h-3" />
+        ) : (
+          <Pause className="w-3 h-3" />
+        )}
+      </button>
     </div>
   );
 }
@@ -771,6 +825,14 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
                           className={cn("w-3 h-3 shrink-0", healthColor[badHealth])}
                         />
                       )}
+                      {/* Always-visible cue that auto-recovery is paused for this
+                          browser (the monitor won't refresh/reopen it). */}
+                      {b.autoRecoveryPaused && (
+                        <PauseCircle
+                          aria-label="auto-recovery paused"
+                          className="w-3 h-3 shrink-0 text-warning"
+                        />
+                      )}
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-1 min-w-0">
                       <span
@@ -781,13 +843,14 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
                       >
                         {stateLabel}
                       </span>
-                      {/* Focus / Refresh — only when there's a live daemon to
-                          target. Hover/focus-revealed via group/tile. */}
+                      {/* Check / Focus / Refresh / Reopen / Pause — only when
+                          there's a live daemon to target. Hover/focus-revealed. */}
                       {active && pidAlive && workflowName && (
                         <BrowserTileControls
                           workflow={workflowName}
                           instance={instance}
                           systemId={b.system}
+                          paused={!!b.autoRecoveryPaused}
                         />
                       )}
                     </div>

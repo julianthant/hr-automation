@@ -181,7 +181,8 @@ function resolveInstanceDaemonPid(dir: string, workflow: string, instance: strin
 async function enqueueBrowserControlCommand(
   dir: string,
   req: BrowserControlRequest,
-  commandType: "refresh_browser" | "reopen_browser" | "focus_browser" | "health_check",
+  commandType: "refresh_browser" | "reopen_browser" | "focus_browser" | "health_check" | "set_auto_recovery",
+  extraPayload: Record<string, unknown> = {},
 ): Promise<BrowserControlResult> {
   const workflow = req.workflow?.trim();
   const instance = req.instance?.trim();
@@ -212,7 +213,7 @@ async function enqueueBrowserControlCommand(
       workflow,
       targetWorkerId: worker.workerId,
       ...(browser ? { targetBrowserProcessId: browser.browserProcessId } : {}),
-      payload: { systemId },
+      payload: { systemId, ...extraPayload },
     });
     return { ok: true, commandId };
   } finally {
@@ -246,6 +247,12 @@ export function buildFocusBrowserHandler(dir: string) {
 export function buildHealthCheckBrowserHandler(dir: string) {
   return (req: BrowserControlRequest): Promise<BrowserControlResult> =>
     enqueueBrowserControlCommand(dir, req, "health_check");
+}
+
+/** Pause/resume the monitor's AUTO-recovery for one browser — the panel's Pause toggle. */
+export function buildSetAutoRecoveryHandler(dir: string) {
+  return (req: BrowserControlRequest & { paused: boolean }): Promise<BrowserControlResult> =>
+    enqueueBrowserControlCommand(dir, req, "set_auto_recovery", { paused: req.paused ? "true" : "false" });
 }
 
 /** Probe a single daemon's /status endpoint with a short timeout. */

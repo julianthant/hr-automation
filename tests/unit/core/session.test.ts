@@ -1000,6 +1000,31 @@ test('session: health monitor surfaces failed after the reopen budget is exhaust
   }
 })
 
+test('session: pauseAutoRecovery stops the monitor refreshing/reopening but still surfaces the fault', async () => {
+  const emits: Array<{ status: string; reason?: string }> = []
+  let reloads = 0
+  let newPages = 0
+  const root = makeHealthPage({ evaluate: async () => { throw new Error('ctx destroyed') }, onReload: () => { reloads++ } })
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunchWithNewPage(root, () => { newPages++; return makeHealthPage() }),
+    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
+    healthMonitorOverride: { tickMs: 20 },
+  })
+  try {
+    s.pauseAutoRecovery('a')
+    assert.equal(s.isAutoRecoveryPaused('a'), true)
+    await new Promise((r) => setTimeout(r, 150))
+    assert.equal(reloads, 0, 'paused: no auto-refresh')
+    assert.equal(newPages, 0, 'paused: no auto-reopen')
+    // The fault is still surfaced (unhealthy with a paused reason).
+    const unhealthy = emits.find((e) => e.status === 'unhealthy')
+    assert.ok(unhealthy, `expected an unhealthy surface while paused: ${JSON.stringify(emits)}`)
+    assert.match(unhealthy!.reason ?? '', /paused/)
+  } finally {
+    await s.close()
+  }
+})
+
 test('session: health monitor surfaces an EXPIRED session (SSO url) for re-auth — no refresh/reopen', async () => {
   const emits: Array<{ status: string; reason?: string }> = []
   let reloads = 0

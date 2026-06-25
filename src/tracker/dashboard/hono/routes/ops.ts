@@ -17,6 +17,7 @@ import {
   buildRefreshBrowserHandler,
   buildReopenBrowserHandler,
   buildSaveDataHandler,
+  buildSetAutoRecoveryHandler,
   buildStopWorkerHandler,
   readQueueDepth,
 } from "../../../../control/ops/index.js";
@@ -412,6 +413,16 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       instance: String(body.instance ?? ""),
       systemId: String(body.systemId ?? ""),
     }), buildHealthCheckBrowserHandler(deps.dir), 202);
+  });
+
+  // Pause/resume auto-recovery for one browser (so the operator can inspect it).
+  app.post("/api/browser/auto-recovery", async (c) => {
+    return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
+      instance: String(body.instance ?? ""),
+      systemId: String(body.systemId ?? ""),
+      paused: body.paused === true || body.paused === "true",
+    }), buildSetAutoRecoveryHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/drain", async (c) => {

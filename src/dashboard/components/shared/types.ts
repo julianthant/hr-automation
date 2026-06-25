@@ -269,6 +269,8 @@ export interface BrowserState {
   url?: string;
   /** Recent health transitions (oldest→newest, capped) — the recovery trail. */
   healthHistory?: Array<{ at: string; status: BrowserHealth; reason?: string }>;
+  /** Operator paused auto-recovery for this browser. */
+  autoRecoveryPaused?: boolean;
 }
 
 export interface SessionInfo {

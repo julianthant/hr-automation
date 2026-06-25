@@ -33,8 +33,8 @@ export function buildBrowserHealthHooks(
   trackerDir?: string,
 ): Pick<SessionObserver, 'onBrowserHealth'> {
   return {
-    onBrowserHealth: (systemId, status, reason, url) => {
-      emitBrowserHealth(instance, systemId, systemId, status, reason, trackerDir, url)
+    onBrowserHealth: (systemId, status, reason, url, paused) => {
+      emitBrowserHealth(instance, systemId, systemId, status, reason, trackerDir, url, paused)
     },
   }
 }

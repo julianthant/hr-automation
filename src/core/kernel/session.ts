@@ -230,7 +230,10 @@ export class Session {
   private idleTouchCb?: (systemId: string) => void
   private idleRefreshCb?: (systemId: string, phase: 'start' | 'end') => void
   /** Set by `Session.launch` — per-browser health lifecycle for the session tiles. */
-  private healthCb?: (systemId: string, status: BrowserHealthStatus, reason?: string, url?: string) => void
+  private healthCb?: (systemId: string, status: BrowserHealthStatus, reason?: string, url?: string, paused?: boolean) => void
+  /** Systems whose AUTO-recovery the operator paused (still probed + surfaced,
+   * but the monitor won't refresh/reopen — lets them inspect a broken browser). */
+  private autoRecoveryPaused = new Set<string>()
   /** Per-system health-monitor state, keyed by systemId. */
   private healthStates = new Map<string, HealthMonitorState>()
   /** The health-monitor interval (root session only). */
@@ -310,8 +313,8 @@ export class Session {
     session.idleRefreshCb = (systemId: string, phase: 'start' | 'end'): void => {
       opts.observer?.onIdleRefresh?.(systemId, phase)
     }
-    session.healthCb = (systemId: string, status: BrowserHealthStatus, reason?: string, url?: string): void => {
-      opts.observer?.onBrowserHealth?.(systemId, status, reason, url)
+    session.healthCb = (systemId: string, status: BrowserHealthStatus, reason?: string, url?: string, paused?: boolean): void => {
+      opts.observer?.onBrowserHealth?.(systemId, status, reason, url, paused)
     }
     session.healthMonitorOverride = opts.healthMonitorOverride
     opts.onReady?.(session)
@@ -755,14 +758,35 @@ export class Session {
   }
 
   /** Emit a per-browser health transition (best-effort; never breaks automation).
-   * Auto-attaches the system's current url so the tile can show where the
-   * browser actually is (e.g. stuck on the SSO login page). */
+   * Auto-attaches the system's current url + auto-recovery-paused flag so the
+   * tile can show where the browser is and whether auto-recovery is off. */
   private emitHealth(systemId: string, status: BrowserHealthStatus, reason?: string): void {
     try {
-      this.healthCb?.(systemId, status, reason, this.currentUrl(systemId))
+      this.healthCb?.(systemId, status, reason, this.currentUrl(systemId), this.isAutoRecoveryPaused(systemId))
     } catch {
       /* observability must not break automation */
     }
+  }
+
+  /** Whether the operator paused AUTO-recovery for this system (manual controls
+   * still work; the monitor just won't refresh/reopen it). Workers defer to the
+   * parent (the root owns the monitor + the pause set). */
+  isAutoRecoveryPaused(id: string): boolean {
+    return this.autoRecoveryPaused.has(id) || (this.parent?.isAutoRecoveryPaused(id) ?? false)
+  }
+
+  /** Pause auto-recovery for a system and surface it immediately (emit current health). */
+  pauseAutoRecovery(id: string): void {
+    this.autoRecoveryPaused.add(id)
+    const st = this.healthStates.get(id)
+    this.emitHealth(id, st?.lastStatus ?? 'healthy')
+  }
+
+  /** Resume auto-recovery for a system and surface it immediately. */
+  resumeAutoRecovery(id: string): void {
+    this.autoRecoveryPaused.delete(id)
+    const st = this.healthStates.get(id)
+    this.emitHealth(id, st?.lastStatus ?? 'healthy')
   }
 
   /**
@@ -1032,6 +1056,13 @@ export class Session {
         // disconnect surfaces `failed` via onBrowserDisconnect separately.)
         if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', verdict.reason)
         st.lastStatus = 'failed'
+        return
+      }
+      // Auto-recovery paused — surface the fault so the operator sees it, but
+      // do NOT refresh/reopen (they're inspecting). Manual controls still work.
+      if (this.isAutoRecoveryPaused(systemId)) {
+        if (st.lastStatus !== 'unhealthy') this.emitHealth(systemId, 'unhealthy', `${verdict.reason ?? 'unhealthy'} (auto-recovery paused)`)
+        st.lastStatus = 'unhealthy'
         return
       }
       const maxRefreshes = this.healthMonitorOverride?.maxAutoRefreshes ?? HEALTH_MONITOR_MAX_AUTO_REFRESH
