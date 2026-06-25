@@ -111,7 +111,7 @@ describe("buildSeparationDateChangeComment", () => {
 
 describe("buildTerminationComments", () => {
   // ─── Worked reference cases (live separations, pinned as exact strings) ───
-  it("Lydia Li (#3949): sick-range clause — 'Sick leave from … to …'", () => {
+  it("Lydia Li (#3949): multi-sick → only the LATEST sick date (no range)", () => {
     // New Kronos: lastPunch 04/23, sick ["04/27","04/28","04/30"], Kuali Sep 04/30.
     // → LDW 04/23 (unchanged), Sep 04/30, TermEff 05/01.
     const result = buildTerminationComments(
@@ -122,7 +122,7 @@ describe("buildTerminationComments", () => {
     );
     assert.equal(
       result,
-      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. Sick leave from 04/27/2026 to 04/30/2026. Kuali form #3949.",
+      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. Sick Leave on 04/30/2026. Kuali form #3949.",
     );
   });
 
@@ -175,7 +175,9 @@ describe("buildTerminationComments", () => {
     );
   });
 
-  it("both sick + holiday present → sick clause first, then holiday", () => {
+  it("both sick + holiday present, holiday LATER → only the holiday clause (not both)", () => {
+    // Latest sick 04/28, latest holiday 04/30 → holiday is the separation-
+    // determining leave day, so ONLY the holiday clause is reported.
     const result = buildTerminationComments(
       "05/01/2026",
       "04/23/2026",
@@ -187,8 +189,69 @@ describe("buildTerminationComments", () => {
     );
     assert.equal(
       result,
-      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. " +
-        "Sick leave from 04/27/2026 to 04/28/2026. Holiday Pay on 04/30/2026. Kuali form #3949.",
+      "Termination eff 05/01/2026. Last Day Worked 04/23/2026. Holiday Pay on 04/30/2026. Kuali form #3949.",
+    );
+  });
+
+  it("both sick + holiday present, sick LATER → only the sick clause (not both)", () => {
+    // Latest sick 05/02 > latest holiday 04/30 → sick wins; holiday is dropped.
+    const result = buildTerminationComments(
+      "05/03/2026",
+      "04/23/2026",
+      "3949",
+      {
+        sickDates: ["04/27/2026", "05/02/2026"],
+        holidayDates: ["04/30/2026"],
+      },
+    );
+    assert.equal(
+      result,
+      "Termination eff 05/03/2026. Last Day Worked 04/23/2026. Sick Leave on 05/02/2026. Kuali form #3949.",
+    );
+  });
+
+  it("both present, holiday range LATER → only 'Holiday Pay from … to …' (sick dropped)", () => {
+    // Holiday spans 06/19→06/26 (latest 06/26) and beats the latest sick 06/12 →
+    // the holiday RANGE clause wins and the sick clause is dropped.
+    const result = buildTerminationComments(
+      "06/27/2026",
+      "06/10/2026",
+      "4016",
+      {
+        sickDates: ["06/11/2026", "06/12/2026"],
+        holidayDates: ["06/19/2026", "06/26/2026"],
+      },
+    );
+    assert.equal(
+      result,
+      "Termination eff 06/27/2026. Last Day Worked 06/10/2026. Holiday Pay from 06/19/2026 to 06/26/2026. Kuali form #4016.",
+    );
+  });
+
+  it("both present, same latest date → sick wins the tie (only the sick clause)", () => {
+    const result = buildTerminationComments(
+      "06/13/2026",
+      "06/10/2026",
+      "4016",
+      { sickDates: ["06/12/2026"], holidayDates: ["06/12/2026"] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 06/13/2026. Last Day Worked 06/10/2026. Sick Leave on 06/12/2026. Kuali form #4016.",
+    );
+  });
+
+  it("matches the operator-reported #4299 case — latest sick date, not the range", () => {
+    // Sick 05/19/2026 → 06/11/2026; LDW 06/10, Sep 06/11, TermEff 06/12.
+    const result = buildTerminationComments(
+      "06/12/2026",
+      "06/10/2026",
+      "4299",
+      { sickDates: ["05/19/2026", "06/11/2026"], holidayDates: [] },
+    );
+    assert.equal(
+      result,
+      "Termination eff 06/12/2026. Last Day Worked 06/10/2026. Sick Leave on 06/11/2026. Kuali form #4299.",
     );
   });
 
@@ -223,8 +286,8 @@ describe("mapReasonCode", () => {
     assert.equal(mapReasonCode("Retirement"), "Voluntary Separation Program");
   });
 
-  it("maps 'Appointment Expired' to 'Resign - No Reason Given' (Kuali overrides UCPath INVOL code)", () => {
-    assert.equal(mapReasonCode("Appointment Expired"), "Resign - No Reason Given");
+  it("maps 'Appointment Expired' to the UCPath INVOL_TERM 'Appointment Expired' reason", () => {
+    assert.equal(mapReasonCode("Appointment Expired"), "Appointment Expired");
   });
 
   it("maps intra-campus transfer to 'Transfer - Intra Location'", () => {

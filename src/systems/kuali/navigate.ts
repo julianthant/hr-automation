@@ -213,6 +213,7 @@ export async function extractSeparationData(page: Page): Promise<KualiSeparation
 const INVOLUNTARY_TYPES = [
   "Never Started Employment",
   "Graduated/No longer a Student",
+  "Appointment Expired",
 ];
 
 /**
