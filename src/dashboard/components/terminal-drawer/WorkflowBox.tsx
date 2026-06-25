@@ -723,9 +723,14 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
                       idleBySystem?.[b.system]?.lastTouchAt
                     ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
                     : `${b.system} · ${authLabel[b.authState]}`;
-                // Append the browser's current url so hovering a tile (esp. a
-                // failed one) shows where it actually is — e.g. stuck on SSO.
-                const tip = b.url ? `${tipBase}\n${b.url}` : tipBase;
+                // Append the browser's current url + a recovery trail so
+                // hovering a tile (esp. a failed/flapping one) shows where it
+                // actually is and how it got there.
+                const trail =
+                  b.healthHistory && b.healthHistory.length >= 2
+                    ? `\nrecovery: ${b.healthHistory.map((h) => h.status).join(" → ")}`
+                    : "";
+                const tip = `${tipBase}${b.url ? `\n${b.url}` : ""}${trail}`;
                 return (
                   <div
                     key={b.browserId}

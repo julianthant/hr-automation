@@ -267,6 +267,8 @@ export interface BrowserState {
   lastError?: string;
   /** The browser's current page URL (from the latest health event). */
   url?: string;
+  /** Recent health transitions (oldest→newest, capped) — the recovery trail. */
+  healthHistory?: Array<{ at: string; status: BrowserHealth; reason?: string }>;
 }
 
 export interface SessionInfo {
