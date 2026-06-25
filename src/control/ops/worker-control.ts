@@ -181,7 +181,7 @@ function resolveInstanceDaemonPid(dir: string, workflow: string, instance: strin
 async function enqueueBrowserControlCommand(
   dir: string,
   req: BrowserControlRequest,
-  commandType: "refresh_browser" | "focus_browser",
+  commandType: "refresh_browser" | "reopen_browser" | "focus_browser" | "health_check",
 ): Promise<BrowserControlResult> {
   const workflow = req.workflow?.trim();
   const instance = req.instance?.trim();
@@ -230,10 +230,22 @@ export function buildRefreshBrowserHandler(dir: string) {
     enqueueBrowserControlCommand(dir, req, "refresh_browser");
 }
 
+/** Reopen one system on a fresh tab (same auth, no Duo) — the panel's Reopen escalation. */
+export function buildReopenBrowserHandler(dir: string) {
+  return (req: BrowserControlRequest): Promise<BrowserControlResult> =>
+    enqueueBrowserControlCommand(dir, req, "reopen_browser");
+}
+
 /** Bring one system's Chromium window to the front — the panel's Focus button. */
 export function buildFocusBrowserHandler(dir: string) {
   return (req: BrowserControlRequest): Promise<BrowserControlResult> =>
     enqueueBrowserControlCommand(dir, req, "focus_browser");
+}
+
+/** Probe one system's health now and emit a fresh tile state — the panel's Check button. */
+export function buildHealthCheckBrowserHandler(dir: string) {
+  return (req: BrowserControlRequest): Promise<BrowserControlResult> =>
+    enqueueBrowserControlCommand(dir, req, "health_check");
 }
 
 /** Probe a single daemon's /status endpoint with a short timeout. */
