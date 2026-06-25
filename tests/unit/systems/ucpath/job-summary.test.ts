@@ -28,8 +28,11 @@ import {
   navigateToWorkforceJobSummary,
   pollForJobInfoScan,
   pickWorkLocationRow,
+  pickEffectiveDatedRow,
+  effectiveDateKey,
   workLocationDateKey,
   type WorkLocationRow,
+  type JobInfoRow,
 } from "../../../../src/systems/ucpath/job-summary.js";
 
 /** Build a Work Location row with sensible defaults for the picker tests. */
@@ -39,6 +42,16 @@ function wlRow(partial: Partial<WorkLocationRow>): WorkLocationRow {
     deptId: "000000",
     departmentDescription: "Dept",
     positionNumber: "40000000",
+    ...partial,
+  };
+}
+
+/** Build a Job Information row with sensible defaults for the picker tests. */
+function jiRow(partial: Partial<JobInfoRow>): JobInfoRow {
+  return {
+    effectiveDate: "",
+    jobCode: "004722",
+    jobDescription: "BLANK AST 3",
     ...partial,
   };
 }
@@ -118,19 +131,19 @@ describe("canSkipJobSummaryNavigation", () => {
  * callback + injected sleep so the wall-clock dependency is testable.
  */
 describe("pollForJobInfoScan", () => {
-  it("returns the first scan when the job code is already present (no extra attempts, no sleep)", async () => {
+  it("returns the first scan when a job-coded row is already present (no extra attempts, no sleep)", async () => {
     let scans = 0;
     let sleeps = 0;
     const result = await pollForJobInfoScan(
       async () => {
         scans++;
-        return { jobCode: "004722", jobDescription: "BLANK AST 3" };
+        return [jiRow({ jobCode: "004722", jobDescription: "BLANK AST 3" })];
       },
       { attempts: 5, intervalMs: 1, sleep: async () => { sleeps++; } },
     );
-    assert.deepStrictEqual(result, { jobCode: "004722", jobDescription: "BLANK AST 3" });
+    assert.deepStrictEqual(result, [jiRow({ jobCode: "004722", jobDescription: "BLANK AST 3" })]);
     assert.strictEqual(scans, 1, "non-empty on first scan — must not keep polling");
-    assert.strictEqual(sleeps, 0, "no sleep when the first scan already has the job code");
+    assert.strictEqual(sleeps, 0, "no sleep when the first scan already has a job-coded row");
   });
 
   it("polls past empty scans (the grid-render race) and returns the first populated scan", async () => {
@@ -140,13 +153,13 @@ describe("pollForJobInfoScan", () => {
         scans++;
         // Grid not yet rendered on the first two scans, then it populates.
         return scans < 3
-          ? { jobCode: "", jobDescription: "" }
-          : { jobCode: "004722", jobDescription: "BLANK AST 3" };
+          ? []
+          : [jiRow({ jobCode: "004722", jobDescription: "BLANK AST 3" })];
       },
       { attempts: 5, intervalMs: 1, sleep: async () => {} },
     );
-    assert.deepStrictEqual(result, { jobCode: "004722", jobDescription: "BLANK AST 3" });
-    assert.strictEqual(scans, 3, "must re-scan until the lazily-rendered grid yields the job code");
+    assert.deepStrictEqual(result, [jiRow({ jobCode: "004722", jobDescription: "BLANK AST 3" })]);
+    assert.strictEqual(scans, 3, "must re-scan until the lazily-rendered grid yields a job code");
   });
 
   it("returns the last (empty) scan after exhausting attempts — caller decides empty is fatal", async () => {
@@ -155,11 +168,11 @@ describe("pollForJobInfoScan", () => {
     const result = await pollForJobInfoScan(
       async () => {
         scans++;
-        return { jobCode: "", jobDescription: "" };
+        return [];
       },
       { attempts: 4, intervalMs: 1, sleep: async () => { sleeps++; } },
     );
-    assert.deepStrictEqual(result, { jobCode: "", jobDescription: "" });
+    assert.deepStrictEqual(result, []);
     assert.strictEqual(scans, 4, "scans exactly `attempts` times when the grid never populates");
     assert.strictEqual(sleeps, 3, "sleeps between attempts but not after the final one");
   });
@@ -256,6 +269,60 @@ describe("pickWorkLocationRow", () => {
       wlRow({ effectiveDate: "01/01/2026", departmentDescription: "Dated" }),
     ];
     assert.strictEqual(pickWorkLocationRow(rows, "06/10/2026")?.departmentDescription, "Dated");
+  });
+});
+
+/**
+ * The same effective-date rule must govern EVERYTHING read from Workforce Job
+ * Summary — not just the Work Location department. `pickEffectiveDatedRow` is
+ * the shared picker; here it's exercised on Job Information rows (Job Code /
+ * Payroll Title), the value that fills Kuali's Payroll Title Code/Title. A
+ * promotion/reclassification effective AFTER the separation must NOT win.
+ */
+describe("pickEffectiveDatedRow (Job Information / Payroll Title)", () => {
+  it("`effectiveDateKey` and the `workLocationDateKey` alias agree", () => {
+    assert.strictEqual(effectiveDateKey("06/10/2026"), 20260610);
+    assert.strictEqual(effectiveDateKey("06/10/2026"), workLocationDateKey("06/10/2026"));
+  });
+
+  it("picks the job code in effect as of separation, not a later promotion", () => {
+    const rows = [
+      jiRow({ effectiveDate: "01/01/2025", jobCode: "004722", jobDescription: "BLANK AST 3" }),
+      // Reclassified to a new title AFTER the separation — must be excluded.
+      jiRow({ effectiveDate: "07/01/2026", jobCode: "004920", jobDescription: "SUPERVISOR" }),
+    ];
+    const picked = pickEffectiveDatedRow(rows, "06/15/2026");
+    assert.strictEqual(picked?.jobCode, "004722");
+    assert.strictEqual(picked?.jobDescription, "BLANK AST 3");
+  });
+
+  it("includes a job row whose effective date EQUALS the separation date", () => {
+    const rows = [
+      jiRow({ effectiveDate: "01/01/2026", jobCode: "004722", jobDescription: "Old title" }),
+      jiRow({ effectiveDate: "06/10/2026", jobCode: "004920", jobDescription: "Same-day title" }),
+    ];
+    const picked = pickEffectiveDatedRow(rows, "06/10/2026");
+    assert.strictEqual(picked?.jobDescription, "Same-day title", "at-or-before includes equality");
+  });
+
+  it("picks the latest job row when NO separation date is supplied (current job)", () => {
+    const rows = [
+      jiRow({ effectiveDate: "01/01/2025", jobDescription: "Old" }),
+      jiRow({ effectiveDate: "01/01/2026", jobDescription: "Current" }),
+    ];
+    assert.strictEqual(pickEffectiveDatedRow(rows)?.jobDescription, "Current");
+  });
+
+  it("falls back to the FIRST job row when no row carries a usable date (legacy behavior)", () => {
+    const rows = [
+      jiRow({ effectiveDate: "", jobDescription: "First" }),
+      jiRow({ effectiveDate: "", jobDescription: "Second" }),
+    ];
+    assert.strictEqual(pickEffectiveDatedRow(rows, "06/10/2026")?.jobDescription, "First");
+  });
+
+  it("returns null for no rows", () => {
+    assert.strictEqual(pickEffectiveDatedRow([] as JobInfoRow[]), null);
   });
 });
 

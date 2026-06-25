@@ -205,13 +205,21 @@ export async function findTerminationTransactionStatus(
   const tol = opts.toleranceDays ?? SEPARATION_TERMINATION_WINDOW_DAYS;
   const effectiveDate = await readTerminationEffectiveDate(page, frame, ter.transactionId);
   if (!effectiveDate) {
-    // Couldn't read the effdt → fall back to legacy (use the TER) so we never do
-    // WORSE than before, but flag it so a live run surfaces the gap.
+    // Couldn't read the effdt → we CANNOT confirm this TER is THIS separation.
+    // Do NOT reuse it: silently reusing a prior-job TER skips the real
+    // termination (the 2026-06-24 T001928408 / Micah Roye incident — effdt
+    // 2025-07-01 reused for an 06/17/2026 separation because the drill-in
+    // selector timed out). Treat it as a prior termination and create a fresh
+    // transaction. `ucpath-transaction`'s own EID+effdt existence check
+    // (`findExistingTerminationTransaction`, keyed on the CURRENT effective
+    // date) is the precise backstop that still prevents a duplicate submit if
+    // this TER really is the current separation.
     log.warn(
       `[SS Smart HR] Could not read TER ${ter.transactionId}'s effective date — ` +
-      `treating it as the current separation (could not verify it isn't a prior termination)`,
+      `cannot verify it is THIS separation; creating a fresh transaction ` +
+      `(ucpath-transaction's EID+effdt check backstops a true duplicate)`,
     );
-    return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus, effectiveDate: "" };
+    return { found: false, transactionId: "", approvalStatus: "", effectiveDate: "", priorTerminationSkipped: true };
   }
   if (isWithinSeparationWindow(effectiveDate, opts.separationDate, tol)) {
     log.step(
@@ -236,9 +244,12 @@ export async function findTerminationTransactionStatus(
  * Read-only (drilling into a detail view) — safe in dry-run. Returns "" if the
  * transaction couldn't be opened or no date was found.
  *
- * NEEDS LIVE VERIFY: the results-grid Transaction ID link (`transactionResultLink`)
- * and that the detail page exposes the `Effdt:`/`Start Date` text — authored from
- * the live screenshots, not `playwright-cli`.
+ * The results-grid drill-in target (`transactionResultRow`) and the detail
+ * page's `Effdt:` text were live-verified via playwright-cli on 2026-06-24
+ * (EID 10797079 → row T001928408 → "Effdt: 2025-07-01"). The clickable element
+ * is the result ROW `<tr>`, not a hyperlink — the Transaction ID cell is a
+ * display-only `<span>`, which is why the old link selector timed out and the
+ * step silently fell back to reusing a prior-job TER.
  */
 async function readTerminationEffectiveDate(
   page: Page,
@@ -246,9 +257,9 @@ async function readTerminationEffectiveDate(
   transactionId: string,
 ): Promise<string> {
   try {
-    await safeClick(ssSmartHRTransactions.transactionResultLink(frame, transactionId), {
+    await safeClick(ssSmartHRTransactions.transactionResultRow(frame, transactionId), {
       timeout: 10_000,
-      label: "ss smart hr transaction drill-in link",
+      label: "ss smart hr transaction drill-in row",
     });
     await page.waitForTimeout(2_000);
     await waitForPeopleSoftProcessing(frame, 10_000);

@@ -226,9 +226,17 @@ async function waitForDetailPage(page: Page, timeoutMs: number): Promise<boolean
  * Location tab click timed out 15s on a tab-less results page ("Detail-page
  * name: <none>", EID 10641172, 2026-06-24). This version drills whenever the
  * detail page ISN'T up, trying the scoped rows first, then a grid-independent
- * EMPLID link, then failing LOUD with a precise message (vs the opaque tab
- * timeout). NEEDS LIVE VERIFY: the grid-independent EMPLID drill on the real
- * multi-row results page.
+ * fallback, then failing LOUD with a precise message (vs the opaque tab timeout).
+ *
+ * VERIFIED LIVE 2026-06-24 (EID 10615924, Claudia Bran — 2 empl records): the
+ * modern PeopleSoft Fluid "Find an Existing Value" results grid renders rows as
+ * clickable `tr[id^="trPTS_CFG_CL_STD_RSL"]` whose own `onclick`
+ * (`submitAction_win0(..,'#ICRow<n>')`) drills to the detail page — there is NO
+ * `<a>` drill-in link and the page has NO `#main_target_win0` iframe (content is
+ * native to the page body). The prior `searchResultRows`/`resultDrillLinks`
+ * selectors guessed classic `SEARCH_RESULT`/`PSLEVEL1GRID`/`a[id*=EMPLID]` ids
+ * that the Fluid layout never emits, so BOTH returned 0 and this threw for every
+ * multi-row EID (6 EIDs on 2026-06-24). Selectors re-mapped against the live grid.
  */
 async function ensureJobSummaryDetailPage(
   page: Page,
@@ -304,42 +312,45 @@ export interface WorkLocationRow {
 }
 
 /** MM/DD/YYYY → comparable YYYYMMDD integer, or null when malformed. Pure. */
-export function workLocationDateKey(mmddyyyy: string): number | null {
+export function effectiveDateKey(mmddyyyy: string): number | null {
   const m = mmddyyyy.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   return Number(m[3]) * 10000 + Number(m[1]) * 100 + Number(m[2]);
 }
 
+/** @deprecated Renamed to `effectiveDateKey`; kept as an alias for callers/tests. */
+export const workLocationDateKey = effectiveDateKey;
+
 /**
- * Pick the Work Location row that describes the job state in effect AS OF the
+ * Pick the effective-dated row that describes the state in effect AS OF the
  * separation date: the row with the LATEST Effective Date that is at-or-before
- * the separation date. This is the department for the job actually being
- * separated — more accurate than "the current/first row" when the employee
- * changed departments (it also makes the HDH/non-HDH kronos-skip gate correct
- * for a transfer). Pure + unit-pinned so the selection logic is testable
- * independent of the live PeopleSoft grid.
+ * the separation date. Generic over ANY Workforce Job Summary grid row that
+ * carries an `effectiveDate` (Work Location, Job Information, …) so EVERY tab we
+ * read selects the row for the job actually being separated, not a later
+ * (post-separation) promotion/transfer row. Pure + unit-pinned so the selection
+ * logic is testable independent of the live PeopleSoft grid.
  *
  * Fallbacks (in order):
  *   - No rows                       → null.
  *   - No row carries a usable date  → the FIRST row (legacy behavior; the in-row
- *     date scan found nothing — see `extractWorkLocation`'s frozen-column note).
+ *     date scan found nothing — see the per-tab frozen-column note).
  *   - No `separationDate` supplied  → the row with the LATEST effective date
- *     (= the current department), for non-separations callers.
+ *     (= the current state), for non-separations callers.
  *   - Every row is AFTER the sep date → the EARLIEST row (sep date precedes the
  *     first job state — unusual; the earliest is the best available match).
  */
-export function pickWorkLocationRow(
-  rows: WorkLocationRow[],
+export function pickEffectiveDatedRow<T extends { effectiveDate: string }>(
+  rows: T[],
   separationDate?: string,
-): WorkLocationRow | null {
+): T | null {
   if (rows.length === 0) return null;
   const dated = rows
-    .map((r) => ({ r, key: workLocationDateKey(r.effectiveDate) }))
-    .filter((x): x is { r: WorkLocationRow; key: number } => x.key !== null);
+    .map((r) => ({ r, key: effectiveDateKey(r.effectiveDate) }))
+    .filter((x): x is { r: T; key: number } => x.key !== null);
 
   if (dated.length === 0) return rows[0];
 
-  const sepKey = separationDate ? workLocationDateKey(separationDate) : null;
+  const sepKey = separationDate ? effectiveDateKey(separationDate) : null;
   if (sepKey === null) {
     return dated.reduce((a, b) => (b.key >= a.key ? b : a)).r;
   }
@@ -349,6 +360,19 @@ export function pickWorkLocationRow(
     return atOrBefore.reduce((a, b) => (b.key >= a.key ? b : a)).r;
   }
   return dated.reduce((a, b) => (b.key <= a.key ? b : a)).r;
+}
+
+/**
+ * Work Location convenience wrapper over `pickEffectiveDatedRow` — picks the
+ * department for the job actually being separated (latest Effective Date ≤ the
+ * separation date), which also makes the HDH/non-HDH kronos-skip gate correct
+ * for a transfer.
+ */
+export function pickWorkLocationRow(
+  rows: WorkLocationRow[],
+  separationDate?: string,
+): WorkLocationRow | null {
+  return pickEffectiveDatedRow(rows, separationDate);
 }
 
 /**
@@ -515,10 +539,16 @@ export async function extractWorkLocation(
   return { deptId: picked.deptId, departmentDescription: picked.departmentDescription };
 }
 
-/** One scan of the Job Information grid (Job Code + its Description). */
+/** The Job Information data the separation needs (Job Code + its Description). */
 export interface JobInfoScan {
   jobCode: string;
   jobDescription: string;
+}
+
+/** One effective-dated row of the Job Information grid. */
+export interface JobInfoRow extends JobInfoScan {
+  /** Effective Date as MM/DD/YYYY, or "" when it could not be read in-row. */
+  effectiveDate: string;
 }
 
 /**
@@ -529,8 +559,8 @@ const JOB_INFO_POLL_ATTEMPTS = 20;
 const JOB_INFO_POLL_INTERVAL_MS = 500;
 
 /**
- * Re-run a Job Information DOM scan until it yields a non-empty job code or the
- * attempt budget is spent.
+ * Re-run a Job Information DOM scan until it yields at least one row carrying a
+ * job code or the attempt budget is spent.
  *
  * Why poll: clicking the Job Information tab loads its grid LAZILY and does not
  * reliably raise the PeopleSoft processing spinner, so `waitForPeopleSoftProcessing`
@@ -541,30 +571,42 @@ const JOB_INFO_POLL_INTERVAL_MS = 500;
  * 2026-06-22). The prior fixed `waitForTimeout(3_000)` (removed by 84beeef7)
  * masked the race; this condition-based wait replaces it.
  *
- * Returns the first non-empty scan, or the last (still-empty) scan once the
- * attempts are exhausted — the caller decides whether empty is fatal. `sleep` is
- * injected so the wall-clock dependency is unit-testable.
+ * Returns the first scan that has any job-coded row, or the last (still-empty)
+ * scan once the attempts are exhausted — the caller decides whether empty is
+ * fatal. `sleep` is injected so the wall-clock dependency is unit-testable.
  */
 export async function pollForJobInfoScan(
-  scan: () => Promise<JobInfoScan>,
+  scan: () => Promise<JobInfoRow[]>,
   opts: {
     attempts: number;
     intervalMs: number;
     sleep: (ms: number) => Promise<void>;
   },
-): Promise<JobInfoScan> {
-  let last: JobInfoScan = { jobCode: "", jobDescription: "" };
+): Promise<JobInfoRow[]> {
+  let last: JobInfoRow[] = [];
   for (let attempt = 0; attempt < opts.attempts; attempt++) {
     last = await scan();
-    if (last.jobCode) return last;
+    if (last.some((r) => r.jobCode)) return last;
     if (attempt < opts.attempts - 1) await opts.sleep(opts.intervalMs);
   }
   return last;
 }
 
 /**
- * Extract job code and description from the Job Information tab.
- * Uses cell indices: cells[0] = Job Code, cells[1] = Description.
+ * Extract job code and description from the Job Information tab, selecting the
+ * row for the job state in effect AS OF `opts.separationDate` (latest Effective
+ * Date ≤ the separation date) — the SAME effective-date rule the Work Location
+ * department uses (see `pickEffectiveDatedRow`). Without a separation date it
+ * returns the current (latest effective-dated) job. This stops a promotion /
+ * reclassification that took effect AFTER the separation from shipping a
+ * post-separation Payroll Title Code / Payroll Title to Kuali.
+ *
+ * Uses cell indices: cells[0] = Job Code, cells[1] = Description. The Effective
+ * Date is read in-row when present; otherwise — as on the Work Location tab —
+ * the grid renders its left columns (incl. Effective Date) in a parallel frozen
+ * table, so a count-exact zip recovers the per-row dates. If neither yields
+ * dates the picker falls back to the first job-coded row (today's behavior — no
+ * regression).
  *
  * The grid loads lazily on tab activation, so the DOM scan is POLLED (see
  * `pollForJobInfoScan`) rather than run once — a single post-click scan raced
@@ -572,8 +614,17 @@ export async function pollForJobInfoScan(
  * (separations doc 4290, 2026-06-22). Returns possibly-empty (symmetric with
  * `extractWorkLocation`); `getJobSummaryIdentity` decides that empty on a found
  * record is fatal.
+ *
+ * NEEDS LIVE VERIFY: confirm a per-row Effective Date is read on the live Job
+ * Information grid (logs show a non-empty `eff=` per row). If every row logs
+ * effectiveDate="" for a multi-state employee, the dates live in a frozen
+ * column that neither the in-row read nor the count-exact zip recovered — map
+ * that column explicitly then.
  */
-export async function extractJobInfo(page: Page): Promise<JobInfoScan> {
+export async function extractJobInfo(
+  page: Page,
+  opts: { separationDate?: string } = {},
+): Promise<JobInfoScan> {
   log.step("[Job Summary] Clicking Job Information tab...");
   // Same modal-mask + re-probe pattern as extractWorkLocation — the tab
   // click can flake on the same transparent overlay.
@@ -590,28 +641,71 @@ export async function extractJobInfo(page: Page): Promise<JobInfoScan> {
   const psFrame2 = page.frameLocator("#main_target_win0"); // allow-inline-selector -- iframe FrameLocator for PS processing probe
   await waitForPeopleSoftProcessing(psFrame2, 15_000);
 
-  log.step("[Job Summary] Extracting job code...");
+  log.step("[Job Summary] Extracting job code (all Job Information rows)...");
 
-  // Job Information grid columns: Job Code(0), Description(1), Classified Ind(2),
-  // Empl Status(3), Full/Part Time(4), Standard Hours(5), FTE(6), ...
-  const result = await pollForJobInfoScan(
+  // Scan EVERY job-coded row (not just the first) with its effective date, so
+  // the picker can choose the one in effect as of the separation date. Job
+  // Information grid columns: Job Code(0), Description(1), Classified Ind(2),
+  // Empl Status(3), Full/Part Time(4), Standard Hours(5), FTE(6), ... The
+  // Effective Date is read in-row, with a count-exact frozen-column zip as a
+  // fallback (mirrors extractWorkLocation — see its inline notes).
+  const rows = await pollForJobInfoScan(
     () =>
       page.evaluate(() => {
-        const rows = document.querySelectorAll("tr");
-        for (const row of rows) {
-          const cells = row.querySelectorAll("td");
-          if (cells.length >= 2) {
-            const jobCode = cells[0]?.textContent?.trim() ?? "";
-            // Job codes are 6 digits
-            if (/^\d{6}$/.test(jobCode)) {
-              return {
-                jobCode,
-                jobDescription: cells[1]?.textContent?.trim() ?? "",
-              };
+        // Do NOT define a NAMED `const fn = () => ...` helper here — tsx's
+        // esbuild keepNames adds `__name(...)` which is undefined in the page
+        // context. Anonymous .map/.find callbacks are fine.
+        const JOBCODE = /^\d{6}$/;
+        const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
+
+        // Pass 1 — job-coded rows (cells[0] = job code), capturing an in-row date.
+        const jobRows: Array<{
+          jobCode: string;
+          jobDescription: string;
+          effectiveDate: string;
+        }> = [];
+        for (const tr of Array.from(document.querySelectorAll("tr"))) {
+          const cells = Array.from(tr.querySelectorAll("td")).map((td) =>
+            (td.textContent ?? "").replace(/\s+/g, " ").trim(),
+          );
+          if (cells.length < 2 || !JOBCODE.test(cells[0])) continue;
+          const inRowDate = cells.find((c) => DATE.test(c)) ?? "";
+          jobRows.push({
+            jobCode: cells[0],
+            jobDescription: cells[1] ?? "",
+            effectiveDate: inRowDate,
+          });
+        }
+
+        // Pass 2 — frozen-column fallback. If no job row carried an in-row date,
+        // PeopleSoft likely rendered the left columns (incl. Effective Date) in a
+        // parallel, row-aligned table. Read an "Effective Date" column and zip by
+        // index — but ONLY when its date count EXACTLY matches the job-row count,
+        // so a mismatched/unrelated table can never produce a wrong date↔job pairing.
+        if (jobRows.length > 0 && !jobRows.some((r) => r.effectiveDate)) {
+          for (const table of Array.from(document.querySelectorAll("table"))) {
+            const trs = Array.from((table as HTMLTableElement).rows);
+            let col = -1;
+            for (const tr of trs) {
+              const idx = Array.from(tr.cells).findIndex((c) =>
+                /effective date/i.test((c.textContent ?? "").replace(/\s+/g, " ").trim()),
+              );
+              if (idx >= 0) { col = idx; break; }
+            }
+            if (col < 0) continue;
+            const dates: string[] = [];
+            for (const tr of trs) {
+              const t = tr.cells[col] ? (tr.cells[col].textContent ?? "").replace(/\s+/g, " ").trim() : "";
+              if (DATE.test(t)) dates.push(t);
+            }
+            if (dates.length === jobRows.length) {
+              for (let i = 0; i < jobRows.length; i++) jobRows[i].effectiveDate = dates[i];
+              break;
             }
           }
         }
-        return { jobCode: "", jobDescription: "" };
+
+        return jobRows;
       }),
     {
       attempts: JOB_INFO_POLL_ATTEMPTS,
@@ -620,9 +714,25 @@ export async function extractJobInfo(page: Page): Promise<JobInfoScan> {
     },
   );
 
-  log.step(`  Job Code: ${result.jobCode || "<none>"}`);
-  log.step(`  Description: ${result.jobDescription || "<none>"}`);
-  return result;
+  for (const r of rows) {
+    log.debug(
+      `[Job Summary]   Job Information row: eff=${r.effectiveDate || "<none>"} ` +
+      `jobCode=${r.jobCode || "<none>"} desc="${r.jobDescription || "<none>"}"`,
+    );
+  }
+
+  const picked = pickEffectiveDatedRow(rows, opts.separationDate);
+  if (!picked) {
+    log.step("  Job Code: <none>");
+    log.step("  Description: <none>");
+    return { jobCode: "", jobDescription: "" };
+  }
+  log.step(
+    `  Picked Job Information row (eff ${picked.effectiveDate || "<no date>"}` +
+    (opts.separationDate ? `, latest ≤ separation ${opts.separationDate}` : ", latest") +
+    `): Job Code ${picked.jobCode || "<none>"}, Description "${picked.jobDescription || "<none>"}"`,
+  );
+  return { jobCode: picked.jobCode, jobDescription: picked.jobDescription };
 }
 
 /**
@@ -674,7 +784,10 @@ export async function getJobSummaryIdentity(
   // pickWorkLocationRow. Drives the correct department for the separated job and
   // therefore the correct HDH/non-HDH kronos-skip decision.
   const workLocation = await extractWorkLocation(page, { separationDate: opts.separationDate });
-  const jobInfo = await extractJobInfo(page);
+  // Same effective-date rule as Work Location: pick the Job Information row in
+  // effect AS OF the separation date, so a post-separation promotion /
+  // reclassification never ships a wrong Payroll Title Code / Payroll Title.
+  const jobInfo = await extractJobInfo(page, { separationDate: opts.separationDate });
 
   // A found, active employee always has a job code on the Job Information tab.
   // An empty one after polling is a GENUINE extraction failure on a found
