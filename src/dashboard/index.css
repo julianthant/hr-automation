@@ -330,3 +330,11 @@
 @media (prefers-reduced-motion: reduce) {
   .terminal-drawer { transition: none !important; }
 }
+
+/* Workflow Modifier blueprint canvas — faint engineering grid-paper behind the
+   plates. Dot color is the theme border token, so it tracks light/dark. */
+.blueprint-grid {
+  background-image: radial-gradient(var(--border) 1px, transparent 0);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
