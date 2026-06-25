@@ -79,15 +79,23 @@ export function computeSeparationDate(
  * Build the comments text for the UCPath termination transaction.
  *
  * Base form: `Termination eff <eff>. Last Day Worked <ldw>.` then, when present,
- * a Sick-leave clause and/or a Holiday-Pay clause (sick first, holiday second),
- * then ` Kuali form #<docId>.`. The sick/holiday dates come from the New Kronos
- * separation timecard (`SeparationTimecardData`) and ONLY drive this comment —
- * they never change any date.
+ * a SINGLE leave clause (sick OR holiday — see below), then ` Kuali form #<docId>.`.
+ * `<ldw>` is the physical Last Day Worked, NOT the separation date — sick leave and
+ * holiday pay push out the SEPARATION date (and thus the termination eff date),
+ * never the Last Day Worked. The sick/holiday dates come from the New Kronos
+ * separation timecard (`SeparationTimecardData`); the separation-date extension
+ * itself is done by `computeSeparationDate`, this builder only reports the
+ * separation-determining leave day.
  *
- * Clause shapes (dates are MM/DD/YYYY, chronological):
- *   - 0 dates  → no clause
- *   - 1 date   → ` Sick Leave on <d>.`  /  ` Holiday Pay on <d>.`
- *   - ≥2 dates → ` Sick leave from <first> to <last>.`  /  ` Holiday Pay from <first> to <last>.`
+ * Leave clause (dates are MM/DD/YYYY, chronological):
+ *   - Only ONE clause is ever emitted. When BOTH sick leave and holiday pay are
+ *     present, only the LATEST one is reported (the leave day that actually
+ *     determines the separation date) — never both. Holiday wins only when its
+ *     latest date is strictly later than the latest sick date; sick wins ties.
+ *   - Sick (any count): ` Sick Leave on <latest>.` — the latest sick date only,
+ *     never a range. The separation date already extends to the latest sick day
+ *     (see `computeSeparationDate`); the comment reports that single relevant day.
+ *   - Holiday: 1 → ` Holiday Pay on <d>.`; ≥2 → ` Holiday Pay from <first> to <last>.`
  */
 export function buildTerminationComments(
   terminationEffDate: string,
@@ -98,12 +106,10 @@ export function buildTerminationComments(
   const sickDates = leave?.sickDates ?? [];
   const holidayDates = leave?.holidayDates ?? [];
 
-  let sickClause = "";
-  if (sickDates.length === 1) {
-    sickClause = ` Sick Leave on ${sickDates[0]}.`;
-  } else if (sickDates.length >= 2) {
-    sickClause = ` Sick leave from ${sickDates[0]} to ${sickDates[sickDates.length - 1]}.`;
-  }
+  const latestSick = sickDates.length >= 1 ? sickDates[sickDates.length - 1] : null;
+  const latestHoliday = holidayDates.length >= 1 ? holidayDates[holidayDates.length - 1] : null;
+
+  const sickClause = latestSick ? ` Sick Leave on ${latestSick}.` : "";
 
   let holidayClause = "";
   if (holidayDates.length === 1) {
@@ -112,10 +118,24 @@ export function buildTerminationComments(
     holidayClause = ` Holiday Pay from ${holidayDates[0]} to ${holidayDates[holidayDates.length - 1]}.`;
   }
 
+  // Only ONE leave clause is reported. With BOTH sick leave and holiday pay, keep
+  // only the LATEST one — it is the leave day that sets the separation date
+  // (= max(LDW, last sick, last holiday)); emitting both would double-report the
+  // same separation-determining event. Holiday wins only on a strictly later date
+  // (sick wins ties — the two can't legitimately fall on the same day).
+  let leaveClause: string;
+  if (latestSick && latestHoliday) {
+    leaveClause =
+      parseDate(latestHoliday).getTime() > parseDate(latestSick).getTime()
+        ? holidayClause
+        : sickClause;
+  } else {
+    leaveClause = sickClause || holidayClause;
+  }
+
   return (
     `Termination eff ${terminationEffDate}. Last Day Worked ${lastDayWorked}.` +
-    sickClause +
-    holidayClause +
+    leaveClause +
     ` Kuali form #${docId}.`
   );
 }
@@ -161,11 +181,11 @@ const REASON_CODE_MAP: Record<string, string> = {
   "Quit without Notice": "Resign - Quit Without Notice",
   "Self-Employment": "Resign - Self Employment",
   "Retirement": "Voluntary Separation Program",
-  "Appointment Expired": "Resign - No Reason Given",
   "Transferring to a different UCSD department (outside of RRSS)": "Transfer - Intra Location",
   "Transferring to another UC Campus (outside of UCSD)": "Interlocation (BU) Transfer",
   // ─── Involuntary (UC_INVOL_TERM) ───
   "Graduated/No longer a Student": "No Longer Student",
+  "Appointment Expired": "Appointment Expired",
 };
 
 /**
