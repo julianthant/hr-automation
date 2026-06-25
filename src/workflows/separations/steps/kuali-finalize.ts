@@ -80,12 +80,10 @@ export async function runKualiFinalize(
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
   await clickSave(kualiPage);
-  // Capture the ENTIRE Kuali finalization page as a SEQUENCE of readable chunk
-  // images (scroll top→bottom, one viewport PNG per chunk). `paged` shows
-  // everything for manual review at a readable size — the lightbox steps through
-  // the chunks with next/back — instead of a single tall image the viewer can
-  // only shrink to an unreadable ribbon. Capture geometry (width / chunk height
-  // / overlap) is centralized in `CAPTURE` (src/core/kernel/session.ts).
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], paged: true });
+  // Unified whole-page/form capture: one image of the ENTIRE Kuali finalization
+  // document. The kernel expands the finalization dialog's inner scroll cap (it
+  // is a fixed `max-height` + `overflow:auto` modal) so the form is captured
+  // top-to-bottom, not clipped at its fold.
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'] });
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

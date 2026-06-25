@@ -61,57 +61,9 @@ export function formatCaptureFilename(args: {
   label: string
   system: string
   ts: number
-  /**
-   * Zero-based chunk index for a `paged` capture. When present, a zero-padded
-   * `-cNN` suffix is appended so the N chunk PNGs of one page don't collide on
-   * the shared `ts`+`system` and sort in scroll order lexically. Omitted for
-   * single-file modes (region / bounded / centerSelector / default).
-   */
-  chunk?: number
 }): string {
-  const chunkSuffix =
-    args.chunk !== undefined ? `-c${String(args.chunk + 1).padStart(2, '0')}` : ''
-  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}${chunkSuffix}.png`
+  return `${args.workflow}-${args.itemId}-${args.kind}-${args.label}-${args.system}-${args.ts}.png`
 }
-
-/**
- * Centralized, consistent audit-capture settings — the single source of truth
- * for "what every screenshot should look like." Keep capture geometry here
- * rather than scattering magic numbers across the capture routines so all
- * modes (bounded / region / paged) render at the same readable column width.
- */
-export const CAPTURE = {
-  /**
-   * Fixed layout-viewport WIDTH for every bounded / region / paged capture. A
-   * real-world desktop width: tall forms render at a readable column instead of
-   * being stretched to fit off-screen chrome (the over-widening that turned the
-   * old `slices` captures into 2000px+ ribbons). Tiled daemon windows are
-   * narrower than this on screen, but `setViewportSize` sets the LAYOUT viewport
-   * independently of the OS window, so the capture is still this many px wide.
-   */
-  width: 1280,
-  /**
-   * Height of each scroll chunk in `paged` mode — the fixed capture-viewport
-   * HEIGHT, so a chunk is the same size regardless of the tiled OS window.
-   */
-  chunkHeight: 1000,
-  /**
-   * Vertical OVERLAP (px) between consecutive chunks, so content sitting on a
-   * scroll seam stays fully readable in at least one chunk (the "scroll a bit
-   * less than a full screen each step" optimization). Must be < chunkHeight.
-   */
-  chunkOverlap: 72,
-  /** Hard cap on chunks per page — runaway guard for pathologically tall docs. */
-  maxChunks: 20,
-  /** Settle delay (ms) after each scroll before the shot — lets lazy / virtual rows paint. */
-  settleMs: 250,
-} as const
-
-/**
- * Fixed viewport width used by `bounded`, `region`, and `paged` captures.
- * Aliased to `CAPTURE.width` so there is one knob, not two.
- */
-export const BOUNDED_CAPTURE_WIDTH = CAPTURE.width
 
 interface SystemSlot {
   page: Page
@@ -867,43 +819,58 @@ export class Session {
   }
 
   /**
-   * Capture a screenshot of the entire page content, including content inside
-   * scrollable inner containers (Kuali modals, PeopleSoft iframes with
-   * fixed-height overflow wrappers). `fullPage: true` alone only expands the
-   * document height — it doesn't release `overflow: auto/scroll` on inner
-   * divs. So we temporarily strip overflow + max-height + height caps from
-   * every scrollable element, let layout settle, take the shot, then restore
-   * the original inline styles. Restoration is best-effort; a late-failing
-   * restore still leaves the DOM visually consistent because we reset styles
-   * back to whatever was inline before our mutation.
+   * THE unified "whole page / whole form" audit capture — one `fullPage` PNG
+   * that contains the ENTIRE page or form, never a clipped portion. Every
+   * `ctx.screenshot()` routes here (no per-caller mode soup). It composes the
+   * three transforms an enterprise HR page needs before a `fullPage` shot can
+   * see all of its content, each best-effort + reversible:
    *
-   * The mutation window is ~300ms (waitForTimeout) — acceptable for form-audit
-   * screenshots which happen between discrete Playwright actions, not during
-   * active typing.
+   *   1. `expandScrollContainers` — strip `overflow:auto/scroll` + `max-height`
+   *      caps off inner scroll containers (the Kuali finalization dialog is a
+   *      fixed `max-height` + `overflow:auto` modal; `fullPage` alone only grows
+   *      the DOCUMENT height, not these inner divs).
+   *   2. `widenViewportForCapture` — `fullPage` grows HEIGHT but clamps WIDTH to
+   *      the viewport, so wide content (the PeopleSoft Person Org assignment
+   *      grid, ~1600-2200px) clips on the right in a narrow tiled window. Widen
+   *      the layout viewport to fit the widest content (top document AND inside
+   *      child frames — the grid lives in a fluid-width iframe), so the whole
+   *      grid is in frame. Done BEFORE the iframe grow so the in-frame content
+   *      reflows to its final width first.
+   *   3. `growOverflowingIframes` — the UCPath PeopleSoft content frame
+   *      (`#main_target_win0`) is a fixed `height:520px` same-origin iframe with
+   *      its OWN scroll, so a tall in-frame form (the submitted-transaction
+   *      confirmation) clips at the iframe's fold even under `fullPage`. Grow the
+   *      iframe ELEMENT to its inner `scrollHeight` so the shot walks through the
+   *      whole in-frame form. (This is what the retired `region` mode did by
+   *      hand for one selector; folding it into the default makes every page get
+   *      it for free.)
+   *
+   * All three restore the original inline styles / viewport in the `finally`.
+   * Restoration is best-effort; a late-failing restore still leaves the DOM
+   * visually consistent because we reset to whatever was inline before. The
+   * mutation window is short (settle waits) — fine for form-audit shots taken
+   * between discrete Playwright actions, not during active typing.
    */
   static async captureFullPage(page: Page, path: string): Promise<Buffer> {
     let restoreFn: (() => Promise<void>) | null = null
     let restoreViewport: (() => Promise<void>) | null = null
+    let restoreIframes: (() => Promise<void>) | null = null
     try {
-      // Strip inner-scroll overflow + max-height caps and reset scroll to the
-      // top so `fullPage` starts from a clean, fully-expanded document. The
-      // mutation + its restore callback live in the shared helper.
       restoreFn = await Session.expandScrollContainers(page)
       const maybeWaitForLoadState = page as unknown as {
         waitForLoadState?: (state: 'networkidle', options: { timeout: number }) => Promise<void>
       }
       await maybeWaitForLoadState.waitForLoadState?.('networkidle', { timeout: 1_000 }).catch(() => {})
-      // `fullPage: true` expands the document HEIGHT but clamps WIDTH to the
-      // viewport, so wide content (PeopleSoft Person Org assignment grids,
-      // which often need ~1600-2400px) gets clipped on the right when the
-      // browser window is narrow. Widen the viewport to fit the widest content
-      // — measured at the top document AND inside child frames, since the
-      // PeopleSoft grid lives in a fluid-width iframe — then restore it after
-      // the shot. Best-effort + reversible, like the overflow mutation above.
       restoreViewport = await Session.widenViewportForCapture(page)
+      // Grow fixed-height same-origin iframes AFTER widening, so each frame's
+      // inner `scrollHeight` is measured at its final reflowed width. Without
+      // this the UCPath content frame clips a tall in-frame form at its 520px
+      // fold even though `fullPage` is set on the OUTER document.
+      restoreIframes = await Session.growOverflowingIframes(page)
       const buf = await page.screenshot({ path, fullPage: true })
       return buf
     } finally {
+      if (restoreIframes) await restoreIframes()
       if (restoreViewport) await restoreViewport()
       if (restoreFn) await restoreFn()
     }
@@ -967,96 +934,72 @@ export class Session {
   }
 
   /**
-   * Set the layout viewport to a FIXED width (height unchanged) and return a
-   * best-effort restore callback. Used by `captureRegion` / `captureBoundedFullPage`
-   * to render a tall form at a readable column width regardless of the quarter-
-   * screen tiled OS window, WITHOUT the content-fit widening `captureFullPage`
-   * applies. Never throws; returns a no-op restore when the page can't resize.
-   */
-  private static async setCaptureViewportWidth(page: Page, width: number): Promise<() => Promise<void>> {
-    const maybeResize = page as unknown as {
-      setViewportSize?: (size: { width: number; height: number }) => Promise<void>
-      waitForTimeout?: (ms: number) => Promise<void>
-    }
-    if (typeof maybeResize.setViewportSize !== 'function') return async () => {}
-    try {
-      const m = await page.evaluate(() => ({
-        iw: window.innerWidth || 0,
-        ih: window.innerHeight || 0,
-      })).catch(() => null)
-      if (!m || m.iw <= 0 || m.ih <= 0) return async () => {}
-      if (m.iw === width) return async () => {}
-      await maybeResize.setViewportSize({ width, height: m.ih })
-      await maybeResize.waitForTimeout?.(150).catch(() => {})
-      return async () => {
-        try { await maybeResize.setViewportSize!({ width: m.iw, height: m.ih }) } catch { /* best-effort */ }
-      }
-    } catch {
-      return async () => {}
-    }
-  }
-
-  /**
-   * Set the layout viewport to a FIXED width AND height (for `paged` chunk
-   * capture, where each chunk must be a consistent size regardless of the
-   * quarter-screen tiled OS window) and return a best-effort restore callback.
-   * Never throws; returns a no-op restore when the page can't resize.
-   */
-  private static async setCaptureViewport(page: Page, width: number, height: number): Promise<() => Promise<void>> {
-    const maybeResize = page as unknown as {
-      setViewportSize?: (size: { width: number; height: number }) => Promise<void>
-      waitForTimeout?: (ms: number) => Promise<void>
-    }
-    if (typeof maybeResize.setViewportSize !== 'function') return async () => {}
-    try {
-      const m = await page.evaluate(() => ({
-        iw: window.innerWidth || 0,
-        ih: window.innerHeight || 0,
-      })).catch(() => null)
-      if (!m || m.iw <= 0 || m.ih <= 0) return async () => {}
-      if (m.iw === width && m.ih === height) return async () => {}
-      await maybeResize.setViewportSize({ width, height })
-      await maybeResize.waitForTimeout?.(150).catch(() => {})
-      return async () => {
-        try { await maybeResize.setViewportSize!({ width: m.iw, height: m.ih }) } catch { /* best-effort */ }
-      }
-    } catch {
-      return async () => {}
-    }
-  }
-
-  /**
    * Grow every SAME-ORIGIN iframe whose inner content overflows its rendered
-   * box to its full inner content height, and return a best-effort restore
-   * callback. A fixed-height iframe (the UCPath PeopleSoft content frame is
-   * `height:520px` with its own scroll) clips a tall form: reaching INTO the
-   * frame with `frameLocator(...).screenshot()` still captures only the visible
-   * fold, because the frame's own viewport bounds the shot. Growing the iframe
-   * ELEMENT to its inner `scrollHeight` (and stripping the inner document's
-   * overflow caps first) makes a subsequent `locator(<iframe>).screenshot()` —
-   * or a `fullPage` — include the entire in-frame form. Cross-origin frames
-   * throw on `contentDocument` access and are skipped (best-effort). Verified
-   * against a synthetic nested-iframe UCPath page.
+   * box to its full inner content height — RECURSIVELY through nested frames —
+   * and return a best-effort restore callback. A fixed-height iframe (the UCPath
+   * PeopleSoft content frame `#main_target_win0` is `height:520px` with its own
+   * scroll) clips a tall form: reaching INTO the frame with
+   * `frameLocator(...).screenshot()` still captures only the visible fold, and a
+   * plain `fullPage` on the OUTER document stops at the iframe's rendered height.
+   * Growing the iframe ELEMENT to its inner `scrollHeight` (after stripping the
+   * inner document's overflow caps) makes a subsequent `fullPage` include the
+   * entire in-frame form.
+   *
+   * PeopleSoft nests its content frame inside an outer frame, so a top-level-only
+   * walk never reaches it. We recurse POST-ORDER: grow a frame's OWN nested
+   * iframes first, so when we measure this frame's inner `scrollHeight` it already
+   * reflects its grown descendants, then grow this frame to fit. Cross-origin
+   * frames throw on `contentDocument` access and are skipped (best-effort).
+   * Verified against synthetic single- and nested-iframe UCPath pages.
    */
   private static async growOverflowingIframes(page: Page): Promise<() => Promise<void>> {
     await page.evaluate(() => {
       const saved: Array<{ el: HTMLIFrameElement; height: string; innerCss: Array<[HTMLElement, string]> }> = []
-      for (const el of Array.from(document.querySelectorAll('iframe'))) {
+      // Collect every same-origin (iframe element → its document) pair tagged with
+      // nesting depth, breadth-first. NOTE: this is an ITERATIVE traversal on
+      // purpose — a NAMED nested function/arrow inside `page.evaluate` trips the
+      // esbuild/tsx `__name` helper (undefined in the browser → the whole evaluate
+      // throws and is swallowed by the `.catch` below, silently growing nothing).
+      const MAX_FRAME_DEPTH = 6 // runaway guard for pathological frame nesting
+      const collected: Array<{ el: HTMLIFrameElement; doc: Document; depth: number }> = []
+      const queue: Array<{ doc: Document; depth: number }> = [{ doc: document, depth: 0 }]
+      while (queue.length) {
+        const node = queue.shift()!
+        if (node.depth > MAX_FRAME_DEPTH) continue
+        for (const el of Array.from(node.doc.querySelectorAll('iframe'))) {
+          try {
+            const childDoc = el.contentDocument
+            if (!childDoc || !childDoc.documentElement) continue // cross-origin or not loaded
+            collected.push({ el, doc: childDoc, depth: node.depth + 1 })
+            queue.push({ doc: childDoc, depth: node.depth + 1 })
+          } catch { /* cross-origin iframe — skip */ }
+        }
+      }
+      // Grow DEEPEST frames first, so when a parent frame is measured its inner
+      // `scrollHeight` already reflects its grown children (the PeopleSoft content
+      // frame is nested inside an outer frame).
+      collected.sort((a, b) => b.depth - a.depth)
+      for (const { el, doc } of collected) {
         try {
-          const doc = el.contentDocument
-          if (!doc || !doc.documentElement) continue // cross-origin or not loaded
-          // strip inner-scroll overflow caps so scrollHeight reflects full content
+          // Strip inner-scroll overflow caps so scrollHeight reflects full content.
+          // Detect by COMPUTED style across all elements (a stylesheet rule, not
+          // just inline `style=`/class names, can set the cap).
           const innerCss: Array<[HTMLElement, string]> = []
-          for (const inner of Array.from(doc.querySelectorAll<HTMLElement>('[style*=overflow], [class*=scroll], [class*=Scroll]'))) {
-            const cs = doc.defaultView?.getComputedStyle(inner)
+          const view = doc.defaultView
+          for (const inner of Array.from(doc.querySelectorAll<HTMLElement>('*'))) {
+            const cs = view ? view.getComputedStyle(inner) : null
             if (!cs) continue
-            const caps = cs.maxHeight !== 'none' || cs.overflowY === 'auto' || cs.overflowY === 'scroll'
-            if (!caps) continue
+            const scrolls =
+              (cs.overflowY === 'auto' || cs.overflowY === 'scroll') &&
+              inner.scrollHeight > inner.clientHeight + 2
+            const capped = cs.maxHeight !== 'none' && parseFloat(cs.maxHeight) > 0 &&
+              inner.scrollHeight > inner.clientHeight + 2
+            if (!scrolls && !capped) continue
             innerCss.push([inner, inner.style.cssText])
             inner.style.overflow = 'visible'; inner.style.maxHeight = 'none'; inner.style.height = 'auto'
           }
-          doc.defaultView?.scrollTo(0, 0)
-          const innerH = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0)
+          if (view) view.scrollTo(0, 0)
+          const innerH = Math.max(doc.documentElement.scrollHeight, doc.body ? doc.body.scrollHeight : 0)
           const rendered = el.getBoundingClientRect().height
           if (innerH > rendered + 2) {
             saved.push({ el, height: el.style.height, innerCss })
@@ -1064,7 +1007,7 @@ export class Session {
           } else if (innerCss.length) {
             saved.push({ el, height: el.style.height, innerCss })
           }
-        } catch { /* cross-origin iframe — skip */ }
+        } catch { /* per-frame best-effort */ }
       }
       ;(window as unknown as { __restoreIframes?: () => void }).__restoreIframes = () => {
         for (const s of saved) {
@@ -1081,181 +1024,6 @@ export class Session {
           w.__restoreIframes?.()
         })
       } catch { /* best-effort */ }
-    }
-  }
-
-  /**
-   * Capture ONLY the element matching `selector` as one clean PNG, after
-   * expanding inner-scroll overflow + growing overflowing iframes + fixing the
-   * viewport to `BOUNDED_CAPTURE_WIDTH`. This is the "showcase the whole form,
-   * none of the page chrome" capture: `locator.screenshot()` clips to the
-   * element box, so the nav banner, modal backdrop, and promo footer that made
-   * the old slice captures unreadable are excluded, and the element's FULL
-   * height is captured even when it's taller than the viewport.
-   *
-   * When the selector targets an iframe (UCPath `#main_target_win0`), the
-   * iframe was grown to its inner content height by `growOverflowingIframes`, so
-   * the shot includes the entire in-frame form. Returns the path on success, or
-   * `null` when the element is missing/not visible (caller falls back to a
-   * bounded full-page shot so the capture never silently vanishes). Verified
-   * against synthetic Kuali-modal and UCPath-iframe pages.
-   */
-  static async captureRegion(page: Page, selector: string, path: string): Promise<string | null> {
-    let restoreOverflow: (() => Promise<void>) | null = null
-    let restoreIframes: (() => Promise<void>) | null = null
-    let restoreViewport: (() => Promise<void>) | null = null
-    try {
-      restoreOverflow = await Session.expandScrollContainers(page)
-      restoreIframes = await Session.growOverflowingIframes(page)
-      restoreViewport = await Session.setCaptureViewportWidth(page, BOUNDED_CAPTURE_WIDTH)
-      const maybeLocator = page as unknown as {
-        locator?: (sel: string) => { first: () => { screenshot: (o: { path: string; timeout?: number }) => Promise<Buffer> } }
-      }
-      if (typeof maybeLocator.locator !== 'function') return null
-      // Short timeout: a missing region must fall back fast, not hang ~30s.
-      await maybeLocator.locator(selector).first().screenshot({ path, timeout: 5_000 })
-      return path
-    } catch {
-      return null
-    } finally {
-      if (restoreViewport) await restoreViewport()
-      if (restoreIframes) await restoreIframes()
-      if (restoreOverflow) await restoreOverflow()
-    }
-  }
-
-  /**
-   * Capture the WHOLE page as one `fullPage` PNG at a FIXED width
-   * (`BOUNDED_CAPTURE_WIDTH`), clipped to that width so horizontal overflow
-   * can't stretch the image into a ribbon, and WITHOUT the content-fit viewport
-   * widening `captureFullPage` applies. For a tall form whose container has no
-   * stable selector to target with `captureRegion` (the Kuali finalization
-   * document): the page chrome is still present, but the form is rendered at a
-   * readable column width top-to-bottom in one image instead of unreadable wide
-   * slices. Returns the written path, or `null` on failure. Verified against a
-   * synthetic Kuali page (1280×972, no ribbon vs the old 2038×324 ×3 slices).
-   */
-  static async captureBoundedFullPage(page: Page, path: string): Promise<string | null> {
-    let restoreOverflow: (() => Promise<void>) | null = null
-    let restoreIframes: (() => Promise<void>) | null = null
-    let restoreViewport: (() => Promise<void>) | null = null
-    try {
-      restoreOverflow = await Session.expandScrollContainers(page)
-      restoreIframes = await Session.growOverflowingIframes(page)
-      restoreViewport = await Session.setCaptureViewportWidth(page, BOUNDED_CAPTURE_WIDTH)
-      const fullHeight = await page.evaluate(() => Math.max(
-        document.documentElement?.scrollHeight ?? 0,
-        document.body?.scrollHeight ?? 0,
-      )).catch(() => 0)
-      if (!fullHeight) {
-        // Degenerate geometry — a plain fullPage still beats nothing.
-        await page.screenshot({ path, fullPage: true })
-        return path
-      }
-      await page.screenshot({
-        path,
-        fullPage: true,
-        clip: { x: 0, y: 0, width: BOUNDED_CAPTURE_WIDTH, height: fullHeight },
-      })
-      return path
-    } catch {
-      return null
-    } finally {
-      if (restoreViewport) await restoreViewport()
-      if (restoreIframes) await restoreIframes()
-      if (restoreOverflow) await restoreOverflow()
-    }
-  }
-
-  /**
-   * Capture the WHOLE page as a SEQUENCE of real viewport-sized chunk PNGs by
-   * scrolling top→bottom in `CAPTURE.chunkHeight`-step increments (minus a small
-   * `CAPTURE.chunkOverlap` seam so content on a boundary stays readable in at
-   * least one chunk). Each chunk is a plain VIEWPORT screenshot (NOT `fullPage`),
-   * so — unlike a single tall `fullPage`/`bounded` shot scaled to a ribbon — the
-   * operator gets every part of the page at a readable size for manual review,
-   * and lazy / virtual-scroll content paints because we physically scroll to it.
-   *
-   * The viewport is fixed to `CAPTURE.width`×`CAPTURE.chunkHeight` first, inner
-   * scroll containers are expanded, and overflowing iframes (the UCPath
-   * PeopleSoft content frame) are grown to their inner content height so the
-   * window scroll walks THROUGH the in-frame form too. Each chunk's path is
-   * built by `withChunkSuffix(chunk)` so the N files don't collide on the shared
-   * `ts`+`system` and sort in scroll order.
-   *
-   * Returns the chunk paths written (length ≥ 1). Best-effort: a degenerate /
-   * unmeasurable page falls back to a single plain shot (chunk 0) so the capture
-   * never silently vanishes; a per-chunk screenshot failure stops the loop but
-   * keeps the chunks captured so far.
-   */
-  static async capturePagedFullPage(
-    page: Page,
-    withChunkSuffix: (chunk: number) => string,
-  ): Promise<string[]> {
-    let restoreOverflow: (() => Promise<void>) | null = null
-    let restoreIframes: (() => Promise<void>) | null = null
-    let restoreViewport: (() => Promise<void>) | null = null
-    const written: string[] = []
-    const maybeWait = page as unknown as { waitForTimeout?: (ms: number) => Promise<void> }
-    try {
-      restoreOverflow = await Session.expandScrollContainers(page)
-      restoreIframes = await Session.growOverflowingIframes(page)
-      restoreViewport = await Session.setCaptureViewport(page, CAPTURE.width, CAPTURE.chunkHeight)
-
-      const fullHeight = await page.evaluate(() => Math.max(
-        document.documentElement?.scrollHeight ?? 0,
-        document.body?.scrollHeight ?? 0,
-      )).catch(() => 0)
-
-      if (!fullHeight) {
-        // Degenerate geometry — one plain viewport shot still beats nothing.
-        const p = withChunkSuffix(0)
-        await page.screenshot({ path: p })
-        written.push(p)
-        return written
-      }
-
-      // The browser CLAMPS `window.scrollTo` to `maxScroll` (= fullHeight − one
-      // viewport). The old loop used the UNCLAMPED target `chunk * step` for the
-      // scroll AND the stop check, so on a page only slightly taller than one
-      // viewport the final chunk's target overshot maxScroll, got clamped back to
-      // ~the previous chunk's position, and produced a near-DUPLICATE shot (the
-      // "same one twice" the operator saw on Kuali finalization). Clamp the target
-      // here explicitly (so the logic is testable, not reliant on the browser's
-      // silent clamp) and stop once the strip still BELOW the current fold fits
-      // within the overlap seam — another chunk would only re-show content already
-      // readable in this one. `maxScroll === 0` (page ≤ one viewport) → one chunk.
-      const maxScroll = Math.max(0, fullHeight - CAPTURE.chunkHeight)
-      const step = Math.max(1, CAPTURE.chunkHeight - CAPTURE.chunkOverlap)
-      let y = 0
-      for (let chunk = 0; chunk < CAPTURE.maxChunks; chunk++) {
-        await page.evaluate((top: number) => window.scrollTo(0, top), y).catch(() => {})
-        await maybeWait.waitForTimeout?.(CAPTURE.settleMs).catch(() => {})
-        const p = withChunkSuffix(chunk)
-        // Plain VIEWPORT shot (no fullPage): captures exactly the scrolled fold.
-        await page.screenshot({ path: p })
-        written.push(p)
-        // Done when the content still below this fold is ≤ the overlap seam (this
-        // chunk's bottom already covers it readably) — no clamped near-duplicate.
-        if (maxScroll - y <= CAPTURE.chunkOverlap) break
-        y = Math.min(y + step, maxScroll)
-      }
-      return written
-    } catch {
-      // Best-effort: if nothing was captured, fall back to a single plain shot.
-      if (written.length === 0) {
-        try {
-          const p = withChunkSuffix(0)
-          await page.screenshot({ path: p })
-          written.push(p)
-        } catch { /* best-effort */ }
-      }
-      return written
-    } finally {
-      try { await page.evaluate(() => window.scrollTo(0, 0)) } catch { /* best-effort */ }
-      if (restoreViewport) await restoreViewport()
-      if (restoreIframes) await restoreIframes()
-      if (restoreOverflow) await restoreOverflow()
     }
   }
 
@@ -1298,11 +1066,10 @@ export class Session {
 
   /**
    * Strip `overflow`/`max-height`/`height` caps from every scrollable inner
-   * container (Kuali modals, PeopleSoft frames) so a subsequent fullPage / clip
-   * / element capture sees the full content height, and return a best-effort
-   * restore callback. Shared by `captureFullPage`, `captureBoundedFullPage`, and
-   * `captureRegion` so they all expand + restore identically. See
-   * `captureFullPage`'s doc comment for why each cap is neutralized.
+   * container (Kuali modals, PeopleSoft frames) so a subsequent `fullPage`
+   * capture sees the full content height, and return a best-effort restore
+   * callback. Used by the unified `captureFullPage`. See its doc comment for why
+   * each cap is neutralized.
    */
   private static async expandScrollContainers(page: Page): Promise<() => Promise<void>> {
     await page.evaluate(() => {
@@ -1316,10 +1083,21 @@ export class Session {
         minHeight: string
       }
       const saved: Saved[] = []
-      const candidates = document.querySelectorAll<HTMLElement>(
-        '[style*=overflow], .modal, iframe, [class*=scroll], [class*=Scroll]',
-      )
-      for (const el of Array.from(candidates)) {
+      // Detect scroll containers by COMPUTED style across EVERY element, not by
+      // a name-based selector. The Kuali finalization dialog sets `overflow:auto`
+      // + `max-height` via a STYLESHEET rule on a `class="dialog"` element — a
+      // `[style*=overflow], .modal, [class*=scroll]` selector never matches it,
+      // so the old pre-filter silently skipped it and the modal clipped at its
+      // max-height fold. Two passes (read-only detect, then mutate) so reading
+      // `scrollHeight` isn't interleaved with style writes — that would force a
+      // reflow per element and make an all-element scan O(n²). A hard cap keeps
+      // a pathological DOM (the 30k-px CRM record) from stalling the audit shot.
+      const ELEMENT_SCAN_CAP = 25_000
+      const all = document.querySelectorAll<HTMLElement>('*')
+      const toExpand: HTMLElement[] = []
+      const scanLimit = Math.min(all.length, ELEMENT_SCAN_CAP)
+      for (let i = 0; i < scanLimit; i++) {
+        const el = all[i]
         const s = getComputedStyle(el)
         const scrolls =
           (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowX === 'auto' || s.overflowX === 'scroll') &&
@@ -1328,7 +1106,9 @@ export class Session {
           s.maxHeight !== 'none' &&
           parseFloat(s.maxHeight) > 0 &&
           el.scrollHeight > el.clientHeight + 2
-        if (!scrolls && !constrained) continue
+        if (scrolls || constrained) toExpand.push(el)
+      }
+      for (const el of toExpand) {
         saved.push({
           el,
           overflow: el.style.overflow,
@@ -1347,6 +1127,28 @@ export class Session {
       }
       window.scrollTo(0, 0)
       void document.body.offsetHeight
+      // A `position:fixed`/`absolute` container (the Kuali finalization dialog is
+      // a fixed, centered modal) is OUT of document flow, so growing it does NOT
+      // grow `document.scrollHeight`. A `fullPage` shot is sized to scrollHeight,
+      // so a modal whose EXPANDED content runs taller than the page behind it
+      // (a long Kuali form over the short Action List) clips at the bottom. Bump
+      // `body` min-height to cover the tallest expanded out-of-flow container so
+      // fullPage's measured height includes all of it. Re-read scrollHeight AFTER
+      // the offsetHeight reflow above so the comparison is against final layout.
+      const prevBodyMinHeight = document.body.style.minHeight
+      let maxBottom = 0
+      for (const el of toExpand) {
+        const pos = getComputedStyle(el).position
+        if (pos !== 'fixed' && pos !== 'absolute') continue
+        const r = el.getBoundingClientRect()
+        const bottom = r.top + window.scrollY + el.scrollHeight
+        if (bottom > maxBottom) maxBottom = bottom
+      }
+      const docHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
+      if (maxBottom > docHeight) {
+        document.body.style.minHeight = `${Math.ceil(maxBottom)}px`
+        void document.body.offsetHeight
+      }
       ;(window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers = () => {
         for (const r of saved) {
           r.el.style.overflow = r.overflow
@@ -1356,6 +1158,7 @@ export class Session {
           r.el.style.height = r.height
           r.el.style.minHeight = r.minHeight
         }
+        document.body.style.minHeight = prevBodyMinHeight
         delete (window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers
       }
     })
@@ -1403,21 +1206,15 @@ export class Session {
    * Capture all open pages as structured PNGs under `.screenshots/`, using the
    * canonical `{workflow}-{itemId}-{kind}-{label}-{system}-{ts}.png` convention.
    * Best-effort — a failure on one page never blocks siblings. Returns metadata
-   * for each file successfully written.
+   * for each file successfully written (ONE file per targeted page).
    *
-   * Capture MODE is per-call (applies to every targeted page). Every mode
-   * writes ONE file per page EXCEPT `paged`, which writes N chunk files.
-   * Precedence:
-   * - `opts.paged` → whole-page scroll capture: N viewport-sized chunk PNGs
-   *   (`-cNN`) that together show the ENTIRE page at readable size for manual
-   *   review (Kuali finalization, UCPath submitted confirmation).
-   * - `opts.region` → element/iframe-scoped clean capture (the whole form, none
-   *   of the page chrome). Falls back to a bounded full-page shot if the element
-   *   is missing.
-   * - `opts.centerSelector` → center-on-element VIEWPORT capture (virtual-scroll
-   *   grids).
-   * - `opts.bounded` → fixed-width whole-page capture (no ribbon, no selector).
-   * - none → the default `captureFullPage` shot (content-fit widening).
+   * There is ONE capture mode for every workflow: the unified whole-page/form
+   * `captureFullPage` shot (expand inner-scroll containers + grow fixed-height
+   * iframes + content-fit widen + one `fullPage`), so the ENTIRE page or form is
+   * in frame, never a clipped portion. The lone exception is `opts.centerSelector`
+   * — a VIEWPORT shot centered on an element, for VIRTUAL-SCROLL grids (the Kronos
+   * timecard) whose off-screen rows aren't in the DOM and so can't be reached by
+   * any full-page shot.
    */
   async captureAll(opts: CaptureFileOpts): Promise<Array<{ system: string; path: string; bytes: number }>> {
     const outDir = this.state.screenshotDir ?? PATHS.screenshotDir
@@ -1462,40 +1259,19 @@ export class Session {
       label: opts.label, system, ts: opts.ts,
     }))
     try {
-      if (opts.paged) {
-        // Whole-page scroll capture: N readable viewport chunks that together
-        // show EVERYTHING for manual review. Each chunk gets a `-cNN` filename.
-        const chunkPath = (chunk: number): string => join(outDir, formatCaptureFilename({
-          workflow: opts.workflow, itemId: opts.itemId, kind: opts.kind,
-          label: opts.label, system, ts: opts.ts, chunk,
-        }))
-        const paths = await Session.capturePagedFullPage(page, chunkPath)
-        for (const written of paths) await fileMeta(written)
-        return out
-      }
-      if (opts.region) {
-        // Element/iframe-scoped: the whole form, none of the page chrome.
-        // Falls back to a bounded full-page shot if the element is missing, so
-        // the audit capture never silently vanishes.
-        const written =
-          (await Session.captureRegion(page, opts.region, p)) ??
-          (await Session.captureBoundedFullPage(page, p))
-        if (written) await fileMeta(written)
-        return out
-      }
       if (opts.centerSelector) {
-        // Virtual-scroll grids: center the target row, capture the VIEWPORT.
+        // The ONE exception to the unified whole-page capture: a VIRTUAL-SCROLL
+        // grid (the Kronos timecard) renders only the rows currently in the DOM,
+        // so a `fullPage` shot can't reach off-screen rows no matter how we
+        // expand — physically centering the target row and shooting the VIEWPORT
+        // is the only faithful "everything on screen" capture for it.
         const written = await Session.captureViewportCenteredOnElement(page, opts.centerSelector, p)
         if (written) await fileMeta(written)
         return out
       }
-      if (opts.bounded) {
-        // Tall form, no stable region selector: fixed-width whole-page, no ribbon.
-        const written = await Session.captureBoundedFullPage(page, p)
-        if (written) await fileMeta(written)
-        return out
-      }
-      // Default: expand inner-scroll containers, then one fullPage shot.
+      // The unified capture for EVERY other page: one fullPage shot that expands
+      // inner-scroll containers, grows fixed-height iframes, and content-fit
+      // widens so the ENTIRE page or form is in frame, never a clipped portion.
       const buf = await Session.captureFullPage(page, p)
       out.push({ system, path: p, bytes: buf.byteLength })
       return out
