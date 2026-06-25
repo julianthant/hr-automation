@@ -10,6 +10,8 @@ import {
   RotateCw,
   Crosshair,
   AlertTriangle,
+  ExternalLink,
+  Activity,
 } from "lucide-react";
 import type { AuthState, BrowserHealth, WorkflowInstanceState } from "@/components/shared/types";
 import { useConfirm } from "@/components/shared/useConfirm";
@@ -383,12 +385,30 @@ function StopPill({
   );
 }
 
+type BrowserAction = "check" | "focus" | "refresh" | "reopen";
+
+const BROWSER_ACTIONS: ReadonlyArray<{
+  action: BrowserAction;
+  Icon: typeof Crosshair;
+  verb: (system: string) => string;
+  success: (system: string) => string;
+}> = [
+  { action: "check", Icon: Activity, verb: (s) => `Check ${s} now`, success: (s) => `Checking the ${s} browser` },
+  { action: "focus", Icon: Crosshair, verb: (s) => `Bring the ${s} window to front`, success: (s) => `Bringing the ${s} window to front` },
+  { action: "refresh", Icon: RotateCw, verb: (s) => `Refresh (reload) the ${s} page`, success: (s) => `Reloading the ${s} page` },
+  { action: "reopen", Icon: ExternalLink, verb: (s) => `Reopen ${s} on a fresh tab (same login)`, success: (s) => `Reopening ${s} on a fresh tab` },
+];
+
 /**
- * Per-browser tile controls — Focus ("which browser is this?", brings the
- * Chromium window to front) and Refresh (reload the page — the operator's
- * manual "refresh-only" recovery). Both target THIS browser by
- * `(workflow, instance, systemId)`, so the action always hits the right
- * browser regardless of tile order. Hover/focus-revealed to keep the tile clean.
+ * Per-browser tile controls, all targeting THIS browser by
+ * `(workflow, instance, systemId)` so the action hits the right browser
+ * regardless of tile order. The recovery ladder is exposed as discrete
+ * operator controls:
+ *   - Check  — probe health now (`/api/browser/check`).
+ *   - Focus  — bring the Chromium window to front ("which browser is this?").
+ *   - Refresh — reload the page (rung 1 recovery).
+ *   - Reopen — fresh tab on the same authenticated context (rung 2, no Duo).
+ * Hover/focus-revealed to keep the resting tile clean.
  */
 function BrowserTileControls({
   workflow,
@@ -399,35 +419,28 @@ function BrowserTileControls({
   instance: string;
   systemId: string;
 }) {
-  const [busy, setBusy] = useState<null | "refresh" | "focus">(null);
+  const [busy, setBusy] = useState<null | BrowserAction>(null);
 
-  const post = async (action: "refresh" | "focus") => {
-    setBusy(action);
-    const toastId = toast.loading(
-      action === "refresh" ? `Refreshing ${systemId}…` : `Focusing ${systemId}…`,
-    );
+  const post = async (spec: (typeof BROWSER_ACTIONS)[number]) => {
+    setBusy(spec.action);
+    const toastId = toast.loading(`${spec.verb(systemId)}…`);
     try {
-      const res = await fetch(`/api/browser/${action}`, {
+      const res = await fetch(`/api/browser/${spec.action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workflow, instance, systemId }),
       });
       const json = (await res.json()) as { ok: boolean; error?: string };
       if (!res.ok || !json.ok) {
-        toast.error(`Couldn't ${action} the ${systemId} browser`, {
+        toast.error(`Couldn't ${spec.action} the ${systemId} browser`, {
           id: toastId,
           description: json.error ?? `HTTP ${res.status}`,
         });
         return;
       }
-      toast.success(
-        action === "refresh"
-          ? `Reloading the ${systemId} page`
-          : `Bringing the ${systemId} window to front`,
-        { id: toastId },
-      );
+      toast.success(spec.success(systemId), { id: toastId });
     } catch (err) {
-      toast.error(`Couldn't ${action} the ${systemId} browser`, {
+      toast.error(`Couldn't ${spec.action} the ${systemId} browser`, {
         id: toastId,
         description: (err as Error).message,
       });
@@ -442,40 +455,26 @@ function BrowserTileControls({
 
   return (
     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-within:opacity-100 transition-opacity">
-      <button
-        type="button"
-        disabled={busy !== null}
-        title={`Bring the ${systemId} browser window to front`}
-        aria-label={`Bring the ${systemId} browser window to front`}
-        className={btn}
-        onClick={(e) => {
-          e.stopPropagation();
-          void post("focus");
-        }}
-      >
-        {busy === "focus" ? (
-          <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
-        ) : (
-          <Crosshair className="w-3 h-3" />
-        )}
-      </button>
-      <button
-        type="button"
-        disabled={busy !== null}
-        title={`Refresh (reload) the ${systemId} browser page`}
-        aria-label={`Refresh the ${systemId} browser page`}
-        className={btn}
-        onClick={(e) => {
-          e.stopPropagation();
-          void post("refresh");
-        }}
-      >
-        {busy === "refresh" ? (
-          <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
-        ) : (
-          <RotateCw className="w-3 h-3" />
-        )}
-      </button>
+      {BROWSER_ACTIONS.map((spec) => (
+        <button
+          key={spec.action}
+          type="button"
+          disabled={busy !== null}
+          title={spec.verb(systemId)}
+          aria-label={spec.verb(systemId)}
+          className={btn}
+          onClick={(e) => {
+            e.stopPropagation();
+            void post(spec);
+          }}
+        >
+          {busy === spec.action ? (
+            <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
+          ) : (
+            <spec.Icon className="w-3 h-3" />
+          )}
+        </button>
+      ))}
     </div>
   );
 }
