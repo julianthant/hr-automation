@@ -60,10 +60,10 @@ Each per-system `CLAUDE.md` links to its `LESSONS.md` + `SELECTORS.md` and embed
 
 ## Selector discovery (playwright-cli)
 
-Use `playwright-cli` (install: `npm install -g @playwright/cli@latest`) to map selectors before writing code:
+Use `playwright-cli` (install: `npm install -g @playwright/cli@latest`) to map selectors before writing code. It runs **headless by default** — `--headed` is opt-in only when you need to watch. Verifying selectors is pre-authorized; don't pause to ask. For auth-gated systems run `npm run sel:browser -- <login-url>` — it opens a headless session with the `duo-autopilot/` extension loaded, which clears the Duo MFA prompt itself (you still fill the SSO username/password). Full recipe + fallback: "Verifying selectors" in the root `CLAUDE.md`.
 
 ```bash
-playwright-cli -s=session open --headed <url>
+playwright-cli -s=session open <url>            # headless; add --headed only to watch
 playwright-cli -s=session snapshot              # view element refs
 playwright-cli -s=session click e40             # click by ref ID
 playwright-cli -s=session screenshot
