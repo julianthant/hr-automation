@@ -1,0 +1,93 @@
+[
+  {
+    "id": "crm.search.resultRows#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Search Result Rows",
+    "summary": "All result rows in the search-results table.",
+    "selectorFqn": "crmSelectors.search.resultRows",
+    "verified": "2026-04-14",
+    "tags": ["search", "results", "rows", "table", "crm"],
+    "sourceRef": "src/systems/crm/selectors.ts:18"
+  },
+  {
+    "id": "crm.search.nthResultRow#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Nth Search Result Row",
+    "summary": "Nth result row; use .locator('td').nth(1) for the 'Offer Sent On' column (index 1).",
+    "selectorFqn": "crmSelectors.search.nthResultRow",
+    "verified": "2026-04-14",
+    "tags": ["search", "result", "row", "nth", "table", "crm"],
+    "note": "Column 'Offer Sent On' is hardcoded at index 1; caller must pass the row index i.",
+    "sourceRef": "src/systems/crm/selectors.ts:25"
+  },
+  {
+    "id": "crm.record.thLabelFollowingTd#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Record Field — th Label Strategy",
+    "summary": "Visualforce label → value strategy 1: label in <th>, value in the next sibling <td>.",
+    "selectorFqn": "crmSelectors.record.thLabelFollowingTd",
+    "verified": "2026-04-14",
+    "tags": ["visualforce", "label", "value", "th", "extract", "record", "crm"],
+    "sourceRef": "src/systems/crm/selectors.ts:37"
+  },
+  {
+    "id": "crm.record.tdLabelFollowingTd#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Record Field — td Label Strategy (Fallback)",
+    "summary": "Visualforce label → value strategy 2 (fallback): label in <td>, value in the next sibling <td>.",
+    "selectorFqn": "crmSelectors.record.tdLabelFollowingTd",
+    "verified": "2026-04-14",
+    "tags": ["visualforce", "label", "value", "td", "extract", "record", "fallback", "crm"],
+    "sourceRef": "src/systems/crm/selectors.ts:47"
+  },
+  {
+    "id": "crm.record.cellLabelFollowingTd#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Record Field — Any-Cell Label Strategy (Broader Fallback)",
+    "summary": "Visualforce label → value strategy 3: label in any cell (<th> OR <td>) via .or() chain, value in next sibling <td>.",
+    "selectorFqn": "crmSelectors.record.cellLabelFollowingTd",
+    "tags": ["visualforce", "label", "value", "th", "td", "extract", "record", "fallback", "crm"],
+    "note": "UNVERIFIED against live CRM — added 2026-06-07 as strictly-additive widening; needs live re-verify.",
+    "sourceRef": "src/systems/crm/selectors.ts:62"
+  },
+  {
+    "id": "crm.record.rowLabelLastCell#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Record Field — Row-Scoped Last-Cell Strategy (Fallback)",
+    "summary": "Visualforce label → value strategy 4: finds <tr> containing the label, reads its last <td> — robust when extra spacer cells separate label from value.",
+    "selectorFqn": "crmSelectors.record.rowLabelLastCell",
+    "tags": ["visualforce", "label", "value", "row", "last-cell", "extract", "record", "fallback", "crm"],
+    "note": "UNVERIFIED against live CRM — added 2026-06-07; handles label text split across child nodes via :has-text accumulation.",
+    "sourceRef": "src/systems/crm/selectors.ts:83"
+  },
+  {
+    "id": "crm.record.lightningFieldValue#scrape",
+    "kind": "scrape",
+    "system": "crm",
+    "label": "Record Field — Salesforce Lightning Fallback",
+    "summary": "Salesforce Lightning record-detail fallback: reads .slds-form-element__control for a matching .slds-form-element__label.",
+    "selectorFqn": "crmSelectors.record.lightningFieldValue",
+    "tags": ["lightning", "label", "value", "form-element", "extract", "record", "fallback", "crm"],
+    "note": "UNVERIFIED against live CRM — added 2026-06-07; catches record pages served by Lightning UI instead of classic Visualforce.",
+    "sourceRef": "src/systems/crm/selectors.ts:98"
+  },
+  {
+    "id": "crm.sectionNav.byName#click",
+    "kind": "click",
+    "system": "crm",
+    "label": "Navigate to Section by Name",
+    "summary": "Click a named CRM section via a fallback chain: link → plain text → tab.",
+    "selectorFqn": "crmSelectors.sectionNav.byName",
+    "role": "link",
+    "verified": "2026-04-14",
+    "tags": ["section", "navigation", "name", "fallback", "link", "tab", "crm"],
+    "note": "Fallback chain: getByRole('link', regex) .or(getByText) .or(getByRole('tab', regex)); regex not escaped for special chars; CRM_SECTION_URLS direct-URL map covers only 'UCPath Entry Sheet' — missing sections fall through to this click path.",
+    "sourceRef": "src/systems/crm/selectors.ts:114"
+  }
+]

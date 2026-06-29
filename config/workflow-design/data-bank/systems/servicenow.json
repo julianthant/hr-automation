@@ -1,0 +1,360 @@
+{
+  "system": "servicenow",
+  "label": "ServiceNow",
+  "operations": [
+    {
+      "id": "servicenow.duoApproval#wait",
+      "kind": "wait",
+      "system": "servicenow",
+      "label": "Wait for Duo MFA approval",
+      "summary": "pollDuoApproval / requestDuoApproval — 300s timeout; successUrlMatch=support.ucsd.edu without duosecurity; successCheck=subjectInput visible; hands-off WebAuthn (Touch ID, internal) if HR_AUTOMATION_DUO_WEBAUTHN=1"
+    },
+    {
+      "id": "servicenow.fileUploadSettle#wait",
+      "kind": "wait",
+      "system": "servicenow",
+      "label": "Wait 1000ms for file upload to register",
+      "summary": "page.waitForTimeout(1000) — upload latency before submit"
+    },
+    {
+      "id": "servicenow.formTitle#assert",
+      "kind": "assert",
+      "system": "servicenow",
+      "label": "Verify title includes 'HR General Inquiry'",
+      "summary": "verifyOnInquiryForm — page.title() must include 'HR General Inquiry'; throws with current title + URL on mismatch (indicates SSO redirect / session expired)"
+    },
+    {
+      "id": "servicenow.hrFormAuth#navigate",
+      "kind": "navigate",
+      "system": "servicenow",
+      "label": "Navigate to HR Inquiry form for auth probe",
+      "summary": "page.goto(HR_INQUIRY_FORM_URL, {waitUntil:'domcontentloaded', timeout:15000})",
+      "url": "https://support.ucsd.edu/esc?id=sc_cat_item&table=sc_cat_item&sys_id=d8af3ae8db4fe510b3187d84f39619bf"
+    },
+    {
+      "id": "servicenow.hrInquiry.categoryChoice#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Open Category Select2 dropdown (fallback path)",
+      "summary": "Fallback when native selectOption throws — click categoryChoice to open Select2 drop",
+      "selectorFqn": "hrInquiry.categoryChoice",
+      "role": "link",
+      "verified": "2026-06-02",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Fallback path only; executes when selectOption on categoryInput fails",
+      "sourceRef": "src/systems/servicenow/selectors.ts:64"
+    },
+    {
+      "id": "servicenow.hrInquiry.categoryInput#scrape",
+      "kind": "scrape",
+      "system": "servicenow",
+      "label": "Category — scrape accessible name",
+      "summary": "Offscreen Select2 focusser for the 'Category:' combobox; usable as an anchor for reading accessible state but cannot be clicked or filled directly.",
+      "selectorFqn": "hrInquiry.categoryInput",
+      "role": "combobox",
+      "accessibleName": "Category:",
+      "verified": "2026-06-02",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Same offscreen focusser caveat as specificallyInput. selectOption is tried first on the native <select> before falling back to the Select2 path. Use categoryChoice to open the drop.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:59"
+    },
+    {
+      "id": "servicenow.hrInquiry.categoryInput#select",
+      "kind": "select",
+      "system": "servicenow",
+      "label": "Select Category via native selectOption (primary path)",
+      "summary": "categoryInput.selectOption({label: 'Payroll'}, {timeout:3000}); throws → falls back to Select2 combobox path",
+      "selectorFqn": "hrInquiry.categoryInput"
+    },
+    {
+      "id": "servicenow.hrInquiry.descriptionInput#fill",
+      "kind": "fill",
+      "system": "servicenow",
+      "label": "Fill Description field",
+      "summary": "Description textbox (required) on the HR General Inquiry form.",
+      "selectorFqn": "hrInquiry.descriptionInput",
+      "role": "textbox",
+      "accessibleName": "Description",
+      "verified": "2026-05-01",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "sourceRef": "src/systems/servicenow/selectors.ts:23"
+    },
+    {
+      "id": "servicenow.hrInquiry.descriptionInput#scrape",
+      "kind": "scrape",
+      "system": "servicenow",
+      "label": "Description — scrape",
+      "summary": "Read the current value of the Description textbox on the HR General Inquiry form.",
+      "selectorFqn": "hrInquiry.descriptionInput",
+      "role": "textbox",
+      "accessibleName": "Description",
+      "verified": "2026-05-01",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "sourceRef": "src/systems/servicenow/selectors.ts:23"
+    },
+    {
+      "id": "servicenow.hrInquiry.fileInput#upload",
+      "kind": "upload",
+      "system": "servicenow",
+      "label": "Attach oath PDF via hidden file input",
+      "summary": "hrInquiry.fileInput(page).setInputFiles(attachmentPath) — bypasses the visible 'Choose a file' button to avoid OS file picker",
+      "selectorFqn": "hrInquiry.fileInput",
+      "verified": "2026-05-01",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Clicking the visible 'Choose a file' button triggers an OS file picker; use setInputFiles on this hidden input instead for reliable headless automation.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:111"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2DropSearch.Category#fill",
+      "kind": "fill",
+      "system": "servicenow",
+      "label": "Type into Category search box (fallback path)",
+      "summary": "select2DropSearch(page, 'Category') — scoped by 'Select Category:' accessible name; page.waitForTimeout(500) after fill",
+      "selectorFqn": "hrInquiry.select2DropSearch",
+      "note": "Fallback path only"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2DropSearch.Specifically#fill",
+      "kind": "fill",
+      "system": "servicenow",
+      "label": "Type into Specifically search box",
+      "summary": "select2DropSearch(page, 'Specifically') — scoped by search input accessible name ('Select Specifically:') to avoid strict-mode collision with other open drops",
+      "selectorFqn": "hrInquiry.select2DropSearch"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2DropSearch#fill",
+      "kind": "fill",
+      "system": "servicenow",
+      "label": "Select2 drop search — fill",
+      "summary": "Search input inside an open Select2 dropdown, scoped per-field via the accessible name 'Select <fieldLabel>:'.",
+      "selectorFqn": "hrInquiry.select2DropSearch",
+      "role": "combobox",
+      "verified": "2026-06-04",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Parameterized by fieldLabel (pass 'Specifically' or 'Category'). Scoped by accessible name rather than .select2-drop-active because this ServiceNow build does NOT clear that class when another drop opens, leaving both fields' search inputs in the DOM and causing strict-mode violations.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:87"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2DropSearch#scrape",
+      "kind": "scrape",
+      "system": "servicenow",
+      "label": "Select2 drop search — scrape",
+      "summary": "Read the current search text in an open Select2 dropdown for a specific field.",
+      "selectorFqn": "hrInquiry.select2DropSearch",
+      "role": "combobox",
+      "verified": "2026-06-04",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Parameterized by fieldLabel; same per-field scoping as the fill variant.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:87"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2ResultOption.Category#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Click Category result option (fallback path)",
+      "summary": "select2ResultOption(page, 'Category', value) with 3s timeout; fallback: Enter",
+      "selectorFqn": "hrInquiry.select2ResultOption",
+      "note": "Fallback path only"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2ResultOption.Specifically#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Click Specifically result option",
+      "summary": "select2ResultOption(page, 'Specifically', value) with 3s timeout; fallback: page.keyboard.press('Enter') to accept highlighted match",
+      "selectorFqn": "hrInquiry.select2ResultOption"
+    },
+    {
+      "id": "servicenow.hrInquiry.select2ResultOption#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Select2 result option — click to select",
+      "summary": "A result row in the open Select2 dropdown for a specific field, matched by visible label text.",
+      "selectorFqn": "hrInquiry.select2ResultOption",
+      "role": "option",
+      "verified": "2026-06-04",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Parameterized by fieldLabel and label. Scoped to the field's own .select2-drop via the search input's accessible name, so lingering-active drops from sibling fields do not cause ambiguity. Role inferred from usage (Select2 result item); not a native ARIA role.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:97"
+    },
+    {
+      "id": "servicenow.hrInquiry.specificallyChoice#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Open Specifically Select2 dropdown",
+      "summary": "Click visible a.select2-choice anchor (accessible combobox is offscreen and times out on direct click)",
+      "selectorFqn": "hrInquiry.specificallyChoice",
+      "role": "link",
+      "verified": "2026-06-02",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Scoped to the Specifically: field's .select2-container ancestor to avoid colliding with the Category Select2. Must click this before using select2DropSearch / select2ResultOption.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:45"
+    },
+    {
+      "id": "servicenow.hrInquiry.specificallyInput#scrape",
+      "kind": "scrape",
+      "system": "servicenow",
+      "label": "Specifically — scrape accessible name",
+      "summary": "Offscreen Select2 focusser for the 'Specifically:' combobox; usable as an anchor for reading accessible state but cannot be clicked or filled directly.",
+      "selectorFqn": "hrInquiry.specificallyInput",
+      "role": "combobox",
+      "accessibleName": "Specifically:",
+      "verified": "2026-06-02",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "OFFSCREEN focusser — pointer events are intercepted by the visible Select2 anchor. Use specificallyChoice to open the drop, select2DropSearch to type, and select2ResultOption to pick. Scrape only via this locator.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:35"
+    },
+    {
+      "id": "servicenow.hrInquiry.subjectInput#assert",
+      "kind": "assert",
+      "system": "servicenow",
+      "label": "Check already authenticated (subject input visible)",
+      "summary": "hrInquiry.subjectInput(page).isVisible({timeout:2000}) → if true, skip SSO flow and return true",
+      "selectorFqn": "hrInquiry.subjectInput"
+    },
+    {
+      "id": "servicenow.hrInquiry.subjectInput#fill",
+      "kind": "fill",
+      "system": "servicenow",
+      "label": "Fill Subject field",
+      "summary": "Subject textbox (required) on the HR General Inquiry form.",
+      "selectorFqn": "hrInquiry.subjectInput",
+      "role": "textbox",
+      "accessibleName": "Subject",
+      "verified": "2026-05-01",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "sourceRef": "src/systems/servicenow/selectors.ts:18"
+    },
+    {
+      "id": "servicenow.hrInquiry.subjectInput#scrape",
+      "kind": "scrape",
+      "system": "servicenow",
+      "label": "Subject — scrape",
+      "summary": "Read the current value of the Subject textbox on the HR General Inquiry form.",
+      "selectorFqn": "hrInquiry.subjectInput",
+      "role": "textbox",
+      "accessibleName": "Subject",
+      "verified": "2026-05-01",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "sourceRef": "src/systems/servicenow/selectors.ts:18"
+    },
+    {
+      "id": "servicenow.hrInquiry.submitButton#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Click Submit button",
+      "summary": "Submit the HR General Inquiry form.",
+      "selectorFqn": "hrInquiry.submitButton",
+      "role": "button",
+      "accessibleName": "Submit",
+      "verified": "2026-05-01",
+      "tags": [
+        "servicenow",
+        "hr-inquiry-form"
+      ],
+      "note": "Redirects to a ticket detail page; parse the ticket number from the redirect URL (number=HRC0XXXXXX) or scrape the page heading as fallback.",
+      "sourceRef": "src/systems/servicenow/selectors.ts:116"
+    },
+    {
+      "id": "servicenow.hrInquiryForm#navigate",
+      "kind": "navigate",
+      "system": "servicenow",
+      "label": "Navigate to HR Inquiry catalog item",
+      "summary": "gotoHrInquiryForm — page.goto with waitUntil:'domcontentloaded'; skips networkidle to avoid 5–10s dead wait on ServiceNow's background XHR",
+      "url": "https://support.ucsd.edu/esc?id=sc_cat_item&table=sc_cat_item&sys_id=d8af3ae8db4fe510b3187d84f39619bf"
+    },
+    {
+      "id": "servicenow.postDuoLanding#assert",
+      "kind": "assert",
+      "system": "servicenow",
+      "label": "Post-Duo landing verification: HR form subject input visible",
+      "summary": "hrInquiry.subjectInput(page).isVisible({timeout:5000}) — confirms we landed on the HR Inquiry form, not another ServiceNow redirect target; logs warn + returns false on failure",
+      "selectorFqn": "hrInquiry.subjectInput"
+    },
+    {
+      "id": "servicenow.specificallyDropSettle#wait",
+      "kind": "wait",
+      "system": "servicenow",
+      "label": "Wait 800ms for Specifically dropdown results to render",
+      "summary": "page.waitForTimeout(800) — Select2 result list loads asynchronously"
+    },
+    {
+      "id": "servicenow.ssoCredentials#fill",
+      "kind": "fill",
+      "system": "servicenow",
+      "label": "Fill SSO username and password",
+      "summary": "fillSsoCredentials — 3-level fallback selectors (accessible label → alternate label → input[name])"
+    },
+    {
+      "id": "servicenow.ssoForm#wait",
+      "kind": "wait",
+      "system": "servicenow",
+      "label": "Wait for TritON SSO form to render",
+      "summary": "waitForSsoForm(page, 15000) — polls for a5.ucsd.edu SSO form; needed because ServiceNow auth_redirect.do hop is client-side and form lags ~1-2s"
+    },
+    {
+      "id": "servicenow.ssoSubmit#click",
+      "kind": "click",
+      "system": "servicenow",
+      "label": "Click SSO Log In button",
+      "summary": "clickSsoSubmit — button[name='_eventId_proceed']"
+    },
+    {
+      "id": "servicenow.ticketNumber#scrape",
+      "kind": "scrape",
+      "system": "servicenow",
+      "label": "Parse ticket number from redirect URL",
+      "summary": "parseTicketNumberFromUrl(page.url()) — extracts ?number=HRC0XXXXXX via URL.searchParams; validates /^HRC\\d{6,}$/"
+    },
+    {
+      "id": "servicenow.ticketNumberPresent#assert",
+      "kind": "assert",
+      "system": "servicenow",
+      "label": "Assert ticket number was captured from redirect URL",
+      "summary": "Throws submitAndCaptureTicketNumber: no number= param in post-submit URL if num is null"
+    },
+    {
+      "id": "servicenow.ticketRedirect#wait",
+      "kind": "wait",
+      "system": "servicenow",
+      "label": "Wait for post-submit redirect to ticket detail URL",
+      "summary": "page.waitForURL(url => url !== before && url.includes('number='), {timeout:60000}); falls through on stale event — URL is probed directly after"
+    }
+  ]
+}

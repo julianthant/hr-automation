@@ -1,0 +1,630 @@
+{
+  "workflow": "person-lookup",
+  "systems": [
+    "ucpath",
+    "crm"
+  ],
+  "steps": [
+    {
+      "step": "auth",
+      "label": "Authenticate UCPath + CRM",
+      "system": "multi",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts",
+      "note": "authSteps:true — kernel-prepended, parallel-ready. UCPath requires SSO + Duo MFA (duo-autopilot extension auto-clears Duo in headless sessions). CRM is Salesforce SSO (ACT CRM). Each system's BrowserContext is shared across up to 4 pool workers (shared-context-pool mode, poolSize:4); each worker opens its own Page on first ctx.page(id) call.",
+      "operations": [
+        {
+          "id": "ucpath.authenticate#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Login to UCPath (SSO + Duo MFA)",
+          "summary": "requireLogin(loginToUCPath, 'UCPath authentication failed') — navigates to UCPath HR Tasks, fills SSO credentials, awaits Duo MFA approval",
+          "sourceRef": "src/infra/auth/login.ts"
+        },
+        {
+          "id": "crm.authenticate#control",
+          "kind": "control",
+          "system": "crm",
+          "label": "Login to ACT CRM (Salesforce SSO)",
+          "summary": "requireLogin(loginToACTCrm, 'CRM authentication failed') — navigates to act-crm.my.site.com, fills SSO credentials, awaits MFA if required",
+          "sourceRef": "src/infra/auth/login.ts"
+        }
+      ]
+    },
+    {
+      "step": "searching",
+      "label": "Search UCPath Person Org Summary",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts",
+      "note": "searchingStep calls lookupPersonInUcpath (lookup.ts) which delegates to searchByEid or searchByName in person-org-summary.ts. Name path: multi-attempt strategy (full name → first-only → middle-as-first), each attempt re-navigates fresh after PeopleSoft 'No matching values' popups. EID path: fills emplIdInput directly, PeopleSoft auto-redirects to detail page on single match. Both paths capture a screenshot of the final page state.",
+      "operations": [
+        {
+          "id": "control.eidOrNameBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: EID input vs name input",
+          "summary": "isEidInput(input): EID path fills emplIdInput + skips CRM EID-disambiguation; name path fills lastNameInput+nameInput with multi-attempt strategy + applies HDH dept filter",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        },
+        {
+          "id": "ucpath.personOrgSummaryUrl#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to Person Org Summary landing URL",
+          "url": "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?CONTEXTIDPARAMS=TEMPLATE_ID%3aPTPPNAVCOL&scname=ADMN_UC_ADMIN_LOC_HIRE_NAVCOLL&PanelCollapsible=Y&PTPPB_GROUPLET_ID=UC_HIRE_TASKS_TILE_FL&CRefName=UC_HIRE_TASKS_TILE_FL&AJAXTRANSFER=Y",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "waitUntil:domcontentloaded, timeout:30s; then 5s settle + networkidle. Re-navigated fresh on each name-path search attempt after 'No matching values' popups break the form."
+        },
+        {
+          "id": "ucpath.hrTasks.personOrgSummaryLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'Person Organizational Summary' in HR Tasks sidebar",
+          "selectorFqn": "hrTasks.personOrgSummaryLink",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts"
+        },
+        {
+          "id": "ucpath.collapseSidebar#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Collapse HR Tasks sidebar",
+          "summary": "collapseSidebar(page, { onlyIfExpanded:true, quiet:true }) — avoids sidebar overlay intercepting iframe button clicks",
+          "sourceRef": "src/systems/ucpath/navigate.ts"
+        },
+        {
+          "id": "ucpath.personOrgSummary.lastNameInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Last Name field (name-path) or clear it (EID-path)",
+          "selectorFqn": "personOrgSummary.lastNameInput",
+          "inputVar": "{lastName}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "EID path: fills empty string to clear any retained value; name path: fills the extracted lastName from 'Last, First Middle' input"
+        },
+        {
+          "id": "ucpath.personOrgSummary.nameInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Name (first + optional middle) field (name-path) or clear (EID-path)",
+          "selectorFqn": "personOrgSummary.nameInput",
+          "inputVar": "{firstName}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "EID path: fills empty string; name path: fills first + middle (attempt 1), first-only (attempt 2), middle-only (attempt 3)"
+        },
+        {
+          "id": "ucpath.personOrgSummary.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID field (EID-path only)",
+          "selectorFqn": "personOrgSummary.emplIdInput",
+          "inputVar": "{emplId}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "EID path only; cleared first then filled with the 8-digit emplId"
+        },
+        {
+          "id": "ucpath.personOrgSummary.searchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Search button",
+          "selectorFqn": "personOrgSummary.searchButton",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts"
+        },
+        {
+          "id": "ucpath.networkidle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for search results to load",
+          "summary": "page.waitForTimeout(3s) + waitForLoadState('networkidle', 15s) + waitForPeopleSoftProcessing(frame)",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts"
+        },
+        {
+          "id": "ucpath.personOrgSummary.nothingYetText#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Detect 'Nothing yet' empty-state indicator",
+          "selectorFqn": "personOrgSummary.nothingYetText",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Name path only; count() > 0 → return empty results immediately"
+        },
+        {
+          "id": "ucpath.personOrgSummary.noMatchingValuesText#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Detect 'No matching values' message",
+          "selectorFqn": "personOrgSummary.noMatchingValuesText",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Name path only; count() > 0 → return empty results; triggers fresh re-navigation on next attempt"
+        },
+        {
+          "id": "ucpath.personOrgSummary.personIdValue#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Detect single-result auto-redirect to detail page",
+          "selectorFqn": "personOrgSummary.personIdValue",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Both paths; PeopleSoft skips the results grid and navigates directly to detail when exactly 1 result; count() > 0 → extractSingleResultDetail path"
+        },
+        {
+          "id": "ucpath.personOrgSummary.viewAllLink#click-results",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'View All' to expand paginated results grid (name-path)",
+          "selectorFqn": "personOrgSummary.viewAllLink",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Name path only; optional — clickIfPresent with 10s timeout; loads all result rows before extracting the grid table"
+        },
+        {
+          "id": "ucpath.personOrgSummary.resultsTable#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape results grid → raw candidate rows",
+          "selectorFqn": "personOrgSummary.resultsTable",
+          "outputVar": "{candidateRows}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Name path only (multi-result case); grid id #tdgbrPTS_CFG_CL_STD_RSL$0; 9 cells per data row; first cell is Empl ID (5+ digits); keeps only rows where businessUnit === 'SDCMP' as sdcmpCandidates"
+        },
+        {
+          "id": "ucpath.personOrgSummary.drillInButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click drill-in button for each SDCMP candidate row",
+          "selectorFqn": "personOrgSummary.drillInButton",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Name path only; loops over sdcmpResults; selector id PTS_CFG_CL_RSLT_PTS_DRILLIN$40$$IMG${rowIndex}; navigates to the person's detail page"
+        },
+        {
+          "id": "ucpath.personOrgSummary.viewAllLink#click-instances",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'View All' to expand Employment Instances on detail page",
+          "selectorFqn": "personOrgSummary.viewAllLink",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Both paths (detail page); optional — clickIfPresent with 3s timeout; expands hidden Employment Instances so the preferred active/HDH assignment row is visible"
+        },
+        {
+          "id": "ucpath.personOrgSummary.lastHireDate#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Last Hire Date from ORG Instance section",
+          "selectorFqn": "personOrgSummary.lastHireDate",
+          "outputVar": "{ucpathStartDate}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Selector #PER_INST_EMP_VW_LAST_HIRE_DT$0; stored as backend-only ucpathStartDate — operator-facing Start Date is CRM-sourced (cross-verification step); used only for EID disambiguation date tolerance"
+        },
+        {
+          "id": "ucpath.personOrgSummary.terminationDate#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Termination Date from ORG Instance section",
+          "selectorFqn": "personOrgSummary.terminationDate",
+          "outputVar": "{terminationDate}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Selector #PER_INST_EMP_VW_TERMINATION_DT$0; blanked for active assignments (active hrStatus → override termDate to empty)"
+        },
+        {
+          "id": "ucpath.personOrgSummary.terminationReason#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Termination Reason from ORG Instance section",
+          "selectorFqn": "personOrgSummary.terminationReason",
+          "outputVar": "{terminationReason}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Selector #PER_INST_EMP_VW_DESCR$0 (PeopleSoft action-reason, e.g. 'Resign - Personal Reasons'); blanked when terminationDate is empty"
+        },
+        {
+          "id": "ucpath.personOrgSummary.personNameValue#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape person's full name from detail page",
+          "selectorFqn": "personOrgSummary.personNameValue",
+          "outputVar": "{searchName}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Registry selector tried first; falls back to generic leaf-text body scan filtered by PERSON_ORG_NAME_LABELS skip list; returns null if no valid name found"
+        },
+        {
+          "id": "ucpath.personOrgSummary.body#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Employment Instances assignment rows from page body",
+          "selectorFqn": "personOrgSummary.body",
+          "outputVar": "{department}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "body.evaluate: scans all tables for rows with 12+ cells and a valid BU code in cell[3]; selectPreferredAssignmentDetails picks active-first, HDH-active-first, highest emplRecord; outputs department, deptId, hrStatus, jobCode, jobCodeDescription, effectiveDate, positionNumber, expectedJobEndDate, fte, emplClass"
+        },
+        {
+          "id": "ucpath.personOrgSummary.returnToSearchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'Return to Search' between drill-ins (name-path loop)",
+          "selectorFqn": "personOrgSummary.returnToSearchButton",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "Name path only; skipped after the last candidate; re-clicks viewAllLink if maxRowIndex >= 10 (paginated results)"
+        },
+        {
+          "id": "ucpath.hdhFilter#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Apply HDH department whitelist filter",
+          "summary": "isAcceptedHdhDepartment(r.department): keeps rows where dept contains 'Housing', 'Dining', 'Hospitality', 'On Campus Housing', or 'HOUSING/DINING/HOSPITALITY'; case-insensitive. Bypassed when keepNonHdh:true (Active Check mode).",
+          "sourceRef": "src/domain/hdh/departments.ts",
+          "note": "Name path only; runs after all drill-ins complete; rejected non-HDH SDCMP rows are logged; CRM-only fallback can surface a better EID when 0 HDH results"
+        },
+        {
+          "id": "ucpath.stampSearchResult#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Stamp search result fields and capture screenshot",
+          "summary": "ctx.updateData({ searchName, emplId, department, hrStatus, jobTitle }); ctx.captureAndStampScreenshot('person-org-summary', 'personOrgScreenshot') on resolved detail, or 'personOrgSearchScreenshot' on not-found / error",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        }
+      ]
+    },
+    {
+      "step": "cross-verification",
+      "label": "CRM Cross-Verification + CRM Start Date",
+      "system": "crm",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts",
+      "note": "crossVerificationStep in workflow.ts. Runs for BOTH name and EID inputs. EID path: searchCrmByEidOrName (EID query first, name fallback) — sources Start Date from CRM without EID disambiguation. Name path: searchCrmByName (multi-query strategy) — additionally runs matchCrmEid to pick the right SDCMP candidate. CRM Start Date is the operator-facing value; UCPath Last Hire is backend-only. captureAndStampScreenshot: 'crmRecordScreenshot' on found record, 'crmSearchScreenshot' on empty/error.",
+      "operations": [
+        {
+          "id": "control.eidOrNameCrmBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: EID input (searchCrmByEidOrName) vs name input (searchCrmByName)",
+          "summary": "isEidInput(input) → searchCrmByEidOrName({ emplId, lastName:resolvedName.lastName, firstName:resolvedName.firstName }); else → searchCrmByName(parsedLastName, parsedFirst)",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        },
+        {
+          "id": "crm.searchUrl#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to CRM search with query",
+          "url": "{CRM_SEARCH_URL}?q={query}",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "EID path: query = emplId (precise); name path: query iterates buildCrmNameSearchQueries(lastName, firstName) — lastName first, then firstName, then individual tokens; stops at first query that yields name-token-matching rows"
+        },
+        {
+          "id": "crm.searchLoad#wait",
+          "kind": "wait",
+          "system": "crm",
+          "label": "Wait for CRM search results to load",
+          "summary": "waitForLoadState('domcontentloaded', 15s) + waitForLoadState('networkidle', 15s) — catch on networkidle",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts"
+        },
+        {
+          "id": "crm.searchResultsTable#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape CRM search result rows",
+          "outputVar": "{crmSearchRows}",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "Inline locator 'table tbody tr' (not a registry selector); count cells safely to handle rows with fewer than 5 columns; extracts name (cell[0].textContent), offerSentOn (cell[1]), processStage (cell[4]), recordUrl from cell[0] anchor href"
+        },
+        {
+          "id": "crm.nameFilter#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Filter search rows by required name tokens",
+          "summary": "Name path: filter rows where row.name.toLowerCase() contains every token from requiredTokens (lastName+firstName split, letters only, 2+ chars). EID path: keep all rows from EID query, then select records where ucpathEmployeeId === emplId after extraction.",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts"
+        },
+        {
+          "id": "crm.recordUrl#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to CRM record page",
+          "url": "{recordUrl}",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "Navigates to each matching row's recordUrl (absolute URL or prefixed with https://act-crm.my.site.com); waitUntil:domcontentloaded + networkidle"
+        },
+        {
+          "id": "crm.record.firstName#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Employee First Name from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{crmFirstName}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Employee First Name') via strategy chain: record.thLabelFollowingTd → record.tdLabelFollowingTd → record.cellLabelFollowingTd → record.rowLabelLastCell → record.lightningFieldValue; 500ms timeout per strategy variant"
+        },
+        {
+          "id": "crm.record.lastName#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Employee Last Name from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{crmLastName}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Employee Last Name'); combined with firstName as 'lastName, firstName'"
+        },
+        {
+          "id": "crm.record.ppsId#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract PPS ID from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{ppsId}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('PPS ID')"
+        },
+        {
+          "id": "crm.record.ucpathEmployeeId#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract UCPath Employee ID from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{ucpathEmployeeId}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('UCPath Employee ID'); key field for EID-path record selection and for direct-match in matchCrmEid"
+        },
+        {
+          "id": "crm.record.firstDayOfService#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract First Day of Service (Effective Date) from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{firstDayOfService}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('First Day of Service (Effective Date)') with fallback to 'First Day of Service'; becomes the operator-facing startDate via pickCrmStartDate(records, emplId)"
+        },
+        {
+          "id": "crm.record.appointmentEndDate#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Appointment End Date from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{appointmentEndDate}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Appointment (Expected Job) End Date') with fallback to 'Appointment End Date'"
+        },
+        {
+          "id": "crm.record.dateSigned#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Date Signed (oath date) from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{dateSigned}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Date Signed'); used for oathDate in crm-dates step when includeCrmDates:true"
+        },
+        {
+          "id": "crm.record.department#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Department from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{crmDepartment}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Department'); used in CrmRecord shape; surfaced in crm-only path to set ctx.data.department"
+        },
+        {
+          "id": "crm.record.titleCode#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Title Code/Payroll Title from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{titleCode}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Title Code/Payroll Title'); payrollTitleFromTitleCode strips leading code prefix ('4921 - STDT 2' → 'STDT 2') via pickCrmPayrollTitle"
+        },
+        {
+          "id": "crm.record.ucsdEmail#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract UCSD Email Address from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{ucsdEmail}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('UCSD Email Address')"
+        },
+        {
+          "id": "crm.record.personalEmail#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Personal Email Address from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{personalEmail}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Personal Email Address')"
+        },
+        {
+          "id": "crm.record.hireType#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Hire Type from CRM record",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{hireType}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Hire Type')"
+        },
+        {
+          "id": "crm.eidFallback#control",
+          "kind": "control",
+          "system": "control",
+          "label": "EID path: fall back to name search if EID query returned no EID-matching record",
+          "summary": "searchCrmByEidOrName: if searchCrmByEid returns empty (no record whose ucpathEmployeeId === emplId), falls back to searchCrmByName(lastName, firstName); logs 'falling back to name search'",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "EID path only"
+        },
+        {
+          "id": "control.matchCrmEid#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Match CRM records against UCPath SDCMP candidates (name-path)",
+          "summary": "matchCrmEid(sdcmp, crmRecords): (1) direct: CRM ucpathEmployeeId === any SDCMP emplId → crmMatch:'direct'; (2) date: CRM firstDayOfService within ±7 days of UCPath startDate/effectiveDate → crmMatch:'date'; (3) none: CRM records found but no match → crmMatch:'none'. crm-only: crmMatch='crm-only' set earlier when UCPath had 0 SDCMP but CRM had an EID.",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts",
+          "note": "Name path only; EID path stamps startDate+payrollTitle without EID matching"
+        },
+        {
+          "id": "crm.stampCrmData#control",
+          "kind": "control",
+          "system": "crm",
+          "label": "Stamp CRM-sourced fields and capture screenshot",
+          "summary": "ctx.updateData({ crmMatch, crmMatchedEmplId?, startDate, payrollTitle }); stampCrmStartDateAndScreenshot: ctx.captureAndStampScreenshot('crm-record', 'crmRecordScreenshot') on found record, or 'crmSearchScreenshot' on no-record / error",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        }
+      ]
+    },
+    {
+      "step": "active-status",
+      "label": "Derive Active / HDH Status",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts",
+      "note": "activeStatusStep in workflow.ts. Most paths use the sdcmpFromSearch already fetched in the searching step — no new browser operations. Exception: crm-only path (name input where UCPath had no SDCMP but CRM had an EID) re-queries UCPath by that EID via the same searchByEid flow. stampActiveCheckFields must NOT write startDate — that was already set in cross-verification from CRM and must not be overwritten.",
+      "operations": [
+        {
+          "id": "control.crmOnlyBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: crm-only path requires UCPath EID re-query",
+          "summary": "!isEidInput(input) && crmMatch === 'crm-only': must fetch UCPath results by the CRM-sourced EID because UCPath returned 0 SDCMP rows in searching. All other paths (eid-input, direct/date/none CRM matches) use sdcmpFromSearch already fetched.",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        },
+        {
+          "id": "ucpath.personOrgSummaryUrl#navigate-crmonly",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to Person Org Summary for crm-only EID re-query",
+          "url": "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?...",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "CRM-only path only; same searchByEid flow as EID-input path in searching step (fill emplIdInput → click search → extractSingleResultDetail)"
+        },
+        {
+          "id": "ucpath.personOrgSummary.emplIdInput#fill-crmonly",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID for CRM-only re-query",
+          "selectorFqn": "personOrgSummary.emplIdInput",
+          "inputVar": "{emplId}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "CRM-only path only; emplId from ctx.data (set by CRM cross-verification)"
+        },
+        {
+          "id": "ucpath.personOrgSummary.searchButton#click-crmonly",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Search for CRM-only re-query",
+          "selectorFqn": "personOrgSummary.searchButton",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "CRM-only path only"
+        },
+        {
+          "id": "ucpath.personOrgSummary.body#scrape-crmonly",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape detail page results for CRM-only EID",
+          "selectorFqn": "personOrgSummary.body",
+          "outputVar": "{crmOnlyResults}",
+          "sourceRef": "src/systems/ucpath/person-org-summary.ts",
+          "note": "CRM-only path only; same extraction logic as searching step; captureAndStampScreenshot → 'person-org-summary' / 'personOrgScreenshot' on resolution"
+        },
+        {
+          "id": "control.deriveActiveCheckOutcome#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Derive active/HDH status from results",
+          "summary": "resolveActiveStatusResultsForPersonLookup → deriveActiveCheckOutcome: produces activeStatus (active|inactive|not-found|non-hdh|ambiguous), isActive, isHdhAccepted, terminationDate, terminationReason (blanked when active), expectedJobEndDate, candidateEids, startDate (UCPath), effdt",
+          "sourceRef": "src/workflows/person-lookup/outcome.ts"
+        },
+        {
+          "id": "ucpath.stampActiveStatus#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Stamp active-status fields onto tracker row",
+          "summary": "ctx.updateData({ activeStatus, hrStatus, department, emplId?, ucpathStartDate, effdt, terminationDate, terminationReason, expectedJobEndDate, isActive, isHdhAccepted, candidateEids }). startDate is intentionally NOT stamped here — CRM value from cross-verification must not be overwritten.",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        }
+      ]
+    },
+    {
+      "step": "crm-dates",
+      "label": "Optional CRM Date Enrichment",
+      "system": "crm",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts",
+      "note": "crmDatesStep in workflow.ts. Always declared in the steps tuple for consistent step list across all runs; skipped via ctx.skipStep('crm-dates') unless input.includeCrmDates === true. Off by default for normal dashboard input runs. Best-effort — parse failures, CRM search errors, and empty results log and return gracefully without failing the overall lookup. Never throws. Currently used by the OCR verify flow.",
+      "operations": [
+        {
+          "id": "control.includeCrmDatesGate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Gate: skip step unless includeCrmDates === true",
+          "summary": "ctx.skipStep('crm-dates') when input.includeCrmDates !== true; step is always declared so the step list is consistent across all runs",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        },
+        {
+          "id": "crm.searchUrl#navigate-dates",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to CRM search for date enrichment",
+          "url": "{CRM_SEARCH_URL}?q={lastName}",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "searchCrmByName using the resolved ctx.data.searchName parsed via parsePersonOrgNameInput; same multi-query strategy as cross-verification name path"
+        },
+        {
+          "id": "crm.searchLoad#wait-dates",
+          "kind": "wait",
+          "system": "crm",
+          "label": "Wait for CRM search results (dates)",
+          "summary": "waitForLoadState('networkidle', 15s) — graceful catch",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts"
+        },
+        {
+          "id": "crm.searchResultsTable#scrape-dates",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape CRM search result rows for date enrichment",
+          "outputVar": "{crmSearchRows}",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "Inline 'table tbody tr' scrape; same extraction as cross-verification; filters by name tokens"
+        },
+        {
+          "id": "crm.recordUrl#navigate-dates",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to CRM record page for date extraction",
+          "url": "{recordUrl}",
+          "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+          "note": "Same extractCrmRecord flow as cross-verification; all 12 fields extracted, but only firstDayOfService and dateSigned are stamped as outputs"
+        },
+        {
+          "id": "crm.record.firstDayOfService#scrape-dates",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract First Day of Service for date enrichment",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{employmentDate}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('First Day of Service (Effective Date)'); record selection prefers EID-matched record (ctx.data.emplId); falls back to first record; stamped as employmentDate"
+        },
+        {
+          "id": "crm.record.dateSigned#scrape-dates",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract Date Signed for date enrichment",
+          "selectorFqn": "record.thLabelFollowingTd",
+          "outputVar": "{oathDate}",
+          "sourceRef": "src/systems/crm/extract.ts",
+          "note": "extractField('Date Signed'); the oath taken-and-subscribed date; stamped as oathDate"
+        },
+        {
+          "id": "crm.stampCrmDates#control",
+          "kind": "control",
+          "system": "crm",
+          "label": "Stamp CRM date fields onto tracker row",
+          "summary": "ctx.updateData({ employmentDate, oathDate }); best-effort — empty results or errors log and return without failing the run",
+          "sourceRef": "src/workflows/person-lookup/workflow.ts"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Four canonical handler steps (searching → cross-verification → active-status → crm-dates) declared in `defineWorkflow`. crm-dates is always in the steps tuple but skipped via ctx.skipStep unless input.includeCrmDates === true, so the step list is consistent across all runs.",
+    "Shared-context-pool mode (poolSize:4): up to 4 workers share UCPath + CRM BrowserContexts; each worker opens its own Page on first ctx.page(id) call (lazy allocation). Queue-based distribution — workers pull items from a shared queue until empty.",
+    "Input subject resolver: emplId-in-input → 'eid' kind → personOrgSummary EID path + CRM EID search; else → 'name' kind → multi-attempt name search + CRM name search. isEidInput(input) is the runtime discriminator.",
+    "Name search strategy: up to 4 attempts (full name → first-only → middle-as-first → multi-token last name). Stops at first attempt that yields SDCMP candidates. Each attempt re-navigates fresh because PeopleSoft breaks the form after 'No matching values'.",
+    "CRM match outcomes (name-path): 'direct' (UCPath EID in CRM record) | 'date' (CRM firstDayOfService within ±7 days of UCPath startDate) | 'crm-only' (CRM has EID but UCPath had no SDCMP) | 'none' (CRM records found but no match) | '' (no CRM records at all).",
+    "crm-only path in active-status is a re-query UCPath branch: name input where UCPath returned 0 SDCMP rows but CRM had a valid EID; active-status must re-fetch UCPath Person Org by that EID to get the full assignment detail.",
+    "Cross-verification runs for BOTH EID and name inputs: EID inputs search CRM by EID first (then name fallback) to source the CRM Start Date. stampActiveCheckFields must NOT overwrite startDate set by cross-verification.",
+    "separations conditionally delegates to person-lookup (ctx.delegateTo at identity-check step) only when Workforce Job Summary name-match is suspicious (classifyNameSimilarity → 'different' or EID not-found). Normal separations runs skip the delegation entirely.",
+    "Dashboard input run is the only public start path. npm run person-lookup:stop stops the daemon pool. No upload run — person-lookup is typed-input only (name or EID)."
+  ]
+}

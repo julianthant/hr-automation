@@ -1,0 +1,432 @@
+{
+  "workflow": "emergency-contact",
+  "systems": ["ucpath"],
+  "steps": [
+    {
+      "step": "navigation",
+      "label": "Navigate to Emergency Contact Editor",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/emergency-contact/workflow.ts",
+      "note": "Auth is deferred from session-launch to this step so Duo fires AFTER OCR approval. loginToUCPath is idempotent across batch items — Duo only on the first item. After filling emplId + searching, extracts the live employee name from the page header, reads existing contact names for the duplicate guard, and — on a fuzzy match (Levenshtein distance 1-2) and !dryRun — demotes the existing primary contact before re-navigating for the fill step. An exact match (distance 0) sets skipped=true and causes fill-form + save to be skipped.",
+      "operations": [
+        {
+          "id": "control.auth.ucpath#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Deferred UCPath login (Duo MFA)",
+          "summary": "loginToUCPath(page, ctx.workflowInstance, ctx.signal) — deferred from session-launch; first item triggers Duo, subsequent items reuse warm session. Throws on auth failure.",
+          "sourceRef": "src/infra/auth/login.ts"
+        },
+        {
+          "id": "ucpath.emergencyContactUrl#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Open Emergency Contact deep-link URL",
+          "url": "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/ADMINISTER_WORKFORCE_(GBL).EMERGENCY_CONTACT.GBL?NavColl=true&uc_deep_link=1",
+          "summary": "uc_deep_link=1 opens the form outside the HR Tasks iframe; all subsequent field refs land at top-level page.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.networkIdle#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for networkidle after page load",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.modalMask#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss PeopleSoft modal mask (pre-emplId fill)",
+          "summary": "dismissPeopleSoftModalMask — hides #pt_modalMask / .ptModalMask via JS eval before the fill.",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID search field",
+          "selectorFqn": "emergencyContact.emplIdInput",
+          "inputVar": "{emplId}",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.modalMask-2#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss PeopleSoft modal mask (pre-search click)",
+          "summary": "Second dismissPeopleSoftModalMask before clicking Search.",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.searchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Search button",
+          "selectorFqn": "emergencyContact.searchButton",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.networkIdle-2#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait 3s + networkidle after search",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.noMatchMessage#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Assert no 'No matching values' message",
+          "selectorFqn": "emergencyContact.noMatchMessage",
+          "summary": "If 'No matching values were found.' is present, throws NoExistingContactError(emplId). Employee has zero contacts — Add-New path not yet implemented.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.drillInLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Drill-in link (multi-result grid, conditional)",
+          "selectorFqn": "emergencyContact.drillInLink",
+          "note": "Only present when search returns multiple rows. clickIfPresent — no-op if absent.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.networkIdle-3#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait networkidle after drill-in (conditional)",
+          "note": "Only fires if drillInLink was clicked.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.personIdText#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Extract employee name from page header",
+          "summary": "Reads text of the element containing 'Person ID', matches regex /Person ID\\s+\\d+\\s+([A-Za-z][A-Za-z .'-]+?)\\s+Emergency Contact/. Best-effort — no-op on miss.",
+          "outputVar": "{employeeName}",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.contactNameInputs#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Read all existing Contact Name values (duplicate guard)",
+          "selectorFqn": "emergencyContact.contactNameInputs",
+          "outputVar": "{existingContactNames}",
+          "summary": "Reads inputValue() of every Contact Name textbox on the loaded editor. Used by pickBestContactMatch (Levenshtein ≤2).",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "control.duplicateGuard#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Duplicate contact guard (Levenshtein match)",
+          "summary": "pickBestContactMatch on normalised names. distance=0 (exact) → sets skipped=true, skips fill-form+save. distance 1-2 (fuzzy) → demote existing primary (if !dryRun) + re-navigate. distance>2 or null → add normally.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.modalMask-3#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss modal mask (pre-demote, fuzzy + !dryRun path)",
+          "note": "Only on fuzzy match + !dryRun.",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.contactNameInputs-demote#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Re-read Contact Name inputs to locate fuzzy-match row index",
+          "selectorFqn": "emergencyContact.contactNameInputs",
+          "outputVar": "{demoteTargetIndex}",
+          "note": "Only on fuzzy match + !dryRun. Iterates rows to find the one whose value matches existing.name.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.primaryContactCheckboxes#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Uncheck Primary Contact on fuzzy-match row (demote)",
+          "selectorFqn": "emergencyContact.primaryContactCheckboxes",
+          "summary": "primaryContactCheckboxes.nth(targetIndex).uncheck(). Idempotent — no-op if already unchecked.",
+          "note": "Only on fuzzy match + !dryRun.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.modalMask-4#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss modal mask (pre-demote-save, fuzzy + !dryRun path)",
+          "note": "Only on fuzzy match + !dryRun.",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.saveButton-demote#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Save after demoting existing primary contact",
+          "selectorFqn": "emergencyContact.saveButton",
+          "note": "Only on fuzzy match + !dryRun. safeClick-wrapped.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.networkIdle-4#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait 2s + networkidle after demote save",
+          "note": "Only on fuzzy match + !dryRun.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        },
+        {
+          "id": "ucpath.emergencyContactUrl-renavigated#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Re-navigate to Emergency Contact editor after demote (fuzzy + !dryRun path)",
+          "url": "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/ADMINISTER_WORKFORCE_(GBL).EMERGENCY_CONTACT.GBL?NavColl=true&uc_deep_link=1",
+          "summary": "Full navigateToEmergencyContact call (same sequence as ops 2-11) so fill-form starts from a clean editor showing the newly-demoted state.",
+          "note": "Only on fuzzy match + !dryRun. The demote and re-navigate are both inside the shouldDemoteExistingContactForRun guard (returns false on dryRun). On dryRun a fuzzy match only logs and sets fuzzyDemote='would-run'.",
+          "sourceRef": "src/systems/ucpath/personal-data.ts"
+        }
+      ]
+    },
+    {
+      "step": "fill-form",
+      "label": "Fill Emergency Contact Form",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/emergency-contact/enter.ts",
+      "note": "Driven by buildEmergencyContactPlan (ActionPlan). Skipped entirely when navigation step sets skipped=true (exact duplicate found). Save is NOT part of this plan — it lives in the separate save step for accurate dashboard wall-clock timing. On dryRun, a screenshot is taken after execute() before exiting the step.",
+      "operations": [
+        {
+          "id": "ucpath.modalMask-fill#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss modal mask before Add New Row click",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.addNewRow#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'Add a new row at row 1' button",
+          "summary": "page.getByRole('button', { name: /add a new row/i }).first(). Inserts a blank row 1 above any existing contacts.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.networkIdle-fill#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait 2s + networkidle after adding row",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.contactNameInputs#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Contact Name",
+          "selectorFqn": "emergencyContact.contactNameInputs",
+          "inputVar": "{contact.name}",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.primaryContactCheckboxes-fill#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Set Primary Contact checkbox",
+          "selectorFqn": "emergencyContact.primaryContactCheckboxes",
+          "inputVar": "{contact.primary}",
+          "summary": "Checks if contact.primary=true (always true per form convention). check() or uncheck() based on current state vs desired.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.relationshipToEmployee#select",
+          "kind": "select",
+          "system": "ucpath",
+          "label": "Select Relationship to Employee",
+          "summary": "page.getByRole('combobox', { name: 'Relationship to Employee' }).first().selectOption({ label: relationshipLabel }). Raw relationship text is mapped via RELATIONSHIP_MAP in config.ts (e.g. 'mom'→'Parent', 'brother'→'Sibling'). Falls back to 'Other' if not in map.",
+          "inputVar": "{contact.relationship}",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "control.addressBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Address branch: same-as-employee vs manual address",
+          "summary": "wantsSameAddress = contact.sameAddressAsEmployee || !contact.address. True → check sameAddress checkbox only. False → uncheck + open Edit Address modal + fill fields + OK.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.sameAddressAsEmployee#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Check 'Same Address as Employee' (same-address path)",
+          "summary": "page.getByRole('checkbox', { name: 'Same Address as Employee' }).first(). Checks if not already checked.",
+          "note": "Same-address path only (wantsSameAddress=true). Defensive fallback also fires when sameAddressAsEmployee=false but address=null.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.sameAddressAsEmployee-uncheck#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Uncheck 'Same Address as Employee' (manual-address path)",
+          "summary": "Unchecks the checkbox to expose the address fields.",
+          "note": "Manual-address path only (wantsSameAddress=false).",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.modalMask-addr#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss modal mask before Edit Address click (manual-address path)",
+          "note": "Manual-address path only.",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.editAddress#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click 'Edit Address' button to open address modal",
+          "summary": "page.getByRole('button', { name: 'Edit Address' }).first().",
+          "note": "Manual-address path only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.address1#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Address 1 (street)",
+          "summary": "page.getByRole('textbox', { name: 'Address 1' }).first(). Conditional on addr.street being non-null.",
+          "inputVar": "{address.street}",
+          "note": "Manual-address path + addr.street present only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.city#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill City",
+          "summary": "page.getByRole('textbox', { name: 'City' }).first(). Conditional on addr.city being non-null.",
+          "inputVar": "{address.city}",
+          "note": "Manual-address path + addr.city present only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.state#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill State",
+          "summary": "page.getByRole('textbox', { name: 'State' }).first(). Conditional on addr.state being non-null.",
+          "inputVar": "{address.state}",
+          "note": "Manual-address path + addr.state present only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.postal#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Postal (zip)",
+          "summary": "page.getByRole('textbox', { name: 'Postal' }).first(). Conditional on addr.zip being non-null.",
+          "inputVar": "{address.zip}",
+          "note": "Manual-address path + addr.zip present only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.modalMask-addrOk#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss modal mask before OK click (manual-address path)",
+          "note": "Manual-address path only.",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.addressModalOk#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click OK to close Edit Address modal",
+          "summary": "page.getByRole('button', { name: 'OK', exact: true }).first().",
+          "note": "Manual-address path only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.networkIdle-addr#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait 2s + networkidle after address modal OK",
+          "note": "Manual-address path only.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        },
+        {
+          "id": "ucpath.phone#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Phone number",
+          "summary": "page.getByRole('textbox', { name: 'Phone', exact: true }).first(). Uses cellPhone || homePhone || workPhone priority. Only one Phone textbox is filled (Other Phone Numbers tab not used).",
+          "inputVar": "{contact.cellPhone|homePhone|workPhone}",
+          "note": "Conditional — skipped if all three phone fields are null/empty.",
+          "sourceRef": "src/workflows/emergency-contact/enter.ts"
+        }
+      ]
+    },
+    {
+      "step": "save",
+      "label": "Save Emergency Contact Record",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/emergency-contact/workflow.ts",
+      "note": "On dryRun, save is skipped entirely and status is set to 'Dry Run Complete'. On live run, modal mask is dismissed before the Save click and networkidle guards the PeopleSoft roundtrip.",
+      "operations": [
+        {
+          "id": "control.dryRunGate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Dry-run gate: skip save on dryRun=true",
+          "summary": "If record.dryRun is true, ctx.updateData({ status: 'Dry Run Complete' }) + early return. Browser state is preserved (screenshot was already taken in fill-form).",
+          "sourceRef": "src/workflows/emergency-contact/workflow.ts"
+        },
+        {
+          "id": "ucpath.modalMask-save#control",
+          "kind": "control",
+          "system": "ucpath",
+          "label": "Dismiss PeopleSoft modal mask before Save click",
+          "sourceRef": "src/systems/common/modal.ts"
+        },
+        {
+          "id": "ucpath.emergencyContact.saveButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Save button",
+          "selectorFqn": "emergencyContact.saveButton",
+          "summary": "page.getByRole('button', { name: 'Save', exact: true }).first(). Submits the completed Emergency Contact form to UCPath.",
+          "sourceRef": "src/workflows/emergency-contact/workflow.ts"
+        },
+        {
+          "id": "ucpath.networkIdle-save#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait networkidle after Save (PeopleSoft roundtrip)",
+          "sourceRef": "src/workflows/emergency-contact/workflow.ts"
+        },
+        {
+          "id": "ucpath.saveScreenshot#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Capture post-save screenshot",
+          "summary": "ctx.screenshot({ kind: 'form', label: 'emergency-contact-saved' }). Routes through structured tracker pipeline.",
+          "sourceRef": "src/workflows/emergency-contact/workflow.ts"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "BATCH WORKFLOW: archetype='batch', mode='sequential', preEmitPending=true, betweenItems=['reset']. Each approved OCR record becomes a daemon-queued task. betweenItems reset navigates to about:blank so a stuck UCPath page from record N doesn't leak into N+1.",
+    "DEFERRED AUTH: UCPath auth is deferred to the navigation step (deferAuth:true in systems config). This ensures Duo prompt fires AFTER the operator has reviewed OCR results — not at session launch.",
+    "DRY-RUN BOUNDARY: record.dryRun=true → fill-form plan executes (screenshot taken), save step returns early without clicking Save. Fuzzy-demote is also skipped on dryRun (shouldDemoteExistingContactForRun returns false when dryRun=true).",
+    "OCR FAN-OUT GATE: This workflow is started exclusively via /api/ocr/approve-batch with targetWorkflow='emergency-contact'. An 'operation' coordinator row is created at /api/ocr/prepare in the Emergency Contact panel; approved contact rows become operation-member children parented to the coordinator.",
+    "EXACT DUPLICATE SKIP: If findExistingContactDuplicate returns isExact=true, navigation step sets skipped=true and ctx.skipStep is called for both fill-form and save. Row records the skipReason in data.",
+    "FUZZY DEMOTE BRANCH: Levenshtein distance 1-2 on normalized names + !dryRun → demoteExistingContact (uncheck Primary Contact + save) then re-navigate so fill-form starts from the correct editor state. On dryRun, logs only.",
+    "ADD-NEW NOT IMPLEMENTED: If the employee has zero existing contacts, navigateToEmergencyContact throws NoExistingContactError (PeopleSoft shows 'No matching values'). The row records failed; batch continues.",
+    "MODAL MASK PATTERN: #pt_modalMask / .ptModalMask must be hidden via JS eval before every click. dismissPeopleSoftModalMask is called before: emplId fill, Search, Edit Address, OK, and Save.",
+    "NO FRAME REQUIRED: uc_deep_link=1 URL opens outside the HR Tasks Activity Guide iframe — all selectors use top-level page, no getContentFrame() needed.",
+    "PHONE: Only one Phone textbox is filled (cellPhone → homePhone → workPhone priority). The 'Other Phone Numbers' tab for additional phones is not used."
+  ]
+}

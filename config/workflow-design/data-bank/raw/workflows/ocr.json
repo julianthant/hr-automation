@@ -1,0 +1,471 @@
+{
+  "workflow": "ocr",
+  "systems": [],
+  "steps": [
+    {
+      "step": "loading-roster",
+      "label": "Loading Roster",
+      "system": null,
+      "sourceRef": "src/workflows/ocr/orchestrator.ts",
+      "note": "Runs in-process (Node/dashboard). No browser. Emits pending row, optionally dispatches SharePoint roster download, loads roster from disk, pre-renders PDF pages into pdf-cache, seeds placeholder records into the Preview tab.",
+      "operations": [
+        {
+          "id": "control.emit-pending#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit pending tracker row",
+          "summary": "Writes the initial pending OCR row to JSONL with formType, pdfPath, pdfOriginalName, sessionId, rosterMode."
+        },
+        {
+          "id": "control.emit-loading-roster-running#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit running step=loading-roster",
+          "summary": "Writes running row with step=loading-roster so session drawer advances."
+        },
+        {
+          "id": "control.sharepoint-dispatch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Dispatch SharePoint roster download (rosterMode=download|wait)",
+          "summary": "When rosterMode='download' or 'wait', calls requestSharePointDownload and awaits the download result. Parented under the OCR runId. Skipped when rosterMode='existing'.",
+          "inputVar": "{rosterMode}",
+          "outputVar": "{resolvedRosterPath}",
+          "note": "Optional — only when rosterMode is 'download' or 'wait'."
+        },
+        {
+          "id": "control.load-roster#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Load and precompute roster from disk",
+          "summary": "Reads the XLSX/CSV roster file from resolvedRosterPath, precomputes match structures. Skipped (empty roster) when rosterMode='optional' and no path resolved.",
+          "inputVar": "{resolvedRosterPath}",
+          "outputVar": "{roster}"
+        },
+        {
+          "id": "control.pre-render-pdf#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Pre-render PDF pages into pdf-cache",
+          "summary": "Calls ensurePdfPageCache to rasterize all PDF pages to PNG so the Preview tab populates page images immediately. Wrapped in raceOcrPrepWithDiscard.",
+          "inputVar": "{pdfPath, pdfFileId}",
+          "outputVar": "{preRenderedPages, knownPageCount}"
+        },
+        {
+          "id": "control.emit-placeholder-snapshot#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit placeholder snapshot with blank records",
+          "summary": "Emits running step=ocr snapshot with one form-spec-shaped placeholder record per rendered page (spec.placeholderFields). Dashboard Preview tab shows blank inputs immediately."
+        }
+      ]
+    },
+    {
+      "step": "ocr",
+      "label": "OCR (read + match + disambiguate)",
+      "system": null,
+      "sourceRef": "src/workflows/ocr/orchestrator.ts",
+      "note": "Runs LLM OCR pipeline against pre-rendered page images, matches extracted records against the roster, re-reads suspect pages on a tier-1 model, applies carry-forward from a prior reupload, disambiguates ambiguous roster candidates, computes lookup suggestions. All within-process — no browser.",
+      "operations": [
+        {
+          "id": "control.run-ocr-pipeline#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Run LLM OCR pipeline",
+          "summary": "Calls runOcrPipeline with the PDF path, pageImagesDir, spec.ocrRecordSchema, spec.prompt. Uses the multi-provider vision pool. Returns per-page success/failure status and extracted records.",
+          "inputVar": "{pdfPath, preRenderedPages, formType}",
+          "outputVar": "{ocrResult}"
+        },
+        {
+          "id": "control.compute-page-status#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Compute failedPages, emptyPages, pageStatusSummary",
+          "summary": "Derives failedPages (OCR failed on page), emptyPages (OCR succeeded but produced zero records), and summary counts from ocrResult.pages.",
+          "inputVar": "{ocrResult}",
+          "outputVar": "{failedPages, emptyPages, pageStatusSummary}"
+        },
+        {
+          "id": "control.emit-post-ocr-snapshot#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit snapshot with OCR-extracted records (pre-match)",
+          "summary": "Emits running step=ocr snapshot carrying raw extracted records so Preview tab shows extracted names/dates before matching runs."
+        },
+        {
+          "id": "control.match-records#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Match each record against roster (spec.matchRecord)",
+          "summary": "Calls spec.matchRecord({ record, roster }) for each extracted record in parallel. Sets matchState, matchSource, matchConfidence, rosterCandidates.",
+          "inputVar": "{ocrResult.data, roster}",
+          "outputVar": "{records}"
+        },
+        {
+          "id": "control.second-opinion-reread#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Second-opinion re-read for suspect pages",
+          "summary": "For records that matched nothing in the roster AND have no usable EID, re-reads the page on a tier-1 accuracy model (runOcrSecondOpinionPage), re-matches, and adopts the new reading only when it ranks strictly better. Capped by OCR_SECOND_OPINION_MAX (default 5). Skipped when roster is empty.",
+          "note": "Optional — only when at least one suspect record exists and roster is loaded."
+        },
+        {
+          "id": "control.emit-post-match-snapshot#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit snapshot post-matching",
+          "summary": "Emits running step=ocr snapshot with post-match records (badges + EIDs where roster auto-accepted)."
+        },
+        {
+          "id": "control.carry-forward#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Carry-forward resolved fields from previous run (reupload)",
+          "summary": "When input.previousRunId is set, reads the prior OCR row's records and calls applyCarryForward to merge already-resolved fields (EID, matchState) onto v2 re-extracted records via Levenshtein key match.",
+          "inputVar": "{previousRunId}",
+          "note": "Optional — only on reupload."
+        },
+        {
+          "id": "control.disambiguate-llm#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Disambiguate ambiguous roster candidates via LLM",
+          "summary": "For records left lookup-pending with rosterCandidates (and not form-eid or manual), calls disambiguateMatch concurrently (up to OCR_DISAMBIG_CONCURRENCY=4). Applies spec.applyDisambiguation with the chosen EID/confidence.",
+          "inputVar": "{records[].rosterCandidates}",
+          "outputVar": "{records[].employeeId via applyDisambiguation}",
+          "note": "Optional — only when at least one ambiguous record exists."
+        },
+        {
+          "id": "control.lookup-suggestions-llm#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Compute LLM lookup suggestions for unmatched records",
+          "summary": "For records still lookup-pending with needsLookup='name' and no rosterCandidates, calls suggestLookupCandidates (LLM). Suggestions may include an EID hint that becomes a verify-only lookup target.",
+          "inputVar": "{records[].printedName or employee.name}",
+          "outputVar": "{lookupSuggestionsByIndex}",
+          "note": "Optional — only when unmatched-by-roster name-lookup records exist."
+        },
+        {
+          "id": "control.emit-pre-lookup-snapshot#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit snapshot before person-lookup fan-out",
+          "summary": "Emits running step=person-lookup snapshot if there are lookup targets, so Preview keeps showing current records while fan-out runs."
+        }
+      ]
+    },
+    {
+      "step": "person-lookup",
+      "label": "Person Lookup (EID resolution + enrichment)",
+      "system": null,
+      "sourceRef": "src/workflows/ocr/orchestrator.ts",
+      "note": "Fans out delegated person-lookup child runs (one per unresolved record), optionally via SQLite task dependencies. Watches outcomes and patches records progressively. An optional spec.enrichRecords hook (verify form only) fans out to person-lookup + i9-lookup for bespoke enrichment.",
+      "operations": [
+        {
+          "id": "control.build-lookup-targets#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Build lookup targets list",
+          "summary": "Filters records to those needing a lookup (needsLookup='name'|'verify'|'verify-only'). Generates itemIds (ocrChildItemIdPrefix-runId-rN). Applies LLM suggestion EIDs as verify-only lookup targets when present."
+        },
+        {
+          "id": "control.delegate-person-lookup#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Fan-out to person-lookup via delegateToAllImpl",
+          "summary": "Calls delegateToAllImpl({ child: personLookupWorkflow, inputs, fireAndForget:true, deriveItemId, rootTracePrefix, daemonFlags }). Each child is a delegated single row under the OCR runId.",
+          "inputVar": "{lookupTargets[].name or emplId}",
+          "note": "Per-record: name-kind → {name}, verify/verify-only → {emplId, keepNonHdh:true}."
+        },
+        {
+          "id": "control.sqlite-dependency-batch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Create SQLite task dependency batch",
+          "summary": "Calls createOcrEidLookupDependencyBatch to record OCR → person-lookup dependencies in SQLite. On setup failure falls back to direct watchChildRuns.",
+          "note": "Preferred path when OCR_SQLITE_DEPENDENCIES != '0'."
+        },
+        {
+          "id": "control.wake-dependency-scheduler#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Wake dependency scheduler tick",
+          "summary": "Calls runDependencySchedulerTickForTrackerDir so the scheduler picks up the new person-lookup tasks immediately rather than waiting for its next poll interval."
+        },
+        {
+          "id": "control.watch-child-runs#wait",
+          "kind": "wait",
+          "system": "control",
+          "label": "Watch person-lookup child outcomes (watchChildRuns)",
+          "summary": "Blocks until all expected person-lookup child itemIds complete or timeout (default 1h). On each outcome (onProgress) patches the record via patchOcrRecordFromEidLookupOutcome and debounce-emits a progress snapshot.",
+          "outputVar": "{records[] patched with EID/matchState/verification}"
+        },
+        {
+          "id": "control.enrich-records-hook#control",
+          "kind": "control",
+          "system": "control",
+          "label": "spec.enrichRecords hook (verify form only)",
+          "summary": "Awaits spec.enrichRecords for bespoke enrichment. verify form fans out to person-lookup (CRM employment/oath dates, active status) and i9-lookup (authorized-official signer) via delegateToAllImpl + watchChildRuns, then patches records with applyPersonLookupToVerifyRecord / applyI9ToVerifyRecord.",
+          "outputVar": "{records[] enriched with checks[]}",
+          "note": "Optional — only when spec.enrichRecords is declared (verify form only for current specs)."
+        },
+        {
+          "id": "control.emit-post-lookup-snapshot#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit snapshot after lookups complete",
+          "summary": "Emits running step=person-lookup snapshot with fully-patched records."
+        }
+      ]
+    },
+    {
+      "step": "awaiting-approval",
+      "label": "Awaiting Approval / Terminal",
+      "system": null,
+      "sourceRef": "src/workflows/ocr/workflow.ts",
+      "note": "SPLITS on delegation: standalone runs (no parentRunId) emit terminal done at step=person-lookup and return {status:'complete'}. Delegated runs (parentRunId set) park at running step=awaiting-approval, then the kernel handler subscribes to the approval signal. On approve, records/fannedOutItemIds are stamped onto ctx; on discard, OcrDiscardedError is thrown → kernel emits failed.",
+      "operations": [
+        {
+          "id": "control.standalone-terminal#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Standalone: emit terminal done snapshot",
+          "summary": "When completesAfterLookup=true (no parentRunId), emitSnapshot(records, 'person-lookup', 'done') and return {status:'complete'}. Handler seeds ctx.updateData({...reviewData, mode:'prepare'}) for the kernel's terminal row.",
+          "note": "Standalone branch only."
+        },
+        {
+          "id": "control.delegated-emit-awaiting-approval#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Delegated: emit running step=awaiting-approval snapshot",
+          "summary": "Emits running step=awaiting-approval snapshot carrying all records + failedPages/emptyPages. Dashboard OcrReviewPane shows Approve/Discard controls.",
+          "note": "Delegated branch only."
+        },
+        {
+          "id": "control.subscribe-to-approval#wait",
+          "kind": "wait",
+          "system": "control",
+          "label": "Delegated: wait on approval signal (subscribeToApproval)",
+          "summary": "ocrKernelHandler calls subscribeToApproval({ workflow:'ocr', sessionId }, { signal, trackerDir }). Resolves with ApprovedPayload when the operator approves via /api/ocr/approve-batch. Throws OcrDiscardedError on discard, CancelledError on ctx.signal abort.",
+          "outputVar": "{payload.records, payload.fannedOutItemIds}",
+          "note": "Delegated branch only."
+        },
+        {
+          "id": "control.approve-update-ctx#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Delegated: stamp approved records onto ctx (approve path)",
+          "summary": "ctx.updateData({ records, recordCount, fannedOutItemIds, fannedOutCount }) so the kernel's terminal done row carries the approved record set. Actual fan-out (approveTo per-record + approveDocumentTo once-per-PDF) is handled by the /api/ocr/approve-batch HTTP route outside this handler.",
+          "inputVar": "{payload.records, payload.fannedOutItemIds}",
+          "note": "Delegated + approved path only."
+        },
+        {
+          "id": "control.discard-error#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Delegated: throw OcrDiscardedError on discard",
+          "summary": "OcrDiscardedError propagates to the kernel → terminal failed row. The discard HTTP route (/api/ocr/discard-prepare) also writes its own failed step=discarded row and cascade-cancels queued child tasks.",
+          "note": "Delegated + discarded path only."
+        }
+      ]
+    },
+    {
+      "step": "force-research",
+      "label": "Force Research: Per-record Re-fan by Name",
+      "sourceRef": "src/workflows/ocr/force-research.ts",
+      "note": "Operator-triggered mini-orchestrator (HTTP route). Clears EID + matchState on selected records then re-fans person-lookup by extracted name. Oath/EC only — verify rows use verify-relookup instead.",
+      "operations": [
+        {
+          "id": "ocr.load-latest-row-fr#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Load latest OCR row from JSONL",
+          "summary": "findLatestEntryForPredicate by sessionId+runId (7-day lookback). Throws if not found or formType=verify (guard: force-research is oath/EC only).",
+          "outputVar": "{latestRow}"
+        },
+        {
+          "id": "control.clear-fields-fr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Clear resolved fields on selected records",
+          "summary": "For each recordIndex: clears employeeId (flat or nested employee.employeeId), sets matchState=lookup-pending, matchSource=null, matchConfidence=null, verification=null, forceResearch=true.",
+          "inputVar": "{recordIndices}"
+        },
+        {
+          "id": "ocr.emit-running-fr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit running person-lookup snapshot",
+          "summary": "emitTrackerRow with status=running step=person-lookup and cleared records so dashboard shows lookup activity."
+        },
+        {
+          "id": "person-lookup.fanout-fr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Fan-out person-lookup by name via fanOutAndWatch",
+          "summary": "fanOutAndWatch dispatches one personLookupWorkflow child per target record using extracted name (spec.carryForwardKey). itemIds: ocr-force-{runId}-r{idx}. 30-min timeout. cascade-cancel on discard-abort.",
+          "outputVar": "{byItemId, missingItemIds}"
+        },
+        {
+          "id": "control.patch-records-fr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Patch records from lookup outcomes",
+          "summary": "patchOcrRecordFromEidLookupOutcome(records, idx, outcome, 'name') for each byItemId result. patchOcrRecordUnresolved for missingItemIds.",
+          "inputVar": "{byItemId, missingItemIds}"
+        },
+        {
+          "id": "ocr.emit-review-fr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Re-emit awaiting-approval running+done snapshots",
+          "summary": "emitOcrReviewSnapshot twice: status=running step=awaiting-approval, then status=done step=awaiting-approval. Preserves parentRunId/parentSubject from prior row via readQueueTitle.",
+          "note": "Running→done pair ensures the dashboard Preview tab refreshes with patched records."
+        }
+      ]
+    },
+    {
+      "step": "retry-page",
+      "label": "Single-page OCR Retry",
+      "sourceRef": "src/workflows/ocr/retry-page.ts",
+      "note": "Operator-triggered mini-orchestrator (HTTP route). Re-OCRs one failed or empty page, re-matches, fans out person-lookup for new records that need it, splices results into the existing records array.",
+      "operations": [
+        {
+          "id": "ocr.load-latest-row-rp#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Load latest OCR row (SQLite then JSONL)",
+          "summary": "readLatestRow: tries SQLite runs table first via openStateDb, falls back to findLatestEntryForPredicate JSONL (7-day lookback). Throws RetryPageError for discarded/approved rows or missing pdfFileId.",
+          "outputVar": "{latestRow}"
+        },
+        {
+          "id": "llm.re-ocr-page-rp#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Re-OCR single page via vision pool",
+          "summary": "runSinglePageThroughPool: buildVisionPool → runOcrPerPage on page-{N}.png from pdf-cache/{pdfFileId}/. Returns records or stillFailed=true with updated error/attemptedKeys. On stillFailed, patches failedPages and emits the row without person-lookup.",
+          "inputVar": "{pageNum, pdfFileId}",
+          "outputVar": "{newPageRecords or stillFailed}"
+        },
+        {
+          "id": "ocr.match-new-records-rp#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Match new records against roster",
+          "summary": "Loads roster from rosterPath (row.data.rosterPath), calls spec.matchRecord on each new record. Roster is empty if no path was stored.",
+          "inputVar": "{newPageRecords}",
+          "outputVar": "{matchedNewRecords}"
+        },
+        {
+          "id": "person-lookup.fanout-rp#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Fan-out person-lookup for new records needing lookup",
+          "summary": "fanOutAndWatch per new record where spec.needsLookup returns 'name', 'verify', or 'verify-only'. itemIds: ocr-retry-{runId}-p{pageNum}-r{i}. 60-min default timeout.",
+          "outputVar": "{byItemId}"
+        },
+        {
+          "id": "control.patch-records-rp#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Patch new records from lookup outcomes",
+          "summary": "patchOcrRecordFromEidLookupOutcome for each outcome by kind. patchUnresolved for missing outcomes (no result within timeout). Handles name and verify-only kinds.",
+          "inputVar": "{byItemId}"
+        },
+        {
+          "id": "control.splice-records-rp#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Splice records and update failedPages/pageStatusSummary",
+          "summary": "Filter out existing records with sourcePage===pageNum (drop old), append new matched+patched records. Remove page from failedPages. Recompute pageStatusSummary (total, succeeded, failed)."
+        },
+        {
+          "id": "ocr.emit-row-rp#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit awaiting-approval running+done snapshots",
+          "summary": "emitOcrReviewSnapshot twice (running then done) with updated records, failedPages, pageStatusSummary. Inherits parentRunId/parentSubject/__name from prior row."
+        }
+      ]
+    },
+    {
+      "step": "verify-relookup",
+      "label": "Verify Relookup: Per-record Per-lookup Re-run",
+      "sourceRef": "src/workflows/ocr/verify-relookup.ts",
+      "note": "Operator-triggered mini-orchestrator (HTTP route). Targets a single failed verify-check by re-running either person-lookup or i9-lookup for that record. Only for verify formType rows. Rebuilds checks[] after patching.",
+      "operations": [
+        {
+          "id": "ocr.load-latest-row-vr#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Load latest OCR row (verify only)",
+          "summary": "findLatestEntryForPredicate by sessionId+runId (7-day lookback). Throws if formType !== 'verify'. Derives rootTracePrefix from frozen __traceId for trace propagation to children.",
+          "outputVar": "{latestRow, rootTracePrefix}"
+        },
+        {
+          "id": "ocr.emit-running-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit intermediate running relookup row",
+          "summary": "emitRelookupRow with status=running step=verify-relookup. Shows queue/session activity while the lookup runs."
+        },
+        {
+          "id": "control.lookup-branch-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: person lookup or i9 lookup",
+          "summary": "input.lookup==='person' → runPersonRelookup (personLookupWorkflow). input.lookup==='i9' → runI9Relookup (i9LookupWorkflow); guards that record.formKind==='oath'.",
+          "inputVar": "{lookup}"
+        },
+        {
+          "id": "person-lookup.fanout-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Fan-out person-lookup (person branch)",
+          "summary": "fanOutAndWatch with personLookupWorkflow: { name, includeCrmDates:true, keepNonHdh:true, taskGroupId:sessionId }. Per-invocation nonce in itemId (ocr-verify-relook-person-{runId}-r{idx}-{nonce}) prevents matching stale completed enrichment children.",
+          "note": "Person relookup branch only."
+        },
+        {
+          "id": "i9-lookup.fanout-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Fan-out i9-lookup (i9 branch)",
+          "summary": "fanOutAndWatch with i9LookupWorkflow: { lastName, firstName }. watchWorkflow:'i9-lookup'. Per-invocation nonce in itemId (ocr-verify-relook-i9-{runId}-r{idx}-{nonce}).",
+          "note": "I9 relookup branch only — oath records with blank officerSigned only."
+        },
+        {
+          "id": "control.patch-record-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Patch targeted record from lookup outcome",
+          "summary": "Person: patchOcrRecordFromEidLookupOutcome + applyPersonLookupToVerifyRecord (CRM dates, active status). I9: applyI9ToVerifyRecord (authorized-official signer). patchOcrRecordUnresolved on timeout.",
+          "inputVar": "{lookupOutcome}"
+        },
+        {
+          "id": "control.rebuild-checks-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Rebuild verify checks for targeted record",
+          "summary": "buildVerifyChecks(records[idx]) re-evaluates present/found/missing for each check field (name, EID, activeStatus, employmentDate, oathDate, officialSigner) after the patched data."
+        },
+        {
+          "id": "ocr.emit-terminal-vr#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Re-emit running+done person-lookup snapshots",
+          "summary": "emitRelookupRow twice: status=running step=person-lookup, then status=done step=person-lookup. Re-opens the terminal done row so the ↻ spins until patched records arrive."
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "OCR is kernel-registered but NOT daemon-mode: it runs in the dashboard's Node process (same as sharepoint-download). No browsers, no Playwright, no selectors — zero Selectors.* references in the workflow.",
+    "Step count follows ocrSteps = ['loading-roster','ocr','person-lookup','awaiting-approval']. The legacy 'matching', 'disambiguating', and 'verification' step names are remapped display aliases; they are not in ocrSteps.",
+    "DELEGATED vs STANDALONE split: standalone runs (no parentRunId) complete done after person-lookup with a read-only completeness card; delegated runs park at awaiting-approval until operator approves/discards. The Approve button is UI-gated on parentRunId.",
+    "Approve fan-out is form-spec driven and handled by the /api/ocr/approve-batch HTTP route (outside the workflow handler): approveTo (per-record → oath-signature signer / EC contact / OnBase import row) and approveDocumentTo (once-per-PDF → oath-upload ticket). Both are optional; a spec may declare either, both, or neither.",
+    "force-research, retry-page, verify-relookup are operator-triggered mini-orchestrators (HTTP routes) that reuse the person-lookup / i9-lookup fan-out primitives. They are not part of the main ocrSteps sequence but patch the same OCR row's tracker data in place.",
+    "verify form (spec.enrichRecords) suppresses the generic eid-lookup fan-out (needsLookup→null) and delegates ALL enrichment in its hook to person-lookup (CRM dates, active status) and i9-lookup (authorized official).",
+    "Root trace-id propagation: the OCR run's traceId is composed from the operation coordinator's rootTracePrefix when delegated (so prep shares the coordinator's prefix). This prefix propagates to every person-lookup child and approve fan-out row.",
+    "SQLite task dependencies are the primary person-lookup fan-out wait mechanism; falls back to watchChildRuns on setup error. The anchor task_kind=ocr terminates (done) when its last dependency settles."
+  ]
+}

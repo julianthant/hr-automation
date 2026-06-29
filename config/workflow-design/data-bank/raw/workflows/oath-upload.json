@@ -1,0 +1,398 @@
+{
+  "workflow": "oath-upload",
+  "systems": ["servicenow"],
+  "steps": [
+    {
+      "step": "resolve-pdf",
+      "label": "Resolve PDF path and hash from file store",
+      "system": "control",
+      "sourceRef": "src/workflows/oath-upload/handler.ts",
+      "operations": [
+        {
+          "id": "control.resolvePdf#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Resolve PDF path",
+          "summary": "If pdfPath present use it directly; else open controlDb and call getRegisteredFile(db, pdfFileId) to get storagePath; throws if neither pdfPath nor pdfFileId is available",
+          "inputVar": "{pdfPath, pdfFileId}",
+          "outputVar": "{pdfPath}"
+        },
+        {
+          "id": "control.deriveHash#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Derive PDF sha256 hash",
+          "summary": "pdfHash = input.pdfHash ?? registered.sha256 ?? hashFile(storagePath).sha256; fail-safe — warns and returns undefined on error",
+          "inputVar": "{pdfPath}",
+          "outputVar": "{pdfHash}"
+        }
+      ]
+    },
+    {
+      "step": "wait-approval",
+      "label": "Wait for operator OCR approval and learn signer itemIds (full mode only)",
+      "system": "control",
+      "sourceRef": "src/workflows/oath-upload/handler.ts",
+      "note": "Skipped when mode!='full' or signerItemIds already present in input (legacy approve fan-out). Waits cross-process via JSONL backstop. OcrDiscardedError → CancelledError (orange Cancelled row, not red Failed). OcrApprovalFailedError → throw. Zero signer rows after approval → stamp approval-empty + throw (do NOT file an empty ticket).",
+      "operations": [
+        {
+          "id": "control.approvalWaitGate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Gate: skip if not full mode or signerItemIds already set",
+          "summary": "needsApprovalWait = mode==='full' && signerItemIds.length===0; if false → ctx.skipStep('wait-approval')"
+        },
+        {
+          "id": "control.subscribeToApproval#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Subscribe to OCR approval signal (cross-process wait)",
+          "summary": "subscribeToApproval({ workflow: 'ocr', sessionId }, { signal }) — blocks until operator approves or discards the OCR prep in the OCR review panel",
+          "inputVar": "{sessionId}"
+        },
+        {
+          "id": "control.readFannedOutItemIds#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Extract signer itemIds from approved OCR payload",
+          "summary": "signerItemIds = [...payload.fannedOutItemIds]; payload.fannedOutItemIds is stamped by the OCR approve route's fan-out",
+          "outputVar": "{signerItemIds}"
+        },
+        {
+          "id": "control.handleOcrDiscardedError#assert",
+          "kind": "assert",
+          "system": "control",
+          "label": "Discard → CancelledError (not workflow failure)",
+          "summary": "OcrDiscardedError → throw Object.assign(new CancelledError('discarded'), { cause: err }) so the terminal row classifies on the Cancel surface"
+        },
+        {
+          "id": "control.handleOcrApprovalFailedError#assert",
+          "kind": "assert",
+          "system": "control",
+          "label": "OCR prep failure → throw, no ticket filed",
+          "summary": "OcrApprovalFailedError → throw Error('oath-upload: OCR prep failed — NOT filing the HR ticket')"
+        },
+        {
+          "id": "control.zeroSignerGuard#assert",
+          "kind": "assert",
+          "system": "control",
+          "label": "Assert at least one signer row after full-mode approval",
+          "summary": "If needsApprovalWait && signerItemIds.length===0 → ctx.updateData({status:'approval-empty', signerCount:'0'}), throw — full mode always requires verified signers before filing"
+        }
+      ]
+    },
+    {
+      "step": "wait-signatures",
+      "label": "Wait for all oath-signature signer rows to complete successfully",
+      "system": "control",
+      "sourceRef": "src/workflows/oath-upload/handler.ts",
+      "note": "Cross-daemon watch on the oath-signature daemon (not oath-upload's own daemon), eliminating the old single-worker deadlock. Skipped for upload-only or signerItemIds=[]. All signers must be status='done'; any missing/failed/cancelled → throw, no ticket.",
+      "operations": [
+        {
+          "id": "control.signatureWaitGate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Gate: skip if upload-only or no signer itemIds",
+          "summary": "mode==='upload-only' OR signerItemIds.length===0 → ctx.skipStep('wait-signatures'), ctx.updateData({signerCount:'skipped'})"
+        },
+        {
+          "id": "control.watchChildRuns#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Watch oath-signature signer rows until all have terminal outcomes",
+          "summary": "watchChildRuns({ workflow: 'oath-signature', expectedItemIds: signerItemIds }) — polls tracker JSONL files for terminal outcomes across daemon boundary",
+          "inputVar": "{signerItemIds}"
+        },
+        {
+          "id": "control.assertAllSignersDone#assert",
+          "kind": "assert",
+          "system": "control",
+          "label": "Assert every expected signer outcome is 'done'",
+          "summary": "Builds byItem map; any expectedItemId missing or status!='done' → throw with itemId=status list; no HR ticket is filed"
+        }
+      ]
+    },
+    {
+      "step": "idempotency-check",
+      "label": "Probe for prior filed ticket (Contract-2 retry guard)",
+      "system": "control",
+      "sourceRef": "src/workflows/oath-upload/handler.ts",
+      "note": "Keyed on sessionId + pdfHash (not runId). A Contract-2 retry assigns a new runId but the same sessionId, so a runId-keyed lookup would miss a prior ticket. Probe is fail-safe: any miss lets the workflow continue.",
+      "operations": [
+        {
+          "id": "control.findPriorTicketForSession#scrape",
+          "kind": "scrape",
+          "system": "control",
+          "label": "Query tracker for prior HRC ticket matching sessionId/pdfHash",
+          "summary": "findPriorTicketForSession(sessionId, pdfHash, trackerDir) — controlDb item index + JSONL lookback (7 days); returns HRC ticket string or null",
+          "inputVar": "{sessionId, pdfHash}",
+          "outputVar": "{priorTicket}"
+        },
+        {
+          "id": "control.skipOnDuplicate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Short-circuit: stamp prior ticket and skip ServiceNow steps",
+          "summary": "If priorTicket: ctx.updateData({ticketNumber: priorTicket}), ctx.skipStep for servicenow-auth + open-hr-form + fill-form + submit, return"
+        }
+      ]
+    },
+    {
+      "step": "servicenow-auth",
+      "label": "Authenticate to ServiceNow via UCSD SSO + Duo MFA",
+      "system": "servicenow",
+      "sourceRef": "src/workflows/oath-upload/handler.ts",
+      "note": "Auth is deliberately deferred past the signature wait to avoid holding a SAML session open across multi-day signing ceremonies. loginToServiceNow navigates to the HR form URL, skips SSO if already authenticated (subject input visible), otherwise fills SSO credentials and waits for Duo. 300s Duo timeout. Hands-off WebAuthn if HR_AUTOMATION_DUO_WEBAUTHN=1.",
+      "operations": [
+        {
+          "id": "servicenow.hrFormAuth#navigate",
+          "kind": "navigate",
+          "system": "servicenow",
+          "label": "Navigate to HR Inquiry form for auth probe",
+          "summary": "page.goto(HR_INQUIRY_FORM_URL, {waitUntil:'domcontentloaded', timeout:15000})",
+          "url": "https://support.ucsd.edu/esc?id=sc_cat_item&table=sc_cat_item&sys_id=d8af3ae8db4fe510b3187d84f39619bf"
+        },
+        {
+          "id": "servicenow.hrInquiry.subjectInput#assert",
+          "kind": "assert",
+          "system": "servicenow",
+          "label": "Check already authenticated (subject input visible)",
+          "summary": "hrInquiry.subjectInput(page).isVisible({timeout:2000}) → if true, skip SSO flow and return true",
+          "selectorFqn": "hrInquiry.subjectInput"
+        },
+        {
+          "id": "servicenow.ssoForm#wait",
+          "kind": "wait",
+          "system": "servicenow",
+          "label": "Wait for TritON SSO form to render",
+          "summary": "waitForSsoForm(page, 15000) — polls for a5.ucsd.edu SSO form; needed because ServiceNow auth_redirect.do hop is client-side and form lags ~1-2s"
+        },
+        {
+          "id": "servicenow.ssoCredentials#fill",
+          "kind": "fill",
+          "system": "servicenow",
+          "label": "Fill SSO username and password",
+          "summary": "fillSsoCredentials — 3-level fallback selectors (accessible label → alternate label → input[name])",
+          "inputVar": "{UCPATH_USER_ID, UCPATH_PASSWORD}"
+        },
+        {
+          "id": "servicenow.ssoSubmit#click",
+          "kind": "click",
+          "system": "servicenow",
+          "label": "Click SSO Log In button",
+          "summary": "clickSsoSubmit — button[name='_eventId_proceed']"
+        },
+        {
+          "id": "servicenow.duoApproval#wait",
+          "kind": "wait",
+          "system": "servicenow",
+          "label": "Wait for Duo MFA approval",
+          "summary": "pollDuoApproval / requestDuoApproval — 300s timeout; successUrlMatch=support.ucsd.edu without duosecurity; successCheck=subjectInput visible; hands-off WebAuthn (Touch ID, internal) if HR_AUTOMATION_DUO_WEBAUTHN=1"
+        },
+        {
+          "id": "servicenow.postDuoLanding#assert",
+          "kind": "assert",
+          "system": "servicenow",
+          "label": "Post-Duo landing verification: HR form subject input visible",
+          "summary": "hrInquiry.subjectInput(page).isVisible({timeout:5000}) — confirms we landed on the HR Inquiry form, not another ServiceNow redirect target; logs warn + returns false on failure",
+          "selectorFqn": "hrInquiry.subjectInput"
+        }
+      ]
+    },
+    {
+      "step": "open-hr-form",
+      "label": "Navigate to HR General Inquiry form and verify",
+      "system": "servicenow",
+      "sourceRef": "src/systems/servicenow/navigate.ts",
+      "operations": [
+        {
+          "id": "servicenow.hrInquiryForm#navigate",
+          "kind": "navigate",
+          "system": "servicenow",
+          "label": "Navigate to HR Inquiry catalog item",
+          "summary": "gotoHrInquiryForm — page.goto with waitUntil:'domcontentloaded'; skips networkidle to avoid 5–10s dead wait on ServiceNow's background XHR",
+          "url": "https://support.ucsd.edu/esc?id=sc_cat_item&table=sc_cat_item&sys_id=d8af3ae8db4fe510b3187d84f39619bf"
+        },
+        {
+          "id": "servicenow.formTitle#assert",
+          "kind": "assert",
+          "system": "servicenow",
+          "label": "Verify title includes 'HR General Inquiry'",
+          "summary": "verifyOnInquiryForm — page.title() must include 'HR General Inquiry'; throws with current title + URL on mismatch (indicates SSO redirect / session expired)"
+        }
+      ]
+    },
+    {
+      "step": "fill-form",
+      "label": "Fill HR Inquiry form fields and attach oath PDF",
+      "system": "servicenow",
+      "sourceRef": "src/workflows/oath-upload/fill-form.ts",
+      "note": "Subject + Description are plain safeFill. 'Specifically' and 'Category' are Select2 v3 typeaheads: click choice anchor → type into search box → click result (or Enter fallback). Category tries native selectOption first, falls back to Select2. File input uses setInputFiles on hidden input to bypass OS file picker.",
+      "operations": [
+        {
+          "id": "servicenow.hrInquiry.subjectInput#fill",
+          "kind": "fill",
+          "system": "servicenow",
+          "label": "Fill Subject field",
+          "selectorFqn": "hrInquiry.subjectInput",
+          "inputVar": "{subject}",
+          "literalValue": "HDH New Hire Oaths"
+        },
+        {
+          "id": "servicenow.hrInquiry.descriptionInput#fill",
+          "kind": "fill",
+          "system": "servicenow",
+          "label": "Fill Description field",
+          "selectorFqn": "hrInquiry.descriptionInput",
+          "inputVar": "{description}",
+          "literalValue": "Please see attached oaths for employees hired under HDH."
+        },
+        {
+          "id": "servicenow.hrInquiry.specificallyChoice#click",
+          "kind": "click",
+          "system": "servicenow",
+          "label": "Open Specifically Select2 dropdown",
+          "summary": "Click visible a.select2-choice anchor (accessible combobox is offscreen and times out on direct click)",
+          "selectorFqn": "hrInquiry.specificallyChoice"
+        },
+        {
+          "id": "servicenow.hrInquiry.select2DropSearch.Specifically#fill",
+          "kind": "fill",
+          "system": "servicenow",
+          "label": "Type into Specifically search box",
+          "summary": "select2DropSearch(page, 'Specifically') — scoped by search input accessible name ('Select Specifically:') to avoid strict-mode collision with other open drops",
+          "selectorFqn": "hrInquiry.select2DropSearch",
+          "inputVar": "{specifically}",
+          "literalValue": "Signing Ceremony (Oath)"
+        },
+        {
+          "id": "servicenow.specificallyDropSettle#wait",
+          "kind": "wait",
+          "system": "servicenow",
+          "label": "Wait 800ms for Specifically dropdown results to render",
+          "summary": "page.waitForTimeout(800) — Select2 result list loads asynchronously"
+        },
+        {
+          "id": "servicenow.hrInquiry.select2ResultOption.Specifically#click",
+          "kind": "click",
+          "system": "servicenow",
+          "label": "Click Specifically result option",
+          "summary": "select2ResultOption(page, 'Specifically', value) with 3s timeout; fallback: page.keyboard.press('Enter') to accept highlighted match",
+          "selectorFqn": "hrInquiry.select2ResultOption",
+          "inputVar": "{specifically}",
+          "literalValue": "Signing Ceremony (Oath)"
+        },
+        {
+          "id": "servicenow.hrInquiry.categoryInput#select",
+          "kind": "select",
+          "system": "servicenow",
+          "label": "Select Category via native selectOption (primary path)",
+          "summary": "categoryInput.selectOption({label: 'Payroll'}, {timeout:3000}); throws → falls back to Select2 combobox path",
+          "selectorFqn": "hrInquiry.categoryInput",
+          "literalValue": "Payroll"
+        },
+        {
+          "id": "servicenow.hrInquiry.categoryChoice#click",
+          "kind": "click",
+          "system": "servicenow",
+          "label": "Open Category Select2 dropdown (fallback path)",
+          "summary": "Fallback when native selectOption throws — click categoryChoice to open Select2 drop",
+          "selectorFqn": "hrInquiry.categoryChoice",
+          "note": "Fallback path only; executes when selectOption on categoryInput fails"
+        },
+        {
+          "id": "servicenow.hrInquiry.select2DropSearch.Category#fill",
+          "kind": "fill",
+          "system": "servicenow",
+          "label": "Type into Category search box (fallback path)",
+          "summary": "select2DropSearch(page, 'Category') — scoped by 'Select Category:' accessible name; page.waitForTimeout(500) after fill",
+          "selectorFqn": "hrInquiry.select2DropSearch",
+          "inputVar": "{category}",
+          "literalValue": "Payroll",
+          "note": "Fallback path only"
+        },
+        {
+          "id": "servicenow.hrInquiry.select2ResultOption.Category#click",
+          "kind": "click",
+          "system": "servicenow",
+          "label": "Click Category result option (fallback path)",
+          "summary": "select2ResultOption(page, 'Category', value) with 3s timeout; fallback: Enter",
+          "selectorFqn": "hrInquiry.select2ResultOption",
+          "literalValue": "Payroll",
+          "note": "Fallback path only"
+        },
+        {
+          "id": "servicenow.hrInquiry.fileInput#upload",
+          "kind": "upload",
+          "system": "servicenow",
+          "label": "Attach oath PDF via hidden file input",
+          "summary": "hrInquiry.fileInput(page).setInputFiles(attachmentPath) — bypasses the visible 'Choose a file' button to avoid OS file picker",
+          "selectorFqn": "hrInquiry.fileInput",
+          "inputVar": "{pdfPath}"
+        },
+        {
+          "id": "servicenow.fileUploadSettle#wait",
+          "kind": "wait",
+          "system": "servicenow",
+          "label": "Wait 1000ms for file upload to register",
+          "summary": "page.waitForTimeout(1000) — upload latency before submit"
+        }
+      ]
+    },
+    {
+      "step": "submit",
+      "label": "Submit HR Inquiry form and capture ticket number",
+      "system": "servicenow",
+      "sourceRef": "src/workflows/oath-upload/handler.ts",
+      "note": "dryRun=true skips the submit click and stamps 'DRY RUN - not submitted'. Ticket number is parsed from the ServiceNow redirect URL (?id=ticket&number=HRC0XXXXXX). Idempotency: a retry that reaches this step with a new runId will have been short-circuited by the idempotency-check step if the prior run filed successfully.",
+      "operations": [
+        {
+          "id": "control.dryRunGate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Dry-run gate: skip submit if dryRun=true",
+          "summary": "dryRun → screenshot hr-inquiry-dry-run-pre-submit, ctx.updateData({ticketNumber:'DRY RUN - not submitted', status:'dry-run-complete'}), return early"
+        },
+        {
+          "id": "servicenow.hrInquiry.submitButton#click",
+          "kind": "click",
+          "system": "servicenow",
+          "label": "Click Submit button",
+          "selectorFqn": "hrInquiry.submitButton"
+        },
+        {
+          "id": "servicenow.ticketRedirect#wait",
+          "kind": "wait",
+          "system": "servicenow",
+          "label": "Wait for post-submit redirect to ticket detail URL",
+          "summary": "page.waitForURL(url => url !== before && url.includes('number='), {timeout:60000}); falls through on stale event — URL is probed directly after"
+        },
+        {
+          "id": "servicenow.ticketNumber#scrape",
+          "kind": "scrape",
+          "system": "servicenow",
+          "label": "Parse ticket number from redirect URL",
+          "summary": "parseTicketNumberFromUrl(page.url()) — extracts ?number=HRC0XXXXXX via URL.searchParams; validates /^HRC\\d{6,}$/",
+          "outputVar": "{ticketNumber}"
+        },
+        {
+          "id": "servicenow.ticketNumberPresent#assert",
+          "kind": "assert",
+          "system": "servicenow",
+          "label": "Assert ticket number was captured from redirect URL",
+          "summary": "Throws submitAndCaptureTicketNumber: no number= param in post-submit URL if num is null"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Mode gate: mode='full' && signerItemIds absent → wait-approval (cross-process OCR subscribe) → wait-signatures (cross-daemon watchChildRuns) → ServiceNow ticket. mode='upload-only' → skip both waits, file ticket directly. Legacy rows with signerItemIds already set skip only wait-approval.",
+    "Born-at-upload (option A): the ticket row is enqueued at /api/ocr/prepare before OCR review; the OCR prep run is delegated under it (parentRunId=oathUploadRunId). This row IS the ticket — no second row is created at approve time for operationWorkflow='oath-upload'.",
+    "Cross-daemon fan-out: oath-upload WAITS on oath-signature rows (watchChildRuns), it does NOT delegate to them. Signer rows are fanned out by the OCR approve route independently, eliminating the single-worker deadlock of the old delegate-signatures step.",
+    "Dry-run boundary: dryRun=true skips only the ServiceNow submit click in the submit step; all preceding steps (including signature wait and form fill) execute normally.",
+    "Cancel is TREE-scoped (E2E-010): cancelling the ticket row also cancels the delegated OCR prep and its descendants (lookup rows) via resolveActionTargets tree walk. Row-scope cancel left the OCR review orphaned at awaiting-approval.",
+    "Zero signer guard: full mode with zero fanned-out signer rows after OCR approval → stamp status=approval-empty, signerCount=0, throw — never file an empty ticket.",
+    "Idempotency probe (between wait-signatures and servicenow-auth): keyed on sessionId+pdfHash (not runId) so Contract-2 retries with a new runId still find and reuse the prior HRC ticket number.",
+    "ServiceNow auth is deliberately deferred past all waits to avoid holding a SAML session open across multi-day signing ceremonies."
+  ]
+}

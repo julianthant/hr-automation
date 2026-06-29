@@ -1,0 +1,739 @@
+{
+  "system": "kuali",
+  "label": "Kuali",
+  "operations": [
+    {
+      "id": "kuali.actionList.docLink#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Click Document Link (exact match)",
+      "summary": "Document link matching a doc number EXACTLY (anchored regex); clicks .first() because both Document# and Document Title columns expose the number.",
+      "selectorFqn": "kualiSelectors.actionList.docLink",
+      "role": "link",
+      "accessibleName": "<docNumber> (exact, anchored)",
+      "verified": "2026-06-17",
+      "tags": [
+        "document",
+        "doc",
+        "link",
+        "action-list",
+        "exact",
+        "kuali"
+      ],
+      "note": "Anchored regex ^\\s*<docId>\\s*$ prevents substring collisions (search '414' returns 4140-4149); clicks .first()",
+      "sourceRef": "src/systems/kuali/selectors.ts:33"
+    },
+    {
+      "id": "kuali.actionList.docLinks#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "All pending document links in the Action List",
+      "summary": "Enumerates every bare-number link in the Action List (one per pending document row) for reading the full set of pending doc numbers.",
+      "selectorFqn": "kualiSelectors.actionList.docLinks",
+      "role": "link",
+      "accessibleName": "/^\\s*\\d+\\s*$/",
+      "tags": [
+        "document",
+        "doc",
+        "links",
+        "action-list",
+        "pending",
+        "enumerate",
+        "kuali"
+      ],
+      "note": "NEEDS LIVE VERIFICATION — derived from docLink pattern; not yet confirmed against a live Action List. Read-only; never opens or mutates a document.",
+      "sourceRef": "src/systems/kuali/selectors.ts:54"
+    },
+    {
+      "id": "kuali.actionList.menuItem#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Click Action List Menu Item",
+      "summary": "\"Action List\" menu item in the Kuali Build nav.",
+      "selectorFqn": "kualiSelectors.actionList.menuItem",
+      "role": "menuitem",
+      "accessibleName": "Action List",
+      "verified": "2026-03-16",
+      "tags": [
+        "action",
+        "list",
+        "menu",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:19"
+    },
+    {
+      "id": "kuali.actionList.searchGoButton#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Click Action List Search GO",
+      "summary": "Submits the Action List search filter; the only \"GO\" button on the page.",
+      "selectorFqn": "kualiSelectors.actionList.searchGoButton",
+      "role": "button",
+      "accessibleName": "GO",
+      "verified": "2026-06-17",
+      "tags": [
+        "action-list",
+        "search",
+        "go",
+        "button",
+        "submit",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:79"
+    },
+    {
+      "id": "kuali.actionList.searchInput#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Action List Search Filter",
+      "summary": "Textbox for filtering the Action List by document number; scoped to the .kp-input-group containing the GO button.",
+      "selectorFqn": "kualiSelectors.actionList.searchInput",
+      "role": "textbox",
+      "accessibleName": "Search",
+      "verified": "2026-06-17",
+      "tags": [
+        "action-list",
+        "search",
+        "input",
+        "textbox",
+        "filter",
+        "kuali"
+      ],
+      "note": "Scoped to .kp-input-group:has(.kp-input-button-right) to avoid the global nav search box",
+      "sourceRef": "src/systems/kuali/selectors.ts:67"
+    },
+    {
+      "id": "kuali.actionList.searchInput#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Action List search box (scrape)",
+      "summary": "Read current filter value from the Action List search textbox.",
+      "selectorFqn": "kualiSelectors.actionList.searchInput",
+      "role": "textbox",
+      "accessibleName": "Search",
+      "verified": "2026-06-17",
+      "tags": [
+        "action-list",
+        "search",
+        "input",
+        "textbox",
+        "filter",
+        "kuali"
+      ],
+      "note": "Same scoping as fill variant — `.kp-input-group:has(.kp-input-button-right)`.",
+      "sourceRef": "src/systems/kuali/selectors.ts:67"
+    },
+    {
+      "id": "kuali.finalTransactions.department#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Department combobox (scrape)",
+      "summary": "Read currently selected department from the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.department",
+      "role": "combobox",
+      "accessibleName": "Department*",
+      "tags": [
+        "department",
+        "combobox",
+        "final",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:163"
+    },
+    {
+      "id": "kuali.finalTransactions.department#select",
+      "kind": "select",
+      "system": "kuali",
+      "label": "Select Department in Final Transactions",
+      "summary": "Department combobox in the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.department",
+      "role": "combobox",
+      "accessibleName": "Department*",
+      "tags": [
+        "department",
+        "combobox",
+        "final",
+        "kuali"
+      ],
+      "note": "selectOption({ index }) not { label } — live UCSD options have irregular internal whitespace that breaks exact label match (ISS-B05). pickDepartmentOptionIndex() does 2-tier case-insensitive match",
+      "sourceRef": "src/systems/kuali/selectors.ts:163",
+      "inputVar": "{departmentDescription}"
+    },
+    {
+      "id": "kuali.finalTransactions.payrollTitle#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Payroll Title",
+      "summary": "Payroll Title textbox in the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.payrollTitle",
+      "role": "textbox",
+      "accessibleName": "Payroll Title*",
+      "tags": [
+        "payroll",
+        "title",
+        "textbox",
+        "final",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:177",
+      "inputVar": "{jobDescription}"
+    },
+    {
+      "id": "kuali.finalTransactions.payrollTitle#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Payroll Title textbox (scrape)",
+      "summary": "Read payroll title from the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.payrollTitle",
+      "role": "textbox",
+      "accessibleName": "Payroll Title*",
+      "tags": [
+        "payroll",
+        "title",
+        "textbox",
+        "final",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:176"
+    },
+    {
+      "id": "kuali.finalTransactions.payrollTitleCode#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Payroll Title Code",
+      "summary": "Payroll Title Code textbox in the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.payrollTitleCode",
+      "role": "textbox",
+      "accessibleName": "Payroll Title Code*",
+      "tags": [
+        "payroll",
+        "title",
+        "code",
+        "textbox",
+        "final",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:170",
+      "inputVar": "{jobCode}"
+    },
+    {
+      "id": "kuali.finalTransactions.payrollTitleCode#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Payroll Title Code textbox (scrape)",
+      "summary": "Read payroll title code from the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.payrollTitleCode",
+      "role": "textbox",
+      "accessibleName": "Payroll Title Code*",
+      "tags": [
+        "payroll",
+        "title",
+        "code",
+        "textbox",
+        "final",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:170"
+    },
+    {
+      "id": "kuali.finalTransactions.terminationEffDate#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Termination Effective Date",
+      "summary": "Termination Effective Date textbox in the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.terminationEffDate",
+      "role": "textbox",
+      "accessibleName": "Termination Effective Date*",
+      "tags": [
+        "termination",
+        "effective",
+        "date",
+        "textbox",
+        "final",
+        "kuali"
+      ],
+      "note": "Direct .fill() with 5s timeout; NOT fillWithVerify (no retry needed for this field)",
+      "sourceRef": "src/systems/kuali/selectors.ts:156",
+      "inputVar": "{termEffDate}"
+    },
+    {
+      "id": "kuali.finalTransactions.terminationEffDate#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Termination Effective Date textbox (scrape)",
+      "summary": "Read termination effective date from the Final Transactions section.",
+      "selectorFqn": "kualiSelectors.finalTransactions.terminationEffDate",
+      "role": "textbox",
+      "accessibleName": "Termination Effective Date*",
+      "tags": [
+        "termination",
+        "effective",
+        "date",
+        "textbox",
+        "final",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:156"
+    },
+    {
+      "id": "kuali.kualiSpaceUrl#navigate",
+      "kind": "navigate",
+      "system": "kuali",
+      "label": "Navigate to Kuali Build Space",
+      "url": "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb",
+      "sourceRef": "src/systems/kuali/navigate.ts"
+    },
+    {
+      "id": "kuali.save.navbarSaveButton#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Click Save (navbar)",
+      "summary": "Save button with a 3-deep fallback chain: action-bar Save → nav Save → generic role Save.",
+      "selectorFqn": "kualiSelectors.save.navbarSaveButton",
+      "role": "button",
+      "accessibleName": "Save",
+      "verified": "2026-04-10",
+      "tags": [
+        "save",
+        "navbar",
+        "button",
+        "fallback",
+        "kuali"
+      ],
+      "note": "IRREVERSIBLE WRITE. 3-deep .or() chain: action-bar → nav → generic role button. Scrolls to top first. Waits for networkidle (critical for batch mode)",
+      "sourceRef": "src/systems/kuali/selectors.ts:222"
+    },
+    {
+      "id": "kuali.separationForm.eid#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "EID textbox (fill)",
+      "summary": "Employee ID textbox on the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.eid",
+      "role": "textbox",
+      "accessibleName": "EID*",
+      "tags": [
+        "eid",
+        "employee",
+        "id",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:96"
+    },
+    {
+      "id": "kuali.separationForm.eid#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Scrape EID",
+      "summary": "Read employee EID from the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.eid",
+      "role": "textbox",
+      "accessibleName": "EID*",
+      "tags": [
+        "eid",
+        "employee",
+        "id",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "note": "May have leading whitespace — .trim() applied; schema allows 5+ digits (lenient) so short EIDs reach identity-check gate",
+      "sourceRef": "src/systems/kuali/selectors.ts:96",
+      "outputVar": "{eid}"
+    },
+    {
+      "id": "kuali.separationForm.employeeName#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Correct Employee Name in Kuali (similar branch)",
+      "summary": "Employee last name, first name textbox on the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.employeeName",
+      "role": "textbox",
+      "accessibleName": "Employee Last Name, First Name*",
+      "tags": [
+        "employee",
+        "name",
+        "last",
+        "first",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:90",
+      "inputVar": "{correctedName}",
+      "note": "Only on 'similar' tier. Writes to UNSUBMITTED Kuali draft even in dry-run (like timekeeper fill). correctNameSpelling preserves Last,First format and swaps only the misspelled token"
+    },
+    {
+      "id": "kuali.separationForm.employeeName#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Scrape Employee Name",
+      "summary": "Read employee last name, first name from the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.employeeName",
+      "role": "textbox",
+      "accessibleName": "Employee Last Name, First Name*",
+      "tags": [
+        "employee",
+        "name",
+        "last",
+        "first",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "note": "Raw value is ALL-CAPS (e.g. 'NAKAGAWA,MATTHEW K'); normalized to 'Last, First M' via displayPersonName() before stamping ctx.data",
+      "sourceRef": "src/systems/kuali/selectors.ts:90",
+      "outputVar": "{employeeName}"
+    },
+    {
+      "id": "kuali.separationForm.lastDayWorked#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Write Back Last Day Worked (conditional)",
+      "summary": "Last Day Worked date textbox on the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.lastDayWorked",
+      "role": "textbox",
+      "accessibleName": "Last Day Worked*",
+      "tags": [
+        "last-day",
+        "worked",
+        "date",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "note": "Only when ldwChanged (Kronos last punch ≠ Kuali LDW). Live runs only (dry-run terminal exits before this). fillWithVerify: fill → readback → retry with pressSequentially if dropped",
+      "sourceRef": "src/systems/kuali/selectors.ts:102",
+      "inputVar": "{lastDayWorked}"
+    },
+    {
+      "id": "kuali.separationForm.lastDayWorked#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Scrape Last Day Worked",
+      "summary": "Read Last Day Worked date from the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.lastDayWorked",
+      "role": "textbox",
+      "accessibleName": "Last Day Worked*",
+      "tags": [
+        "last-day",
+        "worked",
+        "date",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:102",
+      "outputVar": "{lastDayWorked}"
+    },
+    {
+      "id": "kuali.separationForm.location#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Location textbox (fill)",
+      "summary": "Optional Location textbox on the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.location",
+      "role": "textbox",
+      "accessibleName": "Location *",
+      "tags": [
+        "location",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "note": "Optional field — 3s timeout, silent failure if absent.",
+      "sourceRef": "src/systems/kuali/selectors.ts:120"
+    },
+    {
+      "id": "kuali.separationForm.location#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Scrape Location (optional)",
+      "summary": "Read location value from the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.location",
+      "role": "textbox",
+      "accessibleName": "Location *",
+      "tags": [
+        "location",
+        "textbox",
+        "separation",
+        "kuali"
+      ],
+      "note": "Optional — 3s timeout, silent failure on missing field",
+      "sourceRef": "src/systems/kuali/selectors.ts:120",
+      "outputVar": "{location}"
+    },
+    {
+      "id": "kuali.separationForm.separationDate#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Write Back Separation Date (conditional)",
+      "summary": "Separation Date textbox on the Kuali separation form; matched via regex /Separation Date/.",
+      "selectorFqn": "kualiSelectors.separationForm.separationDate",
+      "role": "textbox",
+      "accessibleName": "/Separation Date/",
+      "tags": [
+        "separation",
+        "date",
+        "textbox",
+        "kuali"
+      ],
+      "note": "Only when separationDateChanged (derived sep date ≠ Kuali sep date). Live only. Audit comment added in kuali-finalization",
+      "sourceRef": "src/systems/kuali/selectors.ts:108",
+      "inputVar": "{separationDate}"
+    },
+    {
+      "id": "kuali.separationForm.separationDate#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Scrape Separation Date",
+      "summary": "Read Separation Date from the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.separationDate",
+      "role": "textbox",
+      "accessibleName": "/Separation Date/",
+      "tags": [
+        "separation",
+        "date",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:108",
+      "outputVar": "{separationDate}"
+    },
+    {
+      "id": "kuali.separationForm.terminationType#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Scrape Termination Type",
+      "summary": "Read the currently selected termination type from the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.terminationType",
+      "role": "combobox",
+      "accessibleName": "Type of Termination*",
+      "tags": [
+        "type",
+        "termination",
+        "combobox",
+        "separation",
+        "kuali"
+      ],
+      "note": "Read via .evaluate() to get visible text (not internal value). Used by isVoluntaryTermination() and mapReasonCode()",
+      "sourceRef": "src/systems/kuali/selectors.ts:114",
+      "outputVar": "{rawTerminationType}"
+    },
+    {
+      "id": "kuali.separationForm.terminationType#select",
+      "kind": "select",
+      "system": "kuali",
+      "label": "Type of Termination combobox (select)",
+      "summary": "Type of Termination combobox on the Kuali separation form.",
+      "selectorFqn": "kualiSelectors.separationForm.terminationType",
+      "role": "combobox",
+      "accessibleName": "Type of Termination*",
+      "tags": [
+        "type",
+        "termination",
+        "combobox",
+        "separation",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:114"
+    },
+    {
+      "id": "kuali.ssoNav#navigate",
+      "kind": "navigate",
+      "system": "kuali",
+      "label": "Navigate to Kuali Build Space",
+      "url": "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb",
+      "sourceRef": "src/workflows/separations/workflow.ts"
+    },
+    {
+      "id": "kuali.timekeeperTasks.requestAcknowledgedCheckbox#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Check Request Acknowledged",
+      "summary": "Request Acknowledged - In Progress checkbox in the Timekeeper Tasks section.",
+      "selectorFqn": "kualiSelectors.timekeeperTasks.requestAcknowledgedCheckbox",
+      "role": "checkbox",
+      "accessibleName": "Request Acknowledged - In Progress",
+      "tags": [
+        "request",
+        "acknowledged",
+        "checkbox",
+        "timekeeper",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:131",
+      "note": "Runs in parallel with New Kronos timecard fetch via ctx.parallel"
+    },
+    {
+      "id": "kuali.timekeeperTasks.timekeeperComments#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Timekeeper/Approver Comments",
+      "summary": "Timekeeper/Approver Comments textbox in the Timekeeper Tasks section.",
+      "selectorFqn": "kualiSelectors.timekeeperTasks.timekeeperComments",
+      "role": "textbox",
+      "accessibleName": "Timekeeper/Approver Comments:",
+      "tags": [
+        "timekeeper",
+        "approver",
+        "comments",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:145",
+      "inputVar": "{dateChangeComments + comments}",
+      "note": "fillTimekeeperComments: reads existing field value + prepends it (append-aware). dateChangeComments = LDW audit line + sep-date audit line (if changed). comments = edit-resume override + dup-termination note (if approved reuse)"
+    },
+    {
+      "id": "kuali.timekeeperTasks.timekeeperComments#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Timekeeper/Approver Comments textbox (scrape)",
+      "summary": "Read timekeeper/approver comments from the Timekeeper Tasks section.",
+      "selectorFqn": "kualiSelectors.timekeeperTasks.timekeeperComments",
+      "role": "textbox",
+      "accessibleName": "Timekeeper/Approver Comments:",
+      "tags": [
+        "timekeeper",
+        "approver",
+        "comments",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:145"
+    },
+    {
+      "id": "kuali.timekeeperTasks.timekeeperName#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Timekeeper Name",
+      "summary": "Timekeeper Name textbox in the Timekeeper Tasks section.",
+      "selectorFqn": "kualiSelectors.timekeeperTasks.timekeeperName",
+      "role": "textbox",
+      "accessibleName": "Timekeeper Name:*",
+      "tags": [
+        "timekeeper",
+        "name",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:138",
+      "inputVar": "{timekeeperName}",
+      "note": "getTimekeeperName() from config (TIMEKEEPER_NAME env var). Also runs on kronos-skip path (non-HDH / prefill / preset) in a try/catch best-effort block"
+    },
+    {
+      "id": "kuali.timekeeperTasks.timekeeperName#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Timekeeper Name textbox (scrape)",
+      "summary": "Read timekeeper name from the Timekeeper Tasks section.",
+      "selectorFqn": "kualiSelectors.timekeeperTasks.timekeeperName",
+      "role": "textbox",
+      "accessibleName": "Timekeeper Name:*",
+      "tags": [
+        "timekeeper",
+        "name",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:138"
+    },
+    {
+      "id": "kuali.transactionResults.doesNotNeedFinalPayRadio#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Select Does Not Need Final Pay (student employee)",
+      "summary": "\"Does not need Final Pay (student employee)\" radio button in the UCPath Transaction Results section.",
+      "selectorFqn": "kualiSelectors.transactionResults.doesNotNeedFinalPayRadio",
+      "role": "radio",
+      "accessibleName": "Does not need Final Pay (student employee)",
+      "tags": [
+        "final",
+        "pay",
+        "student",
+        "radio",
+        "transaction",
+        "kuali"
+      ],
+      "note": "Hardcoded — assumes all UCSD separations are student employees",
+      "sourceRef": "src/systems/kuali/selectors.ts:202",
+      "literalValue": "Does not need Final Pay (student employee)"
+    },
+    {
+      "id": "kuali.transactionResults.submittedTemplateCheckbox#click",
+      "kind": "click",
+      "system": "kuali",
+      "label": "Check Submitted Termination Template",
+      "summary": "Submitted Termination Template checkbox in the UCPath Transaction Results section.",
+      "selectorFqn": "kualiSelectors.transactionResults.submittedTemplateCheckbox",
+      "role": "checkbox",
+      "accessibleName": "Submitted Termination Template",
+      "tags": [
+        "submitted",
+        "template",
+        "termination",
+        "checkbox",
+        "transaction",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:188"
+    },
+    {
+      "id": "kuali.transactionResults.transactionNumber#assert",
+      "kind": "assert",
+      "system": "kuali",
+      "label": "Verify Transaction Number Still Filled Before Save",
+      "selectorFqn": "kualiSelectors.transactionResults.transactionNumber",
+      "role": "textbox",
+      "inputVar": "{transactionNumber}",
+      "sourceRef": "src/systems/kuali/navigate.ts",
+      "tags": [
+        "transaction",
+        "number",
+        "textbox",
+        "kuali"
+      ],
+      "note": "verifyTxnNumberFilled: 300ms settle wait, readback, re-fill once if wrong, THROW if second mismatch. Kuali reactive bindings can reset the field after other fills"
+    },
+    {
+      "id": "kuali.transactionResults.transactionNumber#fill",
+      "kind": "fill",
+      "system": "kuali",
+      "label": "Fill Transaction Number",
+      "summary": "Transaction Number textbox in the UCPath Transaction Results section.",
+      "selectorFqn": "kualiSelectors.transactionResults.transactionNumber",
+      "role": "textbox",
+      "accessibleName": "Transaction Number:*",
+      "tags": [
+        "transaction",
+        "number",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:195",
+      "inputVar": "{transactionNumber}",
+      "note": "fillWithVerify: fill → readback → retry with pressSequentially. Skipped if empty (left blank for manual entry)"
+    },
+    {
+      "id": "kuali.transactionResults.transactionNumber#scrape",
+      "kind": "scrape",
+      "system": "kuali",
+      "label": "Transaction Number textbox (scrape)",
+      "summary": "Read transaction number from the UCPath Transaction Results section.",
+      "selectorFqn": "kualiSelectors.transactionResults.transactionNumber",
+      "role": "textbox",
+      "accessibleName": "Transaction Number:*",
+      "tags": [
+        "transaction",
+        "number",
+        "textbox",
+        "kuali"
+      ],
+      "sourceRef": "src/systems/kuali/selectors.ts:195"
+    }
+  ]
+}
