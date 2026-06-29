@@ -10,6 +10,9 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
 import { BatchScreenshotsPanel } from "./BatchScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
+import { EidApprovalBanner } from "./EidApprovalBanner";
+import { ViewDataPanel } from "./ViewDataPanel";
+import { isDataPointLog } from "../../../domain/data-point.js";
 import { useLogs, type CollapsedLogEntry } from "@/components/hooks/useLogs";
 import { useCoordinatorAggregatedLogs } from "@/components/hooks/useCoordinatorAggregatedLogs";
 import {
@@ -164,6 +167,14 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
     return logs;
   }, [coordinatorAggregateActive, coordinatorLogs, logs, logsLoading, trackerFallbackLog]);
 
+  // Gate the "View Data" tab: only show it when this run actually recorded
+  // data-provenance points via `ctx.recordData` (mirrors the Edit Data /
+  // Preview gating). Any workflow opts in simply by emitting points.
+  const viewDataAvailable = useMemo(
+    () => displayedLogs.some((l) => isDataPointLog(l)),
+    [displayedLogs],
+  );
+
   // Source-label resolver for the merged coordinator timeline — maps each line's
   // `source` to its human badge. undefined for non-coordinator rows (no badge).
   const sourceLabelOf = useMemo(() => {
@@ -309,6 +320,14 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
       </div>
     ) : undefined;
 
+  // EID-approval review banner — a separations run that PAUSED for operator
+  // approval (data.eidApproval === "pending"). The run is `done` (not failed),
+  // so it never collides with the failure banner; reuse the same top slot.
+  const eidApprovalBanner =
+    entry.workflow === "separations" && entry.data?.eidApproval === "pending" ? (
+      <EidApprovalBanner entry={entry} workflow={logSourceWorkflow} date={date} />
+    ) : undefined;
+
   return (
     <div className="flex-1 flex flex-col bg-card min-w-0 min-h-0 overflow-hidden">
       {/* Detail grid + step pipeline are hidden when the operator maximizes
@@ -381,7 +400,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
         events={events}
         loading={logsLoading}
         delegationLabel={delegationLabel}
-        failureBanner={failureBanner}
+        failureBanner={failureBanner ?? eidApprovalBanner}
         sourceLabelOf={sourceLabelOf}
         delegatedChildren={childEntries.length > 0 ? (childEntries as DelegatedChild[]) : undefined}
         screenshotsSlot={
@@ -409,6 +428,8 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
             date={date}
           />
         }
+        viewDataAvailable={viewDataAvailable}
+        viewDataSlot={<ViewDataPanel logs={displayedLogs} loading={logsLoading} />}
         previewSlot={previewSlot}
         previewHeaderSlot={previewHeaderSlot}
         previewAvailable={previewAvailable}

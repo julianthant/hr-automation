@@ -9,6 +9,8 @@ import {
   Ban,
   SearchX,
   ClipboardList,
+  UserRoundSearch,
+  UserRoundX,
 } from "lucide-react";
 import { memo, type ComponentType, type SVGProps } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
@@ -108,6 +110,23 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     iconClass: "",
     iconColor: "text-muted-foreground",
     label: "Not found",
+  },
+  /** Separations — identity-check resolved a DIFFERENT EID and paused for the
+   *  operator to pick which person to separate (action required → amber). */
+  awaitingApproval: {
+    badge: "bg-warning/12 text-warning border border-warning/40",
+    icon: UserRoundSearch,
+    iconClass: "",
+    iconColor: "text-warning",
+    label: "Awaiting Approval",
+  },
+  /** Separations — operator dismissed the EID-approval review (neutral terminal). */
+  dismissed: {
+    badge: "bg-secondary/90 text-muted-foreground border border-border/80",
+    icon: UserRoundX,
+    iconClass: "",
+    iconColor: "text-muted-foreground",
+    label: "Dismissed",
   },
 };
 
