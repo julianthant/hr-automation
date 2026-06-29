@@ -97,6 +97,22 @@ function isAuthRunningForQueueStrip(e: TrackerEntry): boolean {
   return e.status === "running" && Boolean(e.step?.startsWith("auth:"));
 }
 
+/**
+ * Canonical status key for rollup bucketing. Mirrors the dashboard's
+ * `statusKeyForEntry` cancelled/discarded override: a deliberate operator
+ * action — `failed` + step `cancelled`/`discarded` — is reported as
+ * `"cancelled"`, not `"failed"` (E2E-009). Inlined because the tracker layer
+ * must not import dashboard code (it would cycle and pull React into a
+ * server-safe module); the same one-line override is already inlined across
+ * this layer (e.g. `isDiscardedPrepForQueueStrip` above, `dashboard/failures.ts`).
+ */
+function rollupStatusKey(e: TrackerEntry): string {
+  if (e.status === "failed" && (e.step === "cancelled" || e.step === "discarded")) {
+    return "cancelled";
+  }
+  return e.status;
+}
+
 function isQueueLikeForQueueStrip(e: TrackerEntry): boolean {
   return (
     e.status === "pending" ||
@@ -122,13 +138,25 @@ function rollupBatchMembersToQueueStripSynth(
   const wf = members[0]?.workflow ?? "";
   const ts = members[0]?.timestamp ?? new Date().toISOString();
 
+  // Classify members by their CANONICAL status key (cancelled/discarded override
+  // applied) so a cancelled member (failed + step=cancelled) rolls up to
+  // "cancelled", not "failed" (ISS-010). Precedence: any queued work → pending;
+  // else any running → running; else a GENUINE failure → failed (a real failure
+  // outranks a cancel); else a cancellation → cancelled; else done.
+  const keys = members.map(rollupStatusKey);
   let status: TrackerEntry["status"];
+  let step: string | undefined;
   if (members.some((m) => isQueueLikeForQueueStrip(m))) {
     status = "pending";
-  } else if (members.some((m) => m.status === "running")) {
+  } else if (keys.some((k) => k === "running")) {
     status = "running";
-  } else if (members.some((m) => m.status === "failed")) {
+  } else if (keys.some((k) => k === "failed")) {
     status = "failed";
+  } else if (keys.some((k) => k === "cancelled")) {
+    // Emit the cancelled SHAPE (failed + step=cancelled) so the downstream
+    // countEntriesByQueueStatus → statusKeyForEntry buckets it as cancelled.
+    status = "failed";
+    step = "cancelled";
   } else {
     status = "done";
   }
@@ -139,6 +167,7 @@ function rollupBatchMembersToQueueStripSynth(
     runId: parentRunId,
     timestamp: ts,
     status,
+    ...(step ? { step } : {}),
     data: {},
   };
 }
@@ -150,9 +179,13 @@ function rollupBatchMembersToQueueStripSynth(
  * cards and avoids double-counting children that render inside a group row.
  *
  * - Discarded prep rows are dropped.
- * - Entries with a shared `parentRunId` collapse to one synthetic row.
+ * - Entries with a shared `parentRunId` collapse to one synthetic row whose
+ *   status is the canonical rollup of its members (cancelled ≠ failed).
  * - Approved prep primaries are omitted when that batch has members (children
  *   carry `parentRunId`; the prep anchor is not double-counted).
+ * - Operation coordinators (and any real parent row whose members rolled up to
+ *   a synth) are omitted too — the synth represents them, so a perpetual
+ *   `running`/`step=approved` coordinator does not double-count as Active.
  */
 export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEntry[]): TrackerEntry[] {
   const visible = entries.filter((e) => !isDiscardedPrepForQueueStrip(e));
@@ -176,6 +209,15 @@ export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEn
   const standalone: TrackerEntry[] = [];
   for (const e of visible) {
     if (e.parentRunId && batchMembersByParent.has(e.parentRunId)) continue;
+    // An operation coordinator (or any real parent row whose members were
+    // collected into a synth rollup above) is REPRESENTED by that synth — drop
+    // it so the operation isn't double-counted (coordinator row + synth) and so
+    // the synth's rolled-up status drives the bucket instead of the coordinator's
+    // perpetual running/step=approved (ISS-005). Batch prep anchors are also
+    // dropped via isApprovedPrepForQueueStrip below; operation coordinators are
+    // archetype "operation" (not "batch") and never reach a terminal row, so
+    // that done+approved check never catches them — this does.
+    if (e.runId && batchMembersByParent.has(e.runId)) continue;
     if (isApprovedPrepForQueueStrip(e)) continue;
     standalone.push(e);
   }
