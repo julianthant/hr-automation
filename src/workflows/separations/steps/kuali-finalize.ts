@@ -79,11 +79,23 @@ export async function runKualiFinalize(
   }
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
+
+  // Capture the FILLED finalization form BEFORE saving. A successful Kuali Build
+  // save navigates the document away to the Home apps directory (the Group Hub —
+  // a giant infinite-scroll grid of every form type), so a post-save capture
+  // shoots that catalog instead of the form (and the catalog is tall enough to
+  // hit CAPTURE.maxSlices = 30 every run, flooding the Screenshots tab with the
+  // wrong page). The form's displayed values are identical pre/post-save, so the
+  // pre-save shot is the faithful proof of what we finalized.
+  //
+  // Unified whole-page/form capture: one image (or readable -cNN slices) of the
+  // ENTIRE Kuali finalization document. The kernel detects the finalization
+  // dialog (a fixed `max-height`+`overflow:auto` modal) as the dominant scroll
+  // target and scroll-captures its painted bands top-to-bottom, so the form is
+  // never clipped at its fold (and the sticky "unsupported browser" banner is
+  // hidden so it doesn't reprint in every band). See src/core/CLAUDE.md.
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], stitch: true });
+
   await clickSave(kualiPage);
-  // Unified whole-page/form capture: one image of the ENTIRE Kuali finalization
-  // document. The kernel expands the finalization dialog's inner scroll cap (it
-  // is a fixed `max-height` + `overflow:auto` modal) so the form is captured
-  // top-to-bottom, not clipped at its fold.
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'] });
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);
 }

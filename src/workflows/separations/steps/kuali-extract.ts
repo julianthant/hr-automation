@@ -54,6 +54,15 @@ export async function runKualiExtract(
       lastDayWorked: result.lastDayWorked,
       terminationType: isVoluntaryTermination(result.terminationType) ? "Vol" : "Invol",
     });
+    // Provenance: everything we just EXTRACTED from the Kuali separation doc.
+    // Surfaces in the dashboard's "View Data" tab under this step.
+    ctx.recordData([
+      { direction: "read", field: "name", label: "Employee Name", value: result.employeeName, system: "Kuali" },
+      { direction: "read", field: "eid", label: "EID", value: result.eid, system: "Kuali" },
+      { direction: "read", field: "terminationType", label: "Termination Type", value: result.terminationType, system: "Kuali" },
+      { direction: "read", field: "separationDate", label: "Separation Date", value: result.separationDate, system: "Kuali" },
+      { direction: "read", field: "lastDayWorked", label: "Last Day Worked", value: result.lastDayWorked, system: "Kuali" },
+    ]);
     log.step(
       `[Step: kuali-extraction] END took=${Date.now() - t0}ms `
       + `employeeName='${result.employeeName}' eid='${result.eid}' `

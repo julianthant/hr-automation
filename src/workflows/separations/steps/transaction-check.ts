@@ -4,6 +4,7 @@ import {
   deletePendingTransaction,
 } from "../../../systems/ucpath/index.js";
 import type { Ctx } from "../../../core/kernel/types.js";
+import type { DataPoint } from "../../../domain/data-point.js";
 
 /**
  * Outcome of the `transaction-check` step. The handler branches on `status`:
@@ -88,11 +89,51 @@ export async function runTransactionCheck(
 
     const status = ter.found ? ter.approvalStatus.trim().toLowerCase() : "";
 
+    // Provenance: what the SS Smart HR search found for this EID.
+    {
+      const searchPoints: DataPoint[] = [];
+      if (ter.found) {
+        searchPoints.push(
+          { direction: "read", field: "transactionId", label: "Transaction ID", value: ter.transactionId, system: "UCPath SS Smart HR" },
+          { direction: "read", field: "approvalStatus", label: "Approval Status", value: ter.approvalStatus, system: "UCPath SS Smart HR" },
+        );
+        if (ter.effectiveDate) {
+          searchPoints.push({ direction: "read", field: "effectiveDate", label: "Effective Date", value: ter.effectiveDate, system: "UCPath SS Smart HR" });
+        }
+      } else if (ter.priorTerminationSkipped) {
+        searchPoints.push({
+          direction: "read",
+          field: "existingTermination",
+          label: "Existing Termination",
+          value: "<none>",
+          system: "UCPath SS Smart HR",
+          note: `Prior TER outside separation window${ter.effectiveDate ? ` (effdt ${ter.effectiveDate})` : ""} — not reused`,
+        });
+      } else {
+        searchPoints.push({
+          direction: "read",
+          field: "existingTermination",
+          label: "Existing Termination",
+          value: "<none>",
+          system: "UCPath SS Smart HR",
+        });
+      }
+      ctx.recordData(searchPoints);
+    }
+
     if (ter.found && status === "approved") {
       log.warn(
         `[transaction-check] Existing termination #${ter.transactionId} is APPROVED — ` +
         `reusing it (skipping the UCPath transaction create) and filing a duplicate-termination note`,
       );
+      ctx.recordData({
+        direction: "read",
+        field: "reusedTransactionNumber",
+        label: "Reused Transaction #",
+        value: ter.transactionId,
+        system: "UCPath SS Smart HR",
+        note: "Approved — UCPath transaction create will be skipped",
+      });
       return { status: "approved", transactionNumber: ter.transactionId };
     }
 
@@ -107,6 +148,16 @@ export async function runTransactionCheck(
         `[transaction-check] DRY RUN — would delete any pending termination for eid=${eid} from the ` +
         `in-progress grid, then create a fresh transaction (delete skipped in dry-run)`,
       );
+      if (ter.found && status === "pending") {
+        ctx.recordData({
+          direction: "write",
+          field: "pendingTermination",
+          label: "Pending Termination",
+          value: ter.transactionId,
+          system: "UCPath In-Progress Grid",
+          note: "Dry run — would delete before creating fresh transaction",
+        });
+      }
       return ter.found && status === "pending"
         ? { status: "pending-skipped-dryrun", transactionId: ter.transactionId }
         : { status: "none" };
@@ -118,6 +169,14 @@ export async function runTransactionCheck(
         `[transaction-check] Deleted ${deletedCount} pending termination row(s) for eid=${eid} from the ` +
         `in-progress grid before creating a fresh transaction`,
       );
+      ctx.recordData({
+        direction: "write",
+        field: "pendingTermination",
+        label: "Pending Termination",
+        value: deletedCount,
+        system: "UCPath In-Progress Grid",
+        note: `Deleted ${deletedCount} stale pending row(s) before fresh create`,
+      });
       return { status: "pending-deleted", transactionId: ter.found ? ter.transactionId : "" };
     }
     log.step(
