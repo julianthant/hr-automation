@@ -1,38 +1,108 @@
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
-import { GitFork, Loader2, Tag, Workflow } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "@/lib/notify";
+import { Loader2, Wand2 } from "lucide-react";
 import { useWorkflowPresentation } from "./useWorkflowPresentation.js";
 import type { WorkflowOverride } from "./useWorkflowPresentation.js";
-import { WorkflowPicker } from "./WorkflowPicker.js";
-import { Plate } from "./Plate.js";
-import { RowNamingPlate } from "./RowNamingPlate.js";
-import { StepPipelinePlate } from "./StepPipelinePlate.js";
-import { DelegationPlate } from "./DelegationPlate.js";
-import {
-  countNaming,
-  countSteps,
-  countDelegation,
-  countTotal,
-  isDirty,
-} from "./blueprint-helpers.js";
+import { useWorkflowDesign } from "./useWorkflowDesign.js";
+import { useDataBank } from "./useDataBank.js";
+import { EditorSidebar } from "./EditorSidebar.js";
+import { GraphCanvas } from "./graph/GraphCanvas.js";
+import { groupLaneOps } from "./graph/lane-build.js";
+import { buildOutlineModel } from "./graph/outline-build.js";
+import { designSpecToGraph, graphToDesignSpec } from "./graph/design-spec.js";
+import type { GraphModel } from "./graph/graph-types.js";
+import { countTotal, isDirty } from "./blueprint-helpers.js";
 
-export function WorkflowModifierPage(): JSX.Element {
+interface WorkflowModifierPageProps {
+  /**
+   * Reports the editor's unsaved-draft state up to the host. The rail uses this
+   * to confirm before navigating away from a dirty editor (the "quit" guard).
+   * Reports `false` on unmount so a stale dirty flag never blocks re-entry.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+export function WorkflowModifierPage({
+  onDirtyChange,
+}: WorkflowModifierPageProps = {}): JSX.Element {
   const wp = useWorkflowPresentation();
+  const wd = useWorkflowDesign(wp.selected);
+  const { bank } = useDataBank();
   const [draft, setDraft] = useState<WorkflowOverride>({});
   const [status, setStatus] = useState<string>("");
   const [reverting, setReverting] = useState(false);
 
-  // Seed the draft from the persisted override whenever a workflow loads or
-  // reloads (select / save / revert). Using wp.data.override — the sparse saved
-  // file, not the merged effective — keeps untouched sections round-tripping
-  // through Save and never bakes defaults into the override.
+  // ── Lifted canvas view controller (shared with the sidebar) ───────────────────
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dataFlowOn, setDataFlowOn] = useState(false);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [focusTarget, setFocusTarget] = useState<{ id: string; n: number } | null>(null);
+  const [fitNonce, setFitNonce] = useState(0);
+
+  // Latest live graph model, lifted from the canvas for "Generate scaffold".
+  const modelRef = useRef<GraphModel | null>(null);
+  const handleGraphChange = useCallback((m: GraphModel) => {
+    modelRef.current = m;
+  }, []);
+
+  // Seed the draft from the persisted (sparse) override on select / save / revert.
   useEffect(() => {
     setDraft(wp.data?.override ?? {});
     setStatus("");
   }, [wp.data]);
 
+  // Reset per-workflow view state when the selection changes (the canvas remounts;
+  // these are page-owned so they'd otherwise leak across workflows).
+  useEffect(() => {
+    setCollapsedIds(new Set());
+    setFocusTarget(null);
+    setDataFlowOn(false);
+  }, [wp.selected]);
+
   const dirty = isDirty(draft, wp.data?.override ?? null);
+
+  // Surface the unsaved-draft state to the host so leaving the editor can warn.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  // Always report "clean" when the editor unmounts (host stays unblocked).
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
   const total = countTotal(draft);
+  const designOverlay = useMemo(() => (wd.spec ? designSpecToGraph(wd.spec) : null), [wd.spec]);
+
+  // Outline of the selected workflow (drives the sidebar dropdown + collapse-all).
+  const workflowBank = useMemo(
+    () => bank?.workflows.find((w) => w.workflow === wp.selected),
+    [bank, wp.selected],
+  );
+  const laneOps = useMemo(
+    () => groupLaneOps(workflowBank, wp.data?.base.steps ?? []),
+    [workflowBank, wp.data],
+  );
+  const outline = useMemo(
+    () => (wp.data ? buildOutlineModel(wp.data.base, draft, wp.selected ?? "", laneOps) : null),
+    [wp.data, draft, wp.selected, laneOps],
+  );
+
+  const allCollapsed = !!outline && outline.laneIds.length > 0 && outline.laneIds.every((id) => collapsedIds.has(id));
+  const toggleAll = useCallback(() => {
+    setCollapsedIds(allCollapsed ? new Set() : new Set(outline?.laneIds ?? []));
+  }, [allCollapsed, outline]);
+  const toggleCollapsed = useCallback((id: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const focusLane = useCallback((id: string) => setFocusTarget((prev) => ({ id, n: (prev?.n ?? 0) + 1 })), []);
+  const clearFocus = useCallback(() => setFocusTarget(null), []);
+  const fitAll = useCallback(() => {
+    setFocusTarget(null);
+    setFitNonce((n) => n + 1);
+  }, []);
 
   const handleSelect = (name: string) => {
     wp.load(name);
@@ -67,55 +137,70 @@ export function WorkflowModifierPage(): JSX.Element {
     }
   };
 
+  const handleGenerate = async () => {
+    if (!wp.selected || !modelRef.current) return;
+    // generatedAt is stamped server-side, so a placeholder is fine here.
+    const spec = graphToDesignSpec(modelRef.current, wp.selected, "");
+    const paths = await wd.save(spec);
+    if (paths) {
+      toast.success("Design scaffold generated");
+      setStatus(`Scaffold → ${paths.jsonPath} + ${paths.mdPath}`);
+    } else {
+      toast.error("Scaffold generation failed");
+      setStatus("Scaffold generation failed");
+    }
+  };
+
   return (
     <div className="flex h-full flex-1 overflow-hidden">
-      <WorkflowPicker
+      <EditorSidebar
         list={wp.list}
         selected={wp.selected}
         selectedCount={total}
         onSelect={handleSelect}
+        paletteOpen={paletteOpen}
+        onTogglePalette={() => setPaletteOpen((o) => !o)}
+        outline={outline}
+        focusedId={focusTarget?.id ?? null}
+        onFocus={focusLane}
+        allCollapsed={allCollapsed}
+        onToggleAll={toggleAll}
+        dataFlowOn={dataFlowOn}
+        onToggleDataFlow={() => setDataFlowOn((v) => !v)}
+        onFit={fitAll}
       />
 
-      <main className="flex flex-1 flex-col overflow-hidden" aria-label="Workflow blueprint">
+      <main className="flex flex-1 flex-col overflow-hidden" aria-label="Workflow graph editor">
         {wp.data ? (
           <>
-            <div className="blueprint-grid flex-1 overflow-y-auto">
-              <div className="mx-auto max-w-3xl space-y-4 p-5">
-                <Plate
-                  icon={Tag}
-                  title="Row naming"
-                  headerId="plate-naming"
-                  count={countNaming(draft)}
-                >
-                  <RowNamingPlate data={wp.data} draft={draft} onChange={setDraft} />
-                </Plate>
-
-                <Plate
-                  icon={Workflow}
-                  title="Step pipeline"
-                  headerId="plate-steps"
-                  count={countSteps(draft)}
-                >
-                  <StepPipelinePlate data={wp.data} draft={draft} onChange={setDraft} />
-                </Plate>
-
-                <Plate
-                  icon={GitFork}
-                  title="Delegation"
-                  headerId="plate-delegation"
-                  count={countDelegation(draft)}
-                >
-                  <DelegationPlate
-                    workflowName={wp.selected ?? ""}
-                    data={wp.data}
-                    draft={draft}
-                    onChange={setDraft}
-                  />
-                </Plate>
-              </div>
+            <div className="relative min-h-0 flex-1">
+              {wd.loaded ? (
+                <GraphCanvas
+                  key={`${wp.selected ?? "none"}:${wd.loaded ? "L" : "_"}`}
+                  data={wp.data}
+                  workflowName={wp.selected ?? ""}
+                  draft={draft}
+                  onDraftChange={setDraft}
+                  designOverlay={designOverlay}
+                  onGraphChange={handleGraphChange}
+                  bank={bank}
+                  paletteOpen={paletteOpen}
+                  onClosePalette={() => setPaletteOpen(false)}
+                  dataFlowOn={dataFlowOn}
+                  collapsedIds={collapsedIds}
+                  onToggleCollapsed={toggleCollapsed}
+                  focusTarget={focusTarget}
+                  onClearFocus={clearFocus}
+                  fitNonce={fitNonce}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center" aria-live="polite">
+                  <Loader2 aria-hidden className="h-4 w-4 text-muted-foreground motion-safe:animate-spin" />
+                </div>
+              )}
             </div>
 
-            {/* Sticky action bar */}
+            {/* Action bar: config (revert/save) + scaffold (generate) */}
             <div className="shrink-0 border-t border-border bg-background px-5 py-3">
               <div className="flex items-center gap-2">
                 <button
@@ -140,9 +225,26 @@ export function WorkflowModifierPage(): JSX.Element {
                   </span>
                 ) : null}
 
-                <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">
+                <span aria-live="polite" className="ml-auto truncate text-xs text-muted-foreground">
                   {status}
                 </span>
+
+                <button
+                  type="button"
+                  disabled={wd.saving}
+                  aria-disabled={wd.saving}
+                  onClick={() => {
+                    void handleGenerate();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {wd.saving ? (
+                    <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin" />
+                  ) : (
+                    <Wand2 aria-hidden className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                  Generate scaffold
+                </button>
 
                 <button
                   type="button"
@@ -163,9 +265,7 @@ export function WorkflowModifierPage(): JSX.Element {
           </>
         ) : (
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">
-              Pick a workflow to shape how its rows read.
-            </p>
+            <p className="text-sm text-muted-foreground">Pick a workflow to open its graph.</p>
           </div>
         )}
       </main>
