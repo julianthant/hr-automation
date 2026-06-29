@@ -16,7 +16,7 @@ behavior is byte-for-byte unchanged.
 
 ## 1. The Duo surface — what this covers
 
-Six UCSD Shibboleth SSO logins are gated by Duo MFA. They all land on the same
+Seven UCSD Shibboleth SSO logins are gated by Duo MFA. They all land on the same
 `a5.ucsd.edu` → `*.duosecurity.com` Duo Universal Prompt (v4 frameless), so one
 shared WebAuthn path covers all of them:
 
@@ -28,6 +28,7 @@ shared WebAuthn path covers all of them:
 | `loginToKuali` | Kuali Build | Touch ID / security key | ✅ |
 | `loginToNewKronos` | WFD / New Kronos | Touch ID / security key | ✅ |
 | `loginToServiceNow` | ServiceNow HR (`support.ucsd.edu`) | Touch ID / security key | ✅ |
+| `loginToOnBase` | OnBase (Hyland) via UCSD Shibboleth SSO | Touch ID / security key | ✅ |
 
 **Not in scope:** `loginToI9` (`src/systems/i9/login.ts`) authenticates to i9
 Complete (third-party Mitratech) with **plain email/password — no Shibboleth, no
@@ -86,7 +87,7 @@ pollDuoApproval(page, opts)
 discoverable passkey request the instant its prompt renders; if no authenticator
 exists yet, Chrome shows a native "insert your security key" dialog that can't be
 dismissed from the page and blocks the DOM click path. `clickSsoSubmit` is the
-universal step right before the Duo prompt for **all six** flows, so it is the
+universal step right before the Duo prompt for **all seven** flows, so it is the
 arming point. `beginDuoWebAuthn` also late-arms (idempotent) as a safety net.
 
 **The credential file is single-writer.** Hands-off mode acquires
@@ -172,7 +173,7 @@ re-run the previously-flaky flow (UCPath) a few times solo.
 | ServiceNow fails before reaching Duo: "SSO form not ready" on `support.ucsd.edu/auth_redirect.do` | The `support.ucsd.edu/esc → auth_redirect.do → a5.ucsd.edu` SAML chain is client-side; a one-shot `domcontentloaded` check resolves on the interstitial before the form renders | `waitForSsoForm` polls for the submit button (`src/infra/auth/sso-fields.ts`). |
 | Duo greys "Security key — Not supported in this browser" (CRM) | Playwright Chromium lacks `isExternalCTAP2SecurityKeySupported` | `ctap2SupportShim` forces it true (auto-injected when a usb cred is loaded). |
 | Chrome native "insert your security key" dialog blocks the page (CRM) | Authenticator armed **after** the prompt; CRM auto-fires on load | Arm at `clickSsoSubmit` (before the prompt). Phase 2 also presses Escape to recover. |
-| A flow approves on the phone unexpectedly even with the flag on | The flow didn't reach the shared arming path | All six flows must go through `clickSsoSubmit`. (UKG previously clicked the submit button directly — fixed.) |
+| A flow approves on the phone unexpectedly even with the flag on | The flow didn't reach the shared arming path | All seven flows must go through `clickSsoSubmit`. (UKG previously clicked the submit button directly — fixed.) |
 | Reloading the Duo prompt makes it "sign but never complete" | Reload desyncs Duo's challenge | **Never reload** the prompt; use the in-session click path. |
 
 ### signCount resync one-liner
