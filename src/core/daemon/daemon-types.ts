@@ -29,6 +29,18 @@ export type DaemonInFlight = { itemId: string; runId: string; taskId?: string; a
 export interface DaemonState {
   wakeResolve: (() => void) | null
   shutdownResolve: (() => void) | null
+  /**
+   * Latch for a `/wake` that arrived while no idle waiter was armed (ISS-008).
+   * `resolveWake` (HTTP `/wake`) calls `state.wakeResolve?.()` — a NO-OP whenever
+   * the claim loop is NOT parked (suspended at a top-of-iteration await, mid-
+   * processing, or in the synchronous window between `claimNextItem` returning
+   * null and the idle-wait arming its waiters). A wake dropped in that window
+   * would otherwise be lost until the 15-min keepalive tick. Setting this flag
+   * instead lets the loop's check-before-park guard observe + consume it and
+   * re-claim immediately. Set true by `resolveWake` when `wakeResolve` is null;
+   * cleared when the park guard consumes it.
+   */
+  wakePending: boolean
   forceShutdown: boolean
   drainOnlyShutdown: boolean
   shuttingDown: boolean

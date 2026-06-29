@@ -79,10 +79,21 @@ export interface DaemonOpts {
   heartbeatIntervalMs?: number
   /** Test-only: cap worker command polling interval (default: heartbeat interval). */
   commandPollIntervalMs?: number
+  /** Test-only: cap the idle re-poll backstop interval (default 30s). */
+  idleRepollMs?: number
 }
 
 const DEFAULT_IDLE_MS = 15 * 60 * 1000
 const DEFAULT_LOCK_HEAL_MS = 10_000
+/**
+ * Bounded idle re-poll backstop (ISS-008). The claim loop re-claims on the
+ * SOONER of a `/wake` and this interval, so a missed wake — a `/wake` POST that
+ * timed out against a momentarily-busy daemon, or one dropped in the synchronous
+ * claim→park window — is recovered within seconds instead of waiting out the
+ * 15-min keepalive tick. Much shorter than `DEFAULT_IDLE_MS` but a steady-state
+ * idle daemon only does a cheap indexed `claimNextTask` seek per tick.
+ */
+const DEFAULT_IDLE_REPOLL_MS = 30_000
 
 /**
  * Long-running daemon loop. Must be invoked from a DETACHED process via
@@ -115,6 +126,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   const trackerDir = opts.trackerDir ?? process.env.HRAUTO_TRACKER_DIR
   const launchFn = opts.sessionLaunchFn ?? Session.launch.bind(Session)
   const idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_MS
+  const idleRepollMs = opts.idleRepollMs ?? DEFAULT_IDLE_REPOLL_MS
 
   ensureDaemonsDir(trackerDir)
   const instanceId = randomInstanceId(wf.config.name)
@@ -123,6 +135,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   const state: DaemonState = {
     wakeResolve: null,
     shutdownResolve: null,
+    wakePending: false,
     forceShutdown: false,
     drainOnlyShutdown: false,
     shuttingDown: false,
@@ -225,7 +238,15 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     setDrainOnlyShutdown: (value) => { state.drainOnlyShutdown = value },
     setShuttingDown: (value) => { state.shuttingDown = value },
     setReassignInFlight: (value) => { state.reassignInFlight = value },
-    resolveWake: () => { state.wakeResolve?.() },
+    resolveWake: () => {
+      // Latch the wake if no idle waiter is armed (ISS-008): a `/wake` that
+      // lands while the claim loop is NOT parked (top-of-iteration await,
+      // processing, or the claim→park window) would otherwise resolve into the
+      // void and be lost until the keepalive tick. The check-before-park guard
+      // consumes the latch and re-claims immediately.
+      if (state.wakeResolve) state.wakeResolve()
+      else state.wakePending = true
+    },
     resolveShutdown: () => { state.shutdownResolve?.() },
     abortLaunchAndKillSession,
   })
@@ -465,6 +486,12 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         }
 
         try {
+          // Anchor for the keepalive cadence (ISS-008). The idle park now wakes
+          // every `idleRepollMs` for a cheap re-claim, so the heavier keepalive
+          // tick (healthCheck + orphan recovery) is gated on having been idle
+          // for `idleTimeoutMs` since the last claim OR keepalive — preserving
+          // the original ~15-min cadence rather than running it every re-poll.
+          let lastIdleKeepaliveAt = Date.now()
           setPhase('idle')
           emitWorkerHeartbeat()
           while (!state.shuttingDown) {
@@ -522,6 +549,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               registerBrowserProcesses()
               emitWorkerHeartbeat()
               state.lastActivity = Date.now()
+              // A claim is activity — reset the keepalive idle anchor so the
+              // tick fires only after a genuine `idleTimeoutMs` gap (ISS-008).
+              lastIdleKeepaliveAt = Date.now()
               const itemAuthTimings = itemAuthTimingResolver.resolveForNextItem()
               // Carry the run's frozen trace id onto the session card so its
               // subtitle shows the same id as the run's queue row. The pending
@@ -819,7 +849,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
               continue
             }
 
-            // Idle: wait for wake OR keepalive OR shutdown.
+            // Idle: wait for a wake, a bounded re-poll tick, or shutdown. Park
+            // for the SOONER of `idleRepollMs` (cheap re-claim backstop) and
+            // `idleTimeoutMs` (keepalive cadence); the keepalive itself is gated
+            // below so the shorter re-poll doesn't run it every tick (ISS-008).
+            const parkMs = Math.max(1, Math.min(idleRepollMs, idleTimeoutMs))
             await new Promise<void>((resolve) => {
               // Check-before-park (ISS-006): `/stop` (and the worker stop
               // command) set `state.shuttingDown` then call
@@ -838,6 +872,15 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 resolve()
                 return
               }
+              // Latched wake (ISS-008): a `/wake` arrived with no waiter armed
+              // (resolveWake set `wakePending` instead of resolving into the
+              // void). Consume it here and resolve so the loop re-polls +
+              // re-claims immediately rather than parking past the new work.
+              if (state.wakePending) {
+                state.wakePending = false
+                resolve()
+                return
+              }
               state.wakeResolve = (): void => {
                 state.wakeResolve = null
                 resolve()
@@ -850,21 +893,27 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 state.wakeResolve = null
                 state.shutdownResolve = null
                 resolve()
-              }, idleTimeoutMs).unref()
+              }, parkMs).unref()
             })
 
             if (state.shuttingDown) break
             await pollWorkerCommands()
 
-            // Keepalive tick: recover orphans + healthCheck each system.
-            setPhase('keepalive')
-            await runKeepaliveTick({
-              instanceId,
-              session,
-              systems: wf.config.systems,
-              recoverOrphanedClaims: recoverClaimsFromDeadOrStaleWorkers,
-            })
-            setPhase('idle')
+            // Keepalive tick (recover orphans + healthCheck each system) runs on
+            // the long idle cadence only — the park wakes every `idleRepollMs`
+            // for a cheap re-claim, so only run the heavier keepalive once the
+            // daemon has been genuinely idle for `idleTimeoutMs` (ISS-008).
+            if (Date.now() - lastIdleKeepaliveAt >= idleTimeoutMs) {
+              setPhase('keepalive')
+              await runKeepaliveTick({
+                instanceId,
+                session,
+                systems: wf.config.systems,
+                recoverOrphanedClaims: recoverClaimsFromDeadOrStaleWorkers,
+              })
+              setPhase('idle')
+              lastIdleKeepaliveAt = Date.now()
+            }
           }
         } finally {
           setPhase('draining')
