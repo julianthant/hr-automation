@@ -19,8 +19,35 @@ import {
   toIsoDate,
   calendarDayLabelPattern,
   parseCalendarHeaderOrdinal,
+  probeEidInTimecardText,
 } from "../../../../src/systems/new-kronos/navigate.js";
 import { log } from "../../../../src/utils/log.js";
+
+describe("probeEidInTimecardText", () => {
+  it("matches when the searched EID appears in the timecard header text", () => {
+    const probe = probeEidInTimecardText(
+      "Employee timecards\n10864213 · Argumedo, Zaira N\nMon 6/23",
+      "10864213",
+    );
+    assert.equal(probe.match, true);
+    assert.equal(probe.otherEid, null);
+  });
+
+  it("reports a different 8-digit EID as a wrong-person signal", () => {
+    const probe = probeEidInTimecardText(
+      "Employee timecards\n10851756 · Someone Else\nMon 6/23",
+      "10864213",
+    );
+    assert.equal(probe.match, false);
+    assert.equal(probe.otherEid, "10851756");
+  });
+
+  it("returns no otherEid when no 8-digit id is visible", () => {
+    const probe = probeEidInTimecardText("Employee timecards\nLoading…", "10864213");
+    assert.equal(probe.match, false);
+    assert.equal(probe.otherEid, null);
+  });
+});
 
 describe("resolveSearchResult", () => {
   it("returns true when the result checkbox appears first", async () => {

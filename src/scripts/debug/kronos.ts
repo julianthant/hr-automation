@@ -79,7 +79,7 @@ async function runMap(eid: string): Promise<void> {
   log.step("=== New Kronos: navigating to timecard ===");
   await searchNewKronos(newWin.page, eid);
   await selectEmployeeResult(newWin.page);
-  await newClickGoToTimecard(newWin.page);
+  await newClickGoToTimecard(newWin.page, eid);
   await newWin.page.waitForTimeout(3_000);
   log.success("[New Kronos] On timecard page — ready for mapping");
 
@@ -119,7 +119,7 @@ async function runTest(eid: string): Promise<void> {
     (async () => {
       const found = await searchNewKronos(newWin.page, eid);
       if (!found) return { found: false, date: null as string | null };
-      const date = await checkNewKronosTimecard(newWin.page);
+      const date = await checkNewKronosTimecard(newWin.page, eid);
       return { found: true, date };
     })(),
   ]);
