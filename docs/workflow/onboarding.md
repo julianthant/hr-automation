@@ -2,9 +2,9 @@
 
 ## What It Does
 
-Onboarding handles multi-system onboarding work across CRM, UCPath, and I-9 creation. It authenticates, extracts onboarding data, downloads PDFs, searches for the person in UCPath, creates I-9 work, and completes the transaction stage.
+Onboarding handles multi-system onboarding work across CRM, UCPath, and I-9 creation. It authenticates, searches CRM for the record, extracts onboarding data, downloads PDFs, searches for the person in UCPath, creates I-9 work, and completes the transaction stage.
 
-Stages: `crm-auth`, `extraction`, `pdf-download`, `ucpath-auth`, `person-search`, `i9-creation`, `transaction`.
+Stages: `crm-auth`, `crm-search`, `extraction`, `pdf-download`, `ucpath-auth`, `person-search`, `i9-creation`, `transaction`.
 
 ## Delegation Model
 

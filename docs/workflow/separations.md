@@ -12,8 +12,8 @@ Separations does not delegate to another workflow. It is `single`-archetype: one
 flowchart LR
   A["kuali-extraction"] --> B["identity-check"]
   B --> C["transaction-check"]
-  C --> D["kronos-search"]
-  D --> E["ucpath-job-summary"]
+  C --> D["ucpath-job-summary"]
+  D --> E["kronos-search"]
   E --> F["ucpath-transaction"]
   F --> G["kuali-finalization"]
 ```

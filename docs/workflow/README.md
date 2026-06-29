@@ -1,6 +1,6 @@
 # Workflow Delegation Map
 
-Last checked: 2026-06-23
+Last checked: 2026-06-29
 
 This directory describes what each workflow does, which row archetype it emits, and how delegation appears in the dashboard after the workflow runtime migration.
 
@@ -38,12 +38,11 @@ Queue rows render from `WorkflowRunProjection` plus per-workflow `runtimePolicy`
 - Approval delegation row: `src/dashboard/components/ocr/DelegationRow.tsx`
 - Daemon/batch group row: `src/dashboard/components/queue-panel/DaemonBatchRow.tsx`
 - Batch view: `src/dashboard/components/queue-panel/batch-queue-view.tsx`
-- Pending controls: `src/dashboard/components/queue-panel/QueueItemControls.tsx`
-- Running cancel control: `src/dashboard/components/queue-panel/CancelRunningButton.tsx`
+- Row footer controls: `src/dashboard/components/queue-panel/RowFooter.tsx`, `src/dashboard/components/shared/RowCancelButton.tsx`
+- Operation cancel control: `src/dashboard/components/queue-panel/OperationCancelButton.tsx`
 - Retry/delete group controls: `src/dashboard/components/queue-panel/BatchFooterActions.tsx`
-- Cancel endpoints: `src/tracker/dashboard/ops/cancel.ts`
-- Retry endpoints: `src/tracker/dashboard/ops/retry.ts`
-- Delete endpoints: `src/tracker/dashboard/ops/delete.ts`
+- Cancel/retry/delete logic: `src/control/ops/cancel.ts`, `src/control/ops/retry.ts`, `src/control/ops/delete.ts`
+- Cancel/retry/delete HTTP routes: `src/tracker/dashboard/hono/routes/ops.ts`
 - OCR prepare/approve/discard: `src/tracker/dashboard/ocr/*`
 - Parent/child dependencies: `src/core/task-store/child-state.ts`, `src/core/task-store/terminal.ts`
 
@@ -85,8 +84,8 @@ Workflow rail badges use backend `wfCounts` as the source of truth. The selected
 
 | Action | Where it appears | Endpoint | Scope | Effect |
 |---|---|---|---|---|
-| Start from upload run | Emergency Contact, OCR, Oath Upload. | `/api/ocr/prepare`, `/api/ocr/reupload`, or `/api/oath-upload/start` | Uploaded PDF list and selected form options. | Creates preview/root rows. Emergency Contact and Oath Upload prep go through OCR. |
-| Start from input run | Separations, Person Lookup, Oath Signature, CRM Doc Download. | Workflow enqueue endpoint or modal handoff. | Input names/EIDs/doc ids. | Creates normal daemon rows, except empty Oath Signature opens OCR modal. |
+| Start from upload run | Emergency Contact, Oath Signature, OCR, Oath Upload, OnBase. | `/api/ocr/prepare`, `/api/ocr/reupload`, or `/api/oath-upload/start` | Uploaded PDF list and selected form options. | Creates preview/root rows. Emergency Contact, Oath Signature, Oath Upload, and OnBase prep go through OCR. |
+| Start from input run | Separations, Person Lookup, Oath Signature, CRM Doc Download, Onboarding. | Workflow enqueue endpoint or modal handoff. | Input names/EIDs/doc ids. | Creates normal daemon rows, except empty Oath Signature opens OCR modal. |
 | Cancel queued row | Pending row footer. | `/api/cancel-queued` | One queued task only. | Refuses claimed/running tasks. Marks task attempt cancelled, updates dependency child state as cancelled, writes cancelled/failed tracker audit. |
 | Cancel queued OCR preview row | Pending OCR preview/proxy row footer. | `/api/ocr/discard-prepare` | The OCR preview run and children for that run. | Requests OCR abort, deletes delegated children for that OCR run, writes OCR discarded, mirrors discarded to parent when known. |
 | Stop running row | Running row footer. | `/api/task/force-stop` | One running task. | Marks task cancelled immediately, records dependency cancelled, sends daemon `force-current`. Does not kill Chrome. |
@@ -96,7 +95,7 @@ Workflow rail badges use backend `wfCounts` as the source of truth. The selected
 | Kill browser | Session/worker controls. | `/api/browser/kill` | Recorded browser process only. | Sends kill command/SIGTERM for browser process. Does not by itself mark an entire delegation tree cancelled. |
 | Retry one row | Failed/cancelled row footer. | `/api/retry` | One row/task, preserving parent batch context when known. | Re-enqueues from SQLite task when possible. Falls back to latest JSONL input. OCR and SharePoint have special retry handlers. |
 | Retry group | Batch/delegation group footer. | `/api/retry-bulk` | Members passed by the group. | Retries each eligible member. Group retry is member retry, not a special parent transaction. |
-| Delete one row | Terminal row footer. | Delete endpoint in `ops/delete.ts` | One row plus task subtree/projected entry when resolvable. | Rewrites tracker/log JSONL, removes screenshots, deletes task subtree data. |
+| Delete one row | Terminal row footer. | `/api/delete` (`src/control/ops/delete.ts` logic, `src/tracker/dashboard/hono/routes/ops.ts` route) | One row plus task subtree/projected entry when resolvable. | Rewrites tracker/log JSONL, removes screenshots, deletes task subtree data. |
 | Delete group | Batch/delegation group footer or queue toolbar. | `/api/delete-bulk` | Members passed by caller or visible entries. | Bulk version of delete. OCR discard also calls delegated-child cleanup for that run. |
 | Bump queued row | Pending row footer. | `/api/queue/bump` | One queued task. | Moves pending task earlier/later according to queue bump logic. |
 | OCR approve | OCR preview/approval UI. | `/api/ocr/approve-batch` | Selected OCR records. | Enqueues target workflow children, pre-emits child pending rows, writes OCR approved/done, records dependencies when there is an upstream parent. |
