@@ -9,23 +9,24 @@ import { personLookupWorkflow } from "../../../../src/workflows/person-lookup/in
  * `identity-check` step (`resolveSeparationEid`). The three-tier name gate
  * itself (`same` / `similar` / `different`) is covered by
  * `classifyNameSimilarity` in `tests/unit/services/matching/match.test.ts`; the
- * handler's branch wiring (skip on "same", correct-name on "similar",
- * delegate on "different") is covered by `dry-run.test.ts`.
+ * handler's branch wiring (skip on "same", correct-name on "similar", PAUSE on a
+ * resolved-different EID, eidPreApproved re-run skip) is covered by
+ * `dry-run.test.ts`.
  *
  * The handler calls `resolveSeparationEid` ONLY when the Workforce Job Summary
- * result needs a NAME SEARCH, passing the Job Summary `{ found, name }`:
+ * result needs a NAME SEARCH, passing the Job Summary `{ found, name }`. Since
+ * the 2026-06-29 EID-approval change, this NO LONGER silently overrides the EID
+ * — a resolved DIFFERENT EID returns `needs-approval` (the handler pauses for
+ * operator approval) and it performs NO `ctx.updateData`:
  *
- *   (1) FOUND + name mismatch, resolved EID differs → take the name-derived EID
- *       (name wins) + write it to ctx.data.
- *   (2) FOUND + name mismatch, resolved EID happens to MATCH the Kuali one →
- *       return unchanged, no ctx.data write (the names just rendered
- *       differently; the EID was right).
- *   (3) NOT found + short/incomplete EID → delegate BY NAME, take the resolved
- *       8-digit EID.
- *   (4) NOT found + a COMPLETE 8-digit EID → FAIL LOUD with NO delegation (we do
- *       not silently look up a complete-looking EID; the operator fixes Kuali).
- *   (5) delegation resolves NO valid EID (failed run / done-but-invalid / no
- *       data) → FAIL LOUD.
+ *   (1) FOUND + name mismatch, resolved EID DIFFERS → `needs-approval` carrying
+ *       the proposed person's context (no auto-override).
+ *   (2) FOUND + name mismatch, resolved EID MATCHES the Kuali one → `verified`
+ *       (the names just rendered differently; the EID was right).
+ *   (3) NOT found + short/incomplete EID, resolved EID DIFFERS → `needs-approval`.
+ *   (4) NOT found + a COMPLETE 8-digit EID → FAIL LOUD with NO delegation.
+ *   (5) delegation resolves NO valid EID (failed / done-but-invalid / no data) →
+ *       FAIL LOUD.
  *
  * A scripted/stub `ctx.delegateTo` stands in for the real person-lookup child
  * run — no live browser or daemon.
@@ -49,7 +50,6 @@ function makeStubCtx(delegateResult: {
   error?: { message: string };
 }) {
   const calls: Array<{ workflow: string; input: unknown }> = [];
-  const updated: Record<string, unknown> = {};
   const ctx = {
     delegateTo: async (child: { config: { name: string } }, input: unknown) => {
       calls.push({ workflow: child.config.name, input });
@@ -60,18 +60,24 @@ function makeStubCtx(delegateResult: {
         ...delegateResult,
       };
     },
-    updateData: (patch: Record<string, unknown>) => {
-      Object.assign(updated, patch);
-    },
   } as unknown as Parameters<typeof resolveSeparationEid>[0];
-  return { ctx, calls, updated };
+  return { ctx, calls };
 }
 
 describe("resolveSeparationEid (conditional)", () => {
-  it("(1) FOUND + name mismatch + different resolved EID → takes the name-derived EID", async () => {
+  it("(1) FOUND + name mismatch + different resolved EID → needs-approval (no silent override)", async () => {
     // The Perez case: 10694136 is a valid-FORMAT EID Job Summary FOUND, but its
     // detail-page name didn't match — so the handler calls us with found:true.
-    const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
+    // person-lookup returns the proposed person's name/department/payrollTitle.
+    const { ctx, calls } = makeStubCtx({
+      status: "done",
+      data: {
+        emplId: "10772489",
+        name: "Jason Perez",
+        department: "FACILITIES MANAGEMENT",
+        payrollTitle: "BLDG MAINT WORKER SR",
+      },
+    });
     const kualiData = makeKualiData({ eid: "10694136", employeeName: "Perez, Jason" });
 
     const result = await resolveSeparationEid(ctx, kualiData, {
@@ -79,33 +85,36 @@ describe("resolveSeparationEid (conditional)", () => {
       name: "Some Other Person",
     });
 
-    assert.equal(result, "10772489", "name-derived EID returned over the mismatched Kuali EID");
+    assert.equal(result.status, "needs-approval", "a DIFFERENT EID pauses for approval");
+    assert.equal(result.status === "needs-approval" && result.proposedEid, "10772489");
+    assert.equal(result.status === "needs-approval" && result.proposedName, "Jason Perez");
+    assert.equal(result.status === "needs-approval" && result.proposedDepartment, "FACILITIES MANAGEMENT");
+    assert.equal(result.status === "needs-approval" && result.proposedPayrollTitle, "BLDG MAINT WORKER SR");
     assert.equal(calls.length, 1, "exactly one delegation");
     assert.equal(calls[0].workflow, personLookupWorkflow.config.name);
     assert.deepEqual(calls[0].input, { name: "Perez, Jason" }, "delegated BY NAME");
-    assert.equal(updated.eid, "10772489", "corrected EID persisted to ctx.data");
   });
 
-  it("(2) FOUND + name mismatch but resolved EID matches Kuali → returns unchanged, no ctx.data write", async () => {
-    const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
+  it("(2) FOUND + name mismatch but resolved EID matches Kuali → verified", async () => {
+    const { ctx, calls } = makeStubCtx({ status: "done", data: { emplId: "10772489" } });
     const kualiData = makeKualiData({ eid: "10772489", employeeName: "Mendoza, Matthew" });
 
     const result = await resolveSeparationEid(ctx, kualiData, { found: true, name: "M. Mendoza" });
 
-    assert.equal(result, "10772489", "EID returned verbatim");
+    assert.equal(result.status, "verified", "matching EID is verified, not paused");
+    assert.equal(result.status === "verified" && result.eid, "10772489");
     assert.equal(calls.length, 1, "still delegated to confirm");
-    assert.equal(updated.eid, undefined, "no ctx.data.eid write when the resolved EID matches");
   });
 
-  it("(3) NOT found + short EID → delegates BY NAME and corrects to the resolved 8-digit EID", async () => {
-    const { ctx, calls, updated } = makeStubCtx({ status: "done", data: { emplId: "10610290" } });
+  it("(3) NOT found + short EID → needs-approval with the resolved 8-digit EID", async () => {
+    const { ctx, calls } = makeStubCtx({ status: "done", data: { emplId: "10610290" } });
     const kualiData = makeKualiData({ eid: "1061029", employeeName: "Mendoza, Matthew" });
 
     const result = await resolveSeparationEid(ctx, kualiData, { found: false, name: "" });
 
-    assert.equal(result, "10610290", "corrected 8-digit EID returned");
+    assert.equal(result.status, "needs-approval", "a new EID resolved by name pauses for approval");
+    assert.equal(result.status === "needs-approval" && result.proposedEid, "10610290");
     assert.deepEqual(calls[0].input, { name: "Mendoza, Matthew" }, "delegated BY NAME (no bad EID passed)");
-    assert.equal(updated.eid, "10610290", "corrected EID persisted to ctx.data");
   });
 
   it("(4) NOT found + a COMPLETE 8-digit EID → fails loud with NO delegation", async () => {

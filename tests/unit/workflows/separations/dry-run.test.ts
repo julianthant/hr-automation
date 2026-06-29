@@ -197,6 +197,7 @@ function makeFakeCtx(
     updateData: (patch: Record<string, unknown>) => {
       Object.assign(data, patch);
     },
+    recordData: () => {},
     step: async <R>(_name: string, fn: () => Promise<R>) => fn(),
     markStep: () => {},
     skipStep: (name: string) => {
@@ -555,25 +556,63 @@ describe("separations handler — identity-check (conditional, Job-Summary-gated
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "no submit when the EID is unverified");
   });
 
-  it("corrects the EID from the name on a Job Summary name mismatch, re-fetches, then submits", async () => {
-    // Primary fetch returns a mismatched name; the catch-all default serves the
-    // re-fetch for the corrected EID.
-    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_NAME_MISMATCH);
+  it("PAUSES for EID approval on a Job Summary name mismatch with a different resolved EID (no override, no submit)", async () => {
+    // The wrong-person bug: the Kuali EID resolves in UCPath to a DIFFERENT name,
+    // and a name search resolves a DIFFERENT valid EID. We must NOT silently take
+    // the name-derived EID and submit — pause for operator approval instead.
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce({
+      found: true,
+      name: "Santos Hernandez",
+      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+    });
     const { ctx, probe } = makeFakeCtx(
       { docId: "4131" },
-      { delegateResult: { status: "done", data: { emplId: "10999999" } } },
+      { delegateResult: { status: "done", data: { emplId: "10401814", name: "Jose Hernandez", department: "HOUSING/DINING/HOSPITALITY", payrollTitle: "BLDG MAINT WORKER SR" } } },
     );
+
     await runHandler(ctx, { docId: "4131" });
-    assert.equal(probe.data.eid, "10999999", "name-derived EID persisted to ctx.data");
-    // getJobSummaryIdentity is called TWICE now: the primary identity-gate fetch
-    // (Kuali EID) + the re-fetch after the EID correction.
-    assert.equal(
-      mocks.getJobSummaryIdentity.mock.calls.length, 2,
-      "primary Job Summary fetch + re-fetch for the verified EID",
-    );
-    assert.equal(mocks.getJobSummaryIdentity.mock.calls[0][1], KUALI_FIXTURE.eid, "primary fetch used the Kuali EID");
-    assert.equal(mocks.getJobSummaryIdentity.mock.calls[1][1], "10999999", "re-fetched with the corrected EID");
-    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "still submits, with the corrected EID");
+
+    // No silent override + no termination.
+    assert.equal(probe.data.eid, undefined, "EID NOT overridden in ctx.data");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "no UCPath submit — paused");
+    // Pause state stamped for the review card.
+    assert.equal(probe.data.eidApproval, "pending", "row marked awaiting EID approval");
+    assert.equal(probe.data.status, "Awaiting EID Approval");
+    assert.equal(probe.data.originalEid, KUALI_FIXTURE.eid, "original (Kuali) EID stamped");
+    assert.equal(probe.data.originalEidName, "Santos Hernandez", "original EID's UCPath name stamped");
+    assert.equal(probe.data.proposedEid, "10401814", "name-resolved EID stamped as proposed (not applied)");
+    assert.equal(probe.data.proposedEidName, "Jose Hernandez", "proposed person's name stamped");
+    assert.equal(probe.data.proposedEidPayrollTitle, "BLDG MAINT WORKER SR", "proposed person's payroll title stamped");
+    // Every downstream step skipped; only the primary Job Summary fetch ran (no re-fetch).
+    for (const step of ["transaction-check", "ucpath-job-summary", "kronos-search", "ucpath-transaction", "kuali-finalization"]) {
+      assert.ok(probe.skipped.includes(step), `${step} skipped on pause`);
+    }
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls.length, 1, "primary Job Summary fetch only; no re-fetch on pause");
+  });
+
+  it("EID-approval re-run: forces the operator-approved EID, skips the gate, and submits", async () => {
+    // The approve action re-enqueues with prefilledData.eidApproved set. The
+    // handler must force that EID over extraction and NOT re-pause — even though
+    // the Job Summary name still mismatches (the "Keep original" choice).
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce({
+      found: true, name: "Santos Hernandez",
+      data: { deptId: "000412", departmentDescription: "HOUSING/DINING/HOSPITALITY", jobCode: "004920", jobDescription: "STDT 3" },
+    });
+    const delegateSpy = vi.fn();
+    const { ctx, probe } = makeFakeCtx({ docId: "4313", eidApproved: "10833507" });
+    (ctx as { delegateTo: unknown }).delegateTo = async (...args: unknown[]) => {
+      delegateSpy(...args);
+      return { workflow: "person-lookup", runId: "stub", itemId: "stub", status: "done" as const };
+    };
+
+    await runHandler(ctx, { docId: "4313" });
+
+    assert.equal(probe.data.eid, "10833507", "operator-approved EID forced over extraction");
+    assert.equal(delegateSpy.mock.calls.length, 0, "no person-lookup delegation on an approved re-run");
+    assert.ok(probe.skipped.includes("identity-check"), "identity-check gate skipped (already approved)");
+    assert.notEqual(probe.data.eidApproval, "pending", "does NOT re-pause");
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1, "proceeds to submit with the approved EID");
+    assert.equal(mocks.getJobSummaryIdentity.mock.calls[0][1], "10833507", "Job Summary fetched with the approved EID");
   });
 
   it("skips identity-check on the txn-prefilled resume path (UCPath already accepted the EID)", async () => {

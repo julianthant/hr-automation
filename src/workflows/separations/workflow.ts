@@ -13,6 +13,7 @@ import {
   correctNameSpelling,
 } from "../../services/matching/match.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
+import { separationsStatusExtensions } from "../../domain/separations-status.js";
 import { personLookupWorkflow } from "../person-lookup/index.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
@@ -144,15 +145,36 @@ export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  */
 
 /**
+ * Outcome of the `identity-check` name-search arm (`resolveSeparationEid`):
+ *
+ *   - `verified`        — person-lookup confirmed the SAME EID the Kuali form
+ *                         carried → trust it, proceed.
+ *   - `needs-approval`  — person-lookup resolved a DIFFERENT, valid EID by name.
+ *                         We do NOT silently override + submit a termination
+ *                         (that once terminated the wrong person — see the
+ *                         2026-06-29 EID-approval lesson). The handler PAUSES the
+ *                         run into the operator EID-approval review instead.
+ */
+export type SeparationEidResolution =
+  | { status: "verified"; eid: string }
+  | {
+      status: "needs-approval";
+      proposedEid: string;
+      proposedName: string;
+      proposedDepartment: string;
+      proposedPayrollTitle: string;
+    };
+
+/**
  * The "very different name" / "EID not found" arm of the `identity-check` step:
- * verify the EID via person-lookup BY NAME and reconcile. The handler calls this
- * ONLY when the Workforce Job Summary result is suspicious enough to need a name
- * search — it is a CONDITIONAL fallback, not an every-run pass. The three cases:
+ * verify the EID via person-lookup BY NAME. The handler calls this ONLY when the
+ * Workforce Job Summary result is suspicious enough to need a name search — it
+ * is a CONDITIONAL check, not an every-run pass. The cases:
  *
  *   1. Job Summary FOUND the EID but the detail-page name is VERY DIFFERENT from
- *      the Kuali name (`classifyNameSimilarity` → "different") → the EID points
- *      at the wrong person (the valid-format-but-wrong Perez `10694136` case) →
- *      look the intended person up BY NAME.
+ *      the Kuali name (`classifyNameSimilarity` → "different") → the EID may
+ *      point at the wrong person (the valid-format-but-wrong Perez `10694136`
+ *      case) → look the intended person up BY NAME.
  *   2. Job Summary did NOT find the EID AND the typed EID is short (< 8 digits,
  *      incomplete) → the operator mistyped/truncated it → resolve BY NAME.
  *   3. Job Summary did NOT find the EID AND the typed EID is a complete 8 digits
@@ -163,23 +185,21 @@ export const SEPARATIONS_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
  * The CLOSE-variant case (Job Summary FOUND + `classifyNameSimilarity` →
  * "similar", e.g. Kuali "Balmaceda, Jaden" vs UCPath "Jayden Balmaceda") never
  * reaches here — the handler trusts the EID and fixes the Kuali NAME in place
- * (no person-lookup). And the clean-match case ("same") SKIPS this step entirely
- * (the "dynamic timeline" signal that no verification was needed).
+ * (no person-lookup). And the clean-match case ("same") SKIPS this step entirely.
  *
- * When it delegates, the NAME is authoritative: a resolved valid EID that
- * differs from Kuali's replaces it (`ctx.updateData({ eid })` so it rides every
- * downstream step + the final snapshot), a match returns the EID unchanged, and
- * an unresolvable name FAILS LOUD. The visible correction (its own pipeline step
- * + a delegated person-lookup child row) is the operator-confirmed exception to
- * the no-fallback rule — see CLAUDE.md "Conditional name↔EID verification".
- *
- * Returns the verified EID for the rest of the run.
+ * **Name is NO LONGER silently authoritative.** When person-lookup resolves a
+ * DIFFERENT valid EID, this returns `needs-approval` (with the proposed person's
+ * context) — the handler stamps the EID-approval review and pauses. A resolved
+ * EID that MATCHES the Kuali one returns `verified`; an unresolvable name still
+ * FAILS LOUD. This function performs NO `ctx.updateData` — the decision to
+ * accept a different EID belongs to the operator (see CLAUDE.md "EID approval
+ * review").
  */
 export async function resolveSeparationEid(
-  ctx: Pick<Ctx<typeof separationsSteps, Record<string, unknown>>, "delegateTo" | "updateData">,
+  ctx: Pick<Ctx<typeof separationsSteps, Record<string, unknown>>, "delegateTo">,
   kualiData: KualiSeparationData,
   jobSummary: { found: boolean; name: string },
-): Promise<string> {
+): Promise<SeparationEidResolution> {
   const eidDigits = normalizeEid(kualiData.eid).length;
 
   // Case 3: not found + a complete 8-digit EID → no person to compare against
@@ -213,15 +233,26 @@ export async function resolveSeparationEid(
     log.success(
       `[identity-check] person-lookup confirms EID ${kualiData.eid} for "${kualiData.employeeName}"`,
     );
-    return kualiData.eid;
+    return { status: "verified", eid: kualiData.eid };
   }
 
+  // A DIFFERENT valid EID. Do NOT auto-override + submit — surface BOTH
+  // identities for operator approval. person-lookup's result data already
+  // carries the proposed person's name/department/payroll title (CRM-sourced),
+  // so the approval card can show who the name-search actually resolved to.
+  const data = (result.data ?? {}) as Record<string, string>;
   log.warn(
-    `[identity-check] Taking name-derived EID "${resolvedEid}" over Kuali "${kualiData.eid}" ` +
-    `for "${kualiData.employeeName}" (name is authoritative)`,
+    `[identity-check] person-lookup resolved a DIFFERENT EID "${resolvedEid}" for ` +
+    `"${kualiData.employeeName}" (Kuali EID "${kualiData.eid}") — PAUSING for operator approval ` +
+    `(no silent override).`,
   );
-  ctx.updateData({ eid: resolvedEid });
-  return resolvedEid;
+  return {
+    status: "needs-approval",
+    proposedEid: resolvedEid,
+    proposedName: typeof data.name === "string" ? data.name : "",
+    proposedDepartment: typeof data.department === "string" ? data.department : "",
+    proposedPayrollTitle: typeof data.payrollTitle === "string" ? data.payrollTitle : "",
+  };
 }
 
 export const separationsWorkflow = defineWorkflow({
@@ -270,6 +301,11 @@ export const separationsWorkflow = defineWorkflow({
   steps: separationsSteps,
   schema: SeparationInputSchema,
   runtimePolicy: SEPARATIONS_WORKFLOW_RUNTIME_POLICY,
+  // EID-approval review: identity-check pauses (rather than silently overriding)
+  // when it resolves a DIFFERENT EID by name. The row then displays "Awaiting
+  // Approval"/"Dismissed" via this rule (gated on data.eidApproval). See
+  // src/domain/separations-status.ts + CLAUDE.md "EID approval review".
+  statusExtensions: separationsStatusExtensions,
   // Dashboard input-run gear menu — operator-selectable "Run mode" presets.
   // The implicit "Full" preset (all 5 steps) is synthesized client-side and
   // not listed here. Each preset's `skipSteps` set surfaces in the handler via
@@ -296,29 +332,29 @@ export const separationsWorkflow = defineWorkflow({
   // them again.
   matchKey: "eid",
   detailFields: [
-    { key: "name",              label: "Employee",        editable: true                          },
-    { key: "eid",               label: "EID",             editable: true                          },
+    { key: "name",              label: "Employee",        editable: true, group: "Identity"                            },
+    { key: "eid",               label: "EID",             editable: true, group: "Identity",     inputKind: "id"      },
     { key: "docId",             label: "Doc ID"                                                   },
     { key: "terminationType",   label: "Term Type"                                                }, // computed (Vol/Invol) — display only
-    { key: "lastDayWorked",     label: "Last Day Worked", editable: true                          },
+    { key: "lastDayWorked",     label: "Last Day Worked", editable: true, group: "Dates",        inputKind: "date"    },
     // Separation Date now shows in the grid (Kuali-authoritative date, never
     // overridden). Still editable for edit-and-resume. Always stamped via
     // updateData (date reconciliation + final snapshot), so it never trips the
     // "declared but never populated" warn.
-    { key: "separationDate",    label: "Separation Date", editable: true                          },
+    { key: "separationDate",    label: "Separation Date", editable: true, group: "Dates",        inputKind: "date"    },
     // Department name from the UCPath Workforce Job Summary (read-only). The
     // final snapshot always stamps it ("" when no Job Summary ran), so the
     // key is present on every success path — no populate warn.
     { key: "departmentDescription", label: "Department"                                           },
     // Stamped on every success path: live ("" until the UCPath submit returns a
     // number), dry-run (always "" — no submit), and the failed-no-txn snapshot.
-    { key: "transactionNumber", label: "Txn #",           editable: true                          },
+    { key: "transactionNumber", label: "Txn #",           editable: true, group: "Transaction",  inputKind: "id"      },
     // Free-form Kuali timekeeper-comments override. Edit-and-resume only —
     // not surfaced in the LogPanel detail grid. `fillTimekeeperComments` is
     // append-aware: existing field content is preserved + a newline-joined
     // append is filled. The final/dry-run snapshots stamp it ("" when no
     // prefill) so it never trips the "declared but never populated" warn.
-    { key: "comments",          label: "Comments",        editable: true, displayInGrid: false, multiline: true },
+    { key: "comments",          label: "Comments",        editable: true, displayInGrid: false, multiline: true, group: "Notes" },
     // Read-only preview of the generated UCPath termination comment (incl.
     // sick/holiday clause). Stamped in dry-run so the operator can verify it
     // before a real termination.
@@ -412,6 +448,26 @@ export const separationsWorkflow = defineWorkflow({
       };
     } else {
       kualiData = await ctx.step("kuali-extraction", () => runKualiExtract(ctx, docId));
+    }
+
+    // ─── EID-approval re-run gate ───
+    // When the operator approves a chosen EID from the EID-approval review, the
+    // approve action re-enqueues this doc with `prefilledData.eidApproved` set to
+    // the chosen EID. Force that EID over whatever extraction read and remember
+    // it so the identity-check gate below is SKIPPED (we must not re-pause — the
+    // operator already decided). The inline Job Summary fetch + the HDH kronos
+    // gate below then run with the APPROVED EID, so dept/payroll/timecard are the
+    // approved person's. A fresh (non-approval) run has no marker → eidPreApproved
+    // is false and the normal gate runs.
+    const approvedEid = typeof ctx.data.eidApproved === "string" ? ctx.data.eidApproved.trim() : "";
+    const eidPreApproved = isUcpathEmployeeId(approvedEid);
+    if (eidPreApproved && approvedEid !== kualiData.eid) {
+      log.step(
+        `[identity-check] Using operator-approved EID "${approvedEid}" ` +
+        `(extraction read "${kualiData.eid}") — EID-approval review re-run`,
+      );
+      kualiData = { ...kualiData, eid: approvedEid };
+      ctx.updateData({ eid: approvedEid });
     }
 
     // Preflight: reject future-dated separations so we don't waste Kronos/UCPath
@@ -528,6 +584,17 @@ export const separationsWorkflow = defineWorkflow({
           ? `[Step: identity-check] SKIPPED — txn # prefilled (UCPath already accepted EID '${kualiData.eid}'; no re-submit)`
           : `[Step: identity-check] SKIPPED — kronos-search skipped, no Job Summary gate (operator prefilled/asserted the data)`,
       );
+    } else if (eidPreApproved) {
+      // EID-approval review re-run: the operator already chose this EID, so the
+      // gate must NOT re-evaluate it (a "Keep original" choice would otherwise
+      // re-pause, since its Job Summary name still mismatches the form). Trust it
+      // as given. The Job Summary fetch above already ran with the approved EID,
+      // so dept/payroll are the approved person's.
+      ctx.skipStep("identity-check");
+      log.success(
+        `[Step: identity-check] SKIPPED — EID ${kualiData.eid} was operator-approved via the ` +
+        `EID-approval review; trusted as given (no re-verification).`,
+      );
     } else if (jobSummaryFound && nameTier === "same") {
       ctx.skipStep("identity-check");
       log.success(
@@ -556,35 +623,54 @@ export const separationsWorkflow = defineWorkflow({
         ctx.updateData({ name: correctedName });
       });
     } else {
-      const verifiedEid = await ctx.step("identity-check", () =>
+      const resolution = await ctx.step("identity-check", () =>
         resolveSeparationEid(ctx, kualiData, { found: jobSummaryFound, name: jobSummaryName }),
       );
-      if (verifiedEid !== kualiData.eid) {
-        const correctedFrom = kualiData.eid;
-        kualiData = { ...kualiData, eid: verifiedEid };
-        log.step(
-          `[identity-check] EID corrected ${correctedFrom} → ${verifiedEid} — re-fetching ` +
-          `Job Summary for the verified person`,
-        );
-        // Job Summary re-fetch is CRITICAL: the dept/payroll filled into Kuali
-        // must be the verified person's, not the wrong EID's. A miss now is a
-        // genuine failure (person-lookup said the EID is valid but Workforce
-        // Job Summary can't find it) → fail loud. No New Kronos re-search is
-        // needed — kronos-search runs below with the corrected EID.
-        const ucpathPage = await ctx.page("ucpath");
-        const reJobSummary = await getJobSummaryIdentity(ucpathPage, verifiedEid, {
-          separationDate: kualiData.separationDate,
+      if (resolution.status === "needs-approval") {
+        // ─── PAUSE for operator EID approval ───
+        // person-lookup resolved a DIFFERENT valid EID. We do NOT silently
+        // override + submit a termination (doing so once terminated the wrong
+        // person — a graduating student's doc carried an EID that resolved to a
+        // career maint worker of the same name; see the 2026-06-29 lesson).
+        // Skip every remaining step and return cleanly: the run ends `done`, so
+        // the 3 browsers release and the daemon claims the NEXT queued doc while
+        // this row waits in the EID-approval review. The operator approves a
+        // chosen EID (re-queues the doc with `prefilledData.eidApproved`) or
+        // dismisses it. Both candidate identities are stamped for the review card
+        // (original from the inline Job Summary fetch above; proposed from
+        // person-lookup's CRM-sourced result data).
+        ctx.skipStep("transaction-check");
+        ctx.skipStep("ucpath-job-summary");
+        ctx.skipStep("kronos-search");
+        ctx.skipStep("ucpath-transaction");
+        ctx.skipStep("kuali-finalization");
+        ctx.updateData({
+          eidApproval: "pending",
+          status: "Awaiting EID Approval",
+          // Original (the EID the Kuali form carried).
+          originalEid: kualiData.eid,
+          originalEidName: jobSummaryFound ? jobSummaryName : "",
+          originalEidDepartment: jobSummaryData?.departmentDescription ?? "",
+          originalEidPayrollTitle: jobSummaryData?.jobDescription ?? "",
+          originalEidFound: String(jobSummaryFound),
+          // Proposed (the EID the name search resolved to).
+          proposedEid: resolution.proposedEid,
+          proposedEidName: resolution.proposedName,
+          proposedEidDepartment: resolution.proposedDepartment,
+          proposedEidPayrollTitle: resolution.proposedPayrollTitle,
         });
-        if (!reJobSummary.found || !reJobSummary.data) {
-          throw new Error(
-            `Workforce Job Summary still found no record after correcting the EID to "${verifiedEid}" ` +
-            `for "${kualiData.employeeName}". Verify the person in UCPath, then retry.`,
-          );
-        }
-        jobSummaryFound = true;
-        jobSummaryName = reJobSummary.name;
-        jobSummaryData = reJobSummary.data;
+        log.warn(
+          `[identity-check] EID mismatch for "${kualiData.employeeName}": Kuali EID ${kualiData.eid}` +
+          `${jobSummaryFound ? ` (UCPath "${jobSummaryName}")` : " (not found in UCPath)"} vs ` +
+          `name-resolved EID ${resolution.proposedEid}` +
+          `${resolution.proposedName ? ` ("${resolution.proposedName}")` : ""}. ` +
+          `PAUSED — awaiting operator approval; the queue continues with other docs.`,
+        );
+        return;
       }
+      // verified → the resolved EID matches the Kuali one (person-lookup
+      // confirmed it). No EID change, so no Job Summary re-fetch. (A DIFFERENT
+      // EID no longer overrides here — it pauses for approval above.)
     }
 
     // ─── Step 3: transaction-check (AFTER identity-check, with the verified EID) ───
@@ -625,6 +711,14 @@ export const separationsWorkflow = defineWorkflow({
         ctx.updateData({
           transactionNumber: approvedDuplicateTxn,
           comments: joinComments((ctx.data.comments as string | undefined) ?? "", dupComment),
+        });
+        ctx.recordData({
+          direction: "write",
+          field: "comments",
+          label: "Duplicate-Termination Comment",
+          value: dupComment,
+          system: "Kuali",
+          note: "Queued from approved transaction reuse — UCPath create skipped",
         });
         log.warn(
           `[transaction-check] Reusing APPROVED termination #${approvedDuplicateTxn} — ` +
@@ -707,6 +801,15 @@ export const separationsWorkflow = defineWorkflow({
       await ctx.step("ucpath-job-summary", () =>
         runUcpathJobSummary(kualiPageForDept, jobSummaryData!, kualiData.eid),
       );
+      // Provenance: department/payroll READ from the UCPath Job Summary, then
+      // WRITTEN into the Kuali separation form.
+      ctx.recordData([
+        { direction: "read", field: "departmentDescription", label: "Department", value: jobSummaryData!.departmentDescription, system: "UCPath Job Summary" },
+        { direction: "read", field: "jobCode", label: "Payroll Title Code", value: jobSummaryData!.jobCode, system: "UCPath Job Summary" },
+        { direction: "read", field: "jobDescription", label: "Payroll Title", value: jobSummaryData!.jobDescription, system: "UCPath Job Summary" },
+        { direction: "write", field: "department", label: "Department", value: jobSummaryData!.departmentDescription, system: "Kuali" },
+        { direction: "write", field: "payrollTitle", label: "Payroll Title", value: jobSummaryData!.jobDescription, system: "Kuali" },
+      ]);
     }
 
     // ─── Step 5: kronos-search (2-way parallel — New Kronos timecard + Kuali
@@ -750,6 +853,12 @@ export const separationsWorkflow = defineWorkflow({
         `(lastPunch=${timecard.lastPunchDate ?? "none"}, ` +
         `sick=${timecard.sickDates.length}, holiday=${timecard.holidayDates.length})`,
       );
+      // Provenance: timecard facts READ from the New Kronos separation timecard.
+      ctx.recordData([
+        { direction: "read", field: "lastPunchDate", label: "Last Physical Punch", value: timecard.lastPunchDate, system: "New Kronos" },
+        { direction: "read", field: "sickDates", label: "Sick Days", value: timecard.sickDates, system: "New Kronos" },
+        { direction: "read", field: "holidayDates", label: "Holiday Days", value: timecard.holidayDates, system: "New Kronos" },
+      ]);
     }
 
     // ─── Reconcile dates (NEW MODEL, 2026-06-22) ───
@@ -991,6 +1100,22 @@ export const separationsWorkflow = defineWorkflow({
     }
     } // end !txnNumberPrefilled branch
 
+    // Provenance: the UCPath Smart HR transaction number this run resolved —
+    // newly created, reused from an approved duplicate, or carried over from a
+    // prior run (edit-and-resume).
+    ctx.recordData({
+      direction: "write",
+      field: "transactionNumber",
+      label: "Transaction #",
+      value: transactionNumber,
+      system: "UCPath Smart HR",
+      ...(txnNumberPrefilled
+        ? { note: "prefilled (edit-and-resume)" }
+        : approvedDuplicateTxn
+          ? { note: "reused approved duplicate" }
+          : {}),
+    });
+
     // ─── Step 7: Kuali finalization ───
     await ctx.step("kuali-finalization", () =>
       runKualiFinalize(ctx, {
@@ -1005,6 +1130,17 @@ export const separationsWorkflow = defineWorkflow({
         timekeeperName,
       }),
     );
+    // Provenance: the values finalization WROTE back into the Kuali document.
+    ctx.recordData([
+      { direction: "write", field: "transactionNumber", label: "Transaction #", value: transactionNumber, system: "Kuali" },
+      ...(ldwChanged
+        ? [{ direction: "write" as const, field: "lastDayWorked", label: "Last Day Worked", value: lastDayWorked, system: "Kuali", note: `overrides Kuali '${kualiData.lastDayWorked}' (New Kronos last punch)` }]
+        : []),
+      ...(separationDateChanged
+        ? [{ direction: "write" as const, field: "separationDate", label: "Separation Date", value: separationDate, system: "Kuali", note: `derived from timecard; Kuali had '${kualiData.separationDate}'` }]
+        : []),
+      { direction: "write" as const, field: "terminationEffDate", label: "Termination Eff. Date", value: termEffDate, system: "Kuali" },
+    ]);
 
     // Final state snapshot for the dashboard detail panel / JSONL readers.
     ctx.updateData({
