@@ -14,7 +14,9 @@ import {
 import type { WorkflowPresentationDetail, WorkflowOverride } from "../useWorkflowPresentation.js";
 import { overrideToGraph } from "./graph-build.js";
 import { STEP_X0, STEP_DX, STEP_Y } from "./graph-build.js";
+import { FlaskConical, Split, Ban } from "lucide-react";
 import { groupLaneOps, buildDataFlowEdges } from "./lane-build.js";
+import { deriveWorkflowDryRunDiff } from "../../../../domain/workflow-design/dry-run-diff.js";
 import { nodeTypes } from "./nodes/node-registry.js";
 import { edgeTypes } from "./edges/edge-registry.js";
 import { NodeInspector } from "./NodeInspector.js";
@@ -48,6 +50,8 @@ export interface CanvasViewState {
   paletteOpen: boolean;
   onClosePalette: () => void;
   dataFlowOn: boolean;
+  /** Dry-run overlay: annotate where a dry run diverges from a live run. */
+  dryRunOn: boolean;
   collapsedIds: Set<string>;
   onToggleCollapsed: (id: string) => void;
   /** The lane to focus + a monotonic nonce so re-focusing the same lane re-centers. */
@@ -155,6 +159,7 @@ function GraphCanvasInner({
   paletteOpen,
   onClosePalette,
   dataFlowOn,
+  dryRunOn,
   collapsedIds,
   onToggleCollapsed,
   focusTarget,
@@ -173,6 +178,10 @@ function GraphCanvasInner({
     () => groupLaneOps(workflowBank, data.base.steps),
     [workflowBank, data.base.steps],
   );
+
+  // Where a dry run diverges from a live run (gate / skipped steps + the verbatim
+  // boundary), derived from the same mined bank. Drives the "Dry run" overlay.
+  const dryRunDiff = useMemo(() => deriveWorkflowDryRunDiff(workflowBank), [workflowBank]);
 
   // Per-step data-bank metadata (note / source file) for the inspector detail.
   const stepMeta = useMemo(() => {
@@ -374,8 +383,13 @@ function GraphCanvasInner({
   );
 
   const laneInteraction = useMemo(
-    () => ({ isCollapsed: (id: string) => collapsedIds.has(id), toggleCollapsed: onToggleCollapsed, focusedId }),
-    [collapsedIds, onToggleCollapsed, focusedId],
+    () => ({
+      isCollapsed: (id: string) => collapsedIds.has(id),
+      toggleCollapsed: onToggleCollapsed,
+      focusedId,
+      dryRun: { on: dryRunOn, forStep: (step: string) => dryRunDiff.steps[step] },
+    }),
+    [collapsedIds, onToggleCollapsed, focusedId, dryRunOn, dryRunDiff],
   );
 
   return (
@@ -421,6 +435,43 @@ function GraphCanvasInner({
                 onAddAnnotation={addIntentNode}
                 onClose={onClosePalette}
               />
+            </Panel>
+          ) : null}
+
+          {dryRunOn ? (
+            <Panel position="top-center">
+              <section
+                aria-label="Dry run overlay"
+                className="max-w-md rounded-xl border border-border bg-popover/95 px-3.5 py-3 shadow-lg backdrop-blur-sm"
+              >
+                <div className="flex items-center gap-1.5">
+                  <FlaskConical aria-hidden className="h-4 w-4 shrink-0 text-info" />
+                  <h2 className="text-[12px] font-semibold uppercase tracking-[0.1em] text-foreground">
+                    Dry run
+                  </h2>
+                </div>
+                {dryRunDiff.hasDryRun ? (
+                  <>
+                    <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground">
+                      {dryRunDiff.boundary ?? "Marks where this run differs from a live run."}
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/70 pt-2 text-[11px]">
+                      <span className="inline-flex items-center gap-1 text-info">
+                        <Split aria-hidden className="h-3 w-3 shrink-0" />
+                        Dry-run gate
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-warning">
+                        <Ban aria-hidden className="h-3 w-3 shrink-0" />
+                        Skipped in dry run
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground">
+                    This workflow has no dry-run mode — every run executes the same path.
+                  </p>
+                )}
+              </section>
             </Panel>
           ) : null}
         </ReactFlow>

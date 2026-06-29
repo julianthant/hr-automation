@@ -27,7 +27,10 @@ import {
   resolveQueueRowLiveMessage,
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
-import { aggregateBatchCounts } from "@/components/ocr/delegation-row-helpers";
+import {
+  aggregateBatchCounts,
+  pickPreviewChildren,
+} from "@/components/ocr/delegation-row-helpers";
 import { statusKeyForEntry } from "@/components/shared/status-styles";
 import { cn } from "@/lib/utils";
 
@@ -123,6 +126,29 @@ const HEADER_STATUS: Record<string, HeaderStatus> = {
   },
 };
 
+/** Per-member status icons for the titleless person-anchor preview — mirrors group-row-base's STATUS_ICON. */
+const MEMBER_PREVIEW_ICON: Record<
+  string,
+  { Icon: LucideIcon; color: string; spin: boolean }
+> = {
+  running: { Icon: Loader2, color: "text-primary", spin: true },
+  pending: { Icon: Clock, color: "text-warning", spin: false },
+  done: { Icon: CheckCircle2, color: "text-success", spin: false },
+  skipped: { Icon: CheckCircle2, color: "text-success", spin: false },
+  failed: { Icon: AlertTriangle, color: "text-destructive", spin: false },
+};
+
+/**
+ * True when the resolved operation header title is non-empty (titled variant).
+ * False for a person-kind anchor whose `batchGroupTitle` returns `""` — in that
+ * case the header shows a member-name preview instead of a title string.
+ *
+ * Extracted as a pure helper so it can be tested without mounting React.
+ */
+export function operationHeaderHasTitle(name: string): boolean {
+  return name.trim().length > 0;
+}
+
 function headerStatus(entry: TrackerEntry, ocr?: OperationOcrLink): HeaderStatus {
   if (ocr?.status === "awaiting-review") return HEADER_STATUS.needsReview;
   // `statusKeyForEntry` applies the shared failed+cancelled override so the
@@ -204,6 +230,8 @@ export function OperationRowUnified({
   const canOpenOcr = Boolean(ocrSessionId && ocrRunId && onOpenOcrReview);
 
   const name = projection?.title ?? resolveEntryName(displayParent, displayNames);
+  const hasTitle = operationHeaderHasTitle(name);
+  const previewKids = pickPreviewChildren(members, 3);
   const isActivelyRunning = displayParent.status === "running" && !awaitingReview;
   const isTerminal = displayParent.status === "done" || displayParent.status === "failed";
   const subline = awaitingReview
@@ -229,7 +257,9 @@ export function OperationRowUnified({
           role: "button",
           tabIndex: 0,
           "aria-pressed": selected,
-          "aria-label": `${name || parent.id} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`,
+          "aria-label": hasTitle
+            ? `${name} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`
+            : `${counts.total} ${counts.total === 1 ? "document" : "documents"} — ${resolveOperationStatusLabel(displayParent, ocr).toLowerCase()}`,
           "data-queue-entry-id": parent.id,
           onKeyDown: (e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -246,6 +276,10 @@ export function OperationRowUnified({
           time: formatEntryTime(parent.firstLogTs || parent.timestamp),
           runNumber: getRunNumber(parent),
           secondaryId: projection?.subtitle ?? resolveEntryId(parent),
+          // For titled coordinators suppress the footer id when it matches the
+          // title (avoiding redundant display). For titleless person anchors the
+          // name is "", so leave suppressIdWhenEquals as "" — the trace id in
+          // secondaryId is always different and will always be shown.
           suppressIdWhenEquals: name,
           elapsed: isActivelyRunning ? elapsed : null,
           duration: isTerminal || awaitingReview ? duration : null,
@@ -261,7 +295,7 @@ export function OperationRowUnified({
                     workflow={parent.workflow}
                     id={parent.id}
                     runId={parent.runId}
-                    subject={name || parent.id}
+                    subject={hasTitle ? name : `${counts.total} ${counts.total === 1 ? "document" : "documents"}`}
                   />
                 ),
               }
@@ -273,7 +307,7 @@ export function OperationRowUnified({
                   date,
                   actions: projection?.actions,
                   entry: displayParent,
-                  subject: name || parent.id,
+                  subject: hasTitle ? name : `${counts.total} ${counts.total === 1 ? "document" : "documents"}`,
                   onDelete,
                 },
               }),
@@ -281,13 +315,52 @@ export function OperationRowUnified({
       >
         {/* Header zone */}
         <div className="px-3.5 py-2.5">
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className={cn("flex min-w-0 justify-between gap-2", hasTitle ? "items-center" : "items-start")}>
+            <div className={cn("flex min-w-0 gap-2", hasTitle ? "items-center" : "items-start")}>
               <StatusIcon
                 aria-hidden
-                className={cn("h-3.5 w-3.5 shrink-0", cfg.iconClass, cfg.iconColor)}
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0",
+                  cfg.iconClass,
+                  cfg.iconColor,
+                  !hasTitle && "mt-0.5",
+                )}
               />
-              <span className="truncate text-[14px] font-semibold text-foreground">{name || parent.id}</span>
+              {hasTitle ? (
+                <span className="truncate text-[14px] font-semibold text-foreground">{name}</span>
+              ) : (
+                // Titleless person anchor: show a compact member-name preview
+                // (running→queued→failed→done order from pickPreviewChildren).
+                <div className="flex min-w-0 flex-col gap-1 font-mono text-[10.5px]">
+                  {previewKids.map((kid) => {
+                    const kidCfg = MEMBER_PREVIEW_ICON[kid.status] ?? MEMBER_PREVIEW_ICON.pending;
+                    const KidIcon = kidCfg.Icon;
+                    return (
+                      <div key={kid.id} className="flex items-center gap-2 min-w-0">
+                        <KidIcon
+                          aria-hidden
+                          className={cn(
+                            "h-3 w-3 shrink-0",
+                            kidCfg.color,
+                            kidCfg.spin && "animate-spin motion-reduce:animate-none",
+                          )}
+                        />
+                        <span className="flex-1 truncate min-w-0 text-foreground/90">{kid.name}</span>
+                        {kid.emplId && (
+                          <span className="shrink-0 tabular-nums text-[9.5px] text-muted-foreground">
+                            {kid.emplId}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {previewKids.length === 0 && (
+                    <span className="text-muted-foreground">
+                      {counts.total} {counts.total === 1 ? "person" : "people"}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <span

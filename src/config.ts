@@ -5,7 +5,20 @@ import { homedir } from "os";
 import { join } from "path";
 
 import { screenshotsDir } from "./tracker/paths.js";
+import {
+  applyOperatorSettingsToEnv,
+  loadMergedOperatorSettings,
+} from "./tracker/settings/store.js";
 import { EnvValidationError } from "./utils/env.js";
+
+// Operator settings (`config/settings.json`) layer in UNDER explicit env vars
+// and OVER the hardcoded defaults below: env > settings.json > default. An empty
+// / missing file is a no-op (every settings default mirrors a literal here).
+// `applyOperatorSettingsToEnv` populates the cross-module env-backed knobs (OCR,
+// feature flags, nav retries, separations window) BEFORE anything reads them;
+// the config.ts-owned constants below read the merged settings directly.
+applyOperatorSettingsToEnv();
+const SETTINGS = loadMergedOperatorSettings();
 
 const HOME = homedir();
 // Tracker root. `HRAUTO_TRACKER_DIR` is set by the daemon spawner
@@ -19,13 +32,14 @@ const TRACKER_DIR = process.env.HRAUTO_TRACKER_DIR ?? ".tracker";
 // subdir paths from its helpers, never re-spell them as literals here.
 
 export const PATHS = {
-  reportsDir: join(HOME, "Downloads", "reports"),
+  // An operator-set path wins; an empty setting falls back to the homedir default.
+  reportsDir: SETTINGS.paths.reportsDir || join(HOME, "Downloads", "reports"),
   downloadsDir: join(HOME, "Downloads"),
   // CRM onboarding-document output lives under ~/Documents/onboarding (moved
   // off ~/Downloads on 2026-06-18). crm-doc-download zips each run's per-person
   // folder(s) into this dir; onboarding's in-process iDocs download also lands
   // its per-person folders here via buildCrmDocumentDownloadPath.
-  onboardingDocsDir: join(HOME, "Documents", "onboarding"),
+  onboardingDocsDir: SETTINGS.paths.onboardingDocsDir || join(HOME, "Documents", "onboarding"),
   ukgSessionBase: join(HOME, "ukg_session"),
   ukgSessionSep: join(HOME, "ukg_session_sep"),
   screenshotDir: screenshotsDir(TRACKER_DIR),
@@ -37,8 +51,8 @@ export const PATHS = {
 export const TIMEOUTS = {
   fast: 5_000,
   normal: 10_000,
-  navigation: 15_000,
-  longNavigation: 30_000,
+  navigation: SETTINGS.timeouts.navigationMs,
+  longNavigation: SETTINGS.timeouts.longNavigationMs,
   ukgNavigation: 60_000,
   duoApproval: 180,      // seconds (used by duo-poll.ts)
   duoApprovalCrm: 60,    // seconds
@@ -48,8 +62,8 @@ export const TIMEOUTS = {
 // ─── Screen layout ──────────────────────────────────────────
 
 export const SCREEN = {
-  width: 2560,
-  height: 1440,
+  width: SETTINGS.display.screenWidth,
+  height: SETTINGS.display.screenHeight,
 } as const;
 
 // ─── Annual dates (UPDATE EACH FISCAL YEAR) ─────────────────
@@ -60,16 +74,17 @@ export const SCREEN = {
 // Env values override at module-load time; unset → fall back to hardcoded default.
 
 export const ANNUAL_DATES = {
-  jobEndDate: process.env.ANNUAL_DATES_END ?? "06/30/2026",
-  kronosDefaultEndDate: process.env.KRONOS_DEFAULT_END_DATE ?? "2/1/2026",
-  kronosDefaultStartDate: process.env.KRONOS_DEFAULT_START_DATE ?? "1/1/2017",
+  jobEndDate: process.env.ANNUAL_DATES_END ?? SETTINGS.annualDates.jobEndDate,
+  kronosDefaultEndDate: process.env.KRONOS_DEFAULT_END_DATE ?? SETTINGS.annualDates.kronosDefaultEndDate,
+  kronosDefaultStartDate: process.env.KRONOS_DEFAULT_START_DATE ?? SETTINGS.annualDates.kronosDefaultStartDate,
 } as const;
 
 // ─── Separations ─────────────────────────────────────────────
-// TIMEKEEPER_NAME must be set in .env — used by fillTimekeeperTasks (Kuali).
-// Validated lazily so dashboard/other commands don't require it at startup.
+// TIMEKEEPER_NAME comes from .env (or the Settings page) — used by
+// fillTimekeeperTasks (Kuali). Validated lazily so dashboard/other commands
+// don't require it at startup. Env wins over the settings value.
 export function getTimekeeperName(): string {
-  const name = process.env.TIMEKEEPER_NAME ?? "";
+  const name = process.env.TIMEKEEPER_NAME || SETTINGS.operator.timekeeperName;
   if (!name) throw new EnvValidationError(["TIMEKEEPER_NAME"]);
   return name;
 }

@@ -90,7 +90,7 @@ export function computeOperationPipelineView(
   return { steps, currentStep: stage, status: "running" };
 }
 
-export type CoordinatorLogSource = "coordinator" | "ocr" | "member";
+export type CoordinatorLogSource = "coordinator" | "ocr" | "member" | "session";
 
 export interface CoordinatorLogLine extends CollapsedLogEntry {
   /** Which lifecycle stream this line came from (drives the source label). */
@@ -102,7 +102,23 @@ export const COORDINATOR_LOG_SOURCE_LABEL: Record<CoordinatorLogSource, string> 
   coordinator: "Operation",
   ocr: "OCR",
   member: "Member",
+  session: "Session",
 };
+
+const SESSION_LIFECYCLE_EVENT_TYPES = new Set<string>([
+  "workflow_start",
+  "workflow_end",
+  "session_create",
+  "session_close",
+  "browser_launch",
+  "browser_close",
+  "auth_start",
+  "auth_complete",
+  "duo_request",
+  "duo_start",
+  "duo_complete",
+  "idle_signal",
+]);
 
 /**
  * The OCR-run lifecycle events worth surfacing on the coordinator timeline.
@@ -206,7 +222,7 @@ export function mergeCoordinatorLogs(
   ];
 
   // Stable index by source so equal-ts lines keep a deterministic order.
-  const sourceRank: Record<CoordinatorLogSource, number> = { coordinator: 0, ocr: 1, member: 2 };
+  const sourceRank: Record<CoordinatorLogSource, number> = { coordinator: 0, ocr: 1, member: 2, session: 0 };
   const withIndex = tagged.map((entry, index) => ({ entry, index }));
   withIndex.sort((a, b) => {
     const ta = a.entry.ts ?? "";
@@ -227,4 +243,55 @@ export function mergeCoordinatorLogs(
     out.push(entry);
   }
   return out;
+}
+
+/** Fold daemon session lifecycle events into an input-run coordinator timeline. */
+export function mergeSessionLifecycleIntoCoordinatorLogs(
+  logs: readonly CoordinatorLogLine[],
+  sessionEvents: readonly {
+    type?: string;
+    timestamp?: string;
+    ts?: number;
+    message?: string;
+    system?: string;
+    workflow?: string;
+    itemId?: string;
+  }[],
+  fallback?: Pick<TrackerEntry, "workflow" | "id">,
+): CoordinatorLogLine[] {
+  const sessionLines: CoordinatorLogLine[] = sessionEvents
+    .filter((e) => e.type && SESSION_LIFECYCLE_EVENT_TYPES.has(e.type))
+    .map((e) => ({
+      workflow: e.workflow ?? fallback?.workflow ?? "workflow",
+      itemId: e.itemId ?? fallback?.id ?? "session",
+      level: "step" as const,
+      message: e.message ?? e.type ?? "session",
+      ts:
+        typeof e.timestamp === "string" && e.timestamp.length > 0
+          ? e.timestamp
+          : typeof e.ts === "number"
+            ? new Date(e.ts).toISOString()
+            : "",
+      count: 1,
+      source: "session" as const,
+      ...(e.system ? { system: e.system } : {}),
+    }));
+  const sourceRank: Record<CoordinatorLogSource, number> = {
+    session: 0,
+    coordinator: 1,
+    ocr: 2,
+    member: 3,
+  };
+  const tagged = [...sessionLines, ...logs];
+  const withIndex = tagged.map((entry, index) => ({ entry, index }));
+  withIndex.sort((a, b) => {
+    const ta = a.entry.ts ?? "";
+    const tb = b.entry.ts ?? "";
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    const ra = sourceRank[a.entry.source];
+    const rb = sourceRank[b.entry.source];
+    if (ra !== rb) return ra - rb;
+    return a.index - b.index;
+  });
+  return withIndex.map(({ entry }) => entry);
 }

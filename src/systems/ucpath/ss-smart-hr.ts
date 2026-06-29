@@ -65,6 +65,20 @@ export interface TerminationTransactionStatus {
 export const SEPARATION_TERMINATION_WINDOW_DAYS = 14;
 
 /**
+ * Effective tolerance window, read at CALL time so the operator's Settings value
+ * (populated onto `HRAUTO_SEPARATION_TERMINATION_WINDOW_DAYS` at config load) is
+ * honored regardless of module import order. Falls back to
+ * {@link SEPARATION_TERMINATION_WINDOW_DAYS} when unset/invalid.
+ */
+function effectiveTerminationWindowDays(): number {
+  const n = Number.parseInt(
+    process.env.HRAUTO_SEPARATION_TERMINATION_WINDOW_DAYS ?? "",
+    10,
+  );
+  return Number.isInteger(n) && n >= 0 ? n : SEPARATION_TERMINATION_WINDOW_DAYS;
+}
+
+/**
  * Pick the termination (Action = "TER") row from a parsed results grid. When
  * more than one TER row exists, the first (newest — the grid lists newest
  * first) wins. Pure + order-insensitive on whitespace/case so it is unit
@@ -99,7 +113,7 @@ function toDayNumber(dateStr: string): number | null {
 export function isWithinSeparationWindow(
   terEffdt: string,
   kualiSeparationDate: string,
-  toleranceDays: number = SEPARATION_TERMINATION_WINDOW_DAYS,
+  toleranceDays: number = effectiveTerminationWindowDays(),
 ): boolean {
   const a = toDayNumber(terEffdt);
   const b = toDayNumber(kualiSeparationDate);
@@ -202,7 +216,7 @@ export async function findTerminationTransactionStatus(
     return { found: true, transactionId: ter.transactionId, approvalStatus: ter.approvalStatus, effectiveDate: "" };
   }
 
-  const tol = opts.toleranceDays ?? SEPARATION_TERMINATION_WINDOW_DAYS;
+  const tol = opts.toleranceDays ?? effectiveTerminationWindowDays();
   const effectiveDate = await readTerminationEffectiveDate(page, frame, ter.transactionId);
   if (!effectiveDate) {
     // Couldn't read the effdt → we CANNOT confirm this TER is THIS separation.

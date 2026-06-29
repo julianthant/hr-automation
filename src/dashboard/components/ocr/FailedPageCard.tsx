@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader2, AlertCircle, RefreshCw, EyeOff } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { FailedPage } from "./types";
 

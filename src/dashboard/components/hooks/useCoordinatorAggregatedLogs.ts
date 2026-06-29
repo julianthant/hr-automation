@@ -7,8 +7,10 @@ import {
   buildMemberSummaryLines,
   isOperationCoordinatorWorkflow,
   mergeCoordinatorLogs,
+  mergeSessionLifecycleIntoCoordinatorLogs,
   type CoordinatorLogLine,
 } from "../log-panel/coordinator-logs";
+import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 
 /**
  * Aggregate an operation coordinator row's lifecycle into one merged,
@@ -32,14 +34,19 @@ export function useCoordinatorAggregatedLogs(args: {
   coordinatorLogs: CollapsedLogEntry[];
   childEntries: TrackerEntry[];
   date: string;
+  sessionEvents?: readonly import("@/components/shared/types").RunEvent[];
 }): { active: boolean; logs: CoordinatorLogLine[] } {
-  const { entry, coordinatorLogs, childEntries, date } = args;
+  const { entry, coordinatorLogs, childEntries, date, sessionEvents } = args;
 
-  const isCoordinator = Boolean(
+  const isOcrCoordinator = Boolean(
     entry && isOperationCoordinatorWorkflow(entry.workflow) && entry.data?.ocrRunId,
   );
-  const ocrRunId = isCoordinator ? entry!.data!.ocrRunId ?? null : null;
-  const ocrSessionId = isCoordinator
+  const isInputRunCoordinator = Boolean(
+    entry && resolveRowArchetype(entry) === "operation" && !entry.data?.ocrRunId,
+  );
+  const isCoordinator = isOcrCoordinator || isInputRunCoordinator;
+  const ocrRunId = isOcrCoordinator ? entry!.data!.ocrRunId ?? null : null;
+  const ocrSessionId = isOcrCoordinator
     ? entry!.data!.ocrSessionId ?? entry!.data!.sessionId ?? null
     : null;
 
@@ -50,10 +57,11 @@ export function useCoordinatorAggregatedLogs(args: {
     [childEntries],
   );
 
-  const merged = useMemo(
-    () => mergeCoordinatorLogs(coordinatorLogs, ocrLogs, memberLines),
-    [coordinatorLogs, ocrLogs, memberLines],
-  );
+  const merged = useMemo(() => {
+    const base = mergeCoordinatorLogs(coordinatorLogs, ocrLogs, memberLines);
+    if (!isInputRunCoordinator || !sessionEvents?.length) return base;
+    return mergeSessionLifecycleIntoCoordinatorLogs(base, sessionEvents, entry ?? undefined);
+  }, [coordinatorLogs, ocrLogs, memberLines, isInputRunCoordinator, sessionEvents]);
 
   return { active: isCoordinator, logs: merged };
 }

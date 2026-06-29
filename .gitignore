@@ -3,6 +3,11 @@
 .env.*
 !.env.example
 
+# Operator settings written by the dashboard Settings page — machine-specific
+# operator state (like .env). The other config/ files (workflow-presentation,
+# workflow-design) stay tracked; only this one is ignored.
+config/settings.json
+
 # Python
 __pycache__/
 *.py[cod]
@@ -69,11 +74,15 @@ docs/*
 generated/schemas/*.schema.json
 generated/pathfinder/
 generated/reports/
-# All e2e run artifacts: .e2e/tracker/ (app's isolated tracker + e2e-gates) and
-# .e2e/runs/<ts>/ (harness manifests, issue ledgers, reports). Regenerated each run.
-generated/.e2e/
-# Unit-test tracker output (.tests/{tracker,log,log-validator}). Regenerated each test run.
-generated/.tests/
+# All run-scratch lives in dot-dirs under generated/ (per generated/README.md) —
+# ignore every one of them with a single catch-all. Currently:
+#   .e2e/                  e2e run artifacts (app tracker + harness manifests/reports)
+#   .tests/                unit-test tracker output (tracker/log/log-validator)
+#   .dashboard-preview/    seed-session-fixture.ts dashboard fixture
+#   .duo-soak/             Duo Autopilot soak-run logs
+#   .screenshot-verify/    selector verification screenshots
+#   .screenshot-verify-live/  live-workflow verification shots + tracker
+generated/.*/
 
 # OS
 .DS_Store
@@ -89,6 +98,3 @@ Thumbs.db
 tests/data/*.pdf
 # e2e roster identities sidecar (PII — real names+EIDs for make-e2e-roster.mjs)
 tests/data/e2e-roster-identities.json
-
-# Dashboard preview fixture (scripts/seed-session-fixture.ts)
-generated/.dashboard-preview/

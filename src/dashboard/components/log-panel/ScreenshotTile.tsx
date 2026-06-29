@@ -13,6 +13,10 @@ const KIND_BADGE: Record<
     label: "Form",
     className: "border-primary/40 bg-primary/15 text-primary",
   },
+  step: {
+    label: "Step",
+    className: "border-info/40 bg-info/15 text-info",
+  },
   manual: {
     label: "Manual",
     className: "border-border bg-muted text-muted-foreground",

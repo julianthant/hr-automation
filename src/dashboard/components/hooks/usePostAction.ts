@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 interface PostActionResult<TBody> {
   ok: boolean;

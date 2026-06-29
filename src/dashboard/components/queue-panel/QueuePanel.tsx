@@ -10,7 +10,7 @@ import { StatPills } from "./StatPills";
 import { EntryItem } from "./EntryItem";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { QueueEmptyCta } from "./QueueEmptyCta";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 import { findEnabledAction } from "@/lib/workflow-action-utils";
 import { buildRowCancelDispatchArgs } from "@/lib/row-cancel-request";
@@ -20,7 +20,6 @@ import {
   BatchQueuePrepReviewButton,
   BatchQueuePreviewButton,
 } from "./batch-queue-view";
-import { DaemonBatchRow } from "./DaemonBatchRow";
 import { OperationRow } from "./OperationRow";
 import { DelegationRow } from "@/components/ocr/DelegationRow";
 import type { TrackerEntry } from "@/components/shared/types";
@@ -100,7 +99,7 @@ interface QueuePanelProps {
   onOpenBatchPreview?: () => void;
   loading: boolean;
   /**
-   * Run/upload (`TopBarRunButton`), Capture (`TopBarCaptureButton`) when registered,
+   * Run/upload (`TopBarRunButton`; Capture is an in-modal method of its Run modal),
    * then retry-all / stop-active / delete-all — beside the queue sort control.
    */
   queueBulkActionsSlot?: ReactNode;
@@ -112,8 +111,11 @@ interface QueuePanelProps {
   /** Controlled sort mode (persisted at App level — matches batch screenshot preview). */
   queueSortMode: QueueSortMode;
   onQueueSortModeChange: (mode: QueueSortMode) => void;
-  /** Explicit panel width in px (operator-resized). Omit for the responsive default. */
-  widthPx?: number;
+  /**
+   * When true, fill the parent (used inside a ResizablePanel — the panel owns
+   * the width). When false/omitted, use the responsive fixed-width default.
+   */
+  fill?: boolean;
 }
 
 function pickProjectionRows<K extends QueueGroupSurface["kind"]>(
@@ -227,7 +229,7 @@ export function QueuePanel({
   runControlsSlot,
   queueSortMode,
   onQueueSortModeChange,
-  widthPx,
+  fill,
 }: QueuePanelProps) {
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -314,22 +316,6 @@ export function QueuePanel({
     );
   }, [previewSurfaces, queueSortMode, displayNames]);
 
-  const batchSurfaces = useMemo(
-    () => pickProjectionRows(queueProjectionRows.groupRows, "batch"),
-    [queueProjectionRows.groupRows],
-  );
-
-  const sortedBatchSurfaces = useMemo(() => {
-    const ids = sortDaemonBatchParentIds(
-      batchSurfaces.map((row) => row.surface.parentRunId),
-      batchMembersByParentRunId,
-      queueSortMode,
-      workflowLabel,
-      displayNames,
-    );
-    return reorderByIds(batchSurfaces, (row) => row.surface.parentRunId, ids);
-  }, [batchSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
-
   const operationSurfaces = useMemo(
     () => pickProjectionRows(queueProjectionRows.groupRows, "operation"),
     [queueProjectionRows.groupRows],
@@ -355,15 +341,6 @@ export function QueuePanel({
     [sortedPreviewSurfaces, statusFilter],
   );
 
-  /** Daemon batch cards: visible when any member matches the status filter. */
-  const visibleBatchSurfaces = useMemo(
-    () =>
-      sortedBatchSurfaces.filter((surface) =>
-        queueGroupMatchesStatusFilter(statusFilter, surface.surface.members),
-      ),
-    [sortedBatchSurfaces, statusFilter],
-  );
-
   /** Operation coordinator cards: visible when the row or any member matches. */
   const visibleOperationSurfaces = useMemo(
     () =>
@@ -376,7 +353,6 @@ export function QueuePanel({
   /** Group cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
   const hasGroupQueueCards =
     visiblePreviewSurfaces.length > 0 ||
-    visibleBatchSurfaces.length > 0 ||
     visibleOperationSurfaces.length > 0;
 
   const filtered = useMemo(() => {
@@ -579,24 +555,6 @@ export function QueuePanel({
             batchDrillInEnabled={!batchQueueParentRunId}
           />
         );
-      case "batch":
-        return (
-          <DaemonBatchRow
-            key={`daemon-batch-${surface.parentRunId}`}
-            workflow={workflow}
-            date={date}
-            batchParentRunId={surface.parentRunId}
-            workflowLabel={workflowLabel}
-            titleOverride={surface.titleOverride}
-            projection={projection}
-            memberEntries={surface.members}
-            anchorEntry={surface.parent}
-            isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
-            onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
-            batchDrillInEnabled={!batchQueueParentRunId}
-            onDeletedIds={onBulkDeleted}
-          />
-        );
       case "operation":
         return (
           <OperationRow
@@ -623,16 +581,16 @@ export function QueuePanel({
   const visibleGroupSurfaces: QueueGroupProjectionRow[] = [
     ...visiblePreviewSurfaces,
     ...visibleOperationSurfaces,
-    ...visibleBatchSurfaces,
   ];
 
   return (
     <div
       className={cn(
-        "shrink-0 flex flex-col bg-background",
-        widthPx == null && "w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px]",
+        "flex flex-col bg-background min-h-0",
+        fill
+          ? "h-full w-full flex-1"
+          : "shrink-0 w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px]",
       )}
-      style={widthPx != null ? { width: widthPx } : undefined}
     >
       {batchQueueParentRunId ? (
         // Batch-queue mode: one consolidated toolbar (the old title/"Started …"

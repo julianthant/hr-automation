@@ -7,7 +7,6 @@ import { TerminalDrawerProvider } from "@/components/hooks/useTerminalDrawer";
 import { WorkflowsProvider } from "@/lib/workflows-context";
 import type { TrackerEntry, WorkflowInstanceState } from "@/components/shared/types";
 import { EntryItem } from "@/components/queue-panel/EntryItem";
-import { DaemonBatchRow } from "@/components/queue-panel/DaemonBatchRow";
 import { OperationRowUnified } from "@/components/queue-panel/operation-row-variants";
 import { StatPills } from "@/components/queue-panel/StatPills";
 import { QueueSortDropdown } from "@/components/queue-panel/QueueSortDropdown";
@@ -137,8 +136,8 @@ function batchProjection(runId: string, title: string, subtitle: string): Workfl
     title,
     subtitle,
     status: "running",
-    surfaceType: "batch",
-    rowTypeLabel: "Batch",
+    surfaceType: "operation",
+    rowTypeLabel: "Operation",
     actions: [bulk("retry"), bulk("delete")],
     batchMembers: [],
   } as unknown as WorkflowRunProjection;
@@ -170,7 +169,6 @@ function Flat({ entry, selected = false }: { entry: TrackerEntry; selected?: boo
 function Batch({
   parentRunId,
   members,
-  workflowLabel,
   title,
   subtitle,
   anchorEntry,
@@ -180,21 +178,29 @@ function Batch({
   workflowLabel: string;
   title: string;
   subtitle: string;
-  /** Footer fallback when the batch has no members (pre-fan-out anchor). */
+  /** Footer fallback when the coordinator has no members (pre-fan-out anchor). */
   anchorEntry?: TrackerEntry;
 }) {
+  const parent =
+    anchorEntry ??
+    row({
+      id: `op-${parentRunId.slice(0, 8)}`,
+      runId: parentRunId,
+      status: members[0]?.status ?? "running",
+      data: { archetype: "operation", __traceId: subtitle },
+    });
   return (
-    <DaemonBatchRow
-      workflow="oath-signature"
+    <OperationRowUnified
       date={DATE}
-      batchParentRunId={parentRunId}
-      workflowLabel={workflowLabel}
+      parentRunId={parentRunId}
       projection={batchProjection(parentRunId, title, subtitle)}
-      memberEntries={members}
-      anchorEntry={anchorEntry}
-      isBatchQueueFocused={false}
-      onEnterBatchQueue={NOOP}
-      onDeletedIds={NOOP}
+      displayNames={EMPTY_DISPLAY_NAMES}
+      parent={parent}
+      members={members}
+      selected={false}
+      selectedId={null}
+      onSelect={NOOP}
+      onDelete={NOOP}
     />
   );
 }
@@ -375,7 +381,7 @@ const memberAsSingle = row({
   firstLogTs: "2026-06-01T09:12:00.000Z",
   lastLogTs: "2026-06-01T09:13:40.000Z",
   runOrdinal: 1,
-  data: { archetype: "batch-member", queueRowKind: "person", name: "Carlos Mendez", emplId: "10031200", __traceId: "os-091200-3c0f" },
+  data: { archetype: "operation-member", queueRowKind: "person", name: "Carlos Mendez", emplId: "10031200", __traceId: "os-091200-3c0f" },
 });
 
 // --- BATCH: neutral group cards, identical for every workflow. ---
@@ -397,7 +403,7 @@ function member(
     lastLogTs:
       status === "running" || status === "pending" ? undefined : agoIso(30),
     data: {
-      archetype: "batch-member",
+      archetype: "operation-member",
       queueRowKind: "person",
       name,
       emplId,
@@ -440,7 +446,7 @@ const emptyBatchAnchor = row({
   lastLogMessage: "Awaiting OCR approval…",
   runOrdinal: 1,
   data: {
-    archetype: "batch",
+    archetype: "operation",
     queueRowKind: "file",
     pdfOriginalName: "Oath_Packet_Batch.pdf",
     sessionId: "sess-oath-prefanout",

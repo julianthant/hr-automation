@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Play, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { getInputRunConfig } from "@/lib/input-run-registry";
 import { RunModal } from "@/components/run-modal/RunModal";

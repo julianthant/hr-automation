@@ -138,14 +138,11 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
     setActiveRunId(remainingRuns[remainingRuns.length - 1]?.runId ?? null);
   };
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
-  // Operation coordinator rows (oath-signature / emergency-contact) merge their
-  // own sparse lifecycle logs with the delegated OCR run's KEY events + a
-  // one-line-per-member summary, so the Logs panel shows the real workflow
-  // lifecycle instead of just the coordinator's near-empty runId. No-op
-  // (`active: false`) for every other row.
-  const { active: coordinatorAggregateActive, logs: coordinatorLogs } =
-    useCoordinatorAggregatedLogs({ entry, coordinatorLogs: logs, childEntries, date });
   const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
+  // Operation coordinator rows merge sparse lifecycle logs with OCR KEY events,
+  // member summaries, and (for input-run coordinators) daemon session events.
+  const { active: coordinatorAggregateActive, logs: coordinatorLogs } =
+    useCoordinatorAggregatedLogs({ entry, coordinatorLogs: logs, childEntries, date, sessionEvents: events });
   const screenshotEventCount = useMemo(
     () => events.reduce((n, e) => (e.type === "screenshot" ? n + 1 : n), 0),
     [events],

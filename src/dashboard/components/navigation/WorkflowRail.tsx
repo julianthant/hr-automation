@@ -20,6 +20,10 @@ interface WorkflowRailProps {
   overviewActive?: boolean;
   /** Opens the cross-workflow Overview landing. Omit to hide the entry. */
   onShowOverview?: () => void;
+  /** When true, the Workflow Editor entry is highlighted. */
+  editorActive?: boolean;
+  /** Opens the Workflow Editor (presentation/graph config). Omit to hide the entry. */
+  onShowEditor?: () => void;
 }
 
 interface Group {
@@ -64,6 +68,8 @@ export function WorkflowRail({
   onWorkflowChange,
   overviewActive = false,
   onShowOverview,
+  editorActive = false,
+  onShowEditor,
 }: WorkflowRailProps) {
   const registered = useWorkflows();
 
@@ -80,7 +86,7 @@ export function WorkflowRail({
       className="w-[200px] shrink-0 bg-card flex flex-col"
     >
       <div className="flex-1 overflow-y-auto py-3">
-        {onShowOverview && (
+        {(onShowOverview || onShowEditor) && (
           <div className="mb-4">
             <div className="px-3 mb-1.5">
               <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -88,39 +94,76 @@ export function WorkflowRail({
               </span>
             </div>
             <ul className="px-1.5 flex flex-col gap-px">
-              <li>
-                <button
-                  type="button"
-                  onClick={onShowOverview}
-                  aria-current={overviewActive ? "page" : undefined}
-                  className={cn(
-                    "group w-full h-10 pl-1 pr-2.5 flex items-stretch gap-2 rounded-md text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer",
-                    overviewActive ? "bg-accent/40" : "hover:bg-secondary",
-                  )}
-                >
-                  <span
-                    aria-hidden
+              {onShowOverview && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={onShowOverview}
+                    aria-current={overviewActive ? "page" : undefined}
                     className={cn(
-                      "w-[3px] my-1.5 rounded-r-full transition-colors",
-                      overviewActive
-                        ? "bg-primary"
-                        : "bg-transparent group-hover:bg-border",
+                      "group w-full h-10 pl-1 pr-2.5 flex items-stretch gap-2 rounded-md text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer",
+                      overviewActive ? "bg-accent/40" : "hover:bg-secondary",
                     )}
-                  />
-                  <span className="flex-1 min-w-0 flex items-center">
+                  >
                     <span
+                      aria-hidden
                       className={cn(
-                        "text-[13px] truncate",
+                        "w-[3px] my-1.5 rounded-r-full transition-colors",
                         overviewActive
-                          ? "font-semibold text-foreground"
-                          : "font-medium text-foreground/90",
+                          ? "bg-primary"
+                          : "bg-transparent group-hover:bg-border",
                       )}
-                    >
-                      Dashboard
+                    />
+                    <span className="flex-1 min-w-0 flex items-center">
+                      <span
+                        className={cn(
+                          "text-[13px] truncate",
+                          overviewActive
+                            ? "font-semibold text-foreground"
+                            : "font-medium text-foreground/90",
+                        )}
+                      >
+                        Dashboard
+                      </span>
                     </span>
-                  </span>
-                </button>
-              </li>
+                  </button>
+                </li>
+              )}
+              {onShowEditor && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={onShowEditor}
+                    aria-current={editorActive ? "page" : undefined}
+                    className={cn(
+                      "group w-full h-10 pl-1 pr-2.5 flex items-stretch gap-2 rounded-md text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer",
+                      editorActive ? "bg-accent/40" : "hover:bg-secondary",
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "w-[3px] my-1.5 rounded-r-full transition-colors",
+                        editorActive
+                          ? "bg-primary"
+                          : "bg-transparent group-hover:bg-border",
+                      )}
+                    />
+                    <span className="flex-1 min-w-0 flex items-center">
+                      <span
+                        className={cn(
+                          "text-[13px] truncate",
+                          editorActive
+                            ? "font-semibold text-foreground"
+                            : "font-medium text-foreground/90",
+                        )}
+                      >
+                        Workflow Editor
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
         )}
@@ -136,7 +179,7 @@ export function WorkflowRail({
             </div>
             <ul className="px-1.5 flex flex-col gap-px">
               {group.members.map((wf) => {
-                const active = wf === workflow && !overviewActive;
+                const active = wf === workflow && !overviewActive && !editorActive;
                 const count = entryCounts[wf] || 0;
                 const queued = queuedCounts[wf] || 0;
                 return (

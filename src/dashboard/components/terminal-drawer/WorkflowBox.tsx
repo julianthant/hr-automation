@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import {
   Check,
@@ -17,6 +17,14 @@ import {
   PauseCircle,
   Camera,
 } from "lucide-react";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import type { AuthState, BrowserHealth, WorkflowInstanceState } from "@/components/shared/types";
 import { useConfirm } from "@/components/shared/useConfirm";
 import { formatStepName } from "@/components/shared/types";
@@ -394,44 +402,62 @@ type BrowserAction = "check" | "focus" | "refresh" | "reopen";
 const BROWSER_ACTIONS: ReadonlyArray<{
   action: BrowserAction;
   Icon: typeof Crosshair;
+  /** Short label for the overflow menu row. */
+  menuLabel: string;
   verb: (system: string) => string;
   success: (system: string) => string;
 }> = [
-  { action: "check", Icon: Activity, verb: (s) => `Check ${s} now`, success: (s) => `Checking the ${s} browser` },
-  { action: "focus", Icon: Crosshair, verb: (s) => `Bring the ${s} window to front`, success: (s) => `Bringing the ${s} window to front` },
-  { action: "refresh", Icon: RotateCw, verb: (s) => `Refresh (reload) the ${s} page`, success: (s) => `Reloading the ${s} page` },
-  { action: "reopen", Icon: ExternalLink, verb: (s) => `Reopen ${s} on a fresh tab (same login)`, success: (s) => `Reopening ${s} on a fresh tab` },
+  { action: "check", Icon: Activity, menuLabel: "Check now", verb: (s) => `Check ${s} now`, success: (s) => `Checking the ${s} browser` },
+  { action: "focus", Icon: Crosshair, menuLabel: "Bring to front", verb: (s) => `Bring the ${s} window to front`, success: (s) => `Bringing the ${s} window to front` },
+  { action: "refresh", Icon: RotateCw, menuLabel: "Refresh page", verb: (s) => `Refresh (reload) the ${s} page`, success: (s) => `Reloading the ${s} page` },
+  { action: "reopen", Icon: ExternalLink, menuLabel: "Reopen tab", verb: (s) => `Reopen ${s} on a fresh tab (same login)`, success: (s) => `Reopening ${s} on a fresh tab` },
 ];
 
+type BrowserView = WorkflowInstanceState["sessions"][number]["browsers"][number];
+
 /**
- * Per-browser tile controls, all targeting THIS browser by
- * `(workflow, instance, systemId)` so the action hits the right browser
- * regardless of tile order. The recovery ladder is exposed as discrete
- * operator controls:
- *   - Check  — probe health now (`/api/browser/check`).
- *   - Focus  — bring the Chromium window to front ("which browser is this?").
+ * One per-browser tile. The tile shows status at rest (clean — no buttons); a
+ * **right-click / two-finger click** (context menu) on the tile opens a recovery
+ * menu targeting THIS browser by `(workflow, instance, systemId)`:
+ *   - Peek    — live screenshot of the browser.
+ *   - Check   — probe health now (`/api/browser/check`).
+ *   - Focus   — bring the Chromium window to front ("which browser is this?").
  *   - Refresh — reload the page (rung 1 recovery).
- *   - Reopen — fresh tab on the same authenticated context (rung 2, no Duo).
- * Hover/focus-revealed to keep the resting tile clean.
+ *   - Reopen  — fresh tab on the same authenticated context (rung 2, no Duo).
+ *   - Pause/Resume auto-recovery.
+ * The tile IS the `ContextMenu` trigger (Radix `asChild`), so the menu opens at
+ * the cursor on secondary-click — keeping the resting tile uncluttered and the
+ * state label full-width.
  */
-function BrowserTileControls({
+function BrowserTile({
+  b,
   workflow,
   instance,
-  systemId,
-  paused,
+  active,
+  pidAlive,
+  itemInFlight,
+  idleBySystem,
   onPeek,
 }: {
-  workflow: string;
+  b: BrowserView;
+  workflow: string | null | undefined;
   instance: string;
-  systemId: string;
-  /** Whether auto-recovery is currently paused for this browser (drives the toggle). */
-  paused: boolean;
+  active: boolean;
+  pidAlive: boolean;
+  itemInFlight: boolean;
+  idleBySystem: WorkflowInstanceState["idleBySystem"];
   /** Open the live "peek" screenshot modal for this browser. */
   onPeek: () => void;
 }) {
+  const systemId = b.system;
+  const paused = !!b.autoRecoveryPaused;
   const [busy, setBusy] = useState<null | BrowserAction | "pause">(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const canControl = active && pidAlive && !!workflow;
 
   const post = async (spec: (typeof BROWSER_ACTIONS)[number]) => {
+    if (!workflow) return;
     setBusy(spec.action);
     const toastId = toast.loading(`${spec.verb(systemId)}…`);
     try {
@@ -461,6 +487,7 @@ function BrowserTileControls({
 
   // Pause/resume auto-recovery (toggle — icon + verb flip on `paused`).
   const toggleAutoRecovery = async () => {
+    if (!workflow) return;
     const next = !paused;
     setBusy("pause");
     const toastId = toast.loading(`${next ? "Pausing" : "Resuming"} ${systemId} auto-recovery…`);
@@ -483,69 +510,158 @@ function BrowserTileControls({
     }
   };
 
-  const btn =
-    "p-0.5 rounded inline-flex items-center justify-center text-muted-foreground " +
-    "hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait";
+  // Health overrides the tile look when non-healthy; otherwise the auth state
+  // drives it. Both are bound to THIS browser by id.
+  const badHealth = b.health && b.health !== "healthy" ? b.health : undefined;
+  const tone = badHealth ? healthTone[badHealth] : authBg[b.authState];
+  const labelColor = badHealth ? healthColor[badHealth] : authColor[b.authState];
+  const stateLabel = badHealth ? healthLabel[badHealth] : authLabel[b.authState];
+  const tipBase = badHealth
+    ? `${systemId} · ${healthLabel[badHealth]}${b.lastError ? ` — ${b.lastError}` : ""}`
+    : isIdleRefreshSystem(systemId) &&
+        b.authState === "authed" &&
+        idleBySystem?.[systemId]?.lastTouchAt
+      ? `${systemId} · ${authLabel[b.authState]} · idle page reload timer`
+      : `${systemId} · ${authLabel[b.authState]}`;
+  // Append the browser's current url + a recovery trail so hovering a tile
+  // (esp. a failed/flapping one) shows where it actually is and how it got there.
+  const trail =
+    b.healthHistory && b.healthHistory.length >= 2
+      ? `\nrecovery: ${b.healthHistory.map((h) => h.status).join(" → ")}`
+      : "";
+  const tip = `${tipBase}${b.url ? `\n${b.url}` : ""}${trail}`;
+
+  const tileClass = cn(
+    "relative rounded-md border px-1.5 py-1 min-w-0 transition-colors",
+    tone,
+    canControl && "cursor-context-menu select-none outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    menuOpen && "ring-1 ring-ring/60",
+  );
 
   const pauseTitle = paused
     ? `Resume auto-recovery for the ${systemId} browser`
     : `Pause auto-recovery for the ${systemId} browser (so you can inspect it)`;
+  const menuBusy = busy !== null;
+
+  const tileBody = (
+    <>
+      <div className="flex items-center gap-1 min-w-0 justify-between">
+        <div className="flex items-center gap-1 min-w-0">
+          <AuthIcon state={b.authState} className={cn("w-3 h-3 shrink-0", authColor[b.authState])} />
+          <span className="text-[11px] font-mono text-foreground truncate leading-none">
+            {systemId}
+          </span>
+        </div>
+        {/* Idle ring shows only when healthy + idle-refresh; a non-healthy tile
+            shows its health icon instead. */}
+        {!badHealth &&
+          isIdleRefreshSystem(systemId) &&
+          b.authState === "authed" &&
+          !itemInFlight &&
+          idleBySystem?.[systemId]?.lastTouchAt != null &&
+          idleBySystem[systemId].lastTouchAt.length > 0 && (
+            <IdleCountdownRing
+              systemId={systemId}
+              lastTouchAt={idleBySystem[systemId].lastTouchAt}
+              refreshing={!!idleBySystem[systemId].refreshing}
+              cycling={active && !itemInFlight}
+            />
+          )}
+        {badHealth && (
+          <HealthIcon health={badHealth} className={cn("w-3 h-3 shrink-0", healthColor[badHealth])} />
+        )}
+        {/* Always-visible cue that auto-recovery is paused for this browser. */}
+        {paused && (
+          <PauseCircle aria-label="auto-recovery paused" className="w-3 h-3 shrink-0 text-warning" />
+        )}
+      </div>
+      {/* State word gets the FULL tile width so the longest labels
+          ("Refreshing"/"Unhealthy") never truncate. */}
+      <div className="mt-0.5 min-w-0 min-h-[14px]">
+        <span
+          className={cn(
+            "block text-[9.5px] uppercase tracking-wider font-semibold leading-none truncate",
+            labelColor,
+          )}
+        >
+          {stateLabel}
+        </span>
+      </div>
+    </>
+  );
+
+  // No live daemon to target → a plain, non-interactive status tile.
+  if (!canControl) {
+    return (
+      <div className={tileClass} title={tip}>
+        {tileBody}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/tile:opacity-100 focus-within:opacity-100 transition-opacity">
-      <button
-        type="button"
-        title={`Peek at the ${systemId} browser (live screenshot)`}
-        aria-label={`Peek at the ${systemId} browser`}
-        className={btn}
-        onClick={(e) => {
-          e.stopPropagation();
-          onPeek();
-        }}
-      >
-        <Camera className="w-3 h-3" />
-      </button>
-      {BROWSER_ACTIONS.map((spec) => (
-        <button
-          key={spec.action}
-          type="button"
-          disabled={busy !== null}
-          title={spec.verb(systemId)}
-          aria-label={spec.verb(systemId)}
-          className={btn}
-          onClick={(e) => {
-            e.stopPropagation();
-            void post(spec);
+    <ContextMenu onOpenChange={setMenuOpen}>
+      <ContextMenuTrigger asChild>
+        <div
+          className={tileClass}
+          title={`${tip}\n\nRight-click (two-finger click) for browser actions`}
+          tabIndex={0}
+          aria-haspopup="menu"
+          aria-label={`${systemId} browser — right-click for actions`}
+        >
+          {tileBody}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[11rem]">
+        <ContextMenuItem
+          aria-label={`Peek at the ${systemId} browser (live screenshot)`}
+          className="gap-2.5"
+          onSelect={() => onPeek()}
+        >
+          <Camera className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+          <span>Peek (live screenshot)</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        {BROWSER_ACTIONS.map((spec) => (
+          <ContextMenuItem
+            key={spec.action}
+            disabled={menuBusy}
+            aria-label={spec.verb(systemId)}
+            className="gap-2.5"
+            onSelect={(e) => {
+              e.preventDefault();
+              void post(spec);
+            }}
+          >
+            {busy === spec.action ? (
+              <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin motion-reduce:animate-none text-muted-foreground" />
+            ) : (
+              <spec.Icon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span>{spec.menuLabel}</span>
+          </ContextMenuItem>
+        ))}
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          disabled={menuBusy}
+          aria-label={pauseTitle}
+          className={cn("gap-2.5", paused && "text-warning focus:text-warning")}
+          onSelect={(e) => {
+            e.preventDefault();
+            void toggleAutoRecovery();
           }}
         >
-          {busy === spec.action ? (
-            <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
+          {busy === "pause" ? (
+            <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
+          ) : paused ? (
+            <Play className="w-3.5 h-3.5 shrink-0" />
           ) : (
-            <spec.Icon className="w-3 h-3" />
+            <Pause className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
           )}
-        </button>
-      ))}
-      <button
-        type="button"
-        disabled={busy !== null}
-        title={pauseTitle}
-        aria-label={pauseTitle}
-        aria-pressed={paused}
-        className={cn(btn, paused && "text-warning")}
-        onClick={(e) => {
-          e.stopPropagation();
-          void toggleAutoRecovery();
-        }}
-      >
-        {busy === "pause" ? (
-          <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
-        ) : paused ? (
-          <Play className="w-3 h-3" />
-        ) : (
-          <Pause className="w-3 h-3" />
-        )}
-      </button>
-    </div>
+          <span>{paused ? "Resume auto-recovery" : "Pause auto-recovery"}</span>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -571,42 +687,18 @@ function BrowserPeekModal({
     `/api/browser/screenshot?workflow=${encodeURIComponent(workflow)}` +
     `&instance=${encodeURIComponent(instance)}&systemId=${encodeURIComponent(systemId)}`;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`${systemId} browser live screenshot`}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClose();
-      }}
-    >
-      <div
-        className="relative flex flex-col rounded-lg border border-border bg-card p-2 shadow-2xl max-w-[92vw] max-h-[90vh]"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        size="full"
+        className="w-auto p-2"
+        aria-label={`${systemId} browser live screenshot`}
       >
-        <div className="flex items-center justify-between px-1 pb-2 gap-3">
+        <div className="flex items-center justify-between gap-3 px-1 pb-2 pr-8">
           <span className="text-[12px] font-mono text-muted-foreground">{systemId} · live screenshot</span>
-          <button
-            type="button"
-            aria-label="Close screenshot"
-            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-            onClick={onClose}
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
         {errored ? (
-          <div className="w-[60vw] max-w-[700px] h-[160px] flex items-center justify-center text-[12px] text-destructive px-4 text-center">
+          <div className="flex h-[160px] w-[60vw] max-w-[700px] items-center justify-center px-4 text-center text-[12px] text-destructive">
             Couldn't capture this browser — no live page, or the daemon isn't reachable.
           </div>
         ) : (
@@ -616,19 +708,19 @@ function BrowserPeekModal({
             sizes="92vw"
             loading="eager"
             alt={`${systemId} browser current view`}
-            className={cn("max-w-[88vw] max-h-[80vh] object-contain rounded", !loaded && "opacity-0")}
+            className={cn("max-h-[80vh] max-w-[88vw] rounded object-contain", !loaded && "opacity-0")}
             onLoad={() => setLoaded(true)}
             onError={() => setErrored(true)}
           />
         )}
         {!loaded && !errored && (
           <div className="absolute inset-0 flex items-center justify-center" aria-live="polite">
-            <Loader2 className="w-6 h-6 animate-spin motion-reduce:animate-none text-muted-foreground" />
+            <Loader2 className="h-6 w-6 animate-spin motion-reduce:animate-none text-muted-foreground" />
             <span className="sr-only">Capturing {systemId} screenshot…</span>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -864,101 +956,19 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
         <div className="min-h-[43px]">
           {browsers.length > 0 && (
             <div className="grid grid-cols-2 gap-1">
-              {browsers.map((b) => {
-                // Health overrides the tile look when non-healthy; otherwise the
-                // auth state drives it. Both are bound to THIS browser by id.
-                const badHealth = b.health && b.health !== "healthy" ? b.health : undefined;
-                const tone = badHealth ? healthTone[badHealth] : authBg[b.authState];
-                const labelColor = badHealth ? healthColor[badHealth] : authColor[b.authState];
-                const stateLabel = badHealth ? healthLabel[badHealth] : authLabel[b.authState];
-                const tipBase = badHealth
-                  ? `${b.system} · ${healthLabel[badHealth]}${b.lastError ? ` — ${b.lastError}` : ""}`
-                  : isIdleRefreshSystem(b.system) &&
-                      b.authState === "authed" &&
-                      idleBySystem?.[b.system]?.lastTouchAt
-                    ? `${b.system} · ${authLabel[b.authState]} · idle page reload timer`
-                    : `${b.system} · ${authLabel[b.authState]}`;
-                // Append the browser's current url + a recovery trail so
-                // hovering a tile (esp. a failed/flapping one) shows where it
-                // actually is and how it got there.
-                const trail =
-                  b.healthHistory && b.healthHistory.length >= 2
-                    ? `\nrecovery: ${b.healthHistory.map((h) => h.status).join(" → ")}`
-                    : "";
-                const tip = `${tipBase}${b.url ? `\n${b.url}` : ""}${trail}`;
-                return (
-                  <div
-                    key={b.browserId}
-                    className={cn(
-                      "group/tile rounded-md border px-1.5 py-1 min-w-0 transition-colors",
-                      tone,
-                    )}
-                    title={tip}
-                  >
-                    <div className="flex items-center gap-1 min-w-0 justify-between">
-                      <div className="flex items-center gap-1 min-w-0">
-                        <AuthIcon
-                          state={b.authState}
-                          className={cn("w-3 h-3 shrink-0", authColor[b.authState])}
-                        />
-                        <span className="text-[11px] font-mono text-foreground truncate leading-none">
-                          {b.system}
-                        </span>
-                      </div>
-                      {/* Idle ring shows only when healthy + idle-refresh; a
-                          non-healthy tile shows its health icon instead. */}
-                      {!badHealth &&
-                        isIdleRefreshSystem(b.system) &&
-                        b.authState === "authed" &&
-                        !itemInFlight &&
-                        idleBySystem?.[b.system]?.lastTouchAt != null &&
-                        idleBySystem[b.system].lastTouchAt.length > 0 && (
-                          <IdleCountdownRing
-                            systemId={b.system}
-                            lastTouchAt={idleBySystem[b.system].lastTouchAt}
-                            refreshing={!!idleBySystem[b.system].refreshing}
-                            cycling={active && !itemInFlight}
-                          />
-                        )}
-                      {badHealth && (
-                        <HealthIcon
-                          health={badHealth}
-                          className={cn("w-3 h-3 shrink-0", healthColor[badHealth])}
-                        />
-                      )}
-                      {/* Always-visible cue that auto-recovery is paused for this
-                          browser (the monitor won't refresh/reopen it). */}
-                      {b.autoRecoveryPaused && (
-                        <PauseCircle
-                          aria-label="auto-recovery paused"
-                          className="w-3 h-3 shrink-0 text-warning"
-                        />
-                      )}
-                    </div>
-                    <div className="mt-0.5 flex items-center justify-between gap-1 min-w-0">
-                      <span
-                        className={cn(
-                          "text-[9.5px] uppercase tracking-wider font-semibold leading-none truncate",
-                          labelColor,
-                        )}
-                      >
-                        {stateLabel}
-                      </span>
-                      {/* Check / Focus / Refresh / Reopen / Pause — only when
-                          there's a live daemon to target. Hover/focus-revealed. */}
-                      {active && pidAlive && workflowName && (
-                        <BrowserTileControls
-                          workflow={workflowName}
-                          instance={instance}
-                          systemId={b.system}
-                          paused={!!b.autoRecoveryPaused}
-                          onPeek={() => setPeekSystem(b.system)}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {browsers.map((b) => (
+                <BrowserTile
+                  key={b.browserId}
+                  b={b}
+                  workflow={workflowName}
+                  instance={instance}
+                  active={!!active}
+                  pidAlive={!!pidAlive}
+                  itemInFlight={!!itemInFlight}
+                  idleBySystem={idleBySystem}
+                  onPeek={() => setPeekSystem(b.system)}
+                />
+              ))}
             </div>
           )}
         </div>

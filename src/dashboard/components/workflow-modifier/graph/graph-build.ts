@@ -1,17 +1,39 @@
-// Pure projection: a workflow's presentation config → the React Flow graph.
-//
-// This is one of the four graph↔config↔spec projections the spec calls out as
-// the testable seam (there is no component harness). It reads the SAME effective
-// metadata + sparse override the blueprint used, and lays out config-backed nodes
-// deterministically so the canvas seeds identically every load.
+// The two pure graph↔config projections (the spec's testable seam — there is no
+// component harness). They mirror the blueprint plates' derivations exactly, so
+// the canvas edits the SAME effective values the blueprint did:
+//   • overrideToGraph(base, draft) → nodes/edges: per-part `draft ?? base ?? default`
+//     for display + the sparse override slice each node owns for the inverse.
+//   • graphToOverride(model, baseSteps) → the sparse WorkflowOverride, routed
+//     through `prune` so it stays sparse (defaults collapse to undefined).
 //
 //   row ──seq──▶ step0 ──seq──▶ step1 ──▶ …            (the pipeline)
 //    └──delegation──▶ coordinator ──▶ prep              (the fan-out, if delegating)
 //                                  └──▶ member
 
-import { applyStepDisplay } from "../../../../domain/workflow-presentation/step-display.js";
-import type { WorkflowPresentationDetail } from "../useWorkflowPresentation.js";
-import { buildSampleVars, isDelegatingWorkflow } from "../blueprint-helpers.js";
+import type { WorkflowMetadata } from "../../../lib/workflows-context.js";
+import type {
+  WorkflowOverride,
+  NamingConfig,
+  StepDisplayConfig,
+  StepDisplayRule,
+  DelegationDisplayConfig,
+  TitleSchemeId,
+  SubtitleSchemeId,
+  TraceSchemeId,
+} from "../../../../domain/workflow-presentation/types.js";
+import { formatStepName } from "../../shared/types.js";
+import {
+  buildSampleVars,
+  isDelegatingWorkflow,
+  countDelegation,
+  prune,
+  DEFAULT_TITLE_SCHEME,
+  DEFAULT_SUBTITLE_SCHEME,
+  DEFAULT_TRACE_SCHEME,
+  DEFAULT_MEMBER_TITLE_SCHEME,
+  DEFAULT_MEMBER_SUBTITLE_SCHEME,
+  DEFAULT_PREP_TITLE_SCHEME,
+} from "../blueprint-helpers.js";
 import {
   NODE_ROW,
   NODE_STEP,
@@ -20,19 +42,26 @@ import {
   NODE_MEMBER,
   EDGE_SEQUENCE,
   EDGE_DELEGATION,
+  EDGE_FOLD,
   type GraphModel,
   type GraphNode,
   type GraphEdge,
+  type RowGraphNode,
+  type StepGraphNode,
+  type DelegationCoordinatorGraphNode,
+  type PrepGraphNode,
+  type MemberGraphNode,
 } from "./graph-types.js";
 
-// ── Deterministic layout (px). Horizontal pipeline, delegation drops below. ─────
+// ── Deterministic layout (px). Horizontal pipeline of LANES (wide + tall, they
+//    nest their ops), delegation drops below the lane band. ─────────────────────
 const ROW_POS = { x: 0, y: 40 };
-const STEP_X0 = 340;
-const STEP_DX = 240;
-const STEP_Y = 40;
-const COORD_POS = { x: 340, y: 320 };
-const PREP_POS = { x: 660, y: 280 };
-const MEMBER_POS = { x: 660, y: 400 };
+export const STEP_X0 = 360;
+export const STEP_DX = 384;
+export const STEP_Y = 40;
+const COORD_POS = { x: 360, y: 660 };
+const PREP_POS = { x: 744, y: 600 };
+const MEMBER_POS = { x: 744, y: 760 };
 
 /** Stable node ids — the projections key on these, so keep them deterministic. */
 export const ROW_NODE_ID = "row";
@@ -40,127 +69,209 @@ export const COORDINATOR_NODE_ID = "coordinator";
 export const PREP_NODE_ID = "prep";
 export const MEMBER_NODE_ID = "member";
 export const stepNodeId = (step: string): string => `step:${step}`;
+const stepFromNodeId = (id: string): string => id.slice("step:".length);
+/** Display-only lane id for a mined step with no presentation step. */
+export const opsLaneNodeId = (step: string): string => `opslane:${step}`;
 
 function seqEdge(source: string, target: string): GraphEdge {
-  return {
-    id: `seq:${source}->${target}`,
-    source,
-    target,
-    sourceHandle: "out",
-    targetHandle: "in",
-    type: EDGE_SEQUENCE,
-  };
+  return { id: `seq:${source}->${target}`, source, target, sourceHandle: "out", targetHandle: "in", type: EDGE_SEQUENCE };
 }
-
 function delegationEdge(source: string, target: string): GraphEdge {
-  return {
-    id: `del:${source}->${target}`,
-    source,
-    target,
-    sourceHandle: "out",
-    targetHandle: "in",
-    type: EDGE_DELEGATION,
-  };
+  return { id: `del:${source}->${target}`, source, target, sourceHandle: "out", targetHandle: "in", type: EDGE_DELEGATION };
+}
+function foldEdge(host: string, folded: string): GraphEdge {
+  return { id: `fold:${host}->${folded}`, source: host, target: folded, sourceHandle: "out", targetHandle: "in", type: EDGE_FOLD };
 }
 
+/**
+ * Project a workflow's base metadata + the current sparse draft override into
+ * the React Flow graph. Per-part fallback (`draft ?? base ?? default`) mirrors
+ * the blueprint plates so the canvas previews byte-identically.
+ */
 export function overrideToGraph(
-  data: WorkflowPresentationDetail,
+  base: WorkflowMetadata,
+  draft: WorkflowOverride,
   workflowName: string,
 ): GraphModel {
-  const { effective, override } = data;
-  const label = effective.label;
+  const label = base.label ?? workflowName;
   const sampleVars = buildSampleVars(label);
 
-  const naming = effective.presentation?.naming;
-  const ovNaming = override?.presentation?.naming;
+  const draftNaming = draft.presentation?.naming ?? {};
+  const baseNaming = base.presentation?.naming ?? {};
 
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
   // ── Row (queue-row naming) ────────────────────────────────────────────────
-  nodes.push({
+  const rowNode: RowGraphNode = {
     id: ROW_NODE_ID,
     type: NODE_ROW,
     position: { ...ROW_POS },
     data: {
       workflowLabel: label,
-      title: naming?.title,
-      subtitle: naming?.subtitle,
-      trace: naming?.trace,
-      titleModified: ovNaming?.title !== undefined,
-      subtitleModified: ovNaming?.subtitle !== undefined,
-      traceModified: ovNaming?.trace !== undefined,
+      title: draftNaming.title ?? baseNaming.title ?? { scheme: DEFAULT_TITLE_SCHEME as TitleSchemeId },
+      subtitle:
+        draftNaming.subtitle ?? baseNaming.subtitle ?? { scheme: DEFAULT_SUBTITLE_SCHEME as SubtitleSchemeId },
+      trace: draftNaming.trace ?? baseNaming.trace ?? { scheme: DEFAULT_TRACE_SCHEME as TraceSchemeId },
+      titleOverride: draftNaming.title,
+      subtitleOverride: draftNaming.subtitle,
+      traceOverride: draftNaming.trace,
       sampleVars,
     },
-  });
+  };
+  nodes.push(rowNode);
 
-  // ── Steps (display order from applyStepDisplay) ───────────────────────────
-  const displaySteps = applyStepDisplay([...effective.steps], effective.presentation?.steps);
-  const ovSteps = override?.presentation?.steps;
-  const ruledSteps = new Set((ovSteps?.rules ?? []).map((r) => r.step));
-  displaySteps.forEach((ds, i) => {
-    nodes.push({
-      id: stepNodeId(ds.step),
+  // ── Steps (order + rules mirror StepPipelinePlate) ────────────────────────
+  const order = draft.presentation?.steps?.order ?? [...base.steps];
+  const draftRules = draft.presentation?.steps?.rules ?? [];
+  const baseRules = base.presentation?.steps?.rules ?? [];
+  const ruleFor = (step: string): StepDisplayRule =>
+    draftRules.find((r) => r.step === step) ?? baseRules.find((r) => r.step === step) ?? { step };
+  const labelFor = (step: string): string => ruleFor(step).label ?? formatStepName(step);
+  const foldedInto = (host: string): string[] =>
+    order.filter((s) => ruleFor(s).foldInto === host);
+
+  order.forEach((step, i) => {
+    const rule = ruleFor(step);
+    const node: StepGraphNode = {
+      id: stepNodeId(step),
       type: NODE_STEP,
       position: { x: STEP_X0 + i * STEP_DX, y: STEP_Y },
       data: {
-        step: ds.step,
-        label: ds.label,
-        foldedSteps: ds.foldedSteps,
-        modified:
-          ruledSteps.has(ds.step) || ds.foldedSteps.some((f) => ruledSteps.has(f)),
+        step,
+        stepIndex: i,
+        label: labelFor(step),
+        hidden: rule.hidden ?? false,
+        foldInto: rule.foldInto,
+        foldedSteps: foldedInto(step),
+        overrideRule: draftRules.find((r) => r.step === step),
       },
-    });
+    };
+    nodes.push(node);
   });
 
   // ── Sequence wiring: row → step0 → step1 → … ──────────────────────────────
-  if (displaySteps.length) {
-    edges.push(seqEdge(ROW_NODE_ID, stepNodeId(displaySteps[0].step)));
-    for (let i = 0; i < displaySteps.length - 1; i++) {
-      edges.push(seqEdge(stepNodeId(displaySteps[i].step), stepNodeId(displaySteps[i + 1].step)));
+  if (order.length) {
+    edges.push(seqEdge(ROW_NODE_ID, stepNodeId(order[0])));
+    for (let i = 0; i < order.length - 1; i++) {
+      edges.push(seqEdge(stepNodeId(order[i]), stepNodeId(order[i + 1])));
+    }
+  }
+
+  // ── Fold wiring: host ⇢ folded step (dashed warning, on top of the chain) ──
+  for (const step of order) {
+    const host = ruleFor(step).foldInto;
+    if (host && order.includes(host)) {
+      edges.push(foldEdge(stepNodeId(host), stepNodeId(step)));
     }
   }
 
   // ── Delegation branch (coordinator → prep + member) ───────────────────────
-  if (isDelegatingWorkflow(workflowName)) {
-    const del = effective.presentation?.delegation;
-    const ovDel = override?.presentation?.delegation;
-    nodes.push({
+  if (isDelegatingWorkflow(workflowName) || countDelegation(draft) > 0) {
+    const del = draft.presentation?.delegation ?? {};
+    const baseDel = base.presentation?.delegation ?? {};
+
+    const coordinator: DelegationCoordinatorGraphNode = {
       id: COORDINATOR_NODE_ID,
       type: NODE_DELEGATION_COORDINATOR,
       position: { ...COORD_POS },
       data: {
         workflowLabel: label,
-        coordinatorLabelSuffix: del?.coordinatorLabelSuffix,
-        modified: ovDel?.coordinatorLabelSuffix !== undefined,
+        coordinatorLabelSuffix: del.coordinatorLabelSuffix ?? baseDel.coordinatorLabelSuffix,
+        suffixOverridden: del.coordinatorLabelSuffix !== undefined,
       },
-    });
-    nodes.push({
+    };
+    const prep: PrepGraphNode = {
       id: PREP_NODE_ID,
       type: NODE_PREP,
       position: { ...PREP_POS },
       data: {
-        prepTitle: del?.prepTitle,
-        modified: ovDel?.prepTitle !== undefined,
+        prepTitle: del.prepTitle ?? baseDel.prepTitle ?? { scheme: DEFAULT_PREP_TITLE_SCHEME as TitleSchemeId },
+        prepTitleOverride: del.prepTitle,
         sampleVars,
       },
-    });
-    nodes.push({
+    };
+    const member: MemberGraphNode = {
       id: MEMBER_NODE_ID,
       type: NODE_MEMBER,
       position: { ...MEMBER_POS },
       data: {
-        memberTitle: del?.memberTitle,
-        memberSubtitle: del?.memberSubtitle,
-        titleModified: ovDel?.memberTitle !== undefined,
-        subtitleModified: ovDel?.memberSubtitle !== undefined,
+        memberTitle:
+          del.memberTitle ?? baseDel.memberTitle ?? { scheme: DEFAULT_MEMBER_TITLE_SCHEME as TitleSchemeId },
+        memberSubtitle:
+          del.memberSubtitle ??
+          baseDel.memberSubtitle ?? { scheme: DEFAULT_MEMBER_SUBTITLE_SCHEME as SubtitleSchemeId },
+        memberTitleOverride: del.memberTitle,
+        memberSubtitleOverride: del.memberSubtitle,
         sampleVars,
       },
-    });
+    };
+    nodes.push(coordinator, prep, member);
     edges.push(delegationEdge(ROW_NODE_ID, COORDINATOR_NODE_ID));
     edges.push(delegationEdge(COORDINATOR_NODE_ID, PREP_NODE_ID));
     edges.push(delegationEdge(COORDINATOR_NODE_ID, MEMBER_NODE_ID));
   }
 
   return { nodes, edges };
+}
+
+/**
+ * Inverse projection: the graph's config-backed nodes → the sparse override.
+ * Collects each node's owned override slice + reconstructs step order from the
+ * node sequence (vs `baseSteps`), then routes through `prune` so the result is
+ * byte-identical to what the blueprint setters would have produced.
+ */
+export function graphToOverride(
+  model: GraphModel,
+  workflowName: string,
+  baseSteps: string[],
+): WorkflowOverride {
+  const naming: NamingConfig = {};
+  const steps: StepDisplayConfig = {};
+  const delegation: DelegationDisplayConfig = {};
+
+  const stepOrder: string[] = [];
+  const stepRules: StepDisplayRule[] = [];
+
+  for (const node of model.nodes) {
+    switch (node.type) {
+      case NODE_ROW: {
+        if (node.data.titleOverride !== undefined) naming.title = node.data.titleOverride;
+        if (node.data.subtitleOverride !== undefined) naming.subtitle = node.data.subtitleOverride;
+        if (node.data.traceOverride !== undefined) naming.trace = node.data.traceOverride;
+        break;
+      }
+      case NODE_STEP: {
+        stepOrder.push(stepFromNodeId(node.id));
+        if (node.data.overrideRule !== undefined) stepRules.push(node.data.overrideRule);
+        break;
+      }
+      case NODE_DELEGATION_COORDINATOR: {
+        if (node.data.suffixOverridden) {
+          delegation.coordinatorLabelSuffix = node.data.coordinatorLabelSuffix;
+        }
+        break;
+      }
+      case NODE_PREP: {
+        if (node.data.prepTitleOverride !== undefined) delegation.prepTitle = node.data.prepTitleOverride;
+        break;
+      }
+      case NODE_MEMBER: {
+        if (node.data.memberTitleOverride !== undefined) delegation.memberTitle = node.data.memberTitleOverride;
+        if (node.data.memberSubtitleOverride !== undefined)
+          delegation.memberSubtitle = node.data.memberSubtitleOverride;
+        break;
+      }
+      default:
+        break; // design-intent nodes carry no override
+    }
+  }
+
+  // Step order is an override only when it diverges from the declared base order.
+  const orderDiverges =
+    stepOrder.length === baseSteps.length && stepOrder.some((s, i) => s !== baseSteps[i]);
+  if (orderDiverges) steps.order = stepOrder;
+  if (stepRules.length) steps.rules = stepRules;
+
+  return prune({ presentation: { naming, steps, delegation } });
 }

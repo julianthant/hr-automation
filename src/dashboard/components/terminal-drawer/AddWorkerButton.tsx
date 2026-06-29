@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Plus, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useWorkflows, type WorkflowMetadata } from "@/lib/workflows-context";
 import { getWorkflowIcon } from "@/lib/workflow-icons";
@@ -123,7 +124,8 @@ export function AddWorkerButton({ workerCounts, queuedCounts }: AddWorkerButtonP
           </p>
         </div>
         <div className="my-1 border-t border-border/60" aria-hidden />
-        <ul className="flex flex-col gap-0.5 max-h-72 overflow-y-auto [scrollbar-width:thin]">
+        <ScrollArea className="max-h-72">
+        <ul className="flex flex-col gap-0.5">
           {options.map((opt) => {
             const Icon = getWorkflowIcon(opt.iconName);
             const busy = pending === opt.name;
@@ -161,6 +163,7 @@ export function AddWorkerButton({ workerCounts, queuedCounts }: AddWorkerButtonP
             );
           })}
         </ul>
+        </ScrollArea>
       </PopoverContent>
     </Popover>
   );

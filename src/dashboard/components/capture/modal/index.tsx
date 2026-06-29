@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { toast } from "sonner";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { toast } from "@/lib/notify";
 import { CapturePhotoLightbox } from "../CapturePhotoLightbox.js";
 import { useCaptureSession } from "../../hooks/useCaptureSession.js";
 import { setSessionOwnedByModal } from "../../hooks/useCaptureToasts.js";
@@ -10,7 +18,6 @@ import type {
   CaptureState,
   CaptureValidation,
 } from "../capture-types.js";
-import { ModalChrome } from "./ModalChrome.js";
 import { useConfirm } from "@/components/shared/useConfirm";
 import { LeftColumn } from "./LeftColumn.js";
 import { RightColumn } from "./RightColumn.js";
@@ -19,30 +26,58 @@ import { CaptureStatusBlock } from "./CaptureStatusBlock.js";
 import { CAPTURE_MODAL_GRID_COLS } from "./capture-modal-layout.js";
 
 /**
- * Operator-side capture modal — wider 2-column layout.
+ * Operator-side capture PANEL — the mobile-photo → PDF → handoff flow,
+ * rendered INLINE inside the shared {@link RunModal} as the "Capture photos"
+ * upload method (the standalone capture modal + its toolbar camera button were
+ * retired 2026-06-29 — capture is now one of two methods the operator picks
+ * inside the single Run modal).
  *
- * Left column (auto):  QR square sized to the photo grid + action row height.
- * Right column (1fr):   live thumbnail mirror grid · actions · validation
- *                       on the row below.
+ * Layout (wide 2-column):
+ *   Left column (auto):  QR square sized to the photo grid + action row height.
+ *   Right column (1fr):  live thumbnail mirror grid · actions · validation.
  *
- * State machine (8 states from visual direction §3):
+ * State machine (8 states):
  *   starting | error | open (waiting) | open (phone connected) |
  *   finalizing | finalized | finalize_failed | expired
  *
- * SSE-driven via `useCaptureSession` — the modal opens an EventSource
- * for the duration of the dialog, and `findSession(sessionId)` exposes
- * the live snapshot that the reducer keeps current. The previous 1s
- * polling loop is gone.
+ * SSE-driven via `useCaptureSession` — the panel opens an EventSource while
+ * `active` (the Run modal is open AND Capture is the selected method), and
+ * `findSession(sessionId)` exposes the live snapshot the reducer keeps current.
+ *
+ * The panel owns NO chrome (no Dialog, header, or close button) — the host Run
+ * modal supplies all of that. The host drives leave/close decisions through the
+ * imperative {@link CapturePanelHandle} so an in-flight session is discarded
+ * (with a photo-loss confirm) before the operator switches back to file upload
+ * or closes the modal.
  */
 
-export interface CaptureModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+export interface CapturePanelProps {
+  /**
+   * Gate: the SSE stream + auto-start run only while active — the Run modal is
+   * open AND Capture is the selected upload method. Flipping it false resets the
+   * panel and best-effort discards a still-open session.
+   */
+  active: boolean;
   workflow: string;
-  /** From the registry — shown in the dialog title. */
+  /** From the registry — used for capture toasts/notifications. */
   workflowLabel?: string;
   /** Optional per-invocation hint (free-text) bubbled to the phone. */
   contextHint?: string;
+  /** Called when the panel has finished its flow and the host should dismiss. */
+  onClosed: () => void;
+  /** Mirror lightbox open/closed so the host can guard Esc (lightbox first). */
+  onLightboxOpenChange?: (open: boolean) => void;
+}
+
+export interface CapturePanelHandle {
+  /**
+   * Discard-aware "leave capture": when a session is still `open` with photos,
+   * prompts the operator before discarding. Returns `true` once it is safe to
+   * leave (session discarded / nothing to lose), or `false` if the operator
+   * cancelled — the host then stays in capture mode. A finalized/finalizing
+   * session is never discarded.
+   */
+  leaveCapture: () => Promise<boolean>;
 }
 
 export interface StartedSession {
@@ -53,13 +88,21 @@ export interface StartedSession {
   expiresAt: number;
 }
 
-export function CaptureModal({
-  open,
-  onOpenChange,
-  workflow,
-  workflowLabel,
-  contextHint,
-}: CaptureModalProps) {
+const discardSession = (sessionId: string, reason: string): void => {
+  void fetch("/api/capture/discard", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId, reason }),
+  }).catch(() => {
+    /* best effort — server expires the session anyway */
+  });
+};
+
+export const CapturePanel = forwardRef<CapturePanelHandle, CapturePanelProps>(function CapturePanel(
+  { active, workflow, workflowLabel, contextHint, onClosed, onLightboxOpenChange },
+  ref,
+) {
+  void workflowLabel;
   const [phase, setPhase] = useState<"idle" | "starting" | "session" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [started, setStarted] = useState<StartedSession | null>(null);
@@ -76,9 +119,9 @@ export function CaptureModal({
   const modalBodyRef = useRef<HTMLDivElement>(null);
   const rightBandRef = useRef<HTMLDivElement>(null);
 
-  // SSE stream — only open while dialog is open.
+  // SSE stream — only open while the panel is active.
   const { sessions, lastEvent, connected: sseConnected, findSession } = useCaptureSession({
-    enabled: open,
+    enabled: active,
   });
   void sessions;
   void sseConnected;
@@ -91,6 +134,22 @@ export function CaptureModal({
     if (!info) return "open";
     return info.state;
   }, [phase, info]);
+
+  // Live mirrors for the imperative leave/unmount paths (read latest without
+  // re-subscribing). A started-but-not-yet-streamed session is server-side
+  // `open`, so default to "open" when info hasn't arrived yet.
+  const startedRef = useRef<StartedSession | null>(started);
+  startedRef.current = started;
+  const liveStateRef = useRef<CaptureState | undefined>(undefined);
+  liveStateRef.current = info?.state ?? (started ? "open" : undefined);
+  const photoCountRef = useRef(0);
+  photoCountRef.current = info?.photos.length ?? 0;
+
+  // Mirror lightbox open state to the host (so it can keep Esc from closing the
+  // Run modal while a photo preview is open — the lightbox closes first).
+  useEffect(() => {
+    onLightboxOpenChange?.(lightboxIndex >= 0);
+  }, [lightboxIndex, onLightboxOpenChange]);
 
   // QR is a square exactly as tall as the photo grid + action row (measured on the right).
   useLayoutEffect(() => {
@@ -129,9 +188,9 @@ export function CaptureModal({
     };
   }, [effectiveState, info?.photos.length, started, validation]);
 
-  // ── Lifecycle: reset on open, register-with-toast-hook, unregister
+  // ── Lifecycle: reset when deactivated, kick off when activated
   useEffect(() => {
-    if (!open) {
+    if (!active) {
       setPhase("idle");
       setError(null);
       setStarted(null);
@@ -142,7 +201,19 @@ export function CaptureModal({
       return;
     }
     if (phase === "idle") setPhase("starting");
-  }, [open, phase]);
+  }, [active, phase]);
+
+  // Best-effort discard of a still-open session if the panel unmounts (the host
+  // workflow was switched mid-capture, etc.). The leave/close paths discard
+  // explicitly first; this is belt-and-braces so a session is never orphaned.
+  useEffect(() => {
+    return () => {
+      const s = startedRef.current;
+      if (s && liveStateRef.current === "open") {
+        discardSession(s.sessionId, "capture panel unmounted");
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!started) return;
@@ -150,9 +221,9 @@ export function CaptureModal({
     return () => setSessionOwnedByModal(started.sessionId, false);
   }, [started]);
 
-  // ── Auto-start on dialog open
+  // ── Auto-start once the panel is active
   useEffect(() => {
-    if (!open || started || phase !== "starting") return;
+    if (!active || started || phase !== "starting") return;
     let cancelled = false;
     (async () => {
       try {
@@ -191,7 +262,7 @@ export function CaptureModal({
     return () => {
       cancelled = true;
     };
-  }, [open, started, phase, workflow, contextHint]);
+  }, [active, started, phase, workflow, contextHint]);
 
   // ── Watch for newly-arrived photos via lastEvent so the bounce only
   //    plays for the new tile, not every existing one.
@@ -255,9 +326,9 @@ export function CaptureModal({
     if (info?.state !== "finalized") return;
     if (finalizedAtRef.current !== null) return;
     finalizedAtRef.current = Date.now();
-    const t = window.setTimeout(() => onOpenChange(false), 2_000);
+    const t = window.setTimeout(() => onClosed(), 2_000);
     return () => window.clearTimeout(t);
-  }, [info?.state, onOpenChange]);
+  }, [info?.state, onClosed]);
 
   // ── Actions
   const handleCopy = useCallback(() => {
@@ -308,29 +379,36 @@ export function CaptureModal({
 
   const { confirm, confirmDialog } = useConfirm();
 
-  const handleDiscard = useCallback(async () => {
-    if (!started) return;
-    const photoCount = info?.photos.length ?? 0;
-    if (photoCount > 0) {
+  // Single discard-aware "leave" path, shared by the host (switch to upload /
+  // close modal) and the in-panel Discard button. Never discards a finalized or
+  // finalizing session; confirms before dropping an open session with photos.
+  const leaveCapture = useCallback(async (): Promise<boolean> => {
+    const s = startedRef.current;
+    const st = liveStateRef.current;
+    if (!s) return true;
+    if (st === "finalized" || st === "finalizing") return true;
+    if (st === "open" && photoCountRef.current > 0) {
       const ok = await confirm({
         tone: "destructive",
-        title: `Discard ${photoCount} photo${photoCount === 1 ? "" : "s"}?`,
+        title: `Discard ${photoCountRef.current} photo${photoCountRef.current === 1 ? "" : "s"}?`,
         description: "They’ll be deleted.",
         confirmLabel: "Discard",
       });
-      if (!ok) return;
+      if (!ok) return false;
     }
-    try {
-      await fetch("/api/capture/discard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: started.sessionId, reason: "operator closed modal" }),
-      });
-    } catch {
-      /* best effort */
-    }
-    onOpenChange(false);
-  }, [started, info?.photos.length, onOpenChange, confirm]);
+    discardSession(s.sessionId, "operator left capture");
+    return true;
+  }, [confirm]);
+
+  useImperativeHandle(ref, () => ({ leaveCapture }), [leaveCapture]);
+
+  // Discard button (in-panel) and the expired/error "Close" CTAs both bail out
+  // of the whole Run modal.
+  const handleDiscardAndClose = useCallback(() => {
+    void leaveCapture().then((left) => {
+      if (left) onClosed();
+    });
+  }, [leaveCapture, onClosed]);
 
   const handleDeletePhoto = useCallback(
     async (index: number) => {
@@ -354,64 +432,27 @@ export function CaptureModal({
     [started],
   );
 
-  // Discard-and-close on dialog X / Esc
-  const handleClose = useCallback(() => {
-    if (started && info && info.state === "open") {
-      handleDiscard();
-      return;
-    }
-    onOpenChange(false);
-  }, [started, info, handleDiscard, onOpenChange]);
-
   return (
     <>
-    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : handleClose())}>
-      <DialogContent
-        hideClose
-        className="overflow-hidden p-0 sm:max-w-[760px] gap-0"
-        // Override shadcn's default surface so capture tokens take over.
+      <div
+        ref={modalBodyRef}
+        className="px-[38px] pt-[18px] pb-[26px]"
         style={{
-          backgroundColor: "var(--capture-bg-modal)",
-          borderColor: "var(--capture-border-subtle)",
-          color: "var(--capture-fg-primary)",
-        }}
-        onEscapeKeyDown={(e) => {
-          // Always preventDefault; we orchestrate close manually so Esc
-          // can step out of the lightbox before stepping out of the modal.
-          e.preventDefault();
-          if (lightboxIndex >= 0) {
-            setLightboxIndex(-1);
-            return;
-          }
-          handleClose();
+          ["--capture-band-h" as string]: "12rem",
+          ["--capture-qr-col" as string]: "var(--capture-band-h)",
         }}
       >
-        <ModalChrome
-          state={effectiveState}
-          workflow={workflow}
-          workflowLabel={workflowLabel}
-          contextHint={info?.contextHint ?? contextHint}
-          onClose={handleClose}
-        />
-        <div
-          ref={modalBodyRef}
-          className="px-[38px] pt-[28px] pb-[26px]"
-          style={{
-            ["--capture-band-h" as string]: "12rem",
-            ["--capture-qr-col" as string]: "var(--capture-band-h)",
-          }}
-        >
-          <div className="flex items-start gap-9">
-            <LeftColumn
-              state={effectiveState}
-              started={started}
-              error={error}
-              onCopy={handleCopy}
-              onCloseAndStartNew={() => onOpenChange(false)}
-            />
+        <div className="flex items-start gap-9">
+          <LeftColumn
+            state={effectiveState}
+            started={started}
+            error={error}
+            onCopy={handleCopy}
+            onCloseAndStartNew={onClosed}
+          />
 
-            <div ref={rightBandRef} className="min-w-0 flex-1">
-              <RightColumn
+          <div ref={rightBandRef} className="min-w-0 flex-1">
+            <RightColumn
               state={effectiveState}
               started={started}
               info={info}
@@ -434,70 +475,69 @@ export function CaptureModal({
               onPhotoDelete={(idx) => handleDeletePhoto(idx)}
               onFinalize={handleFinalize}
               onRetryHandoff={handleRetryHandoff}
-              onDiscard={handleDiscard}
-              onCloseAndStartNew={() => onOpenChange(false)}
+              onDiscard={handleDiscardAndClose}
+              onCloseAndStartNew={onClosed}
+            />
+          </div>
+        </div>
+
+        {started && (
+          <div className="mt-4 flex gap-9">
+            <div className="shrink-0" style={{ width: "var(--capture-qr-col)" }} aria-hidden />
+            <div className="min-w-0 flex-1">
+              <ValidationBanner
+                validation={validation}
+                blurFlaggedCount={info?.photos.filter((p) => p.blurFlagged).length ?? 0}
+                photoCount={info?.photos.length ?? 0}
+                active={effectiveState === "open"}
               />
             </div>
           </div>
+        )}
 
-          {started && (
-            <div className="mt-4 flex gap-9">
-              <div className="shrink-0" style={{ width: "var(--capture-qr-col)" }} aria-hidden />
-              <div className="min-w-0 flex-1">
-                <ValidationBanner
-                  validation={validation}
-                  blurFlaggedCount={info?.photos.filter((p) => p.blurFlagged).length ?? 0}
-                  photoCount={info?.photos.length ?? 0}
-                  active={effectiveState === "open"}
-                />
-              </div>
-            </div>
-          )}
-
-          {started && (
+        {started && (
+          <div
+            className="mt-4 grid gap-x-9 gap-y-0"
+            style={{ gridTemplateColumns: CAPTURE_MODAL_GRID_COLS }}
+          >
+            <CaptureStatusBlock
+              className="min-w-0"
+              state={effectiveState}
+              phoneConnected={info?.phoneConnectedAt != null}
+              photoCount={info?.photos.length ?? 0}
+            />
             <div
-              className="mt-4 grid gap-x-9 gap-y-0"
-              style={{ gridTemplateColumns: CAPTURE_MODAL_GRID_COLS }}
-            >
-              <CaptureStatusBlock
-                className="min-w-0"
-                state={effectiveState}
-                phoneConnected={info?.phoneConnectedAt != null}
-                photoCount={info?.photos.length ?? 0}
-              />
-              <div
-                className="col-span-2 mt-3.5 border-t"
-                style={{ borderColor: "var(--capture-border-subtle)" }}
-              />
+              className="col-span-2 mt-3.5 border-t"
+              style={{ borderColor: "var(--capture-border-subtle)" }}
+            />
 
-              <div className="col-span-2 flex min-w-0 items-baseline gap-3 pt-3.5">
-                <code
-                  className="flex-1 truncate font-mono text-[11.5px]"
-                  style={{ color: "var(--capture-fg-body)" }}
-                  title={started.captureUrl}
-                >
-                  {started.captureUrl}
-                </code>
-                <button
-                  type="button"
-                  aria-label="Copy URL"
-                  onClick={handleCopy}
-                  className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
-                  style={{
-                    color: "var(--capture-fg-muted)",
-                    backgroundColor: "transparent",
-                    border: 0,
-                    padding: 0,
-                    ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
-                  }}
-                >
-                  Copy
-                </button>
-              </div>
+            <div className="col-span-2 flex min-w-0 items-baseline gap-3 pt-3.5">
+              <code
+                className="flex-1 truncate font-mono text-[11.5px]"
+                style={{ color: "var(--capture-fg-body)" }}
+                title={started.captureUrl}
+              >
+                {started.captureUrl}
+              </code>
+              <button
+                type="button"
+                aria-label="Copy URL"
+                onClick={handleCopy}
+                className="font-sans text-[10px] cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2"
+                style={{
+                  color: "var(--capture-fg-muted)",
+                  backgroundColor: "transparent",
+                  border: 0,
+                  padding: 0,
+                  ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+                }}
+              >
+                Copy
+              </button>
             </div>
-          )}
-        </div>
-      </DialogContent>
+          </div>
+        )}
+      </div>
 
       {info && (
         <CapturePhotoLightbox
@@ -510,8 +550,7 @@ export function CaptureModal({
           onNavigate={(next) => setLightboxIndex(next)}
         />
       )}
-    </Dialog>
-    {confirmDialog}
+      {confirmDialog}
     </>
   );
-}
+});

@@ -22,6 +22,7 @@ export interface ScreenshotTileData {
 
 export const ALL_FILTER = "all";
 export const ERRORS_FILTER = "errors";
+export const STEPS_FILTER = "steps";
 const SYSTEM_PREFIX = "system:";
 
 /** Chip id for a per-system filter (round-trips through `filterScreenshotTiles`). */
@@ -89,6 +90,19 @@ export function buildScreenshotFilters(
     });
   }
 
+  const stepCount = tiles.reduce(
+    (sum, tile) => (tile.kind === "step" ? sum + 1 : sum),
+    0,
+  );
+  if (stepCount > 0) {
+    chips.push({
+      id: STEPS_FILTER,
+      label: "Steps",
+      count: stepCount,
+      tone: "default",
+    });
+  }
+
   const bySystem = new Map<string, number>();
   for (const tile of tiles) {
     bySystem.set(tile.system, (bySystem.get(tile.system) ?? 0) + 1);
@@ -116,6 +130,9 @@ export function filterScreenshotTiles(
 ): ScreenshotTileData[] {
   if (filterId === ERRORS_FILTER) {
     return tiles.filter((tile) => tile.kind === "error");
+  }
+  if (filterId === STEPS_FILTER) {
+    return tiles.filter((tile) => tile.kind === "step");
   }
   if (filterId.startsWith(SYSTEM_PREFIX)) {
     const system = filterId.slice(SYSTEM_PREFIX.length);

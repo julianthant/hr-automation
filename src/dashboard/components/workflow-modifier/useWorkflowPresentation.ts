@@ -5,6 +5,7 @@ import type { SchemeMeta } from "../../../domain/workflow-presentation/schemes.j
 import type { DisplayStep } from "../../../domain/workflow-presentation/step-display.js";
 
 export type { WorkflowOverride };
+export type { WorkflowMetadata };
 
 export interface WorkflowListEntry {
   name: string;

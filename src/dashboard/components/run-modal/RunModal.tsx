@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Camera, FileText, Loader2, UploadCloud, X } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { DuplicateBanner } from "@/components/oath-upload";
-import { CaptureModal } from "@/components/capture/modal/index.js";
+import { CapturePanel, type CapturePanelHandle } from "@/components/capture/modal/index.js";
 import { useCaptureRegistration } from "@/components/hooks/useCaptureRegistration";
 import type { PriorRunSummary } from "@/components/shared/types";
 import {
@@ -77,9 +77,11 @@ async function mergePdfFiles(files: File[]): Promise<File> {
  * Capture-photos is offered as an alternate upload METHOD inside the same run
  * flow: a workflow that declares `capture: true` in the registry AND has a
  * live capture registration (`GET /api/capture/registry`) shows an "Upload
- * file | Capture photos" switch. Picking Capture hands off to the shared
- * `CaptureModal` (the capture state machine is reused, not forked); the same
- * `/api/capture/*` endpoints produce the same OCR prep row as a file upload.
+ * file | Capture photos" switch. Picking Capture swaps the file UI for the
+ * `CapturePanel` rendered INLINE in this same modal (no separate dialog) — the
+ * same `/api/capture/*` flow produces the same OCR prep row as a file upload.
+ * The standalone capture modal + its toolbar camera button were retired
+ * 2026-06-29; the Run modal is the single entry point for both methods.
  */
 interface RunModalProps {
   open: boolean;
@@ -93,15 +95,36 @@ interface RunModalProps {
 export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModalProps) {
   const config = getRunModalConfig(workflow);
   // Capture-photos upload method. Declarative opt-in via the registry
-  // (`config.capture`, Commit 4 counterpart), gated additionally on a live
-  // capture registration so the option only shows when the backend actually
-  // registered a capture handler. Suppressed in reupload mode (reupload is
-  // file-specific). When the operator picks Capture, we open the shared
-  // CaptureModal (state machine unforked) and dismiss this modal's file UI.
+  // (`config.capture`), gated additionally on a live capture registration so the
+  // option only shows when the backend actually registered a capture handler.
+  // Suppressed in reupload mode (reupload is file-specific). When the operator
+  // picks Capture, the CapturePanel renders inline in place of the file UI.
   const captureRegistration = useCaptureRegistration(workflow);
   const captureCapable =
     !reuploadFor && isRunModalCaptureCapable(workflow) && captureRegistration !== null;
-  const [captureOpen, setCaptureOpen] = useState(false);
+  // Which upload method is selected. "capture" renders the CapturePanel inline
+  // (state machine reused, not forked) in place of the file UI; the footer and
+  // upload sections hide. Resets to "upload" on close. The panel handle lets
+  // this modal route its close affordances (X / Esc / overlay) through the
+  // panel's discard-aware leave (so an open session with photos confirms first).
+  const [mode, setMode] = useState<"upload" | "capture">("upload");
+  const captureMode = captureCapable && mode === "capture";
+  const captureRef = useRef<CapturePanelHandle>(null);
+  const [captureLightboxOpen, setCaptureLightboxOpen] = useState(false);
+  const closeModal = useCallback(() => onOpenChange(false), [onOpenChange]);
+  // Close affordances (X / Esc / overlay) while capturing route through the
+  // panel's discard-aware leave so an open session with photos confirms before
+  // it's dropped. Falls straight to close if the panel isn't mounted.
+  const requestCaptureClose = useCallback(() => {
+    const leaving = captureRef.current?.leaveCapture();
+    if (!leaving) {
+      onOpenChange(false);
+      return;
+    }
+    void leaving.then((left) => {
+      if (left) onOpenChange(false);
+    });
+  }, [onOpenChange]);
   // The workflow's registry entry can lock the form type so the modal hides
   // the picker and force-injects the value on submit (emergency-contact →
   // emergency-contact, oath-signature → oath).
@@ -328,10 +351,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     setDryRun(false);
     setOathUploadMode("full");
     setWorkerChoice(AUTO_WORKERS);
-    // NB: `captureOpen` is intentionally NOT reset here. Picking "Capture
-    // photos" closes this file-upload dialog (open=false) while opening the
-    // CaptureModal — resetting it here would immediately kill that handoff.
-    // The CaptureModal owns its own close via its onOpenChange.
+    // Reopen defaults to the file-upload method. The CapturePanel unmounts when
+    // mode flips back to "upload"; its own unmount cleanup best-effort discards
+    // any still-open session, so resetting here can't orphan a capture.
+    setMode("upload");
+    setCaptureLightboxOpen(false);
     // Reset the form-type pick so the standalone-OCR modal re-defaults on the
     // next open (the default-select effect is gated on `!formType`); a locked
     // form-type re-injects via the `open && effectiveLockedFormType` effect.
@@ -341,6 +365,12 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     // of treating that completion as already handled.
     seenSharePointCompletionTs.current = null;
   }, [open, effectiveLockedFormType]);
+
+  // Never strand the modal in capture mode for a workflow that can't capture
+  // (e.g. the live registration resolved null after a workflow switch).
+  useEffect(() => {
+    if (!captureCapable && mode === "capture") setMode("upload");
+  }, [captureCapable, mode]);
 
   if (!config) {
     return null;
@@ -539,19 +569,31 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
       : "Use the currently queued SharePoint download when it finishes.";
 
   return (
-    <>
-    {captureCapable && captureRegistration && (
-      <CaptureModal
-        open={captureOpen}
-        onOpenChange={setCaptureOpen}
-        workflow={workflow}
-        workflowLabel={captureRegistration.label}
-      />
-    )}
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          onOpenChange(true);
+          return;
+        }
+        if (captureMode) {
+          requestCaptureClose();
+          return;
+        }
+        onOpenChange(false);
+      }}
+    >
       <DialogContent
         hideClose
-        className="overflow-hidden p-0 sm:max-w-[640px] gap-0"
+        className={cn(
+          "overflow-hidden p-0 gap-0",
+          captureMode ? "sm:max-w-[760px]" : "sm:max-w-[640px]",
+        )}
+        onEscapeKeyDown={(e) => {
+          // Esc closes an open photo lightbox first (it's a custom overlay whose
+          // preventDefault doesn't stop Radix from also closing this dialog).
+          if (captureMode && captureLightboxOpen) e.preventDefault();
+        }}
         style={
           {
             "--background": "var(--capture-bg-page)",
@@ -576,7 +618,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
           <button
             type="button"
             aria-label="Close"
-            onClick={() => !submitting && onOpenChange(false)}
+            onClick={() => {
+              if (captureMode) {
+                requestCaptureClose();
+                return;
+              }
+              if (!submitting) onOpenChange(false);
+            }}
             disabled={submitting}
             className={cn(
               "absolute right-[14px] top-[14px] inline-flex h-7 w-7 items-center justify-center rounded-md",
@@ -599,30 +647,37 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <ModeButton
-                  active
+                  active={mode === "upload"}
                   disabled={submitting}
                   label="Upload file"
                   hint="Pick a PDF from this computer"
-                  onClick={() => {}}
+                  onClick={() => {
+                    // Leaving capture mid-session drops it (with a photo-loss
+                    // confirm); staying put if the operator cancels.
+                    if (mode !== "capture") return;
+                    const leaving = captureRef.current?.leaveCapture();
+                    if (!leaving) {
+                      setMode("upload");
+                      return;
+                    }
+                    void leaving.then((left) => {
+                      if (left) setMode("upload");
+                    });
+                  }}
                 />
                 <ModeButton
-                  active={false}
+                  active={mode === "capture"}
                   disabled={submitting}
                   label="Capture photos"
                   hint="Scan a QR on your phone, take photos, bundle to a PDF"
                   icon={<Camera aria-hidden className="h-3.5 w-3.5" />}
-                  onClick={() => {
-                    // Hand off to the shared CaptureModal (unforked state
-                    // machine). Close the file-upload dialog so only one
-                    // dialog is open at a time; the same /api/capture flow
-                    // produces the same OCR prep row as a file upload.
-                    setCaptureOpen(true);
-                    onOpenChange(false);
-                  }}
+                  onClick={() => setMode("capture")}
                 />
               </div>
             </section>
           )}
+          {!captureMode && (
+            <>
           {showOathUploadMode && (
             <section>
               <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground">
@@ -859,8 +914,22 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
               <span className="text-[13px] text-foreground">{error}</span>
             </div>
           )}
+            </>
+          )}
         </div>
 
+        {captureMode && (
+          <CapturePanel
+            ref={captureRef}
+            active={open}
+            workflow={workflow}
+            workflowLabel={captureRegistration?.label}
+            onClosed={closeModal}
+            onLightboxOpenChange={setCaptureLightboxOpen}
+          />
+        )}
+
+        {!captureMode && (
         <DialogFooter className="flex flex-row items-center gap-2.5 border-t border-border/60 px-[38px] py-[18px] mt-[24px] [&_button]:box-border">
           {effectiveShowWorkers && (
             <WorkerStepper
@@ -949,9 +1018,9 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
             Cancel
           </button>
         </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
-    </>
   );
 }
 
