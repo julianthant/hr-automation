@@ -231,10 +231,59 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
 }
 
 /**
+ * Probe top-level page text for the searched EID on the open timecard.
+ * Pure + unit-pinned — the live evaluate wrapper passes `document.body.innerText`.
+ */
+export function probeEidInTimecardText(
+  text: string,
+  searchedEid: string,
+): { match: boolean; otherEid: string | null } {
+  if (text.includes(searchedEid)) return { match: true, otherEid: null };
+  // A different 8-digit id on the timecard is a positive wrong-person signal.
+  const m = text.match(/\b\d{8}\b/);
+  return { match: false, otherEid: m ? m[0] : null };
+}
+
+/**
+ * Poll the open timecard until the searched EID appears in the header/text.
+ * NEEDS LIVE RE-VERIFY 2026-06-29: confirm the searched EID renders as visible
+ * text in the WFD timecard employee header (basis of this check).
+ */
+async function waitForTimecardEmployee(
+  page: Page,
+  eid: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const probe = await page
+      .evaluate(
+        (searchedEid) => {
+          const text = document.body?.innerText ?? "";
+          if (text.includes(searchedEid)) return { match: true, otherEid: null as string | null };
+          const m = text.match(/\b\d{8}\b/);
+          return { match: false, otherEid: m ? m[0] : null };
+        },
+        eid,
+      )
+      .catch(() => ({ match: false as boolean, otherEid: null as string | null }));
+    if (probe.match) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+/**
  * Click Go To dropdown and select Timecard.
  * Go To may be on the main page or inside the search iframe.
+ *
+ * After clicking the Timecards option, polls the timecard header for the
+ * searched EID — Go To can leave the PREVIOUS employee's timecard on screen
+ * (live: search 10864213 but header still showed 10851756, 2026-06-29).
+ * Returns false when the timecard does not switch within the timeout so the
+ * caller can fail loud; `verifyTimecardEmployee` remains the downstream backstop.
  */
-export async function clickGoToTimecard(page: Page): Promise<boolean> {
+export async function clickGoToTimecard(page: Page, eid: string): Promise<boolean> {
   log.step("[New Kronos] Clicking Go To → Timecard...");
 
   const frame = searchFrame(page);
@@ -318,10 +367,27 @@ export async function clickGoToTimecard(page: Page): Promise<boolean> {
     } catch {
       break;
     }
-    // Wait for the Timecard view to render.
-    await page.waitForTimeout(2_500);
-    log.success("[New Kronos] Navigated to Timecard");
-    return true;
+
+    // Post-click EID confirmation: the Timecards menu item can be clicked while
+    // the grid still shows the PREVIOUS employee (live bug, 2026-06-29). Poll the
+    // timecard header/text for the searched EID instead of a fixed sleep.
+    // NEEDS LIVE RE-VERIFY 2026-06-29 — selector/header mapping not re-run here.
+    try {
+      await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 });
+    } catch {
+      // Overlay absent or selector drift — proceed without waiting.
+    }
+
+    const switched = await waitForTimecardEmployee(page, eid, 10_000);
+    if (switched) {
+      log.success(`[New Kronos] Navigated to Timecard for EID ${eid}`);
+      return true;
+    }
+
+    log.error(
+      `[New Kronos] Go To → Timecard clicked but the open timecard did not switch to EID ${eid} within the timeout`,
+    );
+    return false;
   }
 
   log.error(
@@ -370,7 +436,6 @@ export async function verifyTimecardEmployee(
       .evaluate((searchedEid) => {
         const text = document.body?.innerText ?? "";
         if (text.includes(searchedEid)) return { match: true, otherEid: null as string | null };
-        // A different 8-digit id on the timecard is a positive wrong-person signal.
         const m = text.match(/\b\d{8}\b/);
         return { match: false, otherEid: m ? m[0] : null };
       }, eid)
@@ -523,11 +588,11 @@ export async function scrollTimecardToDate(page: Page, targetDate: string): Prom
  * Full timecard check: select employee, Go To → Timecard, check current then previous period.
  * Returns the latest date with time entries, or null if nothing found.
  */
-export async function checkTimecardDates(page: Page): Promise<string | null> {
+export async function checkTimecardDates(page: Page, eid: string): Promise<string | null> {
   await selectEmployeeResult(page);
 
   const driver: TimecardDriver = {
-    goToTimecard: (p) => clickGoToTimecard(p),
+    goToTimecard: (p) => clickGoToTimecard(p, eid),
     afterGoTo: async (p) => {
       await debugScreenshot(p, "new-kronos-timecard-01-current");
     },

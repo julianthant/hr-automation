@@ -44,7 +44,7 @@ export async function runNewKronosTimecard(
   log.step(`[New Kronos] EID ${eid}: ${found ? "FOUND" : "NOT FOUND"}`);
   if (!found) return { found: false, ...EMPTY_TIMECARD };
   await selectNewKronosResult(page);
-  const okTimecard = await clickNewKronosGoToTimecard(page);
+  const okTimecard = await clickNewKronosGoToTimecard(page, eid);
   if (!okTimecard) {
     // The employee WAS found in New Kronos but the Go To → Timecard navigation
     // failed — a MECHANICAL failure, NOT "this person has no Kronos timecard".
