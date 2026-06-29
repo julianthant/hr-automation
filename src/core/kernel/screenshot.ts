@@ -10,7 +10,7 @@ export interface ScreenshotEvent {
   /** Numeric ms since epoch. Same clock as `timestamp`; kept for
    * back-compat with existing readers. */
   ts: number
-  kind: 'form' | 'error' | 'manual'
+  kind: 'form' | 'error' | 'manual' | 'step'
   label: string
   step: string | null
   files: Array<{ system: string; path: string }>
@@ -37,6 +37,7 @@ export function makeScreenshotFn(deps: ScreenshotDeps): ScreenshotFn {
       systems: opts.systems,
       pages: opts.pages,
       ...(opts.centerSelector !== undefined ? { centerSelector: opts.centerSelector } : {}),
+      ...(opts.stitch !== undefined ? { stitch: opts.stitch } : {}),
     })
     const files = rawFiles.map(({ system, path }) => ({ system, path }))
     const capture: ScreenshotCapture = {

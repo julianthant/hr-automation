@@ -1,5 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -388,6 +389,55 @@ test('runOneItem: cancel sticks after controller.abort() even when underlying pr
   // `|| controller.signal.aborted` is what makes this true.
   assert.equal(result.ok, false)
   assert.equal(result.kind, 'cancelled', 'cancel sticks via controller.signal.aborted even when probe returns false')
+})
+
+test('runOneItem: browser disconnect + target-closed error → cancelled, not failed', async () => {
+  const dir = TMP()
+  let browser: EventEmitter & { close: () => Promise<void> }
+  const wf = defineWorkflow({
+    name: 'disconnect-cancel-test',
+    systems: [{ id: 'new-kronos', login: async () => {} }],
+    steps: ['searching'] as const,
+    schema: z.object({ n: z.string() }),
+    authSteps: false,
+    handler: async (ctx) => {
+      await ctx.step('searching', async () => {
+        throw new Error('Target page, context or browser has been closed')
+      })
+    },
+  })
+
+  browser = Object.assign(new EventEmitter(), { close: async () => {} })
+  const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+  const fakeContext = { close: async () => {}, newPage: async () => fakePage } as unknown as import('playwright').BrowserContext
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map([
+      ['new-kronos', { page: fakePage, browser: browser as unknown as import('playwright').Browser, context: fakeContext, chromiumPid: 1 }],
+    ]),
+    readyPromises: new Map([['new-kronos', Promise.resolve()]]),
+  })
+  session.onBrowserDisconnect(() => {})
+  browser.emit('disconnected')
+
+  const result = await runOneItem({
+    wf,
+    session,
+    item: { n: 'x' },
+    itemId: 'x',
+    runId: 'run-disconnect-cancel',
+    trackerDir: dir,
+    callerPreEmits: false,
+    preAssignedInstance: 'Disconnect Cancel Test 1',
+    isCancelRequested: () => false,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.kind, 'cancelled')
+  const entries = readTracker(dir, 'disconnect-cancel-test')
+  const failed = entries.find((e: any) => e.status === 'failed')
+  assert.equal(failed?.step, 'cancelled')
+  assert.notEqual(failed?.error, 'Browser closed unexpectedly')
 })
 
 test('runOneItem: cancel requested during a Playwright failure records cancellation, not browser crash', async () => {

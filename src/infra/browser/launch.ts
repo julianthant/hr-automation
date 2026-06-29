@@ -36,6 +36,17 @@ export const DEFAULT_NAVIGATION_RETRIES = 10;
 const NAVIGATION_RETRY_DELAY_MS = 6_000;
 
 /**
+ * Effective navigation-retry default, read at CALL time so the operator's
+ * Settings value (populated onto `HRAUTO_NAVIGATION_RETRIES` by
+ * `applyOperatorSettingsToEnv` at config load) is honored regardless of module
+ * import order. Falls back to {@link DEFAULT_NAVIGATION_RETRIES} when unset/invalid.
+ */
+function defaultNavigationRetries(): number {
+  const n = Number.parseInt(process.env.HRAUTO_NAVIGATION_RETRIES ?? "", 10);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_NAVIGATION_RETRIES;
+}
+
+/**
  * Navigate to a URL, refreshing through transient "site didn't load" failures
  * before giving up. Operator policy (2026-06-24): when a page fails to load,
  * retry the navigation up to `retries` times with a ~5–10s pause between
@@ -57,7 +68,7 @@ export async function gotoWithRetry(
   page: Page,
   url: string,
   verify?: Locator | ((page: Page) => Promise<boolean>),
-  retries = DEFAULT_NAVIGATION_RETRIES,
+  retries = defaultNavigationRetries(),
   timeout = 15_000,
 ): Promise<void> {
   for (let attempt = 1; attempt <= retries; attempt++) {

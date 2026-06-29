@@ -57,7 +57,7 @@ test("buildJsonlEventsPayload returns only the oath-upload root row (no children
       parentRunId: "synthesized-oath-signature-run",
       status: "done",
       step: "approved",
-      data: { archetype: "batch", mode: "prepare", formType: "oath" },
+      data: { archetype: "operation", mode: "prepare", formType: "oath" },
     }, date, dir);
     trackEventForDate({
       workflow: "oath-signature",

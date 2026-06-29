@@ -12,6 +12,8 @@ import { buildDelegateApi } from '../delegate.js'
 import { emitItemStart, emitStepChange } from '../../tracker/session-events.js'
 import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { tracePrefix } from '../../domain/queue-trace-id.js'
+import { buildDataPointLog } from '../../domain/data-point.js'
+import type { DataPoint } from '../../domain/data-point.js'
 
 export interface MakeCtxOpts {
   session: Session
@@ -123,7 +125,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     }
   }
 
-  const screenshot = makeScreenshotFn({
+  const screenshotBase = makeScreenshotFn({
     session,
     runId,
     workflow,
@@ -131,6 +133,10 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     emit: emitScreenshotEvent,
     currentStep: () => stepper.getCurrentStep(),
   })
+  const screenshot: typeof screenshotBase = async (opts) => {
+    stepper.noteExplicitScreenshot()
+    return screenshotBase(opts)
+  }
 
   // Trace-id propagation (trace/span model): forward the INHERITED root PREFIX
   // (not a recompute) so a whole delegation tree SHARES one operation prefix and
@@ -165,6 +171,19 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     return wrapPageWithSignal(raw, signal)
   }
 
+  // Emit one or more data-provenance points on the structured-log channel,
+  // auto-tagged with the stepper's CURRENT step (same source the screenshot
+  // helper uses). Each point rides `log.step` as an `event: "data:point"` line
+  // so it persists + streams like any other log and surfaces in the dashboard's
+  // "View Data" tab. Purely observational — never touches tracker data.
+  const recordData = (point: DataPoint | DataPoint[]): void => {
+    const points = Array.isArray(point) ? point : [point]
+    const step = stepper.getCurrentStep()
+    for (const p of points) {
+      log.step(buildDataPointLog(p, step))
+    }
+  }
+
   const ctx = {
     page,
     step: <R>(name: string, fn: () => Promise<R>) => stepper.step(name, fn),
@@ -175,6 +194,7 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     parallelAll: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallelAll(tasks),
     retry,
     updateData: (patch: Record<string, unknown>) => stepper.updateData(patch),
+    recordData,
     session: {
       page,
     },

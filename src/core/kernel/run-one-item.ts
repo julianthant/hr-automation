@@ -9,7 +9,7 @@ import { Session } from './session.js'
 import { Stepper } from './stepper.js'
 import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
 import { withLogContext, log } from '../../utils/log.js'
-import { classifyError } from '../../utils/errors.js'
+import { classifyError, isBrowserClosedError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
 import { runWorkflowHandler } from './handler-runner.js'
 import { runRegistry, type RunHandle } from '../run-registry.js'
@@ -245,6 +245,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       emitFailed: emitters.emitFailed,
       emitSkipped: emitters.emitSkipped,
       isCancelRequested: isCancelRequestedWithAbort,
+      hadBrowserDisconnect: () => session.hadBrowserDisconnect(),
       signal: controller.signal,
       ...(skipStepsSet ? { skipSteps: skipStepsSet } : {}),
     })
@@ -272,12 +273,29 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
         }
         throw err
       },
-      mapEscapedHandlerError: () => {
-        if (!emitters.markCancelledStepOnCancelRequested || !isCancelRequestedWithAbort?.()) return undefined
-        emitters.setStep('cancelled')
-        return new CancelledError('cancelled')
+      mapEscapedHandlerError: (err) => {
+        if (!emitters.markCancelledStepOnCancelRequested) return undefined
+        if (
+          isCancelRequestedWithAbort?.()
+          || (isBrowserClosedError(err) && session.hadBrowserDisconnect())
+        ) {
+          emitters.setStep('cancelled')
+          return new CancelledError('cancelled')
+        }
+        return undefined
       },
     })
+  }
+
+  const classifyRunError = (err: unknown): string => {
+    const systemId = session.pageAccess().system ?? undefined
+    return classifyError(err, { systemId })
+  }
+
+  const isCancelledOutcome = (err: unknown): boolean => {
+    if (err instanceof CancelledError) return true
+    return isBrowserClosedError(err)
+      && (controller.signal.aborted || session.hadBrowserDisconnect())
   }
 
   if (args.trackerStub) {
@@ -291,10 +309,10 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       })
       return { ok: true }
     } catch (err) {
-      if (err instanceof CancelledError) {
-        return { ok: false, kind: 'cancelled', error: err.message }
+      if (isCancelledOutcome(err)) {
+        return { ok: false, kind: 'cancelled', error: err instanceof CancelledError ? err.message : "Cancelled by user before step 'cancelled'" }
       }
-      return { ok: false, error: classifyError(err) }
+      return { ok: false, error: classifyRunError(err) }
     } finally {
       runRegistry.unregister(runId)
     }
@@ -466,10 +484,10 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     }, trackerDir)
     return { ok: true }
   } catch (err) {
-    if (err instanceof CancelledError) {
-      return { ok: false, kind: 'cancelled', error: err.message }
+    if (isCancelledOutcome(err)) {
+      return { ok: false, kind: 'cancelled', error: err instanceof CancelledError ? err.message : "Cancelled by user before step 'cancelled'" }
     }
-    return { ok: false, error: classifyError(err) }
+    return { ok: false, error: classifyRunError(err) }
   } finally {
     runRegistry.unregister(runId)
   }

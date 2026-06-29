@@ -58,6 +58,10 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
     instance: opts.instance,
   })
   opts.stepper.setScreenshotFn(ctx.screenshot)
+  // Enable end-of-step audit screenshots: the stepper reads the session's
+  // page-access counter at each step boundary to capture the one system the
+  // step touched. Single wiring site — covers both run-one-item and run-workflow.
+  opts.stepper.setPageAccess(() => opts.session.pageAccess())
 
   if (opts.preHandler) {
     try {

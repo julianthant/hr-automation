@@ -369,7 +369,7 @@ export interface RunEvent {
   finalStatus?: "done" | "failed";
   data?: Record<string, string>;
   /** screenshot event fields (populated when type === "screenshot") */
-  screenshotKind?: "form" | "error" | "manual";
+  screenshotKind?: "form" | "error" | "manual" | "step";
   screenshotLabel?: string;
   screenshotFileCount?: number;
 }

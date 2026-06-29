@@ -6,6 +6,13 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Raw Playwright messages that mean the browser/page/context is gone. */
+const BROWSER_CLOSED_RAW_PATTERNS: RegExp[] = [
+  /Target page, context or browser has been closed/i,
+  /browser has been disconnected/i,
+  /Protocol error.*Target closed/i,
+]
+
 /** Common Playwright/workflow error patterns → concise dashboard-friendly messages. */
 const ERROR_PATTERNS: [RegExp, string][] = [
   [/Target page, context or browser has been closed/i, "Browser closed unexpectedly"],
@@ -25,17 +32,43 @@ const ERROR_PATTERNS: [RegExp, string][] = [
   [/Protocol error.*Target closed/i, "Browser closed during operation"],
 ];
 
+export interface ClassifyErrorOpts {
+  /** When known, appended to browser-closed messages for operator triage. */
+  systemId?: string
+}
+
+/** True when the raw error is Playwright's "target/browser/context closed" shape. */
+export function isBrowserClosedError(err: unknown): boolean {
+  const raw = errorMessage(err)
+  return BROWSER_CLOSED_RAW_PATTERNS.some((pattern) => pattern.test(raw))
+}
+
+function appendSystemId(message: string, systemId: string | undefined): string {
+  if (!systemId) return message
+  if (message.startsWith('Browser closed unexpectedly')) {
+    return `${message} (${systemId})`
+  }
+  if (message === 'Browser disconnected') {
+    return `${message} (${systemId})`
+  }
+  if (message === 'Browser closed during operation') {
+    return `${message} (${systemId})`
+  }
+  return message
+}
+
 /**
  * Map a raw error to a concise, human-readable message for the dashboard.
  * Returns the cleaned message, or the original (truncated) if no pattern matches.
  */
-export function classifyError(err: unknown): string {
+export function classifyError(err: unknown, opts?: ClassifyErrorOpts): string {
   const raw = errorMessage(err);
   for (const [pattern, replacement] of ERROR_PATTERNS) {
     const match = raw.match(pattern);
     if (match) {
       // Support $1, $2 backreferences in replacement
-      return replacement.replace(/\$(\d)/g, (_, i) => match[parseInt(i)] || "");
+      const base = replacement.replace(/\$(\d)/g, (_, i) => match[parseInt(i)] || "");
+      return appendSystemId(base, opts?.systemId)
     }
   }
   // No pattern matched — return first line in full. Dashboard log-line
