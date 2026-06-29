@@ -25,7 +25,7 @@ export interface ScreenshotListEntry {
  */
 export interface ScreenshotGroupedEntry {
   ts: number;
-  kind: "form" | "error" | "manual";
+  kind: "form" | "error" | "manual" | "step";
   label: string;
   step: string | null;
   files: Array<{ system: string; path: string; url: string }>;
@@ -240,7 +240,7 @@ function groupScreenshotRows(
     string,
     {
       ts: number;
-      kind: "form" | "error" | "manual";
+      kind: "form" | "error" | "manual" | "step";
       label: string;
       step: string | null;
       system: string;

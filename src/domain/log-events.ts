@@ -56,7 +56,13 @@ export type LogEventName =
   | "operation:created"
   | "operation:ocr-status"
   | "operation:approved"
-  | "operation:discarded";
+  | "operation:discarded"
+  // Data-provenance point — one value a workflow read from a system or wrote
+  // into one. Emitted by `ctx.recordData` (see `src/domain/data-point.ts`) and
+  // consumed by the dashboard's "View Data" log-panel tab, which groups these
+  // by `step` into read/write lanes. Additive + stable like every other name
+  // here; NOT tailed by the Tier-1 harness.
+  | "data:point";
 
 export interface StructuredLogEvent {
   level: "step" | "success" | "error" | "waiting" | "warn" | "debug";
@@ -81,6 +87,20 @@ export interface StructuredLogEvent {
    * present only on events where a cardinality is meaningful.
    */
   count?: number;
+  /**
+   * Data-provenance fields — present only on `event: "data:point"` lines
+   * emitted by `ctx.recordData`. `dataDirection` is `read` (extracted FROM a
+   * system) or `write` (inputted INTO one); `dataField` is the stable key,
+   * `dataLabel` the human label, `dataValue` the stringified value, `dataNote`
+   * an optional provenance qualifier. The source/destination system rides the
+   * shared `system` field and the originating step rides `step`. See
+   * `src/domain/data-point.ts`.
+   */
+  dataDirection?: "read" | "write";
+  dataField?: string;
+  dataLabel?: string;
+  dataValue?: string;
+  dataNote?: string;
 }
 
 export function normalizeLogEvent(event: StructuredLogEvent): StructuredLogEvent {

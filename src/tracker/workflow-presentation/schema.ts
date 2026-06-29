@@ -51,6 +51,8 @@ const detailField = z.strictObject({
   displayInGrid: z.boolean().optional(),
   multiline: z.boolean().optional(),
   conditional: z.boolean().optional(),
+  inputKind: z.enum(["text", "id", "date"]).optional(),
+  group: z.string().optional(),
 });
 const preset = z.strictObject({ id: z.string(), label: z.string(), skipSteps: z.array(z.string()), description: z.string().optional() });
 

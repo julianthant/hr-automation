@@ -4,6 +4,7 @@ import type { OperatorSubject } from '../../domain/operator-subject.js'
 import type { log } from '../../utils/log.js'
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import type { QueueRowKindOrResolver, InputSubjectOrResolver } from '../../domain/queue-row-kind.js'
+import type { DataPoint } from '../../domain/data-point.js'
 import type { WorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import type { WorkflowRuntimePolicy } from '../../domain/workflow-runtime/types.js'
 import type { WorkflowPresentationConfig } from '../../domain/workflow-presentation/types.js'
@@ -123,10 +124,29 @@ export interface BatchConfig {
  * The two flags are independent: a field can be edit-only (off in grid, on in
  * edit form), display-only (default — on in grid, off in edit form), both, or
  * declared but hidden everywhere (rare, mostly useful for tracker-only data).
+ *
+ * Two further hints shape an EDITABLE field's control + layout in the Edit Data
+ * tab (display-only fields ignore them):
+ *   - `inputKind`             → which input to render: `text` (default sans
+ *                                input), `id` (monospace input), or `date` (a
+ *                                MM/DD/YYYY input with a calendar popover).
+ *   - `group`                 → section label the field is grouped under in the
+ *                                edit form (e.g. "Identity", "Dates"). Fields
+ *                                with the same consecutive group render together
+ *                                under one labeled section.
  */
 export type DetailField<TData> =
   | (keyof TData & string)
-  | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean }
+  | {
+      key: string
+      label: string
+      editable?: boolean
+      displayInGrid?: boolean
+      multiline?: boolean
+      conditional?: boolean
+      inputKind?: 'text' | 'id' | 'date'
+      group?: string
+    }
 
 export type WorkflowQueueTitleConfig<TData> =
   | { kind: 'single' }
@@ -448,6 +468,25 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   ): Promise<{ [K in keyof T]: Awaited<ReturnType<T[K]>> }>
   retry<R>(fn: () => Promise<R>, opts?: RetryOpts): Promise<R>
   updateData(patch: Partial<TData & Record<string, unknown>>): void
+  /**
+   * Record a data-provenance point — one value EXTRACTED from a system
+   * (`direction: "read"`) or INPUTTED into one (`direction: "write"`). Unlike
+   * `updateData` (which keeps a flat snapshot of the tracker row), each point
+   * is an explicit, step-tagged event: the kernel stamps the CURRENT step
+   * automatically, then emits it on the structured-log channel as an
+   * `event: "data:point"` line. The dashboard's "View Data" log-panel tab
+   * groups these by step into read/write lanes so an operator can audit the
+   * data flow without reading the raw log wall.
+   *
+   * Pass a single point or an array. Purely observational — recording a point
+   * never alters tracker data or control flow, so it is safe to sprinkle
+   * liberally through any handler. Any workflow opts in simply by calling it;
+   * the tab auto-appears once a run emits at least one point.
+   *
+   *   ctx.recordData({ direction: "read", field: "lastDayWorked",
+   *     label: "Last Day Worked", value: ldw, system: "Kuali" })
+   */
+  recordData(point: DataPoint | DataPoint[]): void
   session: SessionHandle
   log: typeof log
   isBatch: boolean
@@ -659,7 +698,7 @@ export interface RunOpts {
 
 // Placeholder types — fully defined in Phase 2 (Task 7). Keep in sync.
 export interface ScreenshotOpts {
-  kind: 'form' | 'error' | 'manual'
+  kind: 'form' | 'error' | 'manual' | 'step'
   label: string
   systems?: string[]
   pages?: import('playwright').Page[]
@@ -675,9 +714,20 @@ export interface ScreenshotOpts {
    * routes to the unified `Session.captureFullPage`.
    */
   centerSelector?: string
+  /**
+   * Stitch a TALL capture into ONE continuous image instead of N `-cNN` page
+   * slices. The unified capture still scroll-captures the page band by band, but
+   * the bands are composited (by exact scroll geometry) into a single tall PNG.
+   * Used for the separations UCPath transaction captures, where the operator
+   * wants the whole Smart HR transaction as one image rather than partial
+   * scrolled shots. A short (one-band) page is unaffected (already one file), and
+   * a compositing failure degrades to the normal slices (capture never lost).
+   * Ignored when `centerSelector` is set (the virtual-scroll exception).
+   */
+  stitch?: boolean
 }
 export interface ScreenshotCapture {
-  kind: 'form' | 'error' | 'manual'
+  kind: 'form' | 'error' | 'manual' | 'step'
   label: string
   step: string | null
   ts: number
@@ -689,11 +739,13 @@ export type ScreenshotFn = (opts: ScreenshotOpts) => Promise<ScreenshotCapture>
 export interface CaptureFileOpts {
   workflow: string
   itemId: string
-  kind: 'form' | 'error' | 'manual'
+  kind: 'form' | 'error' | 'manual' | 'step'
   label: string
   ts: number
   systems?: string[]
   pages?: Page[]
   /** Virtual-scroll viewport capture (the Kronos exception — see ScreenshotOpts.centerSelector). */
   centerSelector?: string
+  /** Stitch a tall capture into ONE image instead of `-cNN` slices (see ScreenshotOpts.stitch). */
+  stitch?: boolean
 }

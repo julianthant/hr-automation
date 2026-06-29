@@ -1,5 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { Session } from '../../../src/core/kernel/session.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 
@@ -11,6 +12,23 @@ const makeSystem = (id: string, loginFn?: () => Promise<void>): SystemConfig => 
 test('session: construct with no systems is legal', () => {
   const s = Session.forTesting({ systems: [], browsers: new Map(), readyPromises: new Map() })
   assert.equal(s.systemIds().length, 0)
+})
+
+test('session: onBrowserDisconnect records system id for classification', () => {
+  const browser = Object.assign(new EventEmitter(), { close: async () => {} })
+  const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [makeSystem('new-kronos')],
+    browsers: new Map([
+      ['new-kronos', { page: fakePage, browser: browser as unknown as import('playwright').Browser, context: null as never, chromiumPid: 1 }],
+    ]),
+    readyPromises: new Map(),
+  })
+  assert.equal(s.hadBrowserDisconnect(), false)
+  s.onBrowserDisconnect(() => {})
+  browser.emit('disconnected')
+  assert.equal(s.hadBrowserDisconnect(), true)
+  assert.deepEqual([...s.disconnectedSystems()], ['new-kronos'])
 })
 
 test('session: systemIds returns declared ids in order', () => {
@@ -61,6 +79,35 @@ test('session.page: awaits ready promise, then returns cached page', async () =>
 test('session.page: unknown id throws', async () => {
   const s = Session.forTesting({ systems: [], browsers: new Map(), readyPromises: new Map() })
   await assert.rejects(() => s.page('nope'), /unknown system/i)
+})
+
+test('session.pageAccess: bumps the counter and tracks the last system on every page()', async () => {
+  const fakePage = {} as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [{ id: 'ucpath', login: async () => {} }, { id: 'crm', login: async () => {} }],
+    browsers: new Map([
+      ['ucpath', { page: fakePage, browser: null as never, context: null as never }],
+      ['crm', { page: fakePage, browser: null as never, context: null as never }],
+    ]),
+    readyPromises: new Map([
+      ['ucpath', Promise.resolve()],
+      ['crm', Promise.resolve()],
+    ]),
+  })
+
+  // No page touched yet.
+  assert.deepEqual(s.pageAccess(), { seq: 0, system: null })
+
+  await s.page('ucpath')
+  assert.deepEqual(s.pageAccess(), { seq: 1, system: 'ucpath' })
+
+  await s.page('crm')
+  assert.deepEqual(s.pageAccess(), { seq: 2, system: 'crm' })
+
+  // A second access of the same system still advances the counter (so a step
+  // that re-fetches the same page is detected as having touched a browser).
+  await s.page('crm')
+  assert.deepEqual(s.pageAccess(), { seq: 3, system: 'crm' })
 })
 
 test('session.launch (1 system): fast path — no settle, no stagger, just one login', async () => {

@@ -10,6 +10,7 @@ import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
 import { idleRefreshCadence } from '../../domain/idle-refresh.js'
 import { classifyBrowserHealth, isLoginLikeUrl, type BrowserHealthVerdict } from '../../domain/browser-health.js'
+import { stitchCaptureBands, type CaptureBand } from './capture-stitch.js'
 
 /**
  * Per-system idle-refresh runtime state. One entry per system in this
@@ -62,7 +63,7 @@ const HEALTH_MONITOR_MAX_REOPEN = 3
 export function formatCaptureFilename(args: {
   workflow: string
   itemId: string
-  kind: 'form' | 'error' | 'manual'
+  kind: 'form' | 'error' | 'manual' | 'step'
   label: string
   system: string
   ts: number
@@ -137,6 +138,30 @@ export function computeSliceOffsets(
     if (clamped >= maxY) break
   }
   return ys
+}
+
+/**
+ * Pure: when a page is only slightly taller than one scroll band, the last
+ * offset is clamped to `maxY` so the final pair of bands overlap far more than
+ * the designed `overlap` — producing near-duplicate `-cNN` slices. Return true
+ * when that clamp is detected so the capture can auto-stitch into one image.
+ *
+ * Rule: >=2 offsets AND the last gap is less than `bandHeight - overlap` (the
+ * designed step). Tall pages whose interior offsets already stepped at the
+ * designed gap keep slicing — only the bottom-clamped short-page case returns
+ * true.
+ */
+export function shouldAutoStitchOffsets(
+  offsets: number[],
+  bandHeight: number,
+  overlap: number,
+): boolean {
+  if (offsets.length < 2) return false
+  const designStep = Math.max(1, bandHeight - overlap)
+  const lastGap = offsets[offsets.length - 1] - offsets[offsets.length - 2]
+  if (lastGap >= designStep) return false
+  if (offsets.length > 2 && offsets[1] - offsets[0] >= designStep) return false
+  return true
 }
 
 interface SystemSlot {
@@ -222,6 +247,17 @@ export class Session {
   private parent: Session | null = null
   /** Per-system idle-refresh state, keyed by system id. Empty until launch. */
   private idleStates = new Map<string, IdleRefreshState>()
+  /**
+   * Monotonic counter bumped on every handler `page(id)` call, plus the id of
+   * the most recently accessed system. The Stepper reads `pageAccess()` at step
+   * boundaries to take an end-of-step audit screenshot of the ONE system the
+   * step actually touched: a step whose body never resolved a page leaves the
+   * counter unchanged → no capture (a pure-compute step), and a multi-system run
+   * still yields one screenshot per step (the last-touched page) rather than one
+   * per open page. Per-Session, so a worker child tracks its own access.
+   */
+  private pageAccessSeq = 0
+  private lastAccessedSystem: string | null = null
   /** When true, skip idle reload (handler is inside a `ctx.step` body). Global across systems. */
   private idleGuard: () => boolean = () => false
   /** Global cadence override (tests). Applies to every idle-refresh system. */
@@ -252,6 +288,8 @@ export class Session {
    * `this.parent.authInProgress` so the parent's auth covers the child too.
    */
   private authInProgress = false
+  /** Systems whose Chromium process disconnected during this session lifetime. */
+  private browserDisconnectIds = new Set<string>()
 
   private constructor(private state: SessionState) {}
 
@@ -610,7 +648,23 @@ export class Session {
     }
     if (!slot) throw new Error(`no browser for system: ${id}`)
     if (this.idleStates.has(id)) this.noteIdleActivity(id)
+    // Record handler page access for the Stepper's end-of-step screenshot. This
+    // is the funnel every `ctx.page(id)` / `ctx.session.page(id)` call hits;
+    // internal kernel paths (health monitor, idle reload, reset) touch
+    // `slot.page` directly and deliberately do NOT bump this.
+    this.pageAccessSeq += 1
+    this.lastAccessedSystem = id
     return slot.page
+  }
+
+  /**
+   * Snapshot of handler page access — the monotonic `page(id)` counter and the
+   * most recently accessed system id. The Stepper compares the counter across a
+   * step body to decide whether the step touched a browser (and which one) for
+   * its end-of-step audit screenshot. See `pageAccessSeq` / `lastAccessedSystem`.
+   */
+  pageAccess(): { seq: number; system: string | null } {
+    return { seq: this.pageAccessSeq, system: this.lastAccessedSystem }
   }
 
   async close(): Promise<void> {
@@ -723,6 +777,21 @@ export class Session {
    * Worker slots (browser: null) are skipped — the parent owns browser
    * lifetime in shared-context-pool mode.
    */
+  /** True when any launched browser emitted `disconnected` (this session or parent). */
+  hadBrowserDisconnect(): boolean {
+    if (this.browserDisconnectIds.size > 0) return true
+    return this.parent?.hadBrowserDisconnect() ?? false
+  }
+
+  /** System ids whose browser process disconnected (includes parent pool browsers). */
+  disconnectedSystems(): ReadonlySet<string> {
+    const merged = new Set(this.browserDisconnectIds)
+    if (this.parent) {
+      for (const id of this.parent.disconnectedSystems()) merged.add(id)
+    }
+    return merged
+  }
+
   onBrowserDisconnect(handler: (systemId: string) => void): () => void {
     const registered: Array<{ browser: Browser; listener: () => void }> = []
     for (const [systemId, slot] of this.state.browsers) {
@@ -730,7 +799,10 @@ export class Session {
       // too so a stub Browser (tests) can't break the launch wiring that now
       // registers this internally.
       if (!slot.browser || typeof slot.browser.on !== 'function') continue
-      const listener = (): void => handler(systemId)
+      const listener = (): void => {
+        this.browserDisconnectIds.add(systemId)
+        handler(systemId)
+      }
       slot.browser.on('disconnected', listener)
       registered.push({ browser: slot.browser, listener })
     }
@@ -1117,98 +1189,318 @@ export class Session {
   /**
    * THE unified "whole page / whole form" audit capture. Every `ctx.screenshot()`
    * routes here (no per-caller mode soup). It captures the ENTIRE page or form —
-   * never a clipped portion — as ONE image when the page is short, or as a
-   * sequence of readable page-height SLICES (`-cNN`) when the page is tall, so a
-   * long form is a few readable pages the operator steps through, not one tiny
-   * unreadable long strip. Returns the file path(s) written.
+   * never a clipped portion — as ONE image when the content fits one viewport, or
+   * a sequence of readable page-height SLICES (`-cNN`) when it's tall, so a long
+   * form is a few readable pages the operator steps through, not one tiny strip.
+   * Returns the file path(s) written.
+   *
+   * **Technique — scroll-and-capture the PAINTED pixels** (the approach proven by
+   * full-page-screenshot browser extensions, adapted to Playwright). Rather than
+   * mutating the DOM to force `document.scrollHeight` tall and trusting
+   * `screenshot({fullPage})` to render off-screen content — which is unreliable
+   * when the real content lives inside a scroll container or a same-origin iframe
+   * (the Kuali finalization modal and the UCPath `#main_target_win0` frame both
+   * clipped under the old approach) — we find the element that ACTUALLY scrolls,
+   * scroll it one band at a time, and screenshot what is genuinely PAINTED at each
+   * position. Painted-pixel capture can't clip content the renderer never drew.
    *
    * Pipeline (each step best-effort + reversible, restored in `finally`):
-   *   1. `expandScrollContainers` — strip `overflow:auto/scroll` + `max-height`
-   *      caps off inner scroll containers (the Kuali finalization dialog is a
-   *      fixed `max-height` + `overflow:auto` modal) and bump body min-height for
-   *      a taller-than-page fixed modal, so the full content height is reachable.
-   *   2. `setCaptureWidth(CAPTURE.width)` — pin the layout viewport to a FIXED
+   *   1. `setCaptureWidth(CAPTURE.width)` — pin the layout viewport to a FIXED
    *      readable column width (1280) so a narrow/normal form captures the SAME
    *      width regardless of the tiled daemon window; widen BEYOND 1280 only for
-   *      genuinely wide content (PeopleSoft grids) so the whole grid stays in
-   *      frame. Done before the iframe grow so in-frame content reflows first.
-   *   3. `growOverflowingIframes` — grow the fixed-height (and nested) UCPath
-   *      PeopleSoft content frame to its inner `scrollHeight` so a tall in-frame
-   *      form is reachable by the outer-document capture.
-   *   4. measure full document height, then `computeSliceOffsets` → one
-   *      `page.screenshot({ fullPage:true, clip })` per slice. `clip` resolves
-   *      against the full-page render, so each slice is an exact pixel band of the
-   *      already-expanded page — reliable, unlike a scroll-and-measure that
-   *      collapses when the content lives in a scroll container/iframe.
+   *      genuinely wide content (PeopleSoft grids).
+   *   2. `planScrollCapture` — pick the DOMINANT scroll target (the window, an
+   *      inner `overflow:auto/scroll` container like the Kuali modal, or a
+   *      same-origin iframe like the UCPath content frame — whichever has the
+   *      most hidden overflow), tag it, and HIDE `position:fixed`/`sticky`
+   *      elements that aren't the target (so a sticky banner/header — e.g. the
+   *      "unsupported browser" bar pinned over the Kuali form — doesn't repeat in
+   *      every band). Returns the target's `scrollHeight` + visible band height.
+   *   3. `computeSliceOffsets(scrollHeight, bandHeight, …)` → for each offset,
+   *      `scrollCaptureTo(y)` scrolls the target there + returns its live on-screen
+   *      clip rect, then one `page.screenshot({ clip })` of the painted viewport.
+   *      A content-fits-one-viewport WINDOW page is a single tight `fullPage` shot.
    *
    * `slicePath(null)` names a single-image capture; `slicePath(i)` names slice i.
+   *
+   * `opts.stitch` composites the bands into ONE continuous image (written to
+   * `slicePath(null)`) instead of emitting them as separate `-cNN` slices — see
+   * `stitchCaptureBands`. A short (single-band) page is one image either way; a
+   * compositing failure degrades to writing the raw slices, so a capture is
+   * never lost.
    */
   static async captureFullPage(
     page: Page,
     slicePath: (chunk: number | null) => string,
+    opts?: { stitch?: boolean },
   ): Promise<string[]> {
-    let restoreFn: (() => Promise<void>) | null = null
     let restoreViewport: (() => Promise<void>) | null = null
-    let restoreIframes: (() => Promise<void>) | null = null
+    let restorePlan: (() => Promise<void>) | null = null
     const written: string[] = []
+    const fallbackFullPage = async (): Promise<void> => {
+      if (written.length > 0) return
+      try {
+        const p = slicePath(null)
+        await page.screenshot({ path: p, fullPage: true })
+        written.push(p)
+      } catch { /* best-effort */ }
+    }
     try {
-      restoreFn = await Session.expandScrollContainers(page)
       const maybeWaitForLoadState = page as unknown as {
         waitForLoadState?: (state: 'networkidle', options: { timeout: number }) => Promise<void>
+        waitForTimeout?: (ms: number) => Promise<void>
       }
       await maybeWaitForLoadState.waitForLoadState?.('networkidle', { timeout: 1_000 }).catch(() => {})
       const pin = await Session.setCaptureWidth(page, CAPTURE.width)
       restoreViewport = pin.restore
-      // Grow fixed-height same-origin iframes AFTER widening, so each frame's
-      // inner `scrollHeight` is measured at its final reflowed width.
-      restoreIframes = await Session.growOverflowingIframes(page)
 
-      const geom = await page.evaluate(() => ({
-        fullHeight: Math.max(
-          document.documentElement?.scrollHeight ?? 0,
-          document.body?.scrollHeight ?? 0,
-        ),
-        width: Math.max(
-          window.innerWidth || 0,
-          document.documentElement?.scrollWidth ?? 0,
-          document.body?.scrollWidth ?? 0,
-        ),
-      })).catch(() => ({ fullHeight: 0, width: 0 }))
-      const width = geom.width || pin.width
-      const fullHeight = geom.fullHeight
+      const plan = await Session.planScrollCapture(page)
+      restorePlan = async () => {
+        try {
+          await page.evaluate(() => {
+            const w = window as unknown as { __hrcapRestore?: () => void }
+            w.__hrcapRestore?.()
+          })
+        } catch { /* best-effort */ }
+      }
+      if (!plan || !Number.isFinite(plan.scrollHeight) || plan.scrollHeight <= 0) {
+        await fallbackFullPage()
+        return written
+      }
 
-      if (!fullHeight) {
+      const bandHeight = Math.max(1, Math.min(plan.clientHeight || CAPTURE.sliceHeight, CAPTURE.sliceHeight))
+      const offsets = computeSliceOffsets(plan.scrollHeight, bandHeight, CAPTURE.sliceOverlap, CAPTURE.maxSlices)
+      const autoStitch = shouldAutoStitchOffsets(offsets, bandHeight, CAPTURE.sliceOverlap)
+      const single = offsets.length === 1
+
+      // A short WINDOW page (fits one viewport) is a single tight fullPage shot —
+      // no scrolling, no whitespace padding below the content.
+      if (single && plan.mode === 'window') {
         const p = slicePath(null)
         await page.screenshot({ path: p, fullPage: true })
         written.push(p)
         return written
       }
 
-      const offsets = computeSliceOffsets(fullHeight, CAPTURE.sliceHeight, CAPTURE.sliceOverlap, CAPTURE.maxSlices)
-      const single = offsets.length === 1
-      for (let i = 0; i < offsets.length; i++) {
-        const y = offsets[i]
-        // `fullPage:true` is load-bearing WITH `clip` — it resolves the clip
-        // against the full-page image, not the viewport, so `y` can exceed one fold.
-        const height = single ? fullHeight : Math.min(CAPTURE.sliceHeight, fullHeight - y)
-        const p = single ? slicePath(null) : slicePath(i)
-        await page.screenshot({ path: p, fullPage: true, clip: { x: 0, y, width, height } })
-        written.push(p)
+      // Stitch mode: scroll-capture each band to a buffer, then composite them
+      // into ONE continuous image (overlap removed by exact scroll geometry)
+      // instead of writing separate `-cNN` slices. Also auto-stitch when the
+      // final band pair is heavily over-overlapped (slightly-taller-than-one-band).
+      if (opts?.stitch || autoStitch) {
+        const bands: Array<{ buffer: Buffer; offsetCss: number; clipHeightCss: number | null }> = []
+        for (let i = 0; i < offsets.length; i++) {
+          const clip = await Session.scrollCaptureTo(page, offsets[i])
+          await maybeWaitForLoadState.waitForTimeout?.(250).catch(() => {})
+          try {
+            const buffer = clip ? await page.screenshot({ clip }) : await page.screenshot()
+            bands.push({ buffer, offsetCss: offsets[i], clipHeightCss: clip ? clip.height : null })
+          } catch { /* best-effort — one band failure mustn't lose the rest */ }
+        }
+        if (bands.length === 1) {
+          // One band: no compositing needed — write it as the single image.
+          const p = slicePath(null)
+          try { await fs.writeFile(p, bands[0].buffer); written.push(p) } catch { /* best-effort */ }
+        } else if (bands.length > 1 && bands.every((b) => b.clipHeightCss && b.clipHeightCss > 0)) {
+          try {
+            const stitched = stitchCaptureBands(bands as CaptureBand[])
+            const p = slicePath(null)
+            await fs.writeFile(p, stitched)
+            written.push(p)
+          } catch { /* compositing failed — degrade to raw slices below */ }
+        }
+        // Degrade: stitch couldn't run (missing clip / decode failure). Write the
+        // captured bands as the usual `-cNN` slices so the capture is never lost.
+        if (written.length === 0 && bands.length > 0) {
+          for (let i = 0; i < bands.length; i++) {
+            const p = bands.length === 1 ? slicePath(null) : slicePath(i)
+            try { await fs.writeFile(p, bands[i].buffer); written.push(p) } catch { /* best-effort */ }
+          }
+        }
+        if (written.length === 0) await fallbackFullPage()
+        return written
       }
+
+      for (let i = 0; i < offsets.length; i++) {
+        const clip = await Session.scrollCaptureTo(page, offsets[i])
+        await maybeWaitForLoadState.waitForTimeout?.(250).catch(() => {})
+        const p = single ? slicePath(null) : slicePath(i)
+        try {
+          if (clip) await page.screenshot({ path: p, clip })
+          else await page.screenshot({ path: p })
+          written.push(p)
+        } catch { /* best-effort — one band failure mustn't lose the rest */ }
+      }
+      if (written.length === 0) await fallbackFullPage()
       return written
     } catch {
-      if (written.length === 0) {
-        try {
-          const p = slicePath(null)
-          await page.screenshot({ path: p, fullPage: true })
-          written.push(p)
-        } catch { /* best-effort */ }
-      }
+      await fallbackFullPage()
       return written
     } finally {
-      if (restoreIframes) await restoreIframes()
+      if (restorePlan) await restorePlan()
       if (restoreViewport) await restoreViewport()
-      if (restoreFn) await restoreFn()
+    }
+  }
+
+  /**
+   * Pick the DOMINANT scroll target for a painted-pixel capture and prep the page
+   * for it. Compares the hidden overflow of (a) the window, (b) every visible
+   * `overflow:auto/scroll` element that fills a meaningful slice of the viewport,
+   * and (c) every same-origin iframe's scrolling document, and selects whichever
+   * has the most off-screen content. Tags the chosen element/iframe (`data-hrcap`
+   * / `data-hrcap-frame`) so `scrollCaptureTo` can drive it across evaluate calls,
+   * and hides `position:fixed`/`sticky` chrome that isn't part of the target chain
+   * (so it doesn't reprint in every band). Stashes a `window.__hrcapRestore` that
+   * un-hides + un-tags. Returns the target's `scrollHeight` and visible band
+   * height, or null on failure (caller falls back to a plain fullPage shot).
+   *
+   * Written as ITERATIVE evaluate code — a NAMED nested function/arrow inside
+   * `page.evaluate` trips the esbuild/tsx `__name` keep-names helper (undefined in
+   * the browser → the whole evaluate throws); see `src/core/CLAUDE.md`.
+   */
+  private static async planScrollCapture(page: Page): Promise<
+    { mode: 'window' | 'element' | 'iframe'; scrollHeight: number; clientHeight: number } | null
+  > {
+    try {
+      const plan = await page.evaluate(() => {
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        const docH = Math.max(
+          document.documentElement ? document.documentElement.scrollHeight : 0,
+          document.body ? document.body.scrollHeight : 0,
+        )
+        const winOverflow = Math.max(0, docH - vh)
+        const MIN_OVERFLOW = 40
+        const MIN_HEIGHT_FRAC = 0.35
+        const MIN_WIDTH_FRAC = 0.3
+        const SCAN_CAP = 25_000
+        const all = document.querySelectorAll<HTMLElement>('*')
+        const scanN = Math.min(all.length, SCAN_CAP)
+
+        // (b) dominant scrollable element in this document.
+        let bestEl: HTMLElement | null = null
+        let bestElOverflow = 0
+        for (let i = 0; i < scanN; i++) {
+          const el = all[i]
+          const cs = getComputedStyle(el)
+          const oy = cs.overflowY
+          if (!(oy === 'auto' || oy === 'scroll')) continue
+          const ov = el.scrollHeight - el.clientHeight
+          if (ov <= MIN_OVERFLOW) continue
+          const r = el.getBoundingClientRect()
+          if (r.height < vh * MIN_HEIGHT_FRAC || r.width < vw * MIN_WIDTH_FRAC) continue
+          if (ov > bestElOverflow) { bestElOverflow = ov; bestEl = el }
+        }
+
+        // (c) dominant scrollable same-origin iframe.
+        let bestFrame: HTMLIFrameElement | null = null
+        let bestFrameOverflow = 0
+        let bestFrameScrollHeight = 0
+        const frames = document.querySelectorAll('iframe')
+        for (let i = 0; i < frames.length; i++) {
+          const f = frames[i]
+          let cdoc: Document | null
+          try { cdoc = f.contentDocument } catch { cdoc = null }
+          if (!cdoc || !cdoc.documentElement) continue
+          const se = cdoc.scrollingElement || cdoc.documentElement
+          const ov = se.scrollHeight - se.clientHeight
+          if (ov <= MIN_OVERFLOW) continue
+          const r = f.getBoundingClientRect()
+          if (r.height < vh * MIN_HEIGHT_FRAC || r.width < vw * MIN_WIDTH_FRAC) continue
+          if (ov > bestFrameOverflow) { bestFrameOverflow = ov; bestFrame = f; bestFrameScrollHeight = se.scrollHeight }
+        }
+
+        // Choose the target with the most hidden overflow. Prefer the window on a
+        // tie/within-window content (it shows everything in one column).
+        let mode: 'window' | 'element' | 'iframe' = 'window'
+        let scrollHeight = docH
+        let clientHeight = vh
+        let chainStart: HTMLElement | null = null
+        if (bestFrame && bestFrameOverflow > winOverflow && bestFrameOverflow >= bestElOverflow) {
+          mode = 'iframe'
+          chainStart = bestFrame
+          scrollHeight = bestFrameScrollHeight
+          const r = bestFrame.getBoundingClientRect()
+          clientHeight = Math.max(1, Math.min(r.height, vh))
+          bestFrame.setAttribute('data-hrcap-frame', '1')
+        } else if (bestEl && bestElOverflow > winOverflow) {
+          mode = 'element'
+          chainStart = bestEl
+          scrollHeight = bestEl.scrollHeight
+          const r = bestEl.getBoundingClientRect()
+          clientHeight = Math.max(1, Math.min(bestEl.clientHeight, r.height, vh))
+          bestEl.setAttribute('data-hrcap', '1')
+        }
+
+        // Keep the target + its ancestors visible; hide other fixed/sticky chrome.
+        const keep = new Set<HTMLElement>()
+        let c: HTMLElement | null = chainStart
+        while (c) { keep.add(c); c = c.parentElement }
+        const hidden: Array<[HTMLElement, string]> = []
+        for (let i = 0; i < scanN; i++) {
+          const el = all[i]
+          const cs = getComputedStyle(el)
+          if (cs.position !== 'fixed' && cs.position !== 'sticky') continue
+          if (keep.has(el)) continue
+          if (chainStart && el.contains(chainStart)) continue
+          hidden.push([el, el.style.display])
+          el.style.display = 'none'
+        }
+
+        ;(window as unknown as { __hrcapRestore?: () => void }).__hrcapRestore = () => {
+          for (const pair of hidden) { try { pair[0].style.display = pair[1] } catch { /* ignore */ } }
+          const fr = document.querySelector('[data-hrcap-frame]'); if (fr) fr.removeAttribute('data-hrcap-frame')
+          const te = document.querySelector('[data-hrcap]'); if (te) te.removeAttribute('data-hrcap')
+          try { window.scrollTo(0, 0) } catch { /* ignore */ }
+          delete (window as unknown as { __hrcapRestore?: () => void }).__hrcapRestore
+        }
+
+        return { mode, scrollHeight, clientHeight }
+      })
+      return plan
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Scroll the tagged capture target (iframe content / inner element / window) to
+   * vertical offset `y` and return its live on-screen clip rect (CSS px, clamped
+   * to the viewport) for the next `page.screenshot({ clip })`. Best-effort — a
+   * scroll/measure failure returns null and the caller shoots the bare viewport.
+   */
+  private static async scrollCaptureTo(
+    page: Page,
+    y: number,
+  ): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    try {
+      return await page.evaluate((offset: number) => {
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        let rect: { left: number; top: number; width: number; height: number } | null
+        const frame = document.querySelector('[data-hrcap-frame]') as HTMLIFrameElement | null
+        if (frame) {
+          try { frame.contentWindow?.scrollTo(0, offset) } catch { /* ignore */ }
+          const r = frame.getBoundingClientRect()
+          rect = { left: r.left, top: r.top, width: r.width, height: r.height }
+        } else {
+          const el = document.querySelector('[data-hrcap]') as HTMLElement | null
+          if (el) {
+            el.scrollTop = offset
+            const r = el.getBoundingClientRect()
+            rect = { left: r.left, top: r.top, width: r.width, height: r.height }
+          } else {
+            window.scrollTo(0, offset)
+            rect = { left: 0, top: 0, width: vw, height: vh }
+          }
+        }
+        const x0 = Math.max(0, rect.left)
+        const y0 = Math.max(0, rect.top)
+        const x1 = Math.min(vw, rect.left + rect.width)
+        const y1 = Math.min(vh, rect.top + rect.height)
+        return { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) }
+      }, y)
+    } catch {
+      return null
     }
   }
 
@@ -1266,100 +1558,6 @@ export class Session {
   }
 
   /**
-   * Grow every SAME-ORIGIN iframe whose inner content overflows its rendered
-   * box to its full inner content height — RECURSIVELY through nested frames —
-   * and return a best-effort restore callback. A fixed-height iframe (the UCPath
-   * PeopleSoft content frame `#main_target_win0` is `height:520px` with its own
-   * scroll) clips a tall form: reaching INTO the frame with
-   * `frameLocator(...).screenshot()` still captures only the visible fold, and a
-   * plain `fullPage` on the OUTER document stops at the iframe's rendered height.
-   * Growing the iframe ELEMENT to its inner `scrollHeight` (after stripping the
-   * inner document's overflow caps) makes a subsequent `fullPage` include the
-   * entire in-frame form.
-   *
-   * PeopleSoft nests its content frame inside an outer frame, so a top-level-only
-   * walk never reaches it. We recurse POST-ORDER: grow a frame's OWN nested
-   * iframes first, so when we measure this frame's inner `scrollHeight` it already
-   * reflects its grown descendants, then grow this frame to fit. Cross-origin
-   * frames throw on `contentDocument` access and are skipped (best-effort).
-   * Verified against synthetic single- and nested-iframe UCPath pages.
-   */
-  private static async growOverflowingIframes(page: Page): Promise<() => Promise<void>> {
-    await page.evaluate(() => {
-      const saved: Array<{ el: HTMLIFrameElement; height: string; innerCss: Array<[HTMLElement, string]> }> = []
-      // Collect every same-origin (iframe element → its document) pair tagged with
-      // nesting depth, breadth-first. NOTE: this is an ITERATIVE traversal on
-      // purpose — a NAMED nested function/arrow inside `page.evaluate` trips the
-      // esbuild/tsx `__name` helper (undefined in the browser → the whole evaluate
-      // throws and is swallowed by the `.catch` below, silently growing nothing).
-      const MAX_FRAME_DEPTH = 6 // runaway guard for pathological frame nesting
-      const collected: Array<{ el: HTMLIFrameElement; doc: Document; depth: number }> = []
-      const queue: Array<{ doc: Document; depth: number }> = [{ doc: document, depth: 0 }]
-      while (queue.length) {
-        const node = queue.shift()!
-        if (node.depth > MAX_FRAME_DEPTH) continue
-        for (const el of Array.from(node.doc.querySelectorAll('iframe'))) {
-          try {
-            const childDoc = el.contentDocument
-            if (!childDoc || !childDoc.documentElement) continue // cross-origin or not loaded
-            collected.push({ el, doc: childDoc, depth: node.depth + 1 })
-            queue.push({ doc: childDoc, depth: node.depth + 1 })
-          } catch { /* cross-origin iframe — skip */ }
-        }
-      }
-      // Grow DEEPEST frames first, so when a parent frame is measured its inner
-      // `scrollHeight` already reflects its grown children (the PeopleSoft content
-      // frame is nested inside an outer frame).
-      collected.sort((a, b) => b.depth - a.depth)
-      for (const { el, doc } of collected) {
-        try {
-          // Strip inner-scroll overflow caps so scrollHeight reflects full content.
-          // Detect by COMPUTED style across all elements (a stylesheet rule, not
-          // just inline `style=`/class names, can set the cap).
-          const innerCss: Array<[HTMLElement, string]> = []
-          const view = doc.defaultView
-          for (const inner of Array.from(doc.querySelectorAll<HTMLElement>('*'))) {
-            const cs = view ? view.getComputedStyle(inner) : null
-            if (!cs) continue
-            const scrolls =
-              (cs.overflowY === 'auto' || cs.overflowY === 'scroll') &&
-              inner.scrollHeight > inner.clientHeight + 2
-            const capped = cs.maxHeight !== 'none' && parseFloat(cs.maxHeight) > 0 &&
-              inner.scrollHeight > inner.clientHeight + 2
-            if (!scrolls && !capped) continue
-            innerCss.push([inner, inner.style.cssText])
-            inner.style.overflow = 'visible'; inner.style.maxHeight = 'none'; inner.style.height = 'auto'
-          }
-          if (view) view.scrollTo(0, 0)
-          const innerH = Math.max(doc.documentElement.scrollHeight, doc.body ? doc.body.scrollHeight : 0)
-          const rendered = el.getBoundingClientRect().height
-          if (innerH > rendered + 2) {
-            saved.push({ el, height: el.style.height, innerCss })
-            el.style.height = `${innerH}px`
-          } else if (innerCss.length) {
-            saved.push({ el, height: el.style.height, innerCss })
-          }
-        } catch { /* per-frame best-effort */ }
-      }
-      ;(window as unknown as { __restoreIframes?: () => void }).__restoreIframes = () => {
-        for (const s of saved) {
-          s.el.style.height = s.height
-          for (const [inner, css] of s.innerCss) inner.style.cssText = css
-        }
-        delete (window as unknown as { __restoreIframes?: () => void }).__restoreIframes
-      }
-    }).catch(() => {})
-    return async () => {
-      try {
-        await page.evaluate(() => {
-          const w = window as unknown as { __restoreIframes?: () => void }
-          w.__restoreIframes?.()
-        })
-      } catch { /* best-effort */ }
-    }
-  }
-
-  /**
    * Capture the VIEWPORT (NOT `fullPage`) after scrolling `selector`'s element to
    * the vertical CENTER of the view (`scrollIntoView({ block: 'center' })`). This
    * is the capture for virtual-scroll grids (Old / New Kronos timecards), where
@@ -1393,114 +1591,6 @@ export class Session {
       return path
     } catch {
       return null
-    }
-  }
-
-  /**
-   * Strip `overflow`/`max-height`/`height` caps from every scrollable inner
-   * container (Kuali modals, PeopleSoft frames) so a subsequent `fullPage`
-   * capture sees the full content height, and return a best-effort restore
-   * callback. Used by the unified `captureFullPage`. See its doc comment for why
-   * each cap is neutralized.
-   */
-  private static async expandScrollContainers(page: Page): Promise<() => Promise<void>> {
-    await page.evaluate(() => {
-      interface Saved {
-        el: HTMLElement
-        overflow: string
-        overflowX: string
-        overflowY: string
-        maxHeight: string
-        height: string
-        minHeight: string
-      }
-      const saved: Saved[] = []
-      // Detect scroll containers by COMPUTED style across EVERY element, not by
-      // a name-based selector. The Kuali finalization dialog sets `overflow:auto`
-      // + `max-height` via a STYLESHEET rule on a `class="dialog"` element — a
-      // `[style*=overflow], .modal, [class*=scroll]` selector never matches it,
-      // so the old pre-filter silently skipped it and the modal clipped at its
-      // max-height fold. Two passes (read-only detect, then mutate) so reading
-      // `scrollHeight` isn't interleaved with style writes — that would force a
-      // reflow per element and make an all-element scan O(n²). A hard cap keeps
-      // a pathological DOM (the 30k-px CRM record) from stalling the audit shot.
-      const ELEMENT_SCAN_CAP = 25_000
-      const all = document.querySelectorAll<HTMLElement>('*')
-      const toExpand: HTMLElement[] = []
-      const scanLimit = Math.min(all.length, ELEMENT_SCAN_CAP)
-      for (let i = 0; i < scanLimit; i++) {
-        const el = all[i]
-        const s = getComputedStyle(el)
-        const scrolls =
-          (s.overflowY === 'auto' || s.overflowY === 'scroll' || s.overflowX === 'auto' || s.overflowX === 'scroll') &&
-          (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)
-        const constrained =
-          s.maxHeight !== 'none' &&
-          parseFloat(s.maxHeight) > 0 &&
-          el.scrollHeight > el.clientHeight + 2
-        if (scrolls || constrained) toExpand.push(el)
-      }
-      for (const el of toExpand) {
-        saved.push({
-          el,
-          overflow: el.style.overflow,
-          overflowX: el.style.overflowX,
-          overflowY: el.style.overflowY,
-          maxHeight: el.style.maxHeight,
-          height: el.style.height,
-          minHeight: el.style.minHeight,
-        })
-        el.style.overflow = 'visible'
-        el.style.overflowX = 'visible'
-        el.style.overflowY = 'visible'
-        el.style.maxHeight = 'none'
-        el.style.height = 'auto'
-        el.style.minHeight = '0'
-      }
-      window.scrollTo(0, 0)
-      void document.body.offsetHeight
-      // A `position:fixed`/`absolute` container (the Kuali finalization dialog is
-      // a fixed, centered modal) is OUT of document flow, so growing it does NOT
-      // grow `document.scrollHeight`. A `fullPage` shot is sized to scrollHeight,
-      // so a modal whose EXPANDED content runs taller than the page behind it
-      // (a long Kuali form over the short Action List) clips at the bottom. Bump
-      // `body` min-height to cover the tallest expanded out-of-flow container so
-      // fullPage's measured height includes all of it. Re-read scrollHeight AFTER
-      // the offsetHeight reflow above so the comparison is against final layout.
-      const prevBodyMinHeight = document.body.style.minHeight
-      let maxBottom = 0
-      for (const el of toExpand) {
-        const pos = getComputedStyle(el).position
-        if (pos !== 'fixed' && pos !== 'absolute') continue
-        const r = el.getBoundingClientRect()
-        const bottom = r.top + window.scrollY + el.scrollHeight
-        if (bottom > maxBottom) maxBottom = bottom
-      }
-      const docHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
-      if (maxBottom > docHeight) {
-        document.body.style.minHeight = `${Math.ceil(maxBottom)}px`
-        void document.body.offsetHeight
-      }
-      ;(window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers = () => {
-        for (const r of saved) {
-          r.el.style.overflow = r.overflow
-          r.el.style.overflowX = r.overflowX
-          r.el.style.overflowY = r.overflowY
-          r.el.style.maxHeight = r.maxHeight
-          r.el.style.height = r.height
-          r.el.style.minHeight = r.minHeight
-        }
-        document.body.style.minHeight = prevBodyMinHeight
-        delete (window as unknown as { __restoreScrollContainers?: () => void }).__restoreScrollContainers
-      }
-    })
-    return async () => {
-      try {
-        await page.evaluate(() => {
-          const w = window as unknown as { __restoreScrollContainers?: () => void }
-          w.__restoreScrollContainers?.()
-        })
-      } catch { /* best-effort */ }
     }
   }
 
@@ -1609,7 +1699,7 @@ export class Session {
           workflow: opts.workflow, itemId: opts.itemId, kind: opts.kind,
           label: opts.label, system, ts: opts.ts, chunk,
         }))
-      const written = await Session.captureFullPage(page, slicePath)
+      const written = await Session.captureFullPage(page, slicePath, { stitch: opts.stitch })
       for (const w of written) await fileMeta(w)
       return out
     } catch {

@@ -1,4 +1,4 @@
-import { classifyError } from '../../utils/errors.js'
+import { classifyError, isBrowserClosedError } from '../../utils/errors.js'
 import { log } from '../../utils/log.js'
 import { CancelledError, type ScreenshotFn } from './types.js'
 
@@ -19,9 +19,22 @@ export interface StepperOpts {
   /**
    * Optional screenshot callable invoked inside `step`'s catch, BEFORE `emitFailed` runs.
    * When present, the stepper calls it with { kind: "error", label: stepName }.
-   * Errors are swallowed; the original throw always wins.
+   * It is ALSO called on the SUCCESS path with { kind: "step", label: stepName,
+   * systems: [touchedSystem] } to capture an end-of-step audit screenshot — see
+   * `pageAccess`. Errors are swallowed; the step result always wins.
    */
   screenshotFn?: ScreenshotFn
+  /**
+   * Optional handler page-access snapshot (wired to `Session.pageAccess`). When
+   * present alongside `screenshotFn`, the stepper takes a `kind: "step"`
+   * screenshot at the END of each OUTERMOST step — but only when the step
+   * actually touched a browser page (the access `seq` advanced while the body
+   * ran), scoped to the last system it touched. So a pure-compute step or an
+   * auth `markStep` phase produces nothing, and a multi-system run yields one
+   * screenshot per step rather than one per open page. Omitted by stub/test
+   * callers, which then capture no per-step screenshots (today's behavior).
+   */
+  pageAccess?: () => { seq: number; system: string | null }
   /**
    * Cooperative-cancel probe. Polled at the start of every `step(name, fn)`
    * call before `emitStep`/`fn`. When it returns true, the stepper marks
@@ -35,6 +48,12 @@ export interface StepperOpts {
    * for cancellation, preserving today's behavior verbatim.
    */
   isCancelRequested?: () => boolean
+  /**
+   * True when a browser disconnect was recorded on the run's Session — lets
+   * Target-closed Playwright rejections classify as cancelled even if the
+   * per-run abort signal hasn't been observed yet (disconnect/cancel race).
+   */
+  hadBrowserDisconnect?: () => boolean
   /**
    * Names of steps the caller (dashboard step-preset gear, etc.) marked
    * skipped via the `runtimeOptions.skipSteps` channel. Exposed to the
@@ -61,6 +80,8 @@ export class Stepper {
   private currentStep: string | null = null
   /** Nesting depth of `step()` bodies currently executing (0 = no active step). */
   private stepDepth = 0
+  /** Explicit `ctx.screenshot` calls during the current outermost step body. */
+  private explicitScreenshotsDuringStep = 0
 
   constructor(private opts: StepperOpts) {}
 
@@ -106,7 +127,12 @@ export class Stepper {
     }
     this.announce(name)
     this.stepDepth++
+    if (this.stepDepth === 1) this.explicitScreenshotsDuringStep = 0
     const startedAt = Date.now()
+    // Page-access counter before the body runs — compared after success to know
+    // whether this step touched a browser (and which system) for its end-of-step
+    // screenshot. `null` when no `pageAccess` is wired (stub/test runs).
+    const accessSeqBefore = this.opts.pageAccess?.().seq ?? null
     try {
       const result = await fn()
       // Run-scope `step:done` event — the harness can `waitForEvent(
@@ -115,6 +141,30 @@ export class Stepper {
       // Carries the wall-clock duration. See
       // docs/engineering/structured-log-events.md.
       log.step({ message: `Phase done: ${name}`, event: "step:done", step: name, durationMs: Date.now() - startedAt })
+      // End-of-step audit screenshot — symmetric with the error capture below,
+      // but on the success path. Only the OUTERMOST step captures (stepDepth
+      // is still 1 here; the `finally` decrements it), and only when the step
+      // actually touched a browser page (the access seq advanced) — so nested
+      // sub-steps, pure-compute steps, and `markStep` auth phases produce no
+      // shot. Scoped to the one last-touched system. Best-effort: a capture
+      // failure must never fail a step that already succeeded.
+      if (this.opts.screenshotFn && accessSeqBefore !== null && this.stepDepth === 1) {
+        const access = this.opts.pageAccess?.()
+        if (
+          access?.system &&
+          access.seq > accessSeqBefore &&
+          this.explicitScreenshotsDuringStep === 0
+        ) {
+          try {
+            await this.opts.screenshotFn({
+              kind: 'step',
+              label: name,
+              systems: [access.system],
+              stitch: true,
+            })
+          } catch { /* best-effort */ }
+        }
+      }
       return result
     } catch (err) {
       // CancelledError thrown from inside `fn` (e.g. handler explicitly
@@ -132,6 +182,12 @@ export class Stepper {
       // 'cancelled' step name matches `runOneItem`'s outer-boundary
       // CancelledError — operator-visible cancel messages stay consistent
       // regardless of where the cancellation was intercepted.
+      if (
+        isBrowserClosedError(err)
+        && (this.opts.isCancelRequested?.() || this.opts.hadBrowserDisconnect?.())
+      ) {
+        this.throwCancelled('cancelled')
+      }
       if (this.opts.isCancelRequested?.()) {
         this.throwCancelled('cancelled')
       }
@@ -141,7 +197,8 @@ export class Stepper {
       if (this.opts.screenshotFn) {
         try { await this.opts.screenshotFn({ kind: 'error', label: name }) } catch { /* best-effort */ }
       }
-      const classified = classifyError(err)
+      const systemId = this.opts.pageAccess?.().system ?? undefined
+      const classified = classifyError(err, { systemId })
       this.opts.emitFailed(name, classified)
       throw err
     } finally {
@@ -256,6 +313,18 @@ export class Stepper {
    *  supply a ScreenshotFn that closes over the stepper itself (for currentStep). */
   setScreenshotFn(fn: ScreenshotFn): void {
     this.opts.screenshotFn = fn
+  }
+
+  /** Back-patch the page-access snapshot after construction. Wired by
+   *  handler-runner to `Session.pageAccess`, enabling end-of-step screenshots. */
+  setPageAccess(fn: () => { seq: number; system: string | null }): void {
+    this.opts.pageAccess = fn
+  }
+
+  /** Called by `ctx.screenshot` when a handler takes an explicit audit shot
+   *  during a step — suppresses the automatic end-of-step duplicate. */
+  noteExplicitScreenshot(): void {
+    if (this.stepDepth > 0) this.explicitScreenshotsDuringStep += 1
   }
 
   getData(): Record<string, unknown> {

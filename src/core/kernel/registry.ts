@@ -60,10 +60,10 @@ export function autoLabel(key: string): string {
  * only non-default values ride through.
  */
 export function normalizeDetailField(
-  entry: string | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean },
-): { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean } {
+  entry: string | { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean; inputKind?: 'text' | 'id' | 'date'; group?: string },
+): { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean; inputKind?: 'text' | 'id' | 'date'; group?: string } {
   if (typeof entry === 'string') return { key: entry, label: autoLabel(entry) }
-  const out: { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean } = {
+  const out: { key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean; inputKind?: 'text' | 'id' | 'date'; group?: string } = {
     key: entry.key,
     label: entry.label,
   }
@@ -71,5 +71,8 @@ export function normalizeDetailField(
   if (entry.displayInGrid === false) out.displayInGrid = false
   if (entry.multiline) out.multiline = true
   if (entry.conditional) out.conditional = true
+  // Edit Data layout hints (default `text` / ungrouped are dropped to keep the wire compact).
+  if (entry.inputKind && entry.inputKind !== 'text') out.inputKind = entry.inputKind
+  if (entry.group) out.group = entry.group
   return out
 }

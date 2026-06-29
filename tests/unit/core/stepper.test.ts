@@ -1,6 +1,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { Stepper } from '../../../src/core/kernel/stepper.js'
+import { CancelledError } from '../../../src/core/kernel/types.js'
 
 interface RecordedEvent {
   kind: 'step' | 'data' | 'done' | 'failed'
@@ -229,7 +230,7 @@ test('stepper calls screenshotFn on step failure with { kind: "error", label: st
   assert.equal(captured[0].label, 'boom')
 })
 
-test('stepper does not call screenshotFn on success', async () => {
+test('stepper does not capture on success when pageAccess is not wired', async () => {
   const captured: import('../../../src/core/kernel/types.js').ScreenshotOpts[] = []
   const stepper = new Stepper({
     workflow: 't',
@@ -242,10 +243,71 @@ test('stepper does not call screenshotFn on success', async () => {
       captured.push(opts)
       return { kind: opts.kind, label: opts.label, step: null, ts: Date.now(), files: [] }
     },
+    // no pageAccess → no end-of-step capture (stub/test default behavior)
   })
   const result = await stepper.step('ok', async () => 42)
   assert.equal(result, 42)
   assert.deepEqual(captured, [])
+})
+
+// --- End-of-step audit screenshots (success path) ---
+
+function mkCaptureStepper(pageAccess: () => { seq: number; system: string | null }) {
+  const captured: import('../../../src/core/kernel/types.js').ScreenshotOpts[] = []
+  const stepper = new Stepper({
+    workflow: 't',
+    itemId: '1',
+    runId: 'r',
+    emitStep: () => {},
+    emitData: () => {},
+    emitFailed: () => {},
+    screenshotFn: async (opts) => {
+      captured.push(opts)
+      return { kind: opts.kind, label: opts.label, step: null, ts: Date.now(), files: [] }
+    },
+    pageAccess,
+  })
+  return { stepper, captured }
+}
+
+test('stepper captures a kind:"step" screenshot of the touched system at end of step', async () => {
+  let seq = 0
+  const { stepper, captured } = mkCaptureStepper(() => ({ seq, system: 'ucpath' }))
+  // The body touches a browser page (simulated by advancing the access seq).
+  await stepper.step('person-search', async () => { seq += 1 })
+  assert.equal(captured.length, 1)
+  assert.equal(captured[0].kind, 'step')
+  assert.equal(captured[0].label, 'person-search')
+  assert.deepEqual(captured[0].systems, ['ucpath'])
+  assert.equal(captured[0].stitch, true)
+})
+
+test('stepper skips the end-of-step capture when the step already took an explicit screenshot', async () => {
+  let seq = 0
+  const { stepper, captured } = mkCaptureStepper(() => ({ seq, system: 'kuali' }))
+  await stepper.step('kuali-finalization', async () => {
+    seq += 1
+    stepper.noteExplicitScreenshot()
+  })
+  assert.deepEqual(captured, [])
+})
+
+test('stepper skips the end-of-step capture when the step touched no page (seq unchanged)', async () => {
+  // Constant seq: a prior step touched ucpath, but THIS step is pure compute.
+  const { stepper, captured } = mkCaptureStepper(() => ({ seq: 5, system: 'ucpath' }))
+  await stepper.step('extraction', async () => { /* no ctx.page() */ })
+  assert.deepEqual(captured, [])
+})
+
+test('stepper captures only the OUTERMOST step (nested steps roll up to one)', async () => {
+  let seq = 0
+  const { stepper, captured } = mkCaptureStepper(() => ({ seq, system: 'ucpath' }))
+  await stepper.step('outer', async () => {
+    seq += 1
+    await stepper.step('inner', async () => { seq += 1 })
+  })
+  assert.equal(captured.length, 1)
+  assert.equal(captured[0].label, 'outer')
 })
 
 test('stepper.isInsideStep: false outside step; true inside step fn', async () => {
@@ -267,4 +329,47 @@ test('stepper.isInsideStep: nested steps', async () => {
     assert.equal(stepper.isInsideStep(), true)
   })
   assert.equal(stepper.isInsideStep(), false)
+})
+
+test('stepper.step: browser disconnect + target-closed error → cancelled, not failed', async () => {
+  const events: RecordedEvent[] = []
+  const stepper = new Stepper({
+    workflow: 'wf',
+    itemId: 'id-1',
+    runId: 'run-1',
+    emitStep: (name) => events.push({ kind: 'step', step: name }),
+    emitData: () => {},
+    emitFailed: (step, error) => events.push({ kind: 'failed', step, error }),
+    isCancelRequested: () => false,
+    hadBrowserDisconnect: () => true,
+  })
+  await assert.rejects(
+    () => stepper.step('searching', async () => {
+      throw new Error('Target page, context or browser has been closed')
+    }),
+    (err: unknown) => err instanceof CancelledError,
+  )
+  assert.ok(events.some((e) => e.kind === 'step' && e.step === 'cancelled'))
+  assert.equal(events.some((e) => e.kind === 'failed'), false)
+})
+
+test('stepper.step: genuine target-closed failure includes systemId in message', async () => {
+  const events: RecordedEvent[] = []
+  const stepper = new Stepper({
+    workflow: 'wf',
+    itemId: 'id-1',
+    runId: 'run-1',
+    emitStep: (name) => events.push({ kind: 'step', step: name }),
+    emitData: () => {},
+    emitFailed: (step, error) => events.push({ kind: 'failed', step, error }),
+    pageAccess: () => ({ seq: 1, system: 'new-kronos' }),
+  })
+  await assert.rejects(
+    () => stepper.step('searching', async () => {
+      throw new Error('Target page, context or browser has been closed')
+    }),
+    /Target page/,
+  )
+  const failed = events.find((e) => e.kind === 'failed')
+  assert.equal(failed?.error, 'Browser closed unexpectedly (new-kronos)')
 })
