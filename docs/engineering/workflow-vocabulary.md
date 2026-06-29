@@ -75,7 +75,7 @@ the parent can `await` the child's terminal status.
   Example: OCR row that waits for the operator to confirm extracted rows
   before fanning out.
 - **Use delegated single otherwise.**
-  Example: OCR delegating eid-lookup once per unmatched name.
+  Example: OCR delegating person-lookup once per unmatched name.
 
 ### How the variant is decided
 
@@ -98,7 +98,7 @@ defineWorkflow({
 });
 
 defineWorkflow({
-  name: "eid-lookup",
+  name: "person-lookup",
   archetype: "single",
 });
 ```
@@ -115,11 +115,11 @@ Even if the child workflow's archetype is `single`, calling
 batch row in the child's tab, with each input as a batch member.
 
 ```ts
-await ctx.delegateToAll(eidLookup, [oneInput]);
-// → 1 single row in eid-lookup's tab
+await ctx.delegateToAll(personLookup, [oneInput]);
+// → 1 single row in person-lookup's tab
 
-await ctx.delegateToAll(eidLookup, [input1, input2, input3]);
-// → 1 batch row in eid-lookup's tab, with 3 batch members
+await ctx.delegateToAll(personLookup, [input1, input2, input3]);
+// → 1 batch row in person-lookup's tab, with 3 batch members
 ```
 
 The rule: **N=1 degenerates to a single row. N≥2 produces a batch row
@@ -138,8 +138,8 @@ constantly needs overriding is a workflow with the wrong default.
 ocr tab:
 └── OCR for the PDF [approval row]
 
-eid-lookup tab:
-└── eid-lookup batch [batch row, delegated from OCR]
+person-lookup tab:
+└── person-lookup batch [batch row, delegated from OCR]
     ├── lookup for "John D."   [batch member]
     ├── lookup for "Mary S."   [batch member]
     └── lookup for "Sam K."    [batch member]
@@ -163,7 +163,7 @@ oath-upload tab:
 ocr tab:
 └── OCR for the PDF [approval row]
 
-eid-lookup tab:
+person-lookup tab:
 └── lookup for "John D." [single row, delegated from OCR]
     (no batch — only one person, so a single is enough)
 

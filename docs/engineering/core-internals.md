@@ -7,7 +7,7 @@ Full file-by-file reference for `src/core/`. Orientation, design invariants, and
 - `types.ts` — `WorkflowConfig`, `Ctx`, `SystemConfig`, `RunOpts`, `WorkflowMetadata`, `DetailField`, `RetryOpts`. Single source of truth for the kernel surface.
 - `workflow.ts` — `defineWorkflow`, `runWorkflowBatch` (sequential mode, wrapped in `withBatchLifecycle`), `buildTrackerOpts`, `deriveItemId`. `runWorkflowBatch` delegates to `runWorkflowPool` when `batch?.mode === "pool"` and to `runWorkflowSharedContextPool` when `"shared-context-pool"`. Public `runWorkflow` is re-exported from `run-workflow.ts`.
 - `run-workflow.ts` — `runWorkflow` (single-item entry point). Implements the kernel envelope around `runOneItem` for non-batch callers.
-- `session-observer.ts` — `createSessionObserver` factory used by `runWorkflow` and batch lifecycle for auth-timing observation.
+- `session-observer.ts` — `buildSessionObserver` factory used by `runWorkflow` and batch lifecycle for auth-timing observation.
 - `workflow-tracker-data.ts` — `buildInitialTrackerData`, `splitPrefilled`, `toRecord`, `deriveItemId` shared helpers (extracted from `workflow.ts`).
 - `pool.ts` — `runWorkflowPool`: N workers, each with its own Session. One Duo per worker. Queue-based distribution. Wraps body in `withBatchLifecycle` — per-worker `SessionObserver` captures per-worker `authTimings[]`.
 - `shared-context-pool.ts` — `runWorkflowSharedContextPool`: one parent Session, N worker views via `Session.forWorker`, lazy per-worker pages. Wraps body in `withBatchLifecycle` with a single observer + shared `authTimings[]`.
