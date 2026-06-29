@@ -30,6 +30,7 @@ import {
 } from "@/lib/onbase-document-types";
 import { resolveOnbaseModalFormType } from "@/components/run-modal/onbase-form-type";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
+import { resolveUploadBaseUrl } from "@/lib/upload-url";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
 
@@ -427,17 +428,12 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
     const submitUrl = config.submitUrl(ctx);
 
-    // Route uploads to the dashboard's dedicated upload port (3839 by
-    // default — see `uploadPort` in `startDashboard`). Different port =
-    // different browser origin = separate HTTP/1.1 connection pool, so
-    // a multi-second upload never competes with the dashboard's ~6
-    // long-lived SSE streams for Chrome's 6-connection-per-origin
-    // budget. CORS is wildcard on the backend; cross-origin POST works
-    // without preflight gymnastics. Same behavior in dev (page on
-    // :5173) and prod (page on :3838) — both reroute to :3839.
+    // Uploads go to the dashboard's dedicated upload port, derived from the
+    // serving location — see `resolveUploadBaseUrl` for the why (separate
+    // origin = separate connection pool, won't starve the SSE streams).
     const fullSubmitUrl =
       typeof window !== "undefined"
-        ? `${window.location.protocol}//${window.location.hostname}:3839${submitUrl}`
+        ? `${resolveUploadBaseUrl(window.location)}${submitUrl}`
         : submitUrl;
 
     // Use XHR so we get progress events. Fetch's upload progress is still
