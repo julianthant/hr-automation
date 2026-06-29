@@ -34,7 +34,17 @@
  * a workflow's `statusExtensions.derivedStatus` rule and used by the dashboard
  * to pick an alternate `STATUS_CONFIG` entry.
  */
-export type QueueRowDerivedStatus = "needsReview" | "notFound";
+export type QueueRowDerivedStatus =
+  | "needsReview"
+  | "notFound"
+  // separations EID-approval review: identity-check resolved a DIFFERENT EID by
+  // name and PAUSED for operator approval instead of silently overriding. The
+  // run is mechanically `done` (browsers released, queue proceeds); the row
+  // displays "Awaiting Approval" until the operator approves/dismisses.
+  | "awaitingApproval"
+  // operator reviewed an awaitingApproval row and chose NOT to re-queue (will
+  // fix the Kuali form by hand). Neutral terminal — not a failure.
+  | "dismissed";
 
 /** A supplemental status chip (rendered beside, not instead of, the badge). */
 export interface QueueRowStatusTag {
