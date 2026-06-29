@@ -1,4 +1,5 @@
 export * from "./retry.js";
+export * from "./separations-eid-approval.js";
 export * from "./cancel.js";
 export * from "./supersede.js";
 export * from "./worker-control.js";

@@ -7,6 +7,8 @@ import {
   buildDaemonsSpawnHandler,
   buildDaemonsStopHandler,
   buildDeleteEntryHandler,
+  buildApproveSeparationEidHandler,
+  buildDismissSeparationEidHandler,
   buildDrainWorkerHandler,
   buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
@@ -298,6 +300,25 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
         ...compact({ parentRunId: parent.parentRunId }),
       };
     }, buildEntryReEnqueueHandler(deps.dir, { withData: true }), 202);
+  });
+
+  // Separations EID-approval review — approve a chosen EID (re-queue the doc as a
+  // fresh, gate-skipping run) or dismiss the review (stamp the row, no re-queue).
+  app.post("/api/separations/approve-eid", async (c) => {
+    return postJson(c, (body) => ({
+      id: String(body.id ?? ""),
+      runId: body.runId ? String(body.runId) : undefined,
+      eid: String(body.eid ?? ""),
+      date: body.date ? String(body.date) : undefined,
+    }), buildApproveSeparationEidHandler(deps.dir), 202);
+  });
+
+  app.post("/api/separations/dismiss-eid", async (c) => {
+    return postJson(c, (body) => ({
+      id: String(body.id ?? ""),
+      runId: body.runId ? String(body.runId) : undefined,
+      date: body.date ? String(body.date) : undefined,
+    }), buildDismissSeparationEidHandler(deps.dir));
   });
 
   app.post("/api/save-data", async (c) => {
