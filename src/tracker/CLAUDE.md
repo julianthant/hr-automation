@@ -15,7 +15,7 @@ JSONL + SQLite projection for workflow observability. Workflow handlers should u
 ├── runtime/   rotation-state-*.json     runtime state (OCR key rotation, …)
 ├── daemons/   <workflow>-<ISO>.log + *.queue.jsonl + *.lock.json
 ├── debug/     row-lifecycle-<date>.{json,jsonl}
-├── pdf-cache/ , uploads/               artifacts
+├── pdf-cache/ , uploads/ , captures/   artifacts (captures/ = per-session mobile-capture photos)
 ├── screenshots/  *.png                 operator audit screenshots (PATHS.screenshotDir)
 ├── sharepoint/   *.xlsx                 SharePoint roster downloads (sharepoint-download)
 ├── rosters/      *.xlsx                 emergency-contact pre-flight roster downloads
