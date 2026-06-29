@@ -1,11 +1,27 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, appendFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOcrApproveHandler } from "../../../../src/tracker/dashboard/ocr/approve.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
-import { tracePrefix } from "../../../../src/domain/queue-trace-id.js";
+import { tracePrefix, runIdFragment } from "../../../../src/domain/queue-trace-id.js";
+
+function readEmittedRows(
+  dir: string,
+  workflow: string,
+): Array<{ status: string; data: Record<string, unknown> }> {
+  let text: string;
+  try {
+    text = readFileSync(rowFilePath(workflow, todayLocal(), dir), "utf8");
+  } catch {
+    return [];
+  }
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { status: string; data: Record<string, unknown> });
+}
 
 function todayLocal(): string {
   const d = new Date();
@@ -305,6 +321,54 @@ test("oath approve stamps the OCR root's trace PREFIX as rootTracePrefix on BOTH
     }
     // The once-per-document oath-upload ticket input carries it too.
     assert.equal(readRootTracePrefix(uploadCall!.inputs[0]), ROOT_PREFIX, "oath-upload input stamps the OCR root prefix");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oath approve: an operation-member pre-emit row carries a composed __traceId (ISS-004)", async () => {
+  // ISS-004: the approve fan-out stamps `rootTracePrefix` on the child INPUT, so
+  // the daemon composes the member `__traceId` at CLAIM. A member that is never
+  // claimed (queued then cancelled-while-queued) therefore had NO trace id. The
+  // pre-emit must compose it itself — identically to the daemon's claim-time
+  // `buildTraceId({ rootPrefix })` (`<ocrRootPrefix>-<memberRunId4>`) — so
+  // frozen-once stays consistent and a never-claimed member is still greppable.
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-iss004-"));
+  try {
+    const ROOT_ID = "ou-090553-1a57";
+    const ROOT_PREFIX = tracePrefix(ROOT_ID); // "ou-090553"
+    // operationWorkflow → the per-record fan-out stamps `operation-member` rows.
+    seedOathOcrRow(dir, "sess-tr", "ocr-run-tr", ROOT_ID, { operationWorkflow: "oath-signature" });
+
+    const childRunId = "11112222-3333-4444-5555-666677778888"; // runId4 → "1111"
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId, opts) => {
+        // Drive the pre-emit so the pending ROW is actually written (the prod
+        // path fires onPreEmitPending per item before the enqueue).
+        inputs.forEach((inp, i) => {
+          opts?.onPreEmitPending?.(inp, childRunId, opts.parentRunId, deriveItemId(inp, i));
+        });
+        return { enqueued: inputs.map((inp, i) => ({ id: deriveItemId(inp, i) })) };
+      },
+    });
+
+    const res = await handler({
+      sessionId: "sess-tr",
+      runId: "ocr-run-tr",
+      records: [oathRecord({ employeeId: "10000001", printedName: "DOE, JANE" })],
+    });
+    assert.equal(res.status, 200);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const pending = readEmittedRows(dir, "oath-signature").filter((r) => r.status === "pending");
+    assert.equal(pending.length, 1, "one operation-member pending row emitted");
+    assert.equal(
+      pending[0].data.__traceId,
+      `${ROOT_PREFIX}-${runIdFragment(childRunId)}`,
+      "member pre-emit row carries the composed <ocrRootPrefix>-<memberRunId4> trace id",
+    );
+    assert.equal(pending[0].data.archetype, "operation-member", "fanned-out member shape");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
