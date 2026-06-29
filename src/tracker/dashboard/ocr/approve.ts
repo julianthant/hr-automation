@@ -8,7 +8,7 @@ import { createTaskStore } from "../../../core/task-store/index.js";
 import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate, findFrozenTraceId } from "../../find-latest-entry.js";
-import { tracePrefix } from "../../../domain/queue-trace-id.js";
+import { tracePrefix, runIdFragment } from "../../../domain/queue-trace-id.js";
 import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
 import {
   readFormType,
@@ -276,6 +276,7 @@ export function buildOcrApproveHandler(
               item && typeof item === "object" && !Array.isArray(item)
                 ? (item as Record<string, unknown>)
                 : undefined;
+            const memberTraceId = composeFanOutMemberTraceId(ocrRootTracePrefix, childRunId);
             emitTrackerRow(
               {
                 workflow: approveTo.workflow,
@@ -286,6 +287,7 @@ export function buildOcrApproveHandler(
                 data: {
                   ...buildFallbackPendingData(item),
                   ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                  ...(memberTraceId ? { __traceId: memberTraceId } : {}),
                   archetype: deriveRowArchetype(
                     resolveArchetype(childWfForArchetype.config, item),
                     passedParentRunId ?? childParentRunId,
@@ -330,6 +332,7 @@ export function buildOcrApproveHandler(
                     item && typeof item === "object" && !Array.isArray(item)
                       ? (item as Record<string, unknown>)
                       : undefined;
+                  const memberTraceId = composeFanOutMemberTraceId(ocrRootTracePrefix, childRunId);
                   emitTrackerRow(
                     {
                       workflow: childWf.config.name,
@@ -340,6 +343,7 @@ export function buildOcrApproveHandler(
                       data: {
                         ...buildHttpPendingData(childWf, item, passedParentRunId ?? childParentRunId),
                         ...rootQueueTitleData(readParentSubjectFromInput(item)),
+                        ...(memberTraceId ? { __traceId: memberTraceId } : {}),
                         archetype: deriveRowArchetype(
                           resolveArchetype(childWf.config, item),
                           passedParentRunId ?? childParentRunId,
@@ -759,6 +763,25 @@ export function buildFanOutItemIdResolver(
     }
     return itemId;
   };
+}
+
+/**
+ * Compose a fan-out member's frozen trace id AT PRE-EMIT (ISS-004). The approve
+ * fan-out stamps `rootTracePrefix` on the child INPUT, so the daemon worker
+ * composes the member `__traceId` only at CLAIM (`run-one-item` →
+ * `buildTraceId({ rootPrefix })`). A member that is never claimed (queued then
+ * cancelled-while-queued) therefore carried no trace id. This composes the SAME
+ * value the daemon would — byte-identical to `buildTraceId`'s rootPrefix branch
+ * (`<rootPrefix>-<runIdFragment(runId)>`, using the shared tail helper) — so
+ * `findFrozenTraceId` reuses this at claim (frozen-once) with no drift. Returns
+ * undefined when there is no root prefix (the daemon then composes its own
+ * standalone id at claim, as before). Display/lineage only.
+ */
+function composeFanOutMemberTraceId(
+  rootTracePrefix: string | undefined,
+  childRunId: string,
+): string | undefined {
+  return rootTracePrefix ? `${rootTracePrefix}-${runIdFragment(childRunId)}` : undefined;
 }
 
 function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix: string | undefined): TInput {
