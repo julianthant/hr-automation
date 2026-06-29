@@ -64,7 +64,7 @@ Long-lived daemon sessions sit idle between queued items. Systems with server-si
 
 - **`IdleRefreshCadence`** — `{ thresholdMs: number; tickMs: number }`. `thresholdMs`: reload after this much automation inactivity; `tickMs`: how often the idle timer checks.
 - **`DEFAULT_IDLE_REFRESH_CADENCE`** — `{ thresholdMs: 5 * 60 * 1000, tickMs: 30 * 1000 }` (5-min threshold, 30-sec tick). Conservative for ≥15-min server timeouts.
-- **`IDLE_REFRESH_SYSTEMS`** — `Readonly<Record<string, IdleRefreshCadence>>`. Current entries: `ucpath` and `i9`, both using `DEFAULT_IDLE_REFRESH_CADENCE`. Presence here is the opt-in — add a system here to give it idle-refresh.
+- **`IDLE_REFRESH_SYSTEMS`** — `Readonly<Record<string, IdleRefreshCadence>>`. Current entries: `ucpath`, `i9`, and `new-kronos`, all using `DEFAULT_IDLE_REFRESH_CADENCE`. Presence here is the opt-in — add a system here to give it idle-refresh.
 - **`isIdleRefreshSystem(systemId)`** — returns `true` when the system is in `IDLE_REFRESH_SYSTEMS`.
 - **`idleRefreshCadence(systemId)`** — returns the `IdleRefreshCadence` for the system, or `undefined` if it doesn't opt in.
 

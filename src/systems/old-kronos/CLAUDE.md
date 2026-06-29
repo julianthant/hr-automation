@@ -33,7 +33,7 @@ UKG uses deeply nested iframes:
 3. Check for "network change detected" error in iframe — reloads page if found
 4. Fallback: any frame with "genies" in URL
 5. Fallback: any frame starting with `widgetFrame`
-6. Retry: 15 attempts with 2s waits
+6. Retry: 15 attempts with 1s waits
 7. Last resort: full page reload and retry
 
 ## Download Strategy (Dual-Track)
@@ -47,7 +47,6 @@ UKG uses deeply nested iframes:
 - Date inputs require digit-by-digit typing: triple-click to select, Delete, Home, then type each digit with 100ms delays
 - Report status polling: Phase 1 finds Running/Waiting row, Phase 2 polls that row by TR ID until Complete
 - First poll attempt may show stale "Complete" row from previous run — must skip and keep refreshing
-- `reportLock` mutex serializes report navigation across parallel workers
 - Frame names may vary — multiple fallback strategies everywhere
 - JS evaluation (`clickInFrames`, `jsClickText`) used extensively because Playwright selectors are unreliable in nested frames
 - Filesystem-fallback download path comes from `PATHS.downloadsDir` (`os.homedir() + "/Downloads"`); machine-portable

@@ -2,38 +2,10 @@
 
 Mapped via playwright-cli on 2026-04-01.
 
-## Old Kronos (UKG Workforce Central)
-
-### Dashboard → Genies Grid (widgetFrame804)
-- **QuickFind search**: `locator('#searchQuery')` in widgetFrame804
-- **QuickFind button**: `getByTitle('Find', { exact: true })` in widgetFrame804
-- **Employee row**: `getByRole('row', { name: 'Lee, Brooklyn 10598634...' })` — click to select
-- **Go To button**: `getByTitle('Selected, Current Pay Period')` — inside iframe, only appears when row selected
-- **Timecards in Go To**: `getByText('Timecards', { exact: true })` — MUST be exact to avoid "Approve Timecards"
-
-### Timecard View (widgetFrame808)
-- **Employee name**: readonly combobox at top — NOT fillable, employee carried from Genies
-- **Pay Period textbox**: `getByRole('textbox', { name: 'Current Pay Period' })` — click to open dropdown
-- **Previous Pay Period**: `getByRole('link', { name: 'Previous Pay Period' })` — visible AFTER textbox clicked
-- **Grid columns**: [chk] [chk] Date | Schedule | In | Out | Transfer | PayCode | Amount | Shift | Daily | Period
-- **Grid structure**: All columns in ONE row. `cells[2]=Date, cells[4]=In, cells[5]=Out`
-- **Date format**: `"Sun 3/15"`, `"Mon 3/16"` (short, no year)
-- **Time detection**: Check if `cells[4]` (In) or `cells[5]` (Out) is non-empty
-
-### Critical Flow
-1. Search employee in Genies grid (QuickFind)
-2. Click employee row to select
-3. Click "Go To" button → click "Timecards" (exact match)
-4. Timecard loads in widgetFrame808
-5. Click pay period textbox → click "Previous Pay Period" link
-6. Check grid for In/Out values per date row
-
-### Gotchas
-- Sidebar "Timecards" opens BLANK view — must use Go To from Genies
-- Pay period textbox is readonly — but clickable via `getByRole('textbox', { name: 'Current Pay Period' })`
-- "Timecards" text match must be exact — `getByText('Timecards', { exact: true })` — otherwise matches "Approve Timecards"
-- Genies iframe may show "A network change was detected" — need page reload
-- `force: true` may be needed for readonly inputs in some frames
+> **Note:** Old Kronos (UKG Workforce Central) was removed from the separations
+> workflow on 2026-06-18. Separations now uses Kuali, New Kronos (WFD), and UCPath
+> only. Old Kronos selectors for the `old-kronos-reports` workflow live in
+> `src/systems/old-kronos/selectors.ts`.
 
 ## New Kronos (WFD - Workforce Dayforce)
 
