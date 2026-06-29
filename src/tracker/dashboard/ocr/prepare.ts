@@ -283,7 +283,7 @@ export function buildOcrPrepareHandler(
         lookbackDays: 7,
         predicate: (e) => e.id === sessionId && e.runId === input.previousRunId,
       });
-      const supersededArchetype = supersededRow ? resolveRowArchetype(supersededRow) : "batch";
+      const supersededArchetype = supersededRow ? resolveRowArchetype(supersededRow) : "operation";
       emitTrackerRow(
         {
           workflow: WORKFLOW,

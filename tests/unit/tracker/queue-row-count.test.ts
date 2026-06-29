@@ -42,7 +42,7 @@ test("countSidebarRowsFromTrackerHistory: merges + excludes resolved prep", () =
       runId: "r1",
       status: "done",
       step: "approved",
-      data: { archetype: "batch", mode: "prepare", emplId: "100" },
+      data: { archetype: "operation", mode: "prepare", emplId: "100" },
     },
     {
       workflow: "active-check",
@@ -78,7 +78,7 @@ test("countSidebarRowsFromTrackerHistory: approved OCR review rows are resolved 
       status: "done",
       step: "approved",
       parentRunId: "origin-parent-run",
-      data: { archetype: "batch", mode: "prepare", formType: "oath" },
+      data: { archetype: "operation", mode: "prepare", formType: "oath" },
     },
   ];
   assert.equal(countSidebarRowsFromTrackerHistory(raw, isResolvedPrepEntry), 0);
@@ -122,7 +122,7 @@ test("countSidebarRowsFromTrackerHistory: legacy approved OCR parent plus child 
       runId: "parent-run-1",
       status: "done",
       step: "approved",
-      data: { archetype: "batch", mode: "prepare", fannedOutCount: "1" },
+      data: { archetype: "operation", mode: "prepare", fannedOutCount: "1" },
     },
     {
       workflow: "oath-signature",

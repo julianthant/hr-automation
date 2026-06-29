@@ -193,7 +193,7 @@ test("queryEntriesPayload wfCounts includes approved OCR prep rows that still re
           runId: `${id}#1`,
           status: "done",
           step: "approved",
-          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "batch" },
+          data: { mode: "prepare", pdfOriginalName: `${id}.pdf`, archetype: "operation" },
         },
         dir,
       );

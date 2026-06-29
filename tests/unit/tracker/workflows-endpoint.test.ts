@@ -140,7 +140,7 @@ test('GET /api/workflow-definitions returns metadata registered via register()',
     label: 'Kronos Reports',
     systems: ['old-kronos'],
     steps: ['searching', 'extracting', 'downloading'],
-    archetype: 'batch',
+    archetype: 'operation',
     code: 'kr',
     detailFields: [
       { key: 'employee', label: 'Employee' },

@@ -85,7 +85,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
       parentRunId: "batch-run",
       status: "failed",
       timestamp: "2026-05-20T12:00:00.000Z",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     },
     {
       workflow: "person-lookup",
@@ -94,13 +94,21 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
       parentRunId: "batch-run",
       status: "failed",
       timestamp: "2026-05-20T12:01:00.000Z",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     },
   ] as TrackerEntry[];
 
   const surface: TrackerQueueGroupSurface = {
-    kind: "batch",
+    kind: "operation",
     parentRunId: "batch-run",
+    parent: {
+      workflow: "person-lookup",
+      id: "batch-run",
+      runId: "batch-run",
+      status: "pending",
+      timestamp: "2026-05-20T12:00:00.000Z",
+      data: { archetype: "operation" },
+    },
     members,
   };
 

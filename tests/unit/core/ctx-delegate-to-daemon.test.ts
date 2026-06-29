@@ -292,7 +292,7 @@ describe("dispatchToDaemonAndWait — daemon-dispatch path of delegateToAll (Fin
 
     const child = defineWorkflow({
       name: "daemon-test-child",
-      archetype: "batch",
+      archetype: "operation",
       systems: [],
       authSteps: false,
       steps: ["work"] as const,
@@ -330,7 +330,7 @@ describe("dispatchToDaemonAndWait — daemon-dispatch path of delegateToAll (Fin
     const lines = readWorkflowLines(trackerDir, "daemon-test-child", dateStr);
     const pending = lines.find((l) => l.status === "pending" && l.id === "oath-session-1");
     assert.ok(pending, "expected pre-emitted delegated batch child row");
-    assert.equal((pending!.data as { archetype?: string }).archetype, "batch");
+    assert.equal((pending!.data as { archetype?: string }).archetype, "operation");
     assert.equal((pending!.data as { pdfOriginalName?: string }).pdfOriginalName, "upload-packet.pdf");
   });
 

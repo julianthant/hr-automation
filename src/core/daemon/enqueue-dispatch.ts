@@ -20,6 +20,7 @@ import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
 import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype.js";
+import { buildTraceId } from "../../domain/queue-trace-id.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
 import { log } from "../../utils/log.js";
@@ -233,9 +234,10 @@ export async function enqueueFromHttp(
 
   const resolvedTrackerDir = trackerDir ?? DEFAULT_DIR;
   let effectiveParentRunId = parentRunId;
+  let operationCoordinatorRunId: string | undefined;
   let batchDisplayOrdinal: number | undefined;
-  // A multi-item input run is always a batch. Some workflows (oath-signature)
-  // opt to batch a SINGLE-item input run too via
+  // A multi-item input run is always an operation coordinator. Some workflows
+  // (oath-signature) opt to wrap a SINGLE-item input run too via
   // `delegation.alwaysBatchInputRun`, so they never produce a standalone single
   // row. Only applies to direct input runs (no parentRunId) — delegated
   // fan-out rows already carry one.
@@ -244,11 +246,12 @@ export async function enqueueFromHttp(
   const isDirectInputRunBatch =
     (inputs.length > 1 || forcesInputRunBatch) && !effectiveParentRunId;
   if (isDirectInputRunBatch) {
-    effectiveParentRunId = randomUUID();
+    operationCoordinatorRunId = randomUUID();
+    effectiveParentRunId = operationCoordinatorRunId;
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
   }
   const queuedInputs = isDirectInputRunBatch
-    ? inputs.map((input) => mergeRuntimeOptions(input, { rowShape: "batch-member" }))
+    ? inputs.map((input) => mergeRuntimeOptions(input, { rowShape: "operation-member" }))
     : inputs;
 
   // Fail-fast schema validation here (ensureDaemonsAndEnqueue also does this,
@@ -282,6 +285,35 @@ export async function enqueueFromHttp(
     : undefined;
 
   try {
+    if (operationCoordinatorRunId) {
+      const coordinatorItemId = `input-run-${operationCoordinatorRunId.slice(0, 8)}`;
+      const coordinatorTraceId = buildTraceId({
+        code: wf.code,
+        runId: operationCoordinatorRunId,
+        at: new Date(now),
+      });
+      const coordinatorData: StampedData = {
+        archetype: "operation",
+        queueRowKind: "person",
+        __id: coordinatorItemId,
+        __traceId: coordinatorTraceId,
+        ...(batchDisplayOrdinal !== undefined
+          ? { batchDisplayOrdinal: String(batchDisplayOrdinal) }
+          : {}),
+      };
+      emitTrackerRow(
+        {
+          workflow: wf.config.name,
+          timestamp: now,
+          id: coordinatorItemId,
+          runId: operationCoordinatorRunId,
+          status: "pending",
+          data: coordinatorData,
+        },
+        resolvedTrackerDir,
+      );
+    }
+
     await ensureDaemonsAndEnqueue(
       wf,
       queuedInputs,

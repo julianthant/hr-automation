@@ -11,6 +11,7 @@ export type {
 export {
   getEventSortKey,
   resolveInstanceForRun,
+  resolveInstanceForOperationCoordinator,
   filterEventsForRun,
   filterLiveSessionState,
   rebuildSessionState,

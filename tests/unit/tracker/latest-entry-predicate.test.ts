@@ -160,7 +160,7 @@ test("findLatestEntryForPredicate preserves parentRunId from the SQLite runs pro
   // Regression: bulk cancel/retry/discard inherit the prior row through the
   // SQLite fast path (db + runId). The reconstructed entry must carry
   // parentRunId — otherwise emitInheritedRow drops the batch/operation member's
-  // parent linkage, the synthetic batch anchor evaporates, and every cancelled
+  // parent linkage, the synthetic operation anchor evaporates, and every cancelled
   // member surfaces as a standalone row (the separation cancel-all bug).
   const dir = mkdtempSync(join(tmpdir(), "latest-entry-"));
   try {
@@ -173,7 +173,7 @@ test("findLatestEntryForPredicate preserves parentRunId from the SQLite runs pro
       runId: "member-run",
       parentRunId: "batch-anchor-1",
       status: "pending",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     }, dir);
     const db = openStateDb(dir);
 
@@ -187,7 +187,7 @@ test("findLatestEntryForPredicate preserves parentRunId from the SQLite runs pro
     });
 
     assert.equal(latest?.parentRunId, "batch-anchor-1", "parentRunId preserved from runs projection");
-    assert.equal(latest?.data?.archetype, "batch-member");
+    assert.equal(latest?.data?.archetype, "operation-member");
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });
@@ -209,7 +209,7 @@ test("findLatestEntryForPredicate preserves parentRunId via the SQLite items (it
       runId: "member-run-2",
       parentRunId: "batch-anchor-1",
       status: "pending",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     }, dir);
     const db = openStateDb(dir);
 

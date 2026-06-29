@@ -256,8 +256,8 @@ export interface GatedWorkflowSpec {
    * Defaults to the LAST stage (the common "park before terminal" shape).
    */
   gatedStages?: readonly string[];
-  /** Row archetype — `single` (default) or `batch`. */
-  archetype?: "single" | "batch";
+  /** Row archetype — `single` (default) or `operation`. */
+  archetype?: "single" | "operation";
   /** Input subject — drives `queueRowKind`. Defaults to `name` (person). */
   inputSubject?: "name" | "eid" | "email" | "kualiId" | "pdf" | "selector";
   /**

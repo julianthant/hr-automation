@@ -57,7 +57,7 @@ const emergencyContactStub: GatedWorkflowSpec = {
   code: "ec",
   stages: ["ucpath-auth", "transaction"],
   gatedStages: ["transaction"],
-  archetype: "batch",
+  archetype: "operation",
   inputSubject: "name",
   runtimePolicy: EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY,
   initialData: (input) => {
@@ -260,7 +260,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   for (const c of [c1!, c2!, c3!]) {
     const row = dash.row("emergency-contact", c.runId);
     assert.equal(row.parentRunId, PARENT_RUN, `EC child ${c.itemId} parentRunId === the delegating run`);
-    assert.equal(row.archetype, "batch-member", `EC child ${c.itemId} is a batch-member`);
+    assert.equal(row.archetype, "operation-member", `EC child ${c.itemId} is a batch-member`);
     const emplId = row.data.emplId;
     assert.ok(emplId && byEid[emplId], `EC child ${c.itemId} carries a known EID (got ${emplId})`);
     // Title-by-kind: person → resolved employee name.
@@ -292,7 +292,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   // anchor path uses preferTraceIdSubtitle).
   const anchor = dash.groupAnchor("emergency-contact", PARENT_RUN);
   assert.equal(anchor.memberCount, 3, "emergency-contact group anchor has 3 members");
-  assert.equal(anchor.kind, "batch", "delegated EC members render as a batch surface");
+  assert.equal(anchor.kind, "operation", "delegated EC members render as an operation surface");
   assert.equal(anchor.subtitle, "<traceId>", "group anchor subtitle is the trace id");
 
   // No count drift: exactly 3 distinct EC child runs surfaced (no orphan/double).

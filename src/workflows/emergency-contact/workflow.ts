@@ -78,7 +78,7 @@ export function buildEmergencyContactPendingData(
 export const emergencyContactWorkflow = defineWorkflow({
   name: WORKFLOW,
   label: "Emergency Contact",
-  archetype: "batch",
+  archetype: "operation",
   inputSubject: "name",
   code: "ec",
   category: "Onboarding",
@@ -106,14 +106,18 @@ export const emergencyContactWorkflow = defineWorkflow({
   },
   // OCR approval populates these fields up front so the dashboard shows rich
   // rows from the pending state onward. The handler only refreshes employeeName
-  // after the iframe extraction succeeds.
+  // after the iframe extraction succeeds. These are DISPLAY-only (not `editable`):
+  // emergency-contact is not opted into the dashboard's Edit Data tab — its
+  // inputs come from OCR approval, not an edit-and-resume override. Only
+  // separations is opted in (see src/workflows/CLAUDE.md "Opt-Ins"). Removing
+  // `editable` here is what scopes the Edit Data tab to separations only.
   detailFields: [
-    { key: "employeeName", label: "Employee", editable: true },
-    { key: "emplId", label: "Empl ID", editable: true },
-    { key: "contactName", label: "Contact", editable: true },
-    { key: "relationship", label: "Relationship", editable: true },
-    { key: "contactPhone", label: "Contact Phone", editable: true, conditional: true },
-    { key: "contactAddress", label: "Contact Address", editable: true, conditional: true },
+    { key: "employeeName", label: "Employee" },
+    { key: "emplId", label: "Empl ID" },
+    { key: "contactName", label: "Contact" },
+    { key: "relationship", label: "Relationship" },
+    { key: "contactPhone", label: "Contact Phone", conditional: true },
+    { key: "contactAddress", label: "Contact Address", conditional: true },
   ],
   getName: (d) => d.employeeName ?? "",
   getId: (d) => d.emplId ?? "",

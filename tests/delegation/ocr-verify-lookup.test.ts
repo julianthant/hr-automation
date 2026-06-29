@@ -278,15 +278,15 @@ test(
     // ─── Group anchors (alwaysBatchDelegatedMembers → batch surface) ─────────
     const plAnchor = dash.groupAnchor("person-lookup", ocr.runId);
     assert.equal(plAnchor.memberCount, 3, "person-lookup group anchor has 3 members");
-    assert.equal(plAnchor.kind, "batch", "delegated person-lookup members render as a batch surface");
+    assert.equal(plAnchor.kind, "operation", "delegated person-lookup members render as an operation surface");
     assert.equal(plAnchor.subtitle, "<traceId>", "pl group anchor subtitle is the trace id");
 
     const i9Anchor = dash.groupAnchor("i9-lookup", ocr.runId);
     assert.equal(i9Anchor.memberCount, 1, "i9-lookup group anchor has 1 member");
     assert.equal(
       i9Anchor.kind,
-      "batch",
-      "a lone delegated i9-lookup member still renders as a batch surface (alwaysBatchDelegatedMembers)",
+      "operation",
+      "a lone delegated i9-lookup member still renders as an operation surface (alwaysBatchDelegatedMembers)",
     );
     assert.equal(i9Anchor.subtitle, "<traceId>", "i9 group anchor subtitle is the trace id");
 

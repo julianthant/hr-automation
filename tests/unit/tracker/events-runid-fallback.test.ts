@@ -9,6 +9,7 @@ import {
   createDashboardServer,
   filterEventsForRun,
   resolveInstanceForRun,
+  resolveInstanceForOperationCoordinator,
 } from "../../../src/tracker/dashboard.js";
 import type { SessionEvent } from "../../../src/tracker/session-events.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
@@ -268,6 +269,257 @@ describe("filterEventsForRun", () => {
     const out = filterEventsForRun(events, trackers, "A", Date.parse("2026-04-23T10:06:00Z"));
     assert.equal(out.length, 2);
     assert.deepEqual(out.map((e) => e.type), ["item_start", "item_complete"]);
+  });
+});
+
+// ── operation coordinator row tests ──────────────────────────────────────────
+
+function coordinatorEntry(
+  coordinatorRunId: string,
+  timestamp: string = "2026-04-23T10:00:00Z",
+): TrackerEntry {
+  return {
+    workflow: "separations",
+    timestamp,
+    id: `input-run-${coordinatorRunId.slice(0, 8)}`,
+    runId: coordinatorRunId,
+    status: "pending",
+    // Coordinator rows have archetype:"operation" but NO data.instance — the
+    // daemon runs member items, each carrying the real workflowInstance.
+    data: { archetype: "operation", queueRowKind: "person" },
+  };
+}
+
+function memberEntry(
+  memberRunId: string,
+  parentRunId: string,
+  instance: string,
+  timestamp: string = "2026-04-23T10:01:00Z",
+): TrackerEntry {
+  return {
+    workflow: "separations",
+    timestamp,
+    id: "alice@example.com",
+    runId: memberRunId,
+    parentRunId,
+    status: "running",
+    data: { archetype: "operation-member", instance },
+  };
+}
+
+describe("resolveInstanceForOperationCoordinator", () => {
+  it("returns undefined when coordinator has no direct instance and no children", () => {
+    const trackers = [coordinatorEntry("COORD-1")];
+    assert.equal(resolveInstanceForOperationCoordinator(trackers, "COORD-1"), undefined);
+  });
+
+  it("returns the direct instance when the coordinator row carries data.instance", () => {
+    const trackers = [
+      { ...coordinatorEntry("COORD-1"), data: { archetype: "operation", instance: "Separations 1" } },
+    ];
+    assert.equal(resolveInstanceForOperationCoordinator(trackers, "COORD-1"), "Separations 1");
+  });
+
+  it("falls back to a child member's instance when coordinator lacks data.instance", () => {
+    const trackers = [
+      coordinatorEntry("COORD-1"),
+      memberEntry("MEMBER-A", "COORD-1", "Separations 1"),
+      memberEntry("MEMBER-B", "COORD-1", "Separations 1"),
+    ];
+    assert.equal(resolveInstanceForOperationCoordinator(trackers, "COORD-1"), "Separations 1");
+  });
+
+  it("does not cross-contaminate: returns undefined for a sibling coordinator", () => {
+    const trackers = [
+      coordinatorEntry("COORD-1"),
+      coordinatorEntry("COORD-2"),
+      memberEntry("MEMBER-A", "COORD-1", "Separations 1"),
+    ];
+    // COORD-2 has no children → undefined
+    assert.equal(resolveInstanceForOperationCoordinator(trackers, "COORD-2"), undefined);
+    // COORD-1 resolves via its child
+    assert.equal(resolveInstanceForOperationCoordinator(trackers, "COORD-1"), "Separations 1");
+  });
+
+  it("a normal member run still resolves its own instance directly", () => {
+    const trackers = [
+      coordinatorEntry("COORD-1"),
+      memberEntry("MEMBER-A", "COORD-1", "Separations 1"),
+    ];
+    // resolveInstanceForOperationCoordinator is also safe to call on member
+    // runs — the direct lookup succeeds for the member
+    assert.equal(resolveInstanceForOperationCoordinator(trackers, "MEMBER-A"), "Separations 1");
+  });
+});
+
+describe("filterEventsForRun — operation coordinator lifecycle attribution", () => {
+  it("attributes daemon lifecycle events to the coordinator via child instance fallback", () => {
+    // The coordinator runId has archetype:"operation" but no data.instance.
+    // Members share parentRunId === coordinatorRunId and carry data.instance.
+    // Orphan session lifecycle events (no runId) have the same workflowInstance.
+    const coordinatorRunId = "COORD-1";
+    const memberRunId = "MEMBER-A";
+    const instance = "Separations 1";
+
+    const events: SessionEvent[] = [
+      // Daemon lifecycle — orphan (no runId), emitted at instance scope
+      ev({ type: "workflow_start", timestamp: "2026-04-23T10:00:00Z", workflowInstance: instance }),
+      ev({ type: "browser_launch", timestamp: "2026-04-23T10:00:05Z", workflowInstance: instance, sessionId: "s1", browserId: "b1", system: "kuali" }),
+      ev({ type: "auth_start", timestamp: "2026-04-23T10:00:10Z", workflowInstance: instance, browserId: "b1", system: "kuali" }),
+      ev({ type: "auth_complete", timestamp: "2026-04-23T10:00:30Z", workflowInstance: instance, browserId: "b1", system: "kuali" }),
+      // Member item events (carry runId)
+      ev({ type: "item_start", runId: memberRunId, timestamp: "2026-04-23T10:01:00Z", workflowInstance: instance, currentItemId: "alice@example.com" }),
+      ev({ type: "item_complete", runId: memberRunId, timestamp: "2026-04-23T10:05:00Z", workflowInstance: instance, currentItemId: "alice@example.com" }),
+    ];
+
+    const trackers: TrackerEntry[] = [
+      coordinatorEntry(coordinatorRunId, "2026-04-23T10:00:00Z"),
+      memberEntry(memberRunId, coordinatorRunId, instance, "2026-04-23T10:01:00Z"),
+      { ...memberEntry(memberRunId, coordinatorRunId, instance, "2026-04-23T10:05:00Z"), status: "done" },
+    ];
+
+    // The coordinator view includes:
+    // - orphan lifecycle events (no runId) attributed via workflowInstance + time window
+    // - direct events with runId === coordinatorRunId (there are none here — the
+    //   coordinator is a display-only row; member item events carry memberRunId)
+    // Member item events (runId: "MEMBER-A") do NOT appear in the coordinator view
+    // because they have a different runId; they belong to the member's own log panel.
+    const outCoordinator = filterEventsForRun(
+      events,
+      trackers,
+      coordinatorRunId,
+      Date.parse("2026-04-23T10:06:00Z"),
+    );
+
+    assert.deepEqual(
+      outCoordinator.map((e) => ({ type: e.type, runId: (e.runId as string | undefined) ?? null })),
+      [
+        { type: "workflow_start", runId: null },
+        { type: "browser_launch", runId: null },
+        { type: "auth_start", runId: null },
+        { type: "auth_complete", runId: null },
+      ],
+    );
+  });
+
+  it("operation-member rows get only their own item events — no lifecycle bleed", () => {
+    // Members must NOT receive the coordinator's lifecycle events — those
+    // belong to the coordinator view only. Members have archetype:"operation-member"
+    // which filterEventsForRun excludes from batch-scope attribution.
+    const coordinatorRunId = "COORD-1";
+    const memberRunId = "MEMBER-A";
+    const instance = "Separations 1";
+
+    const events: SessionEvent[] = [
+      ev({ type: "workflow_start", timestamp: "2026-04-23T10:00:00Z", workflowInstance: instance }),
+      ev({ type: "browser_launch", timestamp: "2026-04-23T10:00:05Z", workflowInstance: instance, sessionId: "s1", browserId: "b1", system: "kuali" }),
+      ev({ type: "item_start", runId: memberRunId, timestamp: "2026-04-23T10:01:00Z", workflowInstance: instance, currentItemId: "alice@example.com" }),
+      ev({ type: "item_complete", runId: memberRunId, timestamp: "2026-04-23T10:05:00Z", workflowInstance: instance, currentItemId: "alice@example.com" }),
+    ];
+
+    const trackers: TrackerEntry[] = [
+      coordinatorEntry(coordinatorRunId, "2026-04-23T10:00:00Z"),
+      memberEntry(memberRunId, coordinatorRunId, instance, "2026-04-23T10:01:00Z"),
+      { ...memberEntry(memberRunId, coordinatorRunId, instance, "2026-04-23T10:05:00Z"), status: "done" },
+    ];
+
+    const outMember = filterEventsForRun(
+      events,
+      trackers,
+      memberRunId,
+      Date.parse("2026-04-23T10:06:00Z"),
+    );
+
+    // Member sees only its own direct events; no orphan lifecycle bleed
+    assert.deepEqual(
+      outMember.map((e) => ({ type: e.type, runId: (e.runId as string | undefined) ?? null })),
+      [
+        { type: "item_start", runId: memberRunId },
+        { type: "item_complete", runId: memberRunId },
+      ],
+    );
+  });
+});
+
+describe("/events/run-events operation coordinator SSE (HTTP)", () => {
+  let tmp: string;
+  let server: Server | undefined;
+  let port: number;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "run-events-coord-"));
+  });
+
+  afterEach(async () => {
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = undefined;
+    }
+    if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("streams daemon lifecycle events for the coordinator runId via child instance fallback", async () => {
+    const today = dateLocal();
+    const tsBase = `${today}T10:00:0`;
+    const coordinatorRunId = "coord-run-id-1234";
+    const memberRunId = "member-run-id-5678";
+    const coordinatorItemId = `input-run-${coordinatorRunId.slice(0, 8)}`;
+    const instance = "Separations 1";
+
+    // Coordinator row: archetype:"operation", NO data.instance
+    const coordEntry: TrackerEntry = {
+      workflow: "separations",
+      timestamp: `${tsBase}0Z`,
+      id: coordinatorItemId,
+      runId: coordinatorRunId,
+      status: "pending",
+      data: { archetype: "operation", queueRowKind: "person" },
+    };
+    // Member row: carries parentRunId + data.instance
+    const membEntry: TrackerEntry = {
+      workflow: "separations",
+      timestamp: `${tsBase}3Z`,
+      id: "alice@example.com",
+      runId: memberRunId,
+      parentRunId: coordinatorRunId,
+      status: "running",
+      data: { archetype: "operation-member", instance },
+    };
+
+    appendTrackerEntry(tmp, "separations", today, coordEntry);
+    appendTrackerEntry(tmp, "separations", today, membEntry);
+
+    // Daemon lifecycle events — no runId (batch scope)
+    appendEvent(tmp, { type: "workflow_start", timestamp: `${tsBase}0Z`, pid: 9999, workflowInstance: instance });
+    appendEvent(tmp, { type: "browser_launch", timestamp: `${tsBase}1Z`, pid: 9999, workflowInstance: instance, sessionId: "s1", browserId: "b1", system: "kuali" });
+    appendEvent(tmp, { type: "auth_start", timestamp: `${tsBase}2Z`, pid: 9999, workflowInstance: instance, browserId: "b1", system: "kuali" });
+    // Member item event (has runId)
+    appendEvent(tmp, { type: "item_start", timestamp: `${tsBase}3Z`, pid: 9999, workflowInstance: instance, runId: memberRunId, currentItemId: "alice@example.com" });
+
+    server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
+    port = (server.address() as { port: number }).port;
+
+    const hubSubs = encodeURIComponent(
+      JSON.stringify([{
+        id: "s1",
+        topic: "runEvents",
+        params: { workflow: "separations", id: coordinatorItemId, runId: coordinatorRunId, date: today },
+      }]),
+    );
+    const messages = await collectSSE(
+      `http://localhost:${port}/events/hub?subs=${hubSubs}`,
+      { stopAfter: 1, timeoutMs: 1500 },
+    );
+    const data = messages.map((m) => JSON.parse(m)).flat();
+
+    // Coordinator view must include daemon lifecycle events (workflow_start,
+    // browser_launch, auth_start) AND the member item_start.
+    assert.ok(data.length >= 3, `expected ≥3 events, got ${data.length}: ${JSON.stringify(data.map((e: {type: string}) => e.type))}`);
+    const types = (data as Array<{type: string}>).map((e) => e.type).sort();
+    assert.ok(types.includes("workflow_start"), "coordinator SSE must include workflow_start");
+    assert.ok(types.includes("browser_launch"), "coordinator SSE must include browser_launch");
+    assert.ok(types.includes("auth_start"), "coordinator SSE must include auth_start");
   });
 });
 

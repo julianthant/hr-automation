@@ -10,8 +10,6 @@ import {
 const CANONICAL: RowArchetype[] = [
   "single",
   "preview",
-  "batch-member",
-  "batch",
   "operation",
   "operation-member",
 ];
@@ -20,8 +18,6 @@ describe("row-archetype", () => {
   it("archetypeRowTypeLabel returns the canonical label per archetype", () => {
     assert.equal(archetypeRowTypeLabel("single"), "Single");
     assert.equal(archetypeRowTypeLabel("preview"), "Preview");
-    assert.equal(archetypeRowTypeLabel("batch"), "Batch");
-    assert.equal(archetypeRowTypeLabel("batch-member"), "Batch member");
     assert.equal(archetypeRowTypeLabel("operation"), "Operation");
     assert.equal(archetypeRowTypeLabel("operation-member"), "Operation member");
   });
@@ -30,6 +26,11 @@ describe("row-archetype", () => {
     for (const archetype of CANONICAL) {
       assert.equal(resolveRowArchetype({ data: { archetype } }), archetype);
     }
+  });
+
+  it("resolveRowArchetype normalizes legacy batch stamps", () => {
+    assert.equal(resolveRowArchetype({ data: { archetype: "batch" } }), "operation");
+    assert.equal(resolveRowArchetype({ data: { archetype: "batch-member" } }), "operation-member");
   });
 
   it("resolveRowArchetype defaults to single when data.archetype is missing", () => {
@@ -42,8 +43,6 @@ describe("row-archetype", () => {
   });
 
   it("resolveRowArchetype throws when data.archetype is set but invalid", () => {
-    // Production write code can't reach this state (StampedData type contract
-    // on emitTrackerRow). An explicitly-invalid value is a bug worth surfacing.
     assert.throws(
       () => resolveRowArchetype({ data: { archetype: "not-a-real-archetype" } }),
       /data\.archetype is set but not a valid RowArchetype/,
@@ -54,9 +53,9 @@ describe("row-archetype", () => {
     );
   });
 
-  it("deriveRowArchetype: batch without parentRunId → batch", () => {
-    assert.equal(deriveRowArchetype("batch"), "batch");
-    assert.equal(deriveRowArchetype("batch", undefined), "batch");
+  it("deriveRowArchetype: operation workflow → operation row", () => {
+    assert.equal(deriveRowArchetype("operation"), "operation");
+    assert.equal(deriveRowArchetype("operation", undefined), "operation");
   });
 
   it("deriveRowArchetype: preview → preview", () => {
@@ -64,25 +63,20 @@ describe("row-archetype", () => {
     assert.equal(deriveRowArchetype("preview", "parent-run-1"), "preview");
   });
 
-  it("deriveRowArchetype: batch with parentRunId → batch", () => {
-    assert.equal(deriveRowArchetype("batch", "parent-run-1"), "batch");
+  it("deriveRowArchetype: operation with parentRunId → operation", () => {
+    assert.equal(deriveRowArchetype("operation", "parent-run-1"), "operation");
   });
 
-  it("deriveRowArchetype: member option → batch-member", () => {
-    assert.equal(deriveRowArchetype("single", "parent-run-1", { member: true }), "batch-member");
-    assert.equal(deriveRowArchetype("batch", undefined, { member: true }), "batch-member");
+  it("deriveRowArchetype: member option → operation-member", () => {
+    assert.equal(deriveRowArchetype("single", "parent-run-1", { member: true }), "operation-member");
+    assert.equal(deriveRowArchetype("operation", undefined, { member: true }), "operation-member");
   });
 
-  it("deriveRowArchetype: memberShape wins → the requested member shape", () => {
+  it("deriveRowArchetype: memberShape → operation-member", () => {
     assert.equal(
       deriveRowArchetype("single", "parent-run-1", { memberShape: "operation-member" }),
       "operation-member",
     );
-    assert.equal(
-      deriveRowArchetype("single", "parent-run-1", { memberShape: "batch-member" }),
-      "batch-member",
-    );
-    // memberShape takes precedence over the legacy `member` boolean.
     assert.equal(
       deriveRowArchetype("single", undefined, { member: true, memberShape: "operation-member" }),
       "operation-member",

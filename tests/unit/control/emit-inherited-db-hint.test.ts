@@ -129,9 +129,9 @@ describe("emitInheritedRow — SQLite db hint plumbing (Finding #13)", () => {
 });
 
 describe("emitDashboardCancelTrackerRow — preserves batch-member parent linkage (separation cancel-all regression)", () => {
-  it("cancel row inherits parentRunId through the db fast path so the batch anchor survives", () => {
+  it("cancel row inherits parentRunId through the db fast path so the operation anchor survives", () => {
     // Repro: a multi-id separation input run stamps batch-member rows under a
-    // synthetic batch anchor (shared parentRunId). Bulk cancel passes `db`, so
+    // synthetic operation anchor (shared parentRunId). Bulk cancel passes `db`, so
     // the prior-row lookup hits the SQLite projection. The emitted cancel row
     // MUST keep parentRunId — otherwise every member orphans out of the
     // (synthetic) anchor and surfaces as a standalone row.
@@ -143,7 +143,7 @@ describe("emitDashboardCancelTrackerRow — preserves batch-member parent linkag
       runId: "member-run",
       parentRunId: "batch-anchor-1",
       status: "pending",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     }, tmp);
 
     emitDashboardCancelTrackerRow("separations", "4131", "member-run", tmp, stores.taskStore.db);
@@ -158,7 +158,7 @@ describe("emitDashboardCancelTrackerRow — preserves batch-member parent linkag
     });
 
     assert.equal(cancelled?.parentRunId, "batch-anchor-1", "cancel row keeps parentRunId");
-    assert.equal(cancelled?.data?.archetype, "batch-member", "cancel row keeps batch-member archetype");
+    assert.equal(cancelled?.data?.archetype, "operation-member", "cancel row keeps batch-member archetype");
     assert.equal(cancelled?.step, "cancelled");
   });
 });

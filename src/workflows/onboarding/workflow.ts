@@ -55,7 +55,7 @@ export const ONBOARDING_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy =
 export const onboardingWorkflow = defineWorkflow({
   name: "onboarding",
   label: "Onboarding",
-  archetype: "batch",
+  archetype: "operation",
   inputSubject: "email",
   code: "on",
   category: "Onboarding",

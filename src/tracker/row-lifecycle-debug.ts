@@ -363,7 +363,7 @@ function observeRow(args: ObserveArgs): void {
       cause = "discard";
     } else if (
       live.status === "done" &&
-      archetype === "batch" &&
+      (live.data?.archetype === "batch" || archetype === "preview") &&
       live.workflow === "ocr" &&
       // New approval contract (2026-05-25): the approve route writes
       // `done step=approved`; the kernel-path handler also returns,
@@ -426,7 +426,7 @@ function observeRow(args: ObserveArgs): void {
   else delete cycle.currentStep;
   cycle.currentSurface = surface;
   cycle.memberIds = memberIds;
-  cycle.isAnchor = archetype === "batch" || memberIds.length > 0;
+  cycle.isAnchor = archetype === "operation" || memberIds.length > 0;
   cycle.endState = { status: live.status, ...(live.step ? { step: live.step } : {}), surface };
   if (live.parentRunId) cycle.parentRunId = live.parentRunId;
   if (live.input) cycle.input = live.input;

@@ -172,7 +172,7 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
 function isPrepRow(entry: TrackerEntry): boolean {
   const data = entry.data ?? {};
   const shape = classifyTrackerRow(entry).shape;
-  return (shape === "batch" || shape === "preview") && (
+  return (shape === "preview" || (shape === "operation" && data.mode === "prepare")) && (
     data.mode === "prepare" || Boolean(data.pdfOriginalName)
   );
 }
@@ -271,9 +271,8 @@ function fallbackEntrySubtitle(entry: TrackerEntry, policy: WorkflowRuntimePolic
 /** Map stamped row archetype to queue surface type; member rows render as single. */
 export function entrySurfaceType(entry: TrackerEntry): WorkflowSurfaceType {
   const archetype = resolveRowArchetype(entry);
-  return archetype === "batch-member" || archetype === "operation-member"
-    ? "single"
-    : archetype;
+  if (archetype === "operation-member") return "single";
+  return archetype;
 }
 
 function rowTypeLabelFor(surfaceType: WorkflowSurfaceType): string {
@@ -290,16 +289,21 @@ function batchGroupTitle(
 
   const anchor = surface.kind === "preview"
     ? surface.parent
-    : surface.kind === "batch"
+    : surface.kind === "operation"
       ? surface.parent
-      : surface.kind === "operation"
-        ? surface.parent
-        : undefined;
+      : undefined;
 
   // Person batches carry no synthetic title — the count badge + member-name
   // preview already identify the bag of people. Session-local ordinals
   // ("Oath 1", "<label> · #1234") are retired across all batch kinds.
-  const kindEntry = anchor ?? surface.members[0];
+  // Synthetic operation shells (`input-run-*`) carry no queueRowKind — read
+  // kind from the real member rows instead of leaking the shell id as title.
+  const kindEntry =
+    surface.kind === "operation" &&
+    anchor?.id.startsWith("input-run-") &&
+    surface.members[0]
+      ? surface.members[0]
+      : anchor ?? surface.members[0];
   if (kindEntry && resolveQueueRowKind(kindEntry) === "person") return "";
 
   if (anchor) {
@@ -448,6 +452,10 @@ function operationSurfaceStatus(surface: Extract<TrackerQueueGroupSurface, { kin
   return surface.parent.status || "running";
 }
 
+function isSyntheticOperationParent(parent: TrackerEntry | undefined): boolean {
+  return parent?.id.startsWith("input-run-") ?? false;
+}
+
 /**
  * The entry whose title / subtitle / step / itemId anchors a group surface
  * card. Preview and operation surfaces always carry a real parent row; a batch
@@ -457,9 +465,11 @@ function operationSurfaceStatus(surface: Extract<TrackerQueueGroupSurface, { kin
 function surfaceAnchorEntry(surface: TrackerQueueGroupSurface): TrackerEntry | undefined {
   switch (surface.kind) {
     case "preview":
-    case "operation":
       return surface.parent;
-    case "batch":
+    case "operation":
+      if (isSyntheticOperationParent(surface.parent)) {
+        return surface.members[0];
+      }
       return surface.parent ?? surface.members[0];
   }
 }
@@ -477,15 +487,25 @@ function surfaceAnchorEntry(surface: TrackerQueueGroupSurface): TrackerEntry | u
  * fan-out under an OCR operation): its anchor falls back to `members[0]`, which
  * would otherwise leak the *member's* tail as the parent footer id.
  */
-function deriveBatchAnchorSubtitle(
+function deriveOperationAnchorSubtitle(
   surface: TrackerQueueGroupSurface,
   anchor: TrackerEntry | undefined,
   fallback: string | undefined,
 ): string | undefined {
-  if (surface.kind !== "batch") return fallback;
-  const anchorTrace = anchor?.data?.__traceId;
-  if (typeof anchorTrace !== "string" || !anchorTrace) return fallback;
-  const prefix = tracePrefix(anchorTrace);
+  if (surface.kind !== "operation") return fallback;
+  // Real coordinator row in panel: keep its stamped trace (or other fallback).
+  if (
+    surface.parent &&
+    anchor === surface.parent &&
+    !isSyntheticOperationParent(surface.parent)
+  ) {
+    return fallback;
+  }
+  // Synthetic shell (delegated fan-out, no coordinator in this workflow):
+  // derive parent trace from member prefix + parentRunId tail.
+  const memberTrace = anchor?.data?.__traceId;
+  if (typeof memberTrace !== "string" || !memberTrace) return fallback;
+  const prefix = tracePrefix(memberTrace);
   const tail = runIdFragment(surface.parentRunId);
   return prefix && tail ? `${prefix}-${tail}` : fallback;
 }
@@ -497,10 +517,6 @@ function computeGroupStatus(surface: TrackerQueueGroupSurface): string {
       return surface.parent.status;
     case "operation":
       return operationSurfaceStatus(surface);
-    case "batch":
-      return surface.parent && surface.parent.status !== "done"
-        ? surface.parent.status
-        : memberAggregateStatus(surface.members);
   }
 }
 
@@ -535,8 +551,6 @@ export function buildProjectionFromQueueSurface(
       ? [surface.parent]
       : surface.kind === "operation"
         ? [surface.parent]
-      : surface.kind === "batch" && surface.parent
-        ? [surface.parent]
         : [];
   const rowTargetEntries = surface.kind === "preview"
     ? [surface.parent]
@@ -568,18 +582,14 @@ export function buildProjectionFromQueueSurface(
   // The group's anchor row for itemId/step purposes — batch (when a parent row
   // exists) and operation surfaces both carry a real parent row; preview is
   // handled separately below.
-  const groupParent = surface.kind === "operation"
-    ? surface.parent
-    : surface.kind === "batch"
-      ? surface.parent
-      : undefined;
+  const groupParent = surface.kind === "operation" ? surface.parent : undefined;
 
   return {
     runId: surface.parentRunId,
     workflowId: fallbackWorkflow,
     itemId: surface.kind === "preview" ? surface.parent.id : groupParent?.id ?? surface.parentRunId,
     title: batchGroupTitle(surface, context, policy),
-    subtitle: deriveBatchAnchorSubtitle(surface, anchor, anchorProjection?.subtitle),
+    subtitle: deriveOperationAnchorSubtitle(surface, anchor, anchorProjection?.subtitle),
     status,
     step: surface.kind === "preview" ? surface.parent.step : groupParent?.step,
     surfaceType,

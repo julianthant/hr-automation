@@ -29,6 +29,33 @@ export function selectRunEventsForRun(
   return mergeAndCap(baseRows, continuation, (row) => row.event_ms, limit);
 }
 
+/**
+ * Return tracker entries for all child runs of an operation coordinator
+ * (`parent_run_id = coordinatorRunId`). Used by `runEventsTopic` to supplement
+ * the coordinator's own `trackerEntries` with member entries that carry
+ * `data.instance` — enabling `resolveInstanceForOperationCoordinator` to resolve
+ * the workflowInstance for the coordinator's log panel.
+ *
+ * Indexed via `idx_run_events_parent`; not date-scoped so it works even when
+ * the coordinator and member rows landed in different partitions.
+ */
+export function selectChildRunEntriesForCoordinator(
+  db: Database,
+  coordinatorRunId: string,
+): TrackerEntry[] {
+  const s = readStmts(db);
+  const rows = s.selectRunEventsByParentRunId.all({
+    parentRunId: coordinatorRunId,
+    limit: 500,
+  }) as RunEventRow[];
+  const out: TrackerEntry[] = [];
+  for (const row of rows) {
+    const entry = mapRunEventRowToWire(row);
+    if (entry) out.push(entry);
+  }
+  return out;
+}
+
 export function mapRunEventRowToWire(row: RunEventRow): TrackerEntry | null {
   if (!isTrackerStatus(row.status)) {
     log.warn(

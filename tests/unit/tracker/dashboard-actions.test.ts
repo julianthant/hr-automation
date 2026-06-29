@@ -157,7 +157,7 @@ describe("performWorkflowAction — cancel scope", () => {
         id: "ocr-sess-1",
         runId: "ocr-run-1",
         status: "pending",
-        data: { archetype: "batch" },
+        data: { archetype: "operation" },
       },
       dir,
     );

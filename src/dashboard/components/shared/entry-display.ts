@@ -79,7 +79,7 @@ export function resolveEntryName(
   const fromMap = displayNames?.get(entry.id);
   if (fromMap) return fromMap;
   const d = entry.data ?? {};
-  if ((d.mode === "prepare" || resolveRowArchetype(entry) === "batch") && d.pdfOriginalName) {
+  if ((d.mode === "prepare" || resolveRowArchetype(entry) === "operation") && d.pdfOriginalName) {
     return d.pdfOriginalName;
   }
   if (entry.parentRunId) {
@@ -200,7 +200,7 @@ export function buildDisplayNameMap(
     e: TrackerEntry,
   ): { base: string; suppressWhenSingularFallback: boolean } => {
     const d = e.data ?? {};
-    if ((d.mode === "prepare" || resolveRowArchetype(e) === "batch") && d.pdfOriginalName) {
+    if ((d.mode === "prepare" || resolveRowArchetype(e) === "operation") && d.pdfOriginalName) {
       return { base: d.pdfOriginalName, suppressWhenSingularFallback: false };
     }
     const personName = resolveEmployeeLabel(d);
@@ -217,7 +217,7 @@ export function buildDisplayNameMap(
     const ocrBase = ocrQueueDisplayBase(e);
     if (ocrBase) return { base: ocrBase, suppressWhenSingularFallback: false };
     // Batch rows already have a unique batch id in __name (e.g. "Oath · 7596").
-    if (resolveRowArchetype(e) === "batch") {
+    if (resolveRowArchetype(e) === "operation") {
       const workflowName = firstNonBlank(d.__name);
       return { base: workflowName || workflowLabel, suppressWhenSingularFallback: false };
     }
