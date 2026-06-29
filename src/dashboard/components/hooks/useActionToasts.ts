@@ -1,4 +1,5 @@
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
+import { notify, NOTIFY_KINDS } from "@/lib/notifications";
 
 /**
  * Action-toast registry. Wires sonner's `toast.loading` ids to entries
@@ -149,6 +150,19 @@ export function resolveActionToastsForEntry(entry: EntryShape): void {
           kind === "cancel-running"
             ? "Workflow stopped at step boundary; daemon ready for next item."
             : "Removed from queue.",
+      });
+      // Record a center notification (no second toast — the loading toast
+      // above already resolved). App's status-transition loop deliberately
+      // skips cancelled, so this is the only place it reaches the bell.
+      notify({
+        kind: NOTIFY_KINDS.runCancelled,
+        title: `Cancelled ${label}`,
+        description:
+          kind === "cancel-running" ? "Workflow stopped at step boundary." : "Removed from queue.",
+        source: entry.workflow,
+        subject: reg.subject,
+        entityRef: { workflow: entry.workflow, id: entry.id, runId: entry.runId },
+        toast: false,
       });
     } else if (isDone) {
       toast.success(`${label} completed`, {

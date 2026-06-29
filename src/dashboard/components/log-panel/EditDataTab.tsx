@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Play, Loader2, Save, RefreshCcw, Copy, Check, ChevronDown } from "lucide-react";
-import { toast } from "sonner";
+import {
+  Play,
+  Loader2,
+  Save,
+  RefreshCcw,
+  RotateCcw,
+  Copy,
+  Check,
+  ChevronDown,
+  Undo2,
+  CalendarDays,
+  AlertCircle,
+  SquarePen,
+} from "lucide-react";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { useWorkflow } from "@/lib/workflows-context";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { statusBadgeClass } from "@/components/shared/status-styles";
 import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
 
@@ -23,10 +37,25 @@ interface EditDataTabProps {
 type PendingAction = null | "run" | "save" | "refresh";
 type EditableFieldKey = { key: string };
 
+/**
+ * One editable detail field as it arrives from the workflow registry. `inputKind`
+ * and `group` are the Edit Data layout hints (see `DetailField` in core kernel
+ * types); both are optional so any workflow opting into editable fields renders
+ * sensibly even without them.
+ */
+type EditField = {
+  key: string;
+  label: string;
+  multiline?: boolean;
+  conditional?: boolean;
+  inputKind?: "text" | "id" | "date";
+  group?: string;
+};
+
 function EmptyEditState({ children }: { children: ReactNode }) {
   return (
-    <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">
-      {children}
+    <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-sm text-muted-foreground">
+      <div className="max-w-sm">{children}</div>
     </div>
   );
 }
@@ -51,28 +80,102 @@ export function buildEditDataInitialValues(
   return out;
 }
 
+// ── Date helpers (MM/DD/YYYY ⇄ the Calendar's YYYY-MM-DD) ─────────────
+/**
+ * Parse an `MM/DD/YYYY` string into the calendar's `YYYY-MM-DD`, or `undefined`
+ * if it isn't a real calendar date. Used both to seed the Calendar popover and
+ * to validate a typed date.
+ */
+export function mmddyyyyToYmd(value: string): string | undefined {
+  const m = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return undefined;
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  const year = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  // Reject impossible days (e.g. 02/31) by round-tripping through Date.
+  const dt = new Date(year, month - 1, day);
+  if (dt.getMonth() !== month - 1 || dt.getDate() !== day) return undefined;
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  return `${year}-${mm}-${dd}`;
+}
+
+/** Format the calendar's `YYYY-MM-DD` back into the stored `MM/DD/YYYY`. */
+export function ymdToMmddyyyy(ymd: string): string {
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd;
+  return `${m[2]}/${m[3]}/${m[1]}`;
+}
+
+/**
+ * Validate an editable field's current value. Returns a short operator-facing
+ * message when the value can't be used, else `null`. Generic (keyed on
+ * `inputKind`, never a field name): a date must be a real `MM/DD/YYYY`, and an
+ * id must not contain whitespace. Empty is always allowed — clearing a field is
+ * a valid edit; presence requirements live in the workflow handler.
+ */
+export function validateEditField(field: EditField, value: string): string | null {
+  const v = (value ?? "").trim();
+  if (v === "") return null;
+  if (field.inputKind === "date" && !mmddyyyyToYmd(v)) return "Use MM/DD/YYYY.";
+  if (field.inputKind === "id" && /\s/.test(v)) return "IDs can't contain spaces.";
+  return null;
+}
+
+/**
+ * Group editable fields into labeled sections by their consecutive `group`
+ * value, preserving declared order. Fields without a `group` fall into an
+ * unlabeled section, so a workflow that sets no groups still renders one clean
+ * list.
+ */
+export function groupEditableFields(
+  fields: ReadonlyArray<EditField>,
+): Array<{ group?: string; fields: EditField[] }> {
+  const out: Array<{ group?: string; fields: EditField[] }> = [];
+  for (const f of fields) {
+    const last = out[out.length - 1];
+    if (last && last.group === f.group) last.fields.push(f);
+    else out.push({ group: f.group, fields: [f] });
+  }
+  return out;
+}
+
+/** Token-driven input classes shared by the text/id, textarea, and date inputs. */
+function fieldInputClass(opts: { dirty: boolean; invalid: boolean; mono: boolean }): string {
+  return cn(
+    "w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground",
+    "transition-colors duration-150 motion-reduce:transition-none",
+    "placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1",
+    opts.invalid
+      ? "border-destructive/60 focus:border-destructive focus:ring-destructive/40"
+      : opts.dirty
+        ? "border-warning/50 focus:border-primary focus:ring-primary/40"
+        : "border-border/60 focus:border-primary focus:ring-primary/40",
+    opts.mono && "font-mono",
+  );
+}
+
 /**
  * Edit-and-resume form. Reads the workflow's metadata from the registry
  * (via useWorkflow) and renders one input per `detailField` whose
- * `editable: true` flag is set. Defaults from `entry.data`. "Run with
- * these values" POSTs /api/run-with-data; the backend attaches the
- * fields as a `prefilledData` channel on the input, the kernel pre-
- * merges them into ctx.data, and the workflow's extraction step is
- * bypassed via its `if (!ctx.data.X) await ctx.step(...)` gate.
+ * `editable: true` flag is set, laid out in labeled sections by `group` with
+ * `date` fields backed by a calendar popover and `id` fields in monospace.
+ * Defaults come from `entry.data`. "Run with these values" POSTs
+ * /api/run-with-data; the backend attaches the fields as a `prefilledData`
+ * channel on the input, the kernel pre-merges them into ctx.data, and the
+ * workflow's extraction step is bypassed via its `if (!ctx.data.X) await
+ * ctx.step(...)` gate.
  *
- * "Copy from prior run" affordance: when the workflow declares a
- * `matchKey` (e.g. `"eid"` for separations) and the current entry has a
- * non-empty `data[matchKey]`, the toolbar surfaces a "Find prior" button.
- * Clicking opens a popover listing past runs of this workflow that share
- * the same `matchKey` value but a different itemId; selecting one fills
- * the form fields with that prior run's data so the operator can carry
- * extracted/edited values forward across duplicate-employee submissions.
+ * "Copy from prior run" affordance: when the workflow declares a `matchKey`
+ * (e.g. `"eid"` for separations) and the current entry has a non-empty
+ * `data[matchKey]`, the toolbar surfaces a "Find prior" button.
  */
 export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) {
   const meta = useWorkflow(workflow);
   const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
   const editableFields = useMemo(
-    () => (meta?.detailFields ?? []).filter((f) => f.editable),
+    () => (meta?.detailFields ?? []).filter((f) => f.editable) as EditField[],
     [meta],
   );
   const resetKey = buildEditDataResetKey(entry, editableFields);
@@ -83,34 +186,46 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   }, [resetKey]);
 
   const [values, setValues] = useState<Record<string, string>>(initial);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<PendingAction>(null);
 
   // Reset when the entry identity / editable set changes, not on every SSE ref.
   useEffect(() => {
     setValues(initial);
+    setTouched({});
   }, [initial, resetKey]);
 
   if (!entry) {
-    return (
-      <EmptyEditState>
-        Select an entry to edit its data.
-      </EmptyEditState>
-    );
+    return <EmptyEditState>Select a row to edit its data.</EmptyEditState>;
   }
   if (editableFields.length === 0) {
     return (
       <EmptyEditState>
         This workflow has no editable fields. Edit-and-resume is opt-in
-        per workflow — see the workflow's <span className="font-mono">detailFields</span>{" "}
-        metadata.
+        per workflow — see the workflow's{" "}
+        <span className="font-mono">detailFields</span> metadata.
       </EmptyEditState>
     );
   }
 
-  const dirty = editableFields.some((f) => (values[f.key] ?? "") !== (initial[f.key] ?? ""));
+  const setFieldValue = (key: string, next: string): void =>
+    setValues((v) => ({ ...v, [key]: next }));
+  const markTouched = (key: string): void => setTouched((t) => ({ ...t, [key]: true }));
 
-  const onReset = (): void => {
+  const isDirty = (f: EditField): boolean => (values[f.key] ?? "") !== (initial[f.key] ?? "");
+  const dirty = editableFields.some(isDirty);
+  const changedCount = editableFields.filter(isDirty).length;
+  const errorFor = (f: EditField): string | null => validateEditField(f, values[f.key] ?? "");
+  const hasBlockingErrors = editableFields.some((f) => errorFor(f) !== null);
+
+  const onResetAll = (): void => {
     setValues(initial);
+    setTouched({});
+  };
+
+  const onResetField = (key: string): void => {
+    setValues((v) => ({ ...v, [key]: initial[key] ?? "" }));
+    setTouched((t) => ({ ...t, [key]: false }));
   };
 
   const onRefresh = async (): Promise<void> => {
@@ -145,6 +260,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
         }
       }
       setValues(next);
+      setTouched({});
       if (filled === 0) {
         toast.warning(`No data available`, {
           id: t,
@@ -249,158 +365,339 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
   const matchValue = matchKey ? (entry.data?.[matchKey] ?? "").toString().trim() : "";
   const priorAvailable = !!matchKey && matchValue.length > 0;
 
+  const sections = groupEditableFields(editableFields);
+  const busy = pending !== null;
+  const workflowLabel = meta?.label ?? workflow;
+
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-3">
-      <div className="text-xs text-muted-foreground">
-        Override extracted values. The workflow will skip its extraction
-        step and use these values directly. Useful when extraction is
-        correct but a downstream step needs to be re-run.
-      </div>
-      <div className="space-y-3">
-        {editableFields.map((f) => (
-          <div key={f.key} className="space-y-1">
-            <label
-              htmlFor={`edit-data-${f.key}`}
-              className="block text-[11px] font-medium text-muted-foreground uppercase tracking-wider"
+    <div className="flex h-full min-h-0 w-full flex-col">
+      {/* Scrollable form body */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="mx-auto w-full max-w-2xl space-y-6">
+          {/* Purpose callout */}
+          <div className="flex items-start gap-3 rounded-lg border border-border bg-card/40 px-3.5 py-3">
+            <div
+              aria-hidden
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground"
             >
-              {f.label}
-            </label>
-            {f.multiline ? (
-              <textarea
-                id={`edit-data-${f.key}`}
-                value={values[f.key] ?? ""}
-                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                rows={3}
-                className={cn(
-                  "w-full min-h-[4.5rem] rounded-md border border-border/60 bg-background",
-                  "px-2.5 py-1.5 text-sm font-mono text-foreground",
-                  "transition-colors duration-150 resize-y",
-                  "focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40",
-                )}
-              />
-            ) : (
-              <input
-                id={`edit-data-${f.key}`}
-                type="text"
-                value={values[f.key] ?? ""}
-                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                className={cn(
-                  "w-full rounded-md border border-border/60 bg-background",
-                  "px-2.5 py-1.5 text-sm font-mono text-foreground",
-                  "transition-colors duration-150",
-                  "focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40",
-                )}
-              />
-            )}
+              <SquarePen className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-sm font-medium text-foreground">Override extracted values</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Re-run this {workflowLabel.toLowerCase()} with the values below instead of
+                extracting them again — useful when the data is right but a later step needs
+                another pass.
+              </p>
+            </div>
           </div>
-        ))}
+
+          {/* Field sections */}
+          <div className="space-y-6">
+            {sections.map((section, si) => (
+              <section key={section.group ?? `__ungrouped-${si}`} className="space-y-3">
+                {section.group && (
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {section.group}
+                    </h3>
+                    <div className="h-px flex-1 bg-border/60" />
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                  {section.fields.map((f) => {
+                    const id = `edit-data-${f.key}`;
+                    const value = values[f.key] ?? "";
+                    const fieldDirty = isDirty(f);
+                    const error = errorFor(f);
+                    const showError = error != null && touched[f.key];
+                    const invalid = showError;
+                    const mono = f.inputKind === "id" || f.inputKind === "date";
+                    // multiline + a lone field in a section span the full row; pairs sit half-width.
+                    const fullWidth = f.multiline || section.fields.length === 1;
+                    const inputCls = fieldInputClass({ dirty: fieldDirty, invalid, mono });
+
+                    return (
+                      <div key={f.key} className={cn("flex flex-col gap-1.5", fullWidth && "sm:col-span-2")}>
+                        <div className="flex items-center justify-between gap-2">
+                          <label
+                            htmlFor={id}
+                            className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+                          >
+                            {f.label}
+                            {fieldDirty && (
+                              <>
+                                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warning" />
+                                <span className="sr-only">(changed)</span>
+                              </>
+                            )}
+                          </label>
+                          {fieldDirty && (
+                            <button
+                              type="button"
+                              onClick={() => onResetField(f.key)}
+                              disabled={busy}
+                              aria-label={`Reset ${f.label} to the extracted value`}
+                              title="Reset to the extracted value"
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded px-1 py-0.5 cursor-pointer",
+                                "text-[10px] font-medium text-muted-foreground",
+                                "transition-colors duration-150 motion-reduce:transition-none",
+                                "hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                                "disabled:opacity-50 disabled:cursor-not-allowed",
+                              )}
+                            >
+                              <Undo2 className="h-3 w-3" aria-hidden />
+                              Reset
+                            </button>
+                          )}
+                        </div>
+
+                        {f.multiline ? (
+                          <textarea
+                            id={id}
+                            value={value}
+                            disabled={busy}
+                            rows={3}
+                            onChange={(e) => setFieldValue(f.key, e.target.value)}
+                            onBlur={() => markTouched(f.key)}
+                            className={cn(inputCls, "min-h-[4.5rem] resize-y disabled:opacity-60")}
+                          />
+                        ) : f.inputKind === "date" ? (
+                          <DateField
+                            id={id}
+                            value={value}
+                            disabled={busy}
+                            inputClassName={cn(inputCls, "pr-9 disabled:opacity-60")}
+                            onChange={(next) => setFieldValue(f.key, next)}
+                            onBlur={() => markTouched(f.key)}
+                          />
+                        ) : (
+                          <input
+                            id={id}
+                            type="text"
+                            value={value}
+                            disabled={busy}
+                            onChange={(e) => setFieldValue(f.key, e.target.value)}
+                            onBlur={() => markTouched(f.key)}
+                            className={cn(inputCls, "disabled:opacity-60")}
+                          />
+                        )}
+
+                        {showError && (
+                          <p
+                            className="flex items-center gap-1 text-[11px] text-destructive"
+                            aria-live="polite"
+                          >
+                            <AlertCircle className="h-3 w-3 shrink-0" aria-hidden />
+                            {error}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="pt-3 flex items-center justify-end gap-2 flex-wrap">
-        {priorAvailable && (
-          <CopyFromPriorButton
-            workflow={workflow}
-            workflowLabel={meta?.label ?? workflow}
-            keyField={matchKey!}
-            keyValue={matchValue}
-            excludeId={entry.id}
-            editableFields={editableFields.map((f) => f.key)}
-            disabled={pending !== null}
-            onApply={(picked) => {
-              const next: Record<string, string> = { ...values };
-              let filled = 0;
-              for (const f of editableFields) {
-                const v = picked.data[f.key];
-                if (v != null && String(v).trim() !== "") {
-                  next[f.key] = String(v);
-                  filled += 1;
+
+      {/* Action bar — pinned below the scroll area. Left: pull values in.
+          Right: act on the values. */}
+      <div className="shrink-0 border-t border-border bg-card/30 px-4 py-3">
+        <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center gap-2">
+          {priorAvailable && (
+            <CopyFromPriorButton
+              workflow={workflow}
+              workflowLabel={workflowLabel}
+              keyField={matchKey!}
+              keyValue={matchValue}
+              excludeId={entry.id}
+              editableFields={editableFields.map((f) => f.key)}
+              disabled={busy}
+              onApply={(picked) => {
+                const next: Record<string, string> = { ...values };
+                let filled = 0;
+                for (const f of editableFields) {
+                  const v = picked.data[f.key];
+                  if (v != null && String(v).trim() !== "") {
+                    next[f.key] = String(v);
+                    filled += 1;
+                  }
                 }
+                setValues(next);
+                setTouched({});
+                toast.success(
+                  `Copied ${filled} field${filled === 1 ? "" : "s"} from ${picked.id}`,
+                  { description: `Source: ${picked.date}` },
+                );
+              }}
+            />
+          )}
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={busy}
+            title="Pull the latest values for this run from tracker entries. Falls back to the richest data across runs of this id when the active run has none."
+            className={cn(
+              "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
+              "text-xs font-medium border border-border/60 text-muted-foreground bg-transparent",
+              "transition-colors duration-150 motion-reduce:transition-none",
+              "hover:text-foreground hover:bg-muted",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+            )}
+          >
+            {pending === "refresh" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+            ) : (
+              <RefreshCcw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            Refresh from logs
+          </button>
+
+          {/* Right cluster — act on the values. */}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {changedCount > 0 && (
+              <span
+                className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                aria-live="polite"
+              >
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warning" />
+                {changedCount} changed
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onResetAll}
+              disabled={!dirty || busy}
+              title="Revert every field to the extracted value"
+              className={cn(
+                "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
+                "text-xs font-medium border border-border/60 text-muted-foreground bg-transparent",
+                "transition-colors duration-150 motion-reduce:transition-none",
+                "hover:text-foreground hover:bg-muted",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+              )}
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={!dirty || busy || hasBlockingErrors}
+              title={
+                hasBlockingErrors
+                  ? "Fix the highlighted fields first"
+                  : "Persist these values without running. Survives dashboard refresh."
               }
-              setValues(next);
-              toast.success(
-                `Copied ${filled} field${filled === 1 ? "" : "s"} from ${picked.id}`,
-                { description: `Source: ${picked.date}` },
-              );
+              className={cn(
+                "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
+                "text-xs font-medium border border-border/60 text-foreground bg-transparent",
+                "transition-colors duration-150 motion-reduce:transition-none",
+                "hover:bg-muted",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+              )}
+            >
+              {pending === "save" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+              ) : (
+                <Save className="h-3.5 w-3.5" aria-hidden />
+              )}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={busy || hasBlockingErrors}
+              title={hasBlockingErrors ? "Fix the highlighted fields first" : undefined}
+              className={cn(
+                "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
+                "bg-primary text-primary-foreground text-xs font-medium",
+                "transition-colors duration-150 motion-reduce:transition-none",
+                "hover:bg-primary/90",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                "disabled:opacity-60 disabled:cursor-not-allowed",
+              )}
+            >
+              {pending === "run" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+              ) : (
+                <Play className="h-3.5 w-3.5" aria-hidden />
+              )}
+              Run with these values
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface DateFieldProps {
+  id: string;
+  value: string;
+  disabled?: boolean;
+  inputClassName: string;
+  onChange: (next: string) => void;
+  onBlur: () => void;
+}
+
+/**
+ * A `MM/DD/YYYY` text input with an inline calendar trigger. The operator can
+ * type a date directly (validated on blur upstream) or pick one from the
+ * popover — selecting from the calendar always yields a valid date and clears
+ * any typed-format error.
+ */
+function DateField({ id, value, disabled, inputClassName, onChange, onBlur }: DateFieldProps) {
+  const [open, setOpen] = useState(false);
+  const ymd = mmddyyyyToYmd(value) ?? "";
+
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type="text"
+        inputMode="numeric"
+        placeholder="MM/DD/YYYY"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        className={inputClassName}
+      />
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label="Pick a date from the calendar"
+            className={cn(
+              "absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded cursor-pointer",
+              "text-muted-foreground transition-colors duration-150 motion-reduce:transition-none",
+              "hover:bg-muted hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+            )}
+          >
+            <CalendarDays className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" sideOffset={6} className="w-auto p-3">
+          <Calendar
+            selected={ymd}
+            onSelect={(picked) => {
+              onChange(ymdToMmddyyyy(picked));
+              onBlur();
+              setOpen(false);
             }}
           />
-        )}
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={pending !== null}
-          title="Pull the latest values for this run from tracker entries. Falls back to the richest data across runs of this id when the active run has none."
-          className={cn(
-            "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
-            "text-xs font-medium border border-border/60",
-            "text-muted-foreground bg-transparent",
-            "transition-colors duration-150",
-            "hover:text-foreground hover:bg-muted",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-          )}
-        >
-          {pending === "refresh" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-          ) : (
-            <RefreshCcw className="h-3.5 w-3.5" />
-          )}
-          Refresh from logs
-        </button>
-        <button
-          type="button"
-          onClick={onReset}
-          disabled={!dirty || pending !== null}
-          className={cn(
-            "inline-flex items-center h-8 px-3 rounded-md cursor-pointer",
-            "text-xs font-medium border border-border/60",
-            "text-muted-foreground bg-transparent",
-            "transition-colors duration-150",
-            "hover:text-foreground hover:bg-muted",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-          )}
-        >
-          Reset
-        </button>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={!dirty || pending !== null}
-          title="Persist these values without running. Survives dashboard refresh."
-          className={cn(
-            "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
-            "text-xs font-medium border border-border/60",
-            "text-foreground bg-transparent",
-            "transition-colors duration-150",
-            "hover:bg-muted",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-          )}
-        >
-          {pending === "save" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
-          )}
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={pending !== null}
-          className={cn(
-            "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
-            "bg-primary text-primary-foreground text-xs font-medium",
-            "transition-colors duration-150",
-            "hover:bg-primary/90",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-            "disabled:opacity-60 disabled:cursor-wait",
-          )}
-        >
-          {pending === "run" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-          ) : (
-            <Play className="h-3.5 w-3.5" />
-          )}
-          Run with these values
-        </button>
-      </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -531,18 +828,19 @@ function CopyFromPriorButton({
             "inline-flex items-center gap-1.5 h-8 px-3 rounded-md cursor-pointer",
             "text-xs font-medium border border-accent-foreground/40",
             "text-accent-foreground bg-accent/30",
-            "transition-colors duration-150",
+            "transition-colors duration-150 motion-reduce:transition-none",
             "hover:bg-accent/50",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             "disabled:opacity-50 disabled:cursor-not-allowed",
           )}
         >
-          <Copy className="h-3.5 w-3.5" />
+          <Copy className="h-3.5 w-3.5" aria-hidden />
           Find prior
-          <ChevronDown className="h-3 w-3 opacity-70" />
+          <ChevronDown className="h-3 w-3 opacity-70" aria-hidden />
         </button>
       </PopoverTrigger>
       <PopoverContent
-        align="end"
+        align="start"
         sideOffset={6}
         className="w-[360px] p-0 max-h-[420px] overflow-hidden flex flex-col"
       >
@@ -550,7 +848,7 @@ function CopyFromPriorButton({
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Prior runs · {keyField} = {keyValue}
           </div>
-          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none text-muted-foreground" />}
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none text-muted-foreground" aria-hidden />}
         </div>
         <div className="flex-1 overflow-y-auto">
           {error ? (
@@ -577,7 +875,7 @@ function CopyFromPriorButton({
                     }}
                     className={cn(
                       "w-full text-left px-3 py-2 cursor-pointer",
-                      "hover:bg-accent/40 transition-colors",
+                      "hover:bg-accent/40 transition-colors motion-reduce:transition-none",
                       "focus-visible:outline-none focus-visible:bg-accent/40",
                     )}
                   >
@@ -591,7 +889,7 @@ function CopyFromPriorButton({
                           statusBadgeClass(e.status),
                         )}
                       >
-                        {e.status === "done" ? <Check className="inline h-3 w-3" /> : e.status}
+                        {e.status === "done" ? <Check className="inline h-3 w-3" aria-hidden /> : e.status}
                       </span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">

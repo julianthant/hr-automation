@@ -21,13 +21,15 @@ export interface WorkflowMetadata {
   steps: string[]
   systems: string[]
   /**
-   * Labeled detailFields — always `{ key, label, editable?, displayInGrid? }`
-   * from /api/workflow-definitions.
+   * Labeled detailFields from /api/workflow-definitions.
    *   - `editable: true`        → field renders in the Edit Data tab.
    *   - `displayInGrid: false`  → field is hidden from LogPanel's detail grid
    *                                (still shown in Edit Data when editable).
+   *   - `inputKind`             → Edit Data control: `id` (mono) / `date`
+   *                                (calendar popover) / `text` (default).
+   *   - `group`                 → Edit Data section label the field is grouped under.
    */
-  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean }>
+  detailFields: Array<{ key: string; label: string; editable?: boolean; displayInGrid?: boolean; multiline?: boolean; conditional?: boolean; inputKind?: "text" | "id" | "date"; group?: string }>
   /**
    * Field key used by the EditDataTab's "Copy from prior run" lookup.
    * When set (e.g. `"eid"` for separations), the EditDataTab surfaces a

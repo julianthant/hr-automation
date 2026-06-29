@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";

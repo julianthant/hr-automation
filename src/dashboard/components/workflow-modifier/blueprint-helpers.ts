@@ -172,7 +172,7 @@ export function isDirty(draft: WorkflowOverride, persisted: WorkflowOverride | n
 }
 
 // ── Sparse-prune core ──────────────────────────────────────────────────────────
-function objHasKeys(obj: Record<string, unknown> | undefined): boolean {
+function objHasKeys(obj: object | undefined): boolean {
   return !!obj && Object.keys(obj).length > 0;
 }
 

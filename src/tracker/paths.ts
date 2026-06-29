@@ -86,6 +86,15 @@ export function uploadsDir(dir: string): string {
   return join(dir, UPLOADS_SUBDIR);
 }
 
+/**
+ * Operator settings override file (`config/settings.json`). Repo-rooted, NOT
+ * under `.tracker/`. Gitignored operator-machine state (like `.env`) — read by
+ * the dashboard `/api/settings` route and by `src/config.ts` at module load.
+ */
+export function operatorSettingsFile(repoRoot: string): string {
+  return join(repoRoot, "config", "settings.json");
+}
+
 /** Git-tracked workflow presentation override store dir. Repo-rooted, NOT under `.tracker/`. */
 export function workflowPresentationDir(repoRoot: string): string {
   return join(repoRoot, "config", "workflow-presentation");
@@ -94,6 +103,27 @@ export function workflowPresentationDir(repoRoot: string): string {
 /** Git-tracked workflow presentation override file for one workflow. Repo-rooted, NOT under `.tracker/`. */
 export function workflowPresentationFile(repoRoot: string, workflow: string): string {
   return join(workflowPresentationDir(repoRoot), `${workflow}.json`);
+}
+
+/** Git-tracked workflow design-intent scaffold dir. Repo-rooted, NOT under `.tracker/`. */
+export function workflowDesignDir(repoRoot: string): string {
+  return join(repoRoot, "config", "workflow-design");
+}
+
+/** Machine spec (`<workflow>.json`) for the design-intent scaffold. */
+export function workflowDesignFile(repoRoot: string, workflow: string): string {
+  return join(workflowDesignDir(repoRoot), `${workflow}.json`);
+}
+
+/** Assembled Data Bank index (`data-bank/index.json`) — the palette + per-workflow
+ *  automation the Workflow Graph Editor loads. Built by `npm run data-bank:build`. */
+export function dataBankIndexFile(repoRoot: string): string {
+  return join(workflowDesignDir(repoRoot), "data-bank", "index.json");
+}
+
+/** Generated human/Claude brief (`<workflow>.md`) for the design-intent scaffold. */
+export function workflowDesignBriefFile(repoRoot: string, workflow: string): string {
+  return join(workflowDesignDir(repoRoot), `${workflow}.md`);
 }
 
 /**

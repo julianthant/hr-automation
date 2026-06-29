@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   ALL_FILTER,
   ERRORS_FILTER,
+  STEPS_FILTER,
   buildScreenshotFilters,
   filterScreenshotTiles,
   flattenScreenshotTiles,
@@ -137,6 +138,36 @@ describe("buildScreenshotFilters", () => {
     );
   });
 
+  test("adds a Steps chip (default tone) only when step tiles exist, after Errors and before systems", () => {
+    const withSteps = buildScreenshotFilters(
+      tilesFrom([
+        entry(100, "step", "person-search", [{ system: "UCPATH" }]),
+        entry(150, "step", "i9-creation", [{ system: "I9" }]),
+        entry(200, "error", "boom", [{ system: "KUALI" }]),
+        entry(300, "form", "save", [{ system: "KUALI" }]),
+      ]),
+    );
+    const stepChip = withSteps.find((c) => c.id === STEPS_FILTER);
+    assert.ok(stepChip, "Steps chip present when a step tile exists");
+    assert.equal(stepChip?.count, 2);
+    assert.equal(stepChip?.tone, "default");
+    // Ordering: All → Errors → Steps → system chips.
+    const ids = withSteps.map((c) => c.id);
+    assert.ok(ids.indexOf(ERRORS_FILTER) < ids.indexOf(STEPS_FILTER));
+    assert.ok(
+      ids.indexOf(STEPS_FILTER) <
+        ids.findIndex((id) => id.startsWith("system:")),
+    );
+
+    const noSteps = buildScreenshotFilters(
+      tilesFrom([entry(100, "form", "ok", [{ system: "KUALI" }])]),
+    );
+    assert.equal(
+      noSteps.some((c) => c.id === STEPS_FILTER),
+      false,
+    );
+  });
+
   test("orders system chips by count desc, then alphabetically", () => {
     const chips = buildScreenshotFilters(
       tilesFrom([
@@ -180,6 +211,19 @@ describe("filterScreenshotTiles", () => {
     assert.deepEqual(
       out.map((t) => t.label),
       ["note", "boom"],
+    );
+  });
+
+  test("Steps returns only step tiles", () => {
+    const stepTiles = flattenScreenshotTiles([
+      entry(100, "error", "boom", [{ system: "KUALI" }]),
+      entry(200, "step", "person-search", [{ system: "UCPATH" }]),
+      entry(300, "form", "save", [{ system: "KUALI" }]),
+    ]);
+    const out = filterScreenshotTiles(stepTiles, STEPS_FILTER);
+    assert.deepEqual(
+      out.map((t) => t.label),
+      ["person-search"],
     );
   });
 

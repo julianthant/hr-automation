@@ -5,8 +5,9 @@ import { cn, dateLocal } from "@/lib/utils";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { SearchBar } from "./SearchBar";
-import { FailureBell } from "./FailureBell";
-import type { SearchResultRow, FailureRow } from "@/components/shared/types";
+import { NotificationBell } from "./NotificationBell";
+import type { NotificationEntityRef } from "@/lib/notifications";
+import type { SearchResultRow } from "@/components/shared/types";
 
 interface TopBarProps {
   date: string;
@@ -24,12 +25,10 @@ interface TopBarProps {
    * for switching workflow/date/selectedId accordingly.
    */
   onSearchSelect?: (row: SearchResultRow) => void;
-  /** Fired when a failure-bell row is clicked. */
-  onFailureSelect?: (row: FailureRow) => void;
+  /** Fired when a notification card is clicked — deep-links to its row. */
+  onOpenNotification?: (ref: NotificationEntityRef) => void;
   /** Per-workflow failure counts for the navbar bell badge. */
   failureCounts?: Record<string, number>;
-  /** Control rendered in the failures popover header (e.g. notification settings gear). */
-  failureBellHeaderSlot?: ReactNode;
 }
 
 /**
@@ -47,16 +46,15 @@ interface TopBarProps {
  * "ambient state" indicators (clock, live), and the navbar for navigation.
  *
  * Input-run enqueue (`InputRunPanel`) lives in the QueuePanel footer. PDF upload
- * (`TopBarRunButton`) and photo Capture (`TopBarCaptureButton`) mount in the queue
- * toolbar beside Retry when enabled for the active workflow.
+ * (`TopBarRunButton`) mounts in the queue toolbar beside Retry when enabled for
+ * the active workflow; photo Capture is an in-modal method of that Run modal.
  */
 export function TopBar({
   date, onDateChange, availableDates,
   rightSlot,
   onSearchSelect,
-  onFailureSelect,
+  onOpenNotification,
   failureCounts,
-  failureBellHeaderSlot,
 }: TopBarProps) {
   void availableDates;
 
@@ -112,12 +110,11 @@ export function TopBar({
 
       {/* ── Failures + date navigator + utility slot — right edge ─ */}
       <div className="flex items-center gap-1 justify-self-end">
-        {onFailureSelect && failureCounts && (
-          <FailureBell
+        {onOpenNotification && failureCounts && (
+          <NotificationBell
             failureCounts={failureCounts}
             date={date}
-            onSelect={onFailureSelect}
-            headerSlot={failureBellHeaderSlot}
+            onOpen={onOpenNotification}
           />
         )}
         <button

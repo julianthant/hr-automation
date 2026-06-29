@@ -35,6 +35,7 @@ export function WorkflowModifierPage({
   // ── Lifted canvas view controller (shared with the sidebar) ───────────────────
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [dataFlowOn, setDataFlowOn] = useState(false);
+  const [dryRunOn, setDryRunOn] = useState(false);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [focusTarget, setFocusTarget] = useState<{ id: string; n: number } | null>(null);
   const [fitNonce, setFitNonce] = useState(0);
@@ -57,6 +58,7 @@ export function WorkflowModifierPage({
     setCollapsedIds(new Set());
     setFocusTarget(null);
     setDataFlowOn(false);
+    setDryRunOn(false);
   }, [wp.selected]);
 
   const dirty = isDirty(draft, wp.data?.override ?? null);
@@ -167,6 +169,8 @@ export function WorkflowModifierPage({
         onToggleAll={toggleAll}
         dataFlowOn={dataFlowOn}
         onToggleDataFlow={() => setDataFlowOn((v) => !v)}
+        dryRunOn={dryRunOn}
+        onToggleDryRun={() => setDryRunOn((v) => !v)}
         onFit={fitAll}
       />
 
@@ -187,6 +191,7 @@ export function WorkflowModifierPage({
                   paletteOpen={paletteOpen}
                   onClosePalette={() => setPaletteOpen(false)}
                   dataFlowOn={dataFlowOn}
+                  dryRunOn={dryRunOn}
                   collapsedIds={collapsedIds}
                   onToggleCollapsed={toggleCollapsed}
                   focusTarget={focusTarget}

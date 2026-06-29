@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowUp } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, compact } from "@/lib/utils";
 import { IconActionButton } from "@/components/shared/IconActionButton";

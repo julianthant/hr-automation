@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
-import { toast } from "sonner";
-import { Camera, AlertTriangle, CheckCircle2, XOctagon, Clock } from "lucide-react";
+import { toast } from "@/lib/notify";
+import { notify, NOTIFY_KINDS } from "@/lib/notifications";
+import { Camera, AlertTriangle } from "lucide-react";
 import { createElement } from "react";
 import type { CaptureSessionEvent } from "@/components/capture/capture-types";
 import { sseHub } from "@/lib/sse-hub";
@@ -135,35 +136,31 @@ export function useCaptureToasts(opts: CaptureToastsOptions = {}): void {
               return;
             }
             case "finalized": {
-              const parentRunId = (ev.payload as { parentRunId?: string }).parentRunId;
-              toast.success("Capture complete", {
+              notify({
+                kind: NOTIFY_KINDS.captureCompleted,
+                title: "Capture complete",
                 description: `${label} · bundle saved`,
-                icon: createElement(CheckCircle2, { "aria-hidden": true, className: "h-4 w-4" }),
-                action: parentRunId
-                  ? {
-                      label: "View",
-                      onClick: () => {
-                        /* Deep-link is handled by the workflow row; toast just
-                           acknowledges. */
-                      },
-                    }
-                  : undefined,
+                source: workflow,
               });
               return;
             }
             case "finalize_failed": {
               const stage = (ev.payload as { stage?: string }).stage ?? "handler";
-              toast.error("Capture handoff failed", {
+              notify({
+                kind: NOTIFY_KINDS.captureFailed,
+                title: "Capture handoff failed",
                 description: `${label}: ${stage} failed — retry from the capture modal`,
-                icon: createElement(XOctagon, { "aria-hidden": true, className: "h-4 w-4" }),
+                source: workflow,
               });
               return;
             }
             case "expired": {
               if (isOwned) return; // modal will surface it inline
-              toast.info("Capture session expired", {
+              notify({
+                kind: NOTIFY_KINDS.captureExpired,
+                title: "Capture session expired",
                 description: `${label} session timed out after 15 min of inactivity`,
-                icon: createElement(Clock, { "aria-hidden": true, className: "h-4 w-4" }),
+                source: workflow,
               });
               return;
             }

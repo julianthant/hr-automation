@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 
 import {
   resolveOperationStatusLabel,
+  operationHeaderHasTitle,
 } from "../../../src/dashboard/components/queue-panel/operation-row-variants.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 import type { OperationOcrLink } from "../../../src/dashboard/components/queue-panel/queue-surface-classifier.js";
@@ -48,6 +49,30 @@ function coordinatorEntry(
 function ocrLink(status: string, step?: string): OperationOcrLink {
   return { runId: "ocr-run-1", sessionId: "sess-1", status, step };
 }
+
+// ---------------------------------------------------------------------------
+// operationHeaderHasTitle — titleless variant detection
+// ---------------------------------------------------------------------------
+
+describe("operationHeaderHasTitle — titleless variant", () => {
+  test("returns true for a non-empty title (file-kind PDF coordinator)", () => {
+    assert.equal(operationHeaderHasTitle("multiple-oath.pdf"), true);
+  });
+
+  test("returns true for a title that is only whitespace-padded", () => {
+    assert.equal(operationHeaderHasTitle("  report.pdf  "), true);
+  });
+
+  test("returns false for an empty string (person-kind operation anchor)", () => {
+    // batchGroupTitle() returns "" for a person-kind operation coordinator;
+    // projection.title ?? resolveEntryName falls through to "" via the ?? operator.
+    assert.equal(operationHeaderHasTitle(""), false);
+  });
+
+  test("returns false for a whitespace-only string", () => {
+    assert.equal(operationHeaderHasTitle("   "), false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // ISS-001: awaiting-review state must NOT say "running"

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { RotateCcw } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import { cn } from "@/lib/utils";
 import { usePostAction } from "@/components/hooks/usePostAction";

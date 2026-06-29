@@ -50,8 +50,8 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(projections.length, 1);
-    assert.equal(projections[0]?.surfaceType, "batch");
-    assert.equal(projections[0]?.rowTypeLabel, "Batch");
+    assert.equal(projections[0]?.surfaceType, "operation");
+    assert.equal(projections[0]?.rowTypeLabel, "Operation");
     assert.deepEqual(projections[0]?.actions.map((action) => action.targets.map((target) => target.runId)), [
       ["run-a", "run-b"],
       ["run-a", "run-b"],
@@ -199,7 +199,7 @@ describe("buildQueueSurfaces", () => {
     // lookup stays a one-member batch surface rather than collapsing to a flat
     // single row.
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.equal(surfaces.groupRows[0]?.kind, "operation");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["ocr-oath-run-1-r0"]);
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
@@ -231,8 +231,8 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(projections.length, 1);
-    assert.equal(projections[0]?.surfaceType, "batch");
-    assert.equal(projections[0]?.rowTypeLabel, "Batch");
+    assert.equal(projections[0]?.surfaceType, "operation");
+    assert.equal(projections[0]?.rowTypeLabel, "Operation");
     assert.notEqual(projections[0]?.subtitle, "batch-1");
   });
 
@@ -260,7 +260,7 @@ describe("buildQueueSurfaces", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.equal(surfaces.groupRows[0]?.kind, "operation");
     assert.equal(surfaces.groupRows[0]?.parentRunId, "batch-1");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((entry) => entry.id), ["a", "b"]);
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);

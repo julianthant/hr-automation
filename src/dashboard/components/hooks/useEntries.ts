@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import type { TrackerEntry } from "@/components/shared/types";
 import { dateLocal, stableKey } from "../../lib/utils";
 import { sseHub } from "@/lib/sse-hub";

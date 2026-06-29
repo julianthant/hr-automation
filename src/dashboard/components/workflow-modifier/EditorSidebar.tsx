@@ -26,6 +26,8 @@ interface EditorSidebarProps {
   onToggleAll: () => void;
   dataFlowOn: boolean;
   onToggleDataFlow: () => void;
+  dryRunOn: boolean;
+  onToggleDryRun: () => void;
   onFit: () => void;
 }
 
@@ -51,6 +53,8 @@ export function EditorSidebar({
   onToggleAll,
   dataFlowOn,
   onToggleDataFlow,
+  dryRunOn,
+  onToggleDryRun,
   onFit,
 }: EditorSidebarProps): JSX.Element {
   return (
@@ -114,10 +118,11 @@ export function EditorSidebar({
         })}
       </nav>
 
-      <div className="flex items-center gap-1.5 border-t border-border p-2.5">
+      <div className="grid grid-cols-2 gap-1.5 border-t border-border p-2.5">
         <ControlButton label={allCollapsed ? "Expand all" : "Collapse all"} onClick={onToggleAll} />
-        <ControlButton label="Data flow" active={dataFlowOn} onClick={onToggleDataFlow} />
         <ControlButton label="Fit" onClick={onFit} />
+        <ControlButton label="Data flow" active={dataFlowOn} onClick={onToggleDataFlow} />
+        <ControlButton label="Dry run" active={dryRunOn} onClick={onToggleDryRun} />
       </div>
     </aside>
   );
@@ -220,7 +225,7 @@ function ControlButton({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "flex-1 rounded-lg border px-2 py-2 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        "w-full rounded-lg border px-2 py-2 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? "border-ring/60 bg-accent text-foreground"
           : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",

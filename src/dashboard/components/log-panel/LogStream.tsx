@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronsDown, Check, ChevronDown, Eye, ExternalLink, Image as ImageIcon, Maximize2, Minimize2, Network, ScrollText, Search, SquarePen, X } from "lucide-react";
+import { ChevronsDown, Check, ChevronDown, Database, Eye, ExternalLink, Image as ImageIcon, Maximize2, Minimize2, Network, ScrollText, Search, SquarePen, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LogLine } from "./LogLine";
 import type { CollapsedLogEntry } from "@/components/hooks/useLogs";
@@ -9,7 +9,7 @@ import type { LogCategory, RunEvent } from "@/components/shared/types";
 import { getLogCategory } from "@/components/shared/types";
 import { isDebugLog } from "./log-display";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -34,6 +34,10 @@ interface LogStreamProps {
   editDataSlot?: ReactNode;
   /** Whether the workflow has any editable fields — gates the Edit Data surface. */
   editDataAvailable?: boolean;
+  /** Rendered in place of the log list when the View Data surface is active. */
+  viewDataSlot?: ReactNode;
+  /** Whether this run recorded ≥1 data point — gates the View Data surface. */
+  viewDataAvailable?: boolean;
   /** Rendered in place of the log list when the Preview surface is active. */
   previewSlot?: LazySlot;
   /**
@@ -91,7 +95,7 @@ interface LogStreamProps {
 // Events is a category (a lens on the timestamped stream), not a surface.
 // ---------------------------------------------------------------------------
 
-type Surface = "logs" | "screenshots" | "preview" | "edit-data" | "delegated";
+type Surface = "logs" | "screenshots" | "preview" | "view-data" | "edit-data" | "delegated";
 type Category = "all" | "errors" | "fill" | "navigate" | "extract" | "debug" | "events";
 
 /** Exported for testing surface-bar completeness assertions only. */
@@ -99,6 +103,7 @@ export const SURFACES: readonly { key: Surface; label: string; icon: LucideIcon 
   { key: "logs", label: "Logs", icon: ScrollText },
   { key: "screenshots", label: "Screenshots", icon: ImageIcon },
   { key: "preview", label: "Preview", icon: Eye },
+  { key: "view-data", label: "View Data", icon: Database },
   { key: "edit-data", label: "Edit Data", icon: SquarePen },
   { key: "delegated", label: "Delegated", icon: Network },
 ];
@@ -133,7 +138,7 @@ const CATEGORY_KEYS = new Set<string>(CATEGORIES.map((c) => c.key));
  * (all/errors/…/events) so existing deep-links keep working.
  */
 export function parseInitialTab(tab: string | undefined): { surface: Surface; category: Category } {
-  if (tab === "screenshots" || tab === "preview" || tab === "edit-data" || tab === "delegated") {
+  if (tab === "screenshots" || tab === "preview" || tab === "view-data" || tab === "edit-data" || tab === "delegated") {
     return { surface: tab, category: "all" };
   }
   if (tab && CATEGORY_KEYS.has(tab)) {
@@ -336,6 +341,8 @@ export function LogStream({
   screenshotsSlot,
   editDataSlot,
   editDataAvailable,
+  viewDataSlot,
+  viewDataAvailable,
   previewSlot,
   previewHeaderSlot,
   previewAvailable,
@@ -372,10 +379,11 @@ export function LogStream({
       SURFACES.filter(
         (s) =>
           (s.key !== "edit-data" || editDataAvailable) &&
+          (s.key !== "view-data" || viewDataAvailable) &&
           (s.key !== "preview" || previewAvailable) &&
           (s.key !== "delegated" || delegatedChildren !== undefined),
       ),
-    [editDataAvailable, previewAvailable, delegatedChildren],
+    [editDataAvailable, previewAvailable, viewDataAvailable, delegatedChildren],
   );
 
   // If the active surface stops being available (e.g. previewAvailable flips
@@ -594,6 +602,17 @@ export function LogStream({
           {screenshotsSlot ?? (
             <div className="px-6 py-4 text-sm text-muted-foreground">
               No screenshots captured for this run yet.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* View Data slot — shown when View Data surface is active and the run has data points */}
+      {surface === "view-data" && (
+        <div className="flex flex-1 overflow-y-auto border-b border-border">
+          {viewDataSlot ?? (
+            <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">
+              View Data is unavailable for this run.
             </div>
           )}
         </div>

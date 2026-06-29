@@ -1,6 +1,6 @@
 import { useMemo, useState, type MouseEvent } from "react";
 import { RotateCcw, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { IconActionButton } from "@/components/shared/IconActionButton";

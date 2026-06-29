@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Toaster, toast } from "sonner";
+import { Toaster } from "sonner";
+import { toast } from "./lib/notify";
+import { notify, NOTIFY_KINDS, type NotificationEntityRef } from "./lib/notifications";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "./components/ui/resizable";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/navigation/TopBar";
 import { QueuePanel } from "./components/queue-panel/QueuePanel";
@@ -31,48 +38,36 @@ import {
   collectEntriesForMergedScope,
   mergedGroupPeersForLogPanel,
 } from "./components/shared/entry-display";
-import type { TrackerEntry, SearchResultRow, FailureRow } from "./components/shared/types";
+import type { TrackerEntry, SearchResultRow } from "./components/shared/types";
 import { WorkflowRail } from "./components/navigation/WorkflowRail";
+import { useConfirm } from "@/components/shared/useConfirm";
 import { InputRunPanel } from "./components/navigation/InputRunPanel";
 import { getInputRunConfig } from "./lib/input-run-registry";
 import { RetryAllButton } from "./components/queue-panel/RetryAllButton";
 import { StopAllButton } from "./components/queue-panel/StopAllButton";
 import { DeleteAllButton } from "./components/queue-panel/DeleteAllButton";
 import { TopBarRunButton } from "./components/navigation/TopBarRunButton";
-import { TopBarCaptureButton } from "./components/navigation/TopBarCaptureButton";
 import { parsePrepareRowData, isResolvedPrepRow, isDiscardedPrepRow } from "./components/ocr/types";
 import { RunModal } from "./components/run-modal/RunModal";
-import { dateLocal, isEditableFocus } from "./lib/utils";
-import { HelpCircle, Workflow } from "lucide-react";
+import { cn, dateLocal, isEditableFocus } from "./lib/utils";
+import {
+  HelpCircle,
+  Settings,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  Loader2,
+} from "lucide-react";
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
-import { ColumnResizer } from "./components/shared/ColumnResizer";
 import { OverviewPanel } from "./components/overview/OverviewPanel";
-import { WorkflowModifierPage } from "./components/workflow-modifier/WorkflowModifierPage.js";
-import { NotificationSettings } from "./components/navigation/NotificationSettings";
+import { SettingsPage } from "./components/settings/SettingsPage";
 import {
   fireDesktopNotification,
   readNotifySettings,
   writeNotifySettings,
 } from "./lib/desktop-notifications";
 
-const QUEUE_WIDTH_STORAGE_KEY = "dashboard.queueWidth";
-
-/** Responsive default width matching the old w-[300/380/460] breakpoints. */
-function defaultQueueWidth(): number {
-  const w = typeof window !== "undefined" ? window.innerWidth : 1440;
-  return w >= 1536 ? 460 : w >= 1440 ? 380 : 320;
-}
-
-function readInitialQueueWidth(): number {
-  if (typeof localStorage !== "undefined") {
-    const stored = localStorage.getItem(QUEUE_WIDTH_STORAGE_KEY);
-    if (stored) {
-      const n = parseInt(stored, 10);
-      if (Number.isFinite(n) && n >= 200 && n <= 900) return n;
-    }
-  }
-  return defaultQueueWidth();
-}
 import type { TrackerEntry as TrackerEntryJsonl } from "../tracker/jsonl.js";
 import { isResolvedPrepEntry } from "../tracker/dashboard/prep-rows.js";
 import { isTerminalNotFoundEntry } from "../domain/tracker-terminal-display.js";
@@ -391,13 +386,28 @@ export function App() {
         entry.step === "awaiting-approval";
       const prevReview = reviewNotifiedRef.current.get(entry.id);
       reviewNotifiedRef.current.set(entry.id, nowReview);
-      if (prevReview === false && nowReview && notifySettingsRef.current.awaitingReview) {
-        fireDesktopNotification({
-          title: `${wfLabel} — awaiting review`,
-          body: `${resolveEntryName(entry, displayNames)} is ready for approval`,
-          tag: `review-${entry.id}`,
-          onClick: () => handleSelectEntryRef.current(entry.id),
+      if (prevReview === false && nowReview) {
+        const reviewName = resolveEntryName(entry, displayNames);
+        // Center notification (no toast — review is a steady-state, not a flash)
+        // plus the backgrounded-tab desktop notification when enabled.
+        notify({
+          kind: NOTIFY_KINDS.ocrAwaitingReview,
+          title: `${reviewName} ready for approval`,
+          description: `${wfLabel} is awaiting review`,
+          source: entry.workflow,
+          subject: reviewName,
+          entityRef: { workflow: entry.workflow, id: entry.id, runId: entry.runId, date },
+          traceId: entry.data?.__traceId,
+          toast: false,
         });
+        if (notifySettingsRef.current.awaitingReview) {
+          fireDesktopNotification({
+            title: `${wfLabel} — awaiting review`,
+            body: `${reviewName} is ready for approval`,
+            tag: `review-${entry.id}`,
+            onClick: () => handleSelectEntryRef.current(entry.id),
+          });
+        }
       }
 
       if (prevStatus === undefined) continue;
@@ -409,16 +419,35 @@ export function App() {
       resolveActionToastsForEntry(entry);
       const name = resolveEntryName(entry, displayNames);
       const isCancelled = entry.status === "failed" && entry.step === "cancelled";
+      const entityRef: NotificationEntityRef = {
+        workflow: entry.workflow,
+        id: entry.id,
+        runId: entry.runId,
+        date,
+      };
+      const traceId = entry.data?.__traceId;
       if (entry.status === "done") {
         if (isTerminalNotFoundEntry(entry)) {
-          toast.message(`${name} not found`, {
+          notify({
+            kind: NOTIFY_KINDS.runNotFound,
+            title: `${name} not found`,
             description: `${wfLabel} finished with no UCPath match`,
-            duration: 5000,
+            source: entry.workflow,
+            subject: name,
+            entityRef,
+            traceId,
+            toastOptions: { duration: 5000 },
           });
         } else {
-          toast.success(`${name} completed`, {
+          notify({
+            kind: NOTIFY_KINDS.runCompleted,
+            title: `${name} completed`,
             description: `${wfLabel} finished`,
-            duration: 5000,
+            source: entry.workflow,
+            subject: name,
+            entityRef,
+            traceId,
+            toastOptions: { duration: 5000 },
           });
         }
       } else if (isCancelled) {
@@ -426,9 +455,16 @@ export function App() {
         // with a specific "Cancelled" message. The generic flow doesn't
         // need to fire a redundant `error` toast — would just be noise.
       } else if (entry.status === "failed") {
-        toast.error(`${name} failed`, {
+        notify({
+          kind: NOTIFY_KINDS.runFailed,
+          title: `${name} failed`,
           description: entry.error || "Unknown error",
-          duration: 8000,
+          source: entry.workflow,
+          subject: name,
+          entityRef,
+          traceId,
+          rerunnable: true,
+          toastOptions: { duration: 8000 },
         });
         if (notifySettingsRef.current.failure) {
           fireDesktopNotification({
@@ -448,18 +484,66 @@ export function App() {
     document.title = running > 0 ? `${running} running \u2014 HR Dashboard` : "HR Dashboard";
   }, [dedupedEntries]);
 
-  // Cross-workflow Overview landing (rail "Overview" entry). Picking any
-  // workflow exits it.
+  // Cross-workflow Overview landing (rail "Dashboard" entry) + the Settings page
+  // (navbar gear). The Workflow Editor now lives as a section INSIDE Settings.
+  // Picking any workflow exits both.
   const [showOverview, setShowOverview] = useState(false);
-  const [showWorkflowModifier, setShowWorkflowModifier] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  // Unsaved-draft state lifted from the Settings page's embedded Workflow
+  // Editor; gates the leave guard. It is only ever true while that editor
+  // section is mounted (WorkflowModifierPage reports `false` on unmount), so a
+  // plain `editorDirty` check covers leaving Settings with unsaved graph edits.
+  const [editorDirty, setEditorDirty] = useState(false);
 
-  // Clear selection when switching workflows
-  const handleWorkflowChange = useCallback((wf: string) => {
+  const { confirm, confirmDialog } = useConfirm();
+
+  // Leaving a dirty Workflow Editor (inside Settings) confirms before
+  // discarding; a clean leave (or any non-editor view) switches instantly.
+  const requestLeaveEditor = useCallback(async (): Promise<boolean> => {
+    if (!editorDirty) return true;
+    return confirm({
+      title: "Discard unsaved changes?",
+      description:
+        "Your Workflow Editor changes haven't been saved. Leaving will discard them.",
+      confirmLabel: "Discard",
+      cancelLabel: "Keep editing",
+      tone: "destructive",
+    });
+  }, [confirm, editorDirty]);
+
+  // Clear selection when switching workflows (also exits Overview + Settings).
+  const handleWorkflowChange = useCallback(
+    async (wf: string) => {
+      if (!(await requestLeaveEditor())) return;
+      setShowOverview(false);
+      setShowSettings(false);
+      setEditorDirty(false);
+      setWorkflow(wf);
+      setSelectedId(null);
+      setBatchQueueParentRunId(null);
+    },
+    [requestLeaveEditor],
+  );
+
+  // Rail "Dashboard" entry — leave Settings (guarded) into the Overview.
+  const handleShowOverview = useCallback(async () => {
+    if (!(await requestLeaveEditor())) return;
+    setShowOverview(true);
+    setShowSettings(false);
+    setEditorDirty(false);
+  }, [requestLeaveEditor]);
+
+  // Navbar gear — open the Settings page. Entering is free (nothing to lose yet).
+  const handleShowSettings = useCallback(() => {
+    setShowSettings(true);
     setShowOverview(false);
-    setShowWorkflowModifier(false);
-    setWorkflow(wf);
-    setSelectedId(null);
-    setBatchQueueParentRunId(null);
+  }, []);
+
+  // Notification preferences live in App (the status-transition effect reads
+  // them) but are EDITED from the Settings page's Notifications section.
+  const handleNotifySettingsChange = useCallback((s: typeof notifySettings) => {
+    setNotifySettings(s);
+    writeNotifySettings(s);
   }, []);
 
   const handleDateChange = useCallback((d: string) => {
@@ -472,15 +556,8 @@ export function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const gPressedAtRef = useRef(0);
 
-  // Resizable queue column (persisted; double-click the handle to reset).
-  const [queueWidth, setQueueWidth] = useState<number>(readInitialQueueWidth);
-  const resetQueueWidth = useCallback(() => {
-    if (typeof localStorage !== "undefined") localStorage.removeItem(QUEUE_WIDTH_STORAGE_KEY);
-    setQueueWidth(defaultQueueWidth());
-  }, []);
-  const commitQueueWidth = useCallback((w: number) => {
-    if (typeof localStorage !== "undefined") localStorage.setItem(QUEUE_WIDTH_STORAGE_KEY, String(w));
-  }, []);
+  // Resizable queue column: the queue↔detail split is a ResizablePanelGroup
+  // (react-resizable-panels) whose sizes persist via its `autoSaveId`.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableFocus(e.target)) return;
@@ -530,10 +607,10 @@ export function App() {
   }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
 
-  const handleFailureSelect = useCallback((row: FailureRow) => {
-    if (row.workflow !== workflow) handleWorkflowChange(row.workflow);
-    if (row.date !== date) handleDateChange(row.date);
-    setSelectedId(row.id);
+  const handleOpenNotification = useCallback((ref: NotificationEntityRef) => {
+    if (ref.workflow !== workflow) handleWorkflowChange(ref.workflow);
+    if (ref.date && ref.date !== date) handleDateChange(ref.date);
+    setSelectedId(ref.id);
   }, [workflow, date, handleWorkflowChange, handleDateChange]);
 
   // Stable handlers for QueuePanel — inline arrows here would mint a fresh
@@ -689,13 +766,21 @@ export function App() {
     <TerminalDrawerProvider>
     <div className="flex flex-col h-screen">
       <Toaster
+        theme="dark"
         position="top-right"
-        toastOptions={{
-          style: {
-            background: "var(--card)",
-            border: "1px solid var(--border)",
-            color: "var(--foreground)",
-          },
+        offset={{ top: "60px", right: "16px" }}
+        expand
+        visibleToasts={4}
+        gap={10}
+        closeButton
+        icons={{
+          success: <CheckCircle2 className="h-[18px] w-[18px]" aria-hidden />,
+          info: <Info className="h-[18px] w-[18px]" aria-hidden />,
+          warning: <AlertTriangle className="h-[18px] w-[18px]" aria-hidden />,
+          error: <AlertCircle className="h-[18px] w-[18px]" aria-hidden />,
+          loading: (
+            <Loader2 className="h-[18px] w-[18px] animate-spin motion-reduce:animate-none" aria-hidden />
+          ),
         }}
       />
       <TopBar
@@ -703,29 +788,10 @@ export function App() {
         onDateChange={handleDateChange}
         availableDates={availableDates}
         onSearchSelect={handleSearchSelect}
-        onFailureSelect={handleFailureSelect}
+        onOpenNotification={handleOpenNotification}
         failureCounts={failureCounts ?? {}}
-        failureBellHeaderSlot={
-          <NotificationSettings
-            settings={notifySettings}
-            onChange={(s) => {
-              setNotifySettings(s);
-              writeNotifySettings(s);
-            }}
-          />
-        }
         rightSlot={
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-label="Workflow configuration"
-              title="Workflow configuration"
-              aria-pressed={showWorkflowModifier}
-              onClick={() => { setShowWorkflowModifier((v) => !v); setShowOverview(false); }}
-              className={`h-8 w-8 rounded-md border border-border flex items-center justify-center cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary ${showWorkflowModifier ? "bg-accent text-foreground" : "bg-secondary text-muted-foreground hover:bg-accent hover:text-foreground"}`}
-            >
-              <Workflow className="w-4 h-4" />
-            </button>
             <button
               type="button"
               onClick={() => setShortcutsOpen(true)}
@@ -734,6 +800,21 @@ export function App() {
               className="h-8 w-8 rounded-md border border-border bg-secondary flex items-center justify-center text-muted-foreground cursor-pointer hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <HelpCircle className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleShowSettings}
+              aria-label="Settings"
+              aria-pressed={showSettings}
+              title="Settings"
+              className={cn(
+                "h-8 w-8 rounded-md border flex items-center justify-center cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                showSettings
+                  ? "border-primary bg-accent text-foreground"
+                  : "border-border bg-secondary text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <Settings className="w-4 h-4" />
             </button>
           </div>
         }
@@ -753,23 +834,26 @@ export function App() {
         }}
       >
       <div className="flex flex-1 overflow-hidden">
-        {/* The workflow rail is hidden in Workflow-Modifier mode — the modifier
-            is a full-page surface with its own workflow picker. The navbar
-            "Workflow configuration" button (a toggle, active-state shown) is the
-            single way in and out. */}
-        {!showWorkflowModifier && (
-          <WorkflowRail
-            workflow={workflow}
-            workflows={workflows}
-            entryCounts={entryCounts}
-            queuedCounts={wfQueuedCounts}
-            onWorkflowChange={handleWorkflowChange}
-            overviewActive={showOverview}
-            onShowOverview={() => { setShowOverview(true); setShowWorkflowModifier(false); }}
+        {/* The rail stays visible in every mode — including the Settings page
+            (navbar gear), which hosts the Workflow Editor as one of its
+            sections. You "quit" Settings by picking any rail entry (Dashboard or
+            a workflow); leaving with unsaved editor edits is guarded by
+            requestLeaveEditor. */}
+        <WorkflowRail
+          workflow={workflow}
+          workflows={workflows}
+          entryCounts={entryCounts}
+          queuedCounts={wfQueuedCounts}
+          onWorkflowChange={handleWorkflowChange}
+          overviewActive={showOverview}
+          onShowOverview={handleShowOverview}
+        />
+        {showSettings ? (
+          <SettingsPage
+            notifySettings={notifySettings}
+            onNotifySettingsChange={handleNotifySettingsChange}
+            onEditorDirtyChange={setEditorDirty}
           />
-        )}
-        {showWorkflowModifier ? (
-          <WorkflowModifierPage />
         ) : showOverview ? (
           <OverviewPanel
             workflows={workflows}
@@ -779,7 +863,19 @@ export function App() {
             onPick={handleWorkflowChange}
           />
         ) : (
-        <>
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId="dashboard.queue-split"
+          className="min-w-0 flex-1"
+        >
+          <ResizablePanel
+            id="queue"
+            order={1}
+            defaultSize={28}
+            minSize={18}
+            maxSize={50}
+            className="flex"
+          >
         <QueuePanel
           entries={dedupedEntries}
           delegationSourceEntries={entries}
@@ -808,7 +904,6 @@ export function App() {
           queueBulkActionsSlot={
             <>
               <TopBarRunButton activeWorkflow={workflow} busyCount={prepareBusyCount} />
-              <TopBarCaptureButton workflow={workflow} />
               <RetryAllButton
                 workflow={workflow}
                 ids={retryAllIds}
@@ -836,15 +931,11 @@ export function App() {
           runControlsSlot={
             getInputRunConfig(workflow) ? <InputRunPanel workflow={workflow} /> : undefined
           }
-          widthPx={queueWidth}
+          fill
         />
-        <ColumnResizer
-          width={queueWidth}
-          onWidthChange={setQueueWidth}
-          onCommit={commitQueueWidth}
-          onReset={resetQueueWidth}
-          ariaLabel="Resize queue panel"
-        />
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="detail" order={2} defaultSize={72} minSize={40} className="flex">
         {(() => {
           if (batchQueueParentRunId && !selectedEntry) {
             return (
@@ -888,12 +979,14 @@ export function App() {
             />
           );
         })()}
-        </>
+          </ResizablePanel>
+        </ResizablePanelGroup>
         )}
       </div>
       </OcrReviewPrepProvider>
       <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} queuedCounts={wfQueuedCounts} />
       <ShortcutsGuide open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      {confirmDialog}
       {/* Reupload RunModal — opened by the Reupload action in the OCR review toolbar */}
       <RunModal
         open={runModalOpen}

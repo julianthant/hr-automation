@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWorkflows, autoLabel } from "@/lib/workflows-context";
 import type { SearchResultRow } from "@/components/shared/types";
 import { statusBadgeClass } from "@/components/shared/status-styles";
@@ -67,7 +68,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
 
   return (
     <div className={wrapperClass}>
-      <div className="max-h-[380px] overflow-y-auto">
+      <ScrollArea className="max-h-[380px]">
         {rows.map((row) => (
           <button
             key={`${row.workflow}::${row.id}::${row.runId}`}
@@ -111,7 +112,7 @@ export function SearchResults({ rows, query, onPick }: SearchResultsProps) {
             </div>
           </button>
         ))}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

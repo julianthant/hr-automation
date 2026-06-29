@@ -2,12 +2,33 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
- * shadcn-style Dialog wrapper around Radix. Used by the emergency-contact
- * RunModal. Mirrors the layout idioms in `tooltip.tsx` / `popover.tsx`
+ * The dashboard's single Dialog primitive — a shadcn-style wrapper around Radix.
+ * Every modal (RunModal, OcrReviewPane, ConfirmDialog, ShortcutsGuide, capture
+ * modal, browser-peek) builds on this; there is no parallel dialog
+ * implementation. Mirrors the layout idioms in `tooltip.tsx` / `popover.tsx`
  * (forwardRef, cn(...) classnames, no extra deps beyond Radix).
+ *
+ * Composition:
+ *   <Dialog><DialogContent size="lg">
+ *     <DialogHeader><DialogTitle/><DialogDescription/></DialogHeader>
+ *     <DialogBody> …scrolls when tall… </DialogBody>
+ *     <DialogFooter> …actions… </DialogFooter>
+ *   </DialogContent></Dialog>
  */
+
+/** Width presets for `DialogContent`. `className` still overrides if needed. */
+export type DialogSize = "sm" | "md" | "lg" | "xl" | "full";
+
+const DIALOG_SIZE: Record<DialogSize, string> = {
+  sm: "max-w-[420px]",
+  md: "max-w-[520px]",
+  lg: "max-w-[720px]",
+  xl: "max-w-[920px]",
+  full: "max-w-[min(96vw,1400px)]",
+};
 
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
@@ -36,14 +57,17 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     /** When true, the default close (X) button is omitted. */
     hideClose?: boolean;
+    /** Width preset (default `md` = 520px). `className` overrides. */
+    size?: DialogSize;
   }
->(({ className, children, hideClose, ...props }, ref) => (
+>(({ className, children, hideClose, size = "md", ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-[520px]",
+        "fixed left-1/2 top-1/2 z-50 w-full",
+        DIALOG_SIZE[size],
         "-translate-x-1/2 -translate-y-1/2",
         "rounded-md border border-border bg-card text-foreground shadow-xl",
         "outline-none",
@@ -78,6 +102,28 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
   <div className={cn("flex flex-col gap-1 px-5 py-4 border-b border-border", className)} {...props} />
 );
 DialogHeader.displayName = "DialogHeader";
+
+/**
+ * Scrollable body region for tall dialogs — caps at `maxHeight` (default 70vh)
+ * and scrolls inside the themed `ScrollArea`, so the header/footer stay pinned.
+ * Opt-in: simple dialogs (ConfirmDialog) don't need it.
+ */
+const DialogBody = ({
+  className,
+  viewportClassName,
+  maxHeight = "70vh",
+  children,
+}: {
+  className?: string;
+  viewportClassName?: string;
+  maxHeight?: string;
+  children?: React.ReactNode;
+}) => (
+  <ScrollArea className={className} viewportClassName={viewportClassName} style={{ maxHeight }}>
+    {children}
+  </ScrollArea>
+);
+DialogBody.displayName = "DialogBody";
 
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
@@ -122,6 +168,7 @@ export {
   DialogOverlay,
   DialogContent,
   DialogHeader,
+  DialogBody,
   DialogFooter,
   DialogTitle,
   DialogDescription,
