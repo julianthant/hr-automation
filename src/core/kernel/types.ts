@@ -197,7 +197,7 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   statusExtensions?: WorkflowStatusExtensions
   /**
    * Short (2-char) workflow code used as the provenance prefix of a row's
-   * trace id (`<code>-<mmddyyHHMMSS>-<runId4>`, see `domain/queue-trace-id.ts`)
+   * trace id (`<code>-<HHMMSS>-<runId4>`, see `domain/queue-trace-id.ts`)
    * and as the daemon instance prefix. Must be unique across workflows.
    * Defaults to the first two letters of `name` when omitted.
    */

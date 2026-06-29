@@ -79,14 +79,14 @@ await withTrackedWorkflow("separations", docId, {}, async (setStep, updateData) 
 - `POST /api/enqueue` — JSON `{workflow, input}`; validates input against the workflow schema, inserts a task row into the SQLite task store, and auto-spawns a daemon if none is alive. Returns `{ok, runId}`.
 - `POST /api/ocr/prepare` — multipart/form-data; fire-and-forgets `runWorkflow(ocrWorkflow)` and returns `{ok, sessionId, pdfPath}`. Body cap: 50MB.
 - `POST /api/ocr/approve-batch` — JSON `{sessionId, records[]}`; expands to N kernel queue items via `enqueueFromHttp` for the downstream form-type daemon.
-- `POST /api/ocr/discard` — JSON `{sessionId, reason?}`; emits `failed` step `discarded`.
+- `POST /api/ocr/discard-prepare` — JSON `{sessionId, reason?}`; emits `failed` step `discarded`.
 - `POST /api/ocr/reocr-whole-pdf` — JSON `{sessionId}`; re-runs OCR for every page.
 - `POST /api/ocr/retry-page` — JSON `{sessionId, pageNumber}`; retries one OCR page.
 - `POST /api/ocr/force-research` — JSON `{sessionId, records[]}`; re-dispatches Person Lookup for a subset of records flagged for forced research.
 
 Implementation: `src/tracker/dashboard/hono/routes/ocr.ts`.
 - **`GET /events/hub?subs=<urlencoded JSON array>`** — single multiplexed SSE connection. Each element is `{ id, topic, params }`; every `data:` line is a `HubEnvelope` `{ sub, data, event? }` for the matching subscription id (`src/tracker/dashboard/hono/routes/hub.ts`). **Legacy per-topic URLs** (`/events`, `/events/logs`, …) were removed (2026-05-08); no `registerEventRoutes` shim remains.
-- **Topic registry** — `src/tracker/dashboard/hono/topics.ts` (`topicRegistry`, `parseSubsQuery`). **Emitters** register in `topics-emitters.ts`. Registered topics include: `entries` (payload includes enriched rows + backend-authoritative `wfCounts` + `failureCounts` from `computeFailureCounts`; rail badges consume `wfCounts` directly, and `failureCounts` drives `FailureBell` without an extra HTTP fetch for counts), `logs`, `sessions`, `runEvents`, `captureSessions`.
+- **Topic registry** — `src/tracker/dashboard/hono/topics.ts` (`topicRegistry`, `parseSubsQuery`). **Emitters** register in `topics-emitters.ts`. Registered topics include: `entries` (payload includes enriched rows + backend-authoritative `wfCounts` + `failureCounts` from `computeFailureCounts`; rail badges consume `wfCounts` directly, and `failureCounts` drives the `NotificationBell` failure badge without an extra HTTP fetch for counts), `logs`, `sessions`, `runEvents`, `captureSessions`.
 - **Rail / sidebar counts** — `wfCounts` are the contract for WorkflowRail badges. Both SQLite and JSONL fallback paths should convert rows to `TrackerEntry[]` and call `countSidebarRowsFromTrackerHistory(asTracker)` so counting dedupes latest rows, carries resolved EIDs, merges rows by employee, and collapses top-level queue surfaces/delegated batches. Do not prefilter latest rows with `resolved_prep = 0`; the shared helper/exclusion callback owns count exclusions. Resolved OCR prep rows that still render in the queue must stay counted.
 - **Run events filtering** — events lacking `runId` (batch-scope `Session.launch`) are attributed via `workflowInstance` + per-run time window inside `filterEventsForRun` (`src/tracker/dashboard/session-state.ts`), **re-exported** from `src/tracker/dashboard.ts` for unit tests and hub code.
 

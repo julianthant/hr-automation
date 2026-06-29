@@ -19,7 +19,7 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/rosters` | GET | `RosterListing[]` — xlsx files in `.tracker/rosters/` + `.tracker/sharepoint/`, newest first | `RunModal` (emergency-contact prep) |
 | `/api/ocr/prepare` | POST (multipart) | `{ok, sessionId, pdfPath}` — fires `runWorkflow(ocrWorkflow)` in the dashboard process | `RunModal` (OCR prep upload) |
 | `/api/ocr/approve-batch` | POST | Body: `{sessionId, records[]}`. Expands to N kernel queue items via `enqueueFromHttp` for the downstream form-type daemon. Marks the OCR parent row `done` step `approved`. | `OcrReviewPane` Approve button |
-| `/api/ocr/discard` | POST | Body: `{sessionId, reason?}`. Emits `failed` step `discarded`; best-effort unlinks the PDF. | `OcrReviewPane` Discard button |
+| `/api/ocr/discard-prepare` | POST | Body: `{sessionId, reason?}`. Emits `failed` step `discarded`; best-effort unlinks the PDF. | `OcrReviewPane` Discard button |
 | `/api/ocr/reocr-whole-pdf` | POST | Body: `{sessionId}`. Re-runs OCR for every page (clears prior failed pages). | `OcrReviewPane` Re-OCR whole PDF dialog |
 | `/api/ocr/retry-page` | POST | Body: `{sessionId, pageNumber}`. Retries one OCR page in isolation. | `FailedPageCard` Retry button |
 | `/api/ocr/force-research` | POST | Body: `{sessionId, records[]}`. Re-dispatches Person Lookup for a subset of records flagged for forced research. | `OcrReviewPane` Force Research action |
@@ -44,7 +44,7 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/daemon/stop` | POST | Body: `{workflow, force?}`. Workflow-scoped stop — tears down EVERY daemon for the workflow and fails its in-flight items. | queue toolbar `StopAllButton` |
 | `/api/daemon/stop-instance` | POST | Body: `{workflow, instance, force?}`. Per-instance stop — stops ONE daemon (resolved from the instance's `workflow_start.pid`); the daemon reassigns its in-flight item to a surviving peer (`reassign: true`) or fails it if it was the last. Returns `{ok, daemonStopped, browsersKilled, reassignable}`. | `WorkflowBox` `StopPill` |
 | `/api/selector-warnings?days=N` | GET | `SelectorWarningRow[]` grouped by label | `SelectorWarningsPanel` (right rail) |
-| `/api/failures` | GET | `FailureRow[]` — `failed` entries on the active date across all workflows, latest run per `(workflow,id)` | `FailureBell` (lazy-fetched on popover open) |
+| `/api/failures` | GET | `FailureRow[]` — `failed` entries on the active date across all workflows, latest run per `(workflow,id)` | `NotificationBell` (lazy-fetched on popover open, merged with the live notification feed) |
 | `/events/hub?subs=<encoded JSON>` | SSE | `{sub, data, event?}` envelopes per subscription | `lib/sse-hub.ts` — all real-time hooks use `sseHub.subscribe(topic, …)`; registry in `topics.ts`, emitters in `topics-emitters.ts` |
 
 ## Data Types (shared between backend and frontend)
@@ -128,7 +128,7 @@ Current consumption:
 | `onboarding` | `batch` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
 | `separations` | `single` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, EID, Doc ID |
 | `person-lookup` | `single` | name or EID | `data.searchName` | auth:ucpath → auth:crm → searching → cross-verification → active-status | Search, EID, Dept, HR Status, Start Date, End Date |
-| `old-kronos-reports` | `batch` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
+| `kronos-reports` | `batch` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
 | `work-study` | `single` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
 | `emergency-contact` | `batch` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
 | `oath-signature` | `single` | empl ID | `data.name` | ocr → ucpath-auth → transaction | Employee, Empl ID, Signature Date |
@@ -202,7 +202,7 @@ src/dashboard/
     capture/                 # capture lightbox, photo tiles, modal chrome/state
     hooks/                   # useEntries (topic `entries`), useLogs / useRunEvents → useSseHistoryStream (`logs`, `runEvents`), useSessions, useDaemons, …
     log-panel/               # LogPanel, LogStream/LogLine, RunSelector, StepPipeline, screenshots, edit-data tab
-    navigation/              # TopBar, WorkflowRail, SearchBar/SearchResults, FailureBell, input-run/capture buttons
+    navigation/              # TopBar, WorkflowRail, SearchBar/SearchResults, NotificationBell, input-run/capture buttons
     oath-upload/             # duplicate-banner helpers
     ocr/                     # OCR review pane, record views, preview pairs, delegation rows
     queue-panel/             # QueuePanel, EntryItem, daemon/batch rows, bulk controls, sort/status/surface helpers
