@@ -63,3 +63,86 @@ test("collapseEntriesForStatStrip two distinct batches → two synth rows + done
   const counts = countEntriesByQueueStatus(collapsed);
   assert.equal(counts.done, 2);
 });
+
+/**
+ * ISS-005: an approved operation coordinator is a perpetual `running`/
+ * `step=approved` row (it never reaches a terminal row) that ALSO owns a synth
+ * member rollup. Before the fix it was counted twice — the coordinator as
+ * Active + the synth as Done — because `isApprovedPrepForQueueStrip` drops only
+ * archetype `batch` prep anchors, never `operation` coordinators. The
+ * coordinator must be dropped (its members' synth rollup represents it), so a
+ * fully-done operation counts as exactly 1 Done, 0 Active/Failed.
+ */
+test("collapseEntriesForStatStrip: an approved operation counts as its done rollup, not coordinator+synth (ISS-005)", () => {
+  const opRun = "op-run";
+  const input: TrackerEntry[] = [
+    {
+      id: "op",
+      status: "running",
+      step: "approved",
+      workflow: "oath-signature",
+      timestamp: "2026-06-29T12:00:00.000Z",
+      runId: opRun,
+      data: { archetype: "operation" },
+    },
+    {
+      id: "m1",
+      status: "done",
+      workflow: "oath-signature",
+      timestamp: "2026-06-29T12:00:01.000Z",
+      runId: "m1",
+      parentRunId: opRun,
+      data: { archetype: "operation-member" },
+    },
+    {
+      id: "m2",
+      status: "done",
+      workflow: "oath-signature",
+      timestamp: "2026-06-29T12:00:02.000Z",
+      runId: "m2",
+      parentRunId: opRun,
+      data: { archetype: "operation-member" },
+    },
+  ];
+
+  const out = collapseEntriesForStatStrip(input);
+  // Coordinator dropped; exactly one synth rollup row remains.
+  assert.equal(out.length, 1);
+  const counts = countEntriesByQueueStatus(out);
+  assert.equal(counts.done, 1);
+  assert.equal(counts.running ?? 0, 0);
+  assert.equal(counts.failed ?? 0, 0);
+});
+
+/**
+ * ISS-010: the synth rollup decided status with raw `m.status === "failed"`,
+ * which also matched a cancelled member (`failed` + `step=cancelled`). It must
+ * route through the canonical status key so a cancelled member counts under
+ * Cancel, not Failed (the E2E-009 invariant).
+ */
+test("collapseEntriesForStatStrip: a cancelled member rolls up to Cancel, not Failed (ISS-010)", () => {
+  const pid = "batch-cancel";
+  const input = [
+    row("c1", "done", { parentRunId: pid }),
+    row("c2", "failed", { parentRunId: pid, step: "cancelled" }),
+  ];
+
+  const out = collapseEntriesForStatStrip(input);
+  assert.equal(out.length, 1);
+  const counts = countEntriesByQueueStatus(out);
+  assert.equal(counts.cancelled, 1);
+  assert.equal(counts.failed ?? 0, 0);
+});
+
+test("collapseEntriesForStatStrip: a genuine member failure still rolls up to Failed (precedence over cancel)", () => {
+  const pid = "batch-mixed";
+  const input = [
+    row("f1", "failed", { parentRunId: pid }),
+    row("f2", "failed", { parentRunId: pid, step: "cancelled" }),
+  ];
+
+  const out = collapseEntriesForStatStrip(input);
+  const counts = countEntriesByQueueStatus(out);
+  assert.equal(counts.failed, 1);
+  assert.equal(counts.cancelled ?? 0, 0);
+});
