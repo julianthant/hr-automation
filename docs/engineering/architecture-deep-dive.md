@@ -148,6 +148,9 @@ export interface Ctx<TSteps extends readonly string[], TData> {
   log: typeof log                           // colored console + JSONL
   isBatch: boolean                          // are we inside a batch run?
   runId: string                             // unique per run
+  parentRunId?: string                      // parent run's id when spawned via delegateTo; undefined for root runs
+  shouldSkipStep(name: TSteps[number]): boolean  // returns true when the step was elected for skipping in RunOpts
+  signal: AbortSignal                       // per-run AbortSignal; flips on operator cancel; auto-injected into Playwright calls
 }
 ```
 
@@ -292,7 +295,7 @@ flowchart LR
 
 #### `ctx.session`, `ctx.log`, `ctx.isBatch`, `ctx.runId` — escape hatches
 
-- `ctx.session.page(id)` — same as `ctx.page(id)`. Also has `newWindow(id)`/`closeWindow(id)` stubs (not implemented).
+- `ctx.session.page(id)` — same as `ctx.page(id)`. `ctx.session` exposes only `page(id)` (`SessionHandle` has no other methods).
 - `ctx.log.step/success/warn/error/waiting` — colored console + JSONL (via `AsyncLocalStorage`).
 - `ctx.isBatch` — are we inside `runWorkflowBatch` / `runWorkflowPool`? Most handlers ignore it.
 - `ctx.runId` — the unique UUID for this run. Useful when writing external state keyed by run.
@@ -322,7 +325,7 @@ return {
   parallelAll: (tasks) => stepper.parallelAll(tasks),
   retry,                              // local linear-backoff impl
   updateData: (patch) => stepper.updateData(patch),
-  session: { page: (id) => session.page(id), newWindow: throw, closeWindow: throw },
+  session: { page: (id) => session.page(id) },   // SessionHandle — page(id) only
   log, isBatch, runId,
 }
 ```
@@ -427,12 +430,18 @@ The emitted data is the _accumulated_ dictionary, so every tracker entry carries
 An in-memory `Map<name, WorkflowMetadata>` populated at module-load time when `defineWorkflow` runs. The dashboard reads it via `/api/workflow-definitions`.
 
 ```ts
+// Simplified — see src/core/kernel/types.ts for the full interface
 interface WorkflowMetadata {
-  name: string; // "onboarding"
-  label: string; // "Onboarding"
+  name: string;        // "onboarding"
+  label: string;       // "Onboarding"
+  archetype: WorkflowArchetype;  // row shape: "single" | "batch" | "preview" | "operation"
+  code: string;        // 2-char provenance prefix for trace ids (e.g. "ob")
+  category?: string;   // rail grouping label; absent → "Other"
+  iconName?: string;   // lucide-react icon name
   steps: readonly string[];
-  systems: string[]; // ["crm", "ucpath", "i9"]
+  systems: string[];   // ["crm", "ucpath", "i9"]
   detailFields: Array<{ key; label }>;
+  presentation: WorkflowPresentationConfig;  // effective config, always present after registry normalization
 }
 ```
 
@@ -485,7 +494,7 @@ flowchart TB
 
 ```
 1. schema.parse(data) — throws if validation fails
-2. derive itemId from data (emplId → docId → email → UUID fallback)
+2. derive itemId from data (emplId → docId → email → sessionId → UUID fallback)
 3. withLogContext(name, itemId, async () => {
 4.   withTrackedWorkflow(...) {
 5.     Session.launch(systems)  — 1 Duo per system
@@ -573,7 +582,8 @@ Implementation: `src/core/daemon/` (daemon loop, queue, registry, HTTP keepalive
 1. `data.emplId` (e.g. "1234567")
 2. `data.docId` (e.g. Kuali doc number)
 3. `data.email` (onboarding)
-4. `fallback` (UUID)
+4. `data.sessionId` (OCR / file-backed workflows)
+5. `fallback` (UUID)
 
 Callers can override with `RunOpts.deriveItemId` — e.g. emergency-contact uses `p{NN}-{emplId}` because rosters can have duplicates per run.
 

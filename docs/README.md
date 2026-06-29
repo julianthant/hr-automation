@@ -51,6 +51,9 @@ These should stay accurate relative to the code and are fair game for stale-doc 
 | `docs/engineering/daemon-teardown-state-machine.md` | Map of the daemon claim/force-stop/reassign/stop-all transitions (states × intents × where each lives), the recurring-bug gap analysis, and the proposed explicit-transition-table refactor (planned, not yet executed) |
 | `docs/engineering/workflow-patterns.md` | Daemon-mode conversion template, edit-data opt-in recipe |
 | `docs/engineering/hands-off-duo-webauthn.md` | Hands-off Duo via CDP WebAuthn: enrollment, two-phase factor selection, the six Duo flows, testing, and failure modes |
+| `docs/engineering/notes-and-logging-vocabulary.md` | Canonical vocabulary for everything the app records while it works: log fields, record names, and observer-facing terms |
+| `docs/engineering/structured-log-events.md` | Closed set of stable event names stamped on run-scope log lines for the dashboard and delegation test harness |
+| `docs/engineering/workflow-vocabulary.md` | Canonical terms for workflow rows, delegation variants, and the queue-surface model; lists legacy vocab to retire |
 | `docs/workflow/README.md` | Workflow delegation index: row units, global actions, cancellation rules, workflow inventory |
 | `docs/workflow/*.md` | Per-workflow behavior, delegation, row shape, and cancel/retry scope notes |
 | `CLAUDE.md` (repo root) | Commands, kernel primer, high-level map (≤15k) |
