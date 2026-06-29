@@ -1,0 +1,457 @@
+{
+  "workflow": "old-kronos-reports",
+  "systems": [
+    "old-kronos"
+  ],
+  "steps": [
+    {
+      "step": "init",
+      "label": "Initialize UKG session and set date range (pre-step, per-worker)",
+      "system": "old-kronos",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+      "note": "Runs before ctx.step('searching') on every handler invocation. getGeniesIframe runs each item; ensureDateRangeSet is guarded by WeakSet<Page> so setDateRange only executes once per worker page lifetime.",
+      "operations": [
+        {
+          "id": "old-kronos.ukg#navigate",
+          "kind": "navigate",
+          "system": "old-kronos",
+          "label": "Authenticate to UKG and open main dashboard",
+          "url": "{UKG_URL}",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+          "note": "loginToUKG is called by the kernel SystemConfig login before the first item; ctx.page('old-kronos') returns the worker's persistent Page"
+        },
+        {
+          "id": "old-kronos.getGeniesIframe#wait",
+          "kind": "wait",
+          "system": "old-kronos",
+          "label": "Wait for Genies iframe to appear (widgetFrame804 or any widgetFrame*)",
+          "summary": "15-attempt loop at 1s intervals; detects network-change error (employeeGrid.networkChangeError) and reloads; last-resort full reload after 15 misses",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.ssoProbe.ssoField#assert",
+          "kind": "assert",
+          "system": "old-kronos",
+          "label": "Assert page has not redirected to SSO login (session expiry guard)",
+          "selectorFqn": "ssoProbe.ssoField",
+          "summary": "If #ssousername or input[name='j_username'] is visible, calls loginToUKG(page) to re-authenticate before continuing",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.dateRange.calendarButton#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click calendar button to open date range picker",
+          "selectorFqn": "dateRange.calendarButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": "Per-worker: only runs on the first item processed by this worker (WeakSet guard). .or() fallback: button:has(i.icon-k-calendar) | button[title='Select Dates']"
+        },
+        {
+          "id": "old-kronos.dateRange.dateInputs#fill.start",
+          "kind": "fill",
+          "system": "old-kronos",
+          "label": "Fill start date into timeframeSelection date input (MMDDYYYY, digit-by-digit)",
+          "selectorFqn": "dateRange.dateInputs",
+          "inputVar": "{startDate}",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": "JQX date widget rejects fill(); triple-click to select, Delete, Home, then inp.press() each digit with 80ms delay. nth(0)."
+        },
+        {
+          "id": "old-kronos.dateRange.dateInputs#fill.end",
+          "kind": "fill",
+          "system": "old-kronos",
+          "label": "Fill end date into timeframeSelection date input (MMDDYYYY, digit-by-digit)",
+          "selectorFqn": "dateRange.dateInputs",
+          "inputVar": "{endDate}",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": "nth(1)."
+        },
+        {
+          "id": "old-kronos.dateRange.applyButton#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click Apply to commit the date range filter",
+          "selectorFqn": "dateRange.applyButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": ".or() fallback: div.timeframeSelection button[title='Apply'] | button:has-text('Apply')"
+        },
+        {
+          "id": "old-kronos.modalDismiss.okButton#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Dismiss any post-date-range modal (OK button)",
+          "selectorFqn": "modalDismiss.okButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.modalDismiss.closeButton#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Dismiss any post-date-range modal (Close button fallback)",
+          "selectorFqn": "modalDismiss.closeButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        }
+      ]
+    },
+    {
+      "step": "searching",
+      "label": "Search for employee by EID using QuickFind",
+      "system": "old-kronos",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+      "operations": [
+        {
+          "id": "old-kronos.modalDismiss.okButton#click.pre",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Dismiss any open modal before searching (OK button)",
+          "selectorFqn": "modalDismiss.okButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.modalDismiss.closeButton#click.pre",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Dismiss any open modal before searching (Close button fallback)",
+          "selectorFqn": "modalDismiss.closeButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.employeeGrid.quickFindInput#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click QuickFind search input to focus it",
+          "selectorFqn": "employeeGrid.quickFindInput",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.employeeGrid.quickFindInput#fill",
+          "kind": "fill",
+          "system": "old-kronos",
+          "label": "Fill employee ID into QuickFind input",
+          "selectorFqn": "employeeGrid.quickFindInput",
+          "inputVar": "{employeeId}",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.employeeGrid.quickFindSubmitButton#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Submit QuickFind search (#quickfindsearch_btn)",
+          "selectorFqn": "employeeGrid.quickFindSubmitButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.modalDismiss.okButton#click.post",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Dismiss any post-search modal (OK button)",
+          "selectorFqn": "modalDismiss.okButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.modalDismiss.closeButton#click.post",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Dismiss any post-search modal (Close button fallback)",
+          "selectorFqn": "modalDismiss.closeButton",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.employeeGrid.firstRow#assert",
+          "kind": "assert",
+          "system": "old-kronos",
+          "label": "Assert search returned a row matching the employee ID",
+          "selectorFqn": "employeeGrid.firstRow",
+          "summary": "Checks #row0genieGrid count > 0 and innerText includes employeeId; failure writes tracker row 'No matches were found on Kronos' and earlyReturn=true — handler returns without extracting or downloading",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+        }
+      ]
+    },
+    {
+      "step": "extracting",
+      "label": "Click employee row and extract employee name",
+      "system": "old-kronos",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+      "note": "clickEmployeeRow tries three strategies in order. Name is scraped from the first row before clicking; the returned name is stamped via ctx.updateData({ name }).",
+      "operations": [
+        {
+          "id": "old-kronos.employeeGrid.firstRow#scrape",
+          "kind": "scrape",
+          "system": "old-kronos",
+          "label": "Read employee name from first grid row innerText",
+          "selectorFqn": "employeeGrid.firstRow",
+          "outputVar": "{employeeName}",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": "Splits innerText on tab/newline; returns first part that is not the EID and contains a letter — that is the name"
+        },
+        {
+          "id": "old-kronos.employeeGrid.firstRow#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click #row0genieGrid to select employee (strategy 1)",
+          "selectorFqn": "employeeGrid.firstRow",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.employeeGrid.allRowsByRole#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click role=row containing employee ID (strategy 2 fallback)",
+          "selectorFqn": "employeeGrid.allRowsByRole",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": "Iterates all div[role='row'] locators; clicks the first whose innerText includes employeeId"
+        },
+        {
+          "id": "old-kronos.employeeGrid.cellByEmployeeId#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click gridcell containing employee ID text (strategy 3 fallback)",
+          "selectorFqn": "employeeGrid.cellByEmployeeId",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.extracting#assert",
+          "kind": "assert",
+          "system": "old-kronos",
+          "label": "Assert employee row was found and clicked",
+          "summary": "If clickEmployeeRow returns false (all three strategies missed), writes tracker 'Could not find row' and sets earlyReturn=true",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+        },
+        {
+          "id": "control.updateData#control",
+          "kind": "control",
+          "system": "control",
+          "label": "ctx.updateData — stamp extracted employee name into run data",
+          "summary": "ctx.updateData({ name: employeeName }) populates the detail panel Name field; employeeName is also used in the downloading step for PDF filename and verification",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+        }
+      ]
+    },
+    {
+      "step": "downloading",
+      "label": "Navigate to Reports, run Time Detail PDF, download, validate, and write tracker",
+      "system": "old-kronos",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+      "note": "ctx.retry wraps doReportFlow: 2 attempts, 3s backoff. Each attempt acquires reportMutex (cross-worker serialization). goBackToMain always runs after the flow (success or throw) to reset UKG state. validateAndRecordTracker runs after a successful download.",
+      "operations": [
+        {
+          "id": "control.ctxRetry#control",
+          "kind": "control",
+          "system": "control",
+          "label": "ctx.retry: wrap doReportFlow with 2 attempts and 3s linear backoff",
+          "summary": "On first attempt failure logs 'Retrying Reports navigation (attempt 2)'; both failures mark success=false and fall through to tracker write",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+        },
+        {
+          "id": "control.reportMutex#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Acquire cross-worker reportMutex before entering Reports navigation",
+          "summary": "UKG serializes report generation server-side; mutex prevents two workers interleaving Go To Reports → Run Report → Download",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+        },
+        {
+          "id": "old-kronos.goToMenu.goToTrigger#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click 'Go To' text trigger to open navigation dropdown (strategy 1)",
+          "selectorFqn": "goToMenu.goToTrigger",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.goToMenu.reportsItem#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click 'Reports' menu item in the Go To dropdown",
+          "selectorFqn": "goToMenu.reportsItem",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.goToMenu.dropdownToggles#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click .dropdown-toggle whose parent contains 'go to' text (strategy 2 fallback)",
+          "selectorFqn": "goToMenu.dropdownToggles",
+          "sourceRef": "src/systems/old-kronos/navigate.ts",
+          "note": "Uses evaluate() to inspect parentElement.innerText; then clicks goToMenu.reportsItem again"
+        },
+        {
+          "id": "old-kronos.goToMenu.sidebarReports#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click sidebar Reports div (strategy 3 fallback)",
+          "selectorFqn": "goToMenu.sidebarReports",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.goToReports#assert",
+          "kind": "assert",
+          "system": "old-kronos",
+          "label": "Assert navigation to Reports page succeeded",
+          "summary": "If all three strategies fail (clickGoToReports returns false), writes tracker 'Could not navigate to Reports', calls goBackToMain, and throws Error to trigger ctx.retry",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+        },
+        {
+          "id": "old-kronos.khtmlReportList#wait",
+          "kind": "wait",
+          "system": "old-kronos",
+          "label": "Wait for khtmlReportList frame to appear (up to 20s, 10 × 2s)",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "page.frame({ name: 'khtmlReportList' }); returns false to handleReportsPage if never found"
+        },
+        {
+          "id": "old-kronos.reportsPage.timecardNavTreeEntry#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click 'Timecard' in the report nav tree to expand it",
+          "selectorFqn": "reportsPage.timecardNavTreeEntry",
+          "sourceRef": "src/systems/old-kronos/reports.ts"
+        },
+        {
+          "id": "old-kronos.timeDetailJs#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "JS-dispatch click on 'Time Detail' link in listFrame",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "listFrame.evaluate() queries all <a> elements, matches title='Time Detail' or textContent='Time Detail', dispatches MouseEvent; no registry selector — JS approach used for reliability in deeply nested iframe"
+        },
+        {
+          "id": "old-kronos.wsActualAdjustedDropdown#select",
+          "kind": "select",
+          "system": "old-kronos",
+          "label": "Select Actual/Adjusted option (index 1) in khtmlReportWorkspace dropdown",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "selectWorkspaceDropdown enumerates all <select> elements in wsFrame; matches row text containing 'actual' or 'adjusted' at optionIndex=1"
+        },
+        {
+          "id": "old-kronos.wsOutputFormatPdf#select",
+          "kind": "select",
+          "system": "old-kronos",
+          "label": "Select PDF output format in khtmlReportWorkspace dropdown",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "selectWorkspaceDropdown matches option text containing 'pdf' or 'acrobat'"
+        },
+        {
+          "id": "old-kronos.reportsPage.checkStatusSelectors#click.snapshot",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click CHECK REPORT STATUS to snapshot existing report row IDs before Run Report",
+          "selectorFqn": "reportsPage.checkStatusSelectors",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "Existing TR ids (span[id^='statusValue'] closest tr.id) are recorded in existingRowIds Set so polling skips stale 'Complete' rows from previous runs"
+        },
+        {
+          "id": "old-kronos.reportsPage.runReportSelectors#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click Run Report button to start report generation",
+          "selectorFqn": "reportsPage.runReportSelectors",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "clickInFrames tries input[value='Run Report'], button:has-text, a:has-text, td:has-text, input[type='submit/button'][value*='Run'] across all frames; jsClickText('Run Report') as final fallback"
+        },
+        {
+          "id": "old-kronos.reportsPage.checkStatusSelectors#click.poll",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Switch to CHECK REPORT STATUS tab to begin polling for new row",
+          "selectorFqn": "reportsPage.checkStatusSelectors",
+          "sourceRef": "src/systems/old-kronos/reports.ts"
+        },
+        {
+          "id": "old-kronos.reportsPage.refreshStatusSelectors#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click Refresh Status to refresh report list (up to 10 poll attempts, 3s apart)",
+          "selectorFqn": "reportsPage.refreshStatusSelectors",
+          "sourceRef": "src/systems/old-kronos/reports.ts"
+        },
+        {
+          "id": "old-kronos.reportStatusRow#scrape",
+          "kind": "scrape",
+          "system": "old-kronos",
+          "label": "Scrape new report status row until status text === 'complete'",
+          "outputVar": "{reportRowId}",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "f.evaluate() finds first span[id^='statusValue'] in a TR not in existingRowIds; candidateRowId locked once detected; polling continues until status.toLowerCase() === 'complete'. 12s initial wait after Run Report."
+        },
+        {
+          "id": "old-kronos.reportStatusRowClick#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click the completed report row (first TD in TR#{reportRowId}) to select it",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "statusFrame.evaluateHandle() retrieves the TR element by id, el.click({ force: true }) bypasses actionability checks"
+        },
+        {
+          "id": "old-kronos.reportsPage.viewReportSelectors#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click View Report to trigger PDF download",
+          "selectorFqn": "reportsPage.viewReportSelectors",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "clickInFrames tries input[value='View Report'], button:has-text, text= across all frames"
+        },
+        {
+          "id": "old-kronos.reportDownload#scrape",
+          "kind": "scrape",
+          "system": "old-kronos",
+          "label": "Capture downloaded PDF via Playwright download event or filesystem diff fallback",
+          "outputVar": "{pdfPath}",
+          "sourceRef": "src/systems/old-kronos/reports.ts",
+          "note": "Primary: page 'download' event + dl.saveAs(dest). Fallback: readdir diff on downloadsDir and reportsDir before/after View Report click; renames new .pdf to dest. Polls up to 30s (1s intervals)."
+        },
+        {
+          "id": "old-kronos.workspace.manageDeptTab#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click Manage My Department tab to return to main dashboard (strategy 1)",
+          "selectorFqn": "workspace.manageDeptTab",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.workspace.manageDeptLi#click",
+          "kind": "click",
+          "system": "old-kronos",
+          "label": "Click Manage My Department li tab (strategy 2 fallback)",
+          "selectorFqn": "workspace.manageDeptLi",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.ukg#navigate.fallback",
+          "kind": "navigate",
+          "system": "old-kronos",
+          "label": "Navigate directly to UKG_URL as last resort to return to main dashboard",
+          "url": "{UKG_URL}",
+          "sourceRef": "src/systems/old-kronos/navigate.ts"
+        },
+        {
+          "id": "old-kronos.pdfValidation#assert",
+          "kind": "assert",
+          "system": "old-kronos",
+          "label": "Validate downloaded PDF: exists, non-empty, no 'No Data Returned', name/ID match",
+          "sourceRef": "src/workflows/old-kronos-reports/validate.ts",
+          "note": "validateAndClean: stat size > 0 + 'No Data Returned' substring check (deletes invalid file). verifyPdfMatch: pdf-parse extracts 'LastName, FirstName ID: 12345' from page 1 via regex /^(.+?)\\s+ID:\\s*(\\d+)/; must match employeeName + employeeId. Mismatch deletes the wrong PDF."
+        },
+        {
+          "id": "old-kronos.trackerWrite#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Write tracker row with final status (Done / Failed / No Data Returned / Mismatch)",
+          "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+          "note": "rt.writeTracker (wrapped with trackerMutex) appends a row to the Excel tracker. buildTrackerRow stamps employeeId, employeeName, status, note, and optional verified='x' flag."
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Pool mode: 4 parallel workers by default (kernel runWorkflowPool, batch.poolSize=4). Each worker authenticates to UKG independently (one Duo MFA per worker).",
+    "Module-scoped KronosRuntime (setKronosRuntime / clearKronosRuntime) must be initialized by the orchestrating runner before the kernel launches. A dashboard-issued retry would throw 'Kronos runtime not initialized' — this workflow is intentionally not in WORKFLOW_LOADERS.",
+    "reportMutex (cross-worker): serializes Go To Reports → handleReportsPage → goBackToMain sequence. UKG server-side session conflicts arise if two workers interleave this path.",
+    "trackerMutex (cross-worker): serializes Excel tracker writes to prevent xlsx corruption from concurrent appends.",
+    "WeakSet<Page> guards setDateRange: runs only once per worker page lifetime — all subsequent items on the same worker skip date initialization.",
+    "ctx.retry (per-worker, per-item): 2 attempts × 3s backoff around doReportFlow. Both attempts acquire reportMutex independently.",
+    "Pre-run row snapshot (existingRowIds): CHECK REPORT STATUS is clicked before Run Report to record current TR ids. Polling after Run Report skips any row in existingRowIds to avoid treating a stale 'Complete' row from a previous run as the current one.",
+    "Dry-run boundary: 4-worker parallel Duo approvals cannot be exercised in a headless session — live run pending user verification (CLAUDE.md 2026-04-17).",
+    "Workflow name is 'kronos-reports' (not 'old-kronos-reports') to match existing dashboard registration and JSONL filenames from the legacy era. Directory is old-kronos-reports."
+  ]
+}

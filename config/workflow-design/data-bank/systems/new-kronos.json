@@ -1,0 +1,607 @@
+{
+  "system": "new-kronos",
+  "label": "New Kronos",
+  "operations": [
+    {
+      "id": "new-kronos.goToMenu.goToButtonInFrame#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Go To Menu — Go To Button (portal-frame iframe)",
+      "summary": "Employee Search panel's \"Go To\" dropdown inside the portal-frame iframe render.",
+      "selectorFqn": "newKronosSelectors.goToMenu.goToButtonInFrame",
+      "role": "button",
+      "accessibleName": "/go to/i",
+      "tags": [
+        "go-to",
+        "button",
+        "frame",
+        "quick-find",
+        "slideout",
+        "dropdown",
+        "navigation",
+        "new-kronos"
+      ],
+      "note": "Same slide-out scoping as goToButtonOnPage but takes a FrameLocator argument. NEEDS LIVE RE-VERIFY 2026-06-22.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:160"
+    },
+    {
+      "id": "new-kronos.goToMenu.goToButtonOnPage#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Click Go To Dropdown",
+      "summary": "Employee Search panel's \"Go To\" dropdown at the top-level page render.",
+      "selectorFqn": "newKronosSelectors.goToMenu.goToButtonOnPage",
+      "role": "button",
+      "accessibleName": "/go to/i",
+      "tags": [
+        "go-to",
+        "button",
+        "page",
+        "quick-find",
+        "slideout",
+        "dropdown",
+        "navigation",
+        "new-kronos"
+      ],
+      "note": "Primary: #goToDropdownButton scoped to .quick-find-content — avoids timecard toolbar 'Go to' button that sits behind slideout mask (live error 2026-06-22)",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:148"
+    },
+    {
+      "id": "new-kronos.goToMenu.timecardItem#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Click Timecard Option in Go To Menu",
+      "summary": "Timecard menu item in the open Go To dropdown.",
+      "selectorFqn": "newKronosSelectors.goToMenu.timecardItem",
+      "role": "option",
+      "accessibleName": "Timecard",
+      "verified": "2026-06-18",
+      "tags": [
+        "timecard",
+        "menu",
+        "item",
+        "option",
+        "navigation",
+        "new-kronos"
+      ],
+      "note": "Anchored name /^\\s*timecards?\\s*$/i — bare /timecard/i substring matched 'Employee timecards' page-title after first doc (2026-06-24). clickGoToTimecard polls timecardItem.first().waitFor with 15s deadline + one dropdown re-open retry",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:183"
+    },
+    {
+      "id": "new-kronos.loadingOverlay.overlay#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "WFD Loading Overlay",
+      "summary": "WFD full-page loading overlay — wait for it to be hidden before clicking.",
+      "selectorFqn": "newKronosSelectors.loadingOverlay.overlay",
+      "tags": [
+        "loading",
+        "overlay",
+        "spinner",
+        "busy",
+        "wfd",
+        "dayforce",
+        "new-kronos"
+      ],
+      "note": "CSS multi-selector: .wfd-loading-overlay, [data-wfd-loading], .wfd-modal-overlay, .wfd-busy-indicator. Used as a wait/probe (waitFor hidden) before clicks; not directly interacted with. NEEDS LIVE RE-VERIFY 2026-06-17.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:37"
+    },
+    {
+      "id": "new-kronos.navbar.employeeSearchButton#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Open Employee Search Sidebar",
+      "summary": "Open the Employee Search sidebar.",
+      "selectorFqn": "newKronosSelectors.navbar.employeeSearchButton",
+      "role": "button",
+      "accessibleName": "Employee Search",
+      "verified": "2026-04-06",
+      "tags": [
+        "employee",
+        "search",
+        "button",
+        "sidebar",
+        "navbar",
+        "new-kronos"
+      ],
+      "sourceRef": "src/systems/new-kronos/selectors.ts:49"
+    },
+    {
+      "id": "new-kronos.search.closeButton#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Close Employee Search Sidebar",
+      "summary": "Close the Employee Search sidebar.",
+      "selectorFqn": "newKronosSelectors.search.closeButton",
+      "role": "button",
+      "accessibleName": "Employee Search Close",
+      "verified": "2026-06-18",
+      "tags": [
+        "close",
+        "sidebar",
+        "button",
+        "search",
+        "new-kronos"
+      ],
+      "note": "Called before verifyTimecardEmployee — closes slide-out so EID text on the open timecard is readable",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:127"
+    },
+    {
+      "id": "new-kronos.search.firstResultCheckbox#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Select Employee (check first result)",
+      "summary": "First result's \"Select Item\" checkbox — checking it selects the employee, enabling the Go To button.",
+      "selectorFqn": "newKronosSelectors.search.firstResultCheckbox",
+      "role": "checkbox",
+      "accessibleName": "Select Item",
+      "verified": "2026-06-18",
+      "tags": [
+        "first",
+        "result",
+        "checkbox",
+        "select-item",
+        "search",
+        "new-kronos"
+      ],
+      "note": "selectEmployeeResult(). Enables the Go To button. Do NOT union with 'Select All' header checkbox",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:96"
+    },
+    {
+      "id": "new-kronos.search.firstResultCheckbox#wait",
+      "kind": "wait",
+      "system": "new-kronos",
+      "label": "Wait for Search Result (found detection)",
+      "selectorFqn": "newKronosSelectors.search.firstResultCheckbox",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:96",
+      "verified": "2026-06-18",
+      "tags": [
+        "first",
+        "result",
+        "checkbox",
+        "select-item",
+        "search",
+        "new-kronos"
+      ],
+      "note": "resolveSearchResult races firstResultCheckbox (attached) vs firstResultSlat (visible) vs noResultsText vs 15s timeout. Timeout → not-found + log.warn (never throws)"
+    },
+    {
+      "id": "new-kronos.search.firstResultRow#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Search — First Result Row (fallback)",
+      "summary": "First result row fallback — menuitemradio or row[role=row]; clicking also selects the employee.",
+      "selectorFqn": "newKronosSelectors.search.firstResultRow",
+      "role": "menuitemradio",
+      "verified": "2026-06-18",
+      "tags": [
+        "first",
+        "result",
+        "row",
+        "menuitemradio",
+        "fallback",
+        "search",
+        "new-kronos"
+      ],
+      "note": ".or() fallback chain: getByRole('menuitemradio') or locator('[role=row]') .first(). Accepts SearchRoot.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:105"
+    },
+    {
+      "id": "new-kronos.search.firstResultSlat#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Search — First Result Slat (found probe)",
+      "summary": "First result SLAT — a \"somebody showed up\" signal for found-detection.",
+      "selectorFqn": "newKronosSelectors.search.firstResultSlat",
+      "role": "menuitemradio",
+      "tags": [
+        "first",
+        "result",
+        "slat",
+        "menuitemradio",
+        "found",
+        "probe",
+        "search",
+        "new-kronos"
+      ],
+      "note": "Kept TIGHT (no [role=row] fallback) so a header/placeholder row cannot false-positive a not-found search into found. Used in Promise.any([...]) race with firstResultCheckbox for found-detection in resolveSearchResult. NEEDS LIVE RE-VERIFY 2026-06-22.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:119"
+    },
+    {
+      "id": "new-kronos.search.noResultsText#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Search — No Results Text",
+      "summary": "\"There are no items to display\" text — no-results probe.",
+      "selectorFqn": "newKronosSelectors.search.noResultsText",
+      "verified": "2026-06-18",
+      "tags": [
+        "no-results",
+        "empty",
+        "text",
+        "probe",
+        "search",
+        "new-kronos"
+      ],
+      "note": "Used to detect empty search results via waitFor. Probed in a race against firstResultCheckbox/firstResultSlat in resolveSearchResult.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:83"
+    },
+    {
+      "id": "new-kronos.search.searchInput#fill",
+      "kind": "fill",
+      "system": "new-kronos",
+      "label": "Fill Employee Search Input",
+      "summary": "Search textbox — accepts employee name or ID; resolved iframe-or-top-level.",
+      "selectorFqn": "newKronosSelectors.search.searchInput",
+      "role": "textbox",
+      "accessibleName": "Search by Employee Name or ID",
+      "verified": "2026-06-18",
+      "tags": [
+        "search",
+        "input",
+        "textbox",
+        "employee",
+        "name",
+        "id",
+        "new-kronos"
+      ],
+      "note": "SearchRoot = FrameLocator | Page (portal-frame iframe OR top-level page — resolveSearchRoot handles both)",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:69",
+      "inputVar": "{eid}"
+    },
+    {
+      "id": "new-kronos.search.searchInput#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Search — Employee Name/ID Input (scrape)",
+      "summary": "Read current value of the employee search textbox.",
+      "selectorFqn": "newKronosSelectors.search.searchInput",
+      "role": "textbox",
+      "accessibleName": "Search by Employee Name or ID",
+      "verified": "2026-06-18",
+      "tags": [
+        "search",
+        "input",
+        "textbox",
+        "employee",
+        "name",
+        "id",
+        "new-kronos"
+      ],
+      "note": "Accepts SearchRoot (FrameLocator | Page). See fill variant for iframe/page duality note.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:69"
+    },
+    {
+      "id": "new-kronos.search.searchSubmitButton#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Click Employee Search Submit",
+      "summary": "Search submit button (exact name to distinguish from other Search buttons).",
+      "selectorFqn": "newKronosSelectors.search.searchSubmitButton",
+      "role": "button",
+      "accessibleName": "Search",
+      "verified": "2026-06-18",
+      "tags": [
+        "search",
+        "submit",
+        "button",
+        "new-kronos"
+      ],
+      "note": "getByRole with exact:true to avoid matching other Search-named buttons on the page.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:77"
+    },
+    {
+      "id": "new-kronos.searchFrame#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Search Frame (portal-frame iframe)",
+      "summary": "Grab the Employee Search sidebar iframe with a dynamic session-dependent name.",
+      "selectorFqn": "newKronosSelectors.searchFrame",
+      "role": "frame",
+      "verified": "2026-04-06",
+      "tags": [
+        "iframe",
+        "frame",
+        "search",
+        "portal",
+        "dayforce",
+        "new-kronos"
+      ],
+      "note": "Returns a FrameLocator (not a Locator); used as the SearchRoot context for all search selectors. iframe name suffix changes each session (name^=\"portal-frame-\"). Inferred scrape kind — this is a container/context provider, not a directly interactive element.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:18"
+    },
+    {
+      "id": "new-kronos.ssoNav#navigate",
+      "kind": "navigate",
+      "system": "new-kronos",
+      "label": "Navigate to New Kronos (WFD)",
+      "summary": "Opens New Kronos Dayforce login page",
+      "sourceRef": "src/systems/new-kronos/index.ts"
+    },
+    {
+      "id": "new-kronos.timecard.applyButton#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Click Apply (date range)",
+      "summary": "Apply button for the custom date range.",
+      "selectorFqn": "newKronosSelectors.timecard.applyButton",
+      "role": "button",
+      "accessibleName": "Apply",
+      "verified": "2026-06-18",
+      "tags": [
+        "apply",
+        "button",
+        "range",
+        "timecard",
+        "new-kronos"
+      ],
+      "sourceRef": "src/systems/new-kronos/selectors.ts:276"
+    },
+    {
+      "id": "new-kronos.timecard.calendarDayCell#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Timecard — Calendar Day Cell",
+      "summary": "Moment-picker day cell for a specific date — click to select a day in the range picker.",
+      "selectorFqn": "newKronosSelectors.timecard.calendarDayCell",
+      "role": "gridcell",
+      "verified": "2026-06-22",
+      "tags": [
+        "calendar",
+        "day",
+        "cell",
+        "gridcell",
+        "range",
+        "timecard",
+        "new-kronos"
+      ],
+      "note": "Takes a runtime name param (string | RegExp) matching the full-date aria-label (e.g. 'Monday, June 11, 2026'). .and(td.js-moment-picker-item:not(.out-of-month)) prevents matching adjacent-month trailing days.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:265"
+    },
+    {
+      "id": "new-kronos.timecard.calendarMonthHeader#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Timecard — Calendar Month/Year Header",
+      "summary": "Moment-picker month/year header (e.g. \"Jun 2026\") — read to know which way to step the calendar.",
+      "selectorFqn": "newKronosSelectors.timecard.calendarMonthHeader",
+      "verified": "2026-06-22",
+      "tags": [
+        "calendar",
+        "month",
+        "header",
+        "range",
+        "timecard",
+        "new-kronos"
+      ],
+      "note": "CSS locator: th.js-moment-picker-parent-view .first(). Read its text to determine navigation direction for calendarPrevMonth / calendarNextMonth.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:242"
+    },
+    {
+      "id": "new-kronos.timecard.calendarNextMonth#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Timecard — Calendar Next Month Arrow",
+      "summary": "Moment-picker \"Next month\" arrow button.",
+      "selectorFqn": "newKronosSelectors.timecard.calendarNextMonth",
+      "role": "button",
+      "accessibleName": "Next month",
+      "verified": "2026-06-22",
+      "tags": [
+        "calendar",
+        "next",
+        "month",
+        "arrow",
+        "range",
+        "timecard",
+        "new-kronos"
+      ],
+      "sourceRef": "src/systems/new-kronos/selectors.ts:256"
+    },
+    {
+      "id": "new-kronos.timecard.calendarPrevMonth#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Timecard — Calendar Previous Month Arrow",
+      "summary": "Moment-picker \"Previous month\" arrow button.",
+      "selectorFqn": "newKronosSelectors.timecard.calendarPrevMonth",
+      "role": "button",
+      "accessibleName": "Previous month",
+      "verified": "2026-06-22",
+      "tags": [
+        "calendar",
+        "previous",
+        "month",
+        "arrow",
+        "range",
+        "timecard",
+        "new-kronos"
+      ],
+      "sourceRef": "src/systems/new-kronos/selectors.ts:249"
+    },
+    {
+      "id": "new-kronos.timecard.endDateInput#fill",
+      "kind": "fill",
+      "system": "new-kronos",
+      "label": "Fill Kronos Date Range End",
+      "summary": "End date input for custom range — NATIVE <input type=date>, value as ISO YYYY-MM-DD.",
+      "selectorFqn": "newKronosSelectors.timecard.endDateInput",
+      "verified": "2026-06-22",
+      "tags": [
+        "end",
+        "date",
+        "input",
+        "range",
+        "timecard",
+        "native",
+        "new-kronos"
+      ],
+      "note": "Targeted by id #endDateTimeInput. Same fill rules as startDateInput: ISO only, no masked typing.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:234",
+      "inputVar": "{kronosEnd}"
+    },
+    {
+      "id": "new-kronos.timecard.endDateInput#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Timecard — End Date Input (scrape)",
+      "summary": "Read the current end date value from the custom range input.",
+      "selectorFqn": "newKronosSelectors.timecard.endDateInput",
+      "verified": "2026-06-22",
+      "tags": [
+        "end",
+        "date",
+        "input",
+        "range",
+        "timecard",
+        "native",
+        "new-kronos"
+      ],
+      "note": "Value is ISO YYYY-MM-DD. Targeted by id #endDateTimeInput.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:235"
+    },
+    {
+      "id": "new-kronos.timecard.payPeriodTriggerButton#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Open Pay Period Selector",
+      "summary": "Pay-period trigger button — text varies (\"Current Pay Period\", \"Previous Pay Period\", or a date range).",
+      "selectorFqn": "newKronosSelectors.timecard.payPeriodTriggerButton",
+      "role": "button",
+      "accessibleName": "/Pay Period|Schedule Period|^\\d+\\/\\d+\\/\\d+/",
+      "verified": "2026-06-18",
+      "tags": [
+        "pay",
+        "period",
+        "trigger",
+        "button",
+        "timecard",
+        "new-kronos"
+      ],
+      "note": "Regex name matches current, previous, or date-range display. .first() in case multiple match.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:203"
+    },
+    {
+      "id": "new-kronos.timecard.previousPayPeriodOption#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Timecard — Previous Pay Period Option",
+      "summary": "Previous Pay Period option inside an open period dropdown.",
+      "selectorFqn": "newKronosSelectors.timecard.previousPayPeriodOption",
+      "role": "option",
+      "accessibleName": "Previous Pay Period",
+      "verified": "2026-06-18",
+      "tags": [
+        "previous",
+        "pay",
+        "period",
+        "option",
+        "timecard",
+        "new-kronos"
+      ],
+      "sourceRef": "src/systems/new-kronos/selectors.ts:214"
+    },
+    {
+      "id": "new-kronos.timecard.selectRangeButton#click",
+      "kind": "click",
+      "system": "new-kronos",
+      "label": "Click Select Range (custom date range)",
+      "summary": "\"Select range\" button to switch to custom date range.",
+      "selectorFqn": "newKronosSelectors.timecard.selectRangeButton",
+      "role": "button",
+      "accessibleName": "Select range",
+      "verified": "2026-06-18",
+      "tags": [
+        "select",
+        "range",
+        "button",
+        "custom",
+        "date",
+        "timecard",
+        "new-kronos"
+      ],
+      "sourceRef": "src/systems/new-kronos/selectors.ts:221"
+    },
+    {
+      "id": "new-kronos.timecard.startDateInput#fill",
+      "kind": "fill",
+      "system": "new-kronos",
+      "label": "Fill Kronos Date Range Start",
+      "summary": "Start date input for custom range — NATIVE <input type=date>, value as ISO YYYY-MM-DD.",
+      "selectorFqn": "newKronosSelectors.timecard.startDateInput",
+      "verified": "2026-06-22",
+      "tags": [
+        "start",
+        "date",
+        "input",
+        "range",
+        "timecard",
+        "native",
+        "new-kronos"
+      ],
+      "note": "Native <input type=date>; value MUST be ISO YYYY-MM-DD via fill() — MM/DD/YYYY is silently dropped (reverts to today). computeKronosDateRange(lastDayWorked, separationDate) ±1 month",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:228",
+      "inputVar": "{kronosStart}"
+    },
+    {
+      "id": "new-kronos.timecard.startDateInput#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Timecard — Start Date Input (scrape)",
+      "summary": "Read the current start date value from the custom range input.",
+      "selectorFqn": "newKronosSelectors.timecard.startDateInput",
+      "verified": "2026-06-22",
+      "tags": [
+        "start",
+        "date",
+        "input",
+        "range",
+        "timecard",
+        "native",
+        "new-kronos"
+      ],
+      "note": "Value is ISO YYYY-MM-DD. Targeted by id #startDateTimeInput.",
+      "sourceRef": "src/systems/new-kronos/selectors.ts:229"
+    },
+    {
+      "id": "new-kronos.timecardEmployee#assert",
+      "kind": "assert",
+      "system": "new-kronos",
+      "label": "Assert Open Timecard Belongs to Searched EID",
+      "summary": "verifyTimecardEmployee polls timecard page text for the searched EID; THROWS when timecard shows a different employee (stale Go To left previous employee's timecard)",
+      "inputVar": "{eid}",
+      "sourceRef": "src/workflows/separations/steps/kronos-search.ts",
+      "note": "Live bug 2026-06-24: search 10603110 → Yang/10832819 still displayed. Throw is non-fatal in settled parallel block (logged + fallback to Kuali dates)"
+    },
+    {
+      "id": "new-kronos.timecardGrid.holidayDates#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Scrape Holiday Pay Dates",
+      "summary": "getSeparationTimecardData() — Holiday-Hourly rows from timecard grid; chronological MM/DD/YYYY list",
+      "outputVar": "{holidayDates}",
+      "sourceRef": "src/systems/new-kronos/navigate.ts",
+      "note": "When both sick and holiday present: only the latest (the one that sets separationDate) appears in the comment clause"
+    },
+    {
+      "id": "new-kronos.timecardGrid.lastPunchDate#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Scrape Last Physical Punch Date",
+      "summary": "getSeparationTimecardData() parses .ui-grid-viewport rows for In/Out punches; lastPunchDate = latest date with an In or Out entry",
+      "outputVar": "{lastPunchDate}",
+      "sourceRef": "src/systems/new-kronos/navigate.ts",
+      "note": "Virtual-scroll grid — only on-screen rows in DOM; screenshot uses centerSelector+viewport (not fullPage). null when no punch found"
+    },
+    {
+      "id": "new-kronos.timecardGrid.sickDates#scrape",
+      "kind": "scrape",
+      "system": "new-kronos",
+      "label": "Scrape Sick Leave Dates",
+      "summary": "getSeparationTimecardData() — Sick-Hourly rows from timecard grid; chronological MM/DD/YYYY list",
+      "outputVar": "{sickDates}",
+      "sourceRef": "src/systems/new-kronos/navigate.ts",
+      "note": "Extends separationDate AND drives leave clause in buildTerminationComments"
+    }
+  ]
+}

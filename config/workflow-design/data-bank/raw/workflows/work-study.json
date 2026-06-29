@@ -1,0 +1,286 @@
+{
+  "workflow": "work-study",
+  "systems": ["ucpath"],
+  "steps": [
+    {
+      "step": "ucpath-auth",
+      "label": "UCPath Authentication",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/work-study/workflow.ts",
+      "note": "Announce-only step (ctx.markStep). Kernel-managed UCPath login via loginToUCPath. ctx.page('ucpath') blocks until auth resolves.",
+      "operations": [
+        {
+          "id": "ucpath.ucpath-auth#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Await UCPath login",
+          "summary": "ctx.markStep('ucpath-auth'); ctx.page('ucpath') blocks until kernel loginToUCPath resolves"
+        }
+      ]
+    },
+    {
+      "step": "transaction",
+      "label": "PayPath Transaction",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/work-study/enter.ts",
+      "note": "Executes buildWorkStudyPlan — a 9-stage ActionPlan (sequential). All form interactions operate inside the PeopleSoft iframe via getContentFrame(page).",
+      "operations": [
+        {
+          "id": "ucpath.smart-hr-url#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to Smart HR / PayPath Actions",
+          "url": "UCPATH_SMART_HR_URL",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "note": "page.goto with waitUntil: domcontentloaded, timeout 30s"
+        },
+        {
+          "id": "ucpath.wait-page-ready-nav#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for Smart HR page ready",
+          "summary": "page.waitForTimeout(3000) + page.waitForLoadState('networkidle', { timeout: 15000 })",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.hrTasks.payPathLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Expand PayPath/Additional Pay in HR Tasks sidebar",
+          "selectorFqn": "hrTasks.payPathLink",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.wait-2s-expand#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait 2s for sidebar expansion",
+          "summary": "page.waitForTimeout(2000)",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.hrTasks.payPathActionsLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click PayPath Actions sub-item in sidebar",
+          "selectorFqn": "hrTasks.payPathActionsLink",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.wait-page-ready-paypath#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for PayPath Actions search page ready",
+          "summary": "page.waitForTimeout(3000) + networkidle(15s)",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.smartHR.sidebarNavigationToggle#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Check sidebar aria-expanded state",
+          "selectorFqn": "smartHR.sidebarNavigationToggle",
+          "summary": "getAttribute('aria-expanded') — collapse only if result === 'true'",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.smartHR.sidebarNavigationToggle#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Collapse sidebar (conditional)",
+          "selectorFqn": "smartHR.sidebarNavigationToggle",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "note": "Only clicked when aria-expanded === 'true'. Required to prevent sidebar intercepting iframe button clicks."
+        },
+        {
+          "id": "ucpath.payPathActions.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID in PayPath search form",
+          "selectorFqn": "payPathActions.emplIdInput",
+          "inputVar": "{emplId}",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "note": "Operates on getContentFrame(page) (PeopleSoft iframe)"
+        },
+        {
+          "id": "ucpath.payPathActions.searchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Search",
+          "selectorFqn": "payPathActions.searchButton",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.wait-search-reload#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for iframe reload after search",
+          "summary": "page.waitForTimeout(5000) + networkidle(15s). PeopleSoft reloads iframe content on search.",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.alertOkButton#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Check for PeopleSoft payroll-in-progress alert dialog",
+          "selectorFqn": "payPathActions.alertOkButton",
+          "summary": "isVisible({ timeout: 2000 }) — alert may appear with 'payroll in progress' warning",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.alertOkButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Dismiss PeopleSoft alert dialog (conditional)",
+          "selectorFqn": "payPathActions.alertOkButton",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "note": "Only clicked if alert is visible. Followed by waitForTimeout(2000)."
+        },
+        {
+          "id": "ucpath.payPathActions.employeeNameDisplay#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape employee name from Position Data header",
+          "selectorFqn": "payPathActions.employeeNameDisplay",
+          "outputVar": "{employeeName}",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "summary": "textContent() → wsCtx.employeeName; propagated later via ctx.updateData({ name: wsCtx.employeeName })"
+        },
+        {
+          "id": "ucpath.payPathActions.effectiveDateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Effective Date in Position Data tab",
+          "selectorFqn": "payPathActions.effectiveDateInput",
+          "inputVar": "{effectiveDate}",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.positionChangeReasonInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Position Change Reason",
+          "selectorFqn": "payPathActions.positionChangeReasonInput",
+          "literalValue": "JRL",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.positionPoolInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Position Pool",
+          "selectorFqn": "payPathActions.positionPoolInput",
+          "literalValue": "F",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.jobDataTab#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Job Data tab",
+          "selectorFqn": "payPathActions.jobDataTab",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.wait-page-ready-jobdata#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for Job Data tab load",
+          "summary": "page.waitForTimeout(3000) + networkidle(15s)",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.jobDataCommentsInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Job Data Comments",
+          "selectorFqn": "payPathActions.jobDataCommentsInput",
+          "inputVar": "{comments}",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "note": "comments = 'Updated pool id to F per work study award {effectiveDate}'"
+        },
+        {
+          "id": "ucpath.payPathActions.additionalPayDataTab#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Additional Pay Data tab",
+          "selectorFqn": "payPathActions.additionalPayDataTab",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.wait-page-ready-addlpay#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for Additional Pay Data tab load",
+          "summary": "page.waitForTimeout(3000) + networkidle(15s)",
+          "sourceRef": "src/workflows/work-study/enter.ts"
+        },
+        {
+          "id": "ucpath.payPathActions.initiatorsCommentsInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Initiator's Comments",
+          "selectorFqn": "payPathActions.initiatorsCommentsInput",
+          "inputVar": "{comments}",
+          "sourceRef": "src/workflows/work-study/enter.ts",
+          "note": "Same comments template as Job Data Comments"
+        },
+        {
+          "id": "ucpath.smartHR.saveAndSubmitButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Save and Submit",
+          "selectorFqn": "smartHR.saveAndSubmitButton",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "summary": "waitForSaveEnabled(btn, { timeoutMs: 15000 }) then safeClick; called via clickSaveAndSubmit from enter.ts"
+        },
+        {
+          "id": "ucpath.wait-save-processing#wait",
+          "kind": "wait",
+          "system": "ucpath",
+          "label": "Wait for PeopleSoft processing after submit",
+          "summary": "page.waitForTimeout(5000) + waitForPeopleSoftProcessing(frame, 30000)",
+          "sourceRef": "src/systems/ucpath/transaction.ts"
+        },
+        {
+          "id": "ucpath.smartHR.errorBanner#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Assert no error banner after submit",
+          "selectorFqn": "smartHR.errorBanner",
+          "summary": "errorLocator.count() > 0 → extract error text, return { success: false, error }; handler throws if !result.success",
+          "sourceRef": "src/systems/ucpath/transaction.ts"
+        },
+        {
+          "id": "ucpath.smartHR.confirmationOkButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click OK on transaction confirmation page",
+          "selectorFqn": "smartHR.confirmationOkButton",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "summary": "waitFor visible (15s) then clickIfPresent"
+        },
+        {
+          "id": "ucpath.transaction-number#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape transaction number from Smart HR Transactions list",
+          "outputVar": "{transactionNumber}",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "summary": "readLatestTransactionNumber(page, emplId) — re-navigates to Smart HR Transactions, polls up to 15s for newly-submitted row matching EID, extracts T-number"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Single-system workflow (ucpath only). No delegation, no fan-out, no parallel branches.",
+    "ucpath-auth step is announce-only (ctx.markStep); actual UCPath login is kernel-managed via requireLogin(loginToUCPath).",
+    "All PeopleSoft form interactions operate inside the main iframe via getContentFrame(page) — same pattern as onboarding.",
+    "Sidebar collapse is a guard step: sidebar must be collapsed before clicking iframe buttons or PeopleSoft intercepts the events.",
+    "waitForPageReady helper (3s + networkidle) is called after initial navigation, after each tab click. Search result uses a longer 5s + networkidle wait.",
+    "Position Pool is hardcoded to 'F'; Position Change Reason hardcoded to 'JRL'.",
+    "comments template: 'Updated pool id to F per work study award {effectiveDate}' — written to both Job Data Comments and Initiator's Comments fields.",
+    "Known idempotency gap: no pre-submit dupe probe exists. A kernel retry after a successful submit will re-submit the PayPath transaction. Fix pattern: scan Smart HR Transactions list for an existing pending transaction (see separations' findExistingTerminationTransaction). Until fixed, operators must manually verify before retrying.",
+    "Employee name is scraped from the PeopleSoft Position Data header after search and propagated via ctx.updateData({ name }) at the end of the transaction step."
+  ]
+}

@@ -1,0 +1,253 @@
+{
+  "workflow": "crm-doc-download",
+  "systems": ["crm"],
+  "steps": [
+    {
+      "step": "auth",
+      "label": "Authenticate to ACT CRM",
+      "system": "crm",
+      "sourceRef": "src/workflows/crm-doc-download/workflow.ts",
+      "operations": [
+        {
+          "id": "crm.sso-login#control",
+          "kind": "control",
+          "system": "crm",
+          "label": "ACT CRM SSO login (kernel-managed)",
+          "summary": "requireLogin(loginToACTCrm, 'ACT CRM authentication failed') — kernel prepends auth step when authSteps: true; Duo MFA auto-cleared by duo-autopilot extension",
+          "note": "loginToACTCrm defined in src/infra/auth/login.ts. No handler-visible selectors — kernel owns the auth page interactions."
+        }
+      ]
+    },
+    {
+      "step": "search-record",
+      "label": "Search CRM Onboarding Record",
+      "system": "crm",
+      "sourceRef": "src/workflows/crm-doc-download/workflow.ts",
+      "operations": [
+        {
+          "id": "crm.search-url#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to CRM search results page with query param",
+          "url": "https://act-crm.my.site.com/hr/ONB_SearchOnboardings?q={query}",
+          "inputVar": "{query}",
+          "note": "query = input.email if present, else input.emplId. Direct URL navigation (faster than search-input UI). waitUntil='domcontentloaded', timeout=15s. ctx.retry attempts=3."
+        },
+        {
+          "id": "crm.search-load#wait",
+          "kind": "wait",
+          "system": "crm",
+          "label": "Wait for network idle after search navigation",
+          "summary": "page.waitForLoadState('networkidle', { timeout: 15_000 })"
+        },
+        {
+          "id": "crm.search.resultRows#assert",
+          "kind": "assert",
+          "system": "crm",
+          "label": "Assert at least one result row exists",
+          "selectorFqn": "crm.search.resultRows",
+          "summary": "rows.count() === 0 → throw ExtractionError('No search results found')"
+        },
+        {
+          "id": "crm.search.nthResultRow#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape 'Offer Sent On' date from each result row to identify latest",
+          "selectorFqn": "crm.search.nthResultRow",
+          "outputVar": "{latestIndex}",
+          "note": "Compound: nthResultRow(page, i).locator('td').nth(1) for column index 1. Iterates all rows; parses each date with new Date(); latestIndex = row with most recent date. Silently skips unparseable dates; throws 'CRM returned search rows but no parsable Offer Sent On date' if no valid date found."
+        },
+        {
+          "id": "crm.search.nthResultRow#click",
+          "kind": "click",
+          "system": "crm",
+          "label": "Click name link of latest-dated result row to open employee record",
+          "selectorFqn": "crm.search.nthResultRow",
+          "note": "Primary: nthResultRow(page, latestIndex).locator('td').first().locator('a') via clickIfPresent. Fallback: safeClick on the first td cell directly. ctx.retry attempts=3."
+        },
+        {
+          "id": "crm.record-load#wait",
+          "kind": "wait",
+          "system": "crm",
+          "label": "Wait for employee record page to load fully",
+          "summary": "waitForLoadState('domcontentloaded', timeout=15s) then waitForLoadState('networkidle', timeout=15s)"
+        }
+      ]
+    },
+    {
+      "step": "download",
+      "label": "Download iDocs PDF Documents",
+      "system": "crm",
+      "sourceRef": "src/workflows/crm-doc-download/workflow.ts",
+      "note": "Calls downloadCrmIdocsDocuments (src/systems/crm/idocs-download.ts). Direct HTTP fetch via page.context().request.get() — bypasses PDF.js viewer UI entirely. Default docIndices=[0,2]: idx 0=Signed Offer Letter, idx 2=EE Data Gathering Form. ctx.retry attempts=2, backoff=2000ms.",
+      "operations": [
+        {
+          "id": "crm.idocs-disk-check#control",
+          "kind": "control",
+          "system": "crm",
+          "label": "Skip re-download if all requested PDFs already exist on disk",
+          "summary": "existsSync(folderPath) → readdirSync matches ^Doc<N>-.+\\.pdf$ for every requested index. Returns early with found list if all present.",
+          "note": "Guard against re-running a partially-complete download step."
+        },
+        {
+          "id": "crm.idocs-viewer-iframe#wait",
+          "kind": "wait",
+          "system": "crm",
+          "label": "Wait for iDocs PDF.js viewer iframe and extract document hash",
+          "outputVar": "{hash}",
+          "summary": "Polls page.frames() every 500ms up to 30s for a frame at crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx. Extracts h= (hash) and c= (totalDocs) from iframe URL query params.",
+          "note": "hash is required for the document-server fetch URL. totalDocs used to skip out-of-range index requests."
+        },
+        {
+          "id": "crm.idocs-document#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "HTTP GET each requested document from iDocs document server",
+          "url": "https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforceDocumentServer?i={docIndex}&h={hash}",
+          "inputVar": "{docIndex}",
+          "outputVar": "{pdfBytes}",
+          "summary": "page.context().request.get(url) for each docIndex in input.docIndices (default [0, 2]). Serial loop; skips indices >= totalDocs with log.error."
+        },
+        {
+          "id": "crm.idocs-pdf#assert",
+          "kind": "assert",
+          "system": "crm",
+          "label": "Assert iDocs response is OK and is a valid PDF",
+          "summary": "response.ok() must be true. isCrmPdfResponse: rejects HTML (prefix check); accepts application/pdf content-type OR PDF magic bytes (%PDF-). Throws on failure."
+        },
+        {
+          "id": "crm.save-pdf#control",
+          "kind": "control",
+          "system": "crm",
+          "label": "Write PDF bytes to disk and register in tracker",
+          "summary": "Filename = Doc<N>-<sanitized>.pdf. Name source priority: Content-Disposition header → CRM_DOC_DEFAULT_NAMES[idx] ('Signed Offer Letter' idx 0 / 'EE Data Gathering Form' idx 2) → 'document-N'. writeFile(savedPath, body). tryRegisterDownloadedFile({kind:'crm-document'}).",
+          "note": "savedCount accumulates across indices; used in archive step to populate pdfDownload detail field."
+        }
+      ]
+    },
+    {
+      "step": "archive",
+      "label": "Resolve Name, Rename Folder, Zip Archive",
+      "system": "crm",
+      "sourceRef": "src/workflows/crm-doc-download/workflow.ts",
+      "operations": [
+        {
+          "id": "control.known-folder-branch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: skip CRM name extraction if folder path already known",
+          "summary": "Known if input.folderPath set OR (input.firstName && input.lastName). Dashboard runs (email/EID only) always take the extraction branch.",
+          "note": "When knownFolder is set: download was already into finalFolder; temp-rename and extractNameForFolder are both skipped. extractNameForFolder failure is a soft error — log.warn + fallback '<query> EID' folder, run never fails."
+        },
+        {
+          "id": "crm.entry-sheet#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to UCPath Entry Sheet section (URL fast path)",
+          "url": "https://act-crm.my.site.com/hr/ONB_PPSEntrySheet?id={recordId}",
+          "note": "recordId extracted from current page URL searchParams.get('id'). Fast path when CRM_SECTION_URLS has 'UCPath Entry Sheet'. Falls through to sectionNav.byName click when fast path unavailable."
+        },
+        {
+          "id": "crm.sectionNav.byName#click",
+          "kind": "click",
+          "system": "crm",
+          "label": "Fallback: click UCPath Entry Sheet section nav element",
+          "selectorFqn": "crm.sectionNav.byName",
+          "literalValue": "UCPath Entry Sheet",
+          "note": "3-deep .or() chain: getByRole('link',{name:/UCPath Entry Sheet/i}) | getByText('UCPath Entry Sheet') | getByRole('tab',{name:/UCPath Entry Sheet/i}). Only called when direct URL nav is unavailable (recordId missing or section not in CRM_SECTION_URLS)."
+        },
+        {
+          "id": "crm.entry-sheet-load#wait",
+          "kind": "wait",
+          "system": "crm",
+          "label": "Wait for UCPath Entry Sheet section to load",
+          "summary": "page.waitForLoadState('networkidle', { timeout: 15_000 })"
+        },
+        {
+          "id": "crm.record.thLabelFollowingTd#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract name fields — strategy 1: th label → following td (Visualforce, verified 2026-04-14)",
+          "selectorFqn": "crm.record.thLabelFollowingTd",
+          "outputVar": "{firstName}|{lastName}|{middleName}|{livedName}",
+          "note": "Tried first for all four name fields. Labels: firstName=['First Name','Legal First Name'], lastName=['Last Name','Legal Last Name'], middleName=['Middle Name','Middle Initial'], livedName=['Lived Name','Lived First Name','Preferred Name','Preferred First Name']. 500ms timeout per attempt; first hit wins, remaining strategies skipped for that field."
+        },
+        {
+          "id": "crm.record.tdLabelFollowingTd#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract name fields — strategy 2: td label → following td (Visualforce fallback, verified 2026-04-14)",
+          "selectorFqn": "crm.record.tdLabelFollowingTd",
+          "outputVar": "{firstName}|{lastName}|{middleName}|{livedName}",
+          "note": "Fallback when strategy 1 misses for a field. Same label sets and 500ms timeout."
+        },
+        {
+          "id": "crm.record.cellLabelFollowingTd#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract name fields — strategy 3: th OR td label → following td (broader fallback, UNVERIFIED)",
+          "selectorFqn": "crm.record.cellLabelFollowingTd",
+          "outputVar": "{firstName}|{lastName}|{middleName}|{livedName}",
+          "note": "Added 2026-06-07; UNVERIFIED against live CRM DOM. .or() chain combining strategies 1+2 in one locator pass. Strictly additive — can only find MORE values, never break a working extract."
+        },
+        {
+          "id": "crm.record.rowLabelLastCell#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract name fields — strategy 4: row containing label → last td (row-scoped fallback, UNVERIFIED)",
+          "selectorFqn": "crm.record.rowLabelLastCell",
+          "outputVar": "{firstName}|{lastName}|{middleName}|{livedName}",
+          "note": "Added 2026-06-07; UNVERIFIED. tr:has-text(label) → td:last-child. Handles value not in immediate sibling td. stripLabel removes label prefix from extracted text."
+        },
+        {
+          "id": "crm.record.lightningFieldValue#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Extract name fields — strategy 5: Salesforce Lightning slds-form-element (UNVERIFIED)",
+          "selectorFqn": "crm.record.lightningFieldValue",
+          "outputVar": "{firstName}|{lastName}|{middleName}|{livedName}",
+          "note": "Added 2026-06-07; UNVERIFIED. .slds-form-element:has(.slds-form-element__label:has-text(label)) .slds-form-element__control. Catches CRM record pages served by Lightning UI instead of classic Visualforce."
+        },
+        {
+          "id": "control.rename-temp-folder#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Rename temp download folder to final per-person folder name",
+          "summary": "buildCrmDocumentFolderName → 'Last, First (Lived) Middle EID'. existsSync(finalFolder) → rm recursive if exists. fs.rename(downloadTarget, finalFolder). ctx.updateData with resolved firstName/lastName/middleName/livedName.",
+          "note": "downloadTarget = .incoming-{runId} under onboardingDocsDir (temp path used because archive step navigates away from the record page, which the download iframe depends on). Fallback when extraction fails: sanitizeOnboardingFolderName('<query> EID')."
+        },
+        {
+          "id": "control.zip-archive#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Append person folder into run archive under cross-process file lock",
+          "summary": "resolveArchivePath: if parentRunId → 'Onboarding Docs <YYYY-MM-DD> <batch8>.zip' under onboardingDocsDir (shared by all pool workers); else '<folderName>.zip' beside finalFolder. withFileLock('<archivePath>.lock') + zipFolderInto(archivePath, finalFolder, { signal }).",
+          "note": "All pool workers with shared parentRunId append into the same zip — lock serializes concurrent appends. No batch-completion hook needed; archive is complete when the last worker finishes."
+        },
+        {
+          "id": "control.rm-raw-folder#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Delete raw unzipped person folder after archiving",
+          "summary": "rm(finalFolder, { recursive: true, force: true })"
+        },
+        {
+          "id": "control.update-tracker#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Update tracker row with PDF count and archive path",
+          "summary": "ctx.updateData({ pdfDownload: '<N> file(s)', pdfFolder: archivePath })"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "authSteps: true — kernel prepends CRM SSO auth via requireLogin(loginToACTCrm) before the handler runs.",
+    "Batch mode: pool(poolSize=4, preEmitPending=true). Multiple people run concurrently; each pool worker appends its folder into the shared zip under withFileLock.",
+    "inputSubject is a resolver: email→'email', emplId→'eid'. Both are mutually exclusive per run; dashboard input box accepts either interchangeably.",
+    "Delegation lineage: schema carries parentRunId, parentSubject, taskGroupId for a future delegating parent. Today onboarding downloads iDocs in-process; crm-doc-download is only triggered from the dashboard input-run surface.",
+    "ctx.retry wrappers: search-record retries searchCrmOnboardingRecords and selectLatestResult up to 3 attempts each; download retries downloadCrmIdocsDocuments up to 2 attempts with 2000ms backoff.",
+    "archive name extraction failure is a soft error: log.warn + fallback folder '<query> EID'. Run never fails on name resolution.",
+    "No dry-run boundary — all steps perform real side effects (PDF files written, zip archive created)."
+  ]
+}

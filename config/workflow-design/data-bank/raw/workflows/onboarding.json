@@ -1,0 +1,882 @@
+{
+  "workflow": "onboarding",
+  "systems": ["crm", "ucpath", "i9"],
+  "steps": [
+    {
+      "step": "crm-auth",
+      "label": "CRM Authentication",
+      "system": "crm",
+      "sourceRef": "src/workflows/onboarding/workflow.ts",
+      "operations": [
+        {
+          "id": "crm.auth#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Authenticate to ACT CRM",
+          "summary": "requireLogin → loginToACTCrm; ctx.page('crm') waits for the authenticated CRM browser page to be ready in the session pool"
+        }
+      ]
+    },
+    {
+      "step": "crm-search",
+      "label": "CRM Record Search and Section Navigation",
+      "system": "crm",
+      "sourceRef": "src/workflows/onboarding/workflow.ts",
+      "operations": [
+        {
+          "id": "crm.search-url#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to CRM search URL with email query param",
+          "url": "CRM_SEARCH_URL?q={email}",
+          "inputVar": "{email}",
+          "summary": "searchByEmail → searchCrmOnboardingRecords → page.goto(CRM_SEARCH_URL?q=email); waitUntil domcontentloaded + networkidle"
+        },
+        {
+          "id": "crm.search.resultRows#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape result rows to pick latest by Offer Sent On date",
+          "selectorFqn": "crm.search.resultRows",
+          "outputVar": "{latestResultIndex}",
+          "summary": "Count rows; read column 1 (Offer Sent On date) from each nthResultRow; select row index with latest parseable date; throws ExtractionError if 0 rows or all dates unparseable"
+        },
+        {
+          "id": "crm.search.nthResultRow#click",
+          "kind": "click",
+          "system": "crm",
+          "label": "Click name link (first td > a) of latest-dated result row",
+          "selectorFqn": "crm.search.nthResultRow",
+          "summary": "clickIfPresent on nameLink (td.first().locator('a')); fallback clicks td.first() directly; waits domcontentloaded + networkidle"
+        },
+        {
+          "id": "crm.extractField-dept#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape department number from CRM record page (ONB_ViewOnboarding)",
+          "outputVar": "{departmentNumber}",
+          "summary": "extractField with label variants ['Department', 'Department Name', 'Dept']; parseDepartmentNumber extracts parenthesized code e.g. 'Computer Science (000412)' → '000412'",
+          "note": "Must be called AFTER selectLatestResult and BEFORE navigateToSection('UCPath Entry Sheet')"
+        },
+        {
+          "id": "crm.extractField-recruitment#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape recruitment number from CRM record page",
+          "outputVar": "{recruitmentNumber}",
+          "summary": "extractField with label variants ['Recruitment Number', 'Recruitment #', 'Recruitment No', 'Req Number']"
+        },
+        {
+          "id": "crm.sectionNav.byName#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to UCPath Entry Sheet section",
+          "selectorFqn": "crm.sectionNav.byName",
+          "summary": "navigateToSection(page, 'UCPath Entry Sheet'): fast path via CRM_SECTION_URLS direct URL with ?id=recordId when section URL known; fallback clicks sectionNav.byName(page, sectionName).first(); waits networkidle"
+        }
+      ]
+    },
+    {
+      "step": "extraction",
+      "label": "Employee Data Extraction from UCPath Entry Sheet",
+      "system": "crm",
+      "sourceRef": "src/workflows/onboarding/extract.ts",
+      "operations": [
+        {
+          "id": "crm.extractField-positionNumber#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape position number",
+          "outputVar": "{positionNumber}",
+          "summary": "extractField with labels ['Position Number', 'Position #', 'Position No']"
+        },
+        {
+          "id": "crm.extractField-firstName#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape first name",
+          "outputVar": "{firstName}",
+          "summary": "extractField with labels ['First Name', 'Legal First Name']"
+        },
+        {
+          "id": "crm.extractField-lastName#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape last name",
+          "outputVar": "{lastName}",
+          "summary": "extractField with labels ['Last Name', 'Legal Last Name']"
+        },
+        {
+          "id": "crm.extractField-middleName#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape middle name",
+          "outputVar": "{middleName}",
+          "summary": "extractField with labels ['Middle Name', 'Middle Initial']"
+        },
+        {
+          "id": "crm.extractField-ssn#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape SSN",
+          "outputVar": "{ssn}",
+          "summary": "extractField with labels ['SSN (National ID)', 'SSN', 'Social Security Number']"
+        },
+        {
+          "id": "crm.extractField-address#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape address",
+          "outputVar": "{address}",
+          "summary": "extractField with labels ['Address Line 1', 'Address', 'Street Address']"
+        },
+        {
+          "id": "crm.extractField-city#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape city",
+          "outputVar": "{city}",
+          "summary": "extractField with labels ['City']"
+        },
+        {
+          "id": "crm.extractField-state#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape state",
+          "outputVar": "{state}",
+          "summary": "extractField with labels ['State']"
+        },
+        {
+          "id": "crm.extractField-postalCode#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape postal code",
+          "outputVar": "{postalCode}",
+          "summary": "extractField with labels ['Postal Code', 'Zip Code', 'ZIP']"
+        },
+        {
+          "id": "crm.extractField-wage#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape wage / compensation rate",
+          "outputVar": "{wage}",
+          "summary": "extractField with labels ['Compensation rate', 'Compensation Rate', 'Wage', 'Pay Rate']"
+        },
+        {
+          "id": "crm.extractField-dob#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape date of birth",
+          "outputVar": "{dob}",
+          "summary": "extractField with labels ['Date of Birth', 'DOB', 'Birth Date']"
+        },
+        {
+          "id": "crm.extractField-phone#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape phone number",
+          "outputVar": "{phone}",
+          "summary": "extractField with labels ['Cell Phone', 'Mobile Phone', 'Phone', 'Phone Number']"
+        },
+        {
+          "id": "crm.extractField-email#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape personal email",
+          "outputVar": "{extractedEmail}",
+          "summary": "extractField with labels ['Email', 'Email Address', 'Personal Email']"
+        },
+        {
+          "id": "crm.extractField-appointment#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape appointment number",
+          "outputVar": "{appointment}",
+          "summary": "extractField with labels ['Appointment', 'Appointment Number', 'Appt']; extracts trailing digit e.g. 'Casual/Restricted 5' → '5'"
+        },
+        {
+          "id": "crm.extractField-effectiveDate#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Scrape effective date / first day of service",
+          "outputVar": "{effectiveDate}",
+          "summary": "extractField with labels ['First Day of Service (Effective Date)', 'First Day of Service', 'Effective Date', 'Start Date']"
+        },
+        {
+          "id": "control.schema-validate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Validate extracted data against EmployeeData Zod schema",
+          "summary": "validateEmployeeData(rawData): Zod schema parse; throws ExtractionError wrapping the validation message on failure; merges departmentNumber/recruitmentNumber from crm-search phase; calls ctx.updateData with all detail fields (firstName, lastName, email, dob, ssn masked, address, positionNumber, wage, effectiveDate, appointment, phone)"
+        }
+      ]
+    },
+    {
+      "step": "pdf-download",
+      "label": "Download CRM iDocs Onboarding PDFs",
+      "system": "crm",
+      "sourceRef": "src/workflows/onboarding/workflow.ts",
+      "operations": [
+        {
+          "id": "crm.idocs-viewer#navigate",
+          "kind": "navigate",
+          "system": "crm",
+          "label": "Navigate to iDocs PDF.js viewer to extract hash and doc count",
+          "url": "https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx",
+          "summary": "downloadCrmIdocsDocuments navigates to the PDF.js viewer URL embedded in the CRM page; extracts h (hash) and totalDocs count from viewer URL query params"
+        },
+        {
+          "id": "crm.idocs-document-fetch#scrape",
+          "kind": "scrape",
+          "system": "crm",
+          "label": "Fetch onboarding documents via direct HTTP GET (doc indices 0 and 2)",
+          "outputVar": "{pdfFolder}",
+          "summary": "page.context().request.get('/iDocsForSalesforceDocumentServer?i=N&h=hash') for DEFAULT_CRM_DOC_INDICES [0, 2]; writes bytes to local folder path; stamps pdfDownload count and pdfFolder on row data",
+          "note": "Non-fatal: catch block stamps pdfDownload:'Failed:...' and continues to UCPath/I9 phases without interruption"
+        }
+      ]
+    },
+    {
+      "step": "ucpath-auth",
+      "label": "UCPath Authentication",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/onboarding/workflow.ts",
+      "operations": [
+        {
+          "id": "ucpath.auth#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Authenticate to UCPath",
+          "summary": "requireLogin → loginToUCPath; ctx.page('ucpath') waits for the authenticated UCPath browser page from the session pool"
+        }
+      ]
+    },
+    {
+      "step": "person-search",
+      "label": "UCPath Person Search — New-Hire vs Rehire Detection",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/onboarding/workflow.ts",
+      "operations": [
+        {
+          "id": "ucpath.navigate-smart-hr#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to UCPath Smart HR URL",
+          "url": "UCPATH_SMART_HR_URL",
+          "summary": "page.goto(SMART_HR_URL, { waitUntil: 'domcontentloaded', timeout: 30000 }); waitForLoadState networkidle"
+        },
+        {
+          "id": "ucpath.personSearch.searchTypeSelect#select",
+          "kind": "select",
+          "system": "ucpath",
+          "label": "Select search type 'Person'",
+          "selectorFqn": "ucpath.personSearch.searchTypeSelect",
+          "literalValue": "P",
+          "summary": "selectOption('P'); wait networkidle for PeopleSoft roundtrip"
+        },
+        {
+          "id": "ucpath.personSearch.parameterCodeInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill parameter code PERSON_SEARCH",
+          "selectorFqn": "ucpath.personSearch.parameterCodeInput",
+          "literalValue": "PERSON_SEARCH"
+        },
+        {
+          "id": "ucpath.personSearch.loadFormButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Load Form button",
+          "selectorFqn": "ucpath.personSearch.loadFormButton",
+          "summary": "wait networkidle for form reload"
+        },
+        {
+          "id": "ucpath.personSearch.resultCodeInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill result code PERSON_RESULTS",
+          "selectorFqn": "ucpath.personSearch.resultCodeInput",
+          "literalValue": "PERSON_RESULTS"
+        },
+        {
+          "id": "ucpath.personSearch.ssnInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill SSN (9 digits, no dashes)",
+          "selectorFqn": "ucpath.personSearch.ssnInput",
+          "inputVar": "{ssn}"
+        },
+        {
+          "id": "ucpath.personSearch.firstNameInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill first name",
+          "selectorFqn": "ucpath.personSearch.firstNameInput",
+          "inputVar": "{firstName}"
+        },
+        {
+          "id": "ucpath.personSearch.lastNameInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill last name",
+          "selectorFqn": "ucpath.personSearch.lastNameInput",
+          "inputVar": "{lastName}"
+        },
+        {
+          "id": "ucpath.personSearch.dobInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill date of birth",
+          "selectorFqn": "ucpath.personSearch.dobInput",
+          "inputVar": "{dob}"
+        },
+        {
+          "id": "ucpath.personSearch.ssnLookupButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click National ID lookup (magnifying glass) to trigger PeopleSoft validation",
+          "selectorFqn": "ucpath.personSearch.ssnLookupButton",
+          "summary": "Triggers a PeopleSoft dialog roundtrip; dismissPeopleSoftDialog (#ICOK via JS) after click; wait networkidle"
+        },
+        {
+          "id": "ucpath.personSearch.searchSubmitButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Search button",
+          "selectorFqn": "ucpath.personSearch.searchSubmitButton",
+          "summary": "wait networkidle; result discrimination: dismissPeopleSoftDialog after Search — dialog found = new hire (found:false); no dialog = results table present = rehire (found:true)"
+        },
+        {
+          "id": "control.person-search-result#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: rehire short-circuit vs proceed to I9 and transaction",
+          "summary": "If searchResult.found=true: stamps rehire:'Yes' + existingEmplIds (from matches[].emplId joined) + i9ProfileId:'N/A' + status:'Rehire'; handler returns early — i9-creation and transaction steps are skipped. If found=false: stamps rehire:'No'; continues."
+        }
+      ]
+    },
+    {
+      "step": "i9-creation",
+      "label": "I9 Profile Search (existing) or Creation (new)",
+      "system": "i9",
+      "sourceRef": "src/workflows/onboarding/workflow.ts",
+      "operations": [
+        {
+          "id": "i9.search.dialog#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait for I9 search dialog to appear",
+          "selectorFqn": "i9.search.dialog",
+          "summary": "searchI9Employee opens the search dialog on the I9 dashboard"
+        },
+        {
+          "id": "i9.search.clearFiltersLink#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Clear Filters in search dialog",
+          "selectorFqn": "i9.search.clearFiltersLink"
+        },
+        {
+          "id": "i9.search.ssnInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill SSN with dashes in I9 search",
+          "selectorFqn": "i9.search.ssnInput",
+          "inputVar": "{ssn}",
+          "note": "SSN must include dashes (format: 123-45-6789) for I9 search, unlike UCPath person search which uses 9 digits no dashes"
+        },
+        {
+          "id": "i9.search.submitButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Search submit button",
+          "selectorFqn": "i9.search.submitButton"
+        },
+        {
+          "id": "i9.search.resultRows#scrape",
+          "kind": "scrape",
+          "system": "i9",
+          "label": "Scrape I9 search result rows for existing profile",
+          "selectorFqn": "i9.search.resultRows",
+          "outputVar": "{existingI9ProfileId}",
+          "summary": "If results[0].profileId present: stamps i9ProfileId + i9SearchOnly:'true'; press Escape to close dialog; return existing profileId"
+        },
+        {
+          "id": "control.i9-search-branch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: existing I9 profile found vs create new",
+          "summary": "If searchResults.length > 0 and profileId present: press Escape, use existing profileId, skip creation flow. Else: press Escape + waitForTimeout(500), proceed to dashboard.createNewI9Link."
+        },
+        {
+          "id": "i9.dashboard.createNewI9Link#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click 'Create New I-9 : New Employee' dashboard link",
+          "selectorFqn": "i9.dashboard.createNewI9Link",
+          "summary": "clickWithKendoRecovery: closes stale Kendo windows first, then clicks; waits for URL **/employee/profile"
+        },
+        {
+          "id": "i9.profile.firstName#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill first name on Employee Profile form",
+          "selectorFqn": "i9.profile.firstName",
+          "inputVar": "{firstName}"
+        },
+        {
+          "id": "i9.profile.middleName#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill middle name (only when present)",
+          "selectorFqn": "i9.profile.middleName",
+          "inputVar": "{middleName}",
+          "note": "Conditional — only executed when middleName is non-empty"
+        },
+        {
+          "id": "i9.profile.lastName#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill last name on Employee Profile form",
+          "selectorFqn": "i9.profile.lastName",
+          "inputVar": "{lastName}"
+        },
+        {
+          "id": "i9.profile.ssn#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill SSN (9 digits, no dashes) on Employee Profile form",
+          "selectorFqn": "i9.profile.ssn",
+          "inputVar": "{ssn}",
+          "note": "Create flow expects 9 digits no dashes; opposite of I9 search which uses dashes"
+        },
+        {
+          "id": "i9.profile.dob#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill date of birth on Employee Profile form",
+          "selectorFqn": "i9.profile.dob",
+          "inputVar": "{dob}",
+          "note": "jQuery datepicker is force-hidden via JS after fill so it does not block worksite dropdown"
+        },
+        {
+          "id": "i9.profile.email#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill email on Employee Profile form",
+          "selectorFqn": "i9.profile.email",
+          "inputVar": "{email}"
+        },
+        {
+          "id": "i9.profile.worksiteListbox#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Open worksite dropdown",
+          "selectorFqn": "i9.profile.worksiteListbox"
+        },
+        {
+          "id": "i9.profile.worksiteOption#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Select worksite option matching department number",
+          "selectorFqn": "i9.profile.worksiteOption",
+          "inputVar": "{departmentNumber}",
+          "summary": "Matches option by regex /6-{departmentNumber}/; throws if no matching option found"
+        },
+        {
+          "id": "i9.profile.saveContinueButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Save & Continue to persist Employee Profile",
+          "selectorFqn": "i9.profile.saveContinueButton",
+          "summary": "Waits for profile.loaderOverlay hidden; then checks for errorSummary visibility"
+        },
+        {
+          "id": "i9.profile.errorSummary#assert",
+          "kind": "assert",
+          "system": "i9",
+          "label": "Assert no validation error after Save & Continue",
+          "selectorFqn": "i9.profile.errorSummary",
+          "summary": "If errorSummary visible → return I9Result failure object (does not throw); caller retries"
+        },
+        {
+          "id": "control.i9-post-save-branch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: duplicate employee dialog vs OK confirmation after Save",
+          "summary": "If profile.duplicateDialog visible: click duplicateFirstRow, click viewEditSelectedButton, wait **/employee/profile/*, extract profileId from URL, navigate with ?saveAndContinue=true param. Elif profile.okButtonFirst visible: click OK, wait URL, extract profileId. Else: return I9Result error."
+        },
+        {
+          "id": "i9.remoteI9.remoteSection1OnlyRadio#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Select 'Remote - Section 1 Only' radio button",
+          "selectorFqn": "i9.remoteI9.remoteSection1OnlyRadio"
+        },
+        {
+          "id": "i9.remoteI9.startDateInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill I9 start date",
+          "selectorFqn": "i9.remoteI9.startDateInput",
+          "inputVar": "{effectiveDate}"
+        },
+        {
+          "id": "i9.remoteI9.createI9Button#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Create I-9 button",
+          "selectorFqn": "i9.remoteI9.createI9Button"
+        },
+        {
+          "id": "i9.remoteI9.createI9OkButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click OK on Create I-9 confirmation dialog",
+          "selectorFqn": "i9.remoteI9.createI9OkButton"
+        }
+      ]
+    },
+    {
+      "step": "transaction",
+      "label": "UCPath Smart HR Transaction — UC_FULL_HIRE",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/onboarding/enter.ts",
+      "operations": [
+        {
+          "id": "control.dry-run-gate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Dry-run gate: skip UCPath mutation when dryRun=true",
+          "summary": "If input.dryRun: capture screenshot 'onboarding-dry-run-before-submit', stamp status:'Dry Run Complete' + dryRun:true, return early before buildTransactionPlan().execute(). All upstream steps (CRM, person-search, I9) already ran."
+        },
+        {
+          "id": "ucpath.navigate-smart-hr#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to UCPath Smart HR page",
+          "url": "UCPATH_SMART_HR_URL",
+          "summary": "navigateToSmartHR(page) → page.goto(UCPATH_SMART_HR_URL)"
+        },
+        {
+          "id": "ucpath.hrTasks.smartHRTemplatesLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Smart HR Templates in sidebar to expand submenu",
+          "selectorFqn": "ucpath.hrTasks.smartHRTemplatesLink"
+        },
+        {
+          "id": "ucpath.hrTasks.smartHRTransactionsLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Smart HR Transactions child link",
+          "selectorFqn": "ucpath.hrTasks.smartHRTransactionsLink",
+          "summary": "wait 5s + networkidle after click; loads Transactions form in #main_target_win0 iframe"
+        },
+        {
+          "id": "ucpath.smartHR.sidebarNavigationToggle#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Collapse sidebar navigation to prevent overlay blocking iframe buttons",
+          "selectorFqn": "ucpath.smartHR.sidebarNavigationToggle"
+        },
+        {
+          "id": "ucpath.smartHR.templateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Smart HR template ID",
+          "selectorFqn": "ucpath.smartHR.templateInput",
+          "literalValue": "UC_FULL_HIRE"
+        },
+        {
+          "id": "ucpath.smartHR.effectiveDateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill effective date (First Day of Service) in MM/DD/YYYY",
+          "selectorFqn": "ucpath.smartHR.effectiveDateInput",
+          "inputVar": "{effectiveDate}"
+        },
+        {
+          "id": "ucpath.smartHR.createTransactionButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Create Transaction button",
+          "selectorFqn": "ucpath.smartHR.createTransactionButton",
+          "summary": "wait 5s + waitForPeopleSoftProcessing(30s)"
+        },
+        {
+          "id": "ucpath.smartHR.errorBanner#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Assert no error banner after Create Transaction",
+          "selectorFqn": "ucpath.smartHR.errorBanner",
+          "summary": "Returns TransactionResult { success:false, error } if errorBanner count > 0; caller throws"
+        },
+        {
+          "id": "ucpath.smartHR.reasonCodeSelect#select",
+          "kind": "select",
+          "system": "ucpath",
+          "label": "Select reason code",
+          "selectorFqn": "ucpath.smartHR.reasonCodeSelect",
+          "literalValue": "Hire - No Prior UC Affiliation",
+          "summary": "selectOption(REASON_CODE); dismissPeopleSoftModalMask before Continue click"
+        },
+        {
+          "id": "ucpath.smartHR.continueButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Continue after reason code selection",
+          "selectorFqn": "ucpath.smartHR.continueButton",
+          "summary": "Fallback: JS submitAction_win0(document.win0, 'HR_TBH_WRK_TBH_NEXT') when sidebar overlay blocks click; wait 8s + waitForPeopleSoftProcessing(15s)"
+        },
+        {
+          "id": "ucpath.personalData.legalFirstName#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill legal first name",
+          "selectorFqn": "ucpath.personalData.legalFirstName",
+          "inputVar": "{firstName}"
+        },
+        {
+          "id": "ucpath.personalData.legalLastName#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill legal last name",
+          "selectorFqn": "ucpath.personalData.legalLastName",
+          "inputVar": "{lastName}"
+        },
+        {
+          "id": "ucpath.personalData.legalMiddleName#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill legal middle name",
+          "selectorFqn": "ucpath.personalData.legalMiddleName",
+          "inputVar": "{middleName}"
+        },
+        {
+          "id": "ucpath.personalData.preferredFirstName#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill preferred first name (mirrored from legal when no lived name supplied)",
+          "selectorFqn": "ucpath.personalData.preferredFirstName",
+          "inputVar": "{firstName}"
+        },
+        {
+          "id": "ucpath.personalData.preferredLastName#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill preferred last name (mirrored from legal)",
+          "selectorFqn": "ucpath.personalData.preferredLastName",
+          "inputVar": "{lastName}"
+        },
+        {
+          "id": "ucpath.personalData.preferredMiddleName#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill preferred middle name (conditional)",
+          "selectorFqn": "ucpath.personalData.preferredMiddleName",
+          "inputVar": "{middleName}"
+        },
+        {
+          "id": "ucpath.personalData.dateOfBirth#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill date of birth",
+          "selectorFqn": "ucpath.personalData.dateOfBirth",
+          "inputVar": "{dob}"
+        },
+        {
+          "id": "ucpath.personalData.nationalId#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill national ID / SSN (digits only)",
+          "selectorFqn": "ucpath.personalData.nationalId",
+          "inputVar": "{ssn}",
+          "note": "Optional for international students; only filled when ssn is present"
+        },
+        {
+          "id": "ucpath.personalData.addressLine1#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill address line 1",
+          "selectorFqn": "ucpath.personalData.addressLine1",
+          "inputVar": "{address}"
+        },
+        {
+          "id": "ucpath.personalData.city#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill city",
+          "selectorFqn": "ucpath.personalData.city",
+          "inputVar": "{city}"
+        },
+        {
+          "id": "ucpath.personalData.state#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill state",
+          "selectorFqn": "ucpath.personalData.state",
+          "inputVar": "{state}"
+        },
+        {
+          "id": "ucpath.personalData.postalCode#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill postal code",
+          "selectorFqn": "ucpath.personalData.postalCode",
+          "inputVar": "{postalCode}"
+        },
+        {
+          "id": "ucpath.personalData.phoneNumberInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill phone number (Mobile - Personal type, hardcoded grid index $6)",
+          "selectorFqn": "ucpath.personalData.phoneNumberInput",
+          "inputVar": "{phone}"
+        },
+        {
+          "id": "ucpath.personalData.emailAddressInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill email address (Home type, hardcoded grid index $7)",
+          "selectorFqn": "ucpath.personalData.emailAddressInput",
+          "inputVar": "{email}"
+        },
+        {
+          "id": "ucpath.personalData.trackerProfileIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill I9 tracker profile ID",
+          "selectorFqn": "ucpath.personalData.trackerProfileIdInput",
+          "inputVar": "{i9ProfileId}"
+        },
+        {
+          "id": "ucpath.comments.commentsTextarea#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Comments textarea (Personal Data tab)",
+          "selectorFqn": "ucpath.comments.commentsTextarea",
+          "summary": "commentsText = buildCommentsText(effectiveDate, recruitmentNumber, hasSsn); filled on Personal Data tab before navigating to Job Data"
+        },
+        {
+          "id": "ucpath.smartHR.tab.jobData#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Job Data tab",
+          "selectorFqn": "ucpath.smartHR.tab.jobData",
+          "summary": "dismissPeopleSoftModalMask before click; wait 5s + waitForPeopleSoftProcessing(15s)"
+        },
+        {
+          "id": "ucpath.jobData.positionNumberInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill position number",
+          "selectorFqn": "ucpath.jobData.positionNumberInput",
+          "inputVar": "{positionNumber}",
+          "note": "Triggers PeopleSoft page refresh that changes grid indices ($11 → $0); selectors use .or() fallback chains for cross-refresh compatibility"
+        },
+        {
+          "id": "ucpath.jobData.employeeClassificationInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill employee classification (appointment type)",
+          "selectorFqn": "ucpath.jobData.employeeClassificationInput",
+          "inputVar": "{appointment}",
+          "summary": "Defaults to '5' (Casual/Restricted) if appointment not extracted from CRM"
+        },
+        {
+          "id": "ucpath.jobData.compRateCodeInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill comp rate code",
+          "selectorFqn": "ucpath.jobData.compRateCodeInput",
+          "literalValue": "UCHRLY",
+          "summary": "Constant COMP_RATE_CODE; Tab keypress after fill to trigger PeopleSoft validation"
+        },
+        {
+          "id": "ucpath.jobData.compensationRateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill compensation rate (hourly wage)",
+          "selectorFqn": "ucpath.jobData.compensationRateInput",
+          "inputVar": "{wage}",
+          "summary": "parsePayRate({wage}) strips '$' prefix and 'per hour' suffix; Tab after fill triggers auto-fill of Compensation Frequency"
+        },
+        {
+          "id": "ucpath.jobData.compensationFrequencyInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill compensation frequency (conditional — only if not auto-populated by PeopleSoft)",
+          "selectorFqn": "ucpath.jobData.compensationFrequencyInput",
+          "literalValue": "H",
+          "note": "Skipped if compFreq.inputValue() is already non-empty after the compensation rate Tab"
+        },
+        {
+          "id": "ucpath.jobData.expectedJobEndDateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill expected job end date",
+          "selectorFqn": "ucpath.jobData.expectedJobEndDateInput",
+          "literalValue": "JOB_END_DATE",
+          "note": "JOB_END_DATE from config (e.g. '06/30/2026'); update ANNUAL_DATES each fiscal year via ANNUAL_DATES_END env var"
+        },
+        {
+          "id": "ucpath.smartHR.tab.earnsDist#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Earns Dist tab (visit only, no fields to fill)",
+          "selectorFqn": "ucpath.smartHR.tab.earnsDist",
+          "summary": "dismissPeopleSoftModalMask; wait 3s + waitForPeopleSoftProcessing(10s)"
+        },
+        {
+          "id": "ucpath.smartHR.tab.employeeExperience#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Employee Experience tab (visit only, no fields to fill)",
+          "selectorFqn": "ucpath.smartHR.tab.employeeExperience",
+          "summary": "dismissPeopleSoftModalMask; wait 3s + waitForPeopleSoftProcessing(10s)"
+        },
+        {
+          "id": "ucpath.comments.initiatorCommentsTextarea#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Initiator Comments textarea (Employee Experience tab — last tab before submit)",
+          "selectorFqn": "ucpath.comments.initiatorCommentsTextarea",
+          "summary": "Same commentsText content as Comments textarea; timeout 10s"
+        },
+        {
+          "id": "ucpath.personalData-tab-reclick#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Re-click Personal Data tab to enable Save and Submit button",
+          "summary": "frame.getByRole('tab', { name: 'Personal Data' }).click(); dismissPeopleSoftModalMask first; wait 3s + waitForPeopleSoftProcessing(10s); PeopleSoft requires all 4 tabs visited + re-click to enable Save",
+          "note": "Uses inline getByRole (not registry selector) — allowed for tab navigation per architecture rules"
+        },
+        {
+          "id": "ucpath.smartHR.saveAndSubmitButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Save and Submit",
+          "selectorFqn": "ucpath.smartHR.saveAndSubmitButton",
+          "summary": "waitForSaveEnabled polls up to 15s; dismissPeopleSoftModalMask; safeClick; wait 5s + waitForPeopleSoftProcessing(30s)"
+        },
+        {
+          "id": "ucpath.smartHR.errorBanner#assert",
+          "kind": "assert",
+          "system": "ucpath",
+          "label": "Assert no error banner after Save and Submit",
+          "selectorFqn": "ucpath.smartHR.errorBanner",
+          "summary": "TransactionResult { success:false } on error; caller stamps status:'Failed' + transactionError and throws; success stamps status:'Done'"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Dry-run boundary: the transaction step skips ONLY clickSaveAndSubmit (the sole irreversible UCPath mutation). All upstream steps — CRM extraction, PDF download, UCPath person-search, and I9 profile creation — still execute. I9 creation is search-first (idempotent by SSN), so dry-run does not create duplicate profiles.",
+    "Rehire short-circuit: if person-search finds an existing UCPath record (searchResult.found=true), the handler stamps rehire:Yes + existingEmplIds and returns before i9-creation and transaction steps.",
+    "Pool/batch mode: archetype='batch', batch.mode='pool', poolSize=4. Each worker claims one email at a time from the shared SQLite tasks queue. The handler runs per-email with 3 browsers (CRM, UCPath, I9) and 2 Duo MFA challenges per worker (I9 SSO has no Duo).",
+    "PDF download (pdf-download step) is non-fatal: failure is caught, logged, and stamped as pdfDownload:'Failed:...' without interrupting UCPath/I9 phases.",
+    "SSN format inconsistency across systems: UCPath person-search and UCPath personalData.nationalId both expect 9 digits no dashes; I9 search expects dashes (123-45-6789); I9 profile create also expects 9 digits no dashes.",
+    "Retry idempotency gap: the transaction step's Smart HR submit has no duplicate-guard probe (unlike separations' findExistingTerminationTransaction). Operators retrying onboarding must manually confirm no pending hire exists in UCPath before clicking Retry."
+  ]
+}

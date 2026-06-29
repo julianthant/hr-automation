@@ -1,0 +1,863 @@
+{
+  "system": "control",
+  "label": "Control flow",
+  "operations": [
+    {
+      "id": "control.addressBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Address branch: same-as-employee vs manual address",
+      "summary": "wantsSameAddress = contact.sameAddressAsEmployee || !contact.address. True → check sameAddress checkbox only. False → uncheck + open Edit Address modal + fill fields + OK.",
+      "sourceRef": "src/workflows/emergency-contact/enter.ts"
+    },
+    {
+      "id": "control.alreadyHasOath#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Gate: skip add+save if oath already exists",
+      "summary": "If ctx.alreadyHasOath=true: all remaining plan ops (addNewOathLink, oathDateInput, oathOkButton, saveButton) are skipped via early-return guards. Handler then calls ctx.updateData({ status: 'Skipped (Existing Oath)' }) and returns without error.",
+      "sourceRef": "src/workflows/oath-signature/enter.ts"
+    },
+    {
+      "id": "control.approvalWaitGate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Gate: skip if not full mode or signerItemIds already set",
+      "summary": "needsApprovalWait = mode==='full' && signerItemIds.length===0; if false → ctx.skipStep('wait-approval')"
+    },
+    {
+      "id": "control.approve-update-ctx#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Delegated: stamp approved records onto ctx (approve path)",
+      "summary": "ctx.updateData({ records, recordCount, fannedOutItemIds, fannedOutCount }) so the kernel's terminal done row carries the approved record set. Actual fan-out (approveTo per-record + approveDocumentTo once-per-PDF) is handled by the /api/ocr/approve-batch HTTP route outside this handler.",
+      "note": "Delegated + approved path only."
+    },
+    {
+      "id": "control.assertAllSignersDone#assert",
+      "kind": "assert",
+      "system": "control",
+      "label": "Assert every expected signer outcome is 'done'",
+      "summary": "Builds byItem map; any expectedItemId missing or status!='done' → throw with itemId=status list; no HR ticket is filed"
+    },
+    {
+      "id": "control.assertRequiredKeywords#assert",
+      "kind": "assert",
+      "system": "control",
+      "label": "Fail loud if any required keyword is still blank",
+      "summary": "Throws with the list of missing keyword labels if missing.length > 0 — never allows import of an incompletely-keyed document",
+      "note": "Required keyword labels: UCPath ID, Last Name, First Name, Document Name, Department Name, Department Code, Vice Chancellor, Vice Chancellor Code"
+    },
+    {
+      "id": "control.auth.ucpath#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Deferred UCPath login (Duo MFA)",
+      "summary": "loginToUCPath(page, ctx.workflowInstance, ctx.signal) — deferred from session-launch; first item triggers Duo, subsequent items reuse warm session. Throws on auth failure.",
+      "sourceRef": "src/infra/auth/login.ts"
+    },
+    {
+      "id": "control.awaitDuo#wait",
+      "kind": "wait",
+      "system": "control",
+      "label": "Await Duo MFA Approval (×3)",
+      "summary": "Waits for Duo approval on each system; all three pend concurrently — operator approves in any order"
+    },
+    {
+      "id": "control.build-lookup-targets#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Build lookup targets list",
+      "summary": "Filters records to those needing a lookup (needsLookup='name'|'verify'|'verify-only'). Generates itemIds (ocrChildItemIdPrefix-runId-rN). Applies LLM suggestion EIDs as verify-only lookup targets when present."
+    },
+    {
+      "id": "control.carry-forward#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Carry-forward resolved fields from previous run (reupload)",
+      "summary": "When input.previousRunId is set, reads the prior OCR row's records and calls applyCarryForward to merge already-resolved fields (EID, matchState) onto v2 re-extracted records via Levenshtein key match.",
+      "note": "Optional — only on reupload."
+    },
+    {
+      "id": "control.clear-fields-fr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Clear resolved fields on selected records",
+      "summary": "For each recordIndex: clears employeeId (flat or nested employee.employeeId), sets matchState=lookup-pending, matchSource=null, matchConfidence=null, verification=null, forceResearch=true."
+    },
+    {
+      "id": "control.compute-page-status#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Compute failedPages, emptyPages, pageStatusSummary",
+      "summary": "Derives failedPages (OCR failed on page), emptyPages (OCR succeeded but produced zero records), and summary counts from ocrResult.pages."
+    },
+    {
+      "id": "control.crmOnlyBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: crm-only path requires UCPath EID re-query",
+      "summary": "!isEidInput(input) && crmMatch === 'crm-only': must fetch UCPath results by the CRM-sourced EID because UCPath returned 0 SDCMP rows in searching. All other paths (eid-input, direct/date/none CRM matches) use sdcmpFromSearch already fetched.",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts"
+    },
+    {
+      "id": "control.ctxRetry#control",
+      "kind": "control",
+      "system": "control",
+      "label": "ctx.retry: wrap doReportFlow with 2 attempts and 3s linear backoff",
+      "summary": "On first attempt failure logs 'Retrying Reports navigation (attempt 2)'; both failures mark success=false and fall through to tracker write",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+    },
+    {
+      "id": "control.dateReconciliation#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Date Reconciliation (post-kronos)",
+      "summary": "lastDayWorked = timecard.lastPunchDate ?? kualiData.lastDayWorked; separationDate = kronosSkipped ? kualiData.separationDate : computeSeparationDate(LDW, sick, holiday); termEffDate = sep+1",
+      "note": "Pure computation. kronosSkipped → Kuali sep date kept VERBATIM (no 'per Kronos' comment). Derived when kronos ran (even if no punch returned)"
+    },
+    {
+      "id": "control.delegate-person-lookup#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Fan-out to person-lookup via delegateToAllImpl",
+      "summary": "Calls delegateToAllImpl({ child: personLookupWorkflow, inputs, fireAndForget:true, deriveItemId, rootTracePrefix, daemonFlags }). Each child is a delegated single row under the OCR runId.",
+      "note": "Per-record: name-kind → {name}, verify/verify-only → {emplId, keepNonHdh:true}."
+    },
+    {
+      "id": "control.delegated-emit-awaiting-approval#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Delegated: emit running step=awaiting-approval snapshot",
+      "summary": "Emits running step=awaiting-approval snapshot carrying all records + failedPages/emptyPages. Dashboard OcrReviewPane shows Approve/Discard controls.",
+      "note": "Delegated branch only."
+    },
+    {
+      "id": "control.delegateToPersonLookup#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Delegate to Person Lookup by Name",
+      "summary": "ctx.delegateTo(personLookupWorkflow, { name }) on different/not-found tiers; resolved EID replaces kualiData.eid and triggers Job Summary re-fetch",
+      "note": "On EID correction: re-fetches Job Summary with verified EID (critical for correct dept/payroll). No New Kronos re-search needed (kronos-search runs after with corrected EID)"
+    },
+    {
+      "id": "control.deriveActiveCheckOutcome#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Derive active/HDH status from results",
+      "summary": "resolveActiveStatusResultsForPersonLookup → deriveActiveCheckOutcome: produces activeStatus (active|inactive|not-found|non-hdh|ambiguous), isActive, isHdhAccepted, terminationDate, terminationReason (blanked when active), expectedJobEndDate, candidateEids, startDate (UCPath), effdt",
+      "sourceRef": "src/workflows/person-lookup/outcome.ts"
+    },
+    {
+      "id": "control.deriveHash#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Derive PDF sha256 hash",
+      "summary": "pdfHash = input.pdfHash ?? registered.sha256 ?? hashFile(storagePath).sha256; fail-safe — warns and returns undefined on error"
+    },
+    {
+      "id": "control.disambiguate-llm#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Disambiguate ambiguous roster candidates via LLM",
+      "summary": "For records left lookup-pending with rosterCandidates (and not form-eid or manual), calls disambiguateMatch concurrently (up to OCR_DISAMBIG_CONCURRENCY=4). Applies spec.applyDisambiguation with the chosen EID/confidence.",
+      "note": "Optional — only when at least one ambiguous record exists."
+    },
+    {
+      "id": "control.discard-error#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Delegated: throw OcrDiscardedError on discard",
+      "summary": "OcrDiscardedError propagates to the kernel → terminal failed row. The discard HTTP route (/api/ocr/discard-prepare) also writes its own failed step=discarded row and cascade-cancels queued child tasks.",
+      "note": "Delegated + discarded path only."
+    },
+    {
+      "id": "control.dry-run-gate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Dry-run gate: skip UCPath mutation when dryRun=true",
+      "summary": "If input.dryRun: capture screenshot 'onboarding-dry-run-before-submit', stamp status:'Dry Run Complete' + dryRun:true, return early before buildTransactionPlan().execute(). All upstream steps (CRM, person-search, I9) already ran."
+    },
+    {
+      "id": "control.dryRun#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Gate: skip Save if dryRun mode",
+      "summary": "shouldCommitOathSignature = !dryRun && !alreadyHasOath. If dryRun: call options.beforeCommit() (captures dry-run screenshot), log 'Dry run: skipped UCPath Save', set ctx.updateData({ status: 'Dry Run Complete', dryRunProofCaptured: 'true' }). Branches to Return-to-Search without clicking Save.",
+      "note": "Conditional: only evaluated when ctx.alreadyHasOath=false.",
+      "sourceRef": "src/workflows/oath-signature/enter.ts"
+    },
+    {
+      "id": "control.dryRunBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: dry run — screenshot and return without importing",
+      "summary": "If input.dryRun=true: takes a form screenshot (label: onbase-dry-run-pre-import), sets status='Dry Run Complete', returns early — Import button is never clicked",
+      "note": "dryRun is set by the OCR fan-out (OnbaseInput.dryRun). Dry run still walks the full form including keyset autofill + keyword verification."
+    },
+    {
+      "id": "control.dryRunGate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Dry-run gate: skip submit if dryRun=true",
+      "summary": "dryRun → screenshot hr-inquiry-dry-run-pre-submit, ctx.updateData({ticketNumber:'DRY RUN - not submitted', status:'dry-run-complete'}), return early",
+      "sourceRef": "src/workflows/emergency-contact/workflow.ts"
+    },
+    {
+      "id": "control.duplicateGuard#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Duplicate contact guard (Levenshtein match)",
+      "summary": "pickBestContactMatch on normalised names. distance=0 (exact) → sets skipped=true, skips fill-form+save. distance 1-2 (fuzzy) → demote existing primary (if !dryRun) + re-navigate. distance>2 or null → add normally.",
+      "sourceRef": "src/workflows/emergency-contact/enter.ts"
+    },
+    {
+      "id": "control.eidOrNameBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: EID input vs name input",
+      "summary": "isEidInput(input): EID path fills emplIdInput + skips CRM EID-disambiguation; name path fills lastNameInput+nameInput with multi-attempt strategy + applies HDH dept filter",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts"
+    },
+    {
+      "id": "control.eidOrNameCrmBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: EID input (searchCrmByEidOrName) vs name input (searchCrmByName)",
+      "summary": "isEidInput(input) → searchCrmByEidOrName({ emplId, lastName:resolvedName.lastName, firstName:resolvedName.firstName }); else → searchCrmByName(parsedLastName, parsedFirst)",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts"
+    },
+    {
+      "id": "control.emit-loading-roster-running#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit running step=loading-roster",
+      "summary": "Writes running row with step=loading-roster so session drawer advances."
+    },
+    {
+      "id": "control.emit-pending#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit pending tracker row",
+      "summary": "Writes the initial pending OCR row to JSONL with formType, pdfPath, pdfOriginalName, sessionId, rosterMode."
+    },
+    {
+      "id": "control.emit-placeholder-snapshot#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit placeholder snapshot with blank records",
+      "summary": "Emits running step=ocr snapshot with one form-spec-shaped placeholder record per rendered page (spec.placeholderFields). Dashboard Preview tab shows blank inputs immediately."
+    },
+    {
+      "id": "control.emit-post-lookup-snapshot#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit snapshot after lookups complete",
+      "summary": "Emits running step=person-lookup snapshot with fully-patched records."
+    },
+    {
+      "id": "control.emit-post-match-snapshot#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit snapshot post-matching",
+      "summary": "Emits running step=ocr snapshot with post-match records (badges + EIDs where roster auto-accepted)."
+    },
+    {
+      "id": "control.emit-post-ocr-snapshot#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit snapshot with OCR-extracted records (pre-match)",
+      "summary": "Emits running step=ocr snapshot carrying raw extracted records so Preview tab shows extracted names/dates before matching runs."
+    },
+    {
+      "id": "control.emit-pre-lookup-snapshot#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit snapshot before person-lookup fan-out",
+      "summary": "Emits running step=person-lookup snapshot if there are lookup targets, so Preview keeps showing current records while fan-out runs."
+    },
+    {
+      "id": "control.enrich-records-hook#control",
+      "kind": "control",
+      "system": "control",
+      "label": "spec.enrichRecords hook (verify form only)",
+      "summary": "Awaits spec.enrichRecords for bespoke enrichment. verify form fans out to person-lookup (CRM employment/oath dates, active status) and i9-lookup (authorized-official signer) via delegateToAllImpl + watchChildRuns, then patches records with applyPersonLookupToVerifyRecord / applyI9ToVerifyRecord.",
+      "note": "Optional — only when spec.enrichRecords is declared (verify form only for current specs)."
+    },
+    {
+      "id": "control.existingTransactionBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Existing Transaction Short-Circuit",
+      "summary": "If findExistingTerminationTransaction returns a T#: persist to ctx.data, screenshot, return without submit",
+      "note": "alreadyAtSmartHR=true skips re-navigation saving ~12s per doc"
+    },
+    {
+      "id": "control.findPriorTicketForSession#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Query tracker for prior HRC ticket matching sessionId/pdfHash",
+      "summary": "findPriorTicketForSession(sessionId, pdfHash, trackerDir) — controlDb item index + JSONL lookback (7 days); returns HRC ticket string or null"
+    },
+    {
+      "id": "control.handleOcrApprovalFailedError#assert",
+      "kind": "assert",
+      "system": "control",
+      "label": "OCR prep failure → throw, no ticket filed",
+      "summary": "OcrApprovalFailedError → throw Error('oath-upload: OCR prep failed — NOT filing the HR ticket')"
+    },
+    {
+      "id": "control.handleOcrDiscardedError#assert",
+      "kind": "assert",
+      "system": "control",
+      "label": "Discard → CancelledError (not workflow failure)",
+      "summary": "OcrDiscardedError → throw Object.assign(new CancelledError('discarded'), { cause: err }) so the terminal row classifies on the Cancel surface"
+    },
+    {
+      "id": "control.historicalRedirect#assert",
+      "kind": "assert",
+      "system": "control",
+      "label": "Detect historical (paper) I-9 redirect",
+      "summary": "page.url().includes('/form-I9-historical/') → return status:historical (paper import; no electronic Section 2 audit row exists)",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "control.i9-post-save-branch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: duplicate employee dialog vs OK confirmation after Save",
+      "summary": "If profile.duplicateDialog visible: click duplicateFirstRow, click viewEditSelectedButton, wait **/employee/profile/*, extract profileId from URL, navigate with ?saveAndContinue=true param. Elif profile.okButtonFirst visible: click OK, wait URL, extract profileId. Else: return I9Result error."
+    },
+    {
+      "id": "control.i9-search-branch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: existing I9 profile found vs create new",
+      "summary": "If searchResults.length > 0 and profileId present: press Escape, use existing profileId, skip creation flow. Else: press Escape + waitForTimeout(500), proceed to dashboard.createNewI9Link."
+    },
+    {
+      "id": "control.identityCheckNameTier#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Identity Check Name-Tier Branch",
+      "summary": "classifyNameSimilarity(kualiName, jobSummaryName) → same→skipStep, similar→correct name, different/not-found→delegate to person-lookup",
+      "note": "same: EID trusted, no action. similar (e.g. Jaden→Jayden): trust EID, write corrected name to Kuali draft. different/not-found: delegate by name. not-found + complete 8-digit EID: FAIL LOUD"
+    },
+    {
+      "id": "control.includeCrmDatesGate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Gate: skip step unless includeCrmDates === true",
+      "summary": "ctx.skipStep('crm-dates') when input.includeCrmDates !== true; step is always declared so the step list is consistent across all runs",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts"
+    },
+    {
+      "id": "control.keyboard.Tab#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Press Tab to fire Employee Lookup keyset autofill",
+      "summary": "page.keyboard.press('Tab') after filling UCPath ID — triggers OnBase to autofill all keyword fields from the Employee Lookup keyset",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "control.keysetAutofillBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: if keyset did not autofill, fill fallback keyword values from OCR data",
+      "summary": "If keysetAutofilled=false: iterates fallbackKeywordValues(input) and fills each non-empty value via fillKeyword. Combobox keywords (Department Name/Code, Vice Chancellor/Code) use keywordCombobox; all others use keywordInput.",
+      "note": "Fallback data comes from OCR extraction. Executed only when keyset returns nothing (bad/unknown UCPath ID)."
+    },
+    {
+      "id": "control.known-folder-branch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: skip CRM name extraction if folder path already known",
+      "summary": "Known if input.folderPath set OR (input.firstName && input.lastName). Dashboard runs (email/EID only) always take the extraction branch.",
+      "note": "When knownFolder is set: download was already into finalFolder; temp-rename and extractNameForFolder are both skipped. extractNameForFolder failure is a soft error — log.warn + fallback '<query> EID' folder, run never fails."
+    },
+    {
+      "id": "control.kronosDeptGate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Department Gate (HDH vs non-HDH)",
+      "summary": "isAcceptedHdhDepartment(departmentDescription) → HDH: run timecard; non-HDH: skipStep (dates fall back to Kuali verbatim, no timecard comment). FAIL-SAFE: unknown/empty dept still runs",
+      "note": "Keyword match on 'housing'/'dining'/'hospitality' — not a single dept-code. Only skips on POSITIVE non-HDH determination"
+    },
+    {
+      "id": "control.kronosFoundBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Kronos Found/Not-Found Branch",
+      "summary": "Not found → return empty timecard (found:false), handler falls back to Kuali LDW. Found but Go-To fails → THROW (non-fatal in settled parallel, visible in log). Wrong-person timecard → THROW (same semantics).",
+      "note": "A genuine not-found is best-effort quiet; a mechanical failure (found but can't open) is loud. Non-fatal because New Kronos runs in ctx.parallel settled block"
+    },
+    {
+      "id": "control.load-roster#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Load and precompute roster from disk",
+      "summary": "Reads the XLSX/CSV roster file from resolvedRosterPath, precomputes match structures. Skipped (empty roster) when rosterMode='optional' and no path resolved."
+    },
+    {
+      "id": "control.loginToOnBase#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Deferred login to OnBase (SSO + Duo)",
+      "summary": "Calls loginToOnBase(page) — idempotent UCSD Shibboleth SSO + Duo auth; deferAuth:true means the daemon Duos once here after OCR approval, not at fan-out enqueue time",
+      "note": "authSteps:false suppresses kernel auto-auth; loginToOnBase is called explicitly in this step. Throws if authentication fails."
+    },
+    {
+      "id": "control.loginToUCPath#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Call loginToUCPath (idempotent UCPath + Duo MFA)",
+      "summary": "loginToUCPath(page, undefined, ctx.signal). Returns ok boolean; throws 'UCPath authentication failed' on false. Duo MFA fires only on first item per daemon session.",
+      "sourceRef": "src/workflows/oath-signature/workflow.ts"
+    },
+    {
+      "id": "control.lookup-branch-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: person lookup or i9 lookup",
+      "summary": "input.lookup==='person' → runPersonRelookup (personLookupWorkflow). input.lookup==='i9' → runI9Relookup (i9LookupWorkflow); guards that record.formKind==='oath'."
+    },
+    {
+      "id": "control.lookup-suggestions-llm#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Compute LLM lookup suggestions for unmatched records",
+      "summary": "For records still lookup-pending with needsLookup='name' and no rosterCandidates, calls suggestLookupCandidates (LLM). Suggestions may include an EID hint that becomes a verify-only lookup target.",
+      "note": "Optional — only when unmatched-by-roster name-lookup records exist."
+    },
+    {
+      "id": "control.match-records#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Match each record against roster (spec.matchRecord)",
+      "summary": "Calls spec.matchRecord({ record, roster }) for each extracted record in parallel. Sets matchState, matchSource, matchConfidence, rosterCandidates."
+    },
+    {
+      "id": "control.matchCrmEid#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Match CRM records against UCPath SDCMP candidates (name-path)",
+      "summary": "matchCrmEid(sdcmp, crmRecords): (1) direct: CRM ucpathEmployeeId === any SDCMP emplId → crmMatch:'direct'; (2) date: CRM firstDayOfService within ±7 days of UCPath startDate/effectiveDate → crmMatch:'date'; (3) none: CRM records found but no match → crmMatch:'none'. crm-only: crmMatch='crm-only' set earlier when UCPath had 0 SDCMP but CRM had an EID.",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts",
+      "note": "Name path only; EID path stamps startDate+payrollTitle without EID matching"
+    },
+    {
+      "id": "control.parallelStaggeredAuth#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Parallel-Staggered Auth (3 systems)",
+      "summary": "Orchestrates prepareLogin (parallel fill) then staggered submit for Kuali, New Kronos, UCPath; each system's Duo is awaited independently",
+      "note": "All 3 Duos can overlap; operator approves in any order"
+    },
+    {
+      "id": "control.patch-record-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Patch targeted record from lookup outcome",
+      "summary": "Person: patchOcrRecordFromEidLookupOutcome + applyPersonLookupToVerifyRecord (CRM dates, active status). I9: applyI9ToVerifyRecord (authorized-official signer). patchOcrRecordUnresolved on timeout."
+    },
+    {
+      "id": "control.patch-records-fr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Patch records from lookup outcomes",
+      "summary": "patchOcrRecordFromEidLookupOutcome(records, idx, outcome, 'name') for each byItemId result. patchOcrRecordUnresolved for missingItemIds."
+    },
+    {
+      "id": "control.patch-records-rp#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Patch new records from lookup outcomes",
+      "summary": "patchOcrRecordFromEidLookupOutcome for each outcome by kind. patchUnresolved for missing outcomes (no result within timeout). Handles name and verify-only kinds."
+    },
+    {
+      "id": "control.person-search-result#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: rehire short-circuit vs proceed to I9 and transaction",
+      "summary": "If searchResult.found=true: stamps rehire:'Yes' + existingEmplIds (from matches[].emplId joined) + i9ProfileId:'N/A' + status:'Rehire'; handler returns early — i9-creation and transaction steps are skipped. If found=false: stamps rehire:'No'; continues."
+    },
+    {
+      "id": "control.pickEligibleRow#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Pick first eligible signer lookup row from results",
+      "summary": "pickI9SignerSearchResult: finds first result where nextAction is non-empty and does NOT match /^complete\\s+section\\s+[12]$/i. No eligible row → return status:unsigned.",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "control.pre-render-pdf#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Pre-render PDF pages into pdf-cache",
+      "summary": "Calls ensurePdfPageCache to rasterize all PDF pages to PNG so the Preview tab populates page images immediately. Wrapped in raceOcrPrepWithDiscard."
+    },
+    {
+      "id": "control.readFannedOutItemIds#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Extract signer itemIds from approved OCR payload",
+      "summary": "signerItemIds = [...payload.fannedOutItemIds]; payload.fannedOutItemIds is stamped by the OCR approve route's fan-out"
+    },
+    {
+      "id": "control.rebuild-checks-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Rebuild verify checks for targeted record",
+      "summary": "buildVerifyChecks(records[idx]) re-evaluates present/found/missing for each check field (name, EID, activeStatus, employmentDate, oathDate, officialSigner) after the patched data."
+    },
+    {
+      "id": "control.rename-temp-folder#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Rename temp download folder to final per-person folder name",
+      "summary": "buildCrmDocumentFolderName → 'Last, First (Lived) Middle EID'. existsSync(finalFolder) → rm recursive if exists. fs.rename(downloadTarget, finalFolder). ctx.updateData with resolved firstName/lastName/middleName/livedName.",
+      "note": "downloadTarget = .incoming-{runId} under onboardingDocsDir (temp path used because archive step navigates away from the record page, which the download iframe depends on). Fallback when extraction fails: sanitizeOnboardingFolderName('<query> EID')."
+    },
+    {
+      "id": "control.reportMutex#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Acquire cross-worker reportMutex before entering Reports navigation",
+      "summary": "UKG serializes report generation server-side; mutex prevents two workers interleaving Go To Reports → Run Report → Download",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+    },
+    {
+      "id": "control.resolvePdf#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Resolve PDF path",
+      "summary": "If pdfPath present use it directly; else open controlDb and call getRegisteredFile(db, pdfFileId) to get storagePath; throws if neither pdfPath nor pdfFileId is available"
+    },
+    {
+      "id": "control.resolvePdfAndExtractPage#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Resolve pdfFileId to disk path; extract sourcePage as bytes",
+      "summary": "resolvePdfPath opens the control DB to look up the registered file by pdfFileId; extractPdfPage splits out the single page as Buffer — no temp file written",
+      "note": "In-memory page bytes passed directly to chooseFile; extraction is a service call (src/services/ocr/pdf-pages.ts), not a browser op"
+    },
+    {
+      "id": "control.rm-raw-folder#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Delete raw unzipped person folder after archiving",
+      "summary": "rm(finalFolder, { recursive: true, force: true })"
+    },
+    {
+      "id": "control.run-ocr-pipeline#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Run LLM OCR pipeline",
+      "summary": "Calls runOcrPipeline with the PDF path, pageImagesDir, spec.ocrRecordSchema, spec.prompt. Uses the multi-provider vision pool. Returns per-page success/failure status and extracted records."
+    },
+    {
+      "id": "control.schema-validate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Validate extracted data against EmployeeData Zod schema",
+      "summary": "validateEmployeeData(rawData): Zod schema parse; throws ExtractionError wrapping the validation message on failure; merges departmentNumber/recruitmentNumber from crm-search phase; calls ctx.updateData with all detail fields (firstName, lastName, email, dob, ssn masked, address, positionNumber, wage, effectiveDate, appointment, phone)"
+    },
+    {
+      "id": "control.searchFormRecovery#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Recovery branch: return to search form if profile page retained",
+      "summary": "If emplIdInput not visible: check returnToSearchButton.isVisible({ timeout: 2000 }). If visible: click it → waitForLoadState(networkidle) → waitForPersonProfilesSearchForm (emplIdInput.waitFor visible 10s). If neither visible: throw 'Person Profiles search form is not visible and Return to Search is unavailable'. PeopleSoft can reopen the prior profile on direct URL load; this recovers cleanly for daemon item N+1.",
+      "sourceRef": "src/workflows/oath-signature/enter.ts"
+    },
+    {
+      "id": "control.second-opinion-reread#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Second-opinion re-read for suspect pages",
+      "summary": "For records that matched nothing in the roster AND have no usable EID, re-reads the page on a tier-1 accuracy model (runOcrSecondOpinionPage), re-matches, and adopts the new reading only when it ranks strictly better. Capped by OCR_SECOND_OPINION_MAX (default 5). Skipped when roster is empty.",
+      "note": "Optional — only when at least one suspect record exists and roster is loaded."
+    },
+    {
+      "id": "control.sharepoint-dispatch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Dispatch SharePoint roster download (rosterMode=download|wait)",
+      "summary": "When rosterMode='download' or 'wait', calls requestSharePointDownload and awaits the download result. Parented under the OCR runId. Skipped when rosterMode='existing'.",
+      "note": "Optional — only when rosterMode is 'download' or 'wait'."
+    },
+    {
+      "id": "control.signatureWaitGate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Gate: skip if upload-only or no signer itemIds",
+      "summary": "mode==='upload-only' OR signerItemIds.length===0 → ctx.skipStep('wait-signatures'), ctx.updateData({signerCount:'skipped'})"
+    },
+    {
+      "id": "control.skipOnDuplicate#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Short-circuit: stamp prior ticket and skip ServiceNow steps",
+      "summary": "If priorTicket: ctx.updateData({ticketNumber: priorTicket}), ctx.skipStep for servicenow-auth + open-hr-form + fill-form + submit, return"
+    },
+    {
+      "id": "control.splice-records-rp#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Splice records and update failedPages/pageStatusSummary",
+      "summary": "Filter out existing records with sourcePage===pageNum (drop old), append new matched+patched records. Remove page from failedPages. Recompute pageStatusSummary (total, succeeded, failed)."
+    },
+    {
+      "id": "control.sqlite-dependency-batch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Create SQLite task dependency batch",
+      "summary": "Calls createOcrEidLookupDependencyBatch to record OCR → person-lookup dependencies in SQLite. On setup failure falls back to direct watchChildRuns.",
+      "note": "Preferred path when OCR_SQLITE_DEPENDENCIES != '0'."
+    },
+    {
+      "id": "control.standalone-terminal#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Standalone: emit terminal done snapshot",
+      "summary": "When completesAfterLookup=true (no parentRunId), emitSnapshot(records, 'person-lookup', 'done') and return {status:'complete'}. Handler seeds ctx.updateData({...reviewData, mode:'prepare'}) for the kernel's terminal row.",
+      "note": "Standalone branch only."
+    },
+    {
+      "id": "control.subscribe-to-approval#wait",
+      "kind": "wait",
+      "system": "control",
+      "label": "Delegated: wait on approval signal (subscribeToApproval)",
+      "summary": "ocrKernelHandler calls subscribeToApproval({ workflow:'ocr', sessionId }, { signal, trackerDir }). Resolves with ApprovedPayload when the operator approves via /api/ocr/approve-batch. Throws OcrDiscardedError on discard, CancelledError on ctx.signal abort.",
+      "note": "Delegated branch only."
+    },
+    {
+      "id": "control.subscribeToApproval#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Subscribe to OCR approval signal (cross-process wait)",
+      "summary": "subscribeToApproval({ workflow: 'ocr', sessionId }, { signal }) — blocks until operator approves or discards the OCR prep in the OCR review panel"
+    },
+    {
+      "id": "control.transactionCheckBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Transaction Check Result Branch",
+      "summary": "approved+within-window → reuse T#, stamp ctx.data.comments with dup-termination comment, skip ucpath-transaction. All other paths → sweep in-progress grid then create.",
+      "note": "Duplicate-termination comment: 'Duplicate termination. Re Kuali Form #<docId>.' + 'EE termination approved on UCPath.' (initials + date)"
+    },
+    {
+      "id": "control.update-tracker#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Update tracker row with PDF count and archive path",
+      "summary": "ctx.updateData({ pdfDownload: '<N> file(s)', pdfFolder: archivePath })"
+    },
+    {
+      "id": "control.updateData#control",
+      "kind": "control",
+      "system": "control",
+      "label": "ctx.updateData — stamp extracted employee name into run data",
+      "summary": "ctx.updateData({ name: employeeName }) populates the detail panel Name field; employeeName is also used in the downloading step for PDF filename and verification",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts"
+    },
+    {
+      "id": "control.wake-dependency-scheduler#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Wake dependency scheduler tick",
+      "summary": "Calls runDependencySchedulerTickForTrackerDir so the scheduler picks up the new person-lookup tasks immediately rather than waiting for its next poll interval."
+    },
+    {
+      "id": "control.watch-child-runs#wait",
+      "kind": "wait",
+      "system": "control",
+      "label": "Watch person-lookup child outcomes (watchChildRuns)",
+      "summary": "Blocks until all expected person-lookup child itemIds complete or timeout (default 1h). On each outcome (onProgress) patches the record via patchOcrRecordFromEidLookupOutcome and debounce-emits a progress snapshot."
+    },
+    {
+      "id": "control.watchChildRuns#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Watch oath-signature signer rows until all have terminal outcomes",
+      "summary": "watchChildRuns({ workflow: 'oath-signature', expectedItemIds: signerItemIds }) — polls tracker JSONL files for terminal outcomes across daemon boundary"
+    },
+    {
+      "id": "control.zeroResults#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: zero results — check access-restricted vs genuine not-found",
+      "summary": "If resultRows.count() === 0: inspect search.accessRestrictedAlert. count > 0 → return status:unable-to-access; else → return status:not-found",
+      "sourceRef": "src/systems/i9/signer.ts"
+    },
+    {
+      "id": "control.zeroSignerGuard#assert",
+      "kind": "assert",
+      "system": "control",
+      "label": "Assert at least one signer row after full-mode approval",
+      "summary": "If needsApprovalWait && signerItemIds.length===0 → ctx.updateData({status:'approval-empty', signerCount:'0'}), throw — full mode always requires verified signers before filing"
+    },
+    {
+      "id": "control.zip-archive#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Append person folder into run archive under cross-process file lock",
+      "summary": "resolveArchivePath: if parentRunId → 'Onboarding Docs <YYYY-MM-DD> <batch8>.zip' under onboardingDocsDir (shared by all pool workers); else '<folderName>.zip' beside finalFolder. withFileLock('<archivePath>.lock') + zipFolderInto(archivePath, finalFolder, { signal }).",
+      "note": "All pool workers with shared parentRunId append into the same zip — lock serializes concurrent appends. No batch-completion hook needed; archive is complete when the last worker finishes."
+    },
+    {
+      "id": "crm.eidFallback#control",
+      "kind": "control",
+      "system": "control",
+      "label": "EID path: fall back to name search if EID query returned no EID-matching record",
+      "summary": "searchCrmByEidOrName: if searchCrmByEid returns empty (no record whose ucpathEmployeeId === emplId), falls back to searchCrmByName(lastName, firstName); logs 'falling back to name search'",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "EID path only"
+    },
+    {
+      "id": "crm.nameFilter#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Filter search rows by required name tokens",
+      "summary": "Name path: filter rows where row.name.toLowerCase() contains every token from requiredTokens (lastName+firstName split, letters only, 2+ chars). EID path: keep all rows from EID query, then select records where ucpathEmployeeId === emplId after extraction.",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts"
+    },
+    {
+      "id": "i9-lookup.fanout-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Fan-out i9-lookup (i9 branch)",
+      "summary": "fanOutAndWatch with i9LookupWorkflow: { lastName, firstName }. watchWorkflow:'i9-lookup'. Per-invocation nonce in itemId (ocr-verify-relook-i9-{runId}-r{idx}-{nonce}).",
+      "note": "I9 relookup branch only — oath records with blank officerSigned only."
+    },
+    {
+      "id": "llm.re-ocr-page-rp#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Re-OCR single page via vision pool",
+      "summary": "runSinglePageThroughPool: buildVisionPool → runOcrPerPage on page-{N}.png from pdf-cache/{pdfFileId}/. Returns records or stillFailed=true with updated error/attemptedKeys. On stillFailed, patches failedPages and emits the row without person-lookup."
+    },
+    {
+      "id": "ocr.emit-review-fr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Re-emit awaiting-approval running+done snapshots",
+      "summary": "emitOcrReviewSnapshot twice: status=running step=awaiting-approval, then status=done step=awaiting-approval. Preserves parentRunId/parentSubject from prior row via readQueueTitle.",
+      "note": "Running→done pair ensures the dashboard Preview tab refreshes with patched records."
+    },
+    {
+      "id": "ocr.emit-row-rp#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit awaiting-approval running+done snapshots",
+      "summary": "emitOcrReviewSnapshot twice (running then done) with updated records, failedPages, pageStatusSummary. Inherits parentRunId/parentSubject/__name from prior row."
+    },
+    {
+      "id": "ocr.emit-running-fr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit running person-lookup snapshot",
+      "summary": "emitTrackerRow with status=running step=person-lookup and cleared records so dashboard shows lookup activity."
+    },
+    {
+      "id": "ocr.emit-running-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Emit intermediate running relookup row",
+      "summary": "emitRelookupRow with status=running step=verify-relookup. Shows queue/session activity while the lookup runs."
+    },
+    {
+      "id": "ocr.emit-terminal-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Re-emit running+done person-lookup snapshots",
+      "summary": "emitRelookupRow twice: status=running step=person-lookup, then status=done step=person-lookup. Re-opens the terminal done row so the ↻ spins until patched records arrive."
+    },
+    {
+      "id": "ocr.load-latest-row-fr#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Load latest OCR row from JSONL",
+      "summary": "findLatestEntryForPredicate by sessionId+runId (7-day lookback). Throws if not found or formType=verify (guard: force-research is oath/EC only)."
+    },
+    {
+      "id": "ocr.load-latest-row-rp#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Load latest OCR row (SQLite then JSONL)",
+      "summary": "readLatestRow: tries SQLite runs table first via openStateDb, falls back to findLatestEntryForPredicate JSONL (7-day lookback). Throws RetryPageError for discarded/approved rows or missing pdfFileId."
+    },
+    {
+      "id": "ocr.load-latest-row-vr#scrape",
+      "kind": "scrape",
+      "system": "control",
+      "label": "Load latest OCR row (verify only)",
+      "summary": "findLatestEntryForPredicate by sessionId+runId (7-day lookback). Throws if formType !== 'verify'. Derives rootTracePrefix from frozen __traceId for trace propagation to children."
+    },
+    {
+      "id": "ocr.match-new-records-rp#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Match new records against roster",
+      "summary": "Loads roster from rosterPath (row.data.rosterPath), calls spec.matchRecord on each new record. Roster is empty if no path was stored."
+    },
+    {
+      "id": "old-kronos.trackerWrite#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Write tracker row with final status (Done / Failed / No Data Returned / Mismatch)",
+      "sourceRef": "src/workflows/old-kronos-reports/workflow.ts",
+      "note": "rt.writeTracker (wrapped with trackerMutex) appends a row to the Excel tracker. buildTrackerRow stamps employeeId, employeeName, status, note, and optional verified='x' flag."
+    },
+    {
+      "id": "person-lookup.fanout-fr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Fan-out person-lookup by name via fanOutAndWatch",
+      "summary": "fanOutAndWatch dispatches one personLookupWorkflow child per target record using extracted name (spec.carryForwardKey). itemIds: ocr-force-{runId}-r{idx}. 30-min timeout. cascade-cancel on discard-abort."
+    },
+    {
+      "id": "person-lookup.fanout-rp#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Fan-out person-lookup for new records needing lookup",
+      "summary": "fanOutAndWatch per new record where spec.needsLookup returns 'name', 'verify', or 'verify-only'. itemIds: ocr-retry-{runId}-p{pageNum}-r{i}. 60-min default timeout."
+    },
+    {
+      "id": "person-lookup.fanout-vr#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Fan-out person-lookup (person branch)",
+      "summary": "fanOutAndWatch with personLookupWorkflow: { name, includeCrmDates:true, keepNonHdh:true, taskGroupId:sessionId }. Per-invocation nonce in itemId (ocr-verify-relook-person-{runId}-r{idx}-{nonce}) prevents matching stale completed enrichment children.",
+      "note": "Person relookup branch only."
+    },
+    {
+      "id": "sharepoint.authBranch#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Branch: Shibboleth vs ADFS vs already-authed",
+      "summary": "if url includes a5.ucsd.edu → Shibboleth path (ops 8-9); else if url includes ad-wfs-aws.ucsd.edu or /adfs/ls → ADFS path (ops 10-12); else skip SSO (cached trust — jump to Duo gate)"
+    },
+    {
+      "id": "sharepoint.autoClickFallback#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Auto-click fallback — prompt for manual download if click chain failed",
+      "summary": "If clickExcelDownloadMenu returns false (any step not found): log.waiting('Could not auto-click — please click File → Create a Copy → Download a Copy manually (waiting up to Xs)'). The download event race still runs; operator can trigger manually within the timeout."
+    },
+    {
+      "id": "sharepoint.shibbolethSso#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Shibboleth SSO fill + submit (Shibboleth branch only)",
+      "summary": "fillSsoCredentials(page) + clickSsoSubmit(page) — shared infra at src/infra/auth/sso-fields.ts. Shibboleth IdP (a5.ucsd.edu) is not the normal SharePoint route; ADFS (ad-wfs-aws.ucsd.edu) is. Shibboleth path kept as fallback."
+    },
+    {
+      "id": "ucpath.ucpath-auth#control",
+      "kind": "control",
+      "system": "control",
+      "label": "Await UCPath login",
+      "summary": "ctx.markStep('ucpath-auth'); ctx.page('ucpath') blocks until kernel loginToUCPath resolves"
+    }
+  ]
+}

@@ -1,0 +1,286 @@
+{
+  "workflow": "i9-lookup",
+  "systems": [
+    "i9"
+  ],
+  "steps": [
+    {
+      "step": "auth:i9",
+      "label": "Authenticate to I9 Complete",
+      "system": "i9",
+      "sourceRef": "src/systems/i9/login.ts",
+      "note": "Kernel-auto-prepended step from `systems: [{ id: 'i9', login: loginToI9 }]`. Two-step email+password login; no Duo MFA. Fails loud via classifyI9LoginResult on bad credentials. Training-notification dismiss is graceful (no-op if absent).",
+      "operations": [
+        {
+          "id": "i9.i9Complete#navigate",
+          "kind": "navigate",
+          "system": "i9",
+          "label": "Navigate to I9 Complete login page",
+          "url": "{I9_URL}",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.usernameInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill email / username",
+          "selectorFqn": "login.usernameInput",
+          "inputVar": "{email}",
+          "note": "Derived from I9_USER_ID; appends @ucsd.edu if no @ present",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.nextButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Next (email step)",
+          "selectorFqn": "login.nextButton",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.passwordInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill password",
+          "selectorFqn": "login.passwordInput",
+          "inputVar": "{I9_PASSWORD}",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.loginButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Log In",
+          "selectorFqn": "login.loginButton",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.loginRedirect#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Race: wait for wwwe.i9complete.com redirect vs login error visible",
+          "summary": "Promise.race([waitForURL(wwwe.i9complete.com, 15s), login.loginError.waitFor(visible, 15s)]) — whichever fires first",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.loginError#assert",
+          "kind": "assert",
+          "system": "i9",
+          "label": "Assert login succeeded via classifyI9LoginResult",
+          "selectorFqn": "login.loginError",
+          "summary": "Throws with clear .env credential hint if loginError is visible, URL is /Account/Login, or redirect never arrived",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.dismissNotificationButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Dismiss training notification (optional)",
+          "selectorFqn": "login.dismissNotificationButton",
+          "note": "Graceful — entire notification branch is in a try/catch; no-op if popup absent",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.login.confirmYesButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Click Yes to confirm training notification dismiss",
+          "selectorFqn": "login.confirmYesButton",
+          "note": "Only executed when training notification was present",
+          "sourceRef": "src/systems/i9/login.ts"
+        },
+        {
+          "id": "i9.dashboardUrl#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait for dashboard URL after notification dismiss",
+          "summary": "waitForURL: pathname === '/' or search includes 'mobile=false'",
+          "sourceRef": "src/systems/i9/login.ts"
+        }
+      ]
+    },
+    {
+      "step": "lookup",
+      "label": "Search I9 and Look Up Section 2 Signer",
+      "system": "i9",
+      "sourceRef": "src/workflows/i9-lookup/workflow.ts",
+      "note": "Delegates to lookupSection2Signer (src/systems/i9/signer.ts), which calls searchI9Employee (src/systems/i9/search.ts). Branches on result count, access-restricted alert, Next Action eligibility, and historical-record URL redirect. Outputs signerName, i9Status, and optionally profileId via ctx.updateData.",
+      "operations": [
+        {
+          "id": "i9.dashboard.searchOptionsButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Open Search Options dialog",
+          "selectorFqn": "dashboard.searchOptionsButton",
+          "summary": "Via clickWithKendoRecovery — snapshots visible Kendo windows, closes stale modals, retries once",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.dialog#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait for search dialog to become visible",
+          "selectorFqn": "search.dialog",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.clearFiltersLink#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Clear previous search filters",
+          "selectorFqn": "search.clearFiltersLink",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.lastNameInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill last name search field",
+          "selectorFqn": "search.lastNameInput",
+          "inputVar": "{lastName}",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.firstNameInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill first name search field",
+          "selectorFqn": "search.firstNameInput",
+          "inputVar": "{firstName}",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.ssnInput#fill",
+          "kind": "fill",
+          "system": "i9",
+          "label": "Fill SSN field for disambiguation (optional)",
+          "selectorFqn": "search.ssnInput",
+          "inputVar": "{ssn}",
+          "note": "Only filled when ssn is present in input. Format: XXX-XX-XXXX with dashes (differs from create which uses no dashes).",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.submitButton#click",
+          "kind": "click",
+          "system": "i9",
+          "label": "Submit search",
+          "selectorFqn": "search.submitButton",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.searchResults#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait 1s for results grid to populate",
+          "summary": "page.waitForTimeout(1000) — results grid populates asynchronously",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "i9.search.resultRows#scrape",
+          "kind": "scrape",
+          "system": "i9",
+          "label": "Parse search results grid rows",
+          "selectorFqn": "search.resultRows",
+          "outputVar": "{searchResults}",
+          "summary": "Grid columns: Last Name, First Name, Employer, Worksite, Profile ID, I-9 ID, Next Action, Start Date, Created On. Skips rows with <5 cells.",
+          "sourceRef": "src/systems/i9/search.ts"
+        },
+        {
+          "id": "control.zeroResults#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: zero results — check access-restricted vs genuine not-found",
+          "summary": "If resultRows.count() === 0: inspect search.accessRestrictedAlert. count > 0 → return status:unable-to-access; else → return status:not-found",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "i9.search.accessRestrictedAlert#assert",
+          "kind": "assert",
+          "system": "i9",
+          "label": "Detect access-restricted alert on zero results",
+          "selectorFqn": "search.accessRestrictedAlert",
+          "summary": "count() > 0 means record exists but operator's account lacks scope (unable-to-access); 0 means genuine not-found",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "control.pickEligibleRow#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Pick first eligible signer lookup row from results",
+          "summary": "pickI9SignerSearchResult: finds first result where nextAction is non-empty and does NOT match /^complete\\s+section\\s+[12]$/i. No eligible row → return status:unsigned.",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "i9.summaryPage#navigate",
+          "kind": "navigate",
+          "system": "i9",
+          "label": "Navigate directly to I-9 summary page",
+          "url": "/form-I9/summary/{profileId}/{i9Id}",
+          "summary": "Deterministic URL built from search hit IDs; waitUntil:domcontentloaded then networkidle(5s). Paper imports redirect to /form-I9-historical/…",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "i9.networkIdle#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait for network idle after summary navigation",
+          "summary": "page.waitForLoadState('networkidle', { timeout: 5000 }) — graceful catch no-op",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "control.historicalRedirect#assert",
+          "kind": "assert",
+          "system": "control",
+          "label": "Detect historical (paper) I-9 redirect",
+          "summary": "page.url().includes('/form-I9-historical/') → return status:historical (paper import; no electronic Section 2 audit row exists)",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "i9.summary.heading#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait for summary view heading",
+          "selectorFqn": "summary.heading",
+          "summary": "waitForSummaryView: summary.heading OR getByText('Electronic I-9 Audit Trail') OR getByText('Audit History') — .first().waitFor(visible, 10s)",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "i9.summary.auditTrailHeaderRow#wait",
+          "kind": "wait",
+          "system": "i9",
+          "label": "Wait for audit-trail table header row",
+          "selectorFqn": "summary.auditTrailHeaderRow",
+          "summary": ".first().waitFor(visible, 10s) — heading renders before audit table; must wait on header before counting signedSection2Row to prevent race (early count 0 mis-classifies signed as unsigned)",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "i9.summary.signedSection2Row#scrape",
+          "kind": "scrape",
+          "system": "i9",
+          "label": "Scrape 'Signed Section 2' audit row to extract signer name",
+          "selectorFqn": "summary.signedSection2Row",
+          "outputVar": "{signerName}",
+          "summary": "row.count() === 0 → status:unsigned. row.getByRole('cell').allTextContents() → last cell = Created By (signer). Audit columns: [Section, Date, Event, Created By]. Empty last cell → status:error.",
+          "sourceRef": "src/systems/i9/signer.ts"
+        },
+        {
+          "id": "control.updateData#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Emit lookup result via ctx.updateData and take screenshot",
+          "summary": "ctx.updateData({ signerName: result.signerName ?? '', i9Status: result.status, profileId? }); ctx.screenshot({ kind: 'form', label: 'i9-lookup-summary', systems: ['i9'] })",
+          "sourceRef": "src/workflows/i9-lookup/workflow.ts"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Delegated-only workflow — no dashboard start surface. Invoked exclusively via ctx.delegateTo / ctx.delegateToAll from parent workflows (e.g. oath-signature, OCR fan-outs).",
+    "Runtime policy: alwaysBatchDelegatedMembers=true keeps even a lone delegated lookup as a one-member batch surface; memberRow.titleSource='person'.",
+    "Auth is eager (kernel-launched at session start), not deferred — I9 Complete login is fast enough and has no Duo MFA.",
+    "I9 search is name-based (lastName + firstName ± ssn). Do NOT change to EID — I9 Complete's internal employeeId is distinct from UCPath's emplId.",
+    "Summary navigation is deterministic (goto /form-I9/summary/{profileId}/{i9Id}) — the old click-through (last-name link → record-expand → Summary-tab) was fragile; replaced 2026-06-06.",
+    "Output i9Status values: 'signed' | 'unsigned' | 'historical' | 'not-found' | 'unable-to-access' | 'error'. 'unable-to-access' means record exists but operator's account lacks scope.",
+    "No fan-out, no delegation gate, no preview. Single person in → single row out."
+  ]
+}

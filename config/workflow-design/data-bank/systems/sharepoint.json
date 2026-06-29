@@ -1,0 +1,378 @@
+{
+  "system": "sharepoint",
+  "label": "SharePoint",
+  "operations": [
+    {
+      "id": "sharepoint.adfs.passwordInput#fill",
+      "kind": "fill",
+      "system": "sharepoint",
+      "label": "Fill ADFS password (ADFS branch only)",
+      "summary": "\"Password\" textbox on the ADFS sign-in page.",
+      "selectorFqn": "adfs.passwordInput",
+      "role": "textbox",
+      "accessibleName": "password",
+      "verified": "2026-04-22",
+      "tags": [
+        "adfs",
+        "ucsd",
+        "sharepoint",
+        "password",
+        "textbox",
+        "login"
+      ],
+      "note": "Primary is input[name=\"Password\"]; fallbacks are #passwordInput and getByRole(textbox, {name: /^password$/i}).",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:92"
+    },
+    {
+      "id": "sharepoint.adfs.passwordInput#scrape",
+      "kind": "scrape",
+      "system": "sharepoint",
+      "label": "ADFS — Password input (read)",
+      "summary": "\"Password\" textbox on the ADFS sign-in page.",
+      "selectorFqn": "adfs.passwordInput",
+      "role": "textbox",
+      "accessibleName": "password",
+      "verified": "2026-04-22",
+      "tags": [
+        "adfs",
+        "ucsd",
+        "sharepoint",
+        "password",
+        "textbox",
+        "login"
+      ],
+      "note": "Primary is input[name=\"Password\"]; fallbacks are #passwordInput and getByRole(textbox, {name: /^password$/i}).",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:92"
+    },
+    {
+      "id": "sharepoint.adfs.submitButton#click",
+      "kind": "click",
+      "system": "sharepoint",
+      "label": "Click ADFS Sign In button (ADFS branch only)",
+      "summary": "\"Sign in\" submit button on the ADFS sign-in page.",
+      "selectorFqn": "adfs.submitButton",
+      "role": "button",
+      "accessibleName": "sign in",
+      "verified": "2026-04-22",
+      "tags": [
+        "adfs",
+        "ucsd",
+        "sharepoint",
+        "submit",
+        "sign-in",
+        "button",
+        "login"
+      ],
+      "note": "Primary is #submitButton; fallback is getByRole(button, {name: /^sign in$/i}).",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:103"
+    },
+    {
+      "id": "sharepoint.adfs.usernameInput#fill",
+      "kind": "fill",
+      "system": "sharepoint",
+      "label": "Fill ADFS username (ADFS branch only)",
+      "summary": "\"User Account\" textbox on the UCSD ADFS sign-in page.",
+      "selectorFqn": "adfs.usernameInput",
+      "role": "textbox",
+      "accessibleName": "User Account",
+      "verified": "2026-04-22",
+      "tags": [
+        "adfs",
+        "ucsd",
+        "sharepoint",
+        "username",
+        "textbox",
+        "login"
+      ],
+      "note": "Only refilled if the field is currently empty — Microsoft usually pre-populates via ?username= URL param from AAD redirect",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:81"
+    },
+    {
+      "id": "sharepoint.adfs.usernameInput#scrape",
+      "kind": "scrape",
+      "system": "sharepoint",
+      "label": "ADFS — User Account input (read)",
+      "summary": "\"User Account\" textbox on the UCSD ADFS sign-in page.",
+      "selectorFqn": "adfs.usernameInput",
+      "role": "textbox",
+      "accessibleName": "User Account",
+      "verified": "2026-04-22",
+      "tags": [
+        "adfs",
+        "ucsd",
+        "sharepoint",
+        "username",
+        "textbox",
+        "login"
+      ],
+      "note": "Primary is input[name=\"UserName\"]; fallbacks are #userNameInput and getByRole(textbox, {name: /User Account/i}).",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:81"
+    },
+    {
+      "id": "sharepoint.domcontentloadedPostKmsi#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait for DOM content loaded after KMSI dismiss",
+      "summary": "page.waitForLoadState('domcontentloaded', timeout: 10s) — in dismissStaySignedIn, conditional on KMSI button having been present"
+    },
+    {
+      "id": "sharepoint.domcontentloadedPostMs#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait for DOM content loaded after Microsoft Next",
+      "summary": "page.waitForLoadState('domcontentloaded', timeout: 10s) — in handleMicrosoftEmailStep, conditional on email step having run"
+    },
+    {
+      "id": "sharepoint.downloadCapture#assert",
+      "kind": "assert",
+      "system": "sharepoint",
+      "label": "Assert download was captured (not closed, not timed out)",
+      "summary": "Throws 'Browser window was closed before the download completed' if race result==='closed'; throws 'No download captured within Xs' if result===null"
+    },
+    {
+      "id": "sharepoint.downloadEvent#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Race: capture download event vs browser close vs timeout",
+      "summary": "Promise.race([page.once('download'), page.once('close') / context.once('close'), setTimeout(downloadTimeoutSeconds * 1000)]). Default timeout: 300s (5 min)."
+    },
+    {
+      "id": "sharepoint.duoApproval#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Duo MFA approval gate",
+      "summary": "requestDuoApproval (kernel path — requires instance, surfaces Duo chip in Sessions rail) or pollDuoApproval (CLI/standalone path); systemLabel='SharePoint'; successUrlMatch includes sharepoint.com|office.com|kmsi|login.srf; timeout: 180s. Throws if approval times out.",
+      "note": "Conditional — skipped when page.url() already matches a success URL (warm-cookie fast-path)"
+    },
+    {
+      "id": "sharepoint.excelOnline.fileButton#click",
+      "kind": "click",
+      "system": "sharepoint",
+      "label": "Click File button in Excel ribbon (WacFrame_Excel_0 iframe)",
+      "summary": "File button on the Excel Online ribbon (opens the backstage menu).",
+      "selectorFqn": "excelOnline.fileButton",
+      "role": "button",
+      "accessibleName": "File",
+      "verified": "2026-04-22",
+      "tags": [
+        "excel",
+        "ribbon",
+        "file",
+        "button"
+      ],
+      "note": "All three menu ops (fileButton, createACopy, downloadACopy) are scoped to the WAC iframe via getExcelFrame(page). If fileButton count === 0, clickExcelDownloadMenu returns false and falls back to manual-download waiting prompt.",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:145"
+    },
+    {
+      "id": "sharepoint.fileMenu.createACopy#click",
+      "kind": "click",
+      "system": "sharepoint",
+      "label": "Hover 'Create a Copy' to reveal the download flyout",
+      "summary": "\"Create a Copy\" menuitem in the File backstage.",
+      "selectorFqn": "fileMenu.createACopy",
+      "role": "menuitem",
+      "accessibleName": "Create a Copy",
+      "verified": "2026-04-22",
+      "tags": [
+        "excel",
+        "file-menu",
+        "create-a-copy",
+        "menuitem",
+        "backstage"
+      ],
+      "note": "MUST use .hover(), not .click() — clicking fires the default 'Create a copy online' action which navigates away from the file. Returns false if not found.",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:159"
+    },
+    {
+      "id": "sharepoint.fileMenu.downloadACopy#click",
+      "kind": "click",
+      "system": "sharepoint",
+      "label": "Click 'Download a Copy' in the Create a Copy flyout",
+      "summary": "\"Download a Copy\" menuitem in the Create a Copy flyout — fires the browser download event for xlsx.",
+      "selectorFqn": "fileMenu.downloadACopy",
+      "role": "menuitem",
+      "accessibleName": "Download a Copy",
+      "verified": "2026-04-22",
+      "tags": [
+        "excel",
+        "file-menu",
+        "download",
+        "xlsx",
+        "workbook",
+        "menuitem"
+      ],
+      "note": "Returns false if not found. Click triggers the browser's native download event.",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:168"
+    },
+    {
+      "id": "sharepoint.getExcelFrame#scrape",
+      "kind": "scrape",
+      "system": "sharepoint",
+      "label": "Excel Online — WAC iframe frame locator",
+      "summary": "Returns the Excel Online FrameLocator scoping iframe[name=\"WacFrame_Excel_0\"] on doc2.aspx.",
+      "selectorFqn": "getExcelFrame",
+      "verified": "2026-04-22",
+      "tags": [
+        "excel",
+        "iframe",
+        "frame",
+        "wac"
+      ],
+      "note": "Frame-scoping utility — not a clickable/fillable target itself. Role inferred as read-only container. Every post-auth Excel interaction (ribbon, file menu, workbook body) MUST go through this FrameLocator or selectors resolve to nothing.",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:134"
+    },
+    {
+      "id": "sharepoint.kmsi.noButton#click",
+      "kind": "click",
+      "system": "sharepoint",
+      "label": "Dismiss 'Stay signed in?' prompt (No)",
+      "summary": "\"No\" button on the \"Stay signed in?\" / KMSI prompt (login.srf).",
+      "selectorFqn": "kmsi.noButton",
+      "role": "button",
+      "accessibleName": "no",
+      "verified": "2026-04-22",
+      "tags": [
+        "microsoft",
+        "kmsi",
+        "stay-signed-in",
+        "no",
+        "button"
+      ],
+      "note": "Conditional — skipped if kmsi.noButton count === 0; failure swallowed (prompt may auto-dismiss)",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:118"
+    },
+    {
+      "id": "sharepoint.landingUrl#navigate",
+      "kind": "navigate",
+      "system": "sharepoint",
+      "label": "Navigate to SharePoint file URL",
+      "url": "{url}",
+      "summary": "page.goto(landingUrl, { waitUntil: 'domcontentloaded', timeout: 30s }). URL read from pendingLandingUrl module-level slot set by the handler serial queue before each run."
+    },
+    {
+      "id": "sharepoint.microsoft.emailInput#fill",
+      "kind": "fill",
+      "system": "sharepoint",
+      "label": "Fill Microsoft AAD email address",
+      "summary": "Email textbox on the Microsoft sign-in page.",
+      "selectorFqn": "microsoft.emailInput",
+      "role": "textbox",
+      "verified": "2026-04-22",
+      "tags": [
+        "microsoft",
+        "login",
+        "email",
+        "textbox"
+      ],
+      "note": "Conditional — skipped if microsoft.emailInput count === 0 (cached AAD session)",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:40"
+    },
+    {
+      "id": "sharepoint.microsoft.emailInput#scrape",
+      "kind": "scrape",
+      "system": "sharepoint",
+      "label": "Microsoft sign-in — email input (read)",
+      "summary": "Email textbox on the Microsoft sign-in page.",
+      "selectorFqn": "microsoft.emailInput",
+      "role": "textbox",
+      "verified": "2026-04-22",
+      "tags": [
+        "microsoft",
+        "login",
+        "email",
+        "textbox"
+      ],
+      "note": "Primary selector is CSS-based (input[type=\"email\"] / input[name=\"loginfmt\"]) because accessible name varies by tenant; .or() fallback chain used.",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:40"
+    },
+    {
+      "id": "sharepoint.microsoft.nextButton#click",
+      "kind": "click",
+      "system": "sharepoint",
+      "label": "Click Microsoft AAD Next button",
+      "summary": "\"Next\" button on the Microsoft email step.",
+      "selectorFqn": "microsoft.nextButton",
+      "role": "button",
+      "accessibleName": "next",
+      "verified": "2026-04-22",
+      "tags": [
+        "microsoft",
+        "login",
+        "next",
+        "button"
+      ],
+      "note": "Only fires when emailInput was present; triggers AAD redirect chain to ADFS or Shibboleth",
+      "sourceRef": "src/systems/sharepoint/selectors.ts:51"
+    },
+    {
+      "id": "sharepoint.networkIdleKmsi#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait for network idle before KMSI prompt probe",
+      "summary": "page.waitForLoadState('networkidle', timeout: 15s)"
+    },
+    {
+      "id": "sharepoint.networkIdleViewer#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait for Excel Online viewer to settle (network idle)",
+      "summary": "page.waitForLoadState('networkidle', timeout: 30s)"
+    },
+    {
+      "id": "sharepoint.postAuthUrl#assert",
+      "kind": "assert",
+      "system": "sharepoint",
+      "label": "Assert page is on SharePoint or Office URL",
+      "summary": "Reads page.url(); throws 'Expected SharePoint/Office URL after login, got: ...' if it does not include sharepoint.com or office.com"
+    },
+    {
+      "id": "sharepoint.saveAs#scrape",
+      "kind": "scrape",
+      "system": "sharepoint",
+      "label": "Save downloaded file to outDir, derive filename, update tracker row",
+      "summary": "Filename: if input.filenameBase set → '<filenameBase>-<YYYY-MM-DDTHH-MM-SS><ext>'; else '<YYYY-MM-DDTHH-MM-SS>-<sharepoint-suggested>'. download.saveAs(outPath). ctx.updateData({ filename, path: saved }) populates 'File' and 'Saved to' detailFields. Sets module-level lastDownloadResult for HTTP handler via _takeLastDownloadResult()."
+    },
+    {
+      "id": "sharepoint.ssoRedirect#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait for SSO redirect chain to settle",
+      "summary": "page.waitForURL matching a5.ucsd.edu | ad-wfs-aws.ucsd.edu | /adfs/ls | duosecurity.com | sharepoint.com | office.com | login.microsoftonline.com/kmsi | .../login.srf, timeout: 30s"
+    },
+    {
+      "id": "sharepoint.successUrl#assert",
+      "kind": "assert",
+      "system": "sharepoint",
+      "label": "Assert final URL is a SharePoint / Office success URL",
+      "summary": "Throws 'SharePoint authentication did not reach a success URL — final URL: ...' if page.url() does not include sharepoint.com | office.com | login.microsoftonline.com/kmsi | .../login.srf"
+    },
+    {
+      "id": "sharepoint.timeout1s#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait 1s for File menu to open",
+      "summary": "page.waitForTimeout(1000)"
+    },
+    {
+      "id": "sharepoint.timeout2s#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait 2s for WAC iframe JS to hydrate after networkidle",
+      "summary": "page.waitForTimeout(2000)"
+    },
+    {
+      "id": "sharepoint.timeout3s#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait 3s for AAD redirect chain to start",
+      "summary": "page.waitForTimeout(3000)"
+    },
+    {
+      "id": "sharepoint.timeout800ms#wait",
+      "kind": "wait",
+      "system": "sharepoint",
+      "label": "Wait 800ms for download flyout to appear after hover",
+      "summary": "page.waitForTimeout(800)"
+    }
+  ]
+}

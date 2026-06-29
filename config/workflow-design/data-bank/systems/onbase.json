@@ -1,0 +1,675 @@
+{
+  "system": "onbase",
+  "label": "OnBase",
+  "operations": [
+    {
+      "id": "onbase.importForm.clearAllButton#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Clear All Button",
+      "summary": "\"Clear All\" button — reset the whole import form including the attached file.",
+      "selectorFqn": "onbaseSelectors.importForm.clearAllButton",
+      "role": "button",
+      "accessibleName": "Clear All",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "clear",
+        "all",
+        "button",
+        "reset"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:161"
+    },
+    {
+      "id": "onbase.importForm.clearKeywordsButton#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Clear Keywords Button",
+      "summary": "\"Clear Keywords\" button — reset keyword fields without losing the attached file.",
+      "selectorFqn": "onbaseSelectors.importForm.clearKeywordsButton",
+      "role": "button",
+      "accessibleName": "Clear Keywords",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "clear",
+        "keywords",
+        "button"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:154"
+    },
+    {
+      "id": "onbase.importForm.documentNameInput#fill",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Set Document Name constant (keyset never fills this field)",
+      "summary": "The Document Name keyword textbox — the one required field the Employee Lookup keyset does NOT autofill.",
+      "selectorFqn": "onbaseSelectors.importForm.documentNameInput",
+      "role": "textbox",
+      "accessibleName": "Document Name",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "document-name",
+        "keyword",
+        "constant"
+      ],
+      "note": "Must be set manually with the per-doc-type constant (e.g. 'EMERGENCY CONTACT INFORMATION' for X_HR_Emergency Contact). Required ('red') field — Import button stays disabled until populated.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.documentNameInput#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Document Name Input — Scrape",
+      "summary": "Read the current value of the Document Name keyword textbox.",
+      "selectorFqn": "onbaseSelectors.importForm.documentNameInput",
+      "role": "textbox",
+      "accessibleName": "Document Name",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "document-name",
+        "keyword",
+        "constant"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:138"
+    },
+    {
+      "id": "onbase.importForm.documentTypeGroupsSelect#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Document Type Groups — Scrape",
+      "summary": "Read the currently selected document type group from the combobox.",
+      "selectorFqn": "onbaseSelectors.importForm.documentTypeGroupsSelect",
+      "role": "combobox",
+      "accessibleName": "Document Type Groups",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "document-type-groups",
+        "select",
+        "dropdown"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:73"
+    },
+    {
+      "id": "onbase.importForm.documentTypeGroupsSelect#select",
+      "kind": "select",
+      "system": "onbase",
+      "label": "Document Type Groups — Select",
+      "summary": "\"Document Type Groups\" combobox — pick <All>, Payroll Records, or Personnel Records.",
+      "selectorFqn": "onbaseSelectors.importForm.documentTypeGroupsSelect",
+      "role": "combobox",
+      "accessibleName": "Document Type Groups",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "document-type-groups",
+        "select",
+        "dropdown"
+      ],
+      "note": "Drive with .selectOption({ label }). Filters the Document Types dropdown.",
+      "sourceRef": "src/systems/onbase/selectors.ts:73"
+    },
+    {
+      "id": "onbase.importForm.documentTypesSelect#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Document Types — Scrape",
+      "summary": "Read the currently selected X_HR_* document type from the combobox.",
+      "selectorFqn": "onbaseSelectors.importForm.documentTypesSelect",
+      "role": "combobox",
+      "accessibleName": "Document Types",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "document-types",
+        "select",
+        "dropdown",
+        "emergency-contact"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:81"
+    },
+    {
+      "id": "onbase.importForm.documentTypesSelect#select",
+      "kind": "select",
+      "system": "onbase",
+      "label": "Select Document Type",
+      "summary": "\"Document Types\" combobox — pick the X_HR_* type (e.g. X_HR_Emergency Contact).",
+      "selectorFqn": "onbaseSelectors.importForm.documentTypesSelect",
+      "role": "combobox",
+      "accessibleName": "Document Types",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "document-types",
+        "select",
+        "dropdown",
+        "emergency-contact"
+      ],
+      "note": "Must be set before typing UCPath ID + Tab so the Employee Lookup keyset fires with the correct document type context.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.fileInput#upload",
+      "kind": "upload",
+      "system": "onbase",
+      "label": "Attach person's single-page PDF via file picker (in-memory bytes)",
+      "summary": "Hidden <input type=file> behind the \"Choose File\" button. Drive with .setInputFiles(path).",
+      "selectorFqn": "onbaseSelectors.importForm.fileInput",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "file",
+        "upload",
+        "choose-file"
+      ],
+      "note": "File name is {ucpathId}-p{sourcePage}.pdf; uses setInputFiles with in-memory Buffer — no temp file",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.fileTypeSelect#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "File Type — Scrape",
+      "summary": "Read the currently selected file type from the combobox.",
+      "selectorFqn": "onbaseSelectors.importForm.fileTypeSelect",
+      "role": "combobox",
+      "accessibleName": "File Type",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "file-type",
+        "select",
+        "dropdown",
+        "pdf"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:89"
+    },
+    {
+      "id": "onbase.importForm.fileTypeSelect#select",
+      "kind": "select",
+      "system": "onbase",
+      "label": "Select File Type: PDF (.pdf)",
+      "summary": "\"File Type\" combobox — pick PDF (.pdf); defaults to Image File Format.",
+      "selectorFqn": "onbaseSelectors.importForm.fileTypeSelect",
+      "role": "combobox",
+      "accessibleName": "File Type",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "file-type",
+        "select",
+        "dropdown",
+        "pdf"
+      ],
+      "note": "Always select 'PDF (.pdf)' explicitly — default is Image File Format which is incorrect for HR docs.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.frame#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Import Document Iframe",
+      "summary": "The Import Document iframe (FileUploadEnhanced.aspx). Resolve once, then pass the FrameLocator to the field selectors below.",
+      "selectorFqn": "onbaseSelectors.importForm.frame",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "iframe",
+        "frame",
+        "navpanel"
+      ],
+      "note": "Returns a FrameLocator, not a Locator; used to scope all importForm field selectors. Not a user-visible element — emit as scrape to represent 'enter/read the iframe context'.",
+      "sourceRef": "src/systems/onbase/selectors.ts:57"
+    },
+    {
+      "id": "onbase.importForm.importButton#assert",
+      "kind": "assert",
+      "system": "onbase",
+      "label": "Assert Import button is enabled before clicking",
+      "selectorFqn": "onbaseSelectors.importForm.importButton",
+      "summary": "isImportEnabled() calls .isEnabled() on the Import button; throws if false — refuses to import when the form is not ready",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.importButton#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Click Import button to submit the document",
+      "summary": "The \"Import\" submit button — disabled until a file and all required keywords are present.",
+      "selectorFqn": "onbaseSelectors.importForm.importButton",
+      "role": "button",
+      "accessibleName": "Import",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "submit",
+        "button"
+      ],
+      "note": "Gate on isImportEnabled() before clicking — commits a real document to OnBase. Never click in a dry run.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keysetApplyButton#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Apply Keyset Button",
+      "summary": "Apply-keyset (key icon) button beside the Keyset Lookup select.",
+      "selectorFqn": "onbaseSelectors.importForm.keysetApplyButton",
+      "role": "button",
+      "accessibleName": "Keyset Lookup",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyset",
+        "apply",
+        "button"
+      ],
+      "note": "Accessible name matches the adjacent select ('Keyset Lookup') — both share the label. Click after selecting the keyset to arm it.",
+      "sourceRef": "src/systems/onbase/selectors.ts:105"
+    },
+    {
+      "id": "onbase.importForm.keysetLookupSelect#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read current Keyset Lookup value (idempotent check)",
+      "summary": "Read the currently selected keyset from the combobox.",
+      "selectorFqn": "onbaseSelectors.importForm.keysetLookupSelect",
+      "role": "combobox",
+      "accessibleName": "Keyset Lookup",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyset",
+        "employee-lookup",
+        "select",
+        "dropdown"
+      ],
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "ensureKeyset reads inputValue; skips the selectOption call if already set to Employee Lookup"
+    },
+    {
+      "id": "onbase.importForm.keysetLookupSelect#select",
+      "kind": "select",
+      "system": "onbase",
+      "label": "Select Keyset Lookup: Employee Lookup (if not already set)",
+      "summary": "\"Keyset Lookup\" combobox — pick 'Employee Lookup' to enable UCPath ID autofill.",
+      "selectorFqn": "onbaseSelectors.importForm.keysetLookupSelect",
+      "role": "combobox",
+      "accessibleName": "Keyset Lookup",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyset",
+        "employee-lookup",
+        "select",
+        "dropdown"
+      ],
+      "note": "Must be set before clicking keysetApplyButton; 'Employee Lookup' autofills all keywords except Document Name when UCPath ID + Tab is fired.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#fill.departmentCode",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Department Code (dataset combobox)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#fill.departmentName",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Department Name (dataset combobox)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#fill.viceChancellor",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Vice Chancellor (dataset combobox)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#fill.viceChancellorCode",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Vice Chancellor Code (dataset combobox)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Keyword Combobox (Dataset-backed) — Scrape",
+      "summary": "Read a dataset-backed keyword value by OnBase label — e.g. verify keyset populated Department Name.",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "role": "combobox",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyword",
+        "combobox",
+        "dataset",
+        "department",
+        "vice-chancellor"
+      ],
+      "note": "Parameterized: second arg `label` matches the OnBase keyword label exactly.",
+      "sourceRef": "src/systems/onbase/selectors.ts:122"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#scrape.departmentCode",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read Department Code combobox value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#scrape.departmentName",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read Department Name combobox value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#scrape.viceChancellor",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read Vice Chancellor combobox value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#scrape.viceChancellorCode",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read Vice Chancellor Code combobox value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordCombobox#select",
+      "kind": "select",
+      "system": "onbase",
+      "label": "Keyword Combobox (Dataset-backed) — Select",
+      "summary": "Generic dataset-backed keyword combobox by OnBase label (Department Name, Department Code, Vice Chancellor, Vice Chancellor Code).",
+      "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+      "role": "combobox",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyword",
+        "combobox",
+        "dataset",
+        "department",
+        "vice-chancellor"
+      ],
+      "note": "Parameterized: second arg `label` matches the OnBase keyword label exactly. These fields are comboboxes (dataset-backed), not plain textboxes — use selectOption or appropriate Playwright combobox fill, not .fill().",
+      "sourceRef": "src/systems/onbase/selectors.ts:122"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#fill",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Keyword Textbox (Generic) — Fill",
+      "summary": "Generic keyword textbox by OnBase label (e.g. 'Last Name', 'First Name', 'Middle Name', 'Suffix', 'Document Name').",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "role": "textbox",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyword",
+        "textbox",
+        "generic"
+      ],
+      "note": "Parameterized: second arg `label` matches the OnBase keyword label exactly (exact: true). Use concrete selectors (ucpathIdInput, documentNameInput) for the primary key and Document Name; use this for all other text keywords autofilled by the keyset.",
+      "sourceRef": "src/systems/onbase/selectors.ts:113"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#fill.firstName",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: First Name",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#fill.lastName",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Last Name",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#fill.middleName",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Middle Name",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#fill.suffix",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fallback fill: Suffix",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Executed only if keysetAutofilled=false and value is non-empty"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Keyword Textbox (Generic) — Scrape",
+      "summary": "Read a keyword value by OnBase label — useful to verify keyset autofill results.",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "role": "textbox",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "keyword",
+        "textbox",
+        "generic"
+      ],
+      "note": "Parameterized: second arg `label` matches the OnBase keyword label exactly (exact: true).",
+      "sourceRef": "src/systems/onbase/selectors.ts:113"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#scrape.documentName",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read Document Name keyword value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#scrape.firstName",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read First Name keyword value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#scrape.lastName",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read Last Name keyword value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#scrape.lastNamePoll",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Poll Last Name field until non-empty (keyset autofill confirmation)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "Polls inputValue every 500ms up to 12s (label 'Last Name'); returns true if populated (keyset fired), false if timeout (triggers fallback fill branch)"
+    },
+    {
+      "id": "onbase.importForm.keywordInput#scrape.ucpathId",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "Read UCPath ID keyword value (required keyword verification)",
+      "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.ucpathIdInput#fill",
+      "kind": "fill",
+      "system": "onbase",
+      "label": "Fill UCPath ID keyword field",
+      "summary": "The UCPath ID keyword textbox — the primary key; type it + Tab to fire the Employee Lookup keyset autofill.",
+      "selectorFqn": "onbaseSelectors.importForm.ucpathIdInput",
+      "role": "textbox",
+      "accessibleName": "UCPath ID",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "ucpath-id",
+        "keyword",
+        "primary",
+        "autofill"
+      ],
+      "note": "After filling, press Tab to trigger the Employee Lookup keyset — autofills all keywords except Document Name. If the keyset does not populate (unknown UCPath ID), fill required keywords manually from OCR/person-lookup data.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.importForm.ucpathIdInput#scrape",
+      "kind": "scrape",
+      "system": "onbase",
+      "label": "UCPath ID Input — Scrape",
+      "summary": "Read the current value of the UCPath ID keyword textbox.",
+      "selectorFqn": "onbaseSelectors.importForm.ucpathIdInput",
+      "role": "textbox",
+      "accessibleName": "UCPath ID",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "import",
+        "ucpath-id",
+        "keyword",
+        "primary",
+        "autofill"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:130"
+    },
+    {
+      "id": "onbase.importForm.ucpathIdInput#wait",
+      "kind": "wait",
+      "system": "onbase",
+      "label": "Wait for Import Document form ready (UCPath ID field visible)",
+      "selectorFqn": "onbaseSelectors.importForm.ucpathIdInput",
+      "sourceRef": "src/systems/onbase/navigate.ts",
+      "note": "waitFor state:visible, timeout:15000ms — confirms the NavPanelIFrame iframe rendered"
+    },
+    {
+      "id": "onbase.nav.documentRetrievalMenuItem#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Document Retrieval Menu Item",
+      "summary": "\"Document Retrieval\" item in the Main Menu Document group (search screen).",
+      "selectorFqn": "onbaseSelectors.nav.documentRetrievalMenuItem",
+      "role": "menuitem",
+      "accessibleName": "Document Retrieval",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "menu",
+        "document-retrieval",
+        "search",
+        "menuitem",
+        "nav"
+      ],
+      "sourceRef": "src/systems/onbase/selectors.ts:45"
+    },
+    {
+      "id": "onbase.nav.importDocumentMenuItem#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Click Import Document menu item",
+      "summary": "\"Import Document\" item in the Main Menu Document group.",
+      "selectorFqn": "onbaseSelectors.nav.importDocumentMenuItem",
+      "role": "menuitem",
+      "accessibleName": "Import Document",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "menu",
+        "import",
+        "import-document",
+        "menuitem",
+        "nav"
+      ],
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.nav.mainMenuButton#click",
+      "kind": "click",
+      "system": "onbase",
+      "label": "Click nine-squares Main Menu launcher",
+      "summary": "Nine-squares \"Main Menu\" launcher in the top banner.",
+      "selectorFqn": "onbaseSelectors.nav.mainMenuButton",
+      "role": "navigation",
+      "accessibleName": "Main Menu",
+      "verified": "2026-06-22",
+      "tags": [
+        "onbase",
+        "menu",
+        "main-menu",
+        "nine-squares",
+        "launcher",
+        "nav"
+      ],
+      "note": "Role is 'navigation' (a nav landmark), not 'button'; click it to reveal the Main Menu panel.",
+      "sourceRef": "src/systems/onbase/navigate.ts"
+    },
+    {
+      "id": "onbase.page#wait",
+      "kind": "wait",
+      "system": "onbase",
+      "label": "Wait for network idle after import submission",
+      "summary": "page.waitForLoadState('networkidle', {timeout:15000}); error is swallowed with .catch(()=>{}) — best-effort settle",
+      "sourceRef": "src/workflows/onbase/handler.ts"
+    }
+  ]
+}

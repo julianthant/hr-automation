@@ -1,0 +1,377 @@
+{
+  "workflow": "onbase",
+  "systems": [
+    "onbase"
+  ],
+  "steps": [
+    {
+      "step": "authenticate",
+      "label": "Authenticate to OnBase",
+      "system": "onbase",
+      "sourceRef": "src/workflows/onbase/handler.ts",
+      "operations": [
+        {
+          "id": "control.loginToOnBase#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Deferred login to OnBase (SSO + Duo)",
+          "summary": "Calls loginToOnBase(page) — idempotent UCSD Shibboleth SSO + Duo auth; deferAuth:true means the daemon Duos once here after OCR approval, not at fan-out enqueue time",
+          "note": "authSteps:false suppresses kernel auto-auth; loginToOnBase is called explicitly in this step. Throws if authentication fails."
+        }
+      ]
+    },
+    {
+      "step": "prepare-import",
+      "label": "Open Import Document form and attach the person's PDF page",
+      "system": "onbase",
+      "sourceRef": "src/workflows/onbase/handler.ts",
+      "operations": [
+        {
+          "id": "onbase.nav.mainMenuButton#click",
+          "kind": "click",
+          "system": "onbase",
+          "label": "Click nine-squares Main Menu launcher",
+          "selectorFqn": "onbaseSelectors.nav.mainMenuButton",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.nav.importDocumentMenuItem#click",
+          "kind": "click",
+          "system": "onbase",
+          "label": "Click Import Document menu item",
+          "selectorFqn": "onbaseSelectors.nav.importDocumentMenuItem",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.ucpathIdInput#wait",
+          "kind": "wait",
+          "system": "onbase",
+          "label": "Wait for Import Document form ready (UCPath ID field visible)",
+          "selectorFqn": "onbaseSelectors.importForm.ucpathIdInput",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "waitFor state:visible, timeout:15000ms — confirms the NavPanelIFrame iframe rendered"
+        },
+        {
+          "id": "onbase.importForm.documentTypesSelect#select",
+          "kind": "select",
+          "system": "onbase",
+          "label": "Select Document Type",
+          "selectorFqn": "onbaseSelectors.importForm.documentTypesSelect",
+          "inputVar": "{documentType}",
+          "literalValue": "X_HR_Emergency Contact",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.fileTypeSelect#select",
+          "kind": "select",
+          "system": "onbase",
+          "label": "Select File Type: PDF (.pdf)",
+          "selectorFqn": "onbaseSelectors.importForm.fileTypeSelect",
+          "literalValue": "PDF (.pdf)",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keysetLookupSelect#scrape",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read current Keyset Lookup value (idempotent check)",
+          "selectorFqn": "onbaseSelectors.importForm.keysetLookupSelect",
+          "outputVar": "{currentKeyset}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "ensureKeyset reads inputValue; skips the selectOption call if already set to Employee Lookup"
+        },
+        {
+          "id": "onbase.importForm.keysetLookupSelect#select",
+          "kind": "select",
+          "system": "onbase",
+          "label": "Select Keyset Lookup: Employee Lookup (if not already set)",
+          "selectorFqn": "onbaseSelectors.importForm.keysetLookupSelect",
+          "literalValue": "Employee Lookup",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "control.resolvePdfAndExtractPage#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Resolve pdfFileId to disk path; extract sourcePage as bytes",
+          "summary": "resolvePdfPath opens the control DB to look up the registered file by pdfFileId; extractPdfPage splits out the single page as Buffer — no temp file written",
+          "inputVar": "{pdfFileId}+{sourcePage}",
+          "note": "In-memory page bytes passed directly to chooseFile; extraction is a service call (src/services/ocr/pdf-pages.ts), not a browser op"
+        },
+        {
+          "id": "onbase.importForm.fileInput#upload",
+          "kind": "upload",
+          "system": "onbase",
+          "label": "Attach person's single-page PDF via file picker (in-memory bytes)",
+          "selectorFqn": "onbaseSelectors.importForm.fileInput",
+          "inputVar": "{pdfFileId}+{sourcePage}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "File name is {ucpathId}-p{sourcePage}.pdf; uses setInputFiles with in-memory Buffer — no temp file"
+        }
+      ]
+    },
+    {
+      "step": "fill-keywords",
+      "label": "Enter UCPath ID + trigger keyset autofill; set Document Name; fill fallback keywords if needed; assert required keywords",
+      "system": "onbase",
+      "sourceRef": "src/workflows/onbase/handler.ts",
+      "operations": [
+        {
+          "id": "onbase.importForm.ucpathIdInput#fill",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fill UCPath ID keyword field",
+          "selectorFqn": "onbaseSelectors.importForm.ucpathIdInput",
+          "inputVar": "{ucpathId}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "control.keyboard.Tab#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Press Tab to fire Employee Lookup keyset autofill",
+          "summary": "page.keyboard.press('Tab') after filling UCPath ID — triggers OnBase to autofill all keyword fields from the Employee Lookup keyset",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#scrape.lastNamePoll",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Poll Last Name field until non-empty (keyset autofill confirmation)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "outputVar": "{keysetAutofilled}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Polls inputValue every 500ms up to 12s (label 'Last Name'); returns true if populated (keyset fired), false if timeout (triggers fallback fill branch)"
+        },
+        {
+          "id": "onbase.importForm.documentNameInput#fill",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Set Document Name constant (keyset never fills this field)",
+          "selectorFqn": "onbaseSelectors.importForm.documentNameInput",
+          "inputVar": "{documentName}",
+          "literalValue": "EMERGENCY CONTACT INFORMATION",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "control.keysetAutofillBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: if keyset did not autofill, fill fallback keyword values from OCR data",
+          "summary": "If keysetAutofilled=false: iterates fallbackKeywordValues(input) and fills each non-empty value via fillKeyword. Combobox keywords (Department Name/Code, Vice Chancellor/Code) use keywordCombobox; all others use keywordInput.",
+          "note": "Fallback data comes from OCR extraction. Executed only when keyset returns nothing (bad/unknown UCPath ID)."
+        },
+        {
+          "id": "onbase.importForm.keywordInput#fill.lastName",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Last Name",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "inputVar": "{lastName}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#fill.firstName",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: First Name",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "inputVar": "{firstName}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#fill.middleName",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Middle Name",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "inputVar": "{middleName}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#fill.suffix",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Suffix",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "inputVar": "{suffix}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#fill.departmentName",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Department Name (dataset combobox)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "inputVar": "{departmentName}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#fill.departmentCode",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Department Code (dataset combobox)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "inputVar": "{departmentCode}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#fill.viceChancellor",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Vice Chancellor (dataset combobox)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "inputVar": "{viceChancellor}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#fill.viceChancellorCode",
+          "kind": "fill",
+          "system": "onbase",
+          "label": "Fallback fill: Vice Chancellor Code (dataset combobox)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "inputVar": "{viceChancellorCode}",
+          "sourceRef": "src/systems/onbase/navigate.ts",
+          "note": "Executed only if keysetAutofilled=false and value is non-empty"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#scrape.ucpathId",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read UCPath ID keyword value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "outputVar": "{requiredKeywordValues.UCPath ID}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#scrape.lastName",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read Last Name keyword value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "outputVar": "{requiredKeywordValues.Last Name}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#scrape.firstName",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read First Name keyword value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "outputVar": "{requiredKeywordValues.First Name}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordInput#scrape.documentName",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read Document Name keyword value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordInput",
+          "outputVar": "{requiredKeywordValues.Document Name}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#scrape.departmentName",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read Department Name combobox value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "outputVar": "{requiredKeywordValues.Department Name}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#scrape.departmentCode",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read Department Code combobox value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "outputVar": "{requiredKeywordValues.Department Code}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#scrape.viceChancellor",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read Vice Chancellor combobox value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "outputVar": "{requiredKeywordValues.Vice Chancellor}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.keywordCombobox#scrape.viceChancellorCode",
+          "kind": "scrape",
+          "system": "onbase",
+          "label": "Read Vice Chancellor Code combobox value (required keyword verification)",
+          "selectorFqn": "onbaseSelectors.importForm.keywordCombobox",
+          "outputVar": "{requiredKeywordValues.Vice Chancellor Code}",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "control.assertRequiredKeywords#assert",
+          "kind": "assert",
+          "system": "control",
+          "label": "Fail loud if any required keyword is still blank",
+          "summary": "Throws with the list of missing keyword labels if missing.length > 0 — never allows import of an incompletely-keyed document",
+          "note": "Required keyword labels: UCPath ID, Last Name, First Name, Document Name, Department Name, Department Code, Vice Chancellor, Vice Chancellor Code"
+        }
+      ]
+    },
+    {
+      "step": "import",
+      "label": "Click Import (or skip on dry run)",
+      "system": "onbase",
+      "sourceRef": "src/workflows/onbase/handler.ts",
+      "operations": [
+        {
+          "id": "control.dryRunBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Branch: dry run — screenshot and return without importing",
+          "summary": "If input.dryRun=true: takes a form screenshot (label: onbase-dry-run-pre-import), sets status='Dry Run Complete', returns early — Import button is never clicked",
+          "note": "dryRun is set by the OCR fan-out (OnbaseInput.dryRun). Dry run still walks the full form including keyset autofill + keyword verification."
+        },
+        {
+          "id": "onbase.importForm.importButton#assert",
+          "kind": "assert",
+          "system": "onbase",
+          "label": "Assert Import button is enabled before clicking",
+          "selectorFqn": "onbaseSelectors.importForm.importButton",
+          "summary": "isImportEnabled() calls .isEnabled() on the Import button; throws if false — refuses to import when the form is not ready",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.importForm.importButton#click",
+          "kind": "click",
+          "system": "onbase",
+          "label": "Click Import button to submit the document",
+          "selectorFqn": "onbaseSelectors.importForm.importButton",
+          "sourceRef": "src/systems/onbase/navigate.ts"
+        },
+        {
+          "id": "onbase.page#wait",
+          "kind": "wait",
+          "system": "onbase",
+          "label": "Wait for network idle after import submission",
+          "summary": "page.waitForLoadState('networkidle', {timeout:15000}); error is swallowed with .catch(()=>{}) — best-effort settle",
+          "sourceRef": "src/workflows/onbase/handler.ts"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Fan-out target only: the operator never starts onbase directly. Upload path creates an operation coordinator row + delegates an OCR prep row; on OCR approve, one operation-member row per approved person is fanned out to this workflow.",
+    "deferAuth+authSteps:false: loginToOnBase is called explicitly at the authenticate step (after OCR approval), so the operator is not prompted for Duo before reviewing OCR results.",
+    "betweenItems:[reset]: the OnBase browser page is reset to about:blank between persons so a stuck import form from person N cannot leak into person N+1.",
+    "Keyset autofill is load-bearing: typing UCPath ID + Tab populates all required keyword fields except Document Name. Fallback keyword fill (from OCR/person-lookup data) is the exception path for bad/unknown UCPath IDs.",
+    "Dry run boundary: dryRun=true causes the import step to screenshot + return without clicking Import — never commits a real document. The full form including keyset verification still runs.",
+    "Operation coordinator row is display-only (no daemon task); only the fanned-out operation-member rows execute this handler.",
+    "ONBASE_REQUIRED_KEYWORDS: [UCPath ID, Last Name, First Name, Document Name, Department Name, Department Code, Vice Chancellor, Vice Chancellor Code]. The assert at the end of fill-keywords ensures all are non-empty before the import step."
+  ]
+}

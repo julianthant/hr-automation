@@ -1,0 +1,1448 @@
+{
+  "workflow": "separations",
+  "systems": [
+    "kuali",
+    "new-kronos",
+    "ucpath"
+  ],
+  "steps": [
+    {
+      "step": "auth",
+      "label": "3-System Parallel-Staggered Auth",
+      "system": "multi",
+      "sourceRef": "src/workflows/separations/workflow.ts",
+      "note": "authChain: parallel-staggered. prepareLogin fills all 3 SSO forms in parallel; submitLogin fires Kuali@t=0, New Kronos@t+5s, UCPath@t+10s so all 3 Duo prompts overlap on the phone. ctx.page(id) awaits each system's ready promise independently, so phase-1 work starts per browser as soon as its Duo clears.",
+      "operations": [
+        {
+          "id": "control.parallelStaggeredAuth#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Parallel-Staggered Auth (3 systems)",
+          "summary": "Orchestrates prepareLogin (parallel fill) then staggered submit for Kuali, New Kronos, UCPath; each system's Duo is awaited independently",
+          "note": "All 3 Duos can overlap; operator approves in any order"
+        },
+        {
+          "id": "kuali.ssoNav#navigate",
+          "kind": "navigate",
+          "system": "kuali",
+          "label": "Navigate to Kuali Build Space",
+          "url": "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb",
+          "sourceRef": "src/workflows/separations/workflow.ts"
+        },
+        {
+          "id": "new-kronos.ssoNav#navigate",
+          "kind": "navigate",
+          "system": "new-kronos",
+          "label": "Navigate to New Kronos (WFD)",
+          "summary": "Opens New Kronos Dayforce login page",
+          "sourceRef": "src/systems/new-kronos/index.ts"
+        },
+        {
+          "id": "ucpath.ssoNav#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to UCPath Smart HR",
+          "summary": "Opens UCPath HR Tasks landing at UCPATH_SMART_HR_URL",
+          "sourceRef": "src/workflows/separations/workflow.ts"
+        },
+        {
+          "id": "control.awaitDuo#wait",
+          "kind": "wait",
+          "system": "control",
+          "label": "Await Duo MFA Approval (×3)",
+          "summary": "Waits for Duo approval on each system; all three pend concurrently — operator approves in any order"
+        }
+      ]
+    },
+    {
+      "step": "kuali-extraction",
+      "label": "Kuali Extraction",
+      "system": "kuali",
+      "sourceRef": "src/workflows/separations/steps/kuali-extract.ts",
+      "note": "Edit-and-resume bypass: if all required fields already in ctx.data (Dashboard Edit Data → Run), this step is skipped and kualiData is synthesized from prefilled values. Otherwise: navigate to KUALI_SPACE_URL, open Action List, filter+click doc, extract all fields.",
+      "operations": [
+        {
+          "id": "kuali.kualiSpaceUrl#navigate",
+          "kind": "navigate",
+          "system": "kuali",
+          "label": "Navigate to Kuali Build Space",
+          "url": "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb",
+          "sourceRef": "src/systems/kuali/navigate.ts"
+        },
+        {
+          "id": "kuali.actionList.menuItem#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Click Action List Menu Item",
+          "selectorFqn": "kualiSelectors.actionList.menuItem",
+          "role": "menuitem",
+          "accessibleName": "Action List",
+          "sourceRef": "src/systems/kuali/selectors.ts:19",
+          "verified": "2026-03-16",
+          "tags": [
+            "action",
+            "list",
+            "menu",
+            "kuali"
+          ]
+        },
+        {
+          "id": "kuali.actionList.searchInput#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Action List Search Filter",
+          "selectorFqn": "kualiSelectors.actionList.searchInput",
+          "role": "textbox",
+          "accessibleName": "Search",
+          "inputVar": "{docId}",
+          "sourceRef": "src/systems/kuali/selectors.ts:67",
+          "verified": "2026-06-17",
+          "tags": [
+            "action-list",
+            "search",
+            "input",
+            "textbox",
+            "filter",
+            "kuali"
+          ],
+          "note": "Scoped to .kp-input-group:has(.kp-input-button-right) to avoid the global nav search box"
+        },
+        {
+          "id": "kuali.actionList.searchGoButton#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Click Action List Search GO",
+          "selectorFqn": "kualiSelectors.actionList.searchGoButton",
+          "role": "button",
+          "accessibleName": "GO",
+          "sourceRef": "src/systems/kuali/selectors.ts:79",
+          "verified": "2026-06-17",
+          "tags": [
+            "action-list",
+            "search",
+            "go",
+            "button",
+            "submit",
+            "kuali"
+          ]
+        },
+        {
+          "id": "kuali.actionList.docLink#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Click Document Link (exact match)",
+          "selectorFqn": "kualiSelectors.actionList.docLink",
+          "role": "link",
+          "inputVar": "{docId}",
+          "sourceRef": "src/systems/kuali/selectors.ts:33",
+          "verified": "2026-06-17",
+          "tags": [
+            "document",
+            "doc",
+            "link",
+            "action-list",
+            "exact",
+            "kuali"
+          ],
+          "note": "Anchored regex ^\\s*<docId>\\s*$ prevents substring collisions (search '414' returns 4140-4149); clicks .first()"
+        },
+        {
+          "id": "kuali.separationForm.employeeName#scrape",
+          "kind": "scrape",
+          "system": "kuali",
+          "label": "Scrape Employee Name",
+          "selectorFqn": "kualiSelectors.separationForm.employeeName",
+          "role": "textbox",
+          "accessibleName": "Employee Last Name, First Name*",
+          "outputVar": "{employeeName}",
+          "sourceRef": "src/systems/kuali/selectors.ts:90",
+          "tags": [
+            "employee",
+            "name",
+            "last",
+            "first",
+            "textbox",
+            "separation",
+            "kuali"
+          ],
+          "note": "Raw value is ALL-CAPS (e.g. 'NAKAGAWA,MATTHEW K'); normalized to 'Last, First M' via displayPersonName() before stamping ctx.data"
+        },
+        {
+          "id": "kuali.separationForm.eid#scrape",
+          "kind": "scrape",
+          "system": "kuali",
+          "label": "Scrape EID",
+          "selectorFqn": "kualiSelectors.separationForm.eid",
+          "role": "textbox",
+          "accessibleName": "EID*",
+          "outputVar": "{eid}",
+          "sourceRef": "src/systems/kuali/selectors.ts:96",
+          "tags": [
+            "eid",
+            "employee",
+            "id",
+            "textbox",
+            "separation",
+            "kuali"
+          ],
+          "note": "May have leading whitespace — .trim() applied; schema allows 5+ digits (lenient) so short EIDs reach identity-check gate"
+        },
+        {
+          "id": "kuali.separationForm.lastDayWorked#scrape",
+          "kind": "scrape",
+          "system": "kuali",
+          "label": "Scrape Last Day Worked",
+          "selectorFqn": "kualiSelectors.separationForm.lastDayWorked",
+          "role": "textbox",
+          "accessibleName": "Last Day Worked*",
+          "outputVar": "{lastDayWorked}",
+          "sourceRef": "src/systems/kuali/selectors.ts:102",
+          "tags": [
+            "last-day",
+            "worked",
+            "date",
+            "textbox",
+            "separation",
+            "kuali"
+          ]
+        },
+        {
+          "id": "kuali.separationForm.separationDate#scrape",
+          "kind": "scrape",
+          "system": "kuali",
+          "label": "Scrape Separation Date",
+          "selectorFqn": "kualiSelectors.separationForm.separationDate",
+          "role": "textbox",
+          "outputVar": "{separationDate}",
+          "sourceRef": "src/systems/kuali/selectors.ts:108",
+          "tags": [
+            "separation",
+            "date",
+            "textbox",
+            "kuali"
+          ]
+        },
+        {
+          "id": "kuali.separationForm.terminationType#scrape",
+          "kind": "scrape",
+          "system": "kuali",
+          "label": "Scrape Termination Type",
+          "selectorFqn": "kualiSelectors.separationForm.terminationType",
+          "role": "combobox",
+          "accessibleName": "Type of Termination*",
+          "outputVar": "{rawTerminationType}",
+          "sourceRef": "src/systems/kuali/selectors.ts:114",
+          "tags": [
+            "type",
+            "termination",
+            "combobox",
+            "separation",
+            "kuali"
+          ],
+          "note": "Read via .evaluate() to get visible text (not internal value). Used by isVoluntaryTermination() and mapReasonCode()"
+        },
+        {
+          "id": "kuali.separationForm.location#scrape",
+          "kind": "scrape",
+          "system": "kuali",
+          "label": "Scrape Location (optional)",
+          "selectorFqn": "kualiSelectors.separationForm.location",
+          "role": "textbox",
+          "accessibleName": "Location *",
+          "outputVar": "{location}",
+          "sourceRef": "src/systems/kuali/selectors.ts:120",
+          "tags": [
+            "location",
+            "textbox",
+            "separation",
+            "kuali"
+          ],
+          "note": "Optional — 3s timeout, silent failure on missing field"
+        }
+      ]
+    },
+    {
+      "step": "identity-check",
+      "label": "Identity Check (Name↔EID Verification)",
+      "system": "multi",
+      "sourceRef": "src/workflows/separations/workflow.ts",
+      "note": "Skipped when txnNumberPrefilled OR kronosSkippedByInput (edit-resume / Transactions-only preset). Otherwise: (1) inline Workforce Job Summary fetch gates the check; (2) classifyNameSimilarity → same→skip, similar→correct Kuali name in place, different/not-found→delegate to person-lookup. EID correction triggers a Job Summary re-fetch. Non-HDH department determined here gates kronos-search in the next step.",
+      "operations": [
+        {
+          "id": "ucpath.workforceJobSummary#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to Workforce Job Summary",
+          "summary": "Navigates to the UCPath Workforce Job Summary search page (WF_JOB_SUMMARY component); handles campus-discovery redirect and post-detail-page re-navigation",
+          "sourceRef": "src/systems/ucpath/job-summary.ts",
+          "note": "navigateToWorkforceJobSummary() guards on URL + emplIdInput presence; re-navigates after campus-discovery redirect (ISS-B04) and after detail-tab state (ISS-B02)"
+        },
+        {
+          "id": "ucpath.jobSummary.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID on Job Summary Search",
+          "selectorFqn": "ucpathSelectors.jobSummary.emplIdInput",
+          "role": "textbox",
+          "accessibleName": "Empl ID",
+          "inputVar": "{eid}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:455",
+          "verified": "2026-04-01",
+          "tags": [
+            "empl",
+            "id",
+            "employee",
+            "textbox",
+            "job-summary"
+          ]
+        },
+        {
+          "id": "ucpath.jobSummary.searchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Job Summary Search",
+          "selectorFqn": "ucpathSelectors.jobSummary.searchButton",
+          "role": "button",
+          "accessibleName": "Search",
+          "sourceRef": "src/systems/ucpath/selectors.ts:461",
+          "verified": "2026-04-01",
+          "tags": [
+            "search",
+            "button",
+            "job-summary"
+          ]
+        },
+        {
+          "id": "ucpath.jobSummary.workLocationTab#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Work Location Tab",
+          "selectorFqn": "ucpathSelectors.jobSummary.workLocationTab",
+          "role": "tab",
+          "accessibleName": "Work Location",
+          "sourceRef": "src/systems/ucpath/selectors.ts:473",
+          "verified": "2026-04-01",
+          "tags": [
+            "work",
+            "location",
+            "tab",
+            "link",
+            "job-summary"
+          ],
+          "note": "PeopleSoft renders as anchor LINK not role=tab; 3-deep fallback chain (tab→link→anchor). Effective-dated row picked by pickWorkLocationRow (latest at-or-before separationDate)"
+        },
+        {
+          "id": "ucpath.jobSummary.personName#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Employee Name from Job Summary Detail",
+          "selectorFqn": "ucpathSelectors.jobSummary.personName",
+          "outputVar": "{jobSummaryName}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:504",
+          "verified": "2026-06-18",
+          "tags": [
+            "employee",
+            "name",
+            "display",
+            "header",
+            "detail",
+            "job-summary"
+          ],
+          "note": "Primary: #DERIVED_NAME_DISPLAY_NAME; fallback: span.PABOLD11TEXT. Name in First Last order (UCPath convention)"
+        },
+        {
+          "id": "ucpath.jobSummary.workLocationData#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Work Location Tab Data",
+          "summary": "Parses effective-dated Work Location rows: departmentDescription, deptId; picks row with latest Effective Date at-or-before separationDate",
+          "outputVar": "{departmentDescription, deptId}",
+          "sourceRef": "src/systems/ucpath/job-summary.ts",
+          "note": "pickEffectiveDatedRow governs row selection. Department is used immediately for HDH gate. No single named selector — grid row parse via page evaluate"
+        },
+        {
+          "id": "ucpath.jobSummary.jobInformationTab#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Job Information Tab",
+          "selectorFqn": "ucpathSelectors.jobSummary.jobInformationTab",
+          "role": "tab",
+          "accessibleName": "Job Information",
+          "sourceRef": "src/systems/ucpath/selectors.ts:487",
+          "verified": "2026-04-01",
+          "tags": [
+            "job",
+            "information",
+            "tab",
+            "link",
+            "job-summary"
+          ],
+          "note": "Same link-vs-tab caveat as workLocationTab. Grid loads LAZILY — pollForJobInfoScan polls 20×500ms for a non-empty job code before proceeding (prevents blank payroll fill, ISS from 2026-06-22)"
+        },
+        {
+          "id": "ucpath.jobSummary.jobInfoData#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Job Information Tab Data",
+          "summary": "Parses effective-dated Job Information rows: jobCode (6-digit), jobDescription; same pickEffectiveDatedRow rule as Work Location",
+          "outputVar": "{jobCode, jobDescription}",
+          "sourceRef": "src/systems/ucpath/job-summary.ts",
+          "note": "Throws loud on found record with empty job code after polling exhausted. No single named selector — grid row parse"
+        },
+        {
+          "id": "control.identityCheckNameTier#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Identity Check Name-Tier Branch",
+          "summary": "classifyNameSimilarity(kualiName, jobSummaryName) → same→skipStep, similar→correct name, different/not-found→delegate to person-lookup",
+          "note": "same: EID trusted, no action. similar (e.g. Jaden→Jayden): trust EID, write corrected name to Kuali draft. different/not-found: delegate by name. not-found + complete 8-digit EID: FAIL LOUD"
+        },
+        {
+          "id": "kuali.separationForm.employeeName#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Correct Employee Name in Kuali (similar branch)",
+          "selectorFqn": "kualiSelectors.separationForm.employeeName",
+          "role": "textbox",
+          "accessibleName": "Employee Last Name, First Name*",
+          "inputVar": "{correctedName}",
+          "sourceRef": "src/systems/kuali/selectors.ts:90",
+          "tags": [
+            "employee",
+            "name",
+            "last",
+            "first",
+            "textbox",
+            "separation",
+            "kuali"
+          ],
+          "note": "Only on 'similar' tier. Writes to UNSUBMITTED Kuali draft even in dry-run (like timekeeper fill). correctNameSpelling preserves Last,First format and swaps only the misspelled token"
+        },
+        {
+          "id": "control.delegateToPersonLookup#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Delegate to Person Lookup by Name",
+          "summary": "ctx.delegateTo(personLookupWorkflow, { name }) on different/not-found tiers; resolved EID replaces kualiData.eid and triggers Job Summary re-fetch",
+          "note": "On EID correction: re-fetches Job Summary with verified EID (critical for correct dept/payroll). No New Kronos re-search needed (kronos-search runs after with corrected EID)"
+        }
+      ]
+    },
+    {
+      "step": "transaction-check",
+      "label": "Transaction Check (SS Smart HR)",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/separations/steps/transaction-check.ts",
+      "note": "Two independent concerns: (1) SS Smart HR effdt-gated search for approved-reuse — drills into TER row to read its effective date, reuses only within SEPARATION_TERMINATION_WINDOW_DAYS (14) of the Kuali separation date. (2) Date-agnostic in-progress grid sweep — on every create-bound path (not approved-reuse), deletes ALL pending Terminat rows for this EID regardless of effdt. The sweep is the only mutation and is dry-run-guarded. Skipped when txnNumberPrefilled.",
+      "operations": [
+        {
+          "id": "ucpath.hrTasks.ssSmartHRTransactionsLink#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to SS Smart HR Transactions",
+          "selectorFqn": "ucpathSelectors.hrTasks.ssSmartHRTransactionsLink",
+          "role": "link",
+          "accessibleName": "SS Smart HR Transactions",
+          "sourceRef": "src/systems/ucpath/selectors.ts:839",
+          "verified": "2026-04-24",
+          "tags": [
+            "sidebar",
+            "smart-hr",
+            "self-service",
+            "transactions",
+            "link",
+            "hr-tasks"
+          ]
+        },
+        {
+          "id": "ucpath.ssSmartHRTransactions.emplIdInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID on SS Smart HR Search",
+          "selectorFqn": "ucpathSelectors.ssSmartHRTransactions.emplIdInput",
+          "role": "textbox",
+          "accessibleName": "Empl ID",
+          "inputVar": "{eid}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:1259",
+          "verified": "2026-04-24",
+          "tags": [
+            "empl",
+            "id",
+            "employee",
+            "textbox",
+            "ss-smart-hr"
+          ]
+        },
+        {
+          "id": "ucpath.ssSmartHRTransactions.searchButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click SS Smart HR Search Submit",
+          "selectorFqn": "ucpathSelectors.ssSmartHRTransactions.searchButton",
+          "sourceRef": "src/systems/ucpath/selectors.ts:1309",
+          "verified": "2026-04-24",
+          "tags": [
+            "search",
+            "submit",
+            "button",
+            "ss-smart-hr"
+          ]
+        },
+        {
+          "id": "ucpath.ssSmartHRTransactions.gridScan#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scan SS Smart HR Results Grid for TER",
+          "summary": "scanSsSmartHrResults collects cell-text matrix; parseSsSmartHrRows uses header-keyed pass then header-independent pattern pass; pickTerminationRow picks the TER row",
+          "outputVar": "{terRow: {transactionId, approvalStatus}}",
+          "sourceRef": "src/systems/ucpath/ss-smart-hr.ts",
+          "note": "Dual-pass parse (header-keyed + pattern) fixed live miss where APPROVED TER wasn't found by header-only scan (EID 10759273 'Ava Tolles'). STILL NEEDS LIVE VERIFY on SS Smart HR results grid"
+        },
+        {
+          "id": "ucpath.ssSmartHRTransactions.transactionResultRow#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Drill Into TER Row (for effdt read)",
+          "selectorFqn": "ucpathSelectors.ssSmartHRTransactions.transactionResultRow",
+          "sourceRef": "src/systems/ucpath/selectors.ts:1331",
+          "verified": "2026-06-24",
+          "tags": [
+            "transaction",
+            "drill-in",
+            "row",
+            "result",
+            "detail",
+            "effdt",
+            "ss-smart-hr"
+          ],
+          "note": "Transaction ID column is display-only span (not a link) — the clickable target is the ROW tr[id^=trPTS_CFG_CL_STD_RSL] filtered by txnId text. LIVE-VERIFIED 2026-06-24"
+        },
+        {
+          "id": "ucpath.ssSmartHRTransactions.terEffdt#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape TER Effective Date from Detail",
+          "summary": "Reads 'Effdt: YYYY-MM-DD' text (strip) from Transaction Details page; falls back to 'Start Date' cell; compared to Kuali separation date for reuse window decision",
+          "outputVar": "{terEffdt}",
+          "sourceRef": "src/systems/ucpath/ss-smart-hr.ts",
+          "note": "isWithinSeparationWindow(terEffdt, separationDate, 14). Unreadable effdt → priorTerminationSkipped + log.warn (never reuses). Only runs when TER is found"
+        },
+        {
+          "id": "control.transactionCheckBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Transaction Check Result Branch",
+          "summary": "approved+within-window → reuse T#, stamp ctx.data.comments with dup-termination comment, skip ucpath-transaction. All other paths → sweep in-progress grid then create.",
+          "note": "Duplicate-termination comment: 'Duplicate termination. Re Kuali Form #<docId>.' + 'EE termination approved on UCPath.' (initials + date)"
+        },
+        {
+          "id": "ucpath.inProgressGrid.pendingCheckboxes#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Tick Pending Termination Checkboxes (in-progress grid)",
+          "summary": "frame.evaluate() clicks Select checkboxes for every row matching EID + 'Terminat' in the Smart HR Transactions in-progress grid; bypasses PeopleSoft overlay that intercepts Playwright clicks",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "note": "DATE-AGNOSTIC: sweeps all pending terminations for EID regardless of effdt. JS-eval click (not Playwright .click()). LIVE-VERIFIED 2026-06-24"
+        },
+        {
+          "id": "ucpath.smartHR.deleteSelectedTransactionsButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Delete Selected Transactions",
+          "selectorFqn": "ucpathSelectors.smartHR.deleteSelectedTransactionsButton",
+          "role": "button",
+          "accessibleName": "Delete Selected Transactions",
+          "sourceRef": "src/systems/ucpath/selectors.ts:146",
+          "verified": "2026-06-22",
+          "tags": [
+            "delete",
+            "selected",
+            "transactions",
+            "in-progress",
+            "button",
+            "smart-hr"
+          ],
+          "note": "Deletes all checked rows in one click. LIVE-VERIFIED 2026-06-24"
+        },
+        {
+          "id": "ucpath.icokDialog#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Confirm ICOK Deletion Dialog",
+          "summary": "document.getElementById('#ICOK') confirm-dialog — JS-eval click behind PeopleSoft overlay. 'Select Ok to confirm deletion…'",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "note": "PeopleSoft modal overlay intercepts Playwright clicks; must use frame.evaluate(). LIVE-VERIFIED 2026-06-24"
+        }
+      ]
+    },
+    {
+      "step": "ucpath-job-summary",
+      "label": "UCPath Job Summary → Fill Kuali Dept/Payroll",
+      "system": "kuali",
+      "sourceRef": "src/workflows/separations/steps/ucpath-job-summary.ts",
+      "note": "Skipped on: dryRun (no Kuali write), no fillable Job Summary data (prefill/preset/identity-skipped), Transactions-only preset. The Job Summary data was fetched inline before identity-check; this step only fills Kuali from it. Moved BEFORE kronos-search (2026-06-24) so department is resolved before the HDH gate.",
+      "operations": [
+        {
+          "id": "kuali.finalTransactions.department#select",
+          "kind": "select",
+          "system": "kuali",
+          "label": "Select Department in Final Transactions",
+          "selectorFqn": "kualiSelectors.finalTransactions.department",
+          "role": "combobox",
+          "accessibleName": "Department*",
+          "inputVar": "{departmentDescription}",
+          "sourceRef": "src/systems/kuali/selectors.ts:163",
+          "tags": [
+            "department",
+            "combobox",
+            "final",
+            "kuali"
+          ],
+          "note": "selectOption({ index }) not { label } — live UCSD options have irregular internal whitespace that breaks exact label match (ISS-B05). pickDepartmentOptionIndex() does 2-tier case-insensitive match"
+        },
+        {
+          "id": "kuali.finalTransactions.payrollTitleCode#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Payroll Title Code",
+          "selectorFqn": "kualiSelectors.finalTransactions.payrollTitleCode",
+          "role": "textbox",
+          "accessibleName": "Payroll Title Code*",
+          "inputVar": "{jobCode}",
+          "sourceRef": "src/systems/kuali/selectors.ts:170",
+          "tags": [
+            "payroll",
+            "title",
+            "code",
+            "textbox",
+            "final",
+            "kuali"
+          ]
+        },
+        {
+          "id": "kuali.finalTransactions.payrollTitle#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Payroll Title",
+          "selectorFqn": "kualiSelectors.finalTransactions.payrollTitle",
+          "role": "textbox",
+          "accessibleName": "Payroll Title*",
+          "inputVar": "{jobDescription}",
+          "sourceRef": "src/systems/kuali/selectors.ts:177",
+          "tags": [
+            "payroll",
+            "title",
+            "textbox",
+            "final",
+            "kuali"
+          ]
+        }
+      ]
+    },
+    {
+      "step": "kronos-search",
+      "label": "Kronos Search + Kuali Timekeeper Fill (2-way parallel)",
+      "system": "multi",
+      "sourceRef": "src/workflows/separations/steps/kronos-search.ts",
+      "note": "HDH-only (Housing/Dining/Hospitality) — non-HDH departments skip this step entirely (no timecard to read). 2-way ctx.parallel: (A) New Kronos timecard search → lastPunchDate + sickDates + holidayDates; (B) Kuali timekeeper name fill. After step: dates reconciled → lastDayWorked = Kronos last punch (overrides Kuali); separationDate = max(LDW, sick, holiday); termEffDate = sep+1. Conditional write-backs to Kuali (live only, gated on ldwChanged / separationDateChanged).",
+      "operations": [
+        {
+          "id": "control.kronosDeptGate#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Department Gate (HDH vs non-HDH)",
+          "summary": "isAcceptedHdhDepartment(departmentDescription) → HDH: run timecard; non-HDH: skipStep (dates fall back to Kuali verbatim, no timecard comment). FAIL-SAFE: unknown/empty dept still runs",
+          "note": "Keyword match on 'housing'/'dining'/'hospitality' — not a single dept-code. Only skips on POSITIVE non-HDH determination"
+        },
+        {
+          "id": "new-kronos.navbar.employeeSearchButton#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Open Employee Search Sidebar",
+          "selectorFqn": "newKronosSelectors.navbar.employeeSearchButton",
+          "role": "button",
+          "accessibleName": "Employee Search",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:49",
+          "verified": "2026-04-06",
+          "tags": [
+            "employee",
+            "search",
+            "button",
+            "sidebar",
+            "navbar",
+            "new-kronos"
+          ]
+        },
+        {
+          "id": "new-kronos.search.searchInput#fill",
+          "kind": "fill",
+          "system": "new-kronos",
+          "label": "Fill Employee Search Input",
+          "selectorFqn": "newKronosSelectors.search.searchInput",
+          "role": "textbox",
+          "accessibleName": "Search by Employee Name or ID",
+          "inputVar": "{eid}",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:69",
+          "verified": "2026-06-18",
+          "tags": [
+            "search",
+            "input",
+            "textbox",
+            "employee",
+            "name",
+            "id",
+            "new-kronos"
+          ],
+          "note": "SearchRoot = FrameLocator | Page (portal-frame iframe OR top-level page — resolveSearchRoot handles both)"
+        },
+        {
+          "id": "new-kronos.search.searchSubmitButton#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Click Employee Search Submit",
+          "selectorFqn": "newKronosSelectors.search.searchSubmitButton",
+          "role": "button",
+          "accessibleName": "Search",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:77",
+          "verified": "2026-06-18",
+          "tags": [
+            "search",
+            "submit",
+            "button",
+            "new-kronos"
+          ]
+        },
+        {
+          "id": "new-kronos.search.firstResultCheckbox#wait",
+          "kind": "wait",
+          "system": "new-kronos",
+          "label": "Wait for Search Result (found detection)",
+          "selectorFqn": "newKronosSelectors.search.firstResultCheckbox",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:96",
+          "verified": "2026-06-18",
+          "tags": [
+            "first",
+            "result",
+            "checkbox",
+            "select-item",
+            "search",
+            "new-kronos"
+          ],
+          "note": "resolveSearchResult races firstResultCheckbox (attached) vs firstResultSlat (visible) vs noResultsText vs 15s timeout. Timeout → not-found + log.warn (never throws)"
+        },
+        {
+          "id": "control.kronosFoundBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Kronos Found/Not-Found Branch",
+          "summary": "Not found → return empty timecard (found:false), handler falls back to Kuali LDW. Found but Go-To fails → THROW (non-fatal in settled parallel, visible in log). Wrong-person timecard → THROW (same semantics).",
+          "note": "A genuine not-found is best-effort quiet; a mechanical failure (found but can't open) is loud. Non-fatal because New Kronos runs in ctx.parallel settled block"
+        },
+        {
+          "id": "new-kronos.search.firstResultCheckbox#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Select Employee (check first result)",
+          "selectorFqn": "newKronosSelectors.search.firstResultCheckbox",
+          "role": "checkbox",
+          "accessibleName": "Select Item",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:96",
+          "verified": "2026-06-18",
+          "tags": [
+            "first",
+            "result",
+            "checkbox",
+            "select-item",
+            "search",
+            "new-kronos"
+          ],
+          "note": "selectEmployeeResult(). Enables the Go To button. Do NOT union with 'Select All' header checkbox"
+        },
+        {
+          "id": "new-kronos.goToMenu.goToButtonOnPage#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Click Go To Dropdown",
+          "selectorFqn": "newKronosSelectors.goToMenu.goToButtonOnPage",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:148",
+          "tags": [
+            "go-to",
+            "button",
+            "page",
+            "quick-find",
+            "slideout",
+            "dropdown",
+            "navigation",
+            "new-kronos"
+          ],
+          "note": "Primary: #goToDropdownButton scoped to .quick-find-content — avoids timecard toolbar 'Go to' button that sits behind slideout mask (live error 2026-06-22)"
+        },
+        {
+          "id": "new-kronos.goToMenu.timecardItem#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Click Timecard Option in Go To Menu",
+          "selectorFqn": "newKronosSelectors.goToMenu.timecardItem",
+          "role": "option",
+          "accessibleName": "Timecard",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:183",
+          "verified": "2026-06-18",
+          "tags": [
+            "timecard",
+            "menu",
+            "item",
+            "option",
+            "navigation",
+            "new-kronos"
+          ],
+          "note": "Anchored name /^\\s*timecards?\\s*$/i — bare /timecard/i substring matched 'Employee timecards' page-title after first doc (2026-06-24). clickGoToTimecard polls timecardItem.first().waitFor with 15s deadline + one dropdown re-open retry"
+        },
+        {
+          "id": "new-kronos.search.closeButton#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Close Employee Search Sidebar",
+          "selectorFqn": "newKronosSelectors.search.closeButton",
+          "role": "button",
+          "accessibleName": "Employee Search Close",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:127",
+          "verified": "2026-06-18",
+          "tags": [
+            "close",
+            "sidebar",
+            "button",
+            "search",
+            "new-kronos"
+          ],
+          "note": "Called before verifyTimecardEmployee — closes slide-out so EID text on the open timecard is readable"
+        },
+        {
+          "id": "new-kronos.timecardEmployee#assert",
+          "kind": "assert",
+          "system": "new-kronos",
+          "label": "Assert Open Timecard Belongs to Searched EID",
+          "summary": "verifyTimecardEmployee polls timecard page text for the searched EID; THROWS when timecard shows a different employee (stale Go To left previous employee's timecard)",
+          "inputVar": "{eid}",
+          "sourceRef": "src/workflows/separations/steps/kronos-search.ts",
+          "note": "Live bug 2026-06-24: search 10603110 → Yang/10832819 still displayed. Throw is non-fatal in settled parallel block (logged + fallback to Kuali dates)"
+        },
+        {
+          "id": "new-kronos.timecard.payPeriodTriggerButton#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Open Pay Period Selector",
+          "selectorFqn": "newKronosSelectors.timecard.payPeriodTriggerButton",
+          "role": "button",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:203",
+          "verified": "2026-06-18",
+          "tags": [
+            "pay",
+            "period",
+            "trigger",
+            "button",
+            "timecard",
+            "new-kronos"
+          ]
+        },
+        {
+          "id": "new-kronos.timecard.selectRangeButton#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Click Select Range (custom date range)",
+          "selectorFqn": "newKronosSelectors.timecard.selectRangeButton",
+          "role": "button",
+          "accessibleName": "Select range",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:221",
+          "verified": "2026-06-18",
+          "tags": [
+            "select",
+            "range",
+            "button",
+            "custom",
+            "date",
+            "timecard",
+            "new-kronos"
+          ]
+        },
+        {
+          "id": "new-kronos.timecard.startDateInput#fill",
+          "kind": "fill",
+          "system": "new-kronos",
+          "label": "Fill Kronos Date Range Start",
+          "selectorFqn": "newKronosSelectors.timecard.startDateInput",
+          "inputVar": "{kronosStart}",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:228",
+          "verified": "2026-06-22",
+          "tags": [
+            "start",
+            "date",
+            "input",
+            "range",
+            "timecard",
+            "native",
+            "new-kronos"
+          ],
+          "note": "Native <input type=date>; value MUST be ISO YYYY-MM-DD via fill() — MM/DD/YYYY is silently dropped (reverts to today). computeKronosDateRange(lastDayWorked, separationDate) ±1 month"
+        },
+        {
+          "id": "new-kronos.timecard.endDateInput#fill",
+          "kind": "fill",
+          "system": "new-kronos",
+          "label": "Fill Kronos Date Range End",
+          "selectorFqn": "newKronosSelectors.timecard.endDateInput",
+          "inputVar": "{kronosEnd}",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:234",
+          "verified": "2026-06-22",
+          "tags": [
+            "end",
+            "date",
+            "input",
+            "range",
+            "timecard",
+            "native",
+            "new-kronos"
+          ]
+        },
+        {
+          "id": "new-kronos.timecard.applyButton#click",
+          "kind": "click",
+          "system": "new-kronos",
+          "label": "Click Apply (date range)",
+          "selectorFqn": "newKronosSelectors.timecard.applyButton",
+          "role": "button",
+          "accessibleName": "Apply",
+          "sourceRef": "src/systems/new-kronos/selectors.ts:276",
+          "verified": "2026-06-18",
+          "tags": [
+            "apply",
+            "button",
+            "range",
+            "timecard",
+            "new-kronos"
+          ]
+        },
+        {
+          "id": "new-kronos.timecardGrid.lastPunchDate#scrape",
+          "kind": "scrape",
+          "system": "new-kronos",
+          "label": "Scrape Last Physical Punch Date",
+          "summary": "getSeparationTimecardData() parses .ui-grid-viewport rows for In/Out punches; lastPunchDate = latest date with an In or Out entry",
+          "outputVar": "{lastPunchDate}",
+          "sourceRef": "src/systems/new-kronos/navigate.ts",
+          "note": "Virtual-scroll grid — only on-screen rows in DOM; screenshot uses centerSelector+viewport (not fullPage). null when no punch found"
+        },
+        {
+          "id": "new-kronos.timecardGrid.sickDates#scrape",
+          "kind": "scrape",
+          "system": "new-kronos",
+          "label": "Scrape Sick Leave Dates",
+          "summary": "getSeparationTimecardData() — Sick-Hourly rows from timecard grid; chronological MM/DD/YYYY list",
+          "outputVar": "{sickDates}",
+          "sourceRef": "src/systems/new-kronos/navigate.ts",
+          "note": "Extends separationDate AND drives leave clause in buildTerminationComments"
+        },
+        {
+          "id": "new-kronos.timecardGrid.holidayDates#scrape",
+          "kind": "scrape",
+          "system": "new-kronos",
+          "label": "Scrape Holiday Pay Dates",
+          "summary": "getSeparationTimecardData() — Holiday-Hourly rows from timecard grid; chronological MM/DD/YYYY list",
+          "outputVar": "{holidayDates}",
+          "sourceRef": "src/systems/new-kronos/navigate.ts",
+          "note": "When both sick and holiday present: only the latest (the one that sets separationDate) appears in the comment clause"
+        },
+        {
+          "id": "kuali.timekeeperTasks.requestAcknowledgedCheckbox#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Check Request Acknowledged",
+          "selectorFqn": "kualiSelectors.timekeeperTasks.requestAcknowledgedCheckbox",
+          "role": "checkbox",
+          "accessibleName": "Request Acknowledged - In Progress",
+          "sourceRef": "src/systems/kuali/selectors.ts:131",
+          "tags": [
+            "request",
+            "acknowledged",
+            "checkbox",
+            "timekeeper",
+            "kuali"
+          ],
+          "note": "Runs in parallel with New Kronos timecard fetch via ctx.parallel"
+        },
+        {
+          "id": "kuali.timekeeperTasks.timekeeperName#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Timekeeper Name",
+          "selectorFqn": "kualiSelectors.timekeeperTasks.timekeeperName",
+          "role": "textbox",
+          "accessibleName": "Timekeeper Name:*",
+          "inputVar": "{timekeeperName}",
+          "sourceRef": "src/systems/kuali/selectors.ts:138",
+          "tags": [
+            "timekeeper",
+            "name",
+            "textbox",
+            "kuali"
+          ],
+          "note": "getTimekeeperName() from config (TIMEKEEPER_NAME env var). Also runs on kronos-skip path (non-HDH / prefill / preset) in a try/catch best-effort block"
+        },
+        {
+          "id": "control.dateReconciliation#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Date Reconciliation (post-kronos)",
+          "summary": "lastDayWorked = timecard.lastPunchDate ?? kualiData.lastDayWorked; separationDate = kronosSkipped ? kualiData.separationDate : computeSeparationDate(LDW, sick, holiday); termEffDate = sep+1",
+          "note": "Pure computation. kronosSkipped → Kuali sep date kept VERBATIM (no 'per Kronos' comment). Derived when kronos ran (even if no punch returned)"
+        },
+        {
+          "id": "kuali.separationForm.lastDayWorked#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Write Back Last Day Worked (conditional)",
+          "selectorFqn": "kualiSelectors.separationForm.lastDayWorked",
+          "role": "textbox",
+          "accessibleName": "Last Day Worked*",
+          "inputVar": "{lastDayWorked}",
+          "sourceRef": "src/systems/kuali/selectors.ts:102",
+          "tags": [
+            "last-day",
+            "worked",
+            "date",
+            "textbox",
+            "separation",
+            "kuali"
+          ],
+          "note": "Only when ldwChanged (Kronos last punch ≠ Kuali LDW). Live runs only (dry-run terminal exits before this). fillWithVerify: fill → readback → retry with pressSequentially if dropped"
+        },
+        {
+          "id": "kuali.separationForm.separationDate#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Write Back Separation Date (conditional)",
+          "selectorFqn": "kualiSelectors.separationForm.separationDate",
+          "role": "textbox",
+          "inputVar": "{separationDate}",
+          "sourceRef": "src/systems/kuali/selectors.ts:108",
+          "tags": [
+            "separation",
+            "date",
+            "textbox",
+            "kuali"
+          ],
+          "note": "Only when separationDateChanged (derived sep date ≠ Kuali sep date). Live only. Audit comment added in kuali-finalization"
+        }
+      ]
+    },
+    {
+      "step": "ucpath-transaction",
+      "label": "UCPath Smart HR Transaction",
+      "system": "ucpath",
+      "sourceRef": "src/workflows/separations/steps/ucpath-transaction.ts",
+      "note": "Skipped when txnNumberPrefilled (edit-resume) OR approvedDuplicateTxn (transaction-check reuse). Otherwise: (1) findExistingTerminationTransaction probes the Smart HR Transactions list for an existing TER matching EID+effdt — reuses if found. (2) If not found: navigate Smart HR, select template, enter effdt, create, fill EID, select reason code, continue, fill comments, save-and-submit, read T# from readback. EmplIdNotRecognizedError is FATAL (escapes soft-failure catch).",
+      "operations": [
+        {
+          "id": "ucpath.smartHrTransactionsNav#navigate",
+          "kind": "navigate",
+          "system": "ucpath",
+          "label": "Navigate to Smart HR Transactions",
+          "summary": "navigateToSmartHR() + clickSmartHRTransactions() — also called for findExistingTerminationTransaction pre-check",
+          "sourceRef": "src/systems/ucpath/transaction.ts"
+        },
+        {
+          "id": "ucpath.hrTasks.smartHRTemplatesLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Smart HR Templates (sidebar expand)",
+          "selectorFqn": "ucpathSelectors.hrTasks.smartHRTemplatesLink",
+          "sourceRef": "src/systems/ucpath/selectors.ts:824",
+          "verified": "2026-04-24",
+          "tags": [
+            "sidebar",
+            "smart-hr",
+            "templates",
+            "category",
+            "link",
+            "hr-tasks"
+          ]
+        },
+        {
+          "id": "ucpath.hrTasks.smartHRTransactionsLink#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Smart HR Transactions (sidebar leaf)",
+          "selectorFqn": "ucpathSelectors.hrTasks.smartHRTransactionsLink",
+          "role": "link",
+          "accessibleName": "Smart HR Transactions",
+          "sourceRef": "src/systems/ucpath/selectors.ts:831",
+          "verified": "2026-05-27",
+          "tags": [
+            "sidebar",
+            "smart-hr",
+            "transactions",
+            "link",
+            "hr-tasks"
+          ],
+          "note": "exact: true — avoids matching 'SS Smart HR Transactions'"
+        },
+        {
+          "id": "ucpath.smartHR.sidebarNavigationToggle#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Collapse Sidebar (Navigation Area toggle)",
+          "selectorFqn": "ucpathSelectors.smartHR.sidebarNavigationToggle",
+          "role": "button",
+          "accessibleName": "Navigation Area",
+          "sourceRef": "src/systems/ucpath/selectors.ts:52",
+          "verified": "2026-03-16",
+          "tags": [
+            "sidebar",
+            "collapse",
+            "navigation",
+            "button"
+          ]
+        },
+        {
+          "id": "ucpath.smartHrTransactionsList#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scan Smart HR Transactions List for Existing TER",
+          "summary": "findExistingTerminationTransaction: scans the in-flight list by EID + effdt + 'Terminatn' action; returns txnNumber when found. Sets alreadyAtSmartHR flag to skip re-navigation",
+          "outputVar": "{existingTxnNumber}",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "note": "Name-based matching was removed (caused dupes). EID+effdt key is deterministic. Returns txnNumber to short-circuit create"
+        },
+        {
+          "id": "control.existingTransactionBranch#control",
+          "kind": "control",
+          "system": "control",
+          "label": "Existing Transaction Short-Circuit",
+          "summary": "If findExistingTerminationTransaction returns a T#: persist to ctx.data, screenshot, return without submit",
+          "note": "alreadyAtSmartHR=true skips re-navigation saving ~12s per doc"
+        },
+        {
+          "id": "ucpath.smartHR.templateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Smart HR Template",
+          "selectorFqn": "ucpathSelectors.smartHR.templateInput",
+          "role": "textbox",
+          "accessibleName": "Select Template",
+          "inputVar": "{template}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:59",
+          "verified": "2026-03-16",
+          "tags": [
+            "template",
+            "smart-hr",
+            "transaction",
+            "textbox"
+          ],
+          "note": "UC_VOL_TERM or UC_INVOL_TERM, determined by isVoluntaryTermination(rawTerminationType)"
+        },
+        {
+          "id": "ucpath.smartHR.effectiveDateInput#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Effective Date",
+          "selectorFqn": "ucpathSelectors.smartHR.effectiveDateInput",
+          "role": "textbox",
+          "accessibleName": "Effective Date",
+          "inputVar": "{termEffDate}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:66",
+          "verified": "2026-03-16",
+          "tags": [
+            "effective",
+            "date",
+            "textbox",
+            "smart-hr"
+          ],
+          "note": "termEffDate = separationDate + 1 day (computeTerminationEffDate). MM/DD/YYYY format"
+        },
+        {
+          "id": "ucpath.smartHR.createTransactionButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Create Transaction",
+          "selectorFqn": "ucpathSelectors.smartHR.createTransactionButton",
+          "role": "button",
+          "accessibleName": "Create Transaction",
+          "sourceRef": "src/systems/ucpath/selectors.ts:73",
+          "verified": "2026-03-16",
+          "tags": [
+            "create",
+            "transaction",
+            "smart-hr",
+            "button"
+          ]
+        },
+        {
+          "id": "ucpath.smartHR.emplIdOnDetailsPage#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Empl ID on Enter Transaction Details Page",
+          "selectorFqn": "ucpathSelectors.ssSmartHRTransactions.emplIdInput",
+          "role": "textbox",
+          "accessibleName": "Empl ID",
+          "inputVar": "{eid}",
+          "sourceRef": "src/workflows/separations/steps/ucpath-transaction.ts",
+          "verified": "2026-04-24",
+          "tags": [
+            "empl",
+            "id",
+            "employee",
+            "textbox",
+            "ss-smart-hr"
+          ],
+          "note": "Direct .fill() call (ssSmartHRTransactions.emplIdInput(frame).fill(eid, {timeout:10000})). On fill failure: checks if emplIdInput still visible → EmplIdNotRecognizedError (FATAL)"
+        },
+        {
+          "id": "ucpath.smartHR.reasonCodeSelect#select",
+          "kind": "select",
+          "system": "ucpath",
+          "label": "Select Reason Code",
+          "selectorFqn": "ucpathSelectors.smartHR.reasonCodeSelect",
+          "accessibleName": "Reason Code",
+          "inputVar": "{ucpathReason}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:80",
+          "verified": "2026-03-16",
+          "tags": [
+            "reason",
+            "code",
+            "dropdown",
+            "transaction"
+          ],
+          "note": "mapReasonCode(rawTerminationType) maps Kuali strings to UCPath codes. JS fallback: submitAction_win0()"
+        },
+        {
+          "id": "ucpath.smartHR.continueButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Continue (after reason code)",
+          "selectorFqn": "ucpathSelectors.smartHR.continueButton",
+          "role": "button",
+          "accessibleName": "Continue",
+          "sourceRef": "src/systems/ucpath/selectors.ts:86",
+          "verified": "2026-03-16",
+          "tags": [
+            "continue",
+            "button",
+            "reason",
+            "transaction"
+          ]
+        },
+        {
+          "id": "ucpath.comments.commentsTextarea#fill",
+          "kind": "fill",
+          "system": "ucpath",
+          "label": "Fill Transaction Comments",
+          "selectorFqn": "ucpathSelectors.comments.commentsTextarea",
+          "accessibleName": "#HR_TBH_WRK_DESCRLONG_NOTES",
+          "inputVar": "{finalComments}",
+          "sourceRef": "src/systems/ucpath/selectors.ts:284",
+          "verified": "2026-03-16",
+          "tags": [
+            "comments",
+            "textarea",
+            "transaction"
+          ],
+          "note": "finalComments = buildTerminationComments(termEffDate, lastDayWorked, docId, {sickDates, holidayDates}). On timeout: check if emplIdInput still visible → EmplIdNotRecognizedError"
+        },
+        {
+          "id": "ucpath.smartHR.saveAndSubmitButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click Save and Submit",
+          "selectorFqn": "ucpathSelectors.smartHR.saveAndSubmitButton",
+          "role": "button",
+          "accessibleName": "Save and Submit",
+          "sourceRef": "src/systems/ucpath/selectors.ts:121",
+          "verified": "2026-03-16",
+          "tags": [
+            "save",
+            "submit",
+            "transaction",
+            "button"
+          ],
+          "note": "IRREVERSIBLE WRITE. .first() — appears at bottom of every tab"
+        },
+        {
+          "id": "ucpath.smartHR.confirmationOkButton#click",
+          "kind": "click",
+          "system": "ucpath",
+          "label": "Click OK on Confirmation Dialog",
+          "selectorFqn": "ucpathSelectors.smartHR.confirmationOkButton",
+          "role": "button",
+          "accessibleName": "OK",
+          "sourceRef": "src/systems/ucpath/selectors.ts:128",
+          "verified": "2026-04-01",
+          "tags": [
+            "ok",
+            "confirmation",
+            "dialog",
+            "save",
+            "button"
+          ]
+        },
+        {
+          "id": "ucpath.smartHR.transactionNumberReadback#scrape",
+          "kind": "scrape",
+          "system": "ucpath",
+          "label": "Scrape Transaction Number from Readback",
+          "summary": "After confirmation OK: re-navigates Smart HR, scrolls to lower readback area, parses 'Transaction ID: T...' or 'Transaction: T...' text",
+          "outputVar": "{transactionNumber}",
+          "sourceRef": "src/systems/ucpath/transaction.ts",
+          "note": "scrollToTransactionReadbackArea() first. T# immediately persisted via ctx.updateData({transactionNumber}). Missing T# after successful submit → ucpath-transaction-submitted-missing-number screenshot + abort"
+        }
+      ]
+    },
+    {
+      "step": "kuali-finalization",
+      "label": "Kuali Finalization",
+      "system": "kuali",
+      "sourceRef": "src/workflows/separations/steps/kuali-finalize.ts",
+      "note": "IRREVERSIBLE WRITE (Kuali form save). Fills: Termination Effective Date, UCPath Transaction Results (checkbox + T# + final-pay radio), date-change audit comments (LDW and/or sep date if changed), user-supplied comments override. verifyTxnNumberFilled re-reads + re-fills T# before save (Kuali reactive bindings can reset it). Screenshot after save.",
+      "operations": [
+        {
+          "id": "kuali.finalTransactions.terminationEffDate#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Termination Effective Date",
+          "selectorFqn": "kualiSelectors.finalTransactions.terminationEffDate",
+          "role": "textbox",
+          "accessibleName": "Termination Effective Date*",
+          "inputVar": "{termEffDate}",
+          "sourceRef": "src/systems/kuali/selectors.ts:156",
+          "tags": [
+            "termination",
+            "effective",
+            "date",
+            "textbox",
+            "final",
+            "kuali"
+          ],
+          "note": "Direct .fill() with 5s timeout; NOT fillWithVerify (no retry needed for this field)"
+        },
+        {
+          "id": "kuali.transactionResults.submittedTemplateCheckbox#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Check Submitted Termination Template",
+          "selectorFqn": "kualiSelectors.transactionResults.submittedTemplateCheckbox",
+          "role": "checkbox",
+          "accessibleName": "Submitted Termination Template",
+          "sourceRef": "src/systems/kuali/selectors.ts:188",
+          "tags": [
+            "submitted",
+            "template",
+            "termination",
+            "checkbox",
+            "transaction",
+            "kuali"
+          ]
+        },
+        {
+          "id": "kuali.transactionResults.transactionNumber#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Transaction Number",
+          "selectorFqn": "kualiSelectors.transactionResults.transactionNumber",
+          "role": "textbox",
+          "accessibleName": "Transaction Number:*",
+          "inputVar": "{transactionNumber}",
+          "sourceRef": "src/systems/kuali/selectors.ts:195",
+          "tags": [
+            "transaction",
+            "number",
+            "textbox",
+            "kuali"
+          ],
+          "note": "fillWithVerify: fill → readback → retry with pressSequentially. Skipped if empty (left blank for manual entry)"
+        },
+        {
+          "id": "kuali.transactionResults.doesNotNeedFinalPayRadio#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Select Does Not Need Final Pay (student employee)",
+          "selectorFqn": "kualiSelectors.transactionResults.doesNotNeedFinalPayRadio",
+          "role": "radio",
+          "accessibleName": "Does not need Final Pay (student employee)",
+          "literalValue": "Does not need Final Pay (student employee)",
+          "sourceRef": "src/systems/kuali/selectors.ts:202",
+          "tags": [
+            "final",
+            "pay",
+            "student",
+            "radio",
+            "transaction",
+            "kuali"
+          ],
+          "note": "Hardcoded — assumes all UCSD separations are student employees"
+        },
+        {
+          "id": "kuali.timekeeperTasks.timekeeperComments#fill",
+          "kind": "fill",
+          "system": "kuali",
+          "label": "Fill Timekeeper/Approver Comments",
+          "selectorFqn": "kualiSelectors.timekeeperTasks.timekeeperComments",
+          "role": "textbox",
+          "accessibleName": "Timekeeper/Approver Comments:",
+          "inputVar": "{dateChangeComments + comments}",
+          "sourceRef": "src/systems/kuali/selectors.ts:145",
+          "tags": [
+            "timekeeper",
+            "approver",
+            "comments",
+            "textbox",
+            "kuali"
+          ],
+          "note": "fillTimekeeperComments: reads existing field value + prepends it (append-aware). dateChangeComments = LDW audit line + sep-date audit line (if changed). comments = edit-resume override + dup-termination note (if approved reuse)"
+        },
+        {
+          "id": "kuali.transactionResults.transactionNumber#assert",
+          "kind": "assert",
+          "system": "kuali",
+          "label": "Verify Transaction Number Still Filled Before Save",
+          "selectorFqn": "kualiSelectors.transactionResults.transactionNumber",
+          "role": "textbox",
+          "inputVar": "{transactionNumber}",
+          "sourceRef": "src/systems/kuali/navigate.ts",
+          "tags": [
+            "transaction",
+            "number",
+            "textbox",
+            "kuali"
+          ],
+          "note": "verifyTxnNumberFilled: 300ms settle wait, readback, re-fill once if wrong, THROW if second mismatch. Kuali reactive bindings can reset the field after other fills"
+        },
+        {
+          "id": "kuali.save.navbarSaveButton#click",
+          "kind": "click",
+          "system": "kuali",
+          "label": "Click Save (navbar)",
+          "selectorFqn": "kualiSelectors.save.navbarSaveButton",
+          "role": "button",
+          "accessibleName": "Save",
+          "sourceRef": "src/systems/kuali/selectors.ts:222",
+          "verified": "2026-04-10",
+          "tags": [
+            "save",
+            "navbar",
+            "button",
+            "fallback",
+            "kuali"
+          ],
+          "note": "IRREVERSIBLE WRITE. 3-deep .or() chain: action-bar → nav → generic role button. Scrolls to top first. Waits for networkidle (critical for batch mode)"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Step order: kuali-extraction → identity-check → transaction-check → ucpath-job-summary → kronos-search → ucpath-transaction → kuali-finalization",
+    "Dry-run boundary: after date reconciliation (end of kronos-search), before Kuali LDW/sep-date write-backs and ucpath-transaction. Both UCPath submit and Kuali save are skipped. The two benign residuals on the unsubmitted draft (timekeeper fill, similar-branch name correction) remain.",
+    "Department gate: UCPath Workforce Job Summary department (fetched inline before identity-check) gates kronos-search. Non-HDH → skip kronos-search, dates fall back to Kuali verbatim. HDH → read timecard. Fail-safe: unknown/empty dept still runs.",
+    "Date model: lastDayWorked = Kronos last physical punch ?? Kuali LDW. separationDate = (kronos ran) ? max(LDW, sickDates, holidayDates) : Kuali separationDate verbatim. termEffDate = separationDate+1. Write-backs to Kuali when changed (live only).",
+    "ctx.parallel in kronos-search: New Kronos timecard + Kuali timekeeper fill run concurrently via ctx.parallel settled semantics (non-fatal throw via logSettledRejection).",
+    "Transaction-check two concerns: (1) SS Smart HR effdt-gated approved-reuse; (2) date-agnostic in-progress grid sweep on every create-bound path.",
+    "UCPath frame: ALL PeopleSoft interactions use getContentFrame(page) → #main_target_win0 FrameLocator. PeopleSoft overlay intercepts Playwright clicks on some controls → JS-eval escape hatch."
+  ]
+}

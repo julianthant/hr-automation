@@ -1,0 +1,637 @@
+{
+  "system": "crm",
+  "label": "CRM (ACT)",
+  "operations": [
+    {
+      "id": "crm.auth#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Authenticate to ACT CRM",
+      "summary": "requireLogin → loginToACTCrm; ctx.page('crm') waits for the authenticated CRM browser page to be ready in the session pool"
+    },
+    {
+      "id": "crm.authenticate#control",
+      "kind": "control",
+      "system": "crm",
+      "label": "Login to ACT CRM (Salesforce SSO)",
+      "summary": "requireLogin(loginToACTCrm, 'CRM authentication failed') — navigates to act-crm.my.site.com, fills SSO credentials, awaits MFA if required",
+      "sourceRef": "src/infra/auth/login.ts"
+    },
+    {
+      "id": "crm.entry-sheet-load#wait",
+      "kind": "wait",
+      "system": "crm",
+      "label": "Wait for UCPath Entry Sheet section to load",
+      "summary": "page.waitForLoadState('networkidle', { timeout: 15_000 })"
+    },
+    {
+      "id": "crm.entry-sheet#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to UCPath Entry Sheet section (URL fast path)",
+      "url": "https://act-crm.my.site.com/hr/ONB_PPSEntrySheet?id={recordId}",
+      "note": "recordId extracted from current page URL searchParams.get('id'). Fast path when CRM_SECTION_URLS has 'UCPath Entry Sheet'. Falls through to sectionNav.byName click when fast path unavailable."
+    },
+    {
+      "id": "crm.extractField-address#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape address",
+      "summary": "extractField with labels ['Address Line 1', 'Address', 'Street Address']"
+    },
+    {
+      "id": "crm.extractField-appointment#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape appointment number",
+      "summary": "extractField with labels ['Appointment', 'Appointment Number', 'Appt']; extracts trailing digit e.g. 'Casual/Restricted 5' → '5'"
+    },
+    {
+      "id": "crm.extractField-city#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape city",
+      "summary": "extractField with labels ['City']"
+    },
+    {
+      "id": "crm.extractField-dept#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape department number from CRM record page (ONB_ViewOnboarding)",
+      "summary": "extractField with label variants ['Department', 'Department Name', 'Dept']; parseDepartmentNumber extracts parenthesized code e.g. 'Computer Science (000412)' → '000412'",
+      "note": "Must be called AFTER selectLatestResult and BEFORE navigateToSection('UCPath Entry Sheet')"
+    },
+    {
+      "id": "crm.extractField-dob#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape date of birth",
+      "summary": "extractField with labels ['Date of Birth', 'DOB', 'Birth Date']"
+    },
+    {
+      "id": "crm.extractField-effectiveDate#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape effective date / first day of service",
+      "summary": "extractField with labels ['First Day of Service (Effective Date)', 'First Day of Service', 'Effective Date', 'Start Date']"
+    },
+    {
+      "id": "crm.extractField-email#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape personal email",
+      "summary": "extractField with labels ['Email', 'Email Address', 'Personal Email']"
+    },
+    {
+      "id": "crm.extractField-firstName#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape first name",
+      "summary": "extractField with labels ['First Name', 'Legal First Name']"
+    },
+    {
+      "id": "crm.extractField-lastName#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape last name",
+      "summary": "extractField with labels ['Last Name', 'Legal Last Name']"
+    },
+    {
+      "id": "crm.extractField-middleName#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape middle name",
+      "summary": "extractField with labels ['Middle Name', 'Middle Initial']"
+    },
+    {
+      "id": "crm.extractField-phone#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape phone number",
+      "summary": "extractField with labels ['Cell Phone', 'Mobile Phone', 'Phone', 'Phone Number']"
+    },
+    {
+      "id": "crm.extractField-positionNumber#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape position number",
+      "summary": "extractField with labels ['Position Number', 'Position #', 'Position No']"
+    },
+    {
+      "id": "crm.extractField-postalCode#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape postal code",
+      "summary": "extractField with labels ['Postal Code', 'Zip Code', 'ZIP']"
+    },
+    {
+      "id": "crm.extractField-recruitment#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape recruitment number from CRM record page",
+      "summary": "extractField with label variants ['Recruitment Number', 'Recruitment #', 'Recruitment No', 'Req Number']"
+    },
+    {
+      "id": "crm.extractField-ssn#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape SSN",
+      "summary": "extractField with labels ['SSN (National ID)', 'SSN', 'Social Security Number']"
+    },
+    {
+      "id": "crm.extractField-state#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape state",
+      "summary": "extractField with labels ['State']"
+    },
+    {
+      "id": "crm.extractField-wage#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape wage / compensation rate",
+      "summary": "extractField with labels ['Compensation rate', 'Compensation Rate', 'Wage', 'Pay Rate']"
+    },
+    {
+      "id": "crm.idocs-disk-check#control",
+      "kind": "control",
+      "system": "crm",
+      "label": "Skip re-download if all requested PDFs already exist on disk",
+      "summary": "existsSync(folderPath) → readdirSync matches ^Doc<N>-.+\\.pdf$ for every requested index. Returns early with found list if all present.",
+      "note": "Guard against re-running a partially-complete download step."
+    },
+    {
+      "id": "crm.idocs-document-fetch#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Fetch onboarding documents via direct HTTP GET (doc indices 0 and 2)",
+      "summary": "page.context().request.get('/iDocsForSalesforceDocumentServer?i=N&h=hash') for DEFAULT_CRM_DOC_INDICES [0, 2]; writes bytes to local folder path; stamps pdfDownload count and pdfFolder on row data",
+      "note": "Non-fatal: catch block stamps pdfDownload:'Failed:...' and continues to UCPath/I9 phases without interruption"
+    },
+    {
+      "id": "crm.idocs-document#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "HTTP GET each requested document from iDocs document server",
+      "url": "https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforceDocumentServer?i={docIndex}&h={hash}",
+      "summary": "page.context().request.get(url) for each docIndex in input.docIndices (default [0, 2]). Serial loop; skips indices >= totalDocs with log.error."
+    },
+    {
+      "id": "crm.idocs-pdf#assert",
+      "kind": "assert",
+      "system": "crm",
+      "label": "Assert iDocs response is OK and is a valid PDF",
+      "summary": "response.ok() must be true. isCrmPdfResponse: rejects HTML (prefix check); accepts application/pdf content-type OR PDF magic bytes (%PDF-). Throws on failure."
+    },
+    {
+      "id": "crm.idocs-viewer-iframe#wait",
+      "kind": "wait",
+      "system": "crm",
+      "label": "Wait for iDocs PDF.js viewer iframe and extract document hash",
+      "summary": "Polls page.frames() every 500ms up to 30s for a frame at crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx. Extracts h= (hash) and c= (totalDocs) from iframe URL query params.",
+      "note": "hash is required for the document-server fetch URL. totalDocs used to skip out-of-range index requests."
+    },
+    {
+      "id": "crm.idocs-viewer#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to iDocs PDF.js viewer to extract hash and doc count",
+      "url": "https://crickportal-ext.bfs.ucsd.edu/iDocsForSalesforce/Content/pdfjs/web/PDFjsViewer.aspx",
+      "summary": "downloadCrmIdocsDocuments navigates to the PDF.js viewer URL embedded in the CRM page; extracts h (hash) and totalDocs count from viewer URL query params"
+    },
+    {
+      "id": "crm.record-load#wait",
+      "kind": "wait",
+      "system": "crm",
+      "label": "Wait for employee record page to load fully",
+      "summary": "waitForLoadState('domcontentloaded', timeout=15s) then waitForLoadState('networkidle', timeout=15s)"
+    },
+    {
+      "id": "crm.record.appointmentEndDate#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Appointment End Date from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Appointment (Expected Job) End Date') with fallback to 'Appointment End Date'"
+    },
+    {
+      "id": "crm.record.cellLabelFollowingTd#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract name fields — strategy 3: th OR td label → following td (broader fallback, UNVERIFIED)",
+      "summary": "Visualforce label → value strategy 3: label in any cell (<th> OR <td>) via .or() chain, value in next sibling <td>.",
+      "selectorFqn": "crm.record.cellLabelFollowingTd",
+      "tags": [
+        "visualforce",
+        "label",
+        "value",
+        "th",
+        "td",
+        "extract",
+        "record",
+        "fallback",
+        "crm"
+      ],
+      "note": "Added 2026-06-07; UNVERIFIED against live CRM DOM. .or() chain combining strategies 1+2 in one locator pass. Strictly additive — can only find MORE values, never break a working extract.",
+      "sourceRef": "src/systems/crm/selectors.ts:62"
+    },
+    {
+      "id": "crm.record.dateSigned#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Date Signed (oath date) from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Date Signed'); used for oathDate in crm-dates step when includeCrmDates:true"
+    },
+    {
+      "id": "crm.record.dateSigned#scrape-dates",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Date Signed for date enrichment",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Date Signed'); the oath taken-and-subscribed date; stamped as oathDate"
+    },
+    {
+      "id": "crm.record.department#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Department from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Department'); used in CrmRecord shape; surfaced in crm-only path to set ctx.data.department"
+    },
+    {
+      "id": "crm.record.firstDayOfService#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract First Day of Service (Effective Date) from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('First Day of Service (Effective Date)') with fallback to 'First Day of Service'; becomes the operator-facing startDate via pickCrmStartDate(records, emplId)"
+    },
+    {
+      "id": "crm.record.firstDayOfService#scrape-dates",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract First Day of Service for date enrichment",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('First Day of Service (Effective Date)'); record selection prefers EID-matched record (ctx.data.emplId); falls back to first record; stamped as employmentDate"
+    },
+    {
+      "id": "crm.record.firstName#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Employee First Name from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Employee First Name') via strategy chain: record.thLabelFollowingTd → record.tdLabelFollowingTd → record.cellLabelFollowingTd → record.rowLabelLastCell → record.lightningFieldValue; 500ms timeout per strategy variant"
+    },
+    {
+      "id": "crm.record.hireType#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Hire Type from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Hire Type')"
+    },
+    {
+      "id": "crm.record.lastName#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Employee Last Name from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Employee Last Name'); combined with firstName as 'lastName, firstName'"
+    },
+    {
+      "id": "crm.record.lightningFieldValue#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract name fields — strategy 5: Salesforce Lightning slds-form-element (UNVERIFIED)",
+      "summary": "Salesforce Lightning record-detail fallback: reads .slds-form-element__control for a matching .slds-form-element__label.",
+      "selectorFqn": "crm.record.lightningFieldValue",
+      "tags": [
+        "lightning",
+        "label",
+        "value",
+        "form-element",
+        "extract",
+        "record",
+        "fallback",
+        "crm"
+      ],
+      "note": "Added 2026-06-07; UNVERIFIED. .slds-form-element:has(.slds-form-element__label:has-text(label)) .slds-form-element__control. Catches CRM record pages served by Lightning UI instead of classic Visualforce.",
+      "sourceRef": "src/systems/crm/selectors.ts:98"
+    },
+    {
+      "id": "crm.record.personalEmail#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Personal Email Address from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Personal Email Address')"
+    },
+    {
+      "id": "crm.record.ppsId#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract PPS ID from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('PPS ID')"
+    },
+    {
+      "id": "crm.record.rowLabelLastCell#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract name fields — strategy 4: row containing label → last td (row-scoped fallback, UNVERIFIED)",
+      "summary": "Visualforce label → value strategy 4: finds <tr> containing the label, reads its last <td> — robust when extra spacer cells separate label from value.",
+      "selectorFqn": "crm.record.rowLabelLastCell",
+      "tags": [
+        "visualforce",
+        "label",
+        "value",
+        "row",
+        "last-cell",
+        "extract",
+        "record",
+        "fallback",
+        "crm"
+      ],
+      "note": "Added 2026-06-07; UNVERIFIED. tr:has-text(label) → td:last-child. Handles value not in immediate sibling td. stripLabel removes label prefix from extracted text.",
+      "sourceRef": "src/systems/crm/selectors.ts:83"
+    },
+    {
+      "id": "crm.record.tdLabelFollowingTd#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract name fields — strategy 2: td label → following td (Visualforce fallback, verified 2026-04-14)",
+      "summary": "Visualforce label → value strategy 2 (fallback): label in <td>, value in the next sibling <td>.",
+      "selectorFqn": "crm.record.tdLabelFollowingTd",
+      "verified": "2026-04-14",
+      "tags": [
+        "visualforce",
+        "label",
+        "value",
+        "td",
+        "extract",
+        "record",
+        "fallback",
+        "crm"
+      ],
+      "sourceRef": "src/systems/crm/selectors.ts:47",
+      "note": "Fallback when strategy 1 misses for a field. Same label sets and 500ms timeout."
+    },
+    {
+      "id": "crm.record.thLabelFollowingTd#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract name fields — strategy 1: th label → following td (Visualforce, verified 2026-04-14)",
+      "summary": "Visualforce label → value strategy 1: label in <th>, value in the next sibling <td>.",
+      "selectorFqn": "crm.record.thLabelFollowingTd",
+      "verified": "2026-04-14",
+      "tags": [
+        "visualforce",
+        "label",
+        "value",
+        "th",
+        "extract",
+        "record",
+        "crm"
+      ],
+      "sourceRef": "src/systems/crm/selectors.ts:37",
+      "note": "Tried first for all four name fields. Labels: firstName=['First Name','Legal First Name'], lastName=['Last Name','Legal Last Name'], middleName=['Middle Name','Middle Initial'], livedName=['Lived Name','Lived First Name','Preferred Name','Preferred First Name']. 500ms timeout per attempt; first hit wins, remaining strategies skipped for that field."
+    },
+    {
+      "id": "crm.record.titleCode#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract Title Code/Payroll Title from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('Title Code/Payroll Title'); payrollTitleFromTitleCode strips leading code prefix ('4921 - STDT 2' → 'STDT 2') via pickCrmPayrollTitle"
+    },
+    {
+      "id": "crm.record.ucpathEmployeeId#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract UCPath Employee ID from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('UCPath Employee ID'); key field for EID-path record selection and for direct-match in matchCrmEid"
+    },
+    {
+      "id": "crm.record.ucsdEmail#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Extract UCSD Email Address from CRM record",
+      "selectorFqn": "record.thLabelFollowingTd",
+      "sourceRef": "src/systems/crm/extract.ts",
+      "note": "extractField('UCSD Email Address')"
+    },
+    {
+      "id": "crm.recordUrl#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to CRM record page",
+      "url": "{recordUrl}",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "Navigates to each matching row's recordUrl (absolute URL or prefixed with https://act-crm.my.site.com); waitUntil:domcontentloaded + networkidle"
+    },
+    {
+      "id": "crm.recordUrl#navigate-dates",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to CRM record page for date extraction",
+      "url": "{recordUrl}",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "Same extractCrmRecord flow as cross-verification; all 12 fields extracted, but only firstDayOfService and dateSigned are stamped as outputs"
+    },
+    {
+      "id": "crm.save-pdf#control",
+      "kind": "control",
+      "system": "crm",
+      "label": "Write PDF bytes to disk and register in tracker",
+      "summary": "Filename = Doc<N>-<sanitized>.pdf. Name source priority: Content-Disposition header → CRM_DOC_DEFAULT_NAMES[idx] ('Signed Offer Letter' idx 0 / 'EE Data Gathering Form' idx 2) → 'document-N'. writeFile(savedPath, body). tryRegisterDownloadedFile({kind:'crm-document'}).",
+      "note": "savedCount accumulates across indices; used in archive step to populate pdfDownload detail field."
+    },
+    {
+      "id": "crm.search-load#wait",
+      "kind": "wait",
+      "system": "crm",
+      "label": "Wait for network idle after search navigation",
+      "summary": "page.waitForLoadState('networkidle', { timeout: 15_000 })"
+    },
+    {
+      "id": "crm.search-url#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to CRM search URL with email query param",
+      "url": "CRM_SEARCH_URL?q={email}",
+      "note": "query = input.email if present, else input.emplId. Direct URL navigation (faster than search-input UI). waitUntil='domcontentloaded', timeout=15s. ctx.retry attempts=3.",
+      "summary": "searchByEmail → searchCrmOnboardingRecords → page.goto(CRM_SEARCH_URL?q=email); waitUntil domcontentloaded + networkidle"
+    },
+    {
+      "id": "crm.search.nthResultRow#click",
+      "kind": "click",
+      "system": "crm",
+      "label": "Click name link (first td > a) of latest-dated result row",
+      "selectorFqn": "crm.search.nthResultRow",
+      "note": "Primary: nthResultRow(page, latestIndex).locator('td').first().locator('a') via clickIfPresent. Fallback: safeClick on the first td cell directly. ctx.retry attempts=3.",
+      "summary": "clickIfPresent on nameLink (td.first().locator('a')); fallback clicks td.first() directly; waits domcontentloaded + networkidle"
+    },
+    {
+      "id": "crm.search.nthResultRow#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape 'Offer Sent On' date from each result row to identify latest",
+      "summary": "Nth result row; use .locator('td').nth(1) for the 'Offer Sent On' column (index 1).",
+      "selectorFqn": "crm.search.nthResultRow",
+      "verified": "2026-04-14",
+      "tags": [
+        "search",
+        "result",
+        "row",
+        "nth",
+        "table",
+        "crm"
+      ],
+      "note": "Compound: nthResultRow(page, i).locator('td').nth(1) for column index 1. Iterates all rows; parses each date with new Date(); latestIndex = row with most recent date. Silently skips unparseable dates; throws 'CRM returned search rows but no parsable Offer Sent On date' if no valid date found.",
+      "sourceRef": "src/systems/crm/selectors.ts:25"
+    },
+    {
+      "id": "crm.search.resultRows#assert",
+      "kind": "assert",
+      "system": "crm",
+      "label": "Assert at least one result row exists",
+      "selectorFqn": "crm.search.resultRows",
+      "summary": "rows.count() === 0 → throw ExtractionError('No search results found')"
+    },
+    {
+      "id": "crm.search.resultRows#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape result rows to pick latest by Offer Sent On date",
+      "summary": "Count rows; read column 1 (Offer Sent On date) from each nthResultRow; select row index with latest parseable date; throws ExtractionError if 0 rows or all dates unparseable",
+      "selectorFqn": "crm.search.resultRows",
+      "verified": "2026-04-14",
+      "tags": [
+        "search",
+        "results",
+        "rows",
+        "table",
+        "crm"
+      ],
+      "sourceRef": "src/systems/crm/selectors.ts:18"
+    },
+    {
+      "id": "crm.searchLoad#wait",
+      "kind": "wait",
+      "system": "crm",
+      "label": "Wait for CRM search results to load",
+      "summary": "waitForLoadState('domcontentloaded', 15s) + waitForLoadState('networkidle', 15s) — catch on networkidle",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts"
+    },
+    {
+      "id": "crm.searchLoad#wait-dates",
+      "kind": "wait",
+      "system": "crm",
+      "label": "Wait for CRM search results (dates)",
+      "summary": "waitForLoadState('networkidle', 15s) — graceful catch",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts"
+    },
+    {
+      "id": "crm.searchResultsTable#scrape",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape CRM search result rows",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "Inline locator 'table tbody tr' (not a registry selector); count cells safely to handle rows with fewer than 5 columns; extracts name (cell[0].textContent), offerSentOn (cell[1]), processStage (cell[4]), recordUrl from cell[0] anchor href"
+    },
+    {
+      "id": "crm.searchResultsTable#scrape-dates",
+      "kind": "scrape",
+      "system": "crm",
+      "label": "Scrape CRM search result rows for date enrichment",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "Inline 'table tbody tr' scrape; same extraction as cross-verification; filters by name tokens"
+    },
+    {
+      "id": "crm.searchUrl#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to CRM search with query",
+      "url": "{CRM_SEARCH_URL}?q={query}",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "EID path: query = emplId (precise); name path: query iterates buildCrmNameSearchQueries(lastName, firstName) — lastName first, then firstName, then individual tokens; stops at first query that yields name-token-matching rows"
+    },
+    {
+      "id": "crm.searchUrl#navigate-dates",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to CRM search for date enrichment",
+      "url": "{CRM_SEARCH_URL}?q={lastName}",
+      "sourceRef": "src/workflows/person-lookup/crm-search.ts",
+      "note": "searchCrmByName using the resolved ctx.data.searchName parsed via parsePersonOrgNameInput; same multi-query strategy as cross-verification name path"
+    },
+    {
+      "id": "crm.sectionNav.byName#click",
+      "kind": "click",
+      "system": "crm",
+      "label": "Fallback: click UCPath Entry Sheet section nav element",
+      "summary": "Click a named CRM section via a fallback chain: link → plain text → tab.",
+      "selectorFqn": "crm.sectionNav.byName",
+      "role": "link",
+      "verified": "2026-04-14",
+      "tags": [
+        "section",
+        "navigation",
+        "name",
+        "fallback",
+        "link",
+        "tab",
+        "crm"
+      ],
+      "note": "3-deep .or() chain: getByRole('link',{name:/UCPath Entry Sheet/i}) | getByText('UCPath Entry Sheet') | getByRole('tab',{name:/UCPath Entry Sheet/i}). Only called when direct URL nav is unavailable (recordId missing or section not in CRM_SECTION_URLS).",
+      "sourceRef": "src/systems/crm/selectors.ts:114"
+    },
+    {
+      "id": "crm.sectionNav.byName#navigate",
+      "kind": "navigate",
+      "system": "crm",
+      "label": "Navigate to UCPath Entry Sheet section",
+      "selectorFqn": "crm.sectionNav.byName",
+      "summary": "navigateToSection(page, 'UCPath Entry Sheet'): fast path via CRM_SECTION_URLS direct URL with ?id=recordId when section URL known; fallback clicks sectionNav.byName(page, sectionName).first(); waits networkidle"
+    },
+    {
+      "id": "crm.sso-login#control",
+      "kind": "control",
+      "system": "crm",
+      "label": "ACT CRM SSO login (kernel-managed)",
+      "summary": "requireLogin(loginToACTCrm, 'ACT CRM authentication failed') — kernel prepends auth step when authSteps: true; Duo MFA auto-cleared by duo-autopilot extension",
+      "note": "loginToACTCrm defined in src/infra/auth/login.ts. No handler-visible selectors — kernel owns the auth page interactions."
+    },
+    {
+      "id": "crm.stampCrmData#control",
+      "kind": "control",
+      "system": "crm",
+      "label": "Stamp CRM-sourced fields and capture screenshot",
+      "summary": "ctx.updateData({ crmMatch, crmMatchedEmplId?, startDate, payrollTitle }); stampCrmStartDateAndScreenshot: ctx.captureAndStampScreenshot('crm-record', 'crmRecordScreenshot') on found record, or 'crmSearchScreenshot' on no-record / error",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts"
+    },
+    {
+      "id": "crm.stampCrmDates#control",
+      "kind": "control",
+      "system": "crm",
+      "label": "Stamp CRM date fields onto tracker row",
+      "summary": "ctx.updateData({ employmentDate, oathDate }); best-effort — empty results or errors log and return without failing the run",
+      "sourceRef": "src/workflows/person-lookup/workflow.ts"
+    }
+  ]
+}
