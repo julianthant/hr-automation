@@ -27,9 +27,9 @@ Full file-by-file reference for `src/core/`. Orientation, design invariants, and
 - `registry.ts` — lockfile read/write, PID + `/whoami` liveness, `findAliveDaemons`, `spawnDaemon`.
 - `queue.ts` — `enqueueItems`, `claimNextItem`, `markItemDone`/`Failed`/`Cancelled`, `unclaimItem`, `recoverOrphanedClaims`, `readQueueState`.
 - `client.ts` — `ensureDaemonsAndEnqueue(wf, inputs, flags, opts)` — the ONE function every daemon-mode CLI adapter calls.
-- `daemon.ts` — `runWorkflowDaemon(wf, opts)`: long-running daemon main loop. HTTP surface: `GET /whoami`, `POST /wake`, `POST /stop`. Delegates shutdown/cleanup, worker-command handling, and auth-timing rotation to sibling modules.
+- `daemon.ts` — `runWorkflowDaemon(wf, opts)`: long-running daemon main loop. HTTP surface: `GET /whoami`, `GET /status`, `GET /screenshot`, `POST /wake`, `POST /stop`, `POST /cancel-current`. Delegates shutdown/cleanup, worker-command handling, and auth-timing rotation to sibling modules.
 - `shutdown.ts` — `runDaemonShutdownCleanup`, `buildShutdownTrackerData`, `createAbortLaunchAndKillSession`. Terminalizes queued + in-flight items, preserves display metadata on cancellation rows.
-- `worker-commands.ts` — `createHandleWorkerCommand`, `createPollWorkerCommands`, `startWorkerTickInterval`. Routes `cancel_task` / `drain_worker` / `stop_worker` / `kill_browser` / `health_check`; defaults unknown command types to `failCommand` so orphan recovery isn't blocked.
+- `worker-commands.ts` — `createHandleWorkerCommand`, `createPollWorkerCommands`, `startWorkerTickInterval`. Routes `cancel_task` / `drain_worker` / `stop_worker` / `kill_browser` / `health_check` / `refresh_browser` / `reopen_browser` / `focus_browser` / `set_auto_recovery`; defaults unknown command types to `failCommand` so orphan recovery isn't blocked.
 - `in-process-control.ts` — in-process control-DB hooks and SQLite metadata for HTTP / dashboard-initiated runs that still route cancellation through the shared `runRegistry`.
 - `auth-timing.ts` — daemon-only auth timing rotation: `snapshotStartupAuthTimings`, `buildClaimAnchoredAuthTimings`, `createDaemonItemAuthTimingResolver`. Startup session launch + observer wiring stays inline in `daemon.ts`.
 - `http.ts` — daemon HTTP server (express-like minimal server for control surface).

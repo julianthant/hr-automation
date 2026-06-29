@@ -1,6 +1,6 @@
 # Dashboard API Reference
 
-Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API surface, data types, JSONL format, frontend processing rules, workflow configuration, component hooks, icon/toast/styling conventions, and the frontend file tree.
+Full reference companion to `src/dashboard/CLAUDE.md`. Contains the primary API surface (not exhaustive), data types, JSONL format, frontend processing rules, workflow configuration, component hooks, icon/toast/styling conventions, and the frontend file tree.
 
 ## Endpoints
 
@@ -30,10 +30,26 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the complete API
 | `/api/retry-bulk` | POST | Body: `{workflow, ids?[], items?:[{workflowId?, id, runId?, date?}], date?, parentRunId?, source?, scope?}`. Batch footer sends `source:"batch-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `BulkRetryBar`, `BatchFooterActions` via `useWorkflowActionDispatcher` |
 | `/api/cancel-active-bulk` | POST | Body: `{workflow, items:[{id, status, runId?}]}` — `status` must be `pending` or `running`; bulk cancel queued + cooperative cancel running. | `StopAllButton` |
 | `/api/delete-bulk` | POST | Body: `{workflow, date, ids?[], items?:[{workflowId?, id, runId?, date?}], source?, scope?}` — delete many tracker rows + scoped screenshots. Batch footer sends `source:"batch-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `DeleteAllButton`, `BatchFooterActions` via `useWorkflowActionDispatcher` |
+| `/api/workflow-presentation` | GET | `Record<workflow, WorkflowPresentationConfig>` — full effective presentation map for all registered workflows. | `WorkflowModifier` page on mount |
+| `/api/workflow-presentation/:workflow` | GET | `WorkflowPresentationConfig` for one workflow (live override deep-merged over defaults). | `WorkflowModifier` per-workflow load |
+| `/api/workflow-presentation/:workflow` | POST | Body: `WorkflowPresentationConfig`. Persists a presentation override to `config/workflow-presentation/<workflow>.json`; hot-applied via `effectiveMetadata`. | `WorkflowModifier` Save |
+| `/api/workflow-presentation/:workflow` | DELETE | Removes the stored presentation override, reverting to schema defaults. | `WorkflowModifier` Reset |
+| `/api/workflow-presentation/:workflow/preview` | POST | Body: `WorkflowPresentationConfig`. Returns a preview projection without persisting. | `WorkflowModifier` live preview |
+| `/api/workflow-design/:workflow` | GET | `WorkflowDesignScaffold` — design-intent scaffold from `config/workflow-design/<workflow>.json` (git-tracked, human-readable). | `WorkflowModifier` design tab |
+| `/api/workflow-design/:workflow` | POST | Body: `WorkflowDesignScaffold`. Writes (or replaces) the design-intent scaffold + companion `.md` brief; the `.md` is generated — never hand-edit. | `WorkflowModifier` Generate scaffold |
+| `/api/workflow-design/:workflow` | DELETE | Removes the stored design scaffold. | `WorkflowModifier` design reset |
 | `/api/run-with-data` | POST | Body: `{workflow, id, data}`. Re-enqueues with `prefilledData` channel; kernel merges into ctx.data + workflow's extraction gate skips. | `EditDataTab` |
 | `/api/cancel-queued` | POST | Body: `{workflow, id, runId?, scope?, ocrSessionId?, parentRunId?, parentWorkflow?, parentItemId?, formType?, reason?}`. Normal queued rows cancel the SQLite task/attempt, write completed `worker_commands.cancel_task`, emit JSONL audit + tracker `failed` with `step:"cancelled"`, and return 409 if claimed. OCR prep rows set `ocrSessionId` and route through central action dispatch to OCR discard instead. | `RowCancelButton` via `useWorkflowActionDispatcher` |
 | `/api/cancel-running` | POST | Body: `{workflow, id, runId}`. Queues `worker_commands.cancel_task` for the owning worker; cooperative cancel happens at the next kernel step boundary. | `RowCancelButton` via `useWorkflowActionDispatcher` |
+| `/api/save-data` | POST | Body: `{workflow, id, date?, data}`. Persists ad-hoc data edits to the tracker row without re-enqueuing. | `EditDataTab` (save without re-run) |
+| `/api/delete-entry` | POST | Body: `{workflow, id, date?}`. Deletes a single tracker row and its scoped screenshots. | single-row `DeleteButton` via `useWorkflowActionDispatcher` |
 | `/api/browser/kill` | POST | Body: `{browserProcessId}` or `{pid}`. Kills only the recorded browser process row and records a `kill_browser` command. | _no React consumer today_ — prefer row cancel or daemon stop controls |
+| `/api/browser/refresh` | POST | Body: `{systemId?, browserProcessId?}`. Queues `refresh_browser`; daemon reloads the active tab for the target system without reopening. | `BrowserChip` Refresh button |
+| `/api/browser/reopen` | POST | Body: `{systemId?, browserProcessId?}`. Queues `reopen_browser`; daemon opens a fresh tab and re-navigates (no Duo). | `BrowserChip` Reopen button |
+| `/api/browser/focus` | POST | Body: `{systemId?, browserProcessId?}`. Queues `focus_browser`; brings the target browser window to front. | `BrowserChip` Focus button |
+| `/api/browser/check` | POST | Body: `{systemId?, browserProcessId?}`. Queues `health_check` for the target system; result surfaces in the next session event. | `BrowserChip` Check button |
+| `/api/browser/auto-recovery` | POST | Body: `{systemId?, browserProcessId?, enabled}`. Queues `set_auto_recovery`; toggles the tiered auto-recovery policy for the target system. | `BrowserChip` auto-recovery toggle |
+| `/api/browser/screenshot` | GET | Query: `systemId?`. Returns a PNG screenshot of the target system's current page. | `BrowserChip` screenshot preview |
 | `/api/worker/drain` | POST | Body: `{workerId}`. Queues `drain_worker`; worker stops after the current item without failing queued work. | _no React consumer today_ |
 | `/api/worker/stop` | POST | Body: `{workerId}`. Queues `stop_worker`; worker shuts down and hard-kills its active browser only on this explicit stop path. | _no React consumer today_ |
 | `/api/queue/bump` | POST | Body: `{workflow, id, runId?}`. Bumps a queued SQLite task priority so it is claimed next; legacy JSONL rewrite only applies when no task row exists. 409 if claimed. | `BumpButton` via `useWorkflowActionDispatcher` |
