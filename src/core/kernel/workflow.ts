@@ -93,10 +93,10 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     config.authSteps === false ? [] : config.systems.map((s) => `auth:${s.id}`)
   const effectiveSteps: readonly string[] = [...authPrefix, ...config.steps]
   const archetype: WorkflowArchetypeOrResolver<TData> =
-    config.archetype ?? (config.batch ? 'batch' : 'single')
+    config.archetype ?? (config.batch ? 'operation' : 'single')
   const metadataArchetype: WorkflowArchetype =
     typeof archetype === 'function'
-      ? (config.batch ? 'batch' : 'single')
+      ? (config.batch ? 'operation' : 'single')
       : archetype
   // Presentation kind is DERIVED from the declared input subject (defaults to
   // `name` → person — the majority shape; the architecture guard enforces an

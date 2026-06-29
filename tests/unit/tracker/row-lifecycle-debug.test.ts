@@ -109,14 +109,14 @@ describe("buildRowLifecycles", () => {
     assert.ok(row.events.some((e) => e.type === "reassign"));
   });
 
-  it("does not flag a post-terminal surface flip for stable batch anchors", () => {
-    // Oath-signature PDF rows are real batch anchors now. Adding the signer
-    // member changes member count, but the parent stays card:batch.
+  it("does not flag a post-terminal surface flip for stable operation anchors", () => {
+    // Oath-signature PDF rows are real operation anchors now. Adding the signer
+    // member changes member count, but the parent stays card:operation.
     const rows = buildRowLifecycles("oath-signature", [
-      entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "pending", timestamp: ts(0), data: { archetype: "batch", mode: "prepare" } }),
-      entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "running", step: "ocr", timestamp: ts(1), data: { archetype: "batch", mode: "prepare" } }),
-      entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "done", step: "approved", timestamp: ts(2), data: { archetype: "batch", mode: "prepare" } }),
-      entry({ workflow: "oath-signature", id: "signer-1", runId: "k-1", parentRunId: "prep-run", status: "pending", timestamp: ts(3), data: { archetype: "batch-member" } }),
+      entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "pending", timestamp: ts(0), data: { archetype: "operation", mode: "prepare" } }),
+      entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "running", step: "ocr", timestamp: ts(1), data: { archetype: "operation", mode: "prepare" } }),
+      entry({ workflow: "oath-signature", id: "prep-1", runId: "prep-run", status: "done", step: "approved", timestamp: ts(2), data: { archetype: "operation", mode: "prepare" } }),
+      entry({ workflow: "oath-signature", id: "signer-1", runId: "k-1", parentRunId: "prep-run", status: "pending", timestamp: ts(3), data: { archetype: "operation-member" } }),
     ]);
     const parent = rows.find((r) => r.id === "prep-1")!;
     assert.ok(parent);
@@ -129,14 +129,14 @@ describe("buildRowLifecycles", () => {
 describe("resolveRowSurfaces", () => {
   it("classifies a batch with members as a card and members as member rows", () => {
     const surfaces = resolveRowSurfaces([
-      entry({ workflow: "oath-signature", id: "prep", runId: "prep-run", status: "running", step: "ocr", timestamp: ts(0), data: { archetype: "batch", mode: "prepare" } }),
-      entry({ workflow: "oath-signature", id: "m1", runId: "k1", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "batch-member" } }),
-      entry({ workflow: "oath-signature", id: "m2", runId: "k2", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "batch-member" } }),
+      entry({ workflow: "oath-signature", id: "prep", runId: "prep-run", status: "running", step: "ocr", timestamp: ts(0), data: { archetype: "operation", mode: "prepare" } }),
+      entry({ workflow: "oath-signature", id: "m1", runId: "k1", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "operation-member" } }),
+      entry({ workflow: "oath-signature", id: "m2", runId: "k2", parentRunId: "prep-run", status: "running", timestamp: ts(1), data: { archetype: "operation-member" } }),
     ]);
-    assert.equal(surfaces.get("prep")?.surface, "card:batch");
+    assert.equal(surfaces.get("prep")?.surface, "card:operation");
     assert.deepEqual(surfaces.get("prep")?.memberIds, ["m1", "m2"]);
-    assert.equal(surfaces.get("m1")?.surface, "member:batch");
-    assert.equal(surfaces.get("m2")?.surface, "member:batch");
+    assert.equal(surfaces.get("m1")?.surface, "member:operation");
+    assert.equal(surfaces.get("m2")?.surface, "member:operation");
   });
 
   it("classifies an unparented single row as flat", () => {

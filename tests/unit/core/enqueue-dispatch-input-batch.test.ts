@@ -97,8 +97,8 @@ test("enqueueFromHttp marks multi-value input-run batches as normal batch member
   assert.equal(queuedInputs.length, 2);
   assert.equal(typeof opts.parentRunId, "string");
   assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.preset, "lookup-only");
-  assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "batch-member");
-  assert.equal((queuedInputs[1] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "batch-member");
+  assert.equal((queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "operation-member");
+  assert.equal((queuedInputs[1] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape, "operation-member");
 });
 
 test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members", async () => {
@@ -135,9 +135,13 @@ test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members
   opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, "Doe, Jane");
 
   const rows = readRows(trackerDir, "person-lookup");
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
-  assert.deepEqual(rows.map((row) => row.data?.archetype), ["batch-member", "batch-member"]);
+  assert.equal(rows.length, 3, "coordinator + 2 members");
+  const coordinator = rows.find((row) => row.data?.archetype === "operation");
+  assert.ok(coordinator, "emits an operation coordinator row");
+  assert.equal(coordinator?.runId, opts.parentRunId);
+  const members = rows.filter((row) => row.data?.archetype === "operation-member");
+  assert.equal(members.length, 2);
+  assert.deepEqual(members.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
 });
 
 test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysBatchInputRun)", async () => {
@@ -169,13 +173,14 @@ test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysBatch
   assert.equal(typeof opts.parentRunId, "string", "single oath EID still gets a batch parentRunId");
   assert.equal(
     (queuedInputs[0] as { __runtimeOptions: Record<string, unknown> }).__runtimeOptions.rowShape,
-    "batch-member",
+    "operation-member",
   );
   opts.onPreEmitPending(queuedInputs[0], "run-1", opts.parentRunId, "10000001");
   const rows = readRows(trackerDir, "oath-signature");
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.parentRunId, opts.parentRunId);
-  assert.equal(rows[0]?.data?.archetype, "batch-member");
+  assert.equal(rows.length, 2, "coordinator + 1 member");
+  assert.ok(rows.some((row) => row.data?.archetype === "operation"));
+  const member = rows.find((row) => row.data?.archetype === "operation-member");
+  assert.equal(member?.parentRunId, opts.parentRunId);
 });
 
 test("enqueueFromHttp pre-emits oath-signature multi-EID input runs as batch members", async () => {
@@ -212,7 +217,9 @@ test("enqueueFromHttp pre-emits oath-signature multi-EID input runs as batch mem
   opts.onPreEmitPending(queuedInputs[1], "run-2", opts.parentRunId, "10000002");
 
   const rows = readRows(trackerDir, "oath-signature");
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
-  assert.deepEqual(rows.map((row) => row.data?.archetype), ["batch-member", "batch-member"]);
+  assert.equal(rows.length, 3, "coordinator + 2 members");
+  assert.ok(rows.some((row) => row.data?.archetype === "operation"));
+  const members = rows.filter((row) => row.data?.archetype === "operation-member");
+  assert.equal(members.length, 2);
+  assert.deepEqual(members.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
 });

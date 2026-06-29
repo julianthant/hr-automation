@@ -126,7 +126,7 @@ function resolveDelegateArchetype<TData, TSteps extends readonly string[]>(
   )
 }
 
-function withBatchMemberRuntimeOptions<TInput>(input: TInput, renderAs?: DelegateRenderAs): TInput {
+function withOperationMemberRuntimeOptions<TInput>(input: TInput, renderAs?: DelegateRenderAs): TInput {
   if (renderAs !== "batch" || !input || typeof input !== "object" || Array.isArray(input)) {
     return input
   }
@@ -135,7 +135,7 @@ function withBatchMemberRuntimeOptions<TInput>(input: TInput, renderAs?: Delegat
     ...(input as Record<string, unknown>),
     __runtimeOptions: {
       ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
-      rowShape: "batch-member",
+      rowShape: "operation-member",
     },
   } as TInput
 }
@@ -302,7 +302,7 @@ async function runInProcessAndCollectResult<TChildData, TChildSteps extends read
 export async function delegateToImpl<TChildData, TChildSteps extends readonly string[]>(
   args: DelegateCoreArgs<TChildData, TChildSteps>,
 ): Promise<ChildRunResult<TChildData>> {
-  const childInput = withBatchMemberRuntimeOptions(args.input, args.renderAs)
+  const childInput = withOperationMemberRuntimeOptions(args.input, args.renderAs)
   const childItemId =
     args.itemId
     ?? args.child.config.deriveItemId?.(args.input)
@@ -501,7 +501,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
   if (args.inputs.length === 0) return []
 
   const queuedInputs = args.inputs.map((input) =>
-    withRootRuntimeOptions(withBatchMemberRuntimeOptions(input, args.renderAs), {
+    withRootRuntimeOptions(withOperationMemberRuntimeOptions(input, args.renderAs), {
       ...(args.rootCode ? { rootCode: args.rootCode } : {}),
       ...(args.rootTracePrefix ? { rootTracePrefix: args.rootTracePrefix } : {}),
     }),

@@ -11,11 +11,9 @@ import {
  * derived status drives the dashboard badge that replaces the base `done`.
  */
 function entry(eidApproval?: string) {
-  return {
-    workflow: "separations",
-    status: "done",
-    data: eidApproval === undefined ? {} : { eidApproval },
-  };
+  const data: Record<string, string> = {};
+  if (eidApproval !== undefined) data.eidApproval = eidApproval;
+  return { workflow: "separations", status: "done", data };
 }
 
 describe("separationEidApprovalState", () => {

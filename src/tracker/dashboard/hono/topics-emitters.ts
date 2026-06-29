@@ -12,6 +12,7 @@ import {
   mapRunEventRowToWire,
   queryEntriesPayload,
   querySessionEventsForRun,
+  selectChildRunEntriesForCoordinator,
   selectLogsForRun,
   selectRunEventsForRun,
 } from "../../../tracker/state/queries.js";
@@ -22,6 +23,7 @@ import {
   getEventSortKey,
   rebuildSessionState,
   resolveInstanceForRun,
+  resolveInstanceForOperationCoordinator,
 } from "../session-state.js";
 import { log } from "../../../utils/log.js";
 import { getDefaultWorkflow, getProjectionDb } from "./context.js";
@@ -346,6 +348,23 @@ export const runEventsTopic: TopicEmitter<{
           ...(itemId ? { itemId } : {}),
           runId: requestedRunId,
         }).flatMap((row) => { const e = mapRunEventRowToWire(row); return e ? [e] : []; });
+        // Operation coordinator rows (archetype:"operation") have no data.instance
+        // themselves — the daemon processes the member items, each carrying the
+        // real data.instance via parentRunId. The coordinator-only query above
+        // never returns member entries. Supplement with child rows so that
+        // resolveInstanceForOperationCoordinator and filterEventsForRun can find
+        // them (they search by parentRunId). This is a targeted, indexed lookup
+        // only when the direct instance lookup misses, keeping the common path
+        // (normal single/batch rows that carry data.instance directly) unchanged.
+        if (
+          requestedRunId &&
+          resolveInstanceForRun(trackerEntries, requestedRunId) === undefined
+        ) {
+          const childEntries = selectChildRunEntriesForCoordinator(deps.stateDb, requestedRunId);
+          if (childEntries.length > 0) {
+            trackerEntries = [...trackerEntries, ...childEntries];
+          }
+        }
       } catch (err) {
         usedTrackerSqlite = false;
         log.warn(
@@ -363,13 +382,23 @@ export const runEventsTopic: TopicEmitter<{
     let allEvents: Awaited<ReturnType<typeof readSessionEventsTolerant>> = [];
     let usedSqlite = deps.projectionReady && deps.stateDb !== undefined;
     if (deps.projectionReady && deps.stateDb) {
-      // Use `resolveInstanceForRun` (not `Array.find`) so we keep walking past
-      // pending rows that lack `data.instance` and pick up the first row that
-      // actually carries the batch instance. Without this, the SQLite query
-      // runs without `workflowInstance` and batch-scope events (workflow_start,
-      // browser_launch, auth_*, duo_*) — which carry no runId — never enter
-      // `allEvents` for `filterEventsForRun` to attribute.
-      const wfInstance = resolveInstanceForRun(trackerEntries, requestedRunId);
+      // Resolve the workflowInstance for the requested run so the SQLite query
+      // can fetch batch-scope events (workflow_start, browser_launch, auth_*,
+      // duo_*, idle_signal) that carry no runId.
+      //
+      // For most runs, `resolveInstanceForRun` finds the instance directly on a
+      // tracker row with `runId === requestedRunId`.
+      //
+      // Operation coordinator rows (archetype:"operation") are display-only
+      // pending rows that have NO `data.instance` — the daemon processes the
+      // member items, each of which carries the real `data.instance`. After the
+      // child-entry supplement above, `trackerEntries` now contains both the
+      // coordinator row AND its member rows, so `resolveInstanceForOperationCoordinator`
+      // finds the instance via the child fallback path and `filterEventsForRun`
+      // can include the daemon lifecycle events in the coordinator's window.
+      const wfInstance =
+        resolveInstanceForRun(trackerEntries, requestedRunId) ??
+        resolveInstanceForOperationCoordinator(trackerEntries, requestedRunId);
       try {
         const sqliteEvents = querySessionEventsForRun(deps.stateDb, {
           runId: requestedRunId,

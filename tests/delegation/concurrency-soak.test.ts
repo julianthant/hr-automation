@@ -13,7 +13,7 @@
  *   - No count drift:  5 distinct child runIds total; cancelled → Cancelled;
  *                      released → Done.
  *   - Sibling independence: releasing childA3 while A1/A2 cancel does not harm it.
- *   - Projection:      archetype === "batch-member"; parentRunId correct.
+ *   - Projection:      archetype === "operation-member"; parentRunId correct.
  *   - Group anchors:   parentA.memberCount === 3; parentB.memberCount === 2.
  *   - .tracker/ untouched: temp dir only; real .tracker/ never written.
  *
@@ -269,7 +269,7 @@ async function runIteration(
     const row = dash.row("soak-child", runId);
     assert.equal(
       row.archetype,
-      "batch-member",
+      "operation-member",
       `[iter ${iteration}] run ${runId} must be batch-member, got ${row.archetype}`,
     );
     assert.equal(

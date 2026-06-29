@@ -129,7 +129,7 @@ test("delegated OCR prep rows use PDF name as title and inherited Oath title as 
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "running",
     data: {
-      archetype: "batch",
+      archetype: "operation",
       mode: "prepare",
       pdfOriginalName: "packet.pdf",
       __queueTitle: "Oath · 1234",
@@ -154,7 +154,7 @@ test("delegated oath-signature PDF batch rows use the PDF name instead of the wo
     timestamp: "2026-05-18T12:00:00.000Z",
     status: "running",
     data: {
-      archetype: "batch",
+      archetype: "operation",
       pdfOriginalName: "upload-packet.pdf",
       __name: "upload-packet.pdf",
       __id: "oath-session-1",

@@ -142,7 +142,7 @@ test("ctx.delegateTo stamps a natural batch child as batch when it has a parent"
 
   const child = defineWorkflow({
     name: "deleg-child-batch-natural",
-    archetype: "batch",
+    archetype: "operation",
     systems: [],
     authSteps: false,
     steps: ["work"] as const,
@@ -175,13 +175,13 @@ test("ctx.delegateTo stamps a natural batch child as batch when it has a parent"
   const pending = lines.find((l) => l.status === "pending");
   const done = lines.find((l) => l.status === "done");
   assert.ok(pending, "child pending row must be emitted");
-  assert.equal((pending!.data as { archetype?: string }).archetype, "batch");
+  assert.equal((pending!.data as { archetype?: string }).archetype, "operation");
   assert.deepEqual(pending!.input, {
     pdfOriginalName: "oath-batch.pdf",
     sessionId: "oath-session-1",
   });
   assert.ok(done, "child done row must be emitted");
-  assert.equal((done!.data as { archetype?: string }).archetype, "batch");
+  assert.equal((done!.data as { archetype?: string }).archetype, "operation");
 });
 
 test("delegateToAllImpl with concurrency: 1 runs children sequentially", async (t) => {

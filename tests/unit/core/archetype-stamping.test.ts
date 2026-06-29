@@ -37,7 +37,7 @@ describe("archetype stamping on WorkflowConfig", () => {
     assert.equal(wf.archetype, "single");
   });
 
-  it("workflow with batch declared defaults to 'batch'", () => {
+  it("workflow with batch declared defaults to 'operation'", () => {
     const wf = defineWorkflow({
       name: "test-batch-default-archetype",
       label: "Test",
@@ -51,6 +51,6 @@ describe("archetype stamping on WorkflowConfig", () => {
       operatorSubject: () => ({ value: "test", kind: "eid" as const, label: "Test" }),
       handler: async () => {},
     });
-    assert.equal(wf.archetype, "batch");
+    assert.equal(wf.archetype, "operation");
   });
 });

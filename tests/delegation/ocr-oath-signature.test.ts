@@ -42,7 +42,7 @@ async function waitForQueue(
  * projection matches production: `inputSubject:"eid"` (→ person kind),
  * `code:"os"`, `archetype:"single"`, the real runtime policy (which sets
  * `delegation.alwaysBatchDelegatedMembers:true` so even one delegated signer
- * renders as a batch surface), and `initialData`/`getId`/`operatorSubject` that
+ * renders as an operation surface), and `initialData`/`getId`/`operatorSubject` that
  * stamp `emplId` so the person-kind footer subtitle resolves to the EID. Gated
  * at `transaction` (after `ucpath-auth`), exactly where a real signer parks
  * before its UCPath write — the stage we hold/cancel/release.
@@ -195,7 +195,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   for (const c of [c1!, c2!, c3!]) {
     const row = dash.row("oath-signature", c.runId);
     assert.equal(row.parentRunId, PARENT_RUN, `signer ${c.itemId} parentRunId === the delegating run`);
-    assert.equal(row.archetype, "batch-member", `signer ${c.itemId} is a batch-member`);
+    assert.equal(row.archetype, "operation-member", `signer ${c.itemId} is a batch-member`);
     const emplId = row.data.emplId;
     assert.ok(emplId && byEid[emplId], `signer ${c.itemId} carries a known EID (got ${emplId})`);
     // Title-by-kind: person → resolved name.
@@ -218,7 +218,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   // members), subtitle = trace id (anchor uses preferTraceIdSubtitle).
   const anchor = dash.groupAnchor("oath-signature", PARENT_RUN);
   assert.equal(anchor.memberCount, 3, "oath-signature group anchor has 3 members");
-  assert.equal(anchor.kind, "batch", "delegated signer members render as a batch surface");
+  assert.equal(anchor.kind, "operation", "delegated signer members render as an operation surface");
   assert.equal(anchor.subtitle, "<traceId>", "group anchor subtitle is the trace id");
 
   // No count drift: exactly 3 distinct signer runs surfaced (no orphan/double).

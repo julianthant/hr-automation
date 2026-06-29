@@ -10,30 +10,17 @@ export type RowArchetype =
   | "single"
   /** One review/approval row with a preview surface. Workflow: OCR. */
   | "preview"
-  /** Anchor row over N people/subjects, or a parent that will fan out to people after approval. */
-  | "batch"
-  /** Peer person/subject row under a batch anchor or grouped input-run parent. */
-  | "batch-member"
   /**
-   * Top-level run tracker / coordinator for an OCR-backed target workflow
-   * (oath-signature, emergency-contact). Lives in the target workflow's panel,
-   * holds lightweight OCR status before approval, and summarizes the fanned-out
-   * child rows (signers / contacts) after approval. Distinct from `batch`: it is
-   * a coordinator that may have zero members for most of its life, not a batch
-   * anchor over a known person set. It is a **display** row with no daemon task
-   * of its own, stamped explicitly at the OCR prepare route — it is intentionally
-   * NOT a `WorkflowArchetype`, so `deriveRowArchetype` never produces it.
+   * Top-level run tracker / coordinator for an input-run parent or an OCR-backed
+   * target workflow (oath-signature, emergency-contact). Holds lightweight OCR
+   * status before approval and summarizes fanned-out child rows after approval.
+   * May be a display-only row with no daemon task when stamped at OCR prepare.
    */
   | "operation"
   /**
-   * Peer person/subject row fanned out under an {@link "operation"} coordinator
-   * (an oath-signature signer / emergency-contact contact row created by the OCR
-   * approve fan-out of a target-workflow operation run). The operation analogue
-   * of `batch-member`: it nests under the operation parent (`parentRunId`) and
-   * renders inside the coordinator card, NOT as a standalone single row or under
-   * a batch anchor. Stamped via the `operation-member` row-shape runtime option
-   * (set on the fan-out input when `operationWorkflow` is an operation
-   * coordinator), so it survives the SQLite task store to the daemon re-emit.
+   * Peer person/subject row fanned out under an {@link "operation"} coordinator.
+   * Nests under the operation parent (`parentRunId`) and renders inside the
+   * coordinator card. Stamped via the `operation-member` row-shape runtime option.
    */
   | "operation-member";
 
@@ -48,28 +35,21 @@ export type WorkflowArchetype =
   | "single"
   /** Emits one preview/approval row. Example: OCR. */
   | "preview"
-  /** Emits a grouped parent row or upload/approval path that fans out to batch-member rows. */
-  | "batch";
+  /** Emits an operation coordinator row (input-run parent or OCR-backed coordinator). */
+  | "operation";
 
 const LABELS: Record<RowArchetype, string> = {
   "single": "Single",
   "preview": "Preview",
-  "batch": "Batch",
-  "batch-member": "Batch member",
   "operation": "Operation",
   "operation-member": "Operation member",
 };
 
-/**
- * Member row shapes — the delegated/fanned-out peer rows that nest under a
- * grouping anchor. `batch-member` nests under a `batch` anchor; `operation-member`
- * nests under an `operation` coordinator. Carried on the `rowShape` runtime
- * option so the shape survives the SQLite task store to the daemon re-emit.
- */
-export type MemberRowShape = "batch-member" | "operation-member";
+/** Delegated/fanned-out peer rows that nest under an operation coordinator. */
+export type MemberRowShape = "operation-member";
 
 export function isMemberRowShape(v: unknown): v is MemberRowShape {
-  return v === "batch-member" || v === "operation-member";
+  return v === "operation-member";
 }
 
 export function archetypeRowTypeLabel(archetype: RowArchetype): string {
@@ -83,6 +63,13 @@ interface ResolveEntry {
 
 export interface DelegationRoleEntry {
   data?: Record<string, unknown> | null;
+}
+
+/** Legacy JSONL stamps still encountered in older tracker files. */
+function normalizeLegacyRowArchetype(stamped: unknown): RowArchetype | undefined {
+  if (stamped === "batch") return "operation";
+  if (stamped === "batch-member") return "operation-member";
+  return undefined;
 }
 
 /**
@@ -103,6 +90,8 @@ export function resolveRowArchetype(entry: ResolveEntry): RowArchetype {
   if (stamped === undefined || stamped === null) {
     return "single";
   }
+  const legacy = normalizeLegacyRowArchetype(stamped);
+  if (legacy) return legacy;
   if (typeof stamped === "string" && isRowArchetype(stamped)) return stamped;
   throw new Error(
     `resolveRowArchetype: data.archetype is set but not a valid RowArchetype — bug. ` +
@@ -114,8 +103,6 @@ export function isRowArchetype(v: string): v is RowArchetype {
   return (
     v === "single" ||
     v === "preview" ||
-    v === "batch" ||
-    v === "batch-member" ||
     v === "operation" ||
     v === "operation-member"
   );
@@ -133,9 +120,6 @@ export function hasDelegationRole(entry: DelegationRoleEntry, role: "dispatch"):
 /**
  * `WorkflowConfig.archetype` accepts either a literal `WorkflowArchetype` or
  * a resolver function that decides the archetype from the validated input.
- * The resolver form lets a workflow declare different row shapes for
- * different input variants (e.g. oath-signature is `batch` when called with
- * `{ kind: "pdf" }` and `single` when called with `{ kind: "signer" }`).
  *
  * Use `resolveArchetype(config, input)` (or `resolveArchetypeFromValue`) at
  * every read site rather than reading `config.archetype` / `wf.archetype`
@@ -150,7 +134,7 @@ export type WorkflowArchetypeOrResolver<TInput> =
 const VALID_WORKFLOW_ARCHETYPES = new Set<string>([
   "single",
   "preview",
-  "batch",
+  "operation",
 ]);
 
 function isWorkflowArchetype(v: unknown): v is WorkflowArchetype {
@@ -167,7 +151,7 @@ export function resolveArchetypeFromValue<TInput>(
     if (!isWorkflowArchetype(result)) {
       throw new Error(
         `resolveArchetype: workflow '${workflowName}' archetype resolver returned ${JSON.stringify(result)}, ` +
-        `which is not a valid WorkflowArchetype (expected one of: single, preview, batch).`,
+        `which is not a valid WorkflowArchetype (expected one of: single, preview, operation).`,
       );
     }
     return result;
@@ -175,7 +159,7 @@ export function resolveArchetypeFromValue<TInput>(
   if (!isWorkflowArchetype(archetype)) {
     throw new Error(
         `resolveArchetype: workflow '${workflowName}' has invalid literal archetype ${JSON.stringify(archetype)} ` +
-        `(expected one of: single, preview, batch).`,
+        `(expected one of: single, preview, operation).`,
     );
   }
   return archetype;
@@ -198,16 +182,6 @@ export function resolveArchetype<TInput>(
  * Derive the RowArchetype for a single tracker row given the workflow's
  * declared WorkflowArchetype and whether the row has a parent run.
  * Used by pre-emit write sites that don't go through withTrackedWorkflow.
- *
- * Mapping:
- *   memberShape (rowShape option)  → that shape ("batch-member" | "operation-member")
- *   member: true                   → "batch-member" (legacy renderAs:"batch" path)
- *   workflowArchetype === "preview" → "preview"
- *   workflowArchetype === "batch"  → "batch"
- *   everything else                → "single"
- *
- * `parentRunId` does not affect the stamped archetype. It only determines
- * whether the row is scoped as root or delegated at projection time.
  */
 export function deriveRowArchetype(
   workflowArchetype: WorkflowArchetype,
@@ -215,7 +189,8 @@ export function deriveRowArchetype(
   opts?: { member?: boolean; memberShape?: MemberRowShape },
 ): RowArchetype {
   if (opts?.memberShape) return opts.memberShape;
-  if (opts?.member) return "batch-member";
+  if (opts?.member) return "operation-member";
   if (workflowArchetype === "preview") return "preview";
-  return workflowArchetype === "batch" ? "batch" : "single";
+  if (workflowArchetype === "operation") return "operation";
+  return "single";
 }

@@ -1,4 +1,5 @@
 import { resolveRowArchetype, type RowArchetype } from "../domain/row-archetype.js";
+import { runIdFragment, tracePrefix } from "../domain/queue-trace-id.js";
 import {
   getWorkflowRuntimePolicy,
   type WorkflowRuntimePolicyLookup,
@@ -18,20 +19,14 @@ export function classifyTrackerRow(entry: TrackerEntry): TrackerRowClassificatio
   };
 }
 
-function isBatchAnchor(entry: TrackerEntry): boolean {
-  return classifyTrackerRow(entry).shape === "batch";
+function isLegacyBatchAnchor(entry: TrackerEntry): boolean {
+  const stamped = entry.data?.archetype;
+  return stamped === "batch" && !isPreviewAnchor(entry);
 }
 
-/**
- * Operation anchors are top-level coordinator rows for OCR-backed target
- * workflows (oath-signature, emergency-contact). They are always visible in
- * their own workflow panel, hold lightweight OCR status before approval, and
- * summarize fanned-out child rows (signers / contacts) after approval. Unlike a
- * batch anchor they have no daemon task of their own and may sit with zero
- * members for most of their life.
- */
 function isOperationAnchor(entry: TrackerEntry): boolean {
-  return classifyTrackerRow(entry).shape === "operation";
+  const shape = classifyTrackerRow(entry).shape;
+  return shape === "operation" || isLegacyBatchAnchor(entry);
 }
 
 function isPreviewAnchor(entry: TrackerEntry): boolean {
@@ -39,7 +34,7 @@ function isPreviewAnchor(entry: TrackerEntry): boolean {
   if (classification.shape === "preview") return true;
   // Compatibility for older OCR JSONL rows written before `preview` became a
   // first-class archetype. Forward writes should stamp `preview`.
-  return classification.shape === "batch" && entry.workflow === "ocr" && entry.data?.mode === "prepare";
+  return entry.data?.archetype === "batch" && entry.workflow === "ocr" && entry.data?.mode === "prepare";
 }
 
 function entryKey(entry: Pick<TrackerEntry, "workflow" | "id" | "runId">): string {
@@ -64,25 +59,7 @@ function isApprovedPreviewRow(e: TrackerEntry): boolean {
   return e.status === "done" && e.step === "approved";
 }
 
-function isVisibleBatchAnchor(e: TrackerEntry): boolean {
-  return isBatchAnchor(e) && !isPreviewAnchor(e);
-}
-
-function isVisiblePreviewAnchor(e: TrackerEntry): boolean {
-  return isPreviewAnchor(e) && !isDiscardedPreviewRow(e);
-}
-
-function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
-  return entry.runId ?? entry.id;
-}
-
-/**
- * True when the entry's workflow opts into batching its delegated rows even at
- * a count of one (`delegation.alwaysBatchDelegatedMembers`). Keeps a single
- * fanned-out signer / person-lookup result rendering as a one-member batch
- * instead of collapsing to a standalone single row.
- */
-function forcesBatchWhenDelegated(
+function forcesOperationWhenDelegated(
   entry: TrackerEntry,
   runtimePolicies?: WorkflowRuntimePolicyLookup,
 ): boolean {
@@ -98,13 +75,41 @@ function rootPersistingParentRunIds(
 ): Set<string> {
   const runIds = new Set<string>();
   for (const entry of entries) {
-    if (!isVisibleBatchAnchor(entry)) continue;
+    if (!isOperationAnchor(entry)) continue;
     const policy = getWorkflowRuntimePolicy(entry.workflow, runtimePolicies);
     if (policy.delegation?.rootRowPersistsThroughChildren) {
       runIds.add(runIdFor(entry));
     }
   }
   return runIds;
+}
+
+function isVisiblePreviewAnchor(e: TrackerEntry): boolean {
+  return isPreviewAnchor(e) && !isDiscardedPreviewRow(e);
+}
+
+function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
+  return entry.runId ?? entry.id;
+}
+
+function buildSyntheticOperationParent(parentRunId: string, members: TrackerEntry[]): TrackerEntry {
+  const first = members[0]!;
+  const memberTrace = first.data?.__traceId;
+  const prefix =
+    typeof memberTrace === "string" && memberTrace.length > 0 ? tracePrefix(memberTrace) : undefined;
+  const tail = runIdFragment(parentRunId);
+  const composedTrace = prefix && tail ? `${prefix}-${tail}` : undefined;
+  return {
+    workflow: first.workflow,
+    timestamp: first.timestamp,
+    id: `input-run-${parentRunId.slice(0, 8)}`,
+    runId: parentRunId,
+    status: "pending",
+    data: {
+      archetype: "operation",
+      ...(composedTrace ? { __traceId: composedTrace } : {}),
+    },
+  };
 }
 
 function buildMembersByParentRunId(
@@ -114,7 +119,7 @@ function buildMembersByParentRunId(
   const map = new Map<string, TrackerEntry[]>();
   for (const entry of entries) {
     if (!entry.parentRunId) continue;
-    if ((isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry)) && !rootPersistingRunIds.has(entry.parentRunId)) {
+    if ((isOperationAnchor(entry) || isVisiblePreviewAnchor(entry)) && !rootPersistingRunIds.has(entry.parentRunId)) {
       continue; // grouped rows are anchors, not members
     }
     const list = map.get(entry.parentRunId) ?? [];
@@ -138,14 +143,6 @@ export interface TrackerPreviewSurface {
   parent: TrackerEntry;
   members: TrackerEntry[];
   approvalState: "awaiting-approval" | "approved" | "discarded";
-  titleOverride?: string;
-}
-
-export interface TrackerBatchSurface {
-  kind: "batch";
-  parentRunId: string;
-  parent?: TrackerEntry;
-  members: TrackerEntry[];
   titleOverride?: string;
 }
 
@@ -175,7 +172,6 @@ export interface TrackerOperationSurface {
 
 export type TrackerQueueGroupSurface =
   | TrackerPreviewSurface
-  | TrackerBatchSurface
   | TrackerOperationSurface;
 
 export interface TrackerQueueSurfaces {
@@ -248,17 +244,11 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   );
   const rootPersistingRunIds = rootPersistingParentRunIds(visibleSources, input.runtimePolicies);
   const membersByParentRunId = buildMembersByParentRunId(visibleSources, rootPersistingRunIds);
-  const batchAnchors = visibleEntries.filter(isVisibleBatchAnchor);
-  const previewAnchors = visibleEntries.filter(isVisiblePreviewAnchor);
   const operationAnchors = visibleEntries.filter(isOperationAnchor);
-  const batchAnchorRunIds = new Set(batchAnchors.map((entry) => entry.runId ?? entry.id));
-  const previewAnchorRunIds = new Set(previewAnchors.map((entry) => entry.runId ?? entry.id));
+  const previewAnchors = visibleEntries.filter(isVisiblePreviewAnchor);
   const operationAnchorRunIds = new Set(operationAnchors.map((entry) => entry.runId ?? entry.id));
-  const anchoredParentRunIds = new Set([
-    ...batchAnchorRunIds,
-    ...previewAnchorRunIds,
-    ...operationAnchorRunIds,
-  ]);
+  const previewAnchorRunIds = new Set(previewAnchors.map((entry) => entry.runId ?? entry.id));
+  const anchoredParentRunIds = new Set([...operationAnchorRunIds, ...previewAnchorRunIds]);
   const approvalParentRunIds = new Set([...previewAnchorRunIds]);
   const singleChildEntries: TrackerEntry[] = [];
 
@@ -276,11 +266,6 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     });
   }
 
-  // Operation coordinator rows: always visible in their own panel even at zero
-  // members. Their member children (signers / contacts) attach by parentRunId
-  // after approval; the OCR relation is surfaced as a lightweight status link
-  // (from the denormalized `data.ocr*` fields on the row), never duplicated as a
-  // full OCR row.
   for (const parent of operationAnchors) {
     const parentRunId = parent.runId ?? parent.id;
     const members = membersByParentRunId.get(parentRunId) ?? [];
@@ -296,37 +281,26 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     });
   }
 
-  for (const parent of batchAnchors) {
-    const parentRunId = parent.runId ?? parent.id;
-    const members = membersByParentRunId.get(parentRunId) ?? [];
-    groupRows.push({
-      kind: "batch",
-      parentRunId,
-      parent,
-      members,
-      titleOverride: titleOverrideForAnchor(parent),
-    });
-  }
-
   for (const [parentRunId, members] of membersByParentRunId) {
     if (anchoredParentRunIds.has(parentRunId)) continue;
     // A lone delegated child normally renders as a flat single row — unless its
     // workflow opts into `alwaysBatchDelegatedMembers` (oath-signature,
-    // person-lookup), where even one member stays a one-member batch surface.
-    if (members.length === 1 && !forcesBatchWhenDelegated(members[0]!, input.runtimePolicies)) {
+    // person-lookup), where even one member stays a one-member operation surface.
+    if (members.length === 1 && !forcesOperationWhenDelegated(members[0]!, input.runtimePolicies)) {
       singleChildEntries.push(members[0]!);
       continue;
     }
     groupRows.push({
-      kind: "batch",
+      kind: "operation",
       parentRunId,
+      parent: buildSyntheticOperationParent(parentRunId, members),
       members,
     });
   }
 
   const groupedParentRunIds = new Set(groupRows.map((surface) => surface.parentRunId));
   const visibleFlatEntries = visibleEntries.filter((entry) => {
-    if (isVisibleBatchAnchor(entry) || isVisiblePreviewAnchor(entry) || isOperationAnchor(entry)) {
+    if (isOperationAnchor(entry) || isVisiblePreviewAnchor(entry)) {
       return false;
     }
     if (entry.parentRunId && groupedParentRunIds.has(entry.parentRunId)) return false;
@@ -366,9 +340,14 @@ function isQueueLikeEntry(entry: TrackerEntry): boolean {
 
 /** A flat row or group surface counts as queued if its anchor or any member is queue-like. */
 function surfaceIsQueued(surface: TrackerQueueGroupSurface): boolean {
+  if (surface.members.length > 0) {
+    // Member status drives queued for grouped surfaces — synthetic operation
+    // shells always stamp `pending` even when every member is terminal.
+    return surface.members.some((m) => isQueueLikeEntry(m));
+  }
   const parent = "parent" in surface ? surface.parent : undefined;
   if (parent && isQueueLikeEntry(parent)) return true;
-  return surface.members.some((m) => isQueueLikeEntry(m));
+  return false;
 }
 
 /**

@@ -8,7 +8,7 @@ import {
 
 describe("resolveArchetype / resolveArchetypeFromValue", () => {
   it("returns the literal when archetype is a string", () => {
-    for (const v of ["single","preview","batch"] as const) {
+    for (const v of ["single","preview","operation"] as const) {
       assert.equal(resolveArchetype({ name: "test", archetype: v }, {}), v);
     }
   });
@@ -16,13 +16,13 @@ describe("resolveArchetype / resolveArchetypeFromValue", () => {
   it("invokes the resolver function with the input and returns its result", () => {
     type Input = { kind: "pdf" | "signer" };
     const archetype = (input: Input): WorkflowArchetype =>
-      input.kind === "pdf" ? "batch" : "single";
-    assert.equal(resolveArchetype({ name: "oath-signature", archetype }, { kind: "pdf" }), "batch");
+      input.kind === "pdf" ? "operation" : "single";
+    assert.equal(resolveArchetype({ name: "oath-signature", archetype }, { kind: "pdf" }), "operation");
     assert.equal(resolveArchetype({ name: "oath-signature", archetype }, { kind: "signer" }), "single");
   });
 
   it("returns each valid WorkflowArchetype value from a resolver", () => {
-    const all: WorkflowArchetype[] = ["single","preview","batch"];
+    const all: WorkflowArchetype[] = ["single","preview","operation"];
     for (const value of all) {
       assert.equal(resolveArchetype({ name: "test", archetype: () => value }, undefined), value);
     }
@@ -51,10 +51,10 @@ describe("resolveArchetype / resolveArchetypeFromValue", () => {
   });
 
   it("resolveArchetypeFromValue exposes the same behavior without a config wrapper", () => {
-    assert.equal(resolveArchetypeFromValue<unknown>("batch", undefined, "direct"), "batch");
+    assert.equal(resolveArchetypeFromValue<unknown>("operation", undefined, "direct"), "operation");
     assert.equal(
-      resolveArchetypeFromValue<{ x: number }>((input) => (input.x > 0 ? "batch" : "single"), { x: 1 }, "direct"),
-      "batch",
+      resolveArchetypeFromValue<{ x: number }>((input) => (input.x > 0 ? "operation" : "single"), { x: 1 }, "direct"),
+      "operation",
     );
     assert.throws(
       () => resolveArchetypeFromValue<unknown>((() => "wrong") as unknown as () => WorkflowArchetype, undefined, "direct"),

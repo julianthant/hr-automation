@@ -5,6 +5,7 @@ import {
 } from "../session-events.js";
 import type { TrackerEntry } from "../jsonl.js";
 import { isIdleRefreshSystem } from "../../domain/idle-refresh.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 /**
  * Canonical sort key for a session event. Events emitted by
@@ -33,6 +34,31 @@ export function resolveInstanceForRun(
   if (!runId) return undefined;
   for (const t of trackers) {
     if (t.runId !== runId) continue;
+    const instance = t.data?.instance;
+    if (typeof instance === "string" && instance.length > 0) return instance;
+  }
+  return undefined;
+}
+
+function rowArchetypeForRun(
+  trackers: Array<Pick<TrackerEntry, "runId" | "parentRunId" | "data">>,
+  runId: string,
+): ReturnType<typeof resolveRowArchetype> | undefined {
+  for (const t of trackers) {
+    if (t.runId !== runId) continue;
+    return resolveRowArchetype(t);
+  }
+  return undefined;
+}
+
+export function resolveInstanceForOperationCoordinator(
+  trackers: Array<Pick<TrackerEntry, "runId" | "parentRunId" | "data">>,
+  coordinatorRunId: string,
+): string | undefined {
+  const direct = resolveInstanceForRun(trackers, coordinatorRunId);
+  if (direct) return direct;
+  for (const t of trackers) {
+    if (t.parentRunId !== coordinatorRunId) continue;
     const instance = t.data?.instance;
     if (typeof instance === "string" && instance.length > 0) return instance;
   }
@@ -74,16 +100,28 @@ export function resolveInstanceForRun(
  */
 export function filterEventsForRun(
   events: SessionEvent[],
-  trackers: Array<Pick<TrackerEntry, "runId" | "status" | "data" | "timestamp">>,
+  trackers: Array<Pick<TrackerEntry, "runId" | "parentRunId" | "status" | "data" | "timestamp">>,
   runId: string,
   runEndFallback: number = Date.now(),
 ): SessionEvent[] {
   const direct = events.filter((e) => e.runId === runId);
-  const instance = resolveInstanceForRun(trackers, runId);
+  const archetype = rowArchetypeForRun(trackers, runId);
+  const instance =
+    archetype === "operation"
+      ? resolveInstanceForOperationCoordinator(trackers, runId) ?? resolveInstanceForRun(trackers, runId)
+      : resolveInstanceForRun(trackers, runId);
 
   let batchScope: SessionEvent[] = [];
-  if (instance) {
-    const runEntries = trackers.filter((t) => t.runId === runId);
+  if (archetype === "operation-member") {
+    batchScope = [];
+  } else if (instance) {
+    const runEntries =
+      archetype === "operation"
+        ? [
+            ...trackers.filter((t) => t.runId === runId),
+            ...trackers.filter((t) => t.parentRunId === runId),
+          ]
+        : trackers.filter((t) => t.runId === runId);
     if (runEntries.length === 0) {
       // Degenerate: instance resolved but no tracker entries to build a
       // window from. Skip the fallback rather than over-include.

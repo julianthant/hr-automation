@@ -121,7 +121,7 @@ test("delegation harness — 3-child fan-out, cancel one mid-hold, siblings unaf
   for (const c of [c1, c2, c3]) {
     const row = dash.row("harness-child", c.runId);
     assert.equal(row.parentRunId, parentRunId, `child ${c.itemId} parentRunId === parent`);
-    assert.equal(row.archetype, "batch-member", `child ${c.itemId} is a batch-member`);
+    assert.equal(row.archetype, "operation-member", `child ${c.itemId} is a batch-member`);
     // Subtitle rule: EID if present, else trace id (scrubbed). Person row →
     // resolved name title.
     assert.equal(row.subtitle, "<traceId>", `child ${c.itemId} subtitle is the trace id`);

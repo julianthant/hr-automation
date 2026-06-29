@@ -100,6 +100,7 @@ interface CachedReadStatements {
   selectSessionEventsByRunIdAndInstance: ReturnType<Database["prepare"]>;
   selectPriorEntriesByKey: ReturnType<Database["prepare"]>;
   selectResolvedEmplIds: ReturnType<Database["prepare"]>;
+  selectRunEventsByParentRunId: ReturnType<Database["prepare"]>;
 }
 
 const readStmtCache = new WeakMap<Database, CachedReadStatements>();
@@ -281,6 +282,13 @@ export function readStmts(db: Database): CachedReadStatements {
       WHERE tracker_date = @date
         AND latest_empl_id IS NOT NULL
         AND TRIM(latest_empl_id) != ''
+    `),
+    selectRunEventsByParentRunId: db.prepare(`
+      SELECT *
+      FROM run_events
+      WHERE parent_run_id = @parentRunId
+      ORDER BY event_ms ASC, id ASC
+      LIMIT @limit
     `),
   };
   readStmtCache.set(db, s);

@@ -40,7 +40,7 @@ function buildAllDelegatedQueuedHistory(
         runId: `lookup-${p}-${m}#1`,
         parentRunId: `ocr-parent-${p}`,
         status: "pending",
-        data: { archetype: "batch-member" },
+        data: { archetype: "operation-member" },
       });
     }
   }
@@ -70,7 +70,7 @@ test("ISS-002: collapsed-queued count = queued ANCHORS, not raw delegated member
         runId: `lookup-${memberId}#1`,
         parentRunId: `ocr-parent-${p}`,
         status: "pending",
-        data: { archetype: "batch-member" },
+        data: { archetype: "operation-member" },
         step: "searching",
       });
       memberId++;
@@ -89,8 +89,8 @@ test("ISS-002: collapsed-queued count = queued ANCHORS, not raw delegated member
     personLookupPolicies,
   );
 
-  // Total collapses to the 18 batch anchors.
-  assert.equal(total, parentCount, "total collapses to 18 batch anchors");
+  // Total collapses to the 18 operation anchors.
+  assert.equal(total, parentCount, "total collapses to 18 operation anchors");
   // The bug: raw queued depth would be 53 (> total). Collapsed-queued must be
   // the 18 queued anchors, never the raw member count.
   assert.equal(queued, parentCount, "collapsed-queued = 18 queued anchors, not 53 raw members");
@@ -108,7 +108,7 @@ test("ISS-002: a queued anchor and a done anchor → total counts both, queued c
       runId: "done-1#1",
       parentRunId: "parent-A",
       status: "done",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     },
     {
       workflow: "person-lookup",
@@ -117,7 +117,7 @@ test("ISS-002: a queued anchor and a done anchor → total counts both, queued c
       runId: "queued-1#1",
       parentRunId: "parent-B",
       status: "pending",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     },
   ];
   const total = countSidebarRowsFromTrackerHistory(rows, () => false, personLookupPolicies);

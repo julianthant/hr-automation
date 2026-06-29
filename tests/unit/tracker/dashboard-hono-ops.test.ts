@@ -100,7 +100,7 @@ test("Hono /api/cancel-queued honors explicit tree scope for descendants", async
       id: "oath-parent",
       runId: "oath-parent-run",
       status: "pending",
-      data: { archetype: "batch" },
+      data: { archetype: "operation" },
     }, date, dir);
     trackEventForDate({
       workflow: "oath-signature",
@@ -134,7 +134,7 @@ test("Hono /api/cancel-queued routes OCR discard context through workflow action
     id: "ocr-session",
     runId: "ocr-run",
     status: "pending",
-    data: { archetype: "batch" },
+    data: { archetype: "operation" },
   }, dateLocal(), dir);
   trackEventForDate({
     workflow: "oath-upload",

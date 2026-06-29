@@ -56,12 +56,12 @@ test("buildHttpPendingData stamps a single separation enqueue as a single row", 
 test("buildHttpPendingData honors direct input-run batch row-shape hint", () => {
   const data = buildHttpPendingData(
     personLookupWorkflow,
-    { name: "Doe, Jane", __runtimeOptions: { rowShape: "batch-member" } },
+    { name: "Doe, Jane", __runtimeOptions: { rowShape: "operation-member" } },
     "input-run-batch-1",
   );
 
   assert.equal(data.searchName, "Doe, Jane");
-  assert.equal(data.archetype, "batch-member");
+  assert.equal(data.archetype, "operation-member");
 });
 
 test("personLookupWorkflow exposes the stable itemId deriver for HTTP enqueue", () => {

@@ -45,14 +45,14 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
 
-  it("classifies stamped batch rows as batch anchors", () => {
+  it("classifies stamped batch rows as operation anchors", () => {
     const row = entry({
       workflow: "some-future-workflow",
       id: "future-prep-1",
       runId: "future-run-1",
       status: "running",
       step: "awaiting-approval",
-      data: { archetype: "batch" },
+      data: { archetype: "operation" },
     });
 
     const result = buildTrackerQueueSurfaces({
@@ -61,7 +61,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
 
     assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "batch");
+    assert.equal(result.groupRows[0]?.kind, "operation");
   });
 
   it("keeps approved preview rows visible when no delegation members are visible", () => {
@@ -170,8 +170,8 @@ describe("buildTrackerQueueSurfaces", () => {
       delegationSourceEntries: [signer],
       runtimePolicies: new Map([["oath-signature", OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY]]),
     });
-    assert.equal(result.groupRows.length, 1, "one batch surface");
-    assert.equal(result.groupRows[0]?.kind, "batch");
+    assert.equal(result.groupRows.length, 1, "one operation surface");
+    assert.equal(result.groupRows[0]?.kind, "operation");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["10874100"]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), [], "no flat single");
   });
@@ -373,7 +373,7 @@ describe("buildTrackerQueueSurfaces", () => {
     });
 
     assert.equal(result.groupRows.length, 1);
-    assert.equal(result.groupRows[0]?.kind, "batch");
+    assert.equal(result.groupRows[0]?.kind, "operation");
     assert.equal(result.groupRows[0]?.parentRunId, "ocr-run-2");
     assert.deepEqual(result.groupRows[0]?.members.map((e) => e.id), ["lookup-2", "active-2"]);
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
@@ -449,7 +449,7 @@ describe("buildTrackerQueueSurfaces", () => {
       runId: "signer-run-1",
       parentRunId: "op-run-2",
       status: "running",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     });
     const signer2 = entry({
       workflow: "oath-signature",
@@ -457,7 +457,7 @@ describe("buildTrackerQueueSurfaces", () => {
       runId: "signer-run-2",
       parentRunId: "op-run-2",
       status: "pending",
-      data: { archetype: "batch-member" },
+      data: { archetype: "operation-member" },
     });
 
     const result = buildTrackerQueueSurfaces({

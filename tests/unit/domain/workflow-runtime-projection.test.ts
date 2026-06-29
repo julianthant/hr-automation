@@ -82,7 +82,7 @@ describe("workflow runtime projection adapters", () => {
       status: "running",
       step: "awaiting-approval",
       data: {
-        archetype: "batch",
+        archetype: "preview",
         mode: "prepare",
         formType: "oath",
         pdfOriginalName: "oath-file.pdf",
@@ -126,7 +126,7 @@ describe("workflow runtime projection adapters", () => {
       workflowLabels: new Map([["onboarding", "Onboarding"]]),
     });
 
-    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.surfaceType, "operation");
     assert.deepEqual(
       projection.batchMembers.map((member) => member.runId),
       ["child-run-1", "child-run-2"],
@@ -157,7 +157,7 @@ describe("workflow runtime projection adapters", () => {
     assert.equal(surfaces.flatEntries.length, 0);
     assert.equal(surfaces.groupRows.length, 1);
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
-    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.surfaceType, "operation");
   });
 
   it("does not expose a raw parent run id as the batch group subtitle", () => {
@@ -192,7 +192,7 @@ describe("workflow runtime projection adapters", () => {
 
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {});
 
-    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.surfaceType, "operation");
     // Person batches carry no synthetic title (count badge + member preview
     // identify the bag of people); session-local `· #1234` ordinals are retired.
     assert.equal(projection.title, "");
@@ -235,7 +235,7 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase5Policies,
     });
 
-    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.surfaceType, "operation");
     // Shared prefix `os-090551`, parent's runId4 tail `f85c` (from parentRunId
     // "f85c86b9-2d85") — distinct from the member's own `-ad01` tail.
     assert.equal(projection.subtitle, "os-090551-f85c");
@@ -387,7 +387,7 @@ describe("workflow runtime projection adapters", () => {
     });
 
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.equal(surfaces.groupRows[0]?.kind, "operation");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((row) => row.id), ["lookup-1", "active-1"]);
     assert.deepEqual(surfaces.flatEntries.map((row) => row.id), []);
   });
@@ -672,12 +672,12 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
     // alwaysBatchDelegatedMembers keeps even one delegated lookup as a batch.
     assert.equal(surfaces.flatEntries.length, 0);
     assert.equal(surfaces.groupRows.length, 1);
-    assert.equal(surfaces.groupRows[0]?.kind, "batch");
+    assert.equal(surfaces.groupRows[0]?.kind, "operation");
     assert.deepEqual(surfaces.groupRows[0]?.members.map((row) => row.id), ["ocr-active-1"]);
     const projection = buildProjectionFromQueueSurface(surfaces.groupRows[0]!, {
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.surfaceType, "operation");
   });
 
   it("projects separations daemon batch groups without a raw parent run id subtitle", () => {
@@ -706,7 +706,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       workflowLabels: new Map([["separations", "Separations"]]),
       runtimePolicies: phase5Policies,
     });
-    assert.equal(projection.surfaceType, "batch");
+    assert.equal(projection.surfaceType, "operation");
     assert.notEqual(projection.subtitle, "sep-batch-run-12345678");
     assert.deepEqual(projection.actions, [
       {

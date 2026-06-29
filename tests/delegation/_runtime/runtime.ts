@@ -79,7 +79,7 @@ export interface EnqueueOpts {
   /**
    * Render the enqueued row as a delegated **batch member** (count badge +
    * member preview under the parent anchor). Stamps
-   * `__runtimeOptions.rowShape = "batch-member"` on the input — exactly what
+   * `__runtimeOptions.rowShape = "operation-member"` on the input — exactly what
    * the real `approveTo` fan-out (`withBatchMemberRuntimeOptions`) does. Use
    * with `parentRunId` to model the OCR→oath-signature independent-child star
    * case. Without it, a `parentRunId`-enqueued row keeps the workflow's own
@@ -459,7 +459,7 @@ export async function createDelegationRuntime(
         ? {
             __runtimeOptions: {
               ...(existingRuntimeOptions ?? {}),
-              ...(enqueueOpts?.renderAs === "batch" ? { rowShape: "batch-member" } : {}),
+              ...(enqueueOpts?.renderAs === "batch" ? { rowShape: "operation-member" } : {}),
             },
           }
         : {}),

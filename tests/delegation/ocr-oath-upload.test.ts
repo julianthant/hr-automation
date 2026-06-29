@@ -270,7 +270,7 @@ test(
     //    title+subtitle, `ou-` prefix. ──
     const signerRow = dash.row("oath-signature", signer.runId);
     assert.equal(signerRow.parentRunId, PARENT_RUN, "signer parentRunId === the delegating run");
-    assert.equal(signerRow.archetype, "batch-member", "signer row is a batch-member");
+    assert.equal(signerRow.archetype, "operation-member", "signer row is a batch-member");
     assert.equal(signerRow.data.emplId, "10000001", "signer carries the synthetic EID");
     assert.equal(signerRow.title, "Jane Doe", "signer title is the resolved name");
     assert.equal(signerRow.subtitle, "10000001", "signer subtitle is the EID");
@@ -317,13 +317,13 @@ test(
     );
 
     // ── Surface/grouping: both children project sensibly under the OCR card.
-    //    The signer is a lone delegated member → a 1-member batch anchor.
+    //    The signer is a lone delegated member → a 1-member operation anchor.
     const signerAnchor = dash.groupAnchor("oath-signature", PARENT_RUN);
     assert.equal(signerAnchor.memberCount, 1, "oath-signature anchor has 1 signer member");
     assert.equal(
       signerAnchor.kind,
-      "batch",
-      "a lone delegated signer renders as a batch surface (alwaysBatchDelegatedMembers)",
+      "operation",
+      "a lone delegated signer renders as an operation surface (alwaysBatchDelegatedMembers)",
     );
     assert.equal(signerAnchor.subtitle, "<traceId>", "signer anchor subtitle is the trace id");
 
