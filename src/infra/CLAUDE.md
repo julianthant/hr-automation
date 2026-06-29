@@ -6,5 +6,6 @@ Runtime infrastructure that makes browser automation possible. This layer may de
 
 - `auth/` — UCSD SSO, Duo polling, per-system login flows, SSO field helpers, voice cues.
 - `browser/` — Playwright Chromium launch/session primitives and browser window setup.
+- `sqlite/` — node:sqlite compat shim — `openDatabase`/`transaction`.
 
 Infra should not contain HR business rules. Put business meaning in `src/domain/`, reusable app capabilities in `src/services/`, and external system page drivers in `src/systems/`.
