@@ -14,7 +14,7 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 - `ctx.page(id)` returns a Playwright Page proxy that injects per-run `ctx.signal` into Playwright methods with `signal?: AbortSignal`. Do not add handler-side cancel polling for ordinary browser calls.
 - For non-Playwright awaits that accept an `AbortSignal`, pass `ctx.signal`.
 - Compose workflows with `ctx.delegateTo` and `ctx.delegateToAll`. Do not call `runWorkflow(child, ..., { parentRunId })` or `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` directly inside handlers; architecture guards block this.
-- Omitting `renderAs` is a delegated single row (the default — the legacy `renderAs:"flat"` hint was an identical no-op and was removed). `renderAs: "preview"` is a presentation hint; `renderAs: "batch"` means the parent represents a grouped person set, so children are stamped `batch-member` under the parent run (the only value that changes the derived archetype).
+- Omitting `renderAs` is a delegated single row (the default). `renderAs: "preview"` is a presentation hint; `renderAs: "batch"` (legacy name) stamps `operation-member` children under the parent run via `rowShape`.
 
 ## Dashboard Integration
 
@@ -31,11 +31,9 @@ Every workflow must declare `archetype` and `runtimePolicy`; architecture guards
 
 - `single` — one person/subject, one row.
 - `preview` — one review/approval row; OCR is the current preview workflow.
-- `batch` — anchor row over multiple person/subject rows, or a parent that will fan out to person rows after approval.
-- `operation` — a top-level coordinator row for an OCR-backed target workflow (oath-signature / emergency-contact / onbase), created at PDF upload in the target panel with the OCR run delegated under it. Display-only (no daemon task); stamped explicitly at `/api/ocr/prepare` as a direct `archetype: "operation"` literal on the row's `data` (not a named override param) — it is NOT a `WorkflowArchetype`, so `deriveRowArchetype` never produces it and no `defineWorkflow` declares it. Shows denormalized OCR status before approval, signer/contact member summary after. See `src/workflows/ocr/CLAUDE.md`.
+- `operation` — coordinator row over multiple person/subject rows (input-run parent or OCR-backed target workflow). Multi-value dashboard enqueues emit a real coordinator row plus `operation-member` children. OCR-backed coordinators are display-only (stamped at `/api/ocr/prepare`); input-run coordinators are real daemon parents.
 - `parentRunId` means delegated scope only; it never changes stamped row shape.
-- `batch-member` — one person/subject row that belongs to a grouped `batch` parent run.
-- `operation-member` — the operation analogue of `batch-member`: one signer/contact row fanned out under an `operation` coordinator (parented to it). Stamped by the OCR approve fan-out via the `rowShape` runtime option when `isOperationCoordinatorWorkflow(operationWorkflow)`; like `batch-member` it is NOT a `WorkflowArchetype` (no `defineWorkflow` declares it) and projects to a `single` surface when rendered.
+- `operation-member` — peer person/subject row under an `operation` coordinator. Stamped via `rowShape: "operation-member"` on fan-out / multi-input enqueue. Projects to a `single` surface when rendered inline.
 - Dispatch markers are `single` rows with `data.delegationRole = "dispatch"` for terminal-at-enqueue handoffs.
 
 ## Input subject + queue row kind + trace id
@@ -66,7 +64,7 @@ Internal helper workflow modules may live under `src/workflows/<name>/` without 
 
 Daemon-capable workflow registration lives in `src/core/workflow-loaders.ts`. Do not convert in-process callers spawned from inside other workflow handlers.
 
-The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operator override extracted values and re-run without re-extracting. Only **separations** is opted in today. Do not opt in workflows whose inputs are already fully user-supplied.
+The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operator override extracted values and re-run without re-extracting. Only **separations** is opted in today, and that opt-in is exactly **declaring `editable: true` detailFields** — the tab is gated on `detailFields.some(f => f.editable)` (a capability gate, like View Data's `ctx.recordData` gate), so a workflow with no editable fields has no tab. Editable separations fields also set `inputKind` (`id`/`date`) + `group` to shape the form (date picker, mono ids, labeled sections — see `src/dashboard/CLAUDE.md` 2026-06-25). Do not opt in workflows whose inputs are already fully user-supplied (emergency-contact's `editable` flags were removed for this reason).
 
 ## Lessons Learned
 
@@ -75,7 +73,8 @@ The dashboard's "Edit Data" tab + kernel `prefilledData` channel lets an operato
 - **2026-06-01: `inputSubject` is the declared subject axis; `queueRowKind` is derived from it.** Workflows declare `inputSubject` (`name|eid|email|kualiId|pdf|selector`) on `defineWorkflow` — a literal, or a resolver for input-variant workflows. The presentation `queueRowKind` (`person|file|catalog`, still stamped as `data.queueRowKind`) is derived via `subjectToQueueRowKind` in the kernel normalizer (`src/core/kernel/workflow.ts`), so the stamping sites and the dashboard are unchanged. `queueRowKind` is **no longer a `defineWorkflow` field** — the `queue-row-kind-coverage` guard now asserts `inputSubject`. Many subjects funnel onto three kinds (every person-identifying subject → person); this keeps the presentation taxonomy small while naming each workflow's input precisely. person-lookup is the remaining multi-shape workflow; it discriminates by **field presence** (`z.union` + a type guard), not a `kind` literal. (oath-signature was multi-shape too; its PDF variant was removed 2026-06-02 — it's now EID-only, and the paper-roster flow is owned by OCR's approve fan-out.)
 - **2026-05-30: Queue row kind is a third axis, orthogonal to shape and scope.** Kind drives title/subtitle only (via `src/domain/queue-row-presentation.ts`) — never footer/layout/status. Pending→resolved phase is derived at projection time from data presence, not stamped. Trace id (`data.__traceId`) replaced session-local ordinals in titles; `code` is its 2-char prefix. (Superseded declaration mechanism: kind is now derived from `inputSubject` — see the 2026-06-01 entry above.)
 - **2026-05-28: Person Lookup is the merged operator-facing workflow (formerly EID Lookup + Active Check).** `src/workflows/person-lookup/` is registered in `WORKFLOW_LOADERS` and dashboard input runs. It also exports the `lookupPersonInUcpath` primitive for internal callers. Do not add separate `eid-lookup` or `active-check` entries back to any registry.
-- **2026-05-28: Row archetype follows person/subject cardinality, not process count.** A one-person run is `single`; a grouped input run or a PDF/upload path that fans out to people is `batch` with `batch-member` children. Do not collapse an OCR/PDF fan-out to `single` just because it produced one approved person.
+- **2026-06-29: `batch` / `batch-member` retired — use `operation` / `operation-member`.** Multi-subject runs emit one coordinator row plus `operation-member` children. Legacy JSONL stamps `batch`/`batch-member` normalize on read via `resolveRowArchetype`.
+- **2026-05-28: Row archetype follows person/subject cardinality, not process count.** A one-person run is `single`; a grouped input run or a PDF/upload path that fans out to people is an `operation` coordinator with `operation-member` children.
 - **2026-05-25: Dashboard run surfaces are the public start paths.** New operator starts must be input runs or upload runs. Do not add `npm run <workflow>` launch scripts or YAML/batch-file starts; keep CLI adapters internal when tests or composed workflows still need them.
 - **2026-05-16: `buildCliAdapter` remains the internal daemon adapter pattern.** Use it for "shape inputs → enqueue typed items → pre-emit pending rows"; keep pending-data helpers small when reused by in-process paths.
 - **`ensurePageHealthy` is gone.** Use `ctx.session.healthCheck(id)` for an explicit mid-handler probe if needed.
