@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Kronos Reports generates or retrieves Kronos report data for one or more report targets.
+Kronos Reports downloads Time Detail PDF reports from Old Kronos (UKG Workforce Central) for one or more employees. This is the legacy UKG system, distinct from the New Kronos used by the Separations workflow for timecard verification.
 
 ## Delegation Model
 

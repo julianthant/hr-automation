@@ -20,6 +20,6 @@ The workflow returns:
 
 | Scenario | Queue row | Title | Footer/subtitle | Batch view | Actions |
 |---|---|---|---|---|---|
-| Delegated signer lookup | One person row, grouped as a delegated batch surface even when one row exists. | Person name. | Normal delegated child footer. | Appears in the Utils/I9 Lookup workflow context. | Cancel/retry/delete one lookup row. |
+| Delegated signer lookup | One person row, grouped as a delegated batch surface even when one row exists. | Person name. | Normal delegated child footer. | Appears in the Search/I9 Lookup workflow context. | Cancel/retry/delete one lookup row. |
 
 The runtime policy sets `memberRow.titleSource: "person"` and `delegation.alwaysBatchDelegatedMembers: true`, matching the delegated utility grouping used by Person Lookup.
