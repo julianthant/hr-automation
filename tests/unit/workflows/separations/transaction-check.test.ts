@@ -54,6 +54,7 @@ function makeCtx() {
   return {
     page: vi.fn(async () => page),
     screenshot: vi.fn(async () => {}),
+    recordData: vi.fn(),
     page$: page,
   } as never;
 }

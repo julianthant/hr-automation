@@ -85,7 +85,7 @@ export async function runUcpathTransaction(
       // of the body — without this inline call the dashboard detail
       // panel shows "—".
       ctx.updateData({ transactionNumber });
-      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing', systems: ['ucpath'] });
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-existing', systems: ['ucpath'], stitch: true });
       return { transactionNumber, submittedWithoutTxnNumber };
     }
 
@@ -128,7 +128,7 @@ export async function runUcpathTransaction(
           .isVisible({ timeout: 2_000 })
           .catch(() => false);
         if (stillOnDetails) {
-          await ctx.screenshot({ kind: "error", label: "ucpath-emplid-not-recognized", systems: ['ucpath'] });
+          await ctx.screenshot({ kind: "error", label: "ucpath-emplid-not-recognized", systems: ['ucpath'], stitch: true });
           throw new EmplIdNotRecognizedError(kualiData.eid, kualiData.employeeName);
         }
         throw e;
@@ -148,22 +148,25 @@ export async function runUcpathTransaction(
       if (!transactionNumber) {
         submittedWithoutTxnNumber = true;
         await scrollToTransactionReadbackArea(getContentFrame(ucpathPage));
-        await ctx.screenshot({ kind: 'error', label: 'ucpath-transaction-submitted-missing-number', systems: ['ucpath'] });
+        await ctx.screenshot({ kind: 'error', label: 'ucpath-transaction-submitted-missing-number', systems: ['ucpath'], stitch: true });
         return { transactionNumber, submittedWithoutTxnNumber };
       }
       // Persist txn # immediately so kuali-finalization failures don't
       // drop it from the tracker entry's data.
       ctx.updateData({ transactionNumber });
       log.success(`[UCPath Txn] Transaction submitted (#${transactionNumber})`);
-      // Unified whole-page/form capture: one image of the WHOLE submitted UCPath
-      // confirmation. The kernel grows the fixed-height PeopleSoft content frame
-      // (nested `#main_target_win0`) to its full inner height, so the entire
-      // in-frame form — Position → Last Date Worked → Comments → the
-      // `Transaction ID: T…` readback at the very bottom — is in the one image.
-      // (This replaces the old paged-chunks shot plus a separate region close-up
-      // of the T#: the unified capture's recursive iframe-grow reaches the nested
-      // frame's bottom, so the single shot already proves the transaction number.)
-      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'] });
+      // Unified whole-page/form capture of the WHOLE submitted UCPath
+      // confirmation. The kernel detects the nested PeopleSoft content frame
+      // (`#main_target_win0`) as the dominant scroll target and scroll-captures
+      // its painted bands, so the entire in-frame form — Position → Last Date
+      // Worked → Comments → the `Transaction ID: T…` readback at the very bottom —
+      // is captured, proving the transaction number. LIVE-VERIFIED 2026-06-25
+      // (dry-run): the nested iframe's bottom status box + footer buttons are
+      // present. `stitch: true` composites the scrolled bands into ONE continuous
+      // image (the whole Smart HR transaction as a single screenshot) instead of
+      // separate -cNN slices — operator request for UCPath transactions. See
+      // src/core/CLAUDE.md.
+      await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], stitch: true });
     } catch (e) {
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
       // the run fails with the clear message (its own screenshot already fired)
@@ -176,7 +179,7 @@ export async function runUcpathTransaction(
       // separations handler), so the kernel's step-failure screenshot never
       // fires — explicit ctx.screenshot keeps the debug image reachable from
       // the dashboard Screenshots panel.
-      await ctx.screenshot({ kind: "error", label: "ucpath-transaction-failed", systems: ['ucpath'] });
+      await ctx.screenshot({ kind: "error", label: "ucpath-transaction-failed", systems: ['ucpath'], stitch: true });
     }
 
     // In batch mode, navigate UCPath back to Smart HR base URL so the next
