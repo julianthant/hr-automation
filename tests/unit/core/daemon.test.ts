@@ -1905,3 +1905,80 @@ test('runWorkflowDaemon: /stop in the poll window makes an idle daemon exit prom
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+/**
+ * ISS-008 — an idle daemon must claim freshly-enqueued claimable work even when
+ * its `/wake` is LOST, within the bounded re-poll window — NOT sit until the
+ * 15-min keepalive tick.
+ *
+ * The lost-wake races are real: a `/wake` POSTed in the synchronous window
+ * between `claimNextItem()` returning null and the idle-wait arming its waiters
+ * is dropped (no waiter to resolve), and `wakeDaemons` itself swallows a timed-
+ * out POST to a momentarily-busy daemon. Before the fix the daemon parks the
+ * FULL `idleTimeoutMs`, so the enqueued task wedges `queued` for up to 15 min
+ * (live repro: an OCR approve fan-out's signers sat unclaimed for minutes).
+ *
+ * This pins verify (a) — "a daemon idled past K cycles still claims a freshly-
+ * enqueued task." We let the daemon idle through SEVERAL bounded re-poll cycles,
+ * then enqueue work DIRECTLY into SQLite and DELIBERATELY send NO `/wake` (the
+ * worst case: the wake never reaches the daemon at all). The bounded re-poll
+ * backstop must re-claim it within ~`idleRepollMs`, far under `idleTimeoutMs`.
+ * (The `wakePending` latch covers the in-process race with zero latency; it is
+ * exercised by the `/wake`-after-idle tests above — here we prove the backstop
+ * recovers even a wake that is never delivered.)
+ */
+test('runWorkflowDaemon: an idle daemon re-polls and claims enqueued work even with NO wake (ISS-008)', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-iss008-'))
+  try {
+    const seen: string[] = []
+    const wf = defineWorkflow({
+      name: 'dint-iss008',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx, data) => {
+        await ctx.step('run', async () => {
+          seen.push((data as { id: string }).id)
+        })
+      },
+    })
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 60_000, // LARGE: pre-fix, a lost-wake task sits this long
+      idleRepollMs: 150, // bounded backstop: re-claim cadence while idle
+      heartbeatIntervalMs: 30_000, // keep the worker tick from racing the loop
+      commandPollIntervalMs: 30_000,
+    })
+
+    const { port } = await waitForDaemon('dint-iss008', dir)
+
+    // Let the daemon settle into the idle park and idle through ~4 re-poll
+    // cycles (150ms each) before any work exists — "idled past K cycles."
+    await new Promise((r) => setTimeout(r, 600))
+
+    // Enqueue DIRECTLY into SQLite and send NO /wake — simulate a fully lost
+    // wake. Only the bounded re-poll can recover this.
+    await enqueueItems<{ id: string }>('dint-iss008', [{ id: 'lost-wake' }], (d) => d.id, dir)
+
+    await waitFor(async () => {
+      const st = await readQueueStateIncludingTerminals('dint-iss008', dir)
+      return st.done.length === 1
+    }, 5_000)
+
+    assert.deepEqual(seen, ['lost-wake'])
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
