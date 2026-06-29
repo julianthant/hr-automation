@@ -57,6 +57,7 @@ registries:
 - [`src/systems/kuali/SELECTORS.md`](../kuali/SELECTORS.md) · [`LESSONS.md`](../kuali/LESSONS.md)
 - [`src/systems/new-kronos/SELECTORS.md`](../new-kronos/SELECTORS.md) · [`LESSONS.md`](../new-kronos/LESSONS.md)
 - [`src/systems/old-kronos/SELECTORS.md`](../old-kronos/SELECTORS.md) · [`LESSONS.md`](../old-kronos/LESSONS.md)
+- [`src/systems/onbase/SELECTORS.md`](../onbase/SELECTORS.md) · [`LESSONS.md`](../onbase/LESSONS.md)
 - [`src/systems/servicenow/SELECTORS.md`](../servicenow/SELECTORS.md) · [`LESSONS.md`](../servicenow/LESSONS.md)
 - [`src/systems/sharepoint/SELECTORS.md`](../sharepoint/SELECTORS.md) · [`LESSONS.md`](../sharepoint/LESSONS.md)
 - [`src/systems/ucpath/SELECTORS.md`](../ucpath/SELECTORS.md) · [`LESSONS.md`](../ucpath/LESSONS.md)

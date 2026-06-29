@@ -11,6 +11,7 @@ Per-system CLAUDE.md files for system-specific gotchas and lessons:
 - `src/systems/new-kronos/CLAUDE.md` — WFD/Dayforce
 - `src/systems/servicenow/CLAUDE.md` — ServiceNow HR
 - `src/systems/sharepoint/CLAUDE.md` — SharePoint
+- `src/systems/onbase/CLAUDE.md` — OnBase (Hyland) document import
 
 ## Selector registry
 
@@ -25,6 +26,7 @@ src/systems/kuali/selectors.ts
 src/systems/new-kronos/selectors.ts
 src/systems/servicenow/selectors.ts
 src/systems/sharepoint/selectors.ts
+src/systems/onbase/selectors.ts
 ```
 
 Selectors are functions returning `Locator` / `FrameLocator`, each carrying a `// verified YYYY-MM-DD` comment. Fallback chains (`.or()`) up to 6-deep are used where PeopleSoft grid IDs mutate or similar brittle anchors need hardening. Wrap invocations with `safeClick` / `safeFill` from `src/systems/common/` to log `log.warn("selector fallback triggered: <label>")` when the primary + fallbacks all miss.
