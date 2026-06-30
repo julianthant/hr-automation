@@ -90,7 +90,7 @@ export function ViewDataPanel({ logs, loading }: ViewDataPanelProps) {
       {/* Timeline of step stations. */}
       <ol className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {groups.map((group, idx) => (
-          <StepStation key={`${group.step}-${idx}`} group={group} isLast={idx === groups.length - 1} />
+          <StepStation key={group.step} group={group} isLast={idx === groups.length - 1} />
         ))}
       </ol>
     </div>

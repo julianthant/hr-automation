@@ -13,10 +13,13 @@ import { resolveRowArchetype } from "../../../domain/row-archetype.js";
 
 /**
  * Aggregate an operation coordinator row's lifecycle into one merged,
- * source-labeled log timeline. A row qualifies when its workflow is an
- * operation coordinator (oath-signature / emergency-contact) AND it carries a
- * delegated OCR run id (`data.ocrRunId`). For every other row this hook is a
- * no-op (`active: false`) and the caller renders the row's own logs unchanged.
+ * source-labeled log timeline. A row qualifies when it is ANY operation
+ * coordinator: OCR-backed rows (oath-signature / emergency-contact / onbase,
+ * identified by `isOperationCoordinatorWorkflow` AND carrying `data.ocrRunId`)
+ * OR input-run operation shells (any `operation`-archetype row WITHOUT
+ * `data.ocrRunId`, e.g. separations multi-person). For every other row this
+ * hook is a no-op (`active: false`) and the caller renders the row's own logs
+ * unchanged.
  *
  * The coordinator's OWN logs are passed in (already fetched by the LogPanel via
  * `useLogs`); this hook additionally fetches the delegated OCR run's logs (keyed
