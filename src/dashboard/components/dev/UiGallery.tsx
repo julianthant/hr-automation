@@ -599,6 +599,49 @@ const operationPostApproval = buildOperationGalleryRow(
   "Oath Signature",
 );
 
+// A TITLELESS operation coordinator: the parent is person-kind (no PDF/file
+// title), so `batchGroupTitle` returns "" and the header shows ONLY the status
+// icon + badge — no member-name summary. The count badge + expandable member
+// rows identify it. Mirrors the production row the operator flagged.
+const TITLELESS_OP_RUN = "op-oath-titleless-1";
+const titlelessOperationParent = row({
+  id: "ocr-prep-sess-op-titleless",
+  runId: TITLELESS_OP_RUN,
+  workflow: "oath-signature",
+  status: "done",
+  step: "approved",
+  firstLogTs: "2026-06-01T15:12:00.000Z",
+  lastLogTs: "2026-06-01T15:14:00.000Z",
+  lastLogMessage: "All signer rows complete",
+  runOrdinal: 1,
+  data: {
+    archetype: "operation",
+    mode: "prepare",
+    formType: "oath",
+    // person-kind anchor → no synthetic title (titleless variant).
+    queueRowKind: "person",
+    ocrRunId: "ocr-run-op-titleless",
+    ocrSessionId: "sess-op-titleless",
+    ocrStatus: "approved",
+    ocrStep: "approved",
+    operationWorkflow: "oath-signature",
+    operationKind: "oath",
+    operationRunId: TITLELESS_OP_RUN,
+    __traceId: "se-151218-55d5",
+  },
+});
+
+const titlelessOperationMembers = [
+  member("tlm-1", "done", "Figueroa", "10734655", TITLELESS_OP_RUN),
+  member("tlm-2", "done", "Figueroa, Mehkai", "10734655", TITLELESS_OP_RUN),
+];
+
+const titlelessOperation = buildOperationGalleryRow(
+  titlelessOperationParent,
+  titlelessOperationMembers,
+  "Oath Signature",
+);
+
 function QueueRowsTab() {
   return (
     <div className="grid grid-cols-1 min-[820px]:grid-cols-2 gap-4 items-start">
@@ -693,7 +736,7 @@ function QueueRowsTab() {
       {/* ---- OPERATION ---- */}
       <Section
         title="operation"
-        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. One card: header → work zone → footer. The OCR-status / member section sits INSIDE the card above the footer; members are EntryItem single rows, capped to scroll after ~4."
+        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. One card: header → work zone → footer. The OCR-status / member section sits INSIDE the card above the footer; members are EntryItem single rows, capped to scroll after ~4. A titleless (person-anchor) coordinator shows ONLY the status icon + badge in the header — no member-name summary; the count badge + member rows identify it."
       />
       <Variant label="before approval" axes="awaiting review · header jump" note="no middle strip — badge + blue OCR jump in header; footer is the true bottom edge">
         <OpUnifiedFixture fixture={operationPreApproval} />
@@ -722,6 +765,20 @@ function QueueRowsTab() {
       </Variant>
       <Variant label="after approval (collapsed)" axes="status counts only" note="collapsed: per-status tally beside chevron, members hidden">
         <OpUnifiedFixture fixture={operationPostApproval} />
+      </Variant>
+      <Variant
+        label="titleless person anchor (expanded)"
+        axes="operation · person-kind · no title · done"
+        note="header is just the status icon + Done badge — NO member-name summary; count badge + member rows identify it"
+      >
+        <OpUnifiedFixture fixture={titlelessOperation} defaultExpanded />
+      </Variant>
+      <Variant
+        label="titleless person anchor (collapsed)"
+        axes="operation · person-kind · no title · done"
+        note="clean header at rest: status icon + badge only, count tally beside the chevron"
+      >
+        <OpUnifiedFixture fixture={titlelessOperation} />
       </Variant>
     </div>
   );
