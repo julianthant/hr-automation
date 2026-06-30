@@ -7,7 +7,7 @@ This folder is organized by dashboard area. Keep files near the UI surface that 
 | Location | Belongs here | Examples |
 |---|---|---|
 | `navigation/` | Navbar, workflow rail, search, notification center (with filter chips), and top-bar run/capture affordances. | `TopBar.tsx`, `WorkflowRail.tsx`, `SearchBar.tsx`, `NotificationBell.tsx`, `notification-filters.ts`, `InputRunPanel.tsx` |
-| `settings/` | The full-page Settings view (navbar gear) — tweakable operator constants + the embedded Workflow Editor. | `SettingsPage.tsx`, `SettingsField.tsx` |
+| `settings/` | The Settings overlay (navbar gear) — a centered Dialog over the dimmed dashboard for tweakable operator constants, notifications, and read-only credential status. The Workflow Editor is launched FROM here into its own full-page takeover (`workflow-modifier/WorkflowEditorScreen.tsx`), not embedded. | `SettingsDialog.tsx`, `SettingsField.tsx` |
 | `queue-panel/` | Queue list, queue grouping surfaces, batch drill-in, shared `GroupRowBase`, and queue surface classification. | `QueuePanel.tsx`, `group-row-base.tsx`, `queue-surface-classifier.ts`, `batch-queue-view.tsx`, `EntryItem.tsx`, `StatPills.tsx`, `queue-status.ts` |
 | `log-panel/` | Right detail/log column, run selector, step pipeline, screenshots, and edit/retry data view. | `LogPanel.tsx`, `LogStream.tsx`, `LogLine.tsx`, `StepPipeline.tsx`, `ScreenshotsPanel.tsx` |
 | `terminal-drawer/` | Bottom session/daemon drawer and browser/session chips. | `TerminalDrawer.tsx`, `WorkflowBox.tsx`, `BrowserChip.tsx`, `LiveIndicator.tsx` |

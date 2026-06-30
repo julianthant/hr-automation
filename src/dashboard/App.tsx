@@ -61,7 +61,8 @@ import {
 } from "lucide-react";
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
 import { OverviewPanel } from "./components/overview/OverviewPanel";
-import { SettingsPage } from "./components/settings/SettingsPage";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { WorkflowEditorScreen } from "./components/workflow-modifier/WorkflowEditorScreen";
 import {
   fireDesktopNotification,
   readNotifySettings,
@@ -484,15 +485,18 @@ export function App() {
     document.title = running > 0 ? `${running} running \u2014 HR Dashboard` : "HR Dashboard";
   }, [dedupedEntries]);
 
-  // Cross-workflow Overview landing (rail "Dashboard" entry) + the Settings page
-  // (navbar gear). The Workflow Editor now lives as a section INSIDE Settings.
-  // Picking any workflow exits both.
+  // Cross-workflow Overview landing (rail "Dashboard" entry), the Settings
+  // overlay (navbar gear — a centered Dialog over the dimmed dashboard), and the
+  // full-page Workflow Editor takeover (launched FROM the Settings overlay; it
+  // hides the top bar + rail + drawer so the editor's own sidebar is never
+  // nested under another).
   const [showOverview, setShowOverview] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  // Unsaved-draft state lifted from the Settings page's embedded Workflow
-  // Editor; gates the leave guard. It is only ever true while that editor
-  // section is mounted (WorkflowModifierPage reports `false` on unmount), so a
-  // plain `editorDirty` check covers leaving Settings with unsaved graph edits.
+  const [showEditor, setShowEditor] = useState(false);
+  // Unsaved-draft state lifted from the full-page Workflow Editor; gates the
+  // leave guard. Only ever true while the editor takeover is mounted
+  // (WorkflowModifierPage reports `false` on unmount), so a plain `editorDirty`
+  // check covers leaving the editor with unsaved graph edits.
   const [editorDirty, setEditorDirty] = useState(false);
 
   const { confirm, confirmDialog } = useConfirm();
@@ -511,33 +515,41 @@ export function App() {
     });
   }, [confirm, editorDirty]);
 
-  // Clear selection when switching workflows (also exits Overview + Settings).
-  const handleWorkflowChange = useCallback(
-    async (wf: string) => {
-      if (!(await requestLeaveEditor())) return;
-      setShowOverview(false);
-      setShowSettings(false);
-      setEditorDirty(false);
-      setWorkflow(wf);
-      setSelectedId(null);
-      setBatchQueueParentRunId(null);
-    },
-    [requestLeaveEditor],
-  );
+  // Clear selection when switching workflows (also closes Overview + Settings).
+  // The editor is a separate full-page view (rail hidden), so no leave guard is
+  // needed here — global shortcuts are disabled while it's open.
+  const handleWorkflowChange = useCallback((wf: string) => {
+    setShowOverview(false);
+    setShowSettings(false);
+    setWorkflow(wf);
+    setSelectedId(null);
+    setBatchQueueParentRunId(null);
+  }, []);
 
-  // Rail "Dashboard" entry — leave Settings (guarded) into the Overview.
-  const handleShowOverview = useCallback(async () => {
-    if (!(await requestLeaveEditor())) return;
+  // Rail "Dashboard" entry — land on the cross-workflow Overview.
+  const handleShowOverview = useCallback(() => {
     setShowOverview(true);
     setShowSettings(false);
-    setEditorDirty(false);
-  }, [requestLeaveEditor]);
+  }, []);
 
-  // Navbar gear — open the Settings page. Entering is free (nothing to lose yet).
+  // Navbar gear — open the Settings overlay. Entering is free (the draft
+  // persists across open/close; Save commits, Revert discards).
   const handleShowSettings = useCallback(() => {
     setShowSettings(true);
-    setShowOverview(false);
   }, []);
+
+  // Settings → "Workflow Editor": close the overlay and take over the full page.
+  const handleLaunchEditor = useCallback(() => {
+    setShowSettings(false);
+    setShowEditor(true);
+  }, []);
+
+  // Editor "Back to dashboard" — guarded against unsaved graph edits.
+  const handleLeaveEditor = useCallback(async () => {
+    if (!(await requestLeaveEditor())) return;
+    setEditorDirty(false);
+    setShowEditor(false);
+  }, [requestLeaveEditor]);
 
   // Notification preferences live in App (the status-transition effect reads
   // them) but are EDITED from the Settings page's Notifications section.
@@ -562,6 +574,8 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableFocus(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // The full-page editor owns the keyboard; suppress dashboard shortcuts.
+      if (showEditor) return;
 
       if (e.key === "?") {
         e.preventDefault();
@@ -593,7 +607,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [workflows, workflow, handleWorkflowChange, handleDateChange]);
+  }, [workflows, workflow, handleWorkflowChange, handleDateChange, showEditor]);
 
   // Cross-date search → deep-link to the matching (workflow, date, id).
   // Each setter triggers the URL-sync effect; useEntries re-subscribes when
@@ -783,6 +797,10 @@ export function App() {
           ),
         }}
       />
+      {showEditor ? (
+        <WorkflowEditorScreen onBack={handleLeaveEditor} onDirtyChange={setEditorDirty} />
+      ) : (
+        <>
       <TopBar
         date={date}
         onDateChange={handleDateChange}
@@ -834,11 +852,9 @@ export function App() {
         }}
       >
       <div className="flex flex-1 overflow-hidden">
-        {/* The rail stays visible in every mode — including the Settings page
-            (navbar gear), which hosts the Workflow Editor as one of its
-            sections. You "quit" Settings by picking any rail entry (Dashboard or
-            a workflow); leaving with unsaved editor edits is guarded by
-            requestLeaveEditor. */}
+        {/* Settings is a centered overlay (Dialog) and the Workflow Editor is a
+            full-page takeover — neither renders here, so the rail only toggles
+            between the Overview and a workflow's queue/detail panels. */}
         <WorkflowRail
           workflow={workflow}
           workflows={workflows}
@@ -848,13 +864,7 @@ export function App() {
           overviewActive={showOverview}
           onShowOverview={handleShowOverview}
         />
-        {showSettings ? (
-          <SettingsPage
-            notifySettings={notifySettings}
-            onNotifySettingsChange={handleNotifySettingsChange}
-            onEditorDirtyChange={setEditorDirty}
-          />
-        ) : showOverview ? (
+        {showOverview ? (
           <OverviewPanel
             workflows={workflows}
             wfCounts={wfCounts}
@@ -985,7 +995,16 @@ export function App() {
       </div>
       </OcrReviewPrepProvider>
       <TerminalDrawer connected={connected} viewingHistory={date !== dateLocal()} queuedCounts={wfQueuedCounts} />
+        </>
+      )}
       <ShortcutsGuide open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <SettingsDialog
+        open={showSettings}
+        onOpenChange={setShowSettings}
+        notifySettings={notifySettings}
+        onNotifySettingsChange={handleNotifySettingsChange}
+        onLaunchEditor={handleLaunchEditor}
+      />
       {confirmDialog}
       {/* Reupload RunModal — opened by the Reupload action in the OCR review toolbar */}
       <RunModal
