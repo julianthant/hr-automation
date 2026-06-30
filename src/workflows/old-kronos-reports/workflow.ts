@@ -27,6 +27,7 @@ import {
 } from "./tracker.js";
 import type { KronosTrackerRow } from "./tracker.js";
 import { EmployeeIdSchema } from "./schema.js";
+import { DEFAULT_WORKERS } from "./config.js";
 
 /**
  * Module-scoped runtime state. Old Kronos is not exposed through the dashboard
@@ -186,7 +187,7 @@ export const kronosReportsWorkflow = defineWorkflow({
   runtimePolicy: KRONOS_REPORTS_WORKFLOW_RUNTIME_POLICY,
   batch: {
     mode: "pool",
-    poolSize: 4,
+    poolSize: DEFAULT_WORKERS,
     preEmitPending: true,
   },
   detailFields: [
