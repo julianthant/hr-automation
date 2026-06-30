@@ -736,7 +736,7 @@ function QueueRowsTab() {
       {/* ---- OPERATION ---- */}
       <Section
         title="operation"
-        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. One card: header → work zone → footer. The OCR-status / member section sits INSIDE the card above the footer; members are EntryItem single rows, capped to scroll after ~4. A titleless (person-anchor) coordinator shows ONLY the status icon + badge in the header — no member-name summary; the count badge + member rows identify it."
+        sub="Target-workflow coordinator for OCR-backed Oath Signature / Emergency Contact PDF runs. One card: header → work zone → footer. The OCR-status / member section sits INSIDE the card above the footer; members are EntryItem single rows, capped to scroll after ~4. A titleless (person-anchor) coordinator has NO header strip — the card starts at the count badge. Collapsed, it shows a batch-style member-name preview below the count (it reads like a batch row); expanding swaps that for the full member rows."
       />
       <Variant label="before approval" axes="awaiting review · header jump" note="no middle strip — badge + blue OCR jump in header; footer is the true bottom edge">
         <OpUnifiedFixture fixture={operationPreApproval} />
@@ -769,14 +769,14 @@ function QueueRowsTab() {
       <Variant
         label="titleless person anchor (expanded)"
         axes="operation · person-kind · no title · done"
-        note="header is just the status icon + Done badge — NO member-name summary; count badge + member rows identify it"
+        note="NO header strip — card starts at the count badge; expanded shows full member rows"
       >
         <OpUnifiedFixture fixture={titlelessOperation} defaultExpanded />
       </Variant>
       <Variant
         label="titleless person anchor (collapsed)"
         axes="operation · person-kind · no title · done"
-        note="clean header at rest: status icon + badge only, count tally beside the chevron"
+        note="collapsed: count strip + batch-style member-name preview (reads like a batch row); expand for full rows"
       >
         <OpUnifiedFixture fixture={titlelessOperation} />
       </Variant>

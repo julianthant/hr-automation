@@ -27,7 +27,10 @@ import {
   resolveQueueRowLiveMessage,
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
-import { aggregateBatchCounts } from "@/components/ocr/delegation-row-helpers";
+import {
+  aggregateBatchCounts,
+  pickPreviewChildren,
+} from "@/components/ocr/delegation-row-helpers";
 import { statusKeyForEntry } from "@/components/shared/status-styles";
 import { cn } from "@/lib/utils";
 
@@ -123,11 +126,23 @@ const HEADER_STATUS: Record<string, HeaderStatus> = {
   },
 };
 
+/** Per-member status icons for the collapsed member-name preview — mirrors group-row-base's STATUS_ICON. */
+const MEMBER_PREVIEW_ICON: Record<
+  string,
+  { Icon: LucideIcon; color: string; spin: boolean }
+> = {
+  running: { Icon: Loader2, color: "text-primary", spin: true },
+  pending: { Icon: Clock, color: "text-warning", spin: false },
+  done: { Icon: CheckCircle2, color: "text-success", spin: false },
+  skipped: { Icon: CheckCircle2, color: "text-success", spin: false },
+  failed: { Icon: AlertTriangle, color: "text-destructive", spin: false },
+};
+
 /**
  * True when the resolved operation header title is non-empty (titled variant).
  * False for a person-kind anchor whose `batchGroupTitle` returns `""` — in that
- * case the header shows only the status icon + badge (no member-name preview);
- * the count badge + expandable member rows below identify the operation.
+ * case there is no header strip at all; the card starts at the count badge and
+ * the expandable member rows below identify the operation.
  *
  * Extracted as a pure helper so it can be tested without mounting React.
  */
@@ -217,6 +232,7 @@ export function OperationRowUnified({
 
   const name = projection?.title ?? resolveEntryName(displayParent, displayNames);
   const hasTitle = operationHeaderHasTitle(name);
+  const previewKids = pickPreviewChildren(members, 3);
   const isActivelyRunning = displayParent.status === "running" && !awaitingReview;
   const isTerminal = displayParent.status === "done" || displayParent.status === "failed";
   const subline = awaitingReview
@@ -298,66 +314,66 @@ export function OperationRowUnified({
               }),
         }}
       >
-        {/* Header zone */}
-        <div className="px-3.5 py-2.5">
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <StatusIcon
-                aria-hidden
-                className={cn("h-3.5 w-3.5 shrink-0", cfg.iconClass, cfg.iconColor)}
-              />
-              {/* Titled coordinator shows its title; a titleless person anchor
-                  shows only the status icon — the count badge + expandable
-                  member rows below identify the operation. */}
-              {hasTitle && (
+        {/* Header zone — rendered ONLY for a titled coordinator (file-kind, e.g.
+            a PDF filename). A titleless person anchor has NO header strip at all:
+            the count badge + expandable member rows identify the operation, so
+            the card starts directly at the count strip below. */}
+        {hasTitle && (
+          <div className="px-3.5 py-2.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <StatusIcon
+                  aria-hidden
+                  className={cn("h-3.5 w-3.5 shrink-0", cfg.iconClass, cfg.iconColor)}
+                />
                 <span className="truncate text-[14px] font-semibold text-foreground">{name}</span>
-              )}
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <span
-                className={cn(
-                  "rounded-md px-2 py-0.5 font-sans text-[10px] font-medium tracking-wide",
-                  cfg.badge,
-                )}
-              >
-                {cfg.label}
-              </span>
-              {awaitingReview && canOpenOcr ? (
-                <button
-                  type="button"
-                  aria-label="Open OCR review"
-                  title="Open OCR review"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (ocrSessionId && ocrRunId && onOpenOcrReview) {
-                      onOpenOcrReview({ sessionId: ocrSessionId, runId: ocrRunId });
-                    }
-                  }}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span
                   className={cn(
-                    "inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-info/40 bg-info/10",
-                    "text-info transition-colors duration-200",
-                    "hover:border-info/60 hover:bg-info/20",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info cursor-pointer",
+                    "rounded-md px-2 py-0.5 font-sans text-[10px] font-medium tracking-wide",
+                    cfg.badge,
                   )}
                 >
-                  <ArrowUpRight className="size-3" aria-hidden />
-                </button>
-              ) : null}
+                  {cfg.label}
+                </span>
+                {awaitingReview && canOpenOcr ? (
+                  <button
+                    type="button"
+                    aria-label="Open OCR review"
+                    title="Open OCR review"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (ocrSessionId && ocrRunId && onOpenOcrReview) {
+                        onOpenOcrReview({ sessionId: ocrSessionId, runId: ocrRunId });
+                      }
+                    }}
+                    className={cn(
+                      "inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-info/40 bg-info/10",
+                      "text-info transition-colors duration-200",
+                      "hover:border-info/60 hover:bg-info/20",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info cursor-pointer",
+                    )}
+                  >
+                    <ArrowUpRight className="size-3" aria-hidden />
+                  </button>
+                ) : null}
+              </div>
             </div>
+            {subline && (
+              <div className="ml-5 mt-1.5 min-w-0 font-mono text-[11px]">
+                <span
+                  className={cn(
+                    "block truncate",
+                    displayParent.status === "failed" ? "text-destructive" : "text-primary/85",
+                  )}
+                >
+                  {subline}
+                </span>
+              </div>
+            )}
           </div>
-          {subline && (
-            <div className="ml-5 mt-1.5 min-w-0 font-mono text-[11px]">
-              <span
-                className={cn(
-                  "block truncate",
-                  displayParent.status === "failed" ? "text-destructive" : "text-primary/85",
-                )}
-              >
-                {subline}
-              </span>
-            </div>
-          )}
-        </div>
+        )}
 
         {/* Work zone — OCR status (pre-approval) OR member section. Sits ABOVE
             the footer, inside the same card, so the footer stays the bottom. */}
@@ -404,7 +420,10 @@ export function OperationRowUnified({
                 setExpanded((next) => !next);
               }}
               className={cn(
-                "flex w-full items-center gap-2 border-t border-border/60 bg-secondary/15 px-3.5 py-2 text-left transition-colors duration-150",
+                "flex w-full items-center gap-2 bg-secondary/15 px-3.5 py-2 text-left transition-colors duration-150",
+                // Top divider only when a header sits above; a titleless anchor
+                // has no header, so the count strip is the card's top edge.
+                hasTitle && "border-t border-border/60",
                 "hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
               )}
             >
@@ -417,6 +436,36 @@ export function OperationRowUnified({
                 <StatusCounts counts={counts} />
               </span>
             </button>
+
+            {/* Collapsed: a batch-style member-name preview (running→queued→
+                failed→done order via pickPreviewChildren) so the operation reads
+                like a batch row at rest. Expand replaces it with the full rows. */}
+            {!expanded && previewKids.length > 0 && (
+              <div className="flex flex-col gap-1.5 border-t border-border/40 bg-card px-3.5 py-2 font-mono text-[10.5px]">
+                {previewKids.map((kid) => {
+                  const kidCfg = MEMBER_PREVIEW_ICON[kid.status] ?? MEMBER_PREVIEW_ICON.pending;
+                  const KidIcon = kidCfg.Icon;
+                  return (
+                    <div key={kid.id} className="flex min-w-0 items-center gap-2">
+                      <KidIcon
+                        aria-hidden
+                        className={cn(
+                          "h-3 w-3 shrink-0",
+                          kidCfg.color,
+                          kidCfg.spin && "animate-spin motion-reduce:animate-none",
+                        )}
+                      />
+                      <span className="flex-1 truncate min-w-0 text-foreground/90">{kid.name}</span>
+                      {kid.emplId && (
+                        <span className="shrink-0 tabular-nums text-[9.5px] text-muted-foreground">
+                          {kid.emplId}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {expanded && (
               // Members are full EntryItem single rows. The wrapper stops their
