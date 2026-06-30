@@ -40,13 +40,13 @@ export function resolveInstanceForRun(
   return undefined;
 }
 
-function rowArchetypeForRun(
-  trackers: Array<Pick<TrackerEntry, "runId" | "parentRunId" | "data">>,
-  runId: string,
-): ReturnType<typeof resolveRowArchetype> | undefined {
-  for (const t of trackers) {
-    if (t.runId !== runId) continue;
-    return resolveRowArchetype(t);
+/** First non-empty `data.instance` across the given entries, in order. */
+function firstInstanceFromEntries(
+  entries: Array<Pick<TrackerEntry, "data">>,
+): string | undefined {
+  for (const t of entries) {
+    const instance = t.data?.instance;
+    if (typeof instance === "string" && instance.length > 0) return instance;
   }
   return undefined;
 }
@@ -105,23 +105,50 @@ export function filterEventsForRun(
   runEndFallback: number = Date.now(),
 ): SessionEvent[] {
   const direct = events.filter((e) => e.runId === runId);
-  const archetype = rowArchetypeForRun(trackers, runId);
+
+  // Single pass over `trackers` to build every bucket this tick needs, instead
+  // of the ~9 repeated linear scans (archetype probe, two instance scans, two
+  // runEntries filters, the memberRunIds filter, …) that each re-walked the
+  // same array — costly for a separations coordinator with ~50 member rows on
+  // a 500ms SSE tick. `ownEntries` carry this exact runId (the run / the
+  // coordinator row itself); `childEntries` are rows parented to this runId
+  // (an operation coordinator's members). `archetypeEntry` is the FIRST own
+  // entry, matching the old first-match `rowArchetypeForRun`.
+  type Entry = (typeof trackers)[number];
+  let archetypeEntry: Entry | undefined;
+  const ownEntries: Entry[] = [];
+  const childEntries: Entry[] = [];
+  for (const t of trackers) {
+    if (t.runId === runId) {
+      archetypeEntry ??= t;
+      ownEntries.push(t);
+    }
+    if (t.parentRunId === runId) childEntries.push(t);
+  }
+  const archetype = archetypeEntry ? resolveRowArchetype(archetypeEntry) : undefined;
+
+  // Instance resolution derived from the buckets — no extra scan. Operation
+  // coordinator: its own `data.instance` if present, else the first child
+  // member's (mirrors `resolveInstanceForOperationCoordinator`). Otherwise the
+  // run's own first `data.instance` (mirrors `resolveInstanceForRun`).
+  const ownInstance = firstInstanceFromEntries(ownEntries);
   const instance =
     archetype === "operation"
-      ? resolveInstanceForOperationCoordinator(trackers, runId) ?? resolveInstanceForRun(trackers, runId)
-      : resolveInstanceForRun(trackers, runId);
+      ? ownInstance ?? firstInstanceFromEntries(childEntries)
+      : ownInstance;
+
+  const runEntries =
+    archetype === "operation" ? [...ownEntries, ...childEntries] : ownEntries;
+  const memberRunIds = new Set(
+    childEntries
+      .filter((t) => typeof t.runId === "string" && (t.runId as string).length > 0)
+      .map((t) => t.runId as string),
+  );
 
   let batchScope: SessionEvent[] = [];
   if (archetype === "operation-member") {
     batchScope = [];
   } else if (instance) {
-    const runEntries =
-      archetype === "operation"
-        ? [
-            ...trackers.filter((t) => t.runId === runId),
-            ...trackers.filter((t) => t.parentRunId === runId),
-          ]
-        : trackers.filter((t) => t.runId === runId);
     if (runEntries.length === 0) {
       // Degenerate: instance resolved but no tracker entries to build a
       // window from. Skip the fallback rather than over-include.
@@ -139,7 +166,16 @@ export function filterEventsForRun(
       // default `runEndFallback = Date.now()` stretched the window all the
       // way to "now", pulling in orphan events from later items that the
       // same daemon processed on the same `workflowInstance`.
-      const terminated = runEntries.some(
+      //
+      // For an operation COORDINATOR, the termination signal is the
+      // coordinator's OWN row only (`ownEntries`) — NOT its members. The
+      // coordinator is a display-only `pending` row that stays open for the
+      // whole fan-out; if a single member reaching done/failed/skipped capped
+      // the window, daemon-scope events (browser_health / idle_signal) that
+      // land after the last member row but before `runEndFallback` would be
+      // dropped from the consolidated coordinator timeline.
+      const terminationEntries = archetype === "operation" ? ownEntries : runEntries;
+      const terminated = terminationEntries.some(
         (t) => t.status === "done" || t.status === "failed" || t.status === "skipped",
       );
       const lastTrackerTs = Math.max(...trackerTimes);
@@ -174,17 +210,10 @@ export function filterEventsForRun(
   // summary line the coordinator log panel folds in, and pulling every member
   // event here would re-flood the timeline.
   let memberLifecycle: SessionEvent[] = [];
-  if (archetype === "operation") {
-    const memberRunIds = new Set(
-      trackers
-        .filter((t) => t.parentRunId === runId && typeof t.runId === "string" && t.runId.length > 0)
-        .map((t) => t.runId as string),
+  if (archetype === "operation" && memberRunIds.size > 0) {
+    memberLifecycle = events.filter(
+      (e) => e.type === "item_start" && typeof e.runId === "string" && memberRunIds.has(e.runId),
     );
-    if (memberRunIds.size > 0) {
-      memberLifecycle = events.filter(
-        (e) => e.type === "item_start" && typeof e.runId === "string" && memberRunIds.has(e.runId),
-      );
-    }
   }
 
   const merged = [...direct, ...batchScope, ...memberLifecycle];
