@@ -60,6 +60,7 @@ export function WorkflowModifierPage({
   // Reset per-workflow view state when the selection changes (the canvas remounts;
   // these are page-owned so they'd otherwise leak across workflows).
   useEffect(() => {
+    modelRef.current = null; // defend the handleGenerate guard until the new graph mounts
     setCollapsedIds(new Set());
     setFocusTarget(null);
     setDataFlowOn(false);
@@ -276,8 +277,8 @@ export function WorkflowModifierPage({
 
                 <button
                   type="button"
-                  disabled={wd.saving}
-                  aria-disabled={wd.saving}
+                  disabled={wd.saving || !wd.loaded}
+                  aria-disabled={wd.saving || !wd.loaded}
                   onClick={() => {
                     void handleGenerate();
                   }}

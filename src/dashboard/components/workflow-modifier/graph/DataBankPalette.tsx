@@ -316,8 +316,8 @@ function OpRow({
         ) : null}
         {op.inputVar || op.outputVar || selectorHint ? (
           <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {op.inputVar ? <VarPill icon={ArrowDownToLine} value={op.inputVar} accent="text-log-cyan" /> : null}
-            {op.outputVar ? <VarPill icon={ArrowUpFromLine} value={op.outputVar} accent="text-log-teal" /> : null}
+            {op.inputVar ? <VarPill icon={ArrowDownToLine} value={op.inputVar} accent="text-log-teal" /> : null}
+            {op.outputVar ? <VarPill icon={ArrowUpFromLine} value={op.outputVar} accent="text-log-cyan" /> : null}
             {selectorHint ? (
               <span className="truncate font-mono text-[10px] text-muted-foreground">{selectorHint}</span>
             ) : null}
