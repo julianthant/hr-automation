@@ -18,6 +18,8 @@ interface InputFieldProps {
   mono?: boolean;
   min?: number;
   step?: number;
+  /** Shows an amber dot beside the label when this field differs from its saved value. */
+  changed?: boolean;
   className?: string;
 }
 
@@ -32,12 +34,16 @@ export function InputField({
   mono,
   min,
   step,
+  changed,
   className,
 }: InputFieldProps): JSX.Element {
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      <label htmlFor={id} className="text-sm font-medium text-foreground">
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <label htmlFor={id} className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
         {label}
+        {changed && (
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" title="Changed" />
+        )}
       </label>
       <input
         id={id}
@@ -48,11 +54,11 @@ export function InputField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "h-9 max-w-md rounded-md border border-border bg-secondary px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "h-9 w-full rounded-md border border-border bg-secondary px-3 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring",
           mono && "font-mono",
         )}
       />
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -65,11 +71,34 @@ interface ToggleFieldProps {
   description?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  /** Shows an amber dot beside the label when this field differs from its saved value. */
+  changed?: boolean;
 }
 
-export function ToggleField({ id, label, description, checked, onChange }: ToggleFieldProps): JSX.Element {
+export function ToggleField({
+  id,
+  label,
+  description,
+  checked,
+  onChange,
+  changed,
+}: ToggleFieldProps): JSX.Element {
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-0.5">
+        <label
+          htmlFor={id}
+          className="flex cursor-pointer select-none items-center gap-1.5 text-[13px] font-medium text-foreground"
+        >
+          {label}
+          {changed && (
+            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" title="Changed" />
+          )}
+        </label>
+        {description && (
+          <p className="max-w-[44ch] text-xs leading-relaxed text-muted-foreground">{description}</p>
+        )}
+      </div>
       <button
         id={id}
         type="button"
@@ -78,27 +107,18 @@ export function ToggleField({ id, label, description, checked, onChange }: Toggl
         aria-label={label}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative mt-0.5 h-[18px] w-8 shrink-0 rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
           checked ? "border-success/50 bg-success/40" : "border-border bg-accent",
         )}
       >
         <span
           aria-hidden
           className={cn(
-            "absolute top-[2px] h-[12px] w-[12px] rounded-full transition-[left]",
-            checked ? "left-[16px] bg-success" : "left-[2px] bg-foreground",
+            "absolute top-[2px] h-[14px] w-[14px] rounded-full transition-[left]",
+            checked ? "left-[18px] bg-success" : "left-[2px] bg-foreground",
           )}
         />
       </button>
-      <div className="flex flex-col gap-0.5">
-        <label
-          htmlFor={id}
-          className="cursor-pointer text-sm font-medium text-foreground select-none"
-        >
-          {label}
-        </label>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      </div>
     </div>
   );
 }
