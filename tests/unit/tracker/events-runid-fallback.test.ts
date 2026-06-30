@@ -405,6 +405,50 @@ describe("filterEventsForRun — operation coordinator lifecycle attribution", (
     );
   });
 
+  it("keeps the coordinator window open past a completed member (daemon-scope event lands after the done member row)", () => {
+    // Regression for the early-cap bug: a member reaching `done` must NOT close
+    // the coordinator's timeline window. The coordinator row is a display-only
+    // `pending` row, so its window stays open to `runEndFallback` — a
+    // daemon-scope event (here `browser_health`, no runId) that lands AFTER the
+    // done-member tracker row but BEFORE `runEndFallback` must still appear in
+    // the consolidated coordinator view. (Pre-fix: termination keyed off ALL
+    // run entries, so the done member capped `runEnd` at the last member row's
+    // timestamp and this event was dropped.)
+    const coordinatorRunId = "COORD-1";
+    const memberRunId = "MEMBER-A";
+    const instance = "Separations 1";
+
+    const events: SessionEvent[] = [
+      ev({ type: "workflow_start", timestamp: "2026-04-23T10:00:00Z", workflowInstance: instance }),
+      ev({ type: "item_start", runId: memberRunId, timestamp: "2026-04-23T10:01:00Z", workflowInstance: instance, currentItemId: "alice@example.com" }),
+      ev({ type: "item_complete", runId: memberRunId, timestamp: "2026-04-23T10:05:00Z", workflowInstance: instance, currentItemId: "alice@example.com" }),
+      // Daemon-scope health event AFTER the done member row (10:05:00) but
+      // BEFORE runEndFallback (10:06:00). No runId → must attach via the
+      // open coordinator window.
+      ev({ type: "browser_health", timestamp: "2026-04-23T10:05:30Z", workflowInstance: instance, browserId: "b1", system: "kuali", data: { status: "healthy" } }),
+    ];
+
+    const trackers: TrackerEntry[] = [
+      coordinatorEntry(coordinatorRunId, "2026-04-23T10:00:00Z"), // pending — never terminal
+      memberEntry(memberRunId, coordinatorRunId, instance, "2026-04-23T10:01:00Z"),
+      { ...memberEntry(memberRunId, coordinatorRunId, instance, "2026-04-23T10:05:00Z"), status: "done" },
+    ];
+
+    const out = filterEventsForRun(
+      events,
+      trackers,
+      coordinatorRunId,
+      Date.parse("2026-04-23T10:06:00Z"),
+    );
+    const types = out.map((e) => e.type);
+    assert.ok(
+      types.includes("browser_health"),
+      `coordinator window must stay open past a completed member to include the later daemon-scope browser_health event (got: ${JSON.stringify(types)})`,
+    );
+    // The member's item_start is still surfaced on the coordinator timeline.
+    assert.ok(types.includes("item_start"), "member item_start should remain on the coordinator view");
+  });
+
   it("operation-member rows get only their own item events — no lifecycle bleed", () => {
     // Members must NOT receive the coordinator's lifecycle events — those
     // belong to the coordinator view only. Members have archetype:"operation-member"
