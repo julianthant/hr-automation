@@ -21,7 +21,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 - Hardcoded Kuali space ID: `https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb`
 - Uses `getByRole("textbox", { name: "exact label*" })` extensively — brittle if labels change
-- Department combobox uses best-effort case-insensitive substring match (skips `"- - -"` option)
+- Department combobox match is **dept-ID-code-first** (`pickDepartmentOptionIndex`): Tier 0 matches the UCPath `deptId` against the option's leading `"<code> - "` prefix (Kuali renders every option as `"<deptId> - <Name>"`, e.g. `"000141 - Early Childhood Education Center"` — verified 2026-06-30). The code is exact + drift-proof, so it beats the name-substring fallbacks (Tier 1 desc⊆option, Tier 2 option-name⊆desc). Skips the `"- - -"` placeholder. **Always pass `deptId` into `fillFinalTransactions`** — name-only matching silently fails on abbreviation drift (UCPath `"EARLY CHILDHOOD EDU. CENTER"` vs Kuali `"…Education Center"`).
 - Type of Termination extracted via `.evaluate()` on combobox (gets visible text, not internal value)
 - Location field is optional — 3s timeout, silent failure
 - "Does not need Final Pay (student employee)" is hardcoded — assumes all separations are students

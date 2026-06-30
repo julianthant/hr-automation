@@ -107,4 +107,52 @@ describe("pickDepartmentOptionIndex", () => {
       assert.strictEqual(pickDepartmentOptionIndex(o, "Bookstore"), 1);
     });
   });
+
+  // Tier 0 (2026-06-30): match on the UCPath dept ID against the option's
+  // leading `"<deptId> - "` code. Live verify (docs 4403/4406/4407/4408): UCPath
+  // "EARLY CHILDHOOD EDU. CENTER" (deptId 000141) never matched Kuali "000141 -
+  // Early Childhood Education Center" under the name tiers ("EDU." vs "Education"),
+  // leaving the Department dropdown blank. The dept code is the exact, drift-proof
+  // key — Kuali renders every option as "<deptId> - <Name>".
+  describe("tier 0 — UCPath dept ID matches the option's leading code", () => {
+    const ecec = [
+      "- - -",
+      "000141 - Early Childhood Education Center",
+      "000412 - Housing/Dining/Hospitality",
+      "000414 - Bookstore",
+    ];
+
+    it("matches the ECEC case the name tiers miss ('EDU.' vs 'Education')", () => {
+      assert.strictEqual(
+        pickDepartmentOptionIndex(ecec, "EARLY CHILDHOOD EDU. CENTER", "000141"),
+        1,
+      );
+    });
+
+    it("the same case without a deptId still fails the name tiers (proves Tier 0 is what fixes it)", () => {
+      assert.strictEqual(
+        pickDepartmentOptionIndex(ecec, "EARLY CHILDHOOD EDU. CENTER"),
+        -1,
+      );
+    });
+
+    it("dept code match is padding-agnostic (UCPath '141' ↔ Kuali '000141')", () => {
+      assert.strictEqual(pickDepartmentOptionIndex(ecec, "anything", "141"), 1);
+    });
+
+    it("wins over the name tiers even when a different option would name-match", () => {
+      // Description name-matches option 3 (Bookstore), but the deptId points to 1.
+      const o = ["- - -", "000141 - Early Childhood Education Center", "000414 - Bookstore"];
+      assert.strictEqual(pickDepartmentOptionIndex(o, "Bookstore", "000141"), 1);
+    });
+
+    it("falls back to the name tiers when the deptId has no matching option code", () => {
+      // deptId 999999 isn't present → Tier 0 misses → name tier 1 resolves Bookstore.
+      assert.strictEqual(pickDepartmentOptionIndex(ecec, "Bookstore", "999999"), 3);
+    });
+
+    it("ignores an empty/whitespace deptId and uses the name tiers", () => {
+      assert.strictEqual(pickDepartmentOptionIndex(ecec, "Bookstore", "  "), 3);
+    });
+  });
 });

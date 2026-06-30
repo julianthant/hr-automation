@@ -283,16 +283,47 @@ function departmentOptionName(opt: string): string {
 }
 
 /**
+ * The CODE part of a Kuali department option — the leading numeric prefix of a
+ * `"CODE - Name"` option (e.g. `"000141 - Early Childhood Education Center"` →
+ * `"000141"`). Returns "" when the option has no code prefix (e.g. `"- - -"`).
+ */
+function departmentOptionCode(opt: string): string {
+  return opt.match(/^\s*(\d+)\s*-/)?.[1] ?? "";
+}
+
+/**
+ * Two dept codes are the SAME when they're equal after trimming OR equal as
+ * integers (so a UCPath `"141"` still matches a Kuali `"000141"` regardless of
+ * zero-padding). Both come from UCPath/Kuali as zero-padded 6-digit codes today,
+ * but the integer compare makes the match padding-agnostic and future-proof.
+ */
+function deptCodesMatch(a: string, b: string): boolean {
+  const ta = a.trim();
+  const tb = b.trim();
+  if (!ta || !tb) return false;
+  if (ta === tb) return true;
+  const na = Number(ta);
+  const nb = Number(tb);
+  return Number.isInteger(na) && Number.isInteger(nb) && na === nb;
+}
+
+/**
  * Pick the index of the best-matching department `<option>` for a UCPath
- * department description. Returns -1 when nothing confidently matches (the
- * caller then leaves the field blank for manual entry — fail-safe, never a
- * guess).
+ * department. Returns -1 when nothing confidently matches (the caller then
+ * leaves the field blank for manual entry — fail-safe, never a guess).
  *
- * Two tiers, both case-insensitive with collapsed whitespace, skipping the
- * placeholder `"- - -"` row:
- *   1. The UCPath description is a substring of the option (the original,
- *      highest-confidence match — e.g. "Housing/Dining/Hospitality" ⊆
- *      "000412 - Housing/Dining/Hospitality").
+ * Tiers, in priority order, skipping the placeholder `"- - -"` row:
+ *   0. **Dept CODE match** (when `deptId` is supplied) — the option's leading
+ *      `"CODE - "` prefix equals the UCPath dept ID. Kuali renders every dept
+ *      option as `"<deptId> - <Name>"` (live-verified 2026-06-30: `"000141 -
+ *      Early Childhood Education Center"`, `"000412 - Housing/Dining/Hospitality"`)
+ *      and the code IS the UCPath dept ID, so this is an EXACT, drift-proof match
+ *      that's immune to name abbreviation/punctuation differences. This is the
+ *      fix for UCPath "EARLY CHILDHOOD EDU. CENTER" (deptId 000141) never matching
+ *      Kuali "Early Childhood Education Center" under the name tiers ("EDU." vs
+ *      "Education", 2026-06-30 live batch docs 4403/4406/4407/4408).
+ *   1. UCPath description ⊆ option NAME (case-insensitive, collapsed whitespace) —
+ *      e.g. "Housing/Dining/Hospitality" ⊆ "000412 - Housing/Dining/Hospitality".
  *   2. The option's NAME (after the "CODE - " prefix) is a substring of the
  *      UCPath description. This handles UCPath descriptions that carry a
  *      DIVISION PREFIX the Kuali label lacks — live: UCPath "VCSA-CL ASSOCIATED
@@ -311,7 +342,18 @@ function departmentOptionName(opt: string): string {
  * select timed out at 5s for those departments. Selecting by index sidesteps
  * all label/whitespace matching.
  */
-export function pickDepartmentOptionIndex(options: string[], department: string): number {
+export function pickDepartmentOptionIndex(
+  options: string[],
+  department: string,
+  deptId?: string,
+): number {
+  // Tier 0 — exact dept CODE match (most reliable; immune to name drift).
+  const code = (deptId ?? "").trim();
+  if (code) {
+    const tier0 = options.findIndex((opt) => deptCodesMatch(departmentOptionCode(opt), code));
+    if (tier0 >= 0) return tier0;
+  }
+
   const needle = normDept(department);
   if (!needle) return -1;
 
@@ -345,6 +387,13 @@ export async function fillFinalTransactions(
   opts: {
     terminationEffDate?: string;
     department?: string;
+    /**
+     * UCPath dept ID (e.g. "000141") for the department being selected. When
+     * present it is the PRIMARY match key — Kuali options render `"<deptId> -
+     * <Name>"`, so the code is an exact, drift-proof match that beats the
+     * name-substring tiers (see `pickDepartmentOptionIndex` Tier 0).
+     */
+    deptId?: string;
     payrollTitleCode?: string;
     payrollTitle?: string;
   },
@@ -366,9 +415,13 @@ export async function fillFinalTransactions(
     log.step(`  Department: ${opts.department}`);
     const deptCombo = finalTransactions.department(page);
     const allOptions = await deptCombo.locator("option").allTextContents(); // allow-inline-selector -- enumerating option elements of a combobox
-    const matchIdx = pickDepartmentOptionIndex(allOptions, opts.department);
+    const matchIdx = pickDepartmentOptionIndex(allOptions, opts.department, opts.deptId);
     const bestMatch = matchIdx >= 0 ? allOptions[matchIdx].trim() : "NONE";
-    log.step(`Department: searching for "${opts.department}" — best match: "${bestMatch}"`);
+    log.step(
+      `Department: searching for "${opts.department}"`
+      + (opts.deptId ? ` (deptId ${opts.deptId})` : "")
+      + ` — best match: "${bestMatch}"`,
+    );
     if (matchIdx >= 0) {
       // Select by INDEX, not { label }: live UCSD dept options carry irregular
       // internal whitespace that never matches Playwright's exact label compare
