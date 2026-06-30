@@ -9,8 +9,10 @@ import { EditorSidebar } from "./EditorSidebar.js";
 import { GraphCanvas } from "./graph/GraphCanvas.js";
 import { groupLaneOps } from "./graph/lane-build.js";
 import { buildOutlineModel } from "./graph/outline-build.js";
-import { designSpecToGraph, graphToDesignSpec } from "./graph/design-spec.js";
-import type { GraphModel } from "./graph/graph-types.js";
+import { designSpecToGraph, graphToDesignSpec, mergeAddedOpsIntoModel } from "./graph/design-spec.js";
+import { opToActionData } from "./graph/data-bank-dnd.js";
+import type { GraphModel, AddedLaneOp, ActionNodeData } from "./graph/graph-types.js";
+import type { DataBankOperation } from "../../../domain/workflow-design/data-bank.js";
 import { countTotal, isDirty } from "./blueprint-helpers.js";
 
 interface WorkflowModifierPageProps {
@@ -39,6 +41,9 @@ export function WorkflowModifierPage({
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [focusTarget, setFocusTarget] = useState<{ id: string; n: number } | null>(null);
   const [fitNonce, setFitNonce] = useState(0);
+  // Ops the operator dropped into step lanes from the Data Bank, keyed by bare
+  // step. Design intent (no runtime override) — serialized to the scaffold.
+  const [addedOps, setAddedOps] = useState<Record<string, AddedLaneOp[]>>({});
 
   // Latest live graph model, lifted from the canvas for "Generate scaffold".
   const modelRef = useRef<GraphModel | null>(null);
@@ -59,6 +64,7 @@ export function WorkflowModifierPage({
     setFocusTarget(null);
     setDataFlowOn(false);
     setDryRunOn(false);
+    setAddedOps({});
   }, [wp.selected]);
 
   const dirty = isDirty(draft, wp.data?.override ?? null);
@@ -72,6 +78,34 @@ export function WorkflowModifierPage({
 
   const total = countTotal(draft);
   const designOverlay = useMemo(() => (wd.spec ? designSpecToGraph(wd.spec) : null), [wd.spec]);
+
+  // Restore dropped-in ops from the saved design scaffold once it resolves (and
+  // clear them when switching to a workflow with no spec).
+  useEffect(() => {
+    setAddedOps(designOverlay?.addedOps ?? {});
+  }, [designOverlay]);
+
+  const addOpToStep = useCallback((step: string, op: DataBankOperation) => {
+    setAddedOps((prev) => ({
+      ...prev,
+      [step]: [...(prev[step] ?? []), { ...opToActionData(op), addedId: crypto.randomUUID().slice(0, 8) }],
+    }));
+  }, []);
+  const removeAddedOp = useCallback((step: string, addedId: string) => {
+    setAddedOps((prev) => {
+      const next = (prev[step] ?? []).filter((o) => o.addedId !== addedId);
+      const out = { ...prev };
+      if (next.length) out[step] = next;
+      else delete out[step];
+      return out;
+    });
+  }, []);
+  const updateAddedOp = useCallback((step: string, addedId: string, patch: Partial<ActionNodeData>) => {
+    setAddedOps((prev) => ({
+      ...prev,
+      [step]: (prev[step] ?? []).map((o) => (o.addedId === addedId ? { ...o, ...patch } : o)),
+    }));
+  }, []);
 
   // Outline of the selected workflow (drives the sidebar dropdown + collapse-all).
   const workflowBank = useMemo(
@@ -141,8 +175,10 @@ export function WorkflowModifierPage({
 
   const handleGenerate = async () => {
     if (!wp.selected || !modelRef.current) return;
-    // generatedAt is stamped server-side, so a placeholder is fine here.
-    const spec = graphToDesignSpec(modelRef.current, wp.selected, "");
+    // Fold the lane-dropped ops in as step-parented action nodes so they ride the
+    // scaffold. generatedAt is stamped server-side, so a placeholder is fine here.
+    const model = mergeAddedOpsIntoModel(modelRef.current, addedOps);
+    const spec = graphToDesignSpec(model, wp.selected, "");
     const paths = await wd.save(spec);
     if (paths) {
       toast.success("Design scaffold generated");
@@ -197,6 +233,10 @@ export function WorkflowModifierPage({
                   focusTarget={focusTarget}
                   onClearFocus={clearFocus}
                   fitNonce={fitNonce}
+                  addedOps={addedOps}
+                  onAddOpToStep={addOpToStep}
+                  onRemoveAddedOp={removeAddedOp}
+                  onUpdateAddedOp={updateAddedOp}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center" aria-live="polite">

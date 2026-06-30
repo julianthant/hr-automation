@@ -22,6 +22,7 @@ import {
   PREP_NODE_ID,
   MEMBER_NODE_ID,
   stepNodeId,
+  parseStepNodeId,
 } from "../../../../src/dashboard/components/workflow-modifier/graph/graph-build.js";
 import { prune } from "../../../../src/dashboard/components/workflow-modifier/blueprint-helpers.js";
 import {
@@ -170,5 +171,19 @@ describe("graphToOverride", () => {
       second.nodes.map((n) => n.data),
       first.nodes.map((n) => n.data),
     );
+  });
+});
+
+describe("parseStepNodeId", () => {
+  test("recovers the bare step from a step node id (round-trips stepNodeId)", () => {
+    assert.equal(parseStepNodeId(stepNodeId("prepare-import")), "prepare-import");
+    assert.equal(parseStepNodeId("step:foo"), "foo");
+  });
+
+  test("returns null for non-step node ids", () => {
+    assert.equal(parseStepNodeId(ROW_NODE_ID), null);
+    assert.equal(parseStepNodeId(COORDINATOR_NODE_ID), null);
+    assert.equal(parseStepNodeId("opslane:kuali-extract"), null);
+    assert.equal(parseStepNodeId("custom-abc123"), null);
   });
 });

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import type { DataBank, DataBankOperation, DataBankOpKind } from "../../../../domain/workflow-design/data-bank.js";
 import { NODE_NOTE, NODE_GROUP } from "./graph-types.js";
 import { opKindVisual } from "./op-kind-visuals.js";
+import { DATA_BANK_DRAG_MIME, serializeOpDrag } from "./data-bank-dnd.js";
 import {
   availableKinds,
   buildPaletteGroups,
@@ -73,6 +74,11 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
   const addOp = (op: DataBankOperation): void => {
     pushRecent(op.id);
     onAddOp(op);
+  };
+  const startOpDrag = (e: React.DragEvent, op: DataBankOperation): void => {
+    e.dataTransfer.setData(DATA_BANK_DRAG_MIME, serializeOpDrag(op));
+    e.dataTransfer.effectAllowed = "copy";
+    pushRecent(op.id);
   };
   const toggleKind = (kind: DataBankOpKind): void =>
     setKinds((prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]));
@@ -154,6 +160,10 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
             })}
           </div>
         ) : null}
+
+        <p className="text-[10.5px] leading-snug text-muted-foreground">
+          Drag an op onto a step lane to add it there, or onto the canvas for a standalone node.
+        </p>
       </div>
 
       {/* Body */}
@@ -172,7 +182,7 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
                 <ul className="space-y-0.5">
                   {recentOps.map((op) => (
                     <li key={`recent-${op.id}`}>
-                      <OpRow op={op} onAdd={() => addOp(op)} />
+                      <OpRow op={op} onAdd={() => addOp(op)} onDragStart={(e) => startOpDrag(e, op)} />
                     </li>
                   ))}
                 </ul>
@@ -201,7 +211,7 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
                     <ul className="space-y-0.5">
                       {g.ops.map((op) => (
                         <li key={op.id}>
-                          <OpRow op={op} onAdd={() => addOp(op)} />
+                          <OpRow op={op} onAdd={() => addOp(op)} onDragStart={(e) => startOpDrag(e, op)} />
                         </li>
                       ))}
                     </ul>
@@ -268,7 +278,15 @@ function SectionEyebrow({ icon: Icon, label }: { icon: LucideIcon; label: string
   );
 }
 
-function OpRow({ op, onAdd }: { op: DataBankOperation; onAdd: () => void }): JSX.Element {
+function OpRow({
+  op,
+  onAdd,
+  onDragStart,
+}: {
+  op: DataBankOperation;
+  onAdd: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+}): JSX.Element {
   const v = opKindVisual(op.kind);
   const description = op.summary ?? op.accessibleName ?? op.role ?? op.selectorFqn ?? "";
   const selectorHint =
@@ -276,10 +294,12 @@ function OpRow({ op, onAdd }: { op: DataBankOperation; onAdd: () => void }): JSX
   return (
     <button
       type="button"
+      draggable
+      onDragStart={onDragStart}
       onClick={onAdd}
       title={op.selectorFqn ?? op.summary ?? op.label}
-      aria-label={`Add ${v.verb} — ${op.label}`}
-      className="group flex w-full gap-2.5 rounded-lg border border-transparent px-2 py-2 text-left outline-none transition-colors hover:border-border hover:bg-card focus-visible:border-border focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={`Add ${v.verb} — ${op.label} (drag onto a step or the canvas)`}
+      className="group flex w-full cursor-grab gap-2.5 rounded-lg border border-transparent px-2 py-2 text-left outline-none transition-colors hover:border-border hover:bg-card focus-visible:border-border focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
     >
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary">
         <v.icon aria-hidden className={cn("h-3.5 w-3.5", v.accent)} />

@@ -70,6 +70,12 @@ export const PREP_NODE_ID = "prep";
 export const MEMBER_NODE_ID = "member";
 export const stepNodeId = (step: string): string => `step:${step}`;
 const stepFromNodeId = (id: string): string => id.slice("step:".length);
+/** Parse a step node id (`step:<step>`) back to the bare step, or null if `id`
+ *  isn't a step node — the drop-target + scaffold-routing test for "is this a
+ *  step lane?" (a row/coordinator/opslane id returns null). */
+export function parseStepNodeId(id: string): string | null {
+  return id.startsWith("step:") ? id.slice("step:".length) : null;
+}
 /** Display-only lane id for a mined step with no presentation step. */
 export const opsLaneNodeId = (step: string): string => `opslane:${step}`;
 

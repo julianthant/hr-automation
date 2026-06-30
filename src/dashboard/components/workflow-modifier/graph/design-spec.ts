@@ -13,6 +13,7 @@ import type {
 } from "../../../../domain/workflow-design/types.js";
 import { DESIGN_SCHEMA_VERSION } from "../../../../domain/workflow-design/types.js";
 import type { DataBankOpKind } from "../../../../domain/workflow-design/data-bank.js";
+import { stepNodeId, parseStepNodeId } from "./graph-build.js";
 import {
   NODE_ROW,
   NODE_STEP,
@@ -29,6 +30,10 @@ import {
   EDGE_CUSTOM,
   type GraphModel,
   type GraphNode,
+  type GraphEdge,
+  type StepGraphNode,
+  type AddedLaneOp,
+  type ActionNodeData,
 } from "./graph-types.js";
 
 const NODE_TO_DESIGN: Record<string, DesignNodeType> = {
@@ -166,41 +171,62 @@ export function graphToDesignSpec(
   };
 }
 
+function actionDataFromBlock(a: DesignActionOp): ActionNodeData {
+  return {
+    opId: a.opId,
+    kind: a.kind as DataBankOpKind,
+    system: a.system,
+    label: a.label,
+    ...(a.selectorFqn !== undefined ? { selectorFqn: a.selectorFqn } : {}),
+    ...(a.role !== undefined ? { role: a.role } : {}),
+    ...(a.accessibleName !== undefined ? { accessibleName: a.accessibleName } : {}),
+    ...(a.inputVar !== undefined ? { inputVar: a.inputVar } : {}),
+    ...(a.outputVar !== undefined ? { outputVar: a.outputVar } : {}),
+    ...(a.url !== undefined ? { url: a.url } : {}),
+    ...(a.note !== undefined ? { note: a.note } : {}),
+  };
+}
+
 export interface DesignOverlay {
-  /** The intent-only nodes (custom/note/group) to append to the config graph. */
+  /** The intent-only nodes (custom/note/group + free-floating actions) to append
+   *  to the config graph. */
   intentNodes: GraphNode[];
   /** Saved positions keyed by node id — overlaid onto every node (config + intent). */
   positions: Record<string, { x: number; y: number }>;
+  /** Ops that were DROPPED into a step lane (keyed by bare step), restored from
+   *  action nodes whose `parentGroup` is a `step:<step>` id — the page seeds its
+   *  per-step added-ops state from this so dropped ops survive a reload. */
+  addedOps: Record<string, AddedLaneOp[]>;
+  /** Operator-drawn (`custom`) edges to re-seed onto the canvas. Sequence/
+   *  delegation/fold edges are NOT restored — they're re-derived from the config
+   *  by `overrideToGraph`, so re-seeding them would duplicate. */
+  customEdges: GraphEdge[];
 }
 
-/** Rebuild the intent nodes + the position overlay from a saved design spec. */
+/** Rebuild the intent nodes + position overlay + restored lane-added ops from a
+ *  saved design spec. An action node parented to a step (`parentGroup` = `step:…`)
+ *  is restored as a lane-added op; a free action node becomes a standalone node. */
 export function designSpecToGraph(spec: WorkflowDesignSpec): DesignOverlay {
   const positions: Record<string, { x: number; y: number }> = {};
   const intentNodes: GraphNode[] = [];
+  const addedOps: Record<string, AddedLaneOp[]> = {};
   for (const n of spec.nodes) {
     positions[n.id] = { x: n.position.x, y: n.position.y };
     if (n.type === "action" && n.action) {
-      // Action nodes are placed back into intentNodes so GraphCanvas's seedOps gate
-      // sees them and does NOT double-seed the mined ops.
-      const a = n.action;
-      intentNodes.push({
-        id: n.id,
-        type: NODE_ACTION,
-        position: { ...n.position },
-        data: {
-          opId: a.opId,
-          kind: a.kind as DataBankOpKind,
-          system: a.system,
-          label: a.label,
-          ...(a.selectorFqn !== undefined ? { selectorFqn: a.selectorFqn } : {}),
-          ...(a.role !== undefined ? { role: a.role } : {}),
-          ...(a.accessibleName !== undefined ? { accessibleName: a.accessibleName } : {}),
-          ...(a.inputVar !== undefined ? { inputVar: a.inputVar } : {}),
-          ...(a.outputVar !== undefined ? { outputVar: a.outputVar } : {}),
-          ...(a.url !== undefined ? { url: a.url } : {}),
-          ...(a.note !== undefined ? { note: a.note } : {}),
-        },
-      });
+      const step = n.parentGroup ? parseStepNodeId(n.parentGroup) : null;
+      if (step) {
+        // A lane-dropped op — restore into the owning step's added-ops list.
+        (addedOps[step] ??= []).push({ ...actionDataFromBlock(n.action), addedId: n.id });
+      } else {
+        // A free-floating action node — restored like an intent node (so
+        // GraphCanvas's seed gate sees it and does NOT re-seed the mined ops).
+        intentNodes.push({
+          id: n.id,
+          type: NODE_ACTION,
+          position: { ...n.position },
+          data: actionDataFromBlock(n.action),
+        });
+      }
     } else if (n.type === "custom") {
       intentNodes.push({
         id: n.id,
@@ -231,7 +257,51 @@ export function designSpecToGraph(spec: WorkflowDesignSpec): DesignOverlay {
       });
     }
   }
-  return { intentNodes, positions };
+  // Restore operator-drawn edges only (config edges are re-derived from the override).
+  const customEdges: GraphEdge[] = spec.edges
+    .filter((e) => e.type === "custom")
+    .map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: EDGE_CUSTOM,
+      deletable: true,
+      ...(e.label !== undefined ? { label: e.label } : {}),
+    }));
+  return { intentNodes, positions, addedOps, customEdges };
+}
+
+/**
+ * Fold the per-step lane-added ops into a graph model as `action` nodes parented
+ * to their step (`parentId` = `step:<step>`), so the standard `graphToDesignSpec`
+ * capture serializes them — and `designSpecToGraph` restores them as lane-added
+ * ops on the round trip. Lane-added ops are NOT React Flow nodes (they ride per-
+ * step editor state), so this is how they reach the scaffold. Pure: positions are
+ * derived from each step node's position (a stable design hint, not load-bearing).
+ */
+export function mergeAddedOpsIntoModel(
+  model: GraphModel,
+  addedOps: Record<string, AddedLaneOp[]>,
+): GraphModel {
+  const stepPos = new Map<string, { x: number; y: number }>();
+  for (const n of model.nodes) {
+    if (n.type === NODE_STEP) stepPos.set((n as StepGraphNode).data.step, n.position);
+  }
+  const extra: GraphNode[] = [];
+  for (const [step, ops] of Object.entries(addedOps)) {
+    const base = stepPos.get(step) ?? { x: 0, y: 0 };
+    ops.forEach((op, i) => {
+      const { addedId, ...action } = op;
+      extra.push({
+        id: addedId,
+        type: NODE_ACTION,
+        position: { x: base.x, y: base.y + 520 + i * 64 },
+        parentId: stepNodeId(step),
+        data: { ...action },
+      });
+    });
+  }
+  return { nodes: [...model.nodes, ...extra], edges: model.edges };
 }
 
 export { DESIGN_TO_NODE };

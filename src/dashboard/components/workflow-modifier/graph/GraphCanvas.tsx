@@ -7,12 +7,14 @@ import {
   Controls,
   MiniMap,
   Panel,
+  addEdge,
   useNodesState,
   useEdgesState,
   useReactFlow,
+  type Connection,
 } from "@xyflow/react";
 import type { WorkflowPresentationDetail, WorkflowOverride } from "../useWorkflowPresentation.js";
-import { overrideToGraph } from "./graph-build.js";
+import { overrideToGraph, parseStepNodeId } from "./graph-build.js";
 import { STEP_X0, STEP_DX, STEP_Y } from "./graph-build.js";
 import { FlaskConical, Split, Ban } from "lucide-react";
 import { groupLaneOps, buildDataFlowEdges } from "./lane-build.js";
@@ -21,6 +23,7 @@ import { nodeTypes } from "./nodes/node-registry.js";
 import { edgeTypes } from "./edges/edge-registry.js";
 import { NodeInspector } from "./NodeInspector.js";
 import { LaneInteractionContext } from "./lane-interaction.js";
+import { DATA_BANK_DRAG_MIME, parseOpDragPayload, opToActionData } from "./data-bank-dnd.js";
 import type { IntentNodeKind } from "./graph-types.js";
 import { DataBankPalette } from "./DataBankPalette.js";
 import type { DataBank, DataBankOperation } from "../../../../domain/workflow-design/data-bank.js";
@@ -35,13 +38,24 @@ import {
   NODE_ACTION,
   NODE_CUSTOM,
   NODE_NOTE,
+  EDGE_CUSTOM,
   type GraphNode,
   type GraphEdge,
   type GraphModel,
   type StepGraphNode,
   type OpsLaneGraphNode,
   type ActionNodeData,
+  type AddedLaneOp,
 } from "./graph-types.js";
+
+/** The bare step under a drag/drop, via the React Flow node DOM wrapper's
+ *  `data-id` — null when the event isn't over a step lane (empty pane, a palette,
+ *  the row/coordinator). */
+function stepNodeIdAtTarget(target: EventTarget | null): string | null {
+  const el = target instanceof HTMLElement ? target.closest(".react-flow__node") : null;
+  const id = el?.getAttribute("data-id");
+  return id ? parseStepNodeId(id) : null;
+}
 
 /** The lifted, page-owned view controller — focus / collapse / data-flow / fit /
  *  palette state shared between the merged sidebar and the canvas. */
@@ -70,6 +84,14 @@ interface GraphCanvasProps extends CanvasViewState {
   designOverlay: DesignOverlay | null;
   /** Lifts the live nodes+edges up so the page's "Generate scaffold" can read them. */
   onGraphChange: (model: GraphModel) => void;
+  /** Ops the operator dropped into step lanes, keyed by bare step (page-owned). */
+  addedOps: Record<string, AddedLaneOp[]>;
+  /** Drop a Data Bank op into a step lane. */
+  onAddOpToStep: (step: string, op: DataBankOperation) => void;
+  /** Remove a dropped op from a step lane. */
+  onRemoveAddedOp: (step: string, addedId: string) => void;
+  /** Edit a dropped op's data-flow vars / note. */
+  onUpdateAddedOp: (step: string, addedId: string, patch: Partial<ActionNodeData>) => void;
 }
 
 /** Lanes + the presentation spine round-trip to the override; ops lanes are display. */
@@ -109,6 +131,13 @@ function buildInitial(configNodes: GraphNode[], overlay: DesignOverlay | null): 
   const pos = overlay?.positions ?? {};
   const config = configNodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n));
   return [...config, ...(overlay?.intentNodes ?? [])];
+}
+
+/** Seed: derived config edges + the saved operator-drawn (custom) edges. The
+ *  re-sync effect preserves the custom edges thereafter (it partitions on
+ *  `EDGE_CUSTOM`), so seeding them here is what makes drawn edges survive a reload. */
+function buildInitialEdges(configEdges: GraphEdge[], overlay: DesignOverlay | null): GraphEdge[] {
+  return overlay?.customEdges?.length ? [...configEdges, ...overlay.customEdges] : configEdges;
 }
 
 /** Re-sync config-node data from a fresh projection; preserve intent nodes +
@@ -165,9 +194,14 @@ function GraphCanvasInner({
   focusTarget,
   onClearFocus,
   fitNonce,
+  addedOps,
+  onAddOpToStep,
+  onRemoveAddedOp,
+  onUpdateAddedOp,
 }: GraphCanvasInnerProps): JSX.Element {
   const reducedMotion = usePrefersReducedMotion();
   const { screenToFlowPosition, fitView, getNode, setCenter } = useReactFlow();
+  const [dropTargetStep, setDropTargetStep] = useState<string | null>(null);
 
   // The workflow's REAL mined automation, grouped by presentation step.
   const workflowBank = useMemo(
@@ -194,18 +228,22 @@ function GraphCanvasInner({
   // unmapped mined step as a read-only ops lane to the right of the pipeline.
   const configModel = useMemo<GraphModel>(() => {
     const projected = overrideToGraph(data.base, draft, workflowName);
+    // Config nodes (the pipeline spine) are NOT deletable — only operator-placed
+    // action/intent nodes + drawn edges can be removed with the Delete key.
     const nodes: GraphNode[] = projected.nodes.map((n) =>
       n.type === NODE_STEP
         ? ({
             ...n,
+            deletable: false,
             data: {
               ...n.data,
               ops: laneOps.byStep[n.data.step] ?? [],
+              addedOps: addedOps[n.data.step] ?? [],
               bankNote: stepMeta.get(n.data.step)?.note,
               bankSourceRef: stepMeta.get(n.data.step)?.sourceRef,
             },
           } as GraphNode)
-        : n,
+        : ({ ...n, deletable: false } as GraphNode),
     );
     const stepCount = nodes.filter((n) => n.type === NODE_STEP).length;
     laneOps.extraLanes.forEach((ex, i) => {
@@ -213,23 +251,41 @@ function GraphCanvasInner({
         id: ex.id,
         type: NODE_OPS_LANE,
         position: { x: STEP_X0 + (stepCount + i) * STEP_DX, y: STEP_Y },
+        deletable: false,
         data: { step: ex.step, label: ex.label, ops: ex.ops, bankNote: ex.note, bankSourceRef: ex.sourceRef },
       } as GraphNode);
     });
     return { nodes, edges: projected.edges };
-  }, [data.base, draft, workflowName, laneOps, stepMeta]);
+  }, [data.base, draft, workflowName, laneOps, stepMeta, addedOps]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphNode>(
     buildInitial(configModel.nodes, designOverlay),
   );
-  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphEdge>(configModel.edges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphEdge>(
+    buildInitialEdges(configModel.edges, designOverlay),
+  );
   const dropCount = useRef(0);
 
   // Keep config nodes in sync with the projected model (driven by the draft).
+  // Operator-drawn custom edges are NOT derived from the config, so preserve them
+  // across the re-sync (a draft keystroke must not wipe a hand-drawn link).
   useEffect(() => {
     setNodes((curr) => syncNodes(curr, configModel.nodes));
-    setEdges(configModel.edges);
+    setEdges((curr) => [...configModel.edges, ...curr.filter((e) => e.type === EDGE_CUSTOM)]);
   }, [configModel, setNodes, setEdges]);
+
+  // Hand-drawn connections become custom (design-intent) edges.
+  const onConnect = useCallback(
+    (c: Connection) => {
+      setEdges((eds) =>
+        addEdge(
+          { ...c, type: EDGE_CUSTOM, id: `custom:${crypto.randomUUID().slice(0, 8)}`, deletable: true },
+          eds,
+        ),
+      );
+    },
+    [setEdges],
+  );
 
   // Lift the live model up for the scaffold generator (ops lanes are display-only).
   useEffect(() => {
@@ -343,30 +399,48 @@ function GraphCanvasInner({
   );
 
   const addActionNode = useCallback(
-    (op: DataBankOperation) => {
+    (op: DataBankOperation, position?: { x: number; y: number }) => {
       const id = `action-${crypto.randomUUID().slice(0, 8)}`;
-      const position = nextDropPosition();
       const node: GraphNode = {
         id,
         type: NODE_ACTION,
-        position,
-        data: {
-          opId: op.id,
-          kind: op.kind,
-          system: op.system,
-          label: op.label,
-          selectorFqn: op.selectorFqn,
-          role: op.role,
-          accessibleName: op.accessibleName,
-          inputVar: op.inputVar,
-          outputVar: op.outputVar,
-          url: op.url,
-          note: op.note,
-        },
+        position: position ?? nextDropPosition(),
+        data: opToActionData(op),
       };
       setNodes((curr) => [...curr.map((n) => ({ ...n, selected: false })), { ...node, selected: true }]);
     },
     [setNodes, nextDropPosition],
+  );
+
+  // ── Drag-and-drop from the Data Bank palette ───────────────────────────────────
+  // Drop ON a step lane → the op joins that step (an "added" row); drop on empty
+  // canvas → a standalone, connectable action node at the cursor.
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes(DATA_BANK_DRAG_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setDropTargetStep(stepNodeIdAtTarget(e.target));
+  }, []);
+
+  const onDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      const next = e.relatedTarget;
+      if (!(next instanceof Node) || !wrapperRef.current?.contains(next)) setDropTargetStep(null);
+    },
+    [wrapperRef],
+  );
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      const op = parseOpDragPayload(e.dataTransfer.getData(DATA_BANK_DRAG_MIME));
+      setDropTargetStep(null);
+      if (!op) return;
+      e.preventDefault();
+      const step = stepNodeIdAtTarget(e.target);
+      if (step) onAddOpToStep(step, op);
+      else addActionNode(op, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+    },
+    [onAddOpToStep, addActionNode, screenToFlowPosition],
   );
 
   const updateIntentNode = useCallback(
@@ -388,18 +462,27 @@ function GraphCanvasInner({
       toggleCollapsed: onToggleCollapsed,
       focusedId,
       dryRun: { on: dryRunOn, forStep: (step: string) => dryRunDiff.steps[step] },
+      removeAddedOp: onRemoveAddedOp,
+      dropTargetStep,
     }),
-    [collapsedIds, onToggleCollapsed, focusedId, dryRunOn, dryRunDiff],
+    [collapsedIds, onToggleCollapsed, focusedId, dryRunOn, dryRunDiff, onRemoveAddedOp, dropTargetStep],
   );
 
   return (
     <LaneInteractionContext.Provider value={laneInteraction}>
-      <div ref={wrapperRef} className="relative h-full w-full">
+      <div
+        ref={wrapperRef}
+        className="relative h-full w-full"
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragLeave={onDragLeave}
+      >
         <ReactFlow
           nodes={displayNodes}
           edges={displayEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
           onNodeClick={onClearFocus}
           onPaneClick={onClearFocus}
           nodeTypes={nodeTypes}
@@ -409,7 +492,8 @@ function GraphCanvasInner({
           fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
           minZoom={0.2}
           maxZoom={1.75}
-          nodesConnectable={false}
+          nodesConnectable
+          deleteKeyCode={["Backspace", "Delete"]}
           elevateNodesOnSelect
           multiSelectionKeyCode="Shift"
           selectionKeyCode="Shift"
@@ -486,6 +570,8 @@ function GraphCanvasInner({
             onClose={closeInspector}
             onUpdateIntent={updateIntentNode}
             onRemoveIntent={removeIntentNode}
+            onUpdateAddedOp={onUpdateAddedOp}
+            onRemoveAddedOp={onRemoveAddedOp}
           />
         ) : null}
       </div>
