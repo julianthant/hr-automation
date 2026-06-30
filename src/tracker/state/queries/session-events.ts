@@ -1,6 +1,45 @@
-import type { Database } from "../../../infra/sqlite/index.js";
+import type { Database, Statement } from "../../../infra/sqlite/index.js";
 import type { SessionEvent } from "../../session-events.js";
 import { readStmts } from "./statements.js";
+
+/**
+ * Cache of the operation-coordinator IN-branch prepared statement, keyed by
+ * `(instanceClause, placeholders)` shape per Database handle.
+ *
+ * The run-events SSE topic polls every 500ms; the coordinator branch builds an
+ * ad-hoc statement whose `IN (...)` list is variadic, so it cannot reuse the
+ * shared cached `readStmts` hot-path statements. Without this cache the SQL
+ * bytecode is recompiled every tick — `db.prepare()` blocks the Node event
+ * loop, stalling other SSE topics on that tick. The `placeholders` string
+ * (`@m0, @m1, ...`) encodes the member COUNT, so the cache key is stable once
+ * fan-out membership settles (only the bound member-id VALUES change per tick,
+ * which needs no recompile). A `WeakMap` on the Database handle self-invalidates
+ * when the DB handle is replaced (e.g. `.tracker/state.db` recreated).
+ */
+const coordinatorStmtCache = new WeakMap<Database, Map<string, Statement>>();
+
+function getCoordinatorStmt(
+  db: Database,
+  instanceClause: string,
+  placeholders: string,
+): Statement {
+  let byShape = coordinatorStmtCache.get(db);
+  if (!byShape) {
+    byShape = new Map();
+    coordinatorStmtCache.set(db, byShape);
+  }
+  const key = `${instanceClause}\0${placeholders}`;
+  let stmt = byShape.get(key);
+  if (!stmt) {
+    stmt = db.prepare(
+      `SELECT raw_json FROM session_events
+       WHERE run_id = @runId ${instanceClause} OR run_id IN (${placeholders})
+       ORDER BY ts_ms ASC, id ASC`,
+    );
+    byShape.set(key, stmt);
+  }
+  return stmt;
+}
 
 /**
  * Read every session event whose `run_id` matches `opts.runId` OR (for
@@ -34,17 +73,16 @@ export function querySessionEventsForRun(
   let rows: Array<{ raw_json: string }>;
   if (members.length > 0) {
     // Operation coordinator: union the runId / batch-scope clauses with the
-    // member run ids. Built ad hoc (not a cached statement) since the IN list
-    // is variadic; only reached on the coordinator path, never the hot path.
+    // member run ids. The IN list is variadic, so this can't use the shared
+    // `readStmts` cache — instead the per-shape statement is cached by
+    // `(instanceClause, placeholders)` (see `getCoordinatorStmt`) so the 500ms
+    // SSE tick reuses it instead of recompiling SQL every poll. Only reached on
+    // the coordinator path, never the normal hot path.
     const placeholders = members.map((_, i) => `@m${i}`).join(", ");
     const instanceClause = opts.workflowInstance
       ? "OR (run_id IS NULL AND workflow_instance = @instance)"
       : "";
-    const stmt = db.prepare(
-      `SELECT raw_json FROM session_events
-       WHERE run_id = @runId ${instanceClause} OR run_id IN (${placeholders})
-       ORDER BY ts_ms ASC, id ASC`,
-    );
+    const stmt = getCoordinatorStmt(db, instanceClause, placeholders);
     const bindings: Record<string, string> = { runId: opts.runId };
     if (opts.workflowInstance) bindings.instance = opts.workflowInstance;
     members.forEach((r, i) => { bindings[`m${i}`] = r; });
