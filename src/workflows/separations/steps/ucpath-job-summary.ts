@@ -17,6 +17,7 @@ export async function runUcpathJobSummary(
   log.step("[Kuali] Filling department + payroll from UCPath Job Summary...");
   await fillFinalTransactions(kualiPage, {
     department: jobSummaryData.departmentDescription,
+    deptId: jobSummaryData.deptId,
     payrollTitleCode: jobSummaryData.jobCode,
     payrollTitle: jobSummaryData.jobDescription,
   });
