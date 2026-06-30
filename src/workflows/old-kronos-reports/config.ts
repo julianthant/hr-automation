@@ -2,6 +2,7 @@ import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { PATHS, SCREEN, ANNUAL_DATES } from "../../config.js";
+import { numEnv } from "../../utils/env.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,8 +25,8 @@ export const SCREEN_HEIGHT = SCREEN.height;
 
 // ─── Workflow-specific values ────────────────────────────────
 
-/** Default number of parallel workers. */
-export const DEFAULT_WORKERS = 4;
+/** Default number of parallel workers. Operator-tunable via Settings → "Concurrency". */
+export const DEFAULT_WORKERS = numEnv("HRAUTO_DEFAULT_WORKERS", 4);
 
 /** Tracker Excel file path. */
 export const TRACKER_PATH = join(__dirname, "kronos-tracker.xlsx");

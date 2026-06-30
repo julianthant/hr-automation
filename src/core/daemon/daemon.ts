@@ -5,6 +5,7 @@ import { Session } from '../kernel/session.js'
 import { runOneItem } from '../kernel/run-one-item.js'
 import { withBatchLifecycle } from '../kernel/batch-lifecycle.js'
 import { log, enterDaemonLogContext } from '../../utils/log.js'
+import { numEnv } from '../../utils/env.js'
 import {
   lockfilePath,
   randomInstanceId,
@@ -83,7 +84,9 @@ export interface DaemonOpts {
   idleRepollMs?: number
 }
 
-const DEFAULT_IDLE_MS = 15 * 60 * 1000
+// Operator-tunable via Settings → "Daemon" (env populated only for explicitly-set
+// fields; unset = the literal default, so an unconfigured install is unchanged).
+const DEFAULT_IDLE_MS = numEnv('HRAUTO_DAEMON_IDLE_MS', 15 * 60 * 1000)
 const DEFAULT_LOCK_HEAL_MS = 10_000
 /**
  * Bounded idle re-poll backstop (ISS-008). The claim loop re-claims on the
@@ -93,7 +96,7 @@ const DEFAULT_LOCK_HEAL_MS = 10_000
  * 15-min keepalive tick. Much shorter than `DEFAULT_IDLE_MS` but a steady-state
  * idle daemon only does a cheap indexed `claimNextTask` seek per tick.
  */
-const DEFAULT_IDLE_REPOLL_MS = 30_000
+const DEFAULT_IDLE_REPOLL_MS = numEnv('HRAUTO_DAEMON_IDLE_REPOLL_MS', 30_000)
 
 /**
  * Long-running daemon loop. Must be invoked from a DETACHED process via

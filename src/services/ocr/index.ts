@@ -2,6 +2,7 @@ import { KeyRotation } from "./rotation.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { readGeminiKeys } from "./env-keys.js";
 import { classifyOcrError } from "./error-classification.js";
+import { numEnv } from "../../utils/env.js";
 import {
   OcrAllKeysExhaustedError,
   OcrProviderError,
@@ -46,7 +47,9 @@ function getProvider(): OcrProvider {
   return _provider ?? new GeminiProvider();
 }
 
-const MAX_VALIDATION_RETRIES = 1; // 1 retry = 2 total attempts
+// Operator-tunable via Settings → "OCR" (env populated only for an explicitly-set
+// field; unset = the literal default, so an unconfigured install is unchanged).
+const MAX_VALIDATION_RETRIES = numEnv("OCR_MAX_VALIDATION_RETRIES", 1); // 1 retry = 2 total attempts
 
 /**
  * Run OCR on a PDF and validate the result against a Zod schema.

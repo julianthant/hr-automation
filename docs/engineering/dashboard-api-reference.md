@@ -27,9 +27,9 @@ Full reference companion to `src/dashboard/CLAUDE.md`. Contains the primary API 
 | `/api/sharepoint-download/run` | POST | Body: `{ id }`. Response: `{ok, id, label, path, filename}` or `{ok:false, error}` — launches headed SharePoint download via `buildSharePointRosterDownloadHandler` (in `src/workflows/sharepoint-download/`), saves to `.tracker/sharepoint/` | `QueuePanel` Download dropdown — fired when a menu item is picked |
 | `/api/enqueue` | POST | Body: `{workflow, input}`. Validates input against the workflow schema and inserts a task row into the SQLite task store; auto-spawns a daemon if none is alive. Returns `{ok, runId}`. | `InputRunPanel` (typed input runs) |
 | `/api/retry` | POST | Body: `{workflow, id, runId?, date?, parentRunId?}`. Re-enqueues using the entry's persisted `input` field. | `RetryButton` (EntryItem failed rows + LogPanel header) via `useWorkflowActionDispatcher` |
-| `/api/retry-bulk` | POST | Body: `{workflow, ids?[], items?:[{workflowId?, id, runId?, date?}], date?, parentRunId?, source?, scope?}`. Batch footer sends `source:"batch-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `BulkRetryBar`, `BatchFooterActions` via `useWorkflowActionDispatcher` |
+| `/api/retry-bulk` | POST | Body: `{workflow, ids?[], items?:[{workflowId?, id, runId?, date?}], date?, parentRunId?, source?, scope?}`. Operation footer sends `source:"operation-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `BulkRetryBar`, `OperationFooterActions` via `useWorkflowActionDispatcher` |
 | `/api/cancel-active-bulk` | POST | Body: `{workflow, items:[{id, status, runId?}]}` — `status` must be `pending` or `running`; bulk cancel queued + cooperative cancel running. | `StopAllButton` |
-| `/api/delete-bulk` | POST | Body: `{workflow, date, ids?[], items?:[{workflowId?, id, runId?, date?}], source?, scope?}` — delete many tracker rows + scoped screenshots. Batch footer sends `source:"batch-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `DeleteAllButton`, `BatchFooterActions` via `useWorkflowActionDispatcher` |
+| `/api/delete-bulk` | POST | Body: `{workflow, date, ids?[], items?:[{workflowId?, id, runId?, date?}], source?, scope?}` — delete many tracker rows + scoped screenshots. Operation footer sends `source:"operation-view"` + `scope:"visible-view"` with resolved visible targets; legacy callers default to queue-panel/group. | `DeleteAllButton`, `OperationFooterActions` via `useWorkflowActionDispatcher` |
 | `/api/workflow-presentation` | GET | `Record<workflow, WorkflowPresentationConfig>` — full effective presentation map for all registered workflows. | `WorkflowModifier` page on mount |
 | `/api/workflow-presentation/:workflow` | GET | `WorkflowPresentationConfig` for one workflow (live override deep-merged over defaults). | `WorkflowModifier` per-workflow load |
 | `/api/workflow-presentation/:workflow` | POST | Body: `WorkflowPresentationConfig`. Persists a presentation override to `config/workflow-presentation/<workflow>.json`; hot-applied via `effectiveMetadata`. | `WorkflowModifier` Save |
@@ -141,17 +141,17 @@ Current consumption:
 
 | Workflow | Archetype | Primary ID | Name Source | Steps | Detail Fields |
 |----------|-----------|-----------|-------------|-------|---------------|
-| `onboarding` | `batch` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
+| `onboarding` | `operation` | email | `data.firstName + data.lastName` | crm-auth → extraction → pdf-download → ucpath-auth → person-search → i9-creation → transaction | Employee, Email, Dept #, Position #, Wage, Eff Date, I9 Profile |
 | `separations` | `single` | doc ID | `data.name \|\| data.employeeName` | launching → authenticating → kuali-extraction → kronos-search → ucpath-job-summary → ucpath-transaction → kuali-finalization | Employee, EID, Doc ID |
 | `person-lookup` | `single` | name or EID | `data.searchName` | auth:ucpath → auth:crm → searching → cross-verification → active-status | Search, EID, Dept, HR Status, Start Date, End Date |
-| `kronos-reports` | `batch` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
+| `kronos-reports` | `operation` | employee ID | `data.name` | searching → extracting → downloading | Employee, ID |
 | `work-study` | `single` | empl ID | `data.name` | ucpath-auth → transaction | Empl ID, Effective Date |
-| `emergency-contact` | `batch` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
+| `emergency-contact` | `operation` | `p{NN}-{emplId}` | `data.employeeName` | navigation → fill-form → save | Employee, Empl ID, Contact, Relationship |
 | `oath-signature` | `single` | empl ID | `data.name` | ocr → ucpath-auth → transaction | Employee, Empl ID, Signature Date |
 | `oath-upload` | `single` | session ID | (PDF filename / hash) | delegate-signatures → servicenow-auth → open-hr-form → fill-form → submit | PDF, Signers, HR ticket #, Filed, Status |
 | `ocr` | `preview` | session ID | (PDF filename) | upload → ocr → matching → disambiguating → awaiting-approval → approved/discarded | PDF, Form type, Pages, Records |
 | `crm-doc-download` | `single` | email or doc ID | `data.name` | crm-auth → download | Employee, Email, Doc URL |
-| `onbase` | `batch` | (session/PDF) | (PDF filename) | ocr → import | PDF, Doc Type, Pages, Status |
+| `onbase` | `operation` | (session/PDF) | (PDF filename) | ocr → import | PDF, Doc Type, Pages, Status |
 | `sharepoint-download` | `single` | URL or label | (file label) | login → download | Label, Output path |
 | `i9-lookup` | `single` | person name | `data.signerName` | auth:i9 → lookup | Signed By, I-9 Status |
 
@@ -221,7 +221,7 @@ src/dashboard/
     navigation/              # TopBar, WorkflowRail, SearchBar/SearchResults, NotificationBell, input-run/capture buttons
     oath-upload/             # duplicate-banner helpers
     ocr/                     # OCR review pane, record views, preview pairs, delegation rows
-    queue-panel/             # QueuePanel, EntryItem, daemon/batch rows, bulk controls, sort/status/surface helpers
+    queue-panel/             # QueuePanel, EntryItem, daemon/operation rows, bulk controls, sort/status/surface helpers
     run-modal/               # RunModal + SharePointDownloadButton
     shared/                  # reusable buttons, empty state, PDF preview, selector warnings, entry display/types/status styles
     terminal-drawer/         # TerminalDrawer, WorkflowBox, BrowserChip, LiveIndicator

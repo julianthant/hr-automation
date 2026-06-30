@@ -53,10 +53,10 @@ export const TIMEOUTS = {
   normal: 10_000,
   navigation: SETTINGS.timeouts.navigationMs,
   longNavigation: SETTINGS.timeouts.longNavigationMs,
-  ukgNavigation: 60_000,
-  duoApproval: 180,      // seconds (used by duo-poll.ts)
-  duoApprovalCrm: 60,    // seconds
-  retryDelay: 5_000,
+  ukgNavigation: SETTINGS.timeouts.ukgNavigationMs,
+  duoApproval: SETTINGS.timeouts.duoApprovalSeconds,       // seconds (used by duo-poll.ts)
+  duoApprovalCrm: SETTINGS.timeouts.duoApprovalCrmSeconds, // seconds
+  retryDelay: SETTINGS.timeouts.retryDelayMs,
 } as const;
 
 // ─── Screen layout ──────────────────────────────────────────
@@ -90,18 +90,24 @@ export function getTimekeeperName(): string {
 }
 
 // ─── URLs not yet centralized ───────────────────────────────
+// Each URL is operator-overrideable via the Settings page (`settings.urls.*`).
+// An empty/unset setting falls back to the production default literal below, so
+// an unconfigured install is byte-identical. Use an override only to point a
+// system at an alternate/test instance.
 
-export const KUALI_SPACE_URL = "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
-export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
-export const CRM_ENTRY_URL = "https://crm.ucsd.edu/hr";
+export const KUALI_SPACE_URL =
+  SETTINGS.urls.kualiSpace || "https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb";
+export const NEW_KRONOS_URL = SETTINGS.urls.newKronos || "https://ucsd-sso.prd.mykronos.com/wfd/home";
+export const CRM_ENTRY_URL = SETTINGS.urls.crmEntry || "https://crm.ucsd.edu/hr";
 
 /** OnBase (Hyland) document management — UCSD Shibboleth SSO entry point. */
-export const ONBASE_URL = "https://ucsd.hylandcloud.com/251ids/NavPanel.aspx";
+export const ONBASE_URL = SETTINGS.urls.onbase || "https://ucsd.hylandcloud.com/251ids/NavPanel.aspx";
 
 // --- CRM ---
 
 /** ACT CRM onboarding search page (accepts ?q= email param). */
-export const CRM_SEARCH_URL = "https://act-crm.my.site.com/hr/ONB_SearchOnboardings";
+export const CRM_SEARCH_URL =
+  SETTINGS.urls.crmSearch || "https://act-crm.my.site.com/hr/ONB_SearchOnboardings";
 
 /** ACT CRM section URL mappings — record ID appended as ?id= param. */
 export const CRM_SECTION_URLS: Record<string, string> = {
@@ -112,15 +118,17 @@ export const CRM_SECTION_URLS: Record<string, string> = {
 
 /** UCPath Smart HR Tasks page — must use ucphrprdpub subdomain (not ucpath.) to avoid re-triggering SSO. */
 export const UCPATH_SMART_HR_URL =
+  SETTINGS.urls.ucpathSmartHr ||
   "https://ucphrprdpub.universityofcalifornia.edu/psc/ucphrprd/EMPLOYEE/HRMS/c/NUI_FRAMEWORK.PT_AGSTARTPAGE_NUI.GBL?CONTEXTIDPARAMS=TEMPLATE_ID%3aPTPPNAVCOL&scname=ADMN_UC_ADMIN_LOC_HIRE_NAVCOLL&PanelCollapsible=Y&PTPPB_GROUPLET_ID=UC_HIRE_TASKS_TILE_FL&CRefName=UC_HIRE_TASKS_TILE_FL&AJAXTRANSFER=Y";
 
 // --- I9 ---
 
 /** I9 Complete login URL. */
-export const I9_URL = "https://stse.i9complete.com";
+export const I9_URL = SETTINGS.urls.i9 || "https://stse.i9complete.com";
 
 // --- UKG (Kronos) ---
 
 /** UKG workforce management dashboard URL. */
 export const UKG_URL =
+  SETTINGS.urls.ukg ||
   "https://ucsd.kronos.net/wfcstatic/applications/navigator/html5/dist/container/index.html?version=8.1.18.502#/";

@@ -1,5 +1,20 @@
 import { log } from "./log.js";
 
+/**
+ * Read a numeric env var, falling back to `fallback` when unset/blank/invalid.
+ * Used by core modules to make a hardcoded constant operator-tunable via the
+ * settings store (which populates the env var only for an explicitly-set field —
+ * see `applyOperatorSettingsEnv`). When the var is unset (the normal case AND
+ * when the operator hasn't chosen) the result equals the original literal, so an
+ * unconfigured install is behavior-neutral.
+ */
+export function numEnv(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export class EnvValidationError extends Error {
   constructor(missing: string[]) {
     const msg = `Missing required .env variables: ${missing.join(", ")}. Create a .env file with these variables. See .env.example`;

@@ -106,4 +106,49 @@ describe("applyOperatorSettingsEnv", () => {
     applyOperatorSettingsEnv({ features: { duoWebAuthn: false } }, env);
     expect(env.HR_AUTOMATION_DUO_WEBAUTHN).toBe("0");
   });
+
+  it("populates the capture / browser-health / daemon / concurrency / ocr-backoff knobs", () => {
+    const env: NodeJS.ProcessEnv = {};
+    applyOperatorSettingsEnv(
+      {
+        capture: { width: 1600, sliceHeight: 1000, maxSlices: 40 },
+        browserHealth: { monitorTickMs: 45_000, maxAutoRefresh: 5, maxReopen: 2 },
+        daemon: { idleMs: 600_000, idleRepollMs: 15_000 },
+        concurrency: { defaultWorkers: 6 },
+        ocr: { backoffBaseMs: 1_000, backoffCapMs: 30_000, maxValidationRetries: 3 },
+      },
+      env,
+    );
+    expect(env.HRAUTO_CAPTURE_WIDTH).toBe("1600");
+    expect(env.HRAUTO_CAPTURE_SLICE_HEIGHT).toBe("1000");
+    expect(env.HRAUTO_CAPTURE_MAX_SLICES).toBe("40");
+    expect(env.HRAUTO_HEALTH_MONITOR_TICK_MS).toBe("45000");
+    expect(env.HRAUTO_HEALTH_MONITOR_MAX_REFRESH).toBe("5");
+    expect(env.HRAUTO_HEALTH_MONITOR_MAX_REOPEN).toBe("2");
+    expect(env.HRAUTO_DAEMON_IDLE_MS).toBe("600000");
+    expect(env.HRAUTO_DAEMON_IDLE_REPOLL_MS).toBe("15000");
+    expect(env.HRAUTO_DEFAULT_WORKERS).toBe("6");
+    expect(env.OCR_BACKOFF_BASE_MS).toBe("1000");
+    expect(env.OCR_BACKOFF_CAP_MS).toBe("30000");
+    expect(env.OCR_MAX_VALIDATION_RETRIES).toBe("3");
+    // A field the operator left unset is never written.
+    expect("HRAUTO_CAPTURE_MAX_WIDTH" in env).toBe(false);
+  });
+
+  it("persists the new editable sections (urls / capture / daemon) round-trip", () => {
+    writeOperatorSettings(root, {
+      urls: { i9: "https://stse-test.i9complete.com" },
+      capture: { width: 1440 },
+      daemon: { idleRepollMs: 20_000 },
+    });
+    expect(readOperatorSettingsOverride(root)).toEqual({
+      urls: { i9: "https://stse-test.i9complete.com" },
+      capture: { width: 1440 },
+      daemon: { idleRepollMs: 20_000 },
+    });
+  });
+
+  it("fail-loud WRITE: a non-http url override is rejected", () => {
+    expect(() => writeOperatorSettings(root, { urls: { i9: "not-a-url" } })).toThrow();
+  });
 });
