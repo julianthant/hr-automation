@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { OperationCancelButton } from "./OperationCancelButton";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 import type { OperationOcrLink } from "./queue-surface-classifier";
@@ -211,6 +211,11 @@ export function OperationRowUnified({
   expandedExtra,
 }: OperationRowUnifiedProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  // When a collapsed-preview name is clicked we expand the card, select that
+  // member, and scroll its row into view. The scroll waits for the member rows
+  // to mount (one render after `expanded` flips), hence the effect below.
+  const membersScrollRef = useRef<HTMLDivElement | null>(null);
+  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null);
   const displayParent = statusForDisplay(parent, projection);
   const awaitingReview = isAwaitingOcrReview(ocr);
   const cfg = headerStatus(displayParent, ocr);
@@ -248,6 +253,18 @@ export function OperationRowUnified({
   const elapsed = useElapsed(isActivelyRunning ? firstTs : null);
   const duration =
     (isTerminal || awaitingReview) && firstTs !== lastTs ? formatDuration(firstTs, lastTs) : null;
+
+  // After expanding from a clicked preview name, scroll that member's row into
+  // view inside the scroll-capped member list (then clear the pending target).
+  useEffect(() => {
+    if (!expanded || !pendingScrollId) return;
+    const container = membersScrollRef.current;
+    const target = container?.querySelector<HTMLElement>(
+      `[data-queue-entry-id="${CSS.escape(pendingScrollId)}"]`,
+    );
+    target?.scrollIntoView({ block: "nearest" });
+    setPendingScrollId(null);
+  }, [expanded, pendingScrollId]);
 
   return (
     <div data-queue-operation-run-id={parentRunId}>
@@ -439,14 +456,31 @@ export function OperationRowUnified({
 
             {/* Collapsed: a batch-style member-name preview (running→queued→
                 failed→done order via pickPreviewChildren) so the operation reads
-                like a batch row at rest. Expand replaces it with the full rows. */}
+                like a batch row at rest. Each name is a button — clicking it
+                expands the card and scrolls to that member. Hairline dividers
+                separate the rows. Expand replaces the preview with full rows. */}
             {!expanded && previewKids.length > 0 && (
-              <div className="flex flex-col gap-1.5 border-t border-border/40 bg-card px-3.5 py-2 font-mono text-[10.5px]">
-                {previewKids.map((kid) => {
+              <div className="flex flex-col border-t border-border/40 bg-card font-mono text-[10.5px]">
+                {previewKids.map((kid, i) => {
                   const kidCfg = MEMBER_PREVIEW_ICON[kid.status] ?? MEMBER_PREVIEW_ICON.pending;
                   const KidIcon = kidCfg.Icon;
                   return (
-                    <div key={kid.id} className="flex min-w-0 items-center gap-2">
+                    <button
+                      type="button"
+                      key={kid.id}
+                      aria-label={`${kid.name}${kid.emplId ? ` (${kid.emplId})` : ""} — expand and view`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(kid.id);
+                        setPendingScrollId(kid.id);
+                        setExpanded(true);
+                      }}
+                      className={cn(
+                        "flex min-w-0 items-center gap-2 px-3.5 py-1.5 text-left transition-colors duration-150",
+                        "hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
+                        i > 0 && "border-t border-border/40",
+                      )}
+                    >
                       <KidIcon
                         aria-hidden
                         className={cn(
@@ -461,7 +495,7 @@ export function OperationRowUnified({
                           {kid.emplId}
                         </span>
                       )}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -478,7 +512,7 @@ export function OperationRowUnified({
               >
                 {/* Cap the inline list height so a large fan-out scrolls in
                     place instead of growing the card without bound. ~4 rows. */}
-                <div className="max-h-[24rem] overflow-y-auto">
+                <div ref={membersScrollRef} className="max-h-[24rem] overflow-y-auto">
                   {expandedExtra}
                   {members.map((member) => (
                     <EntryItem
