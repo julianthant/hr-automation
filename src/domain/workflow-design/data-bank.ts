@@ -186,12 +186,15 @@ export function mergeSystemOperations(
     }));
 }
 
-/** Field-level merge: keep `prev`, fill any field `next` newly provides; union tags. */
+/** Field-level merge: keep `prev`, fill any field `next` newly provides; union tags.
+ *  `prev` (the system catalog entry) wins for every non-empty field it already has;
+ *  `next` (the workflow op) fills in any field that `prev` left empty. Tags are
+ *  always unioned regardless of which side carried them. */
 function mergeOp(prev: DataBankOperation, next: DataBankOperation): DataBankOperation {
   const tags = prev.tags || next.tags ? [...new Set([...(prev.tags ?? []), ...(next.tags ?? [])])] : undefined;
   return {
-    ...prev,
-    ...Object.fromEntries(Object.entries(next).filter(([, v]) => v !== undefined && v !== "")),
+    ...next,
+    ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v !== undefined && v !== "")),
     ...(tags ? { tags } : {}),
   };
 }
