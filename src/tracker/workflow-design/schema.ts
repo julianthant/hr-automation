@@ -37,14 +37,51 @@ const designActionOp = z.strictObject({
   note: z.string().optional(),
 });
 
-const designNode = z.strictObject({
+const designNode = z
+  .strictObject({
+    id: z.string().min(1),
+    type: designNodeType,
+    position,
+    config: z.record(z.string(), z.unknown()).optional(),
+    intent: intent.optional(),
+    action: designActionOp.optional(),
+    parentGroup: z.string().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.type === "action" && !val.action) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `action node "${val.id}" must have an action block`,
+      });
+    }
+  });
+
+// ── Data Bank schema (fail-soft read boundary — analogous to WorkflowDesignSchema) ──
+
+const dataBankOperation = z.object({
   id: z.string().min(1),
-  type: designNodeType,
-  position,
-  config: z.record(z.string(), z.unknown()).optional(),
-  intent: intent.optional(),
-  action: designActionOp.optional(),
-  parentGroup: z.string().optional(),
+  kind: z.string().min(1),
+  system: z.string().min(1),
+  label: z.string().min(1),
+});
+
+const systemCatalog = z.object({
+  system: z.string().min(1),
+  label: z.string().min(1),
+  operations: z.array(dataBankOperation),
+});
+
+const workflowDataBank = z.object({
+  workflow: z.string().min(1),
+  systems: z.array(z.string()),
+  steps: z.array(z.unknown()),
+});
+
+export const DataBankSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string(),
+  systems: z.array(systemCatalog),
+  workflows: z.array(workflowDataBank),
 });
 
 const designEdge = z.strictObject({
