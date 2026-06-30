@@ -143,6 +143,9 @@ export function applyOperatorSettingsEnv(
     }
     setIfUnset("OCR_DISAMBIG_CONCURRENCY", numStr(ocr.disambigConcurrency));
     setIfUnset("OCR_SUGGEST_CONCURRENCY", numStr(ocr.suggestConcurrency));
+    setIfUnset("OCR_BACKOFF_BASE_MS", numStr(ocr.backoffBaseMs));
+    setIfUnset("OCR_BACKOFF_CAP_MS", numStr(ocr.backoffCapMs));
+    setIfUnset("OCR_MAX_VALIDATION_RETRIES", numStr(ocr.maxValidationRetries));
   }
 
   const perf = override.performance;
@@ -152,6 +155,33 @@ export function applyOperatorSettingsEnv(
       "HRAUTO_SEPARATION_TERMINATION_WINDOW_DAYS",
       numStr(perf.separationTerminationWindowDays),
     );
+  }
+
+  const capture = override.capture;
+  if (capture) {
+    setIfUnset("HRAUTO_CAPTURE_WIDTH", numStr(capture.width));
+    setIfUnset("HRAUTO_CAPTURE_MAX_WIDTH", numStr(capture.maxWidth));
+    setIfUnset("HRAUTO_CAPTURE_SLICE_HEIGHT", numStr(capture.sliceHeight));
+    setIfUnset("HRAUTO_CAPTURE_SLICE_OVERLAP", numStr(capture.sliceOverlap));
+    setIfUnset("HRAUTO_CAPTURE_MAX_SLICES", numStr(capture.maxSlices));
+  }
+
+  const browserHealth = override.browserHealth;
+  if (browserHealth) {
+    setIfUnset("HRAUTO_HEALTH_MONITOR_TICK_MS", numStr(browserHealth.monitorTickMs));
+    setIfUnset("HRAUTO_HEALTH_MONITOR_MAX_REFRESH", numStr(browserHealth.maxAutoRefresh));
+    setIfUnset("HRAUTO_HEALTH_MONITOR_MAX_REOPEN", numStr(browserHealth.maxReopen));
+  }
+
+  const concurrency = override.concurrency;
+  if (concurrency) {
+    setIfUnset("HRAUTO_DEFAULT_WORKERS", numStr(concurrency.defaultWorkers));
+  }
+
+  const daemon = override.daemon;
+  if (daemon) {
+    setIfUnset("HRAUTO_DAEMON_IDLE_MS", numStr(daemon.idleMs));
+    setIfUnset("HRAUTO_DAEMON_IDLE_REPOLL_MS", numStr(daemon.idleRepollMs));
   }
 
   const features = override.features;

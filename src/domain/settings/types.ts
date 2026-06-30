@@ -64,6 +64,78 @@ export interface TimeoutSettings {
   navigationMs: number;
   /** Long/complex page-load timeout (ms) — UKG, Kuali. */
   longNavigationMs: number;
+  /** UKG (Old Kronos) page-navigation timeout (ms) — that system is slow to load. */
+  ukgNavigationMs: number;
+  /** Duo MFA approval wait for onboarding/UCPath flows (SECONDS). */
+  duoApprovalSeconds: number;
+  /** Duo MFA approval wait for CRM/separations flows (SECONDS). */
+  duoApprovalCrmSeconds: number;
+  /** Delay between navigation retries (ms). */
+  retryDelayMs: number;
+}
+
+/**
+ * System entry URLs. Empty string = use the built-in production default. Only
+ * set these to point the automation at an alternate/test instance of a system.
+ */
+export interface UrlSettings {
+  /** Kuali Build onboarding/separations form space. */
+  kualiSpace: string;
+  /** New Kronos (WFD) timecard dashboard. */
+  newKronos: string;
+  /** CRM onboarding search entry. */
+  crmEntry: string;
+  /** OnBase (Hyland) document management entry. */
+  onbase: string;
+  /** ACT CRM onboarding search page. */
+  crmSearch: string;
+  /** UCPath Smart HR Tasks page. */
+  ucpathSmartHr: string;
+  /** I-9 Complete login. */
+  i9: string;
+  /** UKG (Old Kronos) workforce management dashboard. */
+  ukg: string;
+}
+
+/**
+ * Audit-screenshot capture geometry. Mirrors the `CAPTURE` object in
+ * `src/core/kernel/session.ts` — tune for readability of captured forms.
+ */
+export interface CaptureSettings {
+  /** Fixed minimum layout-viewport width (px) for every capture. */
+  width: number;
+  /** Hard cap on widening for pathologically wide content (px). */
+  maxWidth: number;
+  /** Height of each page slice when a tall capture is split (px). */
+  sliceHeight: number;
+  /** Vertical overlap between consecutive slices (px). Must be < sliceHeight. */
+  sliceOverlap: number;
+  /** Hard cap on slices per page (runaway guard for very tall docs). */
+  maxSlices: number;
+}
+
+/** Per-browser health-monitor recovery tuning (the refresh → reopen ladder). */
+export interface BrowserHealthSettings {
+  /** How often the health monitor probes every launched browser (ms). */
+  monitorTickMs: number;
+  /** Max consecutive Refresh attempts (rung 1) before escalating to Reopen. */
+  maxAutoRefresh: number;
+  /** Max consecutive Reopen attempts (rung 2) before surfacing a failure. */
+  maxReopen: number;
+}
+
+/** Worker-pool concurrency defaults. */
+export interface ConcurrencySettings {
+  /** Default parallel workers for the old-kronos-reports batch download. */
+  defaultWorkers: number;
+}
+
+/** Daemon claim-loop timing. Affects how responsively queued work is picked up. */
+export interface DaemonSettings {
+  /** Idle-sleep window before a daemon runs its heavyweight keepalive tick (ms). */
+  idleMs: number;
+  /** Bounded idle re-poll backstop — recovers a missed wake within this window (ms). */
+  idleRepollMs: number;
 }
 
 /** Concurrency / resilience tuning. */
@@ -97,6 +169,12 @@ export interface OcrSettings {
   disambigConcurrency: number;
   /** Concurrency for LLM lookup suggestions (env `OCR_SUGGEST_CONCURRENCY`). */
   suggestConcurrency: number;
+  /** Rate-limit backoff base in ms before retrying an OCR cell (env `OCR_BACKOFF_BASE_MS`). */
+  backoffBaseMs: number;
+  /** Rate-limit backoff ceiling in ms (env `OCR_BACKOFF_CAP_MS`). */
+  backoffCapMs: number;
+  /** Max OCR form-validation retries before failing a page (env `OCR_MAX_VALIDATION_RETRIES`). */
+  maxValidationRetries: number;
 }
 
 /** Toggles. */
@@ -116,9 +194,14 @@ export interface OperatorSettings {
   annualDates: AnnualDateSettings;
   display: DisplaySettings;
   paths: PathSettings;
+  urls: UrlSettings;
   timeouts: TimeoutSettings;
   performance: PerformanceSettings;
   ocr: OcrSettings;
+  capture: CaptureSettings;
+  browserHealth: BrowserHealthSettings;
+  concurrency: ConcurrencySettings;
+  daemon: DaemonSettings;
   features: FeatureSettings;
 }
 
@@ -140,7 +223,24 @@ export const DEFAULT_OPERATOR_SETTINGS: OperatorSettings = {
   },
   display: { screenWidth: 2560, screenHeight: 1440 },
   paths: { reportsDir: "", onboardingDocsDir: "" },
-  timeouts: { navigationMs: 15_000, longNavigationMs: 30_000 },
+  urls: {
+    kualiSpace: "",
+    newKronos: "",
+    crmEntry: "",
+    onbase: "",
+    crmSearch: "",
+    ucpathSmartHr: "",
+    i9: "",
+    ukg: "",
+  },
+  timeouts: {
+    navigationMs: 15_000,
+    longNavigationMs: 30_000,
+    ukgNavigationMs: 60_000,
+    duoApprovalSeconds: 180,
+    duoApprovalCrmSeconds: 60,
+    retryDelayMs: 5_000,
+  },
   performance: { navigationRetries: 10, separationTerminationWindowDays: 14 },
   ocr: {
     secondOpinionMax: 5,
@@ -148,7 +248,14 @@ export const DEFAULT_OPERATOR_SETTINGS: OperatorSettings = {
     pageConcurrency: 0,
     disambigConcurrency: 4,
     suggestConcurrency: 4,
+    backoffBaseMs: 2_000,
+    backoffCapMs: 60_000,
+    maxValidationRetries: 1,
   },
+  capture: { width: 1280, maxWidth: 6000, sliceHeight: 1200, sliceOverlap: 120, maxSlices: 30 },
+  browserHealth: { monitorTickMs: 30_000, maxAutoRefresh: 10, maxReopen: 3 },
+  concurrency: { defaultWorkers: 4 },
+  daemon: { idleMs: 900_000, idleRepollMs: 30_000 },
   features: { debugScreenshots: false, duoWebAuthn: true },
 };
 
@@ -168,9 +275,14 @@ export function mergeOperatorSettings(
     annualDates: { ...base.annualDates, ...ov.annualDates },
     display: { ...base.display, ...ov.display },
     paths: { ...base.paths, ...ov.paths },
+    urls: { ...base.urls, ...ov.urls },
     timeouts: { ...base.timeouts, ...ov.timeouts },
     performance: { ...base.performance, ...ov.performance },
     ocr: { ...base.ocr, ...ov.ocr },
+    capture: { ...base.capture, ...ov.capture },
+    browserHealth: { ...base.browserHealth, ...ov.browserHealth },
+    concurrency: { ...base.concurrency, ...ov.concurrency },
+    daemon: { ...base.daemon, ...ov.daemon },
     features: { ...base.features, ...ov.features },
   };
 }
@@ -209,9 +321,14 @@ export function cloneOperatorSettings(s: OperatorSettings): OperatorSettings {
     annualDates: { ...s.annualDates },
     display: { ...s.display },
     paths: { ...s.paths },
+    urls: { ...s.urls },
     timeouts: { ...s.timeouts },
     performance: { ...s.performance },
     ocr: { ...s.ocr },
+    capture: { ...s.capture },
+    browserHealth: { ...s.browserHealth },
+    concurrency: { ...s.concurrency },
+    daemon: { ...s.daemon },
     features: { ...s.features },
   };
 }

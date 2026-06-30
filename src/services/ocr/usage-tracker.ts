@@ -19,13 +19,16 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { numEnv } from "../../utils/env.js";
 import type { ModelLimit, VisionProviderId } from "./provider-limits.js";
 import { hashKeyValue } from "./rotation.js";
 import type { RateLimitInfo } from "./rate-limit-headers.js";
 
 const WINDOW_MS = 60_000;
-const BACKOFF_BASE_MS = 2_000;
-const BACKOFF_CAP_MS = 60_000;
+// Operator-tunable via Settings → "OCR" (env populated only for an explicitly-set
+// field; unset = the literal default, so an unconfigured install is unchanged).
+const BACKOFF_BASE_MS = numEnv("OCR_BACKOFF_BASE_MS", 2_000);
+const BACKOFF_CAP_MS = numEnv("OCR_BACKOFF_CAP_MS", 60_000);
 const FLUSH_DEBOUNCE_MS = 250;
 
 export interface Candidate {

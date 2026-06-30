@@ -21,6 +21,13 @@ const dateString = z
 const nonNegInt = z.number().int().min(0);
 const posInt = z.number().int().min(1);
 
+// A system URL override: empty string (use the built-in default) or an http(s) URL.
+const urlString = z
+  .string()
+  .trim()
+  .max(2048)
+  .refine((v) => v === "" || /^https?:\/\//i.test(v), "expected an empty string or an http(s) URL");
+
 export const OperatorSettingsOverrideSchema = z
   .strictObject({
     operator: z
@@ -48,10 +55,27 @@ export const OperatorSettingsOverrideSchema = z
         onboardingDocsDir: z.string().trim().max(1024),
       })
       .partial(),
+    urls: z
+      .strictObject({
+        kualiSpace: urlString,
+        newKronos: urlString,
+        crmEntry: urlString,
+        onbase: urlString,
+        crmSearch: urlString,
+        ucpathSmartHr: urlString,
+        i9: urlString,
+        ukg: urlString,
+      })
+      .partial(),
     timeouts: z
       .strictObject({
         navigationMs: z.number().int().min(1_000).max(600_000),
         longNavigationMs: z.number().int().min(1_000).max(600_000),
+        ukgNavigationMs: z.number().int().min(1_000).max(600_000),
+        // Duo waits are in SECONDS (passed to duo-poll.ts).
+        duoApprovalSeconds: z.number().int().min(10).max(600),
+        duoApprovalCrmSeconds: z.number().int().min(10).max(600),
+        retryDelayMs: z.number().int().min(0).max(120_000),
       })
       .partial(),
     performance: z
@@ -68,6 +92,36 @@ export const OperatorSettingsOverrideSchema = z
         pageConcurrency: nonNegInt.max(64),
         disambigConcurrency: posInt.max(64),
         suggestConcurrency: posInt.max(64),
+        backoffBaseMs: z.number().int().min(100).max(60_000),
+        backoffCapMs: z.number().int().min(1_000).max(600_000),
+        maxValidationRetries: nonNegInt.max(10),
+      })
+      .partial(),
+    capture: z
+      .strictObject({
+        width: z.number().int().min(320).max(6_000),
+        maxWidth: z.number().int().min(320).max(16_000),
+        sliceHeight: z.number().int().min(200).max(8_000),
+        sliceOverlap: z.number().int().min(0).max(2_000),
+        maxSlices: posInt.max(200),
+      })
+      .partial(),
+    browserHealth: z
+      .strictObject({
+        monitorTickMs: z.number().int().min(1_000).max(600_000),
+        maxAutoRefresh: nonNegInt.max(100),
+        maxReopen: nonNegInt.max(100),
+      })
+      .partial(),
+    concurrency: z
+      .strictObject({
+        defaultWorkers: posInt.max(16),
+      })
+      .partial(),
+    daemon: z
+      .strictObject({
+        idleMs: z.number().int().min(10_000).max(3_600_000),
+        idleRepollMs: z.number().int().min(1_000).max(600_000),
       })
       .partial(),
     features: z

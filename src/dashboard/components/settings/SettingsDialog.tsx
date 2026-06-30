@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   ArrowUpRight,
   Bell,
+  BookOpen,
+  Camera,
   Flag,
   FolderOpen,
   Gauge,
   KeyRound,
+  Keyboard,
+  Layers,
+  Link2,
   Loader2,
   Monitor,
+  Network,
   Search,
   Settings2,
   Workflow,
@@ -37,22 +44,36 @@ import {
 } from "../../../domain/settings/types.js";
 import { useConfirm } from "@/components/shared/useConfirm";
 import { InputField, ToggleField } from "./SettingsField.js";
+import { ReferencePanel } from "./ReferencePanels.js";
 
 // ── Section definitions ───────────────────────────────────────────────────────
 
 type SectionId =
   | "general"
   | "display"
+  | "urls"
   | "performance"
+  | "capture"
+  | "recovery"
   | "features"
   | "paths"
   | "notifications"
-  | "credentials";
+  | "credentials"
+  // Read-only reference panels ("see what exists in the system").
+  | "ref-rows"
+  | "ref-workflows"
+  | "ref-system"
+  | "ref-shortcuts";
+
+/** A section is either an editable settings group or a read-only reference panel. */
+type SectionKind = "settings" | "reference";
 
 interface Section {
   id: SectionId;
   label: string;
   icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" }>;
+  /** "settings" = editable; "reference" = read-only "what exists" panel. */
+  kind: SectionKind;
   /** Whether this section edits the OperatorSettings draft (shows the Save/Revert footer). */
   settingsBacked: boolean;
   /** Extra terms the section matches in the settings search. */
@@ -60,20 +81,31 @@ interface Section {
 }
 
 const SECTIONS: Section[] = [
-  { id: "general", label: "General", icon: Settings2, settingsBacked: true, keywords: ["timekeeper", "operator", "identity", "annual", "fiscal", "kronos", "job end", "date"] },
-  { id: "display", label: "Display", icon: Monitor, settingsBacked: true, keywords: ["screen", "width", "height", "resolution", "window", "monitor"] },
-  { id: "performance", label: "Performance", icon: Gauge, settingsBacked: true, keywords: ["retries", "timeout", "navigation", "ocr", "concurrency", "second opinion", "separation"] },
-  { id: "features", label: "Features", icon: Flag, settingsBacked: true, keywords: ["debug", "screenshots", "duo", "webauthn", "mfa", "flags"] },
-  { id: "paths", label: "Paths", icon: FolderOpen, settingsBacked: true, keywords: ["reports", "onboarding", "documents", "directory", "folder", "downloads"] },
-  { id: "notifications", label: "Notifications", icon: Bell, settingsBacked: false, keywords: ["desktop", "notify", "alerts", "failure", "review"] },
-  { id: "credentials", label: "Credentials", icon: KeyRound, settingsBacked: false, keywords: ["env", "ucpath", "i-9", "password", "credential", "roster"] },
+  { id: "general", label: "General", icon: Settings2, kind: "settings", settingsBacked: true, keywords: ["timekeeper", "operator", "identity", "annual", "fiscal", "kronos", "job end", "date"] },
+  { id: "display", label: "Display", icon: Monitor, kind: "settings", settingsBacked: true, keywords: ["screen", "width", "height", "resolution", "window", "monitor"] },
+  { id: "urls", label: "System URLs", icon: Link2, kind: "settings", settingsBacked: true, keywords: ["url", "kuali", "kronos", "crm", "ucpath", "i-9", "onbase", "ukg", "instance", "endpoint"] },
+  { id: "performance", label: "Performance", icon: Gauge, kind: "settings", settingsBacked: true, keywords: ["retries", "timeout", "navigation", "ocr", "concurrency", "second opinion", "separation", "duo", "workers", "backoff"] },
+  { id: "capture", label: "Audit capture", icon: Camera, kind: "settings", settingsBacked: true, keywords: ["screenshot", "capture", "width", "slice", "audit", "image"] },
+  { id: "recovery", label: "Recovery & daemon", icon: Activity, kind: "settings", settingsBacked: true, keywords: ["health", "browser", "refresh", "reopen", "daemon", "idle", "recovery", "monitor"] },
+  { id: "features", label: "Features", icon: Flag, kind: "settings", settingsBacked: true, keywords: ["debug", "screenshots", "duo", "webauthn", "mfa", "flags"] },
+  { id: "paths", label: "Paths", icon: FolderOpen, kind: "settings", settingsBacked: true, keywords: ["reports", "onboarding", "documents", "directory", "folder", "downloads"] },
+  { id: "notifications", label: "Notifications", icon: Bell, kind: "settings", settingsBacked: false, keywords: ["desktop", "notify", "alerts", "failure", "review"] },
+  { id: "credentials", label: "Credentials", icon: KeyRound, kind: "settings", settingsBacked: false, keywords: ["env", "ucpath", "i-9", "password", "credential", "roster"] },
+  // ── Reference (read-only "what exists in the system") ──
+  { id: "ref-rows", label: "Row & queue model", icon: Layers, kind: "reference", settingsBacked: false, keywords: ["archetype", "row", "shape", "kind", "queue", "trace", "single", "operation", "preview", "person", "file", "catalog", "status", "reference"] },
+  { id: "ref-workflows", label: "Workflows & OCR", icon: BookOpen, kind: "reference", settingsBacked: false, keywords: ["workflow", "code", "ocr", "form", "steps", "run", "registry", "reference", "index"] },
+  { id: "ref-system", label: "System reference", icon: Network, kind: "reference", settingsBacked: false, keywords: ["browser", "health", "daemon", "idle", "refresh", "states", "verdict", "reference"] },
+  { id: "ref-shortcuts", label: "Keyboard shortcuts", icon: Keyboard, kind: "reference", settingsBacked: false, keywords: ["keyboard", "shortcut", "hotkey", "key", "navigation", "retry", "cancel", "search", "reference"] },
 ];
 
 /** Maps a settings-backed section to the OperatorSettings groups it edits — drives per-section dirty dots. */
 const SECTION_KEYS: Partial<Record<SectionId, (keyof OperatorSettings)[]>> = {
   general: ["operator", "annualDates"],
   display: ["display"],
-  performance: ["performance", "timeouts", "ocr"],
+  urls: ["urls"],
+  performance: ["performance", "timeouts", "ocr", "concurrency"],
+  capture: ["capture"],
+  recovery: ["browserHealth", "daemon"],
   features: ["features"],
   paths: ["paths"],
 };
@@ -488,6 +520,50 @@ function SettingsSectionContent({
               step={1000}
               hint="Used for complex page loads — UKG, Kuali."
             />
+            <InputField
+              id="timeout-ukg-nav"
+              label="UKG navigation timeout (ms)"
+              type="number"
+              value={draft.timeouts.ukgNavigationMs}
+              changed={chg("timeouts", "ukgNavigationMs")}
+              onChange={(v) => patch("timeouts", "ukgNavigationMs", v)}
+              min={1000}
+              step={1000}
+              hint="Old Kronos (UKG) is slow to load."
+            />
+            <InputField
+              id="timeout-retry-delay"
+              label="Retry delay (ms)"
+              type="number"
+              value={draft.timeouts.retryDelayMs}
+              changed={chg("timeouts", "retryDelayMs")}
+              onChange={(v) => patch("timeouts", "retryDelayMs", v)}
+              min={0}
+              step={500}
+              hint="Wait between navigation retries."
+            />
+            <InputField
+              id="timeout-duo"
+              label="Duo approval wait (seconds)"
+              type="number"
+              value={draft.timeouts.duoApprovalSeconds}
+              changed={chg("timeouts", "duoApprovalSeconds")}
+              onChange={(v) => patch("timeouts", "duoApprovalSeconds", v)}
+              min={10}
+              step={5}
+              hint="UCPath / onboarding MFA wait."
+            />
+            <InputField
+              id="timeout-duo-crm"
+              label="Duo approval wait — CRM (seconds)"
+              type="number"
+              value={draft.timeouts.duoApprovalCrmSeconds}
+              changed={chg("timeouts", "duoApprovalCrmSeconds")}
+              onChange={(v) => patch("timeouts", "duoApprovalCrmSeconds", v)}
+              min={10}
+              step={5}
+              hint="CRM / separations MFA wait."
+            />
           </div>
         </Card>
         <Card title="OCR">
@@ -544,6 +620,286 @@ function SettingsSectionContent({
               onChange={(v) => patch("ocr", "suggestConcurrency", v)}
               min={1}
               step={1}
+            />
+            <InputField
+              id="ocr-backoff-base"
+              label="Rate-limit backoff base (ms)"
+              type="number"
+              value={draft.ocr.backoffBaseMs}
+              changed={chg("ocr", "backoffBaseMs")}
+              onChange={(v) => patch("ocr", "backoffBaseMs", v)}
+              min={100}
+              step={100}
+              hint="Starting backoff after an OCR rate-limit."
+            />
+            <InputField
+              id="ocr-backoff-cap"
+              label="Rate-limit backoff cap (ms)"
+              type="number"
+              value={draft.ocr.backoffCapMs}
+              changed={chg("ocr", "backoffCapMs")}
+              onChange={(v) => patch("ocr", "backoffCapMs", v)}
+              min={1000}
+              step={1000}
+            />
+            <InputField
+              id="ocr-max-validation-retries"
+              label="Max validation retries"
+              type="number"
+              value={draft.ocr.maxValidationRetries}
+              changed={chg("ocr", "maxValidationRetries")}
+              onChange={(v) => patch("ocr", "maxValidationRetries", v)}
+              min={0}
+              step={1}
+              hint="Re-OCR attempts when a page fails schema validation."
+            />
+          </div>
+        </Card>
+        <Card title="Concurrency">
+          <div className={FIELD_GRID}>
+            <InputField
+              id="concurrency-default-workers"
+              label="Default workers"
+              type="number"
+              value={draft.concurrency.defaultWorkers}
+              changed={chg("concurrency", "defaultWorkers")}
+              onChange={(v) => patch("concurrency", "defaultWorkers", v)}
+              min={1}
+              step={1}
+              hint="Default parallel workers for the Old Kronos report download."
+            />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (section === "urls") {
+    return (
+      <div className="flex flex-col gap-6">
+        <SectionHead
+          icon={meta.icon}
+          title="System URLs"
+          subtitle="Entry URLs for each external system. Leave blank to use the production default — set one only to target an alternate/test instance."
+        />
+        <Card title="System endpoints">
+          <div className="flex flex-col gap-4">
+            <InputField
+              id="url-kuali"
+              label="Kuali Build space"
+              value={draft.urls.kualiSpace}
+              changed={chg("urls", "kualiSpace")}
+              onChange={(v) => patch("urls", "kualiSpace", v)}
+              placeholder="Default: ucsd.kualibuild.com/build/space/…"
+              mono
+            />
+            <InputField
+              id="url-ucpath"
+              label="UCPath Smart HR"
+              value={draft.urls.ucpathSmartHr}
+              changed={chg("urls", "ucpathSmartHr")}
+              onChange={(v) => patch("urls", "ucpathSmartHr", v)}
+              placeholder="Default: ucphrprdpub.universityofcalifornia.edu/…"
+              mono
+            />
+            <InputField
+              id="url-crm-entry"
+              label="CRM entry"
+              value={draft.urls.crmEntry}
+              changed={chg("urls", "crmEntry")}
+              onChange={(v) => patch("urls", "crmEntry", v)}
+              placeholder="Default: crm.ucsd.edu/hr"
+              mono
+            />
+            <InputField
+              id="url-crm-search"
+              label="CRM onboarding search"
+              value={draft.urls.crmSearch}
+              changed={chg("urls", "crmSearch")}
+              onChange={(v) => patch("urls", "crmSearch", v)}
+              placeholder="Default: act-crm.my.site.com/hr/ONB_SearchOnboardings"
+              mono
+            />
+            <InputField
+              id="url-new-kronos"
+              label="New Kronos (WFD)"
+              value={draft.urls.newKronos}
+              changed={chg("urls", "newKronos")}
+              onChange={(v) => patch("urls", "newKronos", v)}
+              placeholder="Default: ucsd-sso.prd.mykronos.com/wfd/home"
+              mono
+            />
+            <InputField
+              id="url-ukg"
+              label="UKG (Old Kronos)"
+              value={draft.urls.ukg}
+              changed={chg("urls", "ukg")}
+              onChange={(v) => patch("urls", "ukg", v)}
+              placeholder="Default: ucsd.kronos.net/wfcstatic/…"
+              mono
+            />
+            <InputField
+              id="url-i9"
+              label="I-9 Complete"
+              value={draft.urls.i9}
+              changed={chg("urls", "i9")}
+              onChange={(v) => patch("urls", "i9", v)}
+              placeholder="Default: stse.i9complete.com"
+              mono
+            />
+            <InputField
+              id="url-onbase"
+              label="OnBase (Hyland)"
+              value={draft.urls.onbase}
+              changed={chg("urls", "onbase")}
+              onChange={(v) => patch("urls", "onbase", v)}
+              placeholder="Default: ucsd.hylandcloud.com/251ids/NavPanel.aspx"
+              mono
+            />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (section === "capture") {
+    return (
+      <div className="flex flex-col gap-6">
+        <SectionHead
+          icon={meta.icon}
+          title="Audit capture"
+          subtitle="Geometry for the audit screenshots taken at each workflow step. Tune for readability of captured forms."
+        />
+        <Card title="Capture geometry">
+          <div className={FIELD_GRID}>
+            <InputField
+              id="capture-width"
+              label="Minimum width (px)"
+              type="number"
+              value={draft.capture.width}
+              changed={chg("capture", "width")}
+              onChange={(v) => patch("capture", "width", v)}
+              min={320}
+              step={40}
+              hint="Fixed readable column width — a floor, not a cap."
+            />
+            <InputField
+              id="capture-max-width"
+              label="Maximum width (px)"
+              type="number"
+              value={draft.capture.maxWidth}
+              changed={chg("capture", "maxWidth")}
+              onChange={(v) => patch("capture", "maxWidth", v)}
+              min={320}
+              step={100}
+              hint="Hard cap for very wide grids."
+            />
+            <InputField
+              id="capture-slice-height"
+              label="Slice height (px)"
+              type="number"
+              value={draft.capture.sliceHeight}
+              changed={chg("capture", "sliceHeight")}
+              onChange={(v) => patch("capture", "sliceHeight", v)}
+              min={200}
+              step={100}
+              hint="Height of each page slice when a tall form is split."
+            />
+            <InputField
+              id="capture-slice-overlap"
+              label="Slice overlap (px)"
+              type="number"
+              value={draft.capture.sliceOverlap}
+              changed={chg("capture", "sliceOverlap")}
+              onChange={(v) => patch("capture", "sliceOverlap", v)}
+              min={0}
+              step={20}
+              hint="Overlap between consecutive slices. Must be < slice height."
+            />
+            <InputField
+              id="capture-max-slices"
+              label="Max slices per page"
+              type="number"
+              value={draft.capture.maxSlices}
+              changed={chg("capture", "maxSlices")}
+              onChange={(v) => patch("capture", "maxSlices", v)}
+              min={1}
+              step={1}
+            />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (section === "recovery") {
+    return (
+      <div className="flex flex-col gap-6">
+        <SectionHead
+          icon={meta.icon}
+          title="Recovery & daemon"
+          subtitle="Per-browser health-recovery aggressiveness and daemon claim-loop timing."
+        />
+        <Card title="Browser health monitor">
+          <div className={FIELD_GRID}>
+            <InputField
+              id="health-tick"
+              label="Monitor tick (ms)"
+              type="number"
+              value={draft.browserHealth.monitorTickMs}
+              changed={chg("browserHealth", "monitorTickMs")}
+              onChange={(v) => patch("browserHealth", "monitorTickMs", v)}
+              min={1000}
+              step={1000}
+              hint="How often each browser's health is probed."
+            />
+            <InputField
+              id="health-max-refresh"
+              label="Max auto-refresh (rung 1)"
+              type="number"
+              value={draft.browserHealth.maxAutoRefresh}
+              changed={chg("browserHealth", "maxAutoRefresh")}
+              onChange={(v) => patch("browserHealth", "maxAutoRefresh", v)}
+              min={0}
+              step={1}
+              hint="Consecutive Refresh attempts before escalating to Reopen."
+            />
+            <InputField
+              id="health-max-reopen"
+              label="Max reopen (rung 2)"
+              type="number"
+              value={draft.browserHealth.maxReopen}
+              changed={chg("browserHealth", "maxReopen")}
+              onChange={(v) => patch("browserHealth", "maxReopen", v)}
+              min={0}
+              step={1}
+              hint="Consecutive Reopen attempts before surfacing a failure."
+            />
+          </div>
+        </Card>
+        <Card title="Daemon timing">
+          <div className={FIELD_GRID}>
+            <InputField
+              id="daemon-idle"
+              label="Idle keepalive window (ms)"
+              type="number"
+              value={draft.daemon.idleMs}
+              changed={chg("daemon", "idleMs")}
+              onChange={(v) => patch("daemon", "idleMs", v)}
+              min={10000}
+              step={10000}
+              hint="Idle window before a daemon runs its heavyweight keepalive tick."
+            />
+            <InputField
+              id="daemon-repoll"
+              label="Idle re-poll backstop (ms)"
+              type="number"
+              value={draft.daemon.idleRepollMs}
+              changed={chg("daemon", "idleRepollMs")}
+              onChange={(v) => patch("daemon", "idleRepollMs", v)}
+              min={1000}
+              step={1000}
+              hint="How quickly a missed wake is recovered (lower = snappier queue pickup)."
             />
           </div>
         </Card>
@@ -649,6 +1005,35 @@ export function SettingsDialog({
   const current = SECTIONS.find((s) => s.id === activeSection) ?? SECTIONS[0];
   const showFooter = current.settingsBacked;
   const visibleSections = useMemo(() => SECTIONS.filter((s) => sectionMatches(s, query)), [query]);
+  const settingsNavSections = useMemo(() => visibleSections.filter((s) => s.kind === "settings"), [visibleSections]);
+  const referenceNavSections = useMemo(() => visibleSections.filter((s) => s.kind === "reference"), [visibleSections]);
+
+  const renderNavButton = (section: Section): JSX.Element => {
+    const Icon = section.icon;
+    const active = activeSection === section.id;
+    const dirty = sectionDirty(section.id, draft, settings);
+    return (
+      <button
+        key={section.id}
+        type="button"
+        aria-current={active ? "page" : undefined}
+        onClick={() => setActiveSection(section.id)}
+        className={cn(
+          "relative mt-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "bg-accent font-semibold text-foreground" : "text-foreground/90 hover:bg-secondary",
+        )}
+      >
+        {active && (
+          <span aria-hidden className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary" />
+        )}
+        <Icon aria-hidden className="h-4 w-4 shrink-0" />
+        <span className="truncate">{section.label}</span>
+        {dirty && (
+          <span aria-label="Unsaved changes" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+        )}
+      </button>
+    );
+  };
 
   const handleSave = async () => {
     const ok = await save(diffOperatorSettings(draft));
@@ -721,40 +1106,15 @@ export function SettingsDialog({
                   No settings match “{query}”.
                 </p>
               ) : (
-                visibleSections.map((section) => {
-                  const Icon = section.icon;
-                  const active = activeSection === section.id;
-                  const dirty = sectionDirty(section.id, draft, settings);
-                  return (
-                    <button
-                      key={section.id}
-                      type="button"
-                      aria-current={active ? "page" : undefined}
-                      onClick={() => setActiveSection(section.id)}
-                      className={cn(
-                        "relative mt-0.5 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                        active
-                          ? "bg-accent font-semibold text-foreground"
-                          : "text-foreground/90 hover:bg-secondary",
-                      )}
-                    >
-                      {active && (
-                        <span
-                          aria-hidden
-                          className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary"
-                        />
-                      )}
-                      <Icon aria-hidden className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{section.label}</span>
-                      {dirty && (
-                        <span
-                          aria-label="Unsaved changes"
-                          className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                        />
-                      )}
-                    </button>
-                  );
-                })
+                <>
+                  {settingsNavSections.map(renderNavButton)}
+                  {referenceNavSections.length > 0 && (
+                    <p className="mt-3 mb-0.5 px-2.5 pt-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Reference
+                    </p>
+                  )}
+                  {referenceNavSections.map(renderNavButton)}
+                </>
               )}
             </div>
             {/* Workflow Editor launches into its own full-page view */}
@@ -790,6 +1150,11 @@ export function SettingsDialog({
                     />
                   ) : activeSection === "credentials" ? (
                     <CredentialsSection credentials={credentials} />
+                  ) : activeSection === "ref-rows" ||
+                    activeSection === "ref-workflows" ||
+                    activeSection === "ref-system" ||
+                    activeSection === "ref-shortcuts" ? (
+                    <ReferencePanel section={activeSection} />
                   ) : (
                     <>
                       <SettingsSectionContent

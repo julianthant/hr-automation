@@ -6,6 +6,10 @@ export interface WorkflowMetadata {
   name: string
   /** Human-readable label (server-derived from `defineWorkflow.label` or auto-title-cased name). */
   label: string
+  /** 2-char workflow code — the trace-id prefix + daemon instance prefix. Source: `defineWorkflow.code`. */
+  code?: string
+  /** Declared workflow archetype (single | preview | operation). Source: `defineWorkflow.archetype`. */
+  archetype?: string
   /**
    * Display category for `WorkflowRail` grouping (e.g. "Onboarding", "Utils").
    * Absent → the workflow lands in the rail's "Other" group. Source:
