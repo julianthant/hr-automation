@@ -80,21 +80,21 @@ export async function runKualiFinalize(
 
   await verifyTxnNumberFilled(kualiPage, transactionNumber);
 
-  // Capture the FILLED finalization form BEFORE saving. A successful Kuali Build
-  // save navigates the document away to the Home apps directory (the Group Hub —
-  // a giant infinite-scroll grid of every form type), so a post-save capture
-  // shoots that catalog instead of the form (and the catalog is tall enough to
-  // hit CAPTURE.maxSlices = 30 every run, flooding the Screenshots tab with the
-  // wrong page). The form's displayed values are identical pre/post-save, so the
-  // pre-save shot is the faithful proof of what we finalized.
+  // Capture the FILLED finalization form BEFORE saving. The form's displayed
+  // values are identical pre/post-save, so the pre-save shot is the faithful
+  // proof of what we finalized; capturing here also sidesteps the post-save
+  // navigation back to the Kuali Home apps directory.
   //
-  // Unified whole-page/form capture: one image (or readable -cNN slices) of the
-  // ENTIRE Kuali finalization document. The kernel detects the finalization
-  // dialog (a fixed `max-height`+`overflow:auto` modal) as the dominant scroll
-  // target and scroll-captures its painted bands top-to-bottom, so the form is
-  // never clipped at its fold (and the sticky "unsupported browser" banner is
-  // hidden so it doesn't reprint in every band). See src/core/CLAUDE.md.
-  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'], stitch: true });
+  // Written as readable `-cNN` page slices (NO `stitch`) of the ENTIRE
+  // finalization form, so the operator steps through it field-by-field in the
+  // Screenshots tab (top → … → the Final Transactions section) rather than
+  // scrolling one giant tile. The Kuali Build apps catalog stays MOUNTED behind
+  // the document view (a ~16000px `overflow:auto` grid); the kernel's
+  // `planScrollCapture` occlusion-rejects it (it is painted BEHIND the form, so
+  // it is never the top `elementFromPoint`) and picks the visible document
+  // scroll container, scroll-capturing its painted bands top-to-bottom so the
+  // form is never clipped at its fold. See src/core/CLAUDE.md (Audit Screenshots).
+  await ctx.screenshot({ kind: 'form', label: 'kuali-finalization-saved', systems: ['kuali'] });
 
   await clickSave(kualiPage);
   log.step(`[Step: kuali-finalization] END took=${Date.now() - t0}ms success`);

@@ -6,6 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import type { SystemConfig, SessionObserver, CaptureFileOpts } from './types.js'
 import { launchBrowser } from '../../infra/browser/launch.js'
 import { log } from '../../utils/log.js'
+import { numEnv } from '../../utils/env.js'
 import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
 import { idleRefreshCadence } from '../../domain/idle-refresh.js'
@@ -53,12 +54,15 @@ interface HealthMonitorState {
   monitorBusy: boolean
 }
 
+// These three are operator-tunable via Settings → "Browser health" (the settings
+// store populates the env var only for an explicitly-set field; unset = the
+// literal default below, so an unconfigured install is unchanged).
 /** How often the health monitor probes every launched browser (ms). */
-const HEALTH_MONITOR_TICK_MS = 30_000
+const HEALTH_MONITOR_TICK_MS = numEnv('HRAUTO_HEALTH_MONITOR_TICK_MS', 30_000)
 /** Max consecutive Refresh attempts (rung 1) before escalating to Reopen. */
-const HEALTH_MONITOR_MAX_AUTO_REFRESH = 10
+const HEALTH_MONITOR_MAX_AUTO_REFRESH = numEnv('HRAUTO_HEALTH_MONITOR_MAX_REFRESH', 10)
 /** Max consecutive Reopen attempts (rung 2) before surfacing `failed`. */
-const HEALTH_MONITOR_MAX_REOPEN = 3
+const HEALTH_MONITOR_MAX_REOPEN = numEnv('HRAUTO_HEALTH_MONITOR_MAX_REOPEN', 3)
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -87,6 +91,9 @@ export function formatCaptureFilename(args: {
  * window) and splits a TALL page into page-height slices the operator steps
  * through, instead of one tiny unreadable long image.
  */
+// Operator-tunable via Settings → "Audit capture" (env vars populated only for
+// explicitly-set fields; unset = the literal defaults below, so the capture is
+// byte-identical on an unconfigured install).
 export const CAPTURE = {
   /**
    * Fixed MINIMUM layout-viewport WIDTH for every capture. A narrow/normal form
@@ -94,22 +101,22 @@ export const CAPTURE = {
    * (`setViewportSize` sets the LAYOUT viewport independently of the OS window).
    * Wide content (PeopleSoft grids) widens BEYOND this; it is a floor, not a cap.
    */
-  width: 1280,
+  width: numEnv('HRAUTO_CAPTURE_WIDTH', 1280),
   /** Hard cap on widening for pathologically wide content (runaway guard). */
-  maxWidth: 6000,
+  maxWidth: numEnv('HRAUTO_CAPTURE_MAX_WIDTH', 6000),
   /**
    * Height of each page slice when a tall capture is split. ~one comfortable
    * screenful so a slice reads near 1:1 in the dashboard lightbox instead of a
    * shrunk-to-fit ribbon.
    */
-  sliceHeight: 1200,
+  sliceHeight: numEnv('HRAUTO_CAPTURE_SLICE_HEIGHT', 1200),
   /**
    * Vertical OVERLAP (px) between consecutive slices, so content sitting on a
    * slice boundary stays fully readable in at least one slice. Must be < sliceHeight.
    */
-  sliceOverlap: 120,
+  sliceOverlap: numEnv('HRAUTO_CAPTURE_SLICE_OVERLAP', 120),
   /** Hard cap on slices per page — runaway guard for pathologically tall docs. */
-  maxSlices: 30,
+  maxSlices: numEnv('HRAUTO_CAPTURE_MAX_SLICES', 30),
 } as const
 
 /**
@@ -1346,7 +1353,11 @@ export class Session {
    * for it. Compares the hidden overflow of (a) the window, (b) every visible
    * `overflow:auto/scroll` element that fills a meaningful slice of the viewport,
    * and (c) every same-origin iframe's scrolling document, and selects whichever
-   * has the most off-screen content. Tags the chosen element/iframe (`data-hrcap`
+   * has the most off-screen content — but ONLY among containers that are actually
+   * VISIBLE (a scroll container painted behind another layer, e.g. the Kuali Build
+   * apps catalog mounted behind an open document view, is occlusion-rejected so the
+   * capture walks the on-screen form, not the hidden catalog). Tags the chosen
+   * element/iframe (`data-hrcap`
    * / `data-hrcap-frame`) so `scrollCaptureTo` can drive it across evaluate calls,
    * and hides `position:fixed`/`sticky` chrome that isn't part of the target chain
    * (so it doesn't reprint in every band). Stashes a `window.__hrcapRestore` that
@@ -1388,6 +1399,25 @@ export class Session {
           if (ov <= MIN_OVERFLOW) continue
           const r = el.getBoundingClientRect()
           if (r.height < vh * MIN_HEIGHT_FRAC || r.width < vw * MIN_WIDTH_FRAC) continue
+          // Skip a scroll container that is fully OCCLUDED — mounted in the DOM but
+          // painted BEHIND another layer. The Kuali Build apps catalog stays mounted
+          // behind an open document view with ~15000px of overflow; by raw overflow
+          // it wins this scan, so the capture walked the hidden catalog instead of
+          // the visible form. Sample a grid of points in the element's on-screen rect
+          // and keep it only if it (or a descendant) is the TOP painted element at
+          // some point — i.e. it is actually visible to the operator. Fail-open: if
+          // elementFromPoint can't run, don't reject (no regression).
+          let elVisible = false
+          for (let sx = 0; sx < 3 && !elVisible; sx++) {
+            for (let sy = 0; sy < 3 && !elVisible; sy++) {
+              const px = Math.min(vw - 1, Math.max(0, r.left + r.width * (0.25 + sx * 0.25)))
+              const py = Math.min(vh - 1, Math.max(0, r.top + r.height * (0.3 + sy * 0.2)))
+              let top: Element | null = null
+              try { top = document.elementFromPoint(px, py) } catch { /* occlusion probe is best-effort */ }
+              if (top && (top === el || el.contains(top))) elVisible = true
+            }
+          }
+          if (!elVisible) continue
           if (ov > bestElOverflow) { bestElOverflow = ov; bestEl = el }
         }
 
@@ -1406,6 +1436,21 @@ export class Session {
           if (ov <= MIN_OVERFLOW) continue
           const r = f.getBoundingClientRect()
           if (r.height < vh * MIN_HEIGHT_FRAC || r.width < vw * MIN_WIDTH_FRAC) continue
+          // Same occlusion guard as the element scan: skip an iframe painted behind
+          // another layer. A visible iframe is itself the top element at its own
+          // coordinates (the parent document's elementFromPoint can't descend into
+          // the child doc), so a genuinely-shown frame passes via `top === f`.
+          let frameVisible = false
+          for (let sx = 0; sx < 3 && !frameVisible; sx++) {
+            for (let sy = 0; sy < 3 && !frameVisible; sy++) {
+              const px = Math.min(vw - 1, Math.max(0, r.left + r.width * (0.25 + sx * 0.25)))
+              const py = Math.min(vh - 1, Math.max(0, r.top + r.height * (0.3 + sy * 0.2)))
+              let top: Element | null = null
+              try { top = document.elementFromPoint(px, py) } catch { /* occlusion probe is best-effort */ }
+              if (top && (top === f || f.contains(top))) frameVisible = true
+            }
+          }
+          if (!frameVisible) continue
           if (ov > bestFrameOverflow) { bestFrameOverflow = ov; bestFrame = f; bestFrameScrollHeight = se.scrollHeight }
         }
 
