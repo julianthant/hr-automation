@@ -776,7 +776,7 @@ function QueueRowsTab() {
       <Variant
         label="titleless person anchor (collapsed)"
         axes="operation · person-kind · no title · done"
-        note="collapsed: count strip + batch-style member-name preview (reads like a batch row); expand for full rows"
+        note="collapsed: count strip + hairline-divided member-name preview (reads like a batch row); click a name to expand + jump to that member"
       >
         <OpUnifiedFixture fixture={titlelessOperation} />
       </Variant>
