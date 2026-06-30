@@ -98,6 +98,28 @@ export function NodeInspector({
   onUpdateAddedOp,
   onRemoveAddedOp,
 }: NodeInspectorProps): JSX.Element {
+  const inspectorContent: Partial<Record<string, JSX.Element>> = {
+    [NODE_ROW]: <RowInspector data={data} draft={draft} onChange={onChange} />,
+    [NODE_STEP]: (
+      <StepInspector
+        node={node}
+        data={data}
+        draft={draft}
+        onChange={onChange}
+        onUpdateAddedOp={onUpdateAddedOp}
+        onRemoveAddedOp={onRemoveAddedOp}
+      />
+    ),
+    [NODE_DELEGATION_COORDINATOR]: <CoordinatorInspector data={data} draft={draft} onChange={onChange} />,
+    [NODE_PREP]: <PrepInspector data={data} draft={draft} onChange={onChange} />,
+    [NODE_MEMBER]: <MemberInspector data={data} draft={draft} onChange={onChange} />,
+    [NODE_ACTION]: <ActionInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />,
+    [NODE_OPS_LANE]: <OpsLaneInspector node={node} />,
+    [NODE_CUSTOM]: <IntentInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />,
+    [NODE_NOTE]: <IntentInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />,
+    [NODE_GROUP]: <IntentInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />,
+  };
+
   return (
     <aside
       aria-label={`${INSPECTOR_TITLES[node.type ?? ""] ?? "Node"} inspector`}
@@ -118,30 +140,7 @@ export function NodeInspector({
       </header>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3.5">
-        {node.type === NODE_ROW ? (
-          <RowInspector data={data} draft={draft} onChange={onChange} />
-        ) : node.type === NODE_STEP ? (
-          <StepInspector
-            node={node}
-            data={data}
-            draft={draft}
-            onChange={onChange}
-            onUpdateAddedOp={onUpdateAddedOp}
-            onRemoveAddedOp={onRemoveAddedOp}
-          />
-        ) : node.type === NODE_DELEGATION_COORDINATOR ? (
-          <CoordinatorInspector data={data} draft={draft} onChange={onChange} />
-        ) : node.type === NODE_PREP ? (
-          <PrepInspector data={data} draft={draft} onChange={onChange} />
-        ) : node.type === NODE_MEMBER ? (
-          <MemberInspector data={data} draft={draft} onChange={onChange} />
-        ) : node.type === NODE_ACTION ? (
-          <ActionInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />
-        ) : node.type === NODE_OPS_LANE ? (
-          <OpsLaneInspector node={node} />
-        ) : node.type === NODE_CUSTOM || node.type === NODE_NOTE || node.type === NODE_GROUP ? (
-          <IntentInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />
-        ) : (
+        {inspectorContent[node.type ?? ""] ?? (
           <p className="text-xs text-muted-foreground">No editable config for this node.</p>
         )}
       </div>
@@ -293,7 +292,7 @@ function StepInspector({
       <header className="space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Step {idx + 1} of {total}
+            {idx >= 0 ? `Step ${idx + 1} of ${total}` : `Step (unmapped) · ${step}`}
           </span>
           {modified ? (
             <button
