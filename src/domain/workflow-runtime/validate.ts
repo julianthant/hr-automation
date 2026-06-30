@@ -25,7 +25,7 @@ export const WORKFLOW_ACTION_SCOPES = [
 
 export const WORKFLOW_ACTION_SOURCES = [
   "queue-panel",
-  "batch-view",
+  "operation-view",
   "log-panel",
   "daemon",
 ] as const satisfies readonly WorkflowActionSource[];
@@ -74,7 +74,7 @@ export function validateWorkflowRuntimePolicy(
   const buckets: Array<[string, WorkflowActionPolicy[]]> = [
     ["rowActions", policy.rowActions],
     ["groupActions", policy.groupActions],
-    ["batchViewToolbarActions", policy.batchViewToolbarActions],
+    ["operationViewToolbarActions", policy.operationViewToolbarActions],
     ["daemonActions", policy.daemonActions],
   ];
   for (const [bucket, actions] of buckets) {
@@ -88,14 +88,14 @@ export function validateWorkflowRuntimePolicy(
 }
 
 /** Batch-view toolbar actions must not target run ids outside the opened batch members. */
-export function batchViewActionsWithinMembers(
+export function operationViewActionsWithinMembers(
   projection: WorkflowRunProjection,
   memberRunIds: readonly string[],
 ): string[] {
   const allowed = new Set(memberRunIds);
   const errors: string[] = [];
   for (const action of projection.actions) {
-    if (action.source !== "batch-view") continue;
+    if (action.source !== "operation-view") continue;
     for (const target of action.targets) {
       const runId = target.runId ?? target.id;
       if (!allowed.has(runId)) {

@@ -7,7 +7,7 @@ import { useRunScreenshots } from "@/components/hooks/useRunScreenshots";
 import { useInterval } from "@/components/hooks/resource-factory";
 import { queueStatusDisplayLabel } from "../../../domain/tracker-terminal-display.js";
 
-export function BatchScreenshotsPanel({
+export function OperationScreenshotsPanel({
   members,
   displayNames,
   title,
@@ -53,7 +53,7 @@ export function BatchScreenshotsPanel({
 
       <div className="space-y-5 px-6 py-5">
         {members.map((member, index) => (
-          <BatchScreenshotRow
+          <OperationScreenshotRow
             key={`${member.workflow}-${member.id}-${member.runId ?? ""}`}
             member={member}
             ordinal={index + 1}
@@ -66,7 +66,7 @@ export function BatchScreenshotsPanel({
   );
 }
 
-function BatchScreenshotRow({
+function OperationScreenshotRow({
   member,
   ordinal,
   displayName,

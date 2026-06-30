@@ -2,11 +2,11 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 
 import {
-  aggregateBatchCounts,
+  aggregateOperationCounts,
   dedupeMembersByLatestRun,
   pickPreviewChildren,
-  computeBatchElapsed,
-  resolveBatchAccent,
+  computeOperationElapsed,
+  resolveOperationAccent,
 } from "../../../src/dashboard/components/ocr/delegation-row-helpers.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
@@ -23,11 +23,11 @@ function child(over: Partial<TrackerEntry>): TrackerEntry {
   };
 }
 
-describe("aggregateBatchCounts", () => {
+describe("aggregateOperationCounts", () => {
   it("counts each status bucket", () => {
-    // Distinct members have distinct ids (the item identity); aggregateBatchCounts
+    // Distinct members have distinct ids (the item identity); aggregateOperationCounts
     // dedupes by id, so give each member a unique id.
-    const result = aggregateBatchCounts([
+    const result = aggregateOperationCounts([
       child({ id: "a", status: "done" }),
       child({ id: "b", status: "done" }),
       child({ id: "c", status: "running" }),
@@ -46,7 +46,7 @@ describe("aggregateBatchCounts", () => {
   });
 
   it("treats skipped as done (terminal success)", () => {
-    const result = aggregateBatchCounts([
+    const result = aggregateOperationCounts([
       child({ id: "a", status: "skipped" }),
       child({ id: "b", status: "done" }),
     ]);
@@ -54,7 +54,7 @@ describe("aggregateBatchCounts", () => {
   });
 
   it("returns all-zero counts for empty input", () => {
-    assert.deepEqual(aggregateBatchCounts([]), {
+    assert.deepEqual(aggregateOperationCounts([]), {
       done: 0,
       running: 0,
       queued: 0,
@@ -68,7 +68,7 @@ describe("aggregateBatchCounts", () => {
     // A member with status=failed but step=cancelled is a deliberate operator
     // action — it should land in `cancelled`, not `failed`, consistent with how
     // statusKeyForEntry classifies it for the per-member chip.
-    const result = aggregateBatchCounts([
+    const result = aggregateOperationCounts([
       child({ id: "a", status: "failed" }),
       child({ id: "b", status: "failed", step: "cancelled" }),
     ]);
@@ -81,7 +81,7 @@ describe("aggregateBatchCounts", () => {
     // A 3-signer operation where signer "b" failed then was retried: the retry is
     // a NEW run (runId b#2, runOrdinal 2) under the SAME item id "b". The header
     // must read 3 members (2 done + 1 done-retry), NOT 4 with a stray failed.
-    const result = aggregateBatchCounts([
+    const result = aggregateOperationCounts([
       child({ id: "a", runId: "a#1", runOrdinal: 1, status: "done" }),
       child({ id: "b", runId: "b#1", runOrdinal: 1, status: "failed" }),
       child({ id: "b", runId: "b#2", runOrdinal: 2, status: "done" }),
@@ -213,16 +213,16 @@ describe("pickPreviewChildren", () => {
   });
 });
 
-describe("computeBatchElapsed", () => {
+describe("computeOperationElapsed", () => {
   it("returns null when no child has any usable timestamp", () => {
     assert.equal(
-      computeBatchElapsed([child({ timestamp: "", firstLogTs: undefined, lastLogTs: undefined })]),
+      computeOperationElapsed([child({ timestamp: "", firstLogTs: undefined, lastLogTs: undefined })]),
       null,
     );
   });
 
   it("uses the earliest firstLogTs as start and latest lastLogTs as end", () => {
-    const result = computeBatchElapsed([
+    const result = computeOperationElapsed([
       child({
         firstLogTs: "2026-05-01T09:42:00.000Z",
         lastLogTs: "2026-05-01T09:43:00.000Z",
@@ -240,7 +240,7 @@ describe("computeBatchElapsed", () => {
   });
 
   it("freezes (frozen=true) when every child is terminal", () => {
-    const result = computeBatchElapsed([
+    const result = computeOperationElapsed([
       child({
         firstLogTs: "2026-05-01T09:42:00.000Z",
         lastLogTs: "2026-05-01T09:43:00.000Z",
@@ -256,7 +256,7 @@ describe("computeBatchElapsed", () => {
   });
 
   it("falls back to entry.timestamp when firstLogTs missing", () => {
-    const result = computeBatchElapsed([
+    const result = computeOperationElapsed([
       child({
         timestamp: "2026-05-01T09:40:00.000Z",
         firstLogTs: undefined,
@@ -268,35 +268,35 @@ describe("computeBatchElapsed", () => {
   });
 });
 
-describe("resolveBatchAccent", () => {
+describe("resolveOperationAccent", () => {
   it("returns destructive when any child failed", () => {
     assert.equal(
-      resolveBatchAccent({ done: 1, running: 0, queued: 0, failed: 1, cancelled: 0, total: 2 }),
+      resolveOperationAccent({ done: 1, running: 0, queued: 0, failed: 1, cancelled: 0, total: 2 }),
       "destructive",
     );
   });
 
   it("returns success when all children done", () => {
     assert.equal(
-      resolveBatchAccent({ done: 5, running: 0, queued: 0, failed: 0, cancelled: 0, total: 5 }),
+      resolveOperationAccent({ done: 5, running: 0, queued: 0, failed: 0, cancelled: 0, total: 5 }),
       "success",
     );
   });
 
   it("returns warning while running or queued", () => {
     assert.equal(
-      resolveBatchAccent({ done: 1, running: 1, queued: 0, failed: 0, cancelled: 0, total: 2 }),
+      resolveOperationAccent({ done: 1, running: 1, queued: 0, failed: 0, cancelled: 0, total: 2 }),
       "warning",
     );
     assert.equal(
-      resolveBatchAccent({ done: 0, running: 0, queued: 3, failed: 0, cancelled: 0, total: 3 }),
+      resolveOperationAccent({ done: 0, running: 0, queued: 3, failed: 0, cancelled: 0, total: 3 }),
       "warning",
     );
   });
 
   it("returns warning for empty batch (zero children)", () => {
     assert.equal(
-      resolveBatchAccent({ done: 0, running: 0, queued: 0, failed: 0, cancelled: 0, total: 0 }),
+      resolveOperationAccent({ done: 0, running: 0, queued: 0, failed: 0, cancelled: 0, total: 0 }),
       "warning",
     );
   });
@@ -305,7 +305,7 @@ describe("resolveBatchAccent", () => {
     // A batch where some members were cancelled by the operator but none genuinely
     // failed should not go red — the operator chose to stop those rows.
     assert.equal(
-      resolveBatchAccent({ done: 2, running: 0, queued: 0, failed: 0, cancelled: 1, total: 3 }),
+      resolveOperationAccent({ done: 2, running: 0, queued: 0, failed: 0, cancelled: 1, total: 3 }),
       "success",
     );
   });

@@ -1,9 +1,9 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { resolveDaemonBatchQueueTitle } from "../../../src/dashboard/components/queue-panel/batch-queue-view.js";
+import { resolveDaemonOperationQueueTitle } from "../../../src/dashboard/components/queue-panel/operation-queue-view.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 
-test("resolveDaemonBatchQueueTitle ignores a non-PDF titleOverride (random/person name → no title)", () => {
+test("resolveDaemonOperationQueueTitle ignores a non-PDF titleOverride (random/person name → no title)", () => {
   const member: TrackerEntry = {
     workflow: "eid-lookup",
     id: "x",
@@ -14,19 +14,19 @@ test("resolveDaemonBatchQueueTitle ignores a non-PDF titleOverride (random/perso
   } as TrackerEntry;
   // A batch is titled ONLY by a PDF filename. A non-PDF override is dropped.
   assert.equal(
-    resolveDaemonBatchQueueTitle("EID Lookup", [member], "1234", "Oath Signature · #1234"),
+    resolveDaemonOperationQueueTitle("EID Lookup", [member], "1234", "Oath Signature · #1234"),
     "",
   );
 });
 
-test("resolveDaemonBatchQueueTitle honors a titleOverride only when it is a PDF filename", () => {
+test("resolveDaemonOperationQueueTitle honors a titleOverride only when it is a PDF filename", () => {
   assert.equal(
-    resolveDaemonBatchQueueTitle("Oath Upload", [], "1234", "Inherited_Batch.pdf"),
+    resolveDaemonOperationQueueTitle("Oath Upload", [], "1234", "Inherited_Batch.pdf"),
     "Inherited_Batch.pdf",
   );
 });
 
-test("resolveDaemonBatchQueueTitle surfaces a member's pdfOriginalName for file batches", () => {
+test("resolveDaemonOperationQueueTitle surfaces a member's pdfOriginalName for file batches", () => {
   const member: TrackerEntry = {
     workflow: "oath-upload",
     id: "x",
@@ -36,12 +36,12 @@ test("resolveDaemonBatchQueueTitle surfaces a member's pdfOriginalName for file 
     data: { pdfOriginalName: "signed-oath.pdf" },
   } as TrackerEntry;
   assert.equal(
-    resolveDaemonBatchQueueTitle("Oath Upload", [member], "abcd1234"),
+    resolveDaemonOperationQueueTitle("Oath Upload", [member], "abcd1234"),
     "signed-oath.pdf",
   );
 });
 
-test("resolveDaemonBatchQueueTitle returns '' for person batches (no override, no pdf, ordinals retired)", () => {
+test("resolveDaemonOperationQueueTitle returns '' for person batches (no override, no pdf, ordinals retired)", () => {
   const member: TrackerEntry = {
     workflow: "eid-lookup",
     id: "x",
@@ -51,16 +51,16 @@ test("resolveDaemonBatchQueueTitle returns '' for person batches (no override, n
     data: { batchDisplayOrdinal: "3" },
   } as TrackerEntry;
   assert.equal(
-    resolveDaemonBatchQueueTitle("Active Check", [member], "00009999"),
+    resolveDaemonOperationQueueTitle("Active Check", [member], "00009999"),
     "",
   );
 });
 
-test("resolveDaemonBatchQueueTitle treats empty-string override as absent and falls through to ''", () => {
+test("resolveDaemonOperationQueueTitle treats empty-string override as absent and falls through to ''", () => {
   // A sloppy caller passing `parent.data?.__name` where the field happens to be ""
   // must not pin an empty override; with no pdf member the person-batch fallthrough yields "".
   assert.equal(
-    resolveDaemonBatchQueueTitle("Oath Signature", [], "abcd1234", ""),
+    resolveDaemonOperationQueueTitle("Oath Signature", [], "abcd1234", ""),
     "",
   );
 });

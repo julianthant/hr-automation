@@ -3,7 +3,7 @@
  *
  * `performWorkflowAction` is the single dispatcher for operator cancel /
  * retry / delete / bump. These tests pin the blast radius: a queue-panel
- * row action touches exactly one run, a batch-view visible action touches
+ * row action touches exactly one run, a operation-view visible action touches
  * only the rows the caller passed, a group retry touches only the listed
  * members, an OCR prep cancel routes to file-scope discard, and daemon stop
  * is refused outright.
@@ -100,7 +100,7 @@ describe("performWorkflowAction — cancel scope", () => {
       const result = await performWorkflowAction({
         action: "cancel",
         scope: "visible-view",
-        source: "batch-view",
+        source: "operation-view",
         workflowId: "separations",
         targets: [
           { workflowId: "separations", id: "a", runId: "run-a", status: "pending" },

@@ -41,7 +41,7 @@ async function waitForQueue(
  * The gated `oath-signature` stub — mirrors the REAL config so the dashboard
  * projection matches production: `inputSubject:"eid"` (→ person kind),
  * `code:"os"`, `archetype:"single"`, the real runtime policy (which sets
- * `delegation.alwaysBatchDelegatedMembers:true` so even one delegated signer
+ * `delegation.alwaysOperationDelegatedMembers:true` so even one delegated signer
  * renders as an operation surface), and `initialData`/`getId`/`operatorSubject` that
  * stamp `emplId` so the person-kind footer subtitle resolves to the EID. Gated
  * at `transaction` (after `ucpath-auth`), exactly where a real signer parks
@@ -214,7 +214,7 @@ test("OCR → oath-signature approveTo fan-out: projection correct under hold/ca
   assert.equal(dash.row("oath-signature", c3!.runId).statusLabel, "Done");
 
   // Surface / grouping: the oath-signature group anchor over the 3 signer
-  // members (alwaysBatchDelegatedMembers → batch surface even for delegated
+  // members (alwaysOperationDelegatedMembers → batch surface even for delegated
   // members), subtitle = trace id (anchor uses preferTraceIdSubtitle).
   const anchor = dash.groupAnchor("oath-signature", PARENT_RUN);
   assert.equal(anchor.memberCount, 3, "oath-signature group anchor has 3 members");

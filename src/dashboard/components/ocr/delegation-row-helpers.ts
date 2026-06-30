@@ -2,7 +2,7 @@ import type { TrackerEntry } from "@/components/shared/types.js";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { statusKeyForEntry } from "@/components/shared/status-styles.js";
 
-export interface BatchCounts {
+export interface OperationCounts {
   done: number;
   running: number;
   queued: number;
@@ -19,14 +19,14 @@ export interface PreviewChild {
   status: TrackerEntry["status"];
 }
 
-export interface BatchElapsed {
+export interface OperationElapsed {
   startMs: number;
   endMs: number;
   /** True when every child is terminal — caller should stop ticking the timer. */
   frozen: boolean;
 }
 
-export type BatchAccent = "warning" | "success" | "destructive";
+export type OperationAccent = "warning" | "success" | "destructive";
 
 /**
  * Collapse retry attempts to one entry per item — the latest run. A retried
@@ -62,9 +62,9 @@ function isLaterRun(a: TrackerEntry, b: TrackerEntry): boolean {
  * Retry attempts collapse to the latest run per item (`dedupeMembersByLatestRun`)
  * so a retried member counts once (ISS-003).
  */
-export function aggregateBatchCounts(children: TrackerEntry[]): BatchCounts {
+export function aggregateOperationCounts(children: TrackerEntry[]): OperationCounts {
   const deduped = dedupeMembersByLatestRun(children);
-  const counts: BatchCounts = {
+  const counts: OperationCounts = {
     done: 0,
     running: 0,
     queued: 0,
@@ -137,9 +137,9 @@ export function resolveChildLabel(child: TrackerEntry): string {
  * Earliest child start ms → latest end ms. Returns null when no child has a
  * usable timestamp. `frozen=true` means every child is terminal — stop the timer.
  */
-export function computeBatchElapsed(
+export function computeOperationElapsed(
   children: TrackerEntry[],
-): BatchElapsed | null {
+): OperationElapsed | null {
   let startMs = Number.POSITIVE_INFINITY;
   let endMs = 0;
   let any = false;
@@ -171,7 +171,7 @@ export function computeBatchElapsed(
 }
 
 /** Color the 3px left accent stripe by overall batch state. */
-export function resolveBatchAccent(counts: BatchCounts): BatchAccent {
+export function resolveOperationAccent(counts: OperationCounts): OperationAccent {
   if (counts.failed > 0) return "destructive";
   // Cancelled members are amber (operator action, not a system failure). A batch
   // with only cancelled + done members reads as complete-but-partial, not failed.
@@ -181,13 +181,13 @@ export function resolveBatchAccent(counts: BatchCounts): BatchAccent {
 }
 
 /**
- * The batch elapsed/duration label for a `computeBatchElapsed` result: a live
+ * The batch elapsed/duration label for a `computeOperationElapsed` result: a live
  * ticking elapsed while any child is in flight, frozen to a fixed duration once
  * every child is terminal, and empty when there's no usable timestamp. Shared by
- * the batch row (`batch-row-variants`) and the delegation group row
+ * the operation row (`operation-row-variants`) and the delegation group row
  * (`group-row-base`) — previously byte-identical copies in each.
  */
-export function useBatchElapsedLabel(elapsed: BatchElapsed | null): string {
+export function useOperationElapsedLabel(elapsed: OperationElapsed | null): string {
   const liveTick = useElapsed(
     elapsed && !elapsed.frozen ? new Date(elapsed.startMs).toISOString() : null,
   );

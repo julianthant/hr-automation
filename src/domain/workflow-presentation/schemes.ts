@@ -34,7 +34,7 @@ export function resolveTitle(vars: Record<string, string>, part: NamingPartTitle
       return firstNonBlank(vars.pdfOriginalName, vars.__name, readQueueTitle(vars) ?? "");
     case "catalog-label":
       return firstNonBlank(readQueueTitle(vars) ?? "", vars.__name, vars.label);
-    case "batch-anchor":
+    case "operation-anchor":
       return "";
     case "custom-template":
       return part.template ? renderTemplate(part.template, vars) : "";
@@ -73,7 +73,7 @@ export const SCHEME_LIBRARY: { title: SchemeMeta[]; subtitle: SchemeMeta[]; trac
     { id: "person-name", label: "Person name", description: "Resolved employee name (in use: onboarding, separations, work-study, person-lookup)" },
     { id: "pdf-filename", label: "PDF filename", description: "Uploaded document name (in use: OCR, oath-upload, oath-signature)" },
     { id: "catalog-label", label: "Catalog / spec label", description: "Registry or spec label (in use: sharepoint-download)" },
-    { id: "batch-anchor", label: "Batch anchor (no title)", description: "Count badge + member preview identify the row" },
+    { id: "operation-anchor", label: "Operation anchor (no title)", description: "Count badge + member preview identify the row" },
     { id: "custom-template", label: "Custom template…", description: "Token template, e.g. {name} ({emplId})" },
   ],
   subtitle: [

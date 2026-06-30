@@ -1,7 +1,7 @@
 import type { TrackerEntry } from "@/components/shared/types";
 import { isTerminalNotFoundEntry } from "../../../domain/tracker-terminal-display.js";
 import { resolveEntryName } from "../shared/entry-display.js";
-import { resolveDaemonBatchQueueTitle } from "./batch-queue-view.js";
+import { resolveDaemonOperationQueueTitle } from "./operation-queue-view.js";
 
 export type QueueSortMode = "start-newest" | "start-oldest" | "label-asc" | "label-desc";
 
@@ -109,19 +109,19 @@ export function compareTrackerEntriesForQueueSort(
  * flat queue rows. `firstLogTs` is the earliest member log anchor; `timestamp`
  * is the earliest member tracker timestamp when no logs exist yet.
  */
-export function buildDaemonBatchSortRepresentative(
-  batchParentRunId: string,
+export function buildDaemonOperationSortRepresentative(
+  operationParentRunId: string,
   members: TrackerEntry[],
   workflowLabel: string,
 ): TrackerEntry {
-  const title = resolveDaemonBatchQueueTitle(workflowLabel, members, batchParentRunId);
+  const title = resolveDaemonOperationQueueTitle(workflowLabel, members, operationParentRunId);
   if (members.length === 0) {
     return {
       workflow: "",
-      id: batchParentRunId,
+      id: operationParentRunId,
       timestamp: "",
       status: "pending",
-      runId: batchParentRunId,
+      runId: operationParentRunId,
       data: { __subject: title },
     };
   }
@@ -132,16 +132,16 @@ export function buildDaemonBatchSortRepresentative(
   const earliestLog = logs.length > 0 ? [...logs].sort()[0]! : "";
   return {
     workflow: wf,
-    id: batchParentRunId,
+    id: operationParentRunId,
     timestamp: earliestTs,
-    runId: batchParentRunId,
+    runId: operationParentRunId,
     status: "pending",
     ...(earliestLog ? { firstLogTs: earliestLog } : {}),
     data: { __subject: title },
   };
 }
 
-export function batchMembersAreAllTerminalNotFound(members: TrackerEntry[]): boolean {
+export function operationMembersAreAllTerminalNotFound(members: TrackerEntry[]): boolean {
   if (members.length === 0) return false;
   return members.every((m) => isTerminalNotFoundEntry(m));
 }
@@ -151,7 +151,7 @@ export function batchMembersAreAllTerminalNotFound(members: TrackerEntry[]): boo
  * For name sorts, batches whose members are **all** terminal “Not found” sink
  * to the end; for start-time sorts, ordering is by time only.
  */
-export function sortDaemonBatchParentIds(
+export function sortDaemonOperationParentIds(
   parentIds: readonly string[],
   membersByParent: Map<string, TrackerEntry[]>,
   mode: QueueSortMode,
@@ -160,8 +160,8 @@ export function sortDaemonBatchParentIds(
 ): string[] {
   const wrapped = parentIds.map((pid) => {
     const members = membersByParent.get(pid) ?? [];
-    const rep = buildDaemonBatchSortRepresentative(pid, members, workflowLabel);
-    const allNf = batchMembersAreAllTerminalNotFound(members);
+    const rep = buildDaemonOperationSortRepresentative(pid, members, workflowLabel);
+    const allNf = operationMembersAreAllTerminalNotFound(members);
     return { pid, rep, allNf };
   });
   if (!deferTerminalNotFoundToEnd(mode)) {

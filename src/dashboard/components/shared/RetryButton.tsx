@@ -3,7 +3,7 @@ import { RotateCcw } from "lucide-react";
 import { toast } from "@/lib/notify";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
+import { useOptionalOperationQueueParentRunId } from "@/components/hooks/useOperationQueueContext";
 import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 import { IconActionButton } from "@/components/shared/IconActionButton";
 import type { WorkflowActionDescriptor } from "../../../domain/workflow-runtime/types.js";
@@ -38,7 +38,7 @@ export function RetryButton({
   className,
 }: RetryButtonProps) {
   const [pending, setPending] = useState(false);
-  const batchParentRunId = useOptionalBatchQueueParentRunId();
+  const operationParentRunId = useOptionalOperationQueueParentRunId();
   const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
   const retryAction = findEnabledAction(actions, "retry");
   const retryEnabled = actions ? Boolean(retryAction) : true;
@@ -56,7 +56,7 @@ export function RetryButton({
         kind: "retry",
         action: retryAction,
         fallbackTarget: { workflowId: workflow, id, runId, date },
-        parentRunId: batchParentRunId ?? undefined,
+        parentRunId: operationParentRunId ?? undefined,
       });
       if (result.ok) {
         toast.success(`Retry scheduled`, {

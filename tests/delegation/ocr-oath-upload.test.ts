@@ -42,7 +42,7 @@ async function waitForQueue(
 /**
  * The gated `oath-signature` stub — mirrors the REAL config so the signer
  * projection matches production (`inputSubject:"eid"` → person kind, `code:"os"`,
- * `archetype:"single"`, the real `alwaysBatchDelegatedMembers` policy so even a
+ * `archetype:"single"`, the real `alwaysOperationDelegatedMembers` policy so even a
  * lone delegated signer renders as a 1-member batch surface). Same stub P2.9
  * uses. Gated at `transaction` so we can hold/cancel/release the signer row.
  */
@@ -265,7 +265,7 @@ test(
     assert.equal(ocrRow.status, "done", "OCR row is terminal done after approval");
 
     // ── oath-signature signer row (1): real archetype is a batch-member
-    //    (alwaysBatchDelegatedMembers → a lone delegated signer renders as a
+    //    (alwaysOperationDelegatedMembers → a lone delegated signer renders as a
     //    1-member batch surface), parentRunId === ocrRunId, person/eid
     //    title+subtitle, `ou-` prefix. ──
     const signerRow = dash.row("oath-signature", signer.runId);
@@ -323,7 +323,7 @@ test(
     assert.equal(
       signerAnchor.kind,
       "operation",
-      "a lone delegated signer renders as an operation surface (alwaysBatchDelegatedMembers)",
+      "a lone delegated signer renders as an operation surface (alwaysOperationDelegatedMembers)",
     );
     assert.equal(signerAnchor.subtitle, "<traceId>", "signer anchor subtitle is the trace id");
 

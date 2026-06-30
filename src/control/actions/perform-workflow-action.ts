@@ -9,7 +9,7 @@
  * {@link WorkflowActionResult} back to their legacy response shape.
  *
  * Scope discipline is the whole point: queue-panel actions cannot reach
- * batch-view-only rows, batch-view actions cannot escape the opened batch,
+ * operation-view-only rows, operation-view actions cannot escape the opened batch,
  * and daemon stop is rejected outright — it is operational control, not a
  * workflow tree cancel.
  */

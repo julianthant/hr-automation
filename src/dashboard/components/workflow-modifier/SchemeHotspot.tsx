@@ -17,7 +17,7 @@ interface SchemeHotspotProps {
   fieldLabel: string;
   /** Resolved text rendered in the artifact (the live preview value). */
   displayText: string;
-  /** Shown muted+italic when displayText is empty (e.g. batch-anchor title). */
+  /** Shown muted+italic when displayText is empty (e.g. operation-anchor title). */
   emptyLabel?: string;
   /** Render the trigger value in IBM Plex Mono (trace ids, templates). */
   mono?: boolean;

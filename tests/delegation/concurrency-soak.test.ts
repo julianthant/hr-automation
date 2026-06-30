@@ -114,27 +114,27 @@ async function runIteration(
     rt.enqueue(
       "soak-child",
       { id: `${tag}-a1`, name: `Alice-${tag}` },
-      { parentRunId: parentARunId, renderAs: "batch" },
+      { parentRunId: parentARunId, renderAs: "operation" },
     ),
     rt.enqueue(
       "soak-child",
       { id: `${tag}-a2`, name: `Bob-${tag}` },
-      { parentRunId: parentARunId, renderAs: "batch" },
+      { parentRunId: parentARunId, renderAs: "operation" },
     ),
     rt.enqueue(
       "soak-child",
       { id: `${tag}-a3`, name: `Carol-${tag}` },
-      { parentRunId: parentARunId, renderAs: "batch" },
+      { parentRunId: parentARunId, renderAs: "operation" },
     ),
     rt.enqueue(
       "soak-child",
       { id: `${tag}-b1`, name: `Dave-${tag}` },
-      { parentRunId: parentBRunId, renderAs: "batch" },
+      { parentRunId: parentBRunId, renderAs: "operation" },
     ),
     rt.enqueue(
       "soak-child",
       { id: `${tag}-b2`, name: `Eve-${tag}` },
-      { parentRunId: parentBRunId, renderAs: "batch" },
+      { parentRunId: parentBRunId, renderAs: "operation" },
     ),
   ]);
 

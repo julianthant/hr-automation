@@ -263,7 +263,7 @@ export interface GatedWorkflowSpec {
   /**
    * Override the runtime policy. Defaults to `DEFAULT_WORKFLOW_RUNTIME_POLICY`.
    * Pass a real workflow's policy (e.g. oath-signature's
-   * `delegation.alwaysBatchDelegatedMembers: true`) when the stub must mirror
+   * `delegation.alwaysOperationDelegatedMembers: true`) when the stub must mirror
    * production grouping/surface behavior so the projection matches the truth.
    */
   runtimePolicy?: WorkflowRuntimePolicy;

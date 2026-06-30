@@ -15,7 +15,7 @@ import { I9LookupInputSchema, type I9LookupInput } from "./schema.js";
  * When fanned out from a parent (e.g. an OCR run), rows carry `parentRunId`
  * and group under the parent; scope never changes the row's `single` shape.
  *
- * `alwaysBatchDelegatedMembers` keeps even a lone delegated lookup as a
+ * `alwaysOperationDelegatedMembers` keeps even a lone delegated lookup as a
  * one-member batch surface, consistent with how person-lookup handles this.
  */
 const I9_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
@@ -25,7 +25,7 @@ const I9_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   },
   delegation: {
     ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation,
-    alwaysBatchDelegatedMembers: true,
+    alwaysOperationDelegatedMembers: true,
   },
 };
 

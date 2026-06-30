@@ -82,9 +82,9 @@ export const DEFAULT_GROUP_DELETE_ACTION = workflowAction(
 );
 
 export const DEFAULT_BATCH_VIEW_TOOLBAR_ACTIONS: WorkflowActionPolicy[] = [
-  workflowAction("retry", "visible-view", "batch-view", "Retry visible rows"),
-  workflowAction("delete", "visible-view", "batch-view", "Delete visible rows"),
-  workflowAction("cancel", "visible-view", "batch-view", "Cancel visible rows"),
+  workflowAction("retry", "visible-view", "operation-view", "Retry visible rows"),
+  workflowAction("delete", "visible-view", "operation-view", "Delete visible rows"),
+  workflowAction("cancel", "visible-view", "operation-view", "Cancel visible rows"),
 ];
 
 export const DEFAULT_DAEMON_STOP_ACTION = workflowAction(
@@ -98,6 +98,6 @@ export const DEFAULT_DAEMON_STOP_ACTION = workflowAction(
 export const DEFAULT_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   rowActions: DEFAULT_ROW_ACTIONS,
   groupActions: [DEFAULT_GROUP_RETRY_ACTION, DEFAULT_GROUP_DELETE_ACTION],
-  batchViewToolbarActions: DEFAULT_BATCH_VIEW_TOOLBAR_ACTIONS,
+  operationViewToolbarActions: DEFAULT_BATCH_VIEW_TOOLBAR_ACTIONS,
   daemonActions: [DEFAULT_DAEMON_STOP_ACTION],
 };

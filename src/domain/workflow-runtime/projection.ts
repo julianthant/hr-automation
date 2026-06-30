@@ -53,7 +53,7 @@ interface ProjectionOverrides {
   subtitle?: string;
   rowTypeLabel?: string;
   actions?: WorkflowActionDescriptor[];
-  batchMembers?: WorkflowRunProjection[];
+  operationMembers?: WorkflowRunProjection[];
   /**
    * Resolve the person-kind subtitle to the trace id instead of the EID — used
    * for batch/preview group anchors (the member-name preview already shows the
@@ -279,7 +279,7 @@ function rowTypeLabelFor(surfaceType: WorkflowSurfaceType): string {
   return archetypeRowTypeLabel(surfaceType);
 }
 
-function batchGroupTitle(
+function operationGroupTitle(
   surface: TrackerQueueGroupSurface,
   context: WorkflowProjectionContext,
   policy: WorkflowRuntimePolicy,
@@ -382,7 +382,7 @@ export function buildWorkflowRunProjection(
     surfaceType,
     rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType),
     actions: overrides.actions ?? withRowTargets(policy.rowActions, targets),
-    batchMembers: overrides.batchMembers ?? [],
+    operationMembers: overrides.operationMembers ?? [],
   };
 }
 
@@ -460,7 +460,7 @@ function isSyntheticOperationParent(parent: TrackerEntry | undefined): boolean {
  * The entry whose title / subtitle / step / itemId anchors a group surface
  * card. Preview and operation surfaces always carry a real parent row; a batch
  * surface uses its parent when present and otherwise falls back to its first
- * member (an `alwaysBatchDelegatedMembers` one-member batch has no parent row).
+ * member (an `alwaysOperationDelegatedMembers` one-member batch has no parent row).
  */
 function surfaceAnchorEntry(surface: TrackerQueueGroupSurface): TrackerEntry | undefined {
   switch (surface.kind) {
@@ -570,7 +570,7 @@ export function buildProjectionFromQueueSurface(
   // `preferTraceIdSubtitle` so a person batch/preview anchor shows the TRACE ID
   // (the member-name preview already carries the EID on its title-line right),
   // never a repeated EID or a blank slot. `anchor` falls back to `members[0]`
-  // when no parent row exists (an `alwaysBatchDelegatedMembers` one-member
+  // when no parent row exists (an `alwaysOperationDelegatedMembers` one-member
   // batch: oath-signature / person-lookup fan-out), so the slot is filled even
   // when `surface.parent` is undefined.
   const anchorProjection = anchor
@@ -588,13 +588,13 @@ export function buildProjectionFromQueueSurface(
     runId: surface.parentRunId,
     workflowId: fallbackWorkflow,
     itemId: surface.kind === "preview" ? surface.parent.id : groupParent?.id ?? surface.parentRunId,
-    title: batchGroupTitle(surface, context, policy),
+    title: operationGroupTitle(surface, context, policy),
     subtitle: deriveOperationAnchorSubtitle(surface, anchor, anchorProjection?.subtitle),
     status,
     step: surface.kind === "preview" ? surface.parent.step : groupParent?.step,
     surfaceType,
     rowTypeLabel: rowTypeLabelFor(surfaceType),
     actions,
-    batchMembers: members,
+    operationMembers: members,
   };
 }

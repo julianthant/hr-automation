@@ -173,7 +173,7 @@ describe("buildQueueSurfaces", () => {
     assert.deepEqual(surfaces.flatEntries.map((entry) => entry.id), []);
   });
 
-  it("surfaces a single OCR-fan-out person-lookup child as a one-member batch (alwaysBatchDelegatedMembers)", () => {
+  it("surfaces a single OCR-fan-out person-lookup child as a one-member batch (alwaysOperationDelegatedMembers)", () => {
     const eid = row({
       workflow: "person-lookup",
       id: "ocr-oath-run-1-r0",
@@ -195,7 +195,7 @@ describe("buildQueueSurfaces", () => {
       runtimePolicies,
     });
 
-    // person-lookup opts into alwaysBatchDelegatedMembers, so a lone delegated
+    // person-lookup opts into alwaysOperationDelegatedMembers, so a lone delegated
     // lookup stays a one-member batch surface rather than collapsing to a flat
     // single row.
     assert.equal(surfaces.groupRows.length, 1);

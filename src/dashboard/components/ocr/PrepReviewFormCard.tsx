@@ -49,14 +49,14 @@ export interface PrepReviewFormCardProps {
  * checkbox sits in that header beside the phase badge; otherwise it stays in
  * the footer.
  */
-function showBatchCheckboxInHeader(
+function showOperationCheckboxInHeader(
   props: Pick<PrepReviewFormCardProps, "rowOrdinal" | "workflowStatusPhase">,
 ): boolean {
   return props.rowOrdinal != null && props.workflowStatusPhase != null;
 }
 
 export function PrepReviewFormCard(props: PrepReviewFormCardProps) {
-  const headerBatchSelect = showBatchCheckboxInHeader(props);
+  const headerOperationSelect = showOperationCheckboxInHeader(props);
   return (
     <div
       className={cn(
@@ -113,7 +113,7 @@ export function PrepReviewFormCard(props: PrepReviewFormCardProps) {
               <Trash2 className="h-3.5 w-3.5" aria-hidden />
             </button>
           ) : null}
-          {!headerBatchSelect ? (
+          {!headerOperationSelect ? (
             <label
               className={cn(
                 "inline-flex items-center",

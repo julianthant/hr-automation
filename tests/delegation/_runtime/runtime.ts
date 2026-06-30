@@ -80,12 +80,12 @@ export interface EnqueueOpts {
    * Render the enqueued row as a delegated **batch member** (count badge +
    * member preview under the parent anchor). Stamps
    * `__runtimeOptions.rowShape = "operation-member"` on the input — exactly what
-   * the real `approveTo` fan-out (`withBatchMemberRuntimeOptions`) does. Use
+   * the real `approveTo` fan-out (`withOperationMemberRuntimeOptions`) does. Use
    * with `parentRunId` to model the OCR→oath-signature independent-child star
    * case. Without it, a `parentRunId`-enqueued row keeps the workflow's own
    * archetype (`single`) plus delegated scope.
    */
-  renderAs?: "batch";
+  renderAs?: "operation";
 }
 
 export interface WaitForEventOpts {
@@ -299,7 +299,7 @@ export interface DelegationRuntime {
    * document `approveDocumentTo` fan-out, trace-prefix propagation,
    * `childParentRunId`, and terminal OCR row all run, with each child enqueue
    * redirected onto the matching gated daemon (any workflow in
-   * `childWorkflows`) via `rt.enqueue(..., { renderAs: "batch" })`. Resolves
+   * `childWorkflows`) via `rt.enqueue(..., { renderAs: "operation" })`. Resolves
    * with ALL enqueued child runs — each tagged by its `workflow` — once the
    * approve route's background dispatch completes.
    */
@@ -453,13 +453,13 @@ export async function createDelegationRuntime(
     const item: GatedInput = {
       id: enqueueOpts?.itemId ?? input?.id ?? `item-${randomUUID().slice(0, 8)}`,
       ...(input ?? {}),
-      // Mirror `withBatchMemberRuntimeOptions` — the real approve fan-out stamps
+      // Mirror `withOperationMemberRuntimeOptions` — the real approve fan-out stamps
       // this so the daemon's pre-emit derives a `batch-member` archetype.
-      ...(enqueueOpts?.renderAs === "batch" || existingRuntimeOptions
+      ...(enqueueOpts?.renderAs === "operation" || existingRuntimeOptions
         ? {
             __runtimeOptions: {
               ...(existingRuntimeOptions ?? {}),
-              ...(enqueueOpts?.renderAs === "batch" ? { rowShape: "operation-member" } : {}),
+              ...(enqueueOpts?.renderAs === "operation" ? { rowShape: "operation-member" } : {}),
             },
           }
         : {}),
@@ -739,7 +739,7 @@ export async function createDelegationRuntime(
               {
                 itemId,
                 ...(overrideOpts?.parentRunId ? { parentRunId: overrideOpts.parentRunId } : {}),
-                renderAs: "batch",
+                renderAs: "operation",
               },
             );
             enqueued.push({ id: itemId, runId: childRunId });

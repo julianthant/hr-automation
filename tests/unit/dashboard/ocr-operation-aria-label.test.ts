@@ -64,7 +64,7 @@ describe("operationHeaderHasTitle — titleless variant", () => {
   });
 
   test("returns false for an empty string (person-kind operation anchor)", () => {
-    // batchGroupTitle() returns "" for a person-kind operation coordinator;
+    // operationGroupTitle() returns "" for a person-kind operation coordinator;
     // projection.title ?? resolveEntryName falls through to "" via the ?? operator.
     assert.equal(operationHeaderHasTitle(""), false);
   });

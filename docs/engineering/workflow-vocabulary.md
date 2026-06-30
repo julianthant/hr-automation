@@ -8,6 +8,13 @@ accidental complexity that should be removed.
 This doc is the spec. Code that disagrees with it is wrong and should be
 brought in line.
 
+> **2026-06-30 — `batch` retired.** The `batch` / `batch-member` row shapes were
+> renamed to `operation` / `operation-member` across the codebase. They are no
+> longer stampable; old JSONL rows on disk normalize on read via
+> `resolveRowArchetype` (`batch → operation`, `batch-member → operation-member`).
+> The word "batch" now refers ONLY to batch *processing* (a daemon multi-item
+> run, `withBatchLifecycle`, dependency batches) — never a row shape.
+
 ---
 
 ## Row Display Fields
@@ -26,8 +33,8 @@ Every row in the dashboard is one of these things:
 | **single row** | One flat row in a workflow's tab. Represents one run. |
 | **approval row** | A review surface over an OCR'd document that **gates downstream fan-out on operator approval**. The operator approves/discards extracted records; on approve they fan out to downstream rows. Today: oath, emergency-contact. (Formerly called the "preview row".) |
 | **preview row** | A review surface over an OCR'd document that needs **no approval** — read-only. The operator inspects, then discards; nothing fans out. Today: verify (the mixed oath+EC completeness report). |
-| **batch row** | A parent row that houses N batch members. Represents one logical batch run. |
-| **batch member** | A single row that lives inside a batch row. |
+| **operation row** | A parent/coordinator row that houses N operation members. Represents one logical multi-person operation (a fan-out or a multi-value input run). |
+| **operation member** | A single row that lives inside an operation row. |
 
 **Approval row and preview row are the same code archetype (`preview`).** What
 separates them is whether the OCR form spec declares approve fan-out targets
@@ -38,10 +45,10 @@ neither is a preview row with no Approve button. Both block at
 
 ### Rules
 
-1. **Batches don't nest.** A batch row's members are always single rows, never
-   other batch rows.
-2. **Approval/preview is not batch.** OCR can own child work and approval state,
-   but its row archetype is `preview`, not `batch`.
+1. **Operations don't nest.** An operation row's members are always single rows,
+   never other operation rows.
+2. **Approval/preview is not an operation.** OCR can own child work and approval
+   state, but its row archetype is `preview`, not `operation`.
 3. **Every row lives in its own workflow's tab.** A row produced by workflow
    `X` always renders in workflow `X`'s queue panel. Delegation never moves a
    row to a different tab.
@@ -57,7 +64,7 @@ When a workflow calls `ctx.delegateTo(child, input)` or
 |---|---|---|
 | **delegated single** | A single row in the child workflow's tab | The child is a one-shot task — utility lookup, single download, single transaction |
 | **delegated approval** | An approval row | The child needs operator approval before it can continue (e.g. OCR extraction that fans out on approve) |
-| **delegated batch** | A batch row (with N members) in the child workflow's tab | The child is itself a batch — multiple peers of the same kind belong together |
+| **delegated operation** | An operation row (with N members) in the child workflow's tab | The child is itself a group — multiple peers of the same kind belong together |
 
 (A preview row — read-only, no approval — is almost always a standalone run, not
 a delegation target; nothing downstream waits on it.)
@@ -69,8 +76,8 @@ the parent can `await` the child's terminal status.
 
 ### Picking a variant
 
-- **Use delegated batch when you fan out N children of the same kind.**
-  Example: oath-signature batch → N per-signer members.
+- **Use delegated operation when you fan out N children of the same kind.**
+  Example: oath-signature operation → N per-signer members.
 - **Use delegated approval when the child needs operator approval mid-run.**
   Example: OCR row that waits for the operator to confirm extracted rows
   before fanning out.
@@ -79,11 +86,14 @@ the parent can `await` the child's terminal status.
 
 ### How the variant is decided
 
-There are two ways a delegation can become a batch:
+There are two ways a delegation can become an operation:
 
-**1. The child workflow declares its own run is a batch.**
+**1. The child workflow declares its delegated members are always grouped.**
 
-Some workflows declare their per-run archetype upfront. They declare this on the workflow definition:
+A workflow whose fan-outs are conceptually always a group of people (a roster /
+PDF) sets `runtimePolicy.delegation.alwaysOperationDelegatedMembers` so even a
+single delegated child renders as a one-member operation surface. Workflows
+declare their per-run archetype on the definition:
 
 ```ts
 defineWorkflow({
@@ -105,25 +115,27 @@ defineWorkflow({
 
 When a parent calls `ctx.delegateTo(oathSignature, { pdfPath })`, the result
 is a single row in oath-signature's tab. The per-signer rows are
-`operation-member` rows stamped under the operation coordinator — not batch
-members of oath-signature itself.
+`operation-member` rows stamped under the operation coordinator — not members
+of oath-signature itself.
 
 **2. The parent fans out N peers via `delegateToAll`.**
 
 Even if the child workflow's archetype is `single`, calling
 `ctx.delegateToAll(child, inputs)` with N≥2 inputs groups them into one
-batch row in the child's tab, with each input as a batch member.
+operation row in the child's tab, with each input as an operation member.
 
 ```ts
 await ctx.delegateToAll(personLookup, [oneInput]);
 // → 1 single row in person-lookup's tab
+//   (unless the workflow sets alwaysOperationDelegatedMembers, then a 1-member operation)
 
 await ctx.delegateToAll(personLookup, [input1, input2, input3]);
-// → 1 batch row in person-lookup's tab, with 3 batch members
+// → 1 operation row in person-lookup's tab, with 3 operation members
 ```
 
-The rule: **N=1 degenerates to a single row. N≥2 produces a batch row
-with N members.** There are no batches of one — that's just a single.
+The rule: **N=1 degenerates to a single row. N≥2 produces an operation row
+with N members** (unless the workflow opts every delegated member into an
+operation surface via `alwaysOperationDelegatedMembers`).
 
 Overrides at the call site exist but should be rare. A workflow that
 constantly needs overriding is a workflow with the wrong default.
@@ -139,10 +151,10 @@ ocr tab:
 └── OCR for the PDF [approval row]
 
 person-lookup tab:
-└── person-lookup batch [batch row, delegated from OCR]
-    ├── lookup for "John D."   [batch member]
-    ├── lookup for "Mary S."   [batch member]
-    └── lookup for "Sam K."    [batch member]
+└── person-lookup operation [operation row, delegated from OCR]
+    ├── lookup for "John D."   [operation member]
+    ├── lookup for "Mary S."   [operation member]
+    └── lookup for "Sam K."    [operation member]
 
 oath-signature tab:
 └── PDF filename [operation coordinator — display only, no daemon task]
@@ -165,7 +177,7 @@ ocr tab:
 
 person-lookup tab:
 └── lookup for "John D." [single row, delegated from OCR]
-    (no batch — only one person, so a single is enough)
+    (no operation — only one person, so a single is enough)
 
 oath-signature tab:
 └── PDF filename [operation coordinator — display only, no daemon task]
@@ -177,10 +189,11 @@ oath-upload tab:
 └── oath-upload [single row, waiting on the oath-signature run above]
 ```
 
-Notice the EID rule: **N≥2 OCR lookup peers fan out into a batch row; N=1 stays
-as a single row.** The oath-signature PDF surface is the operation coordinator —
-a display-only row stamped at OCR approve time; the actual daemon run is a
-`single` row and operation-member rows are its fanned-out signer children.
+Notice the EID rule: **N≥2 OCR lookup peers fan out into an operation row; N=1
+stays as a single row.** The oath-signature PDF surface is the operation
+coordinator — a display-only row stamped at OCR approve time; the actual daemon
+run is a `single` row and operation-member rows are its fanned-out signer
+children.
 
 Every row is in its own workflow's tab. No synthesized parents in other tabs.
 No cross-tab nesting. Each workflow's queue panel shows only that workflow's
@@ -190,33 +203,32 @@ own work.
 
 ## Code aliases (current state → canonical term)
 
-This section maps the canonical vocabulary to what each term is *currently*
-called in the codebase. Anything in the "current name(s)" column is up for
-deletion or renaming as we converge on the canonical names.
+This section maps the canonical vocabulary to the `RowArchetype` /
+`WorkflowArchetype` values in code.
 
-| Canonical term | Current name(s) in code | Notes |
+| Canonical term | Name in code | Notes |
 |---|---|---|
-| single row | `RowArchetype: "single"`, `WorkflowArchetype: "single"` | Already aligned |
+| single row | `RowArchetype: "single"`, `WorkflowArchetype: "single"` | Aligned |
 | approval row | `RowArchetype: "preview"`, `WorkflowArchetype: "preview"` + a form spec with `approveTo`/`approveDocumentTo` | OCR oath / emergency-contact. The code archetype is still `"preview"`; "approval row" is the canonical name for the variant that gates fan-out on approval. |
 | preview row | `RowArchetype: "preview"`, `WorkflowArchetype: "preview"` + a form spec with **no** approve targets | OCR verify (read-only completeness report). Same `"preview"` code archetype; no Approve button. |
-| batch row | `RowArchetype: "batch"`, `WorkflowArchetype: "batch"` | Aligned |
-| batch member | `RowArchetype: "batch-member"` | Already aligned |
-| operation member | `RowArchetype: "operation-member"` | The operation analogue of batch member — signer/contact rows fanned out under an `operation` coordinator. Stamped by the OCR approve fan-out via the `rowShape` runtime option (gated on `isOperationCoordinatorWorkflow`). |
+| operation row | `RowArchetype: "operation"`, `WorkflowArchetype: "operation"` (display-only coordinator) | oath-signature / emergency-contact / onbase PDF-upload coordinator, and multi-value input runs. The OCR run delegates under it; fan-out children stamp `operation-member`. |
+| operation member | `RowArchetype: "operation-member"` | Signer/contact rows fanned out under an `operation` coordinator. Stamped via the `rowShape: "operation-member"` runtime option (gated on `isOperationCoordinatorWorkflow`). Projects to a `single` surface when rendered. |
 | delegated single | `RowArchetype: "single"` + `parentRunId` | Scope is parentage, not a separate archetype |
 | delegated approval | `RowArchetype: "preview"` + `parentRunId`, `runtimePolicy.preview`, OCR's approval surface | Scope is parentage, not a separate archetype |
-| delegated batch | `RowArchetype: "batch"` + `parentRunId`, with signer children stamped `batch-member` when needed | Scope is parentage, not a separate archetype |
-| operation | `RowArchetype: "operation"` (display-only coordinator) | oath-signature / emergency-contact / onbase PDF-upload coordinator; OCR run delegated under it, fan-out children stamped `operation-member`. |
+| delegated operation | `RowArchetype: "operation"` + `parentRunId`, with peer children stamped `operation-member` | Scope is parentage, not a separate archetype |
 
-### Terms to delete
+### Retired / removed terms
 
-These exist today but have no place in the canonical vocabulary. They should
-be removed as we converge:
+These existed historically and have no place in the canonical vocabulary:
 
+- **`RowArchetype: "batch"` / `WorkflowArchetype: "batch"` / `RowArchetype: "batch-member"`** —
+  renamed 2026-06-30 to `operation` / `operation-member`. No longer stampable;
+  old JSONL normalizes on read. "Batch" now means batch *processing* only.
 - `WorkflowArchetype: "delegating"` — redundant; a workflow that delegates is
-  still a single or batch from a row-shape perspective. Delegation is what its
-  handler does, not what its row looks like.
-- Legacy `WorkflowArchetype: "delegating-batch"` — same redundancy. The workflow's
-  row is a batch; "delegating" is handler behavior.
+  still a single or operation from a row-shape perspective. Delegation is what
+  its handler does, not what its row looks like.
+- Legacy `WorkflowArchetype: "delegating-batch"` — same redundancy. The
+  workflow's row is an operation; "delegating" is handler behavior.
 - Legacy `WorkflowArchetype: "utility"` — collapse into `delegated single` (a utility
   child is just a delegated single that the parent uses for plumbing).
 - Legacy `RowArchetype: "passive-child"` — collapse into `delegated single`. There is
@@ -227,23 +239,10 @@ be removed as we converge:
 - `renderAs: "flat"` — collapse into `delegated single`. "Flat" was the
   rendering hack for "put this under the parent inline"; in the canonical model
   every delegated row lives in its own tab, so there's no flat/grouped
-  distinction.
+  distinction. (`renderAs: "operation"` — formerly `"batch"` — stamps an
+  `operation-member` under the parent.)
 - `originWorkflow` — the entire mechanism for synthesizing a parent row in a
   different workflow's tab is deleted. Rows always live in their own tab.
-- The synthesized-parent machinery in `buildOcrPrepareHandler` — gone with
-  `originWorkflow`.
-- `waitForOcrApproval` as a workflow-handler primitive — replaced by
-  `ctx.delegateTo(ocr, { pdfPath })` whose terminal status implies "approved
-  and fanned out."
-- Legacy `runtimePolicy.delegation.utilityChildSurface`,
-  `flatMemberChildWorkflows`, and `flatMemberSurface` for OCR utilities — OCR
-  EID lookup children now use normal count-based grouping: one child is single,
-  multiple children become a batch surface.
-- `runtimePolicy.prepRow` / `runtimePolicy.memberRow` title configuration —
-  fold into the child workflow's `getName` / `getId` / a single archetype
-  declaration. No separate "prep row" concept.
-- `data.archetype` stamped vs derived heuristics — there is only ever one
-  archetype per row: the canonical primitive. No fallbacks, no derivations.
 
 ### Terms that stay
 
@@ -282,7 +281,7 @@ The display rule for one of the three naming slots:
 | **subtitle scheme** | Footer text beside the run number | `eid-else-trace` (person), `trace-only` (file/catalog) |
 | **trace scheme** | How new runs compose their `__traceId` | `code-time-runid` — `{code}-{HHMMSS}-{runId4}` |
 
-Each slot accepts a curated scheme id or `custom-template` (a `{token}`-interpolated string). The available scheme ids live in `SCHEME_LIBRARY` (`src/domain/workflow-presentation/schemes.ts`) and are exposed to the frontend via `GET /api/workflow-presentation/:workflow` → `schemeLibrary`. Changing a trace scheme only affects **new** runs — it never rewrites a row's frozen `data.__traceId`.
+Each slot accepts a curated scheme id or `custom-template` (a `{token}`-interpolated string). The available scheme ids live in `SCHEME_LIBRARY` (`src/domain/workflow-presentation/schemes.ts`) and are exposed to the frontend via `GET /api/workflow-presentation/:workflow` → `schemeLibrary`. The titleless person-anchor scheme is `operation-anchor` (formerly `batch-anchor`). Changing a trace scheme only affects **new** runs — it never rewrites a row's frozen `data.__traceId`.
 
 ### override store / effective presentation
 
@@ -298,7 +297,7 @@ The `DelegationDisplayConfig` sub-block of `WorkflowPresentationConfig`. Control
 | `prepTitle` | Naming for OCR prep rows delegated under this coordinator |
 | `coordinatorLabelSuffix` | Suffix appended to an operation coordinator's label (e.g. `"Operation"`) |
 
-Delegation naming does **not** affect batch member rows (those use the member workflow's own `naming` config) or standalone single rows.
+Delegation naming does **not** affect operation member rows produced by a different member workflow (those use the member workflow's own `naming` config) or standalone single rows.
 
 ---
 
@@ -307,8 +306,8 @@ Delegation naming does **not** affect batch member rows (those use the member wo
 When designing or describing a workflow:
 
 1. Pick the **row archetype** for your workflow: `single`, `preview`, or
-   `batch`.
-2. If it's a batch row, what are its members?
+   `operation`.
+2. If it's an operation row, what are its members?
 3. If other workflows will delegate to it, keep the same row archetype and use
    `parentRunId` for scope.
 4. In your handler, call `ctx.delegateTo` / `ctx.delegateToAll` to compose

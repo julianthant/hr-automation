@@ -74,7 +74,7 @@ export const PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   // (root rows, not delegated members), so they stay `single`.
   delegation: {
     ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation,
-    alwaysBatchDelegatedMembers: true,
+    alwaysOperationDelegatedMembers: true,
   },
 };
 

@@ -65,7 +65,7 @@ function forcesOperationWhenDelegated(
 ): boolean {
   return (
     getWorkflowRuntimePolicy(entry.workflow, runtimePolicies).delegation
-      ?.alwaysBatchDelegatedMembers === true
+      ?.alwaysOperationDelegatedMembers === true
   );
 }
 
@@ -284,7 +284,7 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
   for (const [parentRunId, members] of membersByParentRunId) {
     if (anchoredParentRunIds.has(parentRunId)) continue;
     // A lone delegated child normally renders as a flat single row — unless its
-    // workflow opts into `alwaysBatchDelegatedMembers` (oath-signature,
+    // workflow opts into `alwaysOperationDelegatedMembers` (oath-signature,
     // person-lookup), where even one member stays a one-member operation surface.
     if (members.length === 1 && !forcesOperationWhenDelegated(members[0]!, input.runtimePolicies)) {
       singleChildEntries.push(members[0]!);

@@ -198,7 +198,7 @@ export function isApprovedPrepRow(e: {
  * pre/post-approval state. OCR-workflow rows are intentionally excluded: those
  * remain flat review surfaces until approved via `isApprovedPrepRow`.
  */
-export function isPrepBatchAnchor(e: {
+export function isPrepOperationAnchor(e: {
   workflow?: string;
   id?: string;
   status: string;

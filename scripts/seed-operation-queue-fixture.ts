@@ -83,12 +83,17 @@ emitTrackerRow(
     runId: operationCoordinatorRunId,
     status: "running",
     data: {
+      // Mirror enqueue-dispatch.ts `coordinatorData` exactly: an operation
+      // coordinator row carries NO `data.instance` (the daemon runs the member
+      // items, each of which carries the real instance). Stamping instance here
+      // would let `resolveInstanceForRun` resolve directly and skip the
+      // child-entry supplement, which is what surfaces member item_start events
+      // on the coordinator timeline.
       archetype: "operation",
       queueRowKind: "person",
       __id: coordinatorItemId,
       __traceId: coordinatorTraceId,
       batchDisplayOrdinal: "1",
-      instance: INSTANCE,
     },
   },
   dir,

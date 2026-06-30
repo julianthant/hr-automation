@@ -131,7 +131,7 @@ function isQueueLikeForQueueStrip(e: TrackerEntry): boolean {
  * One synthetic row per `parentRunId` batch (daemon / OCR delegation batch row),
  * matching daemon batch rollup + StatPills semantics.
  */
-function rollupBatchMembersToQueueStripSynth(
+function rollupOperationMembersToQueueStripSynth(
   parentRunId: string,
   members: readonly TrackerEntry[],
 ): TrackerEntry {
@@ -190,25 +190,25 @@ function rollupBatchMembersToQueueStripSynth(
 export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEntry[]): TrackerEntry[] {
   const visible = entries.filter((e) => !isDiscardedPrepForQueueStrip(e));
 
-  const batchMembersByParent = new Map<string, TrackerEntry[]>();
+  const operationMembersByParent = new Map<string, TrackerEntry[]>();
   for (const e of visible) {
     // OCR entries are direct-delegation children of oath-upload, not fan-out
     // batch members — keep them out of the batch rollup even after archetype migration.
     if (e.workflow === "ocr") continue;
     if (!e.parentRunId) continue;
-    const list = batchMembersByParent.get(e.parentRunId) ?? [];
+    const list = operationMembersByParent.get(e.parentRunId) ?? [];
     list.push(e);
-    batchMembersByParent.set(e.parentRunId, list);
+    operationMembersByParent.set(e.parentRunId, list);
   }
 
-  const synthBatches: TrackerEntry[] = [];
-  for (const [parentRunId, members] of batchMembersByParent) {
-    synthBatches.push(rollupBatchMembersToQueueStripSynth(parentRunId, members));
+  const synthOperations: TrackerEntry[] = [];
+  for (const [parentRunId, members] of operationMembersByParent) {
+    synthOperations.push(rollupOperationMembersToQueueStripSynth(parentRunId, members));
   }
 
   const standalone: TrackerEntry[] = [];
   for (const e of visible) {
-    if (e.parentRunId && batchMembersByParent.has(e.parentRunId)) continue;
+    if (e.parentRunId && operationMembersByParent.has(e.parentRunId)) continue;
     // An operation coordinator (or any real parent row whose members were
     // collected into a synth rollup above) is REPRESENTED by that synth — drop
     // it so the operation isn't double-counted (coordinator row + synth) and so
@@ -217,12 +217,12 @@ export function collapseMergedPrimariesForQueueStrip(entries: readonly TrackerEn
     // dropped via isApprovedPrepForQueueStrip below; operation coordinators are
     // archetype "operation" (not "batch") and never reach a terminal row, so
     // that done+approved check never catches them — this does.
-    if (e.runId && batchMembersByParent.has(e.runId)) continue;
+    if (e.runId && operationMembersByParent.has(e.runId)) continue;
     if (isApprovedPrepForQueueStrip(e)) continue;
     standalone.push(e);
   }
 
-  return [...standalone, ...synthBatches];
+  return [...standalone, ...synthOperations];
 }
 
 /**

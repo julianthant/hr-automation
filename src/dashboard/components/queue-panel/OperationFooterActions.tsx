@@ -11,10 +11,10 @@ import type {
 } from "../../../domain/workflow-runtime/types.js";
 import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActionDispatcher";
 
-export interface BatchFooterActionsProps {
+export interface OperationFooterActionsProps {
   workflow: string;
   date?: string;
-  batchParentRunId: string;
+  operationParentRunId: string;
   memberEntries: TrackerEntry[];
   /** Override retry target rows; defaults to {@link memberEntries}. */
   retryMemberEntries?: TrackerEntry[];
@@ -41,17 +41,17 @@ export function selectEntriesForWorkflowAction(
     .filter((entry): entry is TrackerEntry => entry !== undefined);
 }
 
-export function BatchFooterActions({
+export function OperationFooterActions({
   workflow,
   date,
-  batchParentRunId,
+  operationParentRunId,
   memberEntries,
   retryMemberEntries,
   deleteMemberEntries,
   projection,
   actions,
   onDeletedIds,
-}: BatchFooterActionsProps) {
+}: OperationFooterActionsProps) {
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const { dispatchBulkWorkflowAction } = useWorkflowActionDispatcher();
@@ -88,7 +88,7 @@ export function BatchFooterActions({
   );
   const deleteIds = useMemo(() => deleteItems.map((entry) => entry.id), [deleteItems]);
 
-  async function deleteEntireBatch(e: MouseEvent<HTMLButtonElement>) {
+  async function deleteEntireOperation(e: MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
     if (deleting || deleteIds.length === 0 || !date) return;
     const n = deleteIds.length;
@@ -120,7 +120,7 @@ export function BatchFooterActions({
         items: deleteItems,
         date,
         actions: actionDescriptors,
-        source: "batch-view",
+        source: "operation-view",
         scope: "visible-view",
       });
       const body = result.body;
@@ -165,7 +165,7 @@ export function BatchFooterActions({
     }
   }
 
-  async function retryAllInBatch(ev: MouseEvent<HTMLButtonElement>) {
+  async function retryAllInOperation(ev: MouseEvent<HTMLButtonElement>) {
     ev.stopPropagation();
     if (retrying || retryItems.length === 0) return;
     setRetrying(true);
@@ -182,9 +182,9 @@ export function BatchFooterActions({
         workflow,
         items: retryItems,
         date,
-        parentRunId: batchParentRunId,
+        parentRunId: operationParentRunId,
         actions: actionDescriptors,
-        source: "batch-view",
+        source: "operation-view",
         scope: "visible-view",
       });
       const body = result.body;
@@ -224,7 +224,7 @@ export function BatchFooterActions({
           label={`Retry all ${retryItems.length} ${retryItems.length === 1 ? "item" : "items"} in this batch`}
           title="Re-queue every row in this batch (any status)"
           pending={retrying}
-          onClick={retryAllInBatch}
+          onClick={retryAllInOperation}
           icon={<RotateCcw className="h-3.5 w-3.5" aria-hidden />}
           className={cn(
             "text-muted-foreground bg-transparent",
@@ -240,7 +240,7 @@ export function BatchFooterActions({
           label="Delete all entries in this batch"
           title="Delete entire batch"
           pending={deleting}
-          onClick={deleteEntireBatch}
+          onClick={deleteEntireOperation}
           icon={<Trash2 className="h-3.5 w-3.5" aria-hidden />}
           className={cn(
             "text-muted-foreground bg-transparent",

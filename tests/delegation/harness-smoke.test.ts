@@ -66,9 +66,9 @@ test("delegation harness — 3-child fan-out, cancel one mid-hold, siblings unaf
   // 1. Fan out 3 children under one parentRunId, all gated at `transaction`.
   rt.holdAll("harness-child", "transaction");
   const parentRunId = randomUUID();
-  const c1 = await rt.enqueue("harness-child", { id: "alice", name: "Alice Adams" }, { parentRunId, renderAs: "batch" });
-  const c2 = await rt.enqueue("harness-child", { id: "bob", name: "Bob Brown" }, { parentRunId, renderAs: "batch" });
-  const c3 = await rt.enqueue("harness-child", { id: "carol", name: "Carol Clark" }, { parentRunId, renderAs: "batch" });
+  const c1 = await rt.enqueue("harness-child", { id: "alice", name: "Alice Adams" }, { parentRunId, renderAs: "operation" });
+  const c2 = await rt.enqueue("harness-child", { id: "bob", name: "Bob Brown" }, { parentRunId, renderAs: "operation" });
+  const c3 = await rt.enqueue("harness-child", { id: "carol", name: "Carol Clark" }, { parentRunId, renderAs: "operation" });
 
   // 2. All 3 reached the held `transaction` stage.
   await rt.waitForEvent("step:start", { step: "transaction", count: 3 });
@@ -188,7 +188,7 @@ test("delegation harness — in-process delegateToAll fires children-spawned + s
               { id: "k2", name: "Kid Two" },
               { id: "k3", name: "Kid Three" },
             ],
-            { renderAs: "batch" },
+            { renderAs: "operation" },
           );
         });
       },

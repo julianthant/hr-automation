@@ -133,7 +133,7 @@ test("delegated OCR prep rows use PDF name as title and inherited Oath title as 
       mode: "prepare",
       pdfOriginalName: "packet.pdf",
       __queueTitle: "Oath · 1234",
-      __queueTitleKind: "batch",
+      __queueTitleKind: "operation",
       __queueRootTitle: "Oath · 1234",
       __name: "Oath · 1234",
       __id: "ocr-session-1",
@@ -210,7 +210,7 @@ test("delegated person rows keep the person name instead of inheriting the paren
 test("batch rows display the global queue title", () => {
   const row = entry("ocr-session-1", {
     __queueTitle: "Oath · #90ab",
-    __queueTitleKind: "batch",
+    __queueTitleKind: "operation",
     __queueRootTitle: "Oath · #90ab",
     __name: "Legacy Name",
   });
@@ -224,7 +224,7 @@ test("batch rows display the global queue title", () => {
 test("delegated person rows prefer employee name over root queue title", () => {
   const parent = entry("ocr-session-1", {
     __queueTitle: "Emergency Contact · #3456",
-    __queueTitleKind: "batch",
+    __queueTitleKind: "operation",
     __queueRootTitle: "Emergency Contact · #3456",
   });
   parent.workflow = "ocr";
