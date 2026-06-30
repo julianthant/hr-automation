@@ -20,7 +20,7 @@ import { useWorkflow } from "@/lib/workflows-context";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { statusBadgeClass } from "@/components/shared/status-styles";
-import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
+import { useOptionalOperationQueueParentRunId } from "@/components/hooks/useOperationQueueContext";
 
 interface EditDataTabProps {
   workflow: string;
@@ -173,7 +173,7 @@ function fieldInputClass(opts: { dirty: boolean; invalid: boolean; mono: boolean
  */
 export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) {
   const meta = useWorkflow(workflow);
-  const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
+  const operationQueueParentRunId = useOptionalOperationQueueParentRunId();
   const editableFields = useMemo(
     () => (meta?.detailFields ?? []).filter((f) => f.editable) as EditField[],
     [meta],
@@ -335,7 +335,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
           data: values,
           ...(runId ? { runId } : {}),
           ...(date ? { date } : {}),
-          ...(batchQueueParentRunId ? { parentRunId: batchQueueParentRunId } : {}),
+          ...(operationQueueParentRunId ? { parentRunId: operationQueueParentRunId } : {}),
         }),
       });
       const body = (await res.json()) as { ok: boolean; error?: string };

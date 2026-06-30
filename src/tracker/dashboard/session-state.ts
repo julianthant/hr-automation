@@ -164,7 +164,30 @@ export function filterEventsForRun(
     }
   }
 
-  const merged = [...direct, ...batchScope];
+  // An operation coordinator is the consolidated "event tracker" for its
+  // fanned-out members, so surface each member's `item_start` on the
+  // coordinator timeline too. Those events carry the MEMBER's runId, so they
+  // are neither `direct` (coordinator runId) nor batch-scope (they HAVE a
+  // runId) and would otherwise only appear in each member's own drill-in. We
+  // include only `item_start` (the "member began processing" marker the
+  // operator asked for) — member completion is already shown by the per-member
+  // summary line the coordinator log panel folds in, and pulling every member
+  // event here would re-flood the timeline.
+  let memberLifecycle: SessionEvent[] = [];
+  if (archetype === "operation") {
+    const memberRunIds = new Set(
+      trackers
+        .filter((t) => t.parentRunId === runId && typeof t.runId === "string" && t.runId.length > 0)
+        .map((t) => t.runId as string),
+    );
+    if (memberRunIds.size > 0) {
+      memberLifecycle = events.filter(
+        (e) => e.type === "item_start" && typeof e.runId === "string" && memberRunIds.has(e.runId),
+      );
+    }
+  }
+
+  const merged = [...direct, ...batchScope, ...memberLifecycle];
   merged.sort((a, b) => getEventSortKey(a).localeCompare(getEventSortKey(b)));
   return merged;
 }

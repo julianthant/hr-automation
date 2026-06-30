@@ -1,22 +1,30 @@
 import type { ScreenshotEntry } from "@/components/hooks/useRunScreenshots";
 
 /**
- * One screenshot file, lifted out of its parent entry into a self-contained
- * gallery tile. An entry can carry several files (one per captured system), and
- * the gallery shows each as its own image-forward tile so the operator scans by
- * picture instead of expanding rows. The `entry`/`fileIdx` pair is preserved so
- * a click can hand the original coordinates back to the lightbox queue.
+ * One grid item in the Screenshots tab — a whole capture EVENT, not a single
+ * file. A capture of a tall page (a Kuali finalization form, a long UCPath
+ * grid) emits several `-cNN` page-slice files in ONE entry; those collapse into
+ * a single "folder" group (`isFolder`, cover = the first/top slice) so the grid
+ * shows ONE tile instead of N, and the operator opens it to step through the
+ * slices in order. A short page is a single-file group (`isFolder === false`),
+ * rendered as an ordinary tile. The `entry` is preserved so a click hands the
+ * full slice list to the lightbox queue.
  */
-export interface ScreenshotTileData {
-  /** Stable React key — entry timestamp + label + the file's own path. */
+export interface ScreenshotGroup {
+  /** Stable React key — entry timestamp + label + the cover file's path. */
   key: string;
   entry: ScreenshotEntry;
-  fileIdx: number;
-  file: ScreenshotEntry["files"][number];
+  /** Cover image = the first (top-of-page) slice; the folder's preview. */
+  cover: ScreenshotEntry["files"][number];
+  /** Number of slice files in the capture. `> 1` ⇒ a folder. */
+  fileCount: number;
+  isFolder: boolean;
   ts: number;
   kind: ScreenshotEntry["kind"];
   step: string | null;
   label: string;
+  /** Cover slice's system. A sliced audit capture is one system, so this is
+   *  the group's system for filtering. */
   system: string;
 }
 
@@ -25,36 +33,39 @@ export const ERRORS_FILTER = "errors";
 export const STEPS_FILTER = "steps";
 const SYSTEM_PREFIX = "system:";
 
-/** Chip id for a per-system filter (round-trips through `filterScreenshotTiles`). */
+/** Chip id for a per-system filter (round-trips through `filterScreenshotGroups`). */
 export function systemFilterId(system: string): string {
   return `${SYSTEM_PREFIX}${system}`;
 }
 
 /**
- * Flatten entries → one tile per file, newest first. Array sort is stable, so
- * files within the same entry keep their declared order (chunk order for a
- * paged capture) and equal-timestamp entries keep their incoming order.
+ * Group entries → one grid item per capture event, newest first. A multi-slice
+ * entry becomes a single folder group (cover = its first file); a single-file
+ * entry is a group of one. Array sort is stable, so equal-timestamp entries
+ * keep their incoming order. An entry whose files were all cleaned off disk
+ * (no cover) is dropped.
  */
-export function flattenScreenshotTiles(
+export function buildScreenshotGroups(
   entries: ScreenshotEntry[],
-): ScreenshotTileData[] {
-  const tiles: ScreenshotTileData[] = [];
+): ScreenshotGroup[] {
+  const groups: ScreenshotGroup[] = [];
   for (const entry of entries) {
-    entry.files.forEach((file, fileIdx) => {
-      tiles.push({
-        key: `${entry.ts}-${entry.label}-${file.path}`,
-        entry,
-        fileIdx,
-        file,
-        ts: entry.ts,
-        kind: entry.kind,
-        step: entry.step,
-        label: entry.label,
-        system: file.system,
-      });
+    const cover = entry.files[0];
+    if (!cover) continue;
+    groups.push({
+      key: `${entry.ts}-${entry.label}-${cover.path}`,
+      entry,
+      cover,
+      fileCount: entry.files.length,
+      isFolder: entry.files.length > 1,
+      ts: entry.ts,
+      kind: entry.kind,
+      step: entry.step,
+      label: entry.label,
+      system: cover.system,
     });
   }
-  return tiles.sort((a, b) => b.ts - a.ts);
+  return groups.sort((a, b) => b.ts - a.ts);
 }
 
 export interface ScreenshotFilterChip {
@@ -66,19 +77,21 @@ export interface ScreenshotFilterChip {
 }
 
 /**
- * Build the ordered chip set: `All`, then `Errors` (only when any error tile
- * exists), then one chip per system present — most-populated first, ties broken
- * alphabetically so the bar is stable across refetches.
+ * Build the ordered chip set: `All`, then `Errors` (only when any error group
+ * exists), then `Steps` (only when any step group exists), then one chip per
+ * system present — most-populated first, ties broken alphabetically so the bar
+ * is stable across refetches. Counts are by GROUP (visible tiles), so the `All`
+ * count always equals the number of tiles rendered — a folder counts once.
  */
 export function buildScreenshotFilters(
-  tiles: ScreenshotTileData[],
+  groups: ScreenshotGroup[],
 ): ScreenshotFilterChip[] {
   const chips: ScreenshotFilterChip[] = [
-    { id: ALL_FILTER, label: "All", count: tiles.length, tone: "default" },
+    { id: ALL_FILTER, label: "All", count: groups.length, tone: "default" },
   ];
 
-  const errorCount = tiles.reduce(
-    (sum, tile) => (tile.kind === "error" ? sum + 1 : sum),
+  const errorCount = groups.reduce(
+    (sum, group) => (group.kind === "error" ? sum + 1 : sum),
     0,
   );
   if (errorCount > 0) {
@@ -90,8 +103,8 @@ export function buildScreenshotFilters(
     });
   }
 
-  const stepCount = tiles.reduce(
-    (sum, tile) => (tile.kind === "step" ? sum + 1 : sum),
+  const stepCount = groups.reduce(
+    (sum, group) => (group.kind === "step" ? sum + 1 : sum),
     0,
   );
   if (stepCount > 0) {
@@ -104,8 +117,8 @@ export function buildScreenshotFilters(
   }
 
   const bySystem = new Map<string, number>();
-  for (const tile of tiles) {
-    bySystem.set(tile.system, (bySystem.get(tile.system) ?? 0) + 1);
+  for (const group of groups) {
+    bySystem.set(group.system, (bySystem.get(group.system) ?? 0) + 1);
   }
   const systemChips = [...bySystem.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -120,23 +133,23 @@ export function buildScreenshotFilters(
 }
 
 /**
- * Apply a chip id to the tile list. An unknown id — e.g. a filter whose chip
+ * Apply a chip id to the group list. An unknown id — e.g. a filter whose chip
  * vanished after a refetch (errors cleared, a system no longer present) —
  * falls back to the full set rather than showing an empty grid.
  */
-export function filterScreenshotTiles(
-  tiles: ScreenshotTileData[],
+export function filterScreenshotGroups(
+  groups: ScreenshotGroup[],
   filterId: string,
-): ScreenshotTileData[] {
+): ScreenshotGroup[] {
   if (filterId === ERRORS_FILTER) {
-    return tiles.filter((tile) => tile.kind === "error");
+    return groups.filter((group) => group.kind === "error");
   }
   if (filterId === STEPS_FILTER) {
-    return tiles.filter((tile) => tile.kind === "step");
+    return groups.filter((group) => group.kind === "step");
   }
   if (filterId.startsWith(SYSTEM_PREFIX)) {
     const system = filterId.slice(SYSTEM_PREFIX.length);
-    return tiles.filter((tile) => tile.system === system);
+    return groups.filter((group) => group.system === system);
   }
-  return tiles;
+  return groups;
 }

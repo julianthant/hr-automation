@@ -7,7 +7,6 @@ import {
   buildMemberSummaryLines,
   isOperationCoordinatorWorkflow,
   mergeCoordinatorLogs,
-  mergeSessionLifecycleIntoCoordinatorLogs,
   type CoordinatorLogLine,
 } from "../log-panel/coordinator-logs";
 import { resolveRowArchetype } from "../../../domain/row-archetype.js";
@@ -25,6 +24,11 @@ import { resolveRowArchetype } from "../../../domain/row-archetype.js";
  * one summary line per member from `childEntries`, then runs the pure
  * {@link mergeCoordinatorLogs} merger.
  *
+ * Daemon session-lifecycle events (workflow_start / browser_launch / auth / duo
+ * / idle_signal) are NOT folded in here — they already render once as their own
+ * timestamped event lines in the merged "all" view (via the LogStream events
+ * merge), so folding them in too would double every line.
+ *
  * `useLogs` is always called (hooks can't be conditional); when the row is not a
  * coordinator the OCR ids are `null`, so `useSseHistoryStream` stays disabled
  * (`enabled = Boolean(itemId)`) and no SSE subscription opens.
@@ -34,9 +38,8 @@ export function useCoordinatorAggregatedLogs(args: {
   coordinatorLogs: CollapsedLogEntry[];
   childEntries: TrackerEntry[];
   date: string;
-  sessionEvents?: readonly import("@/components/shared/types").RunEvent[];
 }): { active: boolean; logs: CoordinatorLogLine[] } {
-  const { entry, coordinatorLogs, childEntries, date, sessionEvents } = args;
+  const { entry, coordinatorLogs, childEntries, date } = args;
 
   const isOcrCoordinator = Boolean(
     entry && isOperationCoordinatorWorkflow(entry.workflow) && entry.data?.ocrRunId,
@@ -57,11 +60,10 @@ export function useCoordinatorAggregatedLogs(args: {
     [childEntries],
   );
 
-  const merged = useMemo(() => {
-    const base = mergeCoordinatorLogs(coordinatorLogs, ocrLogs, memberLines);
-    if (!isInputRunCoordinator || !sessionEvents?.length) return base;
-    return mergeSessionLifecycleIntoCoordinatorLogs(base, sessionEvents, entry ?? undefined);
-  }, [coordinatorLogs, ocrLogs, memberLines, isInputRunCoordinator, sessionEvents]);
+  const merged = useMemo(
+    () => mergeCoordinatorLogs(coordinatorLogs, ocrLogs, memberLines),
+    [coordinatorLogs, ocrLogs, memberLines],
+  );
 
   return { active: isCoordinator, logs: merged };
 }

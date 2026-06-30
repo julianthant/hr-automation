@@ -18,7 +18,7 @@ function ScreenshotView({ src, alt }: { src: string; alt: string }) {
   return (
     <div
       className="flex items-center justify-center"
-      style={{ width: "min(86vw, 1400px)", height: "82vh" }}
+      style={{ width: "min(78vw, 1280px)", height: "82vh" }}
     >
       <img
         src={src}
@@ -59,6 +59,19 @@ export function ScreenshotLightbox({
         const file = item.entry.files[item.fileIdx];
         if (!file) return null;
         return <ScreenshotView key={file.url} src={file.url} alt={file.system} />;
+      }}
+      renderThumbnail={(item) => {
+        const file = item.entry.files[item.fileIdx];
+        if (!file) return null;
+        return (
+          <img
+            src={file.url}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover object-top"
+          />
+        );
       }}
       renderCaption={(item, itemIndex) => {
         const file = item.entry.files[item.fileIdx];

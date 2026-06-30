@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 
 export type MediaLightboxChrome = "screenshot" | "capture";
@@ -10,6 +10,13 @@ export interface MediaLightboxProps<T> {
   onClose: () => void;
   renderItem: (item: T, index: number) => ReactNode;
   renderCaption?: (item: T, index: number) => ReactNode;
+  /**
+   * When provided (and there are 2+ items), the screenshot chrome shows a
+   * macOS-Preview-style vertical thumbnail rail on the left — one small preview
+   * per item, the current one highlighted, click to jump. Ignored by the
+   * capture chrome.
+   */
+  renderThumbnail?: (item: T, index: number) => ReactNode;
   /** When false, render nothing. Capture wrapper uses this for closed state. */
   open?: boolean;
   /** Chrome layout — thin wrappers set screenshot vs capture. */
@@ -27,6 +34,7 @@ export function MediaLightbox<T>({
   onClose,
   renderItem,
   renderCaption,
+  renderThumbnail,
   open = true,
   chrome = "screenshot",
   wrapNavigation = false,
@@ -119,6 +127,16 @@ export function MediaLightbox<T>({
     );
   }
 
+  const sidebar =
+    renderThumbnail && items.length > 1 ? (
+      <ThumbnailRail
+        items={items}
+        index={index}
+        onSelect={onIndexChange}
+        renderThumbnail={renderThumbnail}
+      />
+    ) : undefined;
+
   return (
     <ScreenshotOverlay onClose={onClose}>
       <ScreenshotLightboxShell
@@ -129,10 +147,69 @@ export function MediaLightbox<T>({
         onPrev={() => hasPrev && onIndexChange(index - 1)}
         onNext={() => hasNext && onIndexChange(index + 1)}
         caption={renderCaption ? renderCaption(current, index) : undefined}
+        sidebar={sidebar}
       >
         {renderItem(current, index)}
       </ScreenshotLightboxShell>
     </ScreenshotOverlay>
+  );
+}
+
+/**
+ * macOS-Preview-style vertical thumbnail rail. One small preview per item,
+ * scrollable, the active item highlighted with a ring; clicking jumps to it.
+ * The active thumbnail auto-scrolls into view as the operator pages through.
+ */
+function ThumbnailRail<T>({
+  items,
+  index,
+  onSelect,
+  renderThumbnail,
+}: {
+  items: T[];
+  index: number;
+  onSelect: (i: number) => void;
+  renderThumbnail: (item: T, index: number) => ReactNode;
+}) {
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [index]);
+
+  return (
+    <div
+      role="tablist"
+      aria-orientation="vertical"
+      aria-label="Screenshot pages"
+      className="flex max-h-full w-[7rem] shrink-0 flex-col gap-2 overflow-y-auto pr-1"
+    >
+      {items.map((item, i) => {
+        const active = i === index;
+        return (
+          <button
+            key={i}
+            ref={active ? activeRef : undefined}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-label={`Go to page ${i + 1} of ${items.length}`}
+            onClick={() => onSelect(i)}
+            className={`group relative block w-full shrink-0 overflow-hidden rounded-md border bg-muted transition-[border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              active
+                ? "border-primary ring-2 ring-primary"
+                : "border-border opacity-80 hover:opacity-100 hover:border-primary/50"
+            }`}
+          >
+            <div className="aspect-[16/10] w-full overflow-hidden">
+              {renderThumbnail(item, i)}
+            </div>
+            <span className="pointer-events-none absolute bottom-0.5 right-0.5 rounded bg-card/90 px-1 font-mono text-[10px] tabular-nums text-foreground shadow-sm backdrop-blur">
+              {i + 1}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -161,6 +238,7 @@ function ScreenshotLightboxShell({
   onPrev,
   onNext,
   caption,
+  sidebar,
   children,
 }: {
   itemsLength: number;
@@ -170,6 +248,7 @@ function ScreenshotLightboxShell({
   onPrev: () => void;
   onNext: () => void;
   caption?: ReactNode;
+  sidebar?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -190,33 +269,37 @@ function ScreenshotLightboxShell({
           Close
         </button>
       </div>
-      {/* Body — nav arrows sit in side gutters beside the image, not on it. */}
-      <div className="flex min-h-0 items-center justify-center gap-2">
-        {itemsLength > 1 && (
-          <button
-            type="button"
-            disabled={!hasPrev}
-            aria-label="Previous screenshot"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
-            onClick={onPrev}
-          >
-            <ChevronLeft aria-hidden className="h-5 w-5" />
-          </button>
-        )}
-        <div className="flex min-h-0 min-w-0 items-center justify-center">
-          {children}
+      {/* Body — optional thumbnail rail on the left (Preview.app style), then
+          nav arrows in side gutters beside the image, never on it. */}
+      <div className="flex min-h-0 items-stretch justify-center gap-3">
+        {sidebar}
+        <div className="flex min-h-0 items-center justify-center gap-2">
+          {itemsLength > 1 && (
+            <button
+              type="button"
+              disabled={!hasPrev}
+              aria-label="Previous screenshot"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
+              onClick={onPrev}
+            >
+              <ChevronLeft aria-hidden className="h-5 w-5" />
+            </button>
+          )}
+          <div className="flex min-h-0 min-w-0 items-center justify-center">
+            {children}
+          </div>
+          {itemsLength > 1 && (
+            <button
+              type="button"
+              disabled={!hasNext}
+              aria-label="Next screenshot"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
+              onClick={onNext}
+            >
+              <ChevronRight aria-hidden className="h-5 w-5" />
+            </button>
+          )}
         </div>
-        {itemsLength > 1 && (
-          <button
-            type="button"
-            disabled={!hasNext}
-            aria-label="Next screenshot"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
-            onClick={onNext}
-          >
-            <ChevronRight aria-hidden className="h-5 w-5" />
-          </button>
-        )}
       </div>
     </div>
   );

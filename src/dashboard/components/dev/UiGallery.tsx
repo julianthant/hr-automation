@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { BatchQueueParentRunIdProvider } from "@/components/hooks/useBatchQueueContext";
+import { OperationQueueParentRunIdProvider } from "@/components/hooks/useOperationQueueContext";
 import { TerminalDrawerProvider } from "@/components/hooks/useTerminalDrawer";
 import { WorkflowsProvider } from "@/lib/workflows-context";
 import type { TrackerEntry, WorkflowInstanceState } from "@/components/shared/types";
@@ -99,7 +99,7 @@ function Section({ title, sub }: { title: ReactNode; sub: string }) {
 }
 
 // ===========================================================================
-// QUEUE ROWS — synthetic tracker rows + the real EntryItem / DaemonBatchRow.
+// QUEUE ROWS — synthetic tracker rows + the real EntryItem / operation rows.
 // ===========================================================================
 
 /** Build a synthetic tracker row. `_hash` is required for EntryItem's memo. */
@@ -115,11 +115,11 @@ function row(partial: Partial<TrackerEntry> & { id: string }): TrackerEntry {
 
 /**
  * Minimal projection carrying a batch card's title + (trace-id) subtitle.
- * `projection.title` (batchGroupTitle) is the primary title path in production,
+ * `projection.title` (operationGroupTitle) is the primary title path in production,
  * so passing it here is faithful. An empty title renders a no-title anchor.
  */
-function batchProjection(runId: string, title: string, subtitle: string): WorkflowRunProjection {
-  // Enabled retry+delete descriptors with empty targets → BatchFooterActions
+function operationProjection(runId: string, title: string, subtitle: string): WorkflowRunProjection {
+  // Enabled retry+delete descriptors with empty targets → OperationFooterActions
   // acts on every member, so the bulk retry/delete icons render in the footer.
   const bulk = (kind: "retry" | "delete") => ({
     kind,
@@ -139,7 +139,7 @@ function batchProjection(runId: string, title: string, subtitle: string): Workfl
     surfaceType: "operation",
     rowTypeLabel: "Operation",
     actions: [bulk("retry"), bulk("delete")],
-    batchMembers: [],
+    operationMembers: [],
   } as unknown as WorkflowRunProjection;
 }
 
@@ -193,7 +193,7 @@ function Batch({
     <OperationRowUnified
       date={DATE}
       parentRunId={parentRunId}
-      projection={batchProjection(parentRunId, title, subtitle)}
+      projection={operationProjection(parentRunId, title, subtitle)}
       displayNames={EMPTY_DISPLAY_NAMES}
       parent={parent}
       members={members}
@@ -413,7 +413,7 @@ function member(
 }
 
 const FILE_BATCH_RUN = "batch-file-1";
-const fileBatchMembers = [
+const fileOperationMembers = [
   member("fb-1", "done", "Lena Ortiz", "10010001", FILE_BATCH_RUN),
   member("fb-2", "running", "Marcus Bell", "10010002", FILE_BATCH_RUN),
   member("fb-3", "pending", "Sofia Ruiz", "10010003", FILE_BATCH_RUN),
@@ -421,7 +421,7 @@ const fileBatchMembers = [
 ];
 
 const PERSON_BATCH_RUN = "batch-person-1";
-const personBatchMembers = [
+const personOperationMembers = [
   member("pb-1", "done", "Grace Liu", "10020001", PERSON_BATCH_RUN),
   member("pb-2", "done", "Ian Wong", "10020002", PERSON_BATCH_RUN),
   member("pb-3", "running", "Nadia Haddad", "10020003", PERSON_BATCH_RUN),
@@ -435,8 +435,8 @@ const personBatchMembers = [
 // approval window — it's stamped `archetype: batch` at pre-emit but its
 // `batch-member` signer children don't exist until the `fan-out` step.
 const EMPTY_BATCH_RUN = "batch-prefanout-1";
-const emptyBatchMembers: TrackerEntry[] = [];
-const emptyBatchAnchor = row({
+const emptyOperationMembers: TrackerEntry[] = [];
+const emptyOperationAnchor = row({
   id: EMPTY_BATCH_RUN,
   runId: EMPTY_BATCH_RUN,
   workflow: "oath-signature",
@@ -600,7 +600,7 @@ const operationPostApproval = buildOperationGalleryRow(
 );
 
 // A TITLELESS operation coordinator: the parent is person-kind (no PDF/file
-// title), so `batchGroupTitle` returns "" and the header shows ONLY the status
+// title), so `operationGroupTitle` returns "" and the header shows ONLY the status
 // icon + badge — no member-name summary. The count badge + expandable member
 // rows identify it. Mirrors the production row the operator flagged.
 const TITLELESS_OP_RUN = "op-oath-titleless-1";
@@ -686,13 +686,13 @@ function QueueRowsTab() {
 
       {/* ---- BATCH ---- */}
       <Section
-        title="batch"
+        title="operation"
         sub="Dedicated queue-ledger row for batches. It is not a tracker/coordinator parent: title is optional, subtitle = trace id, member preview is compact, and clicking opens the dedicated batch queue view for large fan-outs."
       />
       <Variant label="with title (file)" axes="batch · 4 members · titled" note="title from the batch's file/spec; footer uses bulk retry/delete">
         <Batch
           parentRunId={FILE_BATCH_RUN}
-          members={fileBatchMembers}
+          members={fileOperationMembers}
           workflowLabel="Oath Signature"
           title="Approved_Oath_Batch.pdf"
           subtitle="oc-090500-aprv"
@@ -701,7 +701,7 @@ function QueueRowsTab() {
       <Variant label="no title (person anchor)" axes="batch · 6 members · no title · incl. failed" note="member-name preview + initials identify the batch without inventing a parent title">
         <Batch
           parentRunId={PERSON_BATCH_RUN}
-          members={personBatchMembers}
+          members={personOperationMembers}
           workflowLabel="Onboarding"
           title=""
           subtitle="ob-090500-7f31"
@@ -710,11 +710,11 @@ function QueueRowsTab() {
       <Variant label="0 members (pre-fan-out)" axes="batch · 0 members · file · running" note="oath-signature PDF anchor during OCR approval — empty strip, but footer falls back to the anchor so time/elapsed/retry+delete stay">
         <Batch
           parentRunId={EMPTY_BATCH_RUN}
-          members={emptyBatchMembers}
+          members={emptyOperationMembers}
           workflowLabel="Oath Signature"
           title="Oath_Packet_Batch.pdf"
           subtitle="os-095000-7711"
-          anchorEntry={emptyBatchAnchor}
+          anchorEntry={emptyOperationAnchor}
         />
       </Variant>
 
@@ -755,7 +755,7 @@ function QueueRowsTab() {
           expandedExtra={
             <Batch
               parentRunId={`${OPERATION_POST_RUN}-nested-batch`}
-              members={fileBatchMembers}
+              members={fileOperationMembers}
               workflowLabel="Oath Signature"
               title="Approved_Oath_Batch.pdf"
               subtitle="oc-090500-aprv"
@@ -1125,7 +1125,7 @@ const TABS: { key: TabKey; label: string }[] = [
 export function UiGallery() {
   const [tab, setTab] = useState<TabKey>("rows");
   return (
-    <BatchQueueParentRunIdProvider parentRunId={null}>
+    <OperationQueueParentRunIdProvider parentRunId={null}>
       <TooltipProvider delayDuration={150}>
         <div className="h-screen overflow-y-auto bg-background text-foreground">
           <div className="mx-auto max-w-[1200px] px-6 py-8">
@@ -1164,6 +1164,6 @@ export function UiGallery() {
           </div>
         </div>
       </TooltipProvider>
-    </BatchQueueParentRunIdProvider>
+    </OperationQueueParentRunIdProvider>
   );
 }
