@@ -3,14 +3,14 @@ import { BumpButton } from "@/components/shared/BumpButton";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { RowCancelButton } from "@/components/shared/RowCancelButton";
 import { DeleteButton } from "@/components/shared/DeleteButton";
-import { BatchFooterActions } from "./BatchFooterActions";
+import { OperationFooterActions } from "./OperationFooterActions";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
 export interface ApprovalDelegationFooterActionsProps {
   parent: TrackerEntry;
   delegatedEntries: TrackerEntry[];
   projection?: WorkflowRunProjection;
-  batchParentRunId: string;
+  operationParentRunId: string;
   date?: string;
   onDelete?: (id: string) => void;
 }
@@ -30,7 +30,7 @@ export function ApprovalDelegationFooterActions({
   parent,
   delegatedEntries,
   projection,
-  batchParentRunId,
+  operationParentRunId,
   date,
   onDelete,
 }: ApprovalDelegationFooterActionsProps) {
@@ -38,7 +38,7 @@ export function ApprovalDelegationFooterActions({
 
   if (delegatedEntries.length <= 1) {
     const target = delegatedEntries[0] ?? parent;
-    const targetProjection = projection?.batchMembers.find(
+    const targetProjection = projection?.operationMembers.find(
       (member) => member.runId === (target.runId ?? target.id),
     );
     const targetActions = targetProjection?.actions ?? actions;
@@ -83,10 +83,10 @@ export function ApprovalDelegationFooterActions({
   }
 
   return (
-    <BatchFooterActions
+    <OperationFooterActions
       workflow={parent.workflow}
       date={date}
-      batchParentRunId={batchParentRunId}
+      operationParentRunId={operationParentRunId}
       memberEntries={delegatedEntries}
       retryMemberEntries={delegatedEntries}
       deleteMemberEntries={[parent, ...delegatedEntries]}

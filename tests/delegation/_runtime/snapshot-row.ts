@@ -84,7 +84,7 @@ export interface RowSnapshot {
  * the per-row projection and never exercises that rule; this helper does.
  */
 export interface GroupAnchorSnapshot {
-  kind: "batch" | "preview" | "operation";
+  kind: "operation" | "preview";
   workflowId: string;
   /** The group card's resolved title (empty string for a person operation anchor). */
   title: string;
@@ -351,7 +351,7 @@ export function snapshotGroupAnchor(opts: SnapshotGroupAnchorOpts): GroupAnchorS
   const surface = findGroupSurface(surfaces, opts.parentRunId);
   if (!surface) {
     return {
-      kind: "batch",
+      kind: "operation",
       workflowId: opts.workflow,
       title: "",
       subtitle: undefined,

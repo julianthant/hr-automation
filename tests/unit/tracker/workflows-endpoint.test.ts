@@ -146,7 +146,7 @@ test('GET /api/workflow-definitions returns metadata registered via register()',
       { key: 'employee', label: 'Employee' },
       { key: 'id', label: 'ID' },
     ],
-    presentation: defaultPresentationFromMetadata({ archetype: 'batch' }),
+    presentation: defaultPresentationFromMetadata({ archetype: 'operation' }),
   })
   const handler = buildWorkflowsHandler()
   const result = handler()

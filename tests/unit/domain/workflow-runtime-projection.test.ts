@@ -128,12 +128,12 @@ describe("workflow runtime projection adapters", () => {
 
     assert.equal(projection.surfaceType, "operation");
     assert.deepEqual(
-      projection.batchMembers.map((member) => member.runId),
+      projection.operationMembers.map((member) => member.runId),
       ["child-run-1", "child-run-2"],
     );
   });
 
-  it("renders a lone OCR utility person-lookup child as a one-member batch (alwaysBatchDelegatedMembers)", () => {
+  it("renders a lone OCR utility person-lookup child as a one-member batch (alwaysOperationDelegatedMembers)", () => {
     const child = entry({
       workflow: "person-lookup",
       id: "lookup-1",
@@ -152,7 +152,7 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase5Policies,
     });
 
-    // person-lookup opts into alwaysBatchDelegatedMembers, so a single delegated
+    // person-lookup opts into alwaysOperationDelegatedMembers, so a single delegated
     // lookup is a one-member batch surface, not a flat single.
     assert.equal(surfaces.flatEntries.length, 0);
     assert.equal(surfaces.groupRows.length, 1);
@@ -202,7 +202,7 @@ describe("workflow runtime projection adapters", () => {
 
   it("derives the PARENT trace id (shared prefix, parent runId4 tail) as a one-member person batch group subtitle", () => {
     // oath-signature / person-lookup fan-out: a lone delegated person member
-    // renders as a one-member batch (alwaysBatchDelegatedMembers) with NO parent
+    // renders as a one-member batch (alwaysOperationDelegatedMembers) with NO parent
     // row in panel (the parent run lives in another workflow's tracker). The
     // group card's footer id must identify the PARENT run — derived from
     // `parentRunId` as `<sharedPrefix>-<parentRunId4>` — NOT the member's own
@@ -404,7 +404,7 @@ describe("workflow runtime projection adapters", () => {
         name: "Jane Doe",
         emplId: "10000001",
         __queueTitle: "Oath · 9876",
-        __queueTitleKind: "batch",
+        __queueTitleKind: "operation",
       },
     });
 
@@ -446,7 +446,7 @@ describe("workflow runtime projection adapters", () => {
     // No subtitleTemplate on oath-upload — falls back to the item id.
     assert.equal(projection.subtitle, "upload-session-1");
     // No batch members — single archetype row.
-    assert.equal(projection.batchMembers.length, 0);
+    assert.equal(projection.operationMembers.length, 0);
   });
 
   it("projects an operation coordinator surface — OCR status before approval, signer summary after", () => {
@@ -483,7 +483,7 @@ describe("workflow runtime projection adapters", () => {
     assert.deepEqual(beforeProjection.actions.map((action) => action.kind), ["cancel", "delete"]);
     assert.equal(beforeProjection.actions.find((action) => action.kind === "cancel")?.enabled, true);
     assert.equal(beforeProjection.actions.find((action) => action.kind === "delete")?.enabled, false);
-    assert.equal(beforeProjection.batchMembers.length, 0);
+    assert.equal(beforeProjection.operationMembers.length, 0);
 
     // After approval: signer children are `operation-member` rows (the operation
     // analogue of `batch-member`) — collected as the coordinator's inline members,
@@ -520,9 +520,9 @@ describe("workflow runtime projection adapters", () => {
       runtimePolicies: phase4Policies,
     });
     assert.equal(afterProjection.surfaceType, "operation");
-    assert.deepEqual(afterProjection.batchMembers.map((member) => member.runId), ["signer-run-1"]);
+    assert.deepEqual(afterProjection.operationMembers.map((member) => member.runId), ["signer-run-1"]);
     // Member renders as a single row (operation-member → single surface type).
-    assert.equal(afterProjection.batchMembers[0]!.surfaceType, "single");
+    assert.equal(afterProjection.operationMembers[0]!.surfaceType, "single");
     assert.equal(afterProjection.status, "running");
     // Coordinator footer = operation's own trace, NOT the member's tail.
     assert.equal(afterProjection.subtitle, "ou-101010-op01");
@@ -669,7 +669,7 @@ describe("workflow runtime projection — phase 5 standard workflows", () => {
       delegationSourceEntries: [child],
       runtimePolicies: phase5Policies,
     });
-    // alwaysBatchDelegatedMembers keeps even one delegated lookup as a batch.
+    // alwaysOperationDelegatedMembers keeps even one delegated lookup as a batch.
     assert.equal(surfaces.flatEntries.length, 0);
     assert.equal(surfaces.groupRows.length, 1);
     assert.equal(surfaces.groupRows[0]?.kind, "operation");

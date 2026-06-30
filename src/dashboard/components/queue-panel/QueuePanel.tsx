@@ -15,11 +15,11 @@ import { useWorkflowActionDispatcher } from "@/components/hooks/useWorkflowActio
 import { findEnabledAction } from "@/lib/workflow-action-utils";
 import { buildRowCancelDispatchArgs } from "@/lib/row-cancel-request";
 import {
-  BatchQueueBackButton,
-  BatchQueueMemberList,
-  BatchQueuePrepReviewButton,
-  BatchQueuePreviewButton,
-} from "./batch-queue-view";
+  OperationQueueBackButton,
+  OperationQueueMemberList,
+  OperationQueuePrepReviewButton,
+  OperationQueuePreviewButton,
+} from "./operation-queue-view";
 import { OperationRow } from "./OperationRow";
 import { DelegationRow } from "@/components/ocr/DelegationRow";
 import type { TrackerEntry } from "@/components/shared/types";
@@ -31,7 +31,7 @@ import {
 } from "./queue-surface-classifier";
 import { entryMatchesStatusFilter, queueGroupMatchesStatusFilter } from "./queue-status";
 import {
-  sortDaemonBatchParentIds,
+  sortDaemonOperationParentIds,
   sortQueueEntriesForDisplay,
   type QueueSortMode,
 } from "./queue-sort";
@@ -87,16 +87,16 @@ interface QueuePanelProps {
    */
   onOpenOcrReview?: (target: { sessionId: string; runId: string }) => void;
   /**
-   * When set, the panel shows the consolidated batch toolbar + `BatchQueueMemberList`
+   * When set, the panel shows the consolidated batch toolbar + `OperationQueueMemberList`
    * for that batch anchor only (delegation children today; same shell for future daemon batches).
    */
-  batchQueueParentRunId?: string | null;
+  operationQueueParentRunId?: string | null;
   /** Enter batch-queue mode scoped to entries whose parent run id matches. */
-  onEnterBatchQueue?: (parentRunId: string) => void;
+  onEnterOperationQueue?: (parentRunId: string) => void;
   /** Leave batch-queue mode and return to the main queue list. */
-  onExitBatchQueue?: () => void;
+  onExitOperationQueue?: () => void;
   /** Open the right-pane batch screenshot preview. */
-  onOpenBatchPreview?: () => void;
+  onOpenOperationPreview?: () => void;
   loading: boolean;
   /**
    * Run/upload (`TopBarRunButton`; Capture is an in-modal method of its Run modal),
@@ -220,10 +220,10 @@ export function QueuePanel({
   onOpenReview,
   onReupload,
   onOpenOcrReview,
-  batchQueueParentRunId,
-  onEnterBatchQueue,
-  onExitBatchQueue,
-  onOpenBatchPreview,
+  operationQueueParentRunId,
+  onEnterOperationQueue,
+  onExitOperationQueue,
+  onOpenOperationPreview,
   loading,
   queueBulkActionsSlot,
   runControlsSlot,
@@ -261,37 +261,37 @@ export function QueuePanel({
   );
   const queueSurfaces = queueProjectionRows.surfaces;
 
-  const batchMembersByParentRunId = queueSurfaces.membersByParentRunId;
+  const operationMembersByParentRunId = queueSurfaces.membersByParentRunId;
 
-  const focusedBatchProjection = useMemo(
+  const focusedOperationProjection = useMemo(
     () =>
-      batchQueueParentRunId
+      operationQueueParentRunId
         ? queueProjectionRows.groupRows.find(
-            (row) => row.projection.runId === batchQueueParentRunId,
+            (row) => row.projection.runId === operationQueueParentRunId,
           )?.projection
         : undefined,
-    [batchQueueParentRunId, queueProjectionRows.groupRows],
+    [operationQueueParentRunId, queueProjectionRows.groupRows],
   );
 
-  const batchAnchorIsPrep = useMemo(
+  const operationAnchorIsPrep = useMemo(
     () =>
       Boolean(
-        batchQueueParentRunId &&
+        operationQueueParentRunId &&
           queueSurfaces.groupRows.some(
             (surface) =>
               surface.kind === "preview" &&
-              surface.parentRunId === batchQueueParentRunId,
+              surface.parentRunId === operationQueueParentRunId,
           ),
       ),
-    [batchQueueParentRunId, queueSurfaces.groupRows],
+    [operationQueueParentRunId, queueSurfaces.groupRows],
   );
 
-  const batchQueueMembers = useMemo(
+  const operationQueueMembers = useMemo(
     () =>
-      batchQueueParentRunId
-        ? batchMembersByParentRunId.get(batchQueueParentRunId) ?? []
+      operationQueueParentRunId
+        ? operationMembersByParentRunId.get(operationQueueParentRunId) ?? []
         : [],
-    [batchQueueParentRunId, batchMembersByParentRunId],
+    [operationQueueParentRunId, operationMembersByParentRunId],
   );
 
   const previewSurfaces = useMemo(
@@ -322,15 +322,15 @@ export function QueuePanel({
   );
 
   const sortedOperationSurfaces = useMemo(() => {
-    const ids = sortDaemonBatchParentIds(
+    const ids = sortDaemonOperationParentIds(
       operationSurfaces.map((row) => row.surface.parentRunId),
-      batchMembersByParentRunId,
+      operationMembersByParentRunId,
       queueSortMode,
       workflowLabel,
       displayNames,
     );
     return reorderByIds(operationSurfaces, (row) => row.surface.parentRunId, ids);
-  }, [operationSurfaces, batchMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
+  }, [operationSurfaces, operationMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
 
   /** Preview cards respect StatPills — show when parent or any child matches. */
   const visiblePreviewSurfaces = useMemo(
@@ -375,10 +375,10 @@ export function QueuePanel({
     [filtered, queueSortMode, displayNames],
   );
 
-  const sortedBatchMembers = useMemo(
+  const sortedOperationMembers = useMemo(
     () =>
-      sortQueueEntriesForDisplay(batchQueueMembers, queueSortMode, displayNames),
-    [batchQueueMembers, queueSortMode, displayNames],
+      sortQueueEntriesForDisplay(operationQueueMembers, queueSortMode, displayNames),
+    [operationQueueMembers, queueSortMode, displayNames],
   );
 
   const statPillSource = statPanelEntries ?? visibleEntries;
@@ -392,9 +392,9 @@ export function QueuePanel({
   /** Same order as rendered `EntryItem` rows — used for ↑/↓ keyboard selection. */
   const navigableIds = useMemo(() => {
     if (loading) return [];
-    if (batchQueueParentRunId) return sortedBatchMembers.map((e) => e.id);
+    if (operationQueueParentRunId) return sortedOperationMembers.map((e) => e.id);
     return sortedFiltered.map((row) => row.entry.id);
-  }, [loading, batchQueueParentRunId, sortedBatchMembers, sortedFiltered]);
+  }, [loading, operationQueueParentRunId, sortedOperationMembers, sortedFiltered]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const navigableIdsRef = useRef(navigableIds);
@@ -418,8 +418,8 @@ export function QueuePanel({
   dateRef.current = date;
   const dispatchRef = useRef(dispatchWorkflowAction);
   dispatchRef.current = dispatchWorkflowAction;
-  const inBatchQueueRef = useRef(Boolean(batchQueueParentRunId));
-  inBatchQueueRef.current = Boolean(batchQueueParentRunId);
+  const inOperationQueueRef = useRef(Boolean(operationQueueParentRunId));
+  inOperationQueueRef.current = Boolean(operationQueueParentRunId);
 
   useEffect(() => {
     const scrollEntryIntoView = (id: string) => {
@@ -445,7 +445,7 @@ export function QueuePanel({
         e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.code === "KeyR";
       const isCancelKey =
         e.key === "x" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-      if ((isRetryChord || isCancelKey) && selectedIdRef.current && !inBatchQueueRef.current) {
+      if ((isRetryChord || isCancelKey) && selectedIdRef.current && !inOperationQueueRef.current) {
         const row = rowsByIdRef.current.get(selectedIdRef.current);
         if (!row) return;
         const actions = row.projection.actions;
@@ -548,11 +548,11 @@ export function QueuePanel({
             parent={surface.parent}
             delegatedEntries={surface.members}
             projection={projection}
-            isBatchQueueFocused={batchQueueParentRunId === surface.parentRunId}
-            onEnterBatchQueue={(runId) => onEnterBatchQueue?.(runId)}
+            isOperationQueueFocused={operationQueueParentRunId === surface.parentRunId}
+            onEnterOperationQueue={(runId) => onEnterOperationQueue?.(runId)}
             date={date}
             onDelete={onDelete}
-            batchDrillInEnabled={!batchQueueParentRunId}
+            operationDrillInEnabled={!operationQueueParentRunId}
           />
         );
       case "operation":
@@ -592,7 +592,7 @@ export function QueuePanel({
           : "shrink-0 w-[300px] min-[1440px]:w-[380px] 2xl:w-[460px]",
       )}
     >
-      {batchQueueParentRunId ? (
+      {operationQueueParentRunId ? (
         // Batch-queue mode: one consolidated toolbar (the old title/"Started …"
         // header band is gone). Back sits before the sort dropdown; the
         // screenshot-preview (and prep-review for prep anchors) sit after the
@@ -602,20 +602,20 @@ export function QueuePanel({
             value={queueSortMode}
             onChange={onQueueSortModeChange}
             disabled={loading}
-            leading={<BatchQueueBackButton onBack={() => onExitBatchQueue?.()} />}
+            leading={<OperationQueueBackButton onBack={() => onExitOperationQueue?.()} />}
             actions={
               <>
                 {queueBulkActionsSlot}
-                {onOpenBatchPreview ? (
-                  <BatchQueuePreviewButton
+                {onOpenOperationPreview ? (
+                  <OperationQueuePreviewButton
                     active={selectedId === null}
-                    memberCount={batchQueueMembers.length}
-                    onOpen={onOpenBatchPreview}
+                    memberCount={operationQueueMembers.length}
+                    onOpen={onOpenOperationPreview}
                   />
                 ) : null}
-                {batchAnchorIsPrep ? (
-                  <BatchQueuePrepReviewButton
-                    onOpen={() => onOpenReview?.(batchQueueParentRunId)}
+                {operationAnchorIsPrep ? (
+                  <OperationQueuePrepReviewButton
+                    onOpen={() => onOpenReview?.(operationQueueParentRunId)}
                   />
                 ) : null}
               </>
@@ -643,10 +643,10 @@ export function QueuePanel({
       )}
 
       <div ref={scrollAreaRef} className="flex-1 overflow-y-auto border-b border-border">
-        {batchQueueParentRunId ? (
-          <BatchQueueMemberList
-            members={sortedBatchMembers}
-            projections={focusedBatchProjection?.batchMembers}
+        {operationQueueParentRunId ? (
+          <OperationQueueMemberList
+            members={sortedOperationMembers}
+            projections={focusedOperationProjection?.operationMembers}
             selectedId={selectedId}
             onSelect={onSelect}
             displayNames={displayNames}

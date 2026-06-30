@@ -40,9 +40,9 @@ async function waitForQueue(
 /**
  * The gated `emergency-contact` stub — mirrors the REAL config so the dashboard
  * projection matches production: `inputSubject:"name"` (→ person kind),
- * `code:"ec"`, `archetype:"batch"`, the real
+ * `code:"ec"`, `archetype:"operation"`, the real
  * `EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY` (default delegation policy — NO
- * `alwaysBatchDelegatedMembers`, unlike oath-signature). The EC child input is
+ * `alwaysOperationDelegatedMembers`, unlike oath-signature). The EC child input is
  * the nested `EmergencyContactRecord` (the shape `approveTo.deriveInput`
  * produces), so `getId`/`getName`/`deriveItemId`/`initialData` read the nested
  * `employee.{employeeId,name}`. `initialData` stamps `emplId`/`employeeName` so
@@ -286,7 +286,7 @@ test("OCR → emergency-contact approveTo fan-out: projection correct under hold
   assert.equal(dash.row("emergency-contact", c3!.runId).statusLabel, "Done");
 
   // Surface / grouping: the emergency-contact group anchor over the 3 members.
-  // EC uses the DEFAULT delegation policy (no `alwaysBatchDelegatedMembers`),
+  // EC uses the DEFAULT delegation policy (no `alwaysOperationDelegatedMembers`),
   // but 3 delegated members under one parentRunId still form a batch surface
   // (the count-≥2 path in buildTrackerQueueSurfaces). Subtitle = trace id (the
   // anchor path uses preferTraceIdSubtitle).

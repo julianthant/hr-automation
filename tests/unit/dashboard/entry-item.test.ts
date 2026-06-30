@@ -5,9 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { EntryItem } from "../../../src/dashboard/components/queue-panel/EntryItem.js";
 import {
-  BatchFooterActions,
+  OperationFooterActions,
   selectEntriesForWorkflowAction,
-} from "../../../src/dashboard/components/queue-panel/BatchFooterActions.js";
+} from "../../../src/dashboard/components/queue-panel/OperationFooterActions.js";
 import { TooltipProvider } from "../../../src/dashboard/components/ui/tooltip.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
 import type { WorkflowActionDescriptor } from "../../../src/domain/workflow-runtime/types.js";
@@ -91,10 +91,10 @@ test("live (non-dry-run) rows do NOT render the DRY RUN chip", () => {
 
 test("batch footer actions render retry and delete icon controls for grouped rows", () => {
   const html = renderToStaticMarkup(
-    React.createElement(BatchFooterActions, {
+    React.createElement(OperationFooterActions, {
       workflow: "eid-lookup",
       date: "2026-05-19",
-      batchParentRunId: "ocr-run-1",
+      operationParentRunId: "ocr-run-1",
       memberEntries: [
         {
           workflow: "eid-lookup",
@@ -137,7 +137,7 @@ test("batch footer actions select retry/delete targets from projection descripto
     {
       kind: "retry",
       scope: "visible-view",
-      source: "batch-view",
+      source: "operation-view",
       label: "Retry visible rows",
       targets: [{ workflowId: "eid-lookup", id: "visible-member", runId: "visible-run" }],
       enabled: true,
@@ -145,7 +145,7 @@ test("batch footer actions select retry/delete targets from projection descripto
     {
       kind: "delete",
       scope: "visible-view",
-      source: "batch-view",
+      source: "operation-view",
       label: "Delete visible rows",
       targets: [{ workflowId: "eid-lookup", id: "visible-member", runId: "visible-run" }],
       enabled: true,

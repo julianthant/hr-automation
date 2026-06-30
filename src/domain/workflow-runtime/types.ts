@@ -17,7 +17,7 @@ export type WorkflowActionScope =
 
 export type WorkflowActionSource =
   | "queue-panel"
-  | "batch-view"
+  | "operation-view"
   | "log-panel"
   | "daemon";
 
@@ -55,7 +55,7 @@ export interface WorkflowRunProjection {
   surfaceType: WorkflowSurfaceType;
   rowTypeLabel: string;
   actions: WorkflowActionDescriptor[];
-  batchMembers: WorkflowRunProjection[];
+  operationMembers: WorkflowRunProjection[];
 }
 
 /**
@@ -87,16 +87,16 @@ export interface WorkflowDelegationPolicy {
    * (a roster/PDF), so a single result should still read as a one-member batch
    * rather than collapsing to a standalone single row.
    */
-  alwaysBatchDelegatedMembers?: boolean;
+  alwaysOperationDelegatedMembers?: boolean;
   /**
    * Force a **direct (non-delegated) input run** to batch even with a single
    * item, so this workflow never produces a standalone single row from a manual
-   * input run. Oath Signature sets this (with `alwaysBatchDelegatedMembers`) so
+   * input run. Oath Signature sets this (with `alwaysOperationDelegatedMembers`) so
    * it is "always batch, whether delegated or not". person-lookup does NOT set
    * it — its one-person input runs stay `single`. The OCR fan-out path is
    * unaffected either way (those rows already carry a `parentRunId`).
    */
-  alwaysBatchInputRun?: boolean;
+  alwaysOperationInputRun?: boolean;
 }
 
 /**
@@ -141,7 +141,7 @@ export interface WorkflowPrepRowPolicy {
 export interface WorkflowRuntimePolicy {
   rowActions: WorkflowActionPolicy[];
   groupActions: WorkflowActionPolicy[];
-  batchViewToolbarActions: WorkflowActionPolicy[];
+  operationViewToolbarActions: WorkflowActionPolicy[];
   daemonActions: WorkflowActionPolicy[];
   /** Delegation/cancel-scope behavior for this workflow. */
   delegation?: WorkflowDelegationPolicy;

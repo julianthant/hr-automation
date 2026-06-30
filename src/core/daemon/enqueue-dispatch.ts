@@ -238,19 +238,19 @@ export async function enqueueFromHttp(
   let batchDisplayOrdinal: number | undefined;
   // A multi-item input run is always an operation coordinator. Some workflows
   // (oath-signature) opt to wrap a SINGLE-item input run too via
-  // `delegation.alwaysBatchInputRun`, so they never produce a standalone single
+  // `delegation.alwaysOperationInputRun`, so they never produce a standalone single
   // row. Only applies to direct input runs (no parentRunId) — delegated
   // fan-out rows already carry one.
-  const forcesInputRunBatch =
-    wf.config.runtimePolicy?.delegation?.alwaysBatchInputRun === true;
-  const isDirectInputRunBatch =
-    (inputs.length > 1 || forcesInputRunBatch) && !effectiveParentRunId;
-  if (isDirectInputRunBatch) {
+  const forcesInputRunOperation =
+    wf.config.runtimePolicy?.delegation?.alwaysOperationInputRun === true;
+  const isDirectInputRunOperation =
+    (inputs.length > 1 || forcesInputRunOperation) && !effectiveParentRunId;
+  if (isDirectInputRunOperation) {
     operationCoordinatorRunId = randomUUID();
     effectiveParentRunId = operationCoordinatorRunId;
     batchDisplayOrdinal = allocateLowestBatchDisplayOrdinal(workflowName, resolvedTrackerDir);
   }
-  const queuedInputs = isDirectInputRunBatch
+  const queuedInputs = isDirectInputRunOperation
     ? inputs.map((input) => mergeRuntimeOptions(input, { rowShape: "operation-member" }))
     : inputs;
 

@@ -146,7 +146,7 @@ function buildQueueTitleForInput<TData, TSteps extends readonly string[]>(
     return queueTitleData({ kind: 'single', title })
   }
   const title = config.labelFromInput?.(input) ?? config.label ?? wf.config.label ?? wf.config.name
-  return queueTitleData({ kind: 'batch', title })
+  return queueTitleData({ kind: 'operation', title })
 }
 
 /**

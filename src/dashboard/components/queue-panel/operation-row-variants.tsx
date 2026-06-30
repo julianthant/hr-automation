@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { OperationCancelButton } from "./OperationCancelButton";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { TrackerEntry } from "@/components/shared/types";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 import type { OperationOcrLink } from "./queue-surface-classifier";
@@ -28,7 +28,7 @@ import {
 } from "@/components/shared/entry-display";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import {
-  aggregateBatchCounts,
+  aggregateOperationCounts,
   pickPreviewChildren,
 } from "@/components/ocr/delegation-row-helpers";
 import { statusKeyForEntry } from "@/components/shared/status-styles";
@@ -140,7 +140,7 @@ const MEMBER_PREVIEW_ICON: Record<
 
 /**
  * True when the resolved operation header title is non-empty (titled variant).
- * False for a person-kind anchor whose `batchGroupTitle` returns `""` — in that
+ * False for a person-kind anchor whose `operationGroupTitle` returns `""` — in that
  * case there is no header strip at all; the card starts at the count badge and
  * the expandable member rows below identify the operation.
  *
@@ -211,24 +211,26 @@ export function OperationRowUnified({
   expandedExtra,
 }: OperationRowUnifiedProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  // When a collapsed-preview name is clicked we expand the card, select that
-  // member, and scroll its row into view. The scroll waits for the member rows
-  // to mount (one render after `expanded` flips), hence the effect below.
-  const membersScrollRef = useRef<HTMLDivElement | null>(null);
-  const [pendingScrollId, setPendingScrollId] = useState<string | null>(null);
+  // Selection model: the card root (header + the gaps between rows) selects the
+  // MAIN coordinator row (the "event tracker"). A MEMBER row — a collapsed
+  // member-preview row OR an expanded member EntryItem — selects THAT member
+  // instead, so the operator can open one signer/contact's own logs. Member
+  // clicks therefore `stopPropagation` (so the bubble doesn't re-select the
+  // coordinator at the card root) and route `onSelect(member.id)`. The
+  // count-strip header still toggles collapse (stopPropagation below).
   const displayParent = statusForDisplay(parent, projection);
   const awaitingReview = isAwaitingOcrReview(ocr);
   const cfg = headerStatus(displayParent, ocr);
   const StatusIcon = cfg.icon;
 
-  const counts = useMemo(() => aggregateBatchCounts(members), [members]);
+  const counts = useMemo(() => aggregateOperationCounts(members), [members]);
   // Non-terminal members = running + queued; when any exist the coordinator
   // shows a "Cancel remaining" button to cancel the whole fan-out at once
   // (E2E-102). When all members are terminal the button hides automatically.
   const hasNonTerminalMembers = counts.running + counts.queued > 0;
   const memberProjectionById = useMemo(
-    () => new Map((projection?.batchMembers ?? []).map((m) => [m.itemId, m])),
-    [projection?.batchMembers],
+    () => new Map((projection?.operationMembers ?? []).map((m) => [m.itemId, m])),
+    [projection?.operationMembers],
   );
   const showOcrWorkZone = members.length === 0 && Boolean(ocr) && !awaitingReview;
   const ocrSessionId = ocr?.sessionId;
@@ -253,18 +255,6 @@ export function OperationRowUnified({
   const elapsed = useElapsed(isActivelyRunning ? firstTs : null);
   const duration =
     (isTerminal || awaitingReview) && firstTs !== lastTs ? formatDuration(firstTs, lastTs) : null;
-
-  // After expanding from a clicked preview name, scroll that member's row into
-  // view inside the scroll-capped member list (then clear the pending target).
-  useEffect(() => {
-    if (!expanded || !pendingScrollId) return;
-    const container = membersScrollRef.current;
-    const target = container?.querySelector<HTMLElement>(
-      `[data-queue-entry-id="${CSS.escape(pendingScrollId)}"]`,
-    );
-    target?.scrollIntoView({ block: "nearest" });
-    setPendingScrollId(null);
-  }, [expanded, pendingScrollId]);
 
   return (
     <div data-queue-operation-run-id={parentRunId}>
@@ -456,9 +446,11 @@ export function OperationRowUnified({
 
             {/* Collapsed: a batch-style member-name preview (running→queued→
                 failed→done order via pickPreviewChildren) so the operation reads
-                like a batch row at rest. Each name is a button — clicking it
-                expands the card and scrolls to that member. Hairline dividers
-                separate the rows. Expand replaces the preview with full rows. */}
+                like a batch row at rest. Each preview row is a real button —
+                clicking it selects THAT member (opening its own logs) and
+                expands the card so the highlighted member row is visible. The
+                chevron header still toggles collapse. Hairline dividers separate
+                the rows. */}
             {!expanded && previewKids.length > 0 && (
               <div className="flex flex-col border-t border-border/40 bg-card font-mono text-[10.5px]">
                 {previewKids.map((kid, i) => {
@@ -466,17 +458,16 @@ export function OperationRowUnified({
                   const KidIcon = kidCfg.Icon;
                   return (
                     <button
-                      type="button"
                       key={kid.id}
-                      aria-label={`${kid.name}${kid.emplId ? ` (${kid.emplId})` : ""} — expand and view`}
+                      type="button"
+                      aria-label={`View ${kid.name}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         onSelect(kid.id);
-                        setPendingScrollId(kid.id);
                         setExpanded(true);
                       }}
                       className={cn(
-                        "flex min-w-0 items-center gap-2 px-3.5 py-1.5 text-left transition-colors duration-150",
+                        "flex w-full min-w-0 items-center gap-2 px-3.5 py-1.5 text-left transition-colors duration-150 cursor-pointer",
                         "hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
                         i > 0 && "border-t border-border/40",
                       )}
@@ -502,17 +493,22 @@ export function OperationRowUnified({
             )}
 
             {expanded && (
-              // Members are full EntryItem single rows. The wrapper stops their
-              // click/key events from bubbling up to the coordinator's select.
+              // Members are full EntryItem single rows shown for status + their
+              // own footer actions (retry/cancel/delete). Clicking a member row
+              // selects THAT member (its own logs/screenshots open in the right
+              // panel) via `onSelect={onSelect}`. The wrapper `stopPropagation`
+              // keeps that member click from bubbling to the card root, which
+              // would otherwise re-select the coordinator. Footer action buttons
+              // keep their own stopPropagation, so they still act on the member.
+              // Clicks on the gaps/padding are caught by the wrapper too, so
+              // they no longer select anything (use the card header for that).
               <div
                 className="border-t border-border/40 bg-card pb-3"
                 onClick={(event) => event.stopPropagation()}
-                onKeyDown={(event) => event.stopPropagation()}
-                role="presentation"
               >
                 {/* Cap the inline list height so a large fan-out scrolls in
                     place instead of growing the card without bound. ~4 rows. */}
-                <div ref={membersScrollRef} className="max-h-[24rem] overflow-y-auto">
+                <div className="max-h-[24rem] overflow-y-auto">
                   {expandedExtra}
                   {members.map((member) => (
                     <EntryItem
@@ -520,6 +516,9 @@ export function OperationRowUnified({
                       entry={member}
                       projection={memberProjectionById.get(member.id)}
                       displayNames={displayNames}
+                      // A selected member shows its own (muted) selection ring;
+                      // the coordinator card's ring is suppressed (selected is
+                      // false at the card root when a member is the selection).
                       selected={selectedId === member.id}
                       selectionTone="muted"
                       onSelect={onSelect}

@@ -69,7 +69,7 @@ export const ocrWorkflow = defineWorkflow({
   schema: OcrInputSchema,
   runtimePolicy: OCR_WORKFLOW_RUNTIME_POLICY,
   queueTitle: {
-    kind: "batch",
+    kind: "operation",
     labelFromInput: (input) => input.formType === "emergency-contact" ? "Emergency Contact" : "Oath",
   },
   detailFields: [{ key: "recordCount", label: "Records" }],

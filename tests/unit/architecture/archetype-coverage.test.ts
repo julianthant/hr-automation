@@ -1,6 +1,6 @@
 /**
  * All workflow.ts files that contain a defineWorkflow call must declare an
- * explicit `archetype:` field. The kernel auto-assigns "single" or "batch"
+ * explicit `archetype:` field. The kernel auto-assigns "single" or "operation"
  * from the batch config shape, but explicit declarations make the root row
  * shape visible; preview workflows must opt in explicitly.
  */

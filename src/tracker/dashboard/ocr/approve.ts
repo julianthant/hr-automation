@@ -801,7 +801,7 @@ function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix
 /**
  * Merge a member `rowShape` onto a fan-out child's `__runtimeOptions` so the
  * stamped archetype survives the SQLite task store to the daemon worker's
- * `run-one-item` re-emit (mirrors `rowShape: "batch-member"` for delegated
+ * `run-one-item` re-emit (mirrors `rowShape: "operation-member"` for delegated
  * batches; `normalizeRuntimeOptions` carries it through). No-op when the shape
  * is absent (standalone OCR / oath-upload) or the input isn't a plain object.
  */

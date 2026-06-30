@@ -5,9 +5,9 @@ import { createContext, useContext, type ReactNode } from "react";
  * (OCR prep `runId`, or a dashboard multi-enqueue batch UUID). Input run,
  * retry, and run-with-data pick this up so new work stays in the batch.
  */
-const BatchQueueParentRunIdContext = createContext<string | null>(null);
+const OperationQueueParentRunIdContext = createContext<string | null>(null);
 
-export function BatchQueueParentRunIdProvider({
+export function OperationQueueParentRunIdProvider({
   parentRunId,
   children,
 }: {
@@ -15,12 +15,12 @@ export function BatchQueueParentRunIdProvider({
   children: ReactNode;
 }) {
   return (
-    <BatchQueueParentRunIdContext.Provider value={parentRunId}>
+    <OperationQueueParentRunIdContext.Provider value={parentRunId}>
       {children}
-    </BatchQueueParentRunIdContext.Provider>
+    </OperationQueueParentRunIdContext.Provider>
   );
 }
 
-export function useOptionalBatchQueueParentRunId(): string | null {
-  return useContext(BatchQueueParentRunIdContext);
+export function useOptionalOperationQueueParentRunId(): string | null {
+  return useContext(OperationQueueParentRunIdContext);
 }

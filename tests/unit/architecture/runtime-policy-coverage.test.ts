@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import { buildProjectionFromQueueSurface } from "../../../src/domain/workflow-runtime/projection.js";
 import {
-  batchViewActionsWithinMembers,
+  operationViewActionsWithinMembers,
   validateWorkflowRuntimePolicy,
 } from "../../../src/domain/workflow-runtime/validate.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl.js";
@@ -76,7 +76,7 @@ test("registered workflow metadata runtime policies validate action descriptors"
   assert.deepEqual(errors, [], errors.join("\n"));
 });
 
-test("batch-view visible actions stay scoped to opened batch member run ids", () => {
+test("operation-view visible actions stay scoped to opened batch member run ids", () => {
   const members = [
     {
       workflow: "person-lookup",
@@ -119,7 +119,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
       action.kind === "retry" || action.kind === "delete"
         ? {
             ...action,
-            source: "batch-view" as const,
+            source: "operation-view" as const,
             scope: "visible-view" as const,
             targets: [{ workflowId: "person-lookup", id: "member-a", runId: "run-a" }],
           }
@@ -127,7 +127,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
     ),
   };
 
-  assert.deepEqual(batchViewActionsWithinMembers(scoped, ["run-a", "run-b"]), []);
+  assert.deepEqual(operationViewActionsWithinMembers(scoped, ["run-a", "run-b"]), []);
 
   const leaking = {
     ...scoped,
@@ -143,7 +143,7 @@ test("batch-view visible actions stay scoped to opened batch member run ids", ()
         : action,
     ),
   };
-  const errors = batchViewActionsWithinMembers(leaking, ["run-a", "run-b"]);
+  const errors = operationViewActionsWithinMembers(leaking, ["run-a", "run-b"]);
   assert.ok(errors.length > 0);
   assert.match(errors[0] ?? "", /outside-run/);
 });

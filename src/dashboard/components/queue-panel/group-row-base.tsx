@@ -7,11 +7,11 @@ import { formatEntryTime, getRunNumber } from "@/components/shared/entry-display
 import { QueueRowCard } from "./QueueRowCard";
 import { StatusCounts } from "./StatusCounts";
 import {
-  aggregateBatchCounts,
+  aggregateOperationCounts,
   pickPreviewChildren,
-  computeBatchElapsed,
-  resolveBatchAccent,
-  useBatchElapsedLabel,
+  computeOperationElapsed,
+  resolveOperationAccent,
+  useOperationElapsedLabel,
 } from "@/components/ocr/delegation-row-helpers";
 
 const PREVIEW_KIDS = 3;
@@ -24,7 +24,7 @@ const STATUS_ICON: Record<string, { Icon: LucideIcon; color: string; spin: boole
   failed: { Icon: AlertTriangle, color: "text-destructive", spin: false },
 };
 
-export type GroupRowVariant = "preview" | "batch";
+export type GroupRowVariant = "preview" | "operation";
 
 export interface GroupRowBaseProps {
   /** Exposed as data-queue-group-kind for visual/debug inspection. */
@@ -59,12 +59,12 @@ export function GroupRowBase({
   onEnter,
   footerActions,
 }: GroupRowBaseProps) {
-  const counts = aggregateBatchCounts(members);
-  const accent = resolveBatchAccent(counts);
+  const counts = aggregateOperationCounts(members);
+  const accent = resolveOperationAccent(counts);
   const previewKids = pickPreviewChildren(members, PREVIEW_KIDS);
-  const elapsed = computeBatchElapsed(elapsedEntries ?? members);
+  const elapsed = computeOperationElapsed(elapsedEntries ?? members);
 
-  const elapsedLabel = useBatchElapsedLabel(elapsed);
+  const elapsedLabel = useOperationElapsedLabel(elapsed);
 
   const rowTime = firstTimestamp ? formatEntryTime(firstTimestamp) : "";
   const runNumber = footerRunOrdinal && footerRunOrdinal > 0
@@ -201,7 +201,7 @@ export function GroupRowBase({
   );
 }
 
-function computeProgressSegments(counts: ReturnType<typeof aggregateBatchCounts>) {
+function computeProgressSegments(counts: ReturnType<typeof aggregateOperationCounts>) {
   const segs: { cls: string; flex: number }[] = [];
   if (counts.done > 0) segs.push({ cls: "bg-success", flex: counts.done });
   if (counts.running > 0) segs.push({ cls: "bg-primary", flex: counts.running });

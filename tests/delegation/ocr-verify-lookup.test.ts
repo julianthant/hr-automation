@@ -66,12 +66,12 @@ const I9InputSchema = z.object({ lastName: z.string().min(1), firstName: z.strin
 const I9_RUNTIME_POLICY = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
   memberRow: { titleSource: "person" as const },
-  delegation: { ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation, alwaysBatchDelegatedMembers: true },
+  delegation: { ...DEFAULT_WORKFLOW_RUNTIME_POLICY.delegation, alwaysOperationDelegatedMembers: true },
 };
 
 /**
  * A non-gated person-lookup stub daemon (mirrors `code:"pl"`, `inputSubject:"name"`,
- * `archetype:"single"`, the real `alwaysBatchDelegatedMembers` policy). Its
+ * `archetype:"single"`, the real `alwaysOperationDelegatedMembers` policy). Its
  * `searching` step runs straight through to `done`, stamping `searchName` so the
  * person-kind title resolves to the name.
  */
@@ -275,7 +275,7 @@ test(
     assert.equal(i9Row.data.__traceId, "<traceId>", "i9 child carries a (scrubbed) trace id");
     assert.equal(i9Row.status, "done", "i9 child completed done");
 
-    // ─── Group anchors (alwaysBatchDelegatedMembers → batch surface) ─────────
+    // ─── Group anchors (alwaysOperationDelegatedMembers → batch surface) ─────────
     const plAnchor = dash.groupAnchor("person-lookup", ocr.runId);
     assert.equal(plAnchor.memberCount, 3, "person-lookup group anchor has 3 members");
     assert.equal(plAnchor.kind, "operation", "delegated person-lookup members render as an operation surface");
@@ -286,7 +286,7 @@ test(
     assert.equal(
       i9Anchor.kind,
       "operation",
-      "a lone delegated i9-lookup member still renders as an operation surface (alwaysBatchDelegatedMembers)",
+      "a lone delegated i9-lookup member still renders as an operation surface (alwaysOperationDelegatedMembers)",
     );
     assert.equal(i9Anchor.subtitle, "<traceId>", "i9 group anchor subtitle is the trace id");
 

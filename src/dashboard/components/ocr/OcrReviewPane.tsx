@@ -853,7 +853,7 @@ function useOcrReviewPrepApi(
                         totalPages,
                         rowOrdinal,
                         lookupTracker: lookupTrackerByIndex.get(originalIndex)!,
-                        onBatchSelectedChange: (selected) =>
+                        onOperationSelectedChange: (selected) =>
                           setRecord(originalIndex, { ...record, selected } as AnyPreviewRecord),
                       })}
                       screenshotStrip={
@@ -1259,7 +1259,7 @@ function renderFormCardNav(args: {
   lookupTracker: OcrRecordLookupTracker;
   rowOnPage?: number;
   totalRowsOnPage?: number;
-  onBatchSelectedChange: (selected: boolean) => void;
+  onOperationSelectedChange: (selected: boolean) => void;
 }): ReactNode {
   const sourcePage = (args.record as { sourcePage: number }).sourcePage;
   const pageLocation = args.totalRowsOnPage
@@ -1282,7 +1282,7 @@ function renderFormCardNav(args: {
       }
       selected={args.record.selected}
       selectedDisabled={isUnknown}
-      onSelectedChange={args.onBatchSelectedChange}
+      onSelectedChange={args.onOperationSelectedChange}
     />
   );
 }

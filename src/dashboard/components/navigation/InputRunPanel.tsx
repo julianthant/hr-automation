@@ -4,7 +4,7 @@ import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { getInputRunConfig } from "@/lib/input-run-registry";
 import { RunModal } from "@/components/run-modal/RunModal";
-import { useOptionalBatchQueueParentRunId } from "@/components/hooks/useBatchQueueContext";
+import { useOptionalOperationQueueParentRunId } from "@/components/hooks/useOperationQueueContext";
 import { useWorkflow } from "@/lib/workflows-context";
 import { RunSettingsMenu } from "./RunSettingsMenu";
 import { AUTO_WORKERS, FULL_PRESET_ID, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
@@ -33,7 +33,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
   const config = getInputRunConfig(workflow);
   const workflowDef = useWorkflow(workflow);
   const presets = workflowDef?.presets ?? [];
-  const batchQueueParentRunId = useOptionalBatchQueueParentRunId();
+  const operationQueueParentRunId = useOptionalOperationQueueParentRunId();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -66,7 +66,7 @@ export function InputRunPanel({ workflow }: InputRunPanelProps) {
     setSubmitting(true);
     try {
       const parentRunId =
-        batchQueueParentRunId;
+        operationQueueParentRunId;
       const parallelWorkers = workerChoiceToParam(workerChoice);
       // Dry-run rides `input_json` as a schema field (not the runtimeOptions
       // channel) — fold it onto each parsed input when the toggle is on.

@@ -150,7 +150,7 @@ export type DetailField<TData> =
 
 export type WorkflowQueueTitleConfig<TData> =
   | { kind: 'single' }
-  | { kind: 'batch'; label?: string; labelFromInput?: (input: TData) => string | undefined }
+  | { kind: 'operation'; label?: string; labelFromInput?: (input: TData) => string | undefined }
 
 /**
  * Named "run mode" preset for a workflow. Surfaced in the dashboard's input-run
@@ -191,7 +191,7 @@ export interface WorkflowConfig<TData, TSteps extends readonly string[]> {
   version?: string
   /** Human-readable workflow label for the dashboard (e.g. "Onboarding"). */
   label?: string
-  /** Declarative row shape. Defaults to "batch" if `batch` is set, else "single". */
+  /** Declarative row shape. Defaults to "operation" if `batch` is set, else "single". */
   archetype?: WorkflowArchetypeOrResolver<TData>
   /**
    * What this workflow receives as input — `name | eid | email | kualiId |
@@ -369,7 +369,7 @@ export interface RetryOpts {
 }
 
 /** See `src/core/delegate.ts` for the delegation API + `renderAs` semantics. */
-export type DelegateRenderAs = "batch" | "preview"
+export type DelegateRenderAs = "operation" | "preview"
 
 export interface DelegateOpts {
   /**
@@ -380,7 +380,7 @@ export interface DelegateOpts {
    * row always lives in its own tab; the flat/grouped distinction was a
    * rendering hack, removed per the workflow vocabulary).
    *   - "preview" → preview card row
-   *   - "batch"   → grouped delegation member
+   *   - "operation"   → grouped delegation member
    */
   renderAs?: DelegateRenderAs
   /**

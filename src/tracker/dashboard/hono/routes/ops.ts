@@ -73,8 +73,8 @@ function parseRowCancelScope(value: unknown): WorkflowActionScope {
   return value === "tree" ? "tree" : "row";
 }
 
-function parseBulkActionSource(value: unknown): Extract<WorkflowActionSource, "queue-panel" | "batch-view"> {
-  return value === "batch-view" ? "batch-view" : "queue-panel";
+function parseBulkActionSource(value: unknown): Extract<WorkflowActionSource, "queue-panel" | "operation-view"> {
+  return value === "operation-view" ? "operation-view" : "queue-panel";
 }
 
 function parseBulkActionScope(value: unknown): Extract<WorkflowActionScope, "group" | "visible-view"> {
@@ -262,7 +262,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       items?: Array<{ workflowId?: string; id: string; runId?: string; date?: string }>;
       date?: string;
       parentRunId?: string;
-      source: Extract<WorkflowActionSource, "queue-panel" | "batch-view">;
+      source: Extract<WorkflowActionSource, "queue-panel" | "operation-view">;
       scope: Extract<WorkflowActionScope, "group" | "visible-view">;
     }) => {
       const items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }> = req.items && req.items.length > 0
@@ -570,7 +570,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
       date: string;
       ids: string[];
       items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }>;
-      source: Extract<WorkflowActionSource, "queue-panel" | "batch-view">;
+      source: Extract<WorkflowActionSource, "queue-panel" | "operation-view">;
       scope: Extract<WorkflowActionScope, "group" | "visible-view">;
     }) => {
       const items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }> = req.items.length > 0

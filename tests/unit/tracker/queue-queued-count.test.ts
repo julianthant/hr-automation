@@ -15,7 +15,7 @@ import {
  * collapsed top-level-surface model as the total, so `queued <= total` always.
  *
  * person-lookup's queue is entirely delegated OCR-enrichment members
- * (`alwaysBatchDelegatedMembers: true` → each `parentRunId` group is one batch
+ * (`alwaysOperationDelegatedMembers: true` → each `parentRunId` group is one batch
  * ANCHOR surface). The old rail read the RAW SQLite per-workflow queued task
  * count (every queued member), which diverged from the collapsed total — the
  * field bug behind "53 queued / 18 total".

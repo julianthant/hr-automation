@@ -2,7 +2,7 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   sortQueueEntriesForDisplay,
-  sortDaemonBatchParentIds,
+  sortDaemonOperationParentIds,
   isQueueSortMode,
   DEFAULT_QUEUE_SORT_MODE,
 } from "../../../src/dashboard/components/queue-panel/queue-sort.js";
@@ -114,7 +114,7 @@ test("label-desc respects displayNames map", () => {
   );
 });
 
-test("sortDaemonBatchParentIds orders by batch title for label-asc", () => {
+test("sortDaemonOperationParentIds orders by batch title for label-asc", () => {
   const membersByParent = new Map<string, TrackerEntry[]>();
   membersByParent.set("p-later", [
     entry({
@@ -130,7 +130,7 @@ test("sortDaemonBatchParentIds orders by batch title for label-asc", () => {
       firstLogTs: "2026-05-11T13:00:00.000Z",
     }),
   ]);
-  const ids = sortDaemonBatchParentIds(
+  const ids = sortDaemonOperationParentIds(
     ["p-later", "p-earlier"],
     membersByParent,
     "label-asc",
@@ -164,7 +164,7 @@ test("sortQueueEntriesForDisplay interleaves terminal Not found by time for star
   );
 });
 
-test("sortDaemonBatchParentIds time sort orders all–not-found batches by time like others", () => {
+test("sortDaemonOperationParentIds time sort orders all–not-found batches by time like others", () => {
   const membersByParent = new Map<string, TrackerEntry[]>();
   membersByParent.set("nf", [
     entry({
@@ -182,7 +182,7 @@ test("sortDaemonBatchParentIds time sort orders all–not-found batches by time 
       firstLogTs: "2026-05-11T15:00:00.000Z",
     }),
   ]);
-  const ids = sortDaemonBatchParentIds(
+  const ids = sortDaemonOperationParentIds(
     ["nf", "ok"],
     membersByParent,
     "start-newest",
@@ -191,7 +191,7 @@ test("sortDaemonBatchParentIds time sort orders all–not-found batches by time 
   assert.deepEqual(ids, ["nf", "ok"]);
 });
 
-test("sortDaemonBatchParentIds label sort still sinks all–not-found batches last", () => {
+test("sortDaemonOperationParentIds label sort still sinks all–not-found batches last", () => {
   const membersByParent = new Map<string, TrackerEntry[]>();
   membersByParent.set("p-nf", [
     entry({
@@ -209,7 +209,7 @@ test("sortDaemonBatchParentIds label sort still sinks all–not-found batches la
       firstLogTs: "2026-05-11T15:00:00.000Z",
     }),
   ]);
-  const ids = sortDaemonBatchParentIds(
+  const ids = sortDaemonOperationParentIds(
     ["p-nf", "p-ok"],
     membersByParent,
     "label-asc",

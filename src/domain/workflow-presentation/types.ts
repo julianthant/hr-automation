@@ -10,7 +10,7 @@ export type TitleSchemeId =
   | "person-name" // resolved employee name (current person-kind title)
   | "pdf-filename" // data.pdfOriginalName (current file-kind title)
   | "catalog-label" // registry/spec label (current catalog-kind title)
-  | "batch-anchor" // no title — count badge identifies the row
+  | "operation-anchor" // no title — count badge identifies the row
   | "custom-template";
 
 /** Curated subtitle schemes. */

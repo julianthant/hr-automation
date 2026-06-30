@@ -152,11 +152,11 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.deepEqual(result.flatEntries.map((e) => e.id), []);
   });
 
-  it("renders a lone delegated member as a one-member batch when its workflow opts into alwaysBatchDelegatedMembers", () => {
+  it("renders a lone delegated member as a one-member batch when its workflow opts into alwaysOperationDelegatedMembers", () => {
     // Regression (2026-06-02): in the signer's OWN tab the OCR preview anchor is
     // absent, so the lone fanned-out signer fell into the anchorless
     // delegated-member path and rendered as a flat single. oath-signature opts
-    // into alwaysBatchDelegatedMembers, so it must stay a one-member batch.
+    // into alwaysOperationDelegatedMembers, so it must stay a one-member batch.
     const signer = entry({
       workflow: "oath-signature",
       id: "10874100",
@@ -176,7 +176,7 @@ describe("buildTrackerQueueSurfaces", () => {
     assert.deepEqual(result.flatEntries.map((e) => e.id), [], "no flat single");
   });
 
-  it("renders a lone delegated member flat when its workflow does NOT opt into alwaysBatchDelegatedMembers", () => {
+  it("renders a lone delegated member flat when its workflow does NOT opt into alwaysOperationDelegatedMembers", () => {
     const child = entry({
       workflow: "work-study",
       id: "ws-1",

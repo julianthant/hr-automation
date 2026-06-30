@@ -144,9 +144,9 @@ test("enqueueFromHttp pre-emits person-lookup input-run batches as batch members
   assert.deepEqual(members.map((row) => row.parentRunId), [opts.parentRunId, opts.parentRunId]);
 });
 
-test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysBatchInputRun)", async () => {
+test("enqueueFromHttp batches a SINGLE oath-signature EID input run (alwaysOperationInputRun)", async () => {
   // oath-signature is never a standalone single row — even one manual EID is a
-  // one-member batch (delegation.alwaysBatchInputRun). person-lookup (the first
+  // one-member batch (delegation.alwaysOperationInputRun). person-lookup (the first
   // test) intentionally stays unparented for a single input.
   const trackerDir = tempTrackerDir();
   const result = await enqueueFromHttp("oath-signature", [{ emplId: "10000001" }], { trackerDir });

@@ -7,7 +7,7 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
 
 /**
  * Fallback title for daemon / dashboard batch cards when no projection title is
- * supplied (the projection's `batchGroupTitle` is the primary path).
+ * supplied (the projection's `operationGroupTitle` is the primary path).
  *
  * A batch is titled **only by a PDF filename**. Person / arbitrary batches have
  * NO title — the `{done}/{total}` count badge + the member-name preview already
@@ -15,10 +15,10 @@ import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/typ
  * itself a PDF filename (an inherited delegated *file*-batch label); a random /
  * person name is never used as a title.
  */
-export function resolveDaemonBatchQueueTitle(
+export function resolveDaemonOperationQueueTitle(
   _workflowLabel: string,
   members: TrackerEntry[],
-  _batchParentRunId: string,
+  _operationParentRunId: string,
   titleOverride?: string,
 ): string {
   const pdfName = members.map((m) => m.data?.pdfOriginalName).find((v) => v != null && v !== "");
@@ -34,7 +34,7 @@ export function resolveDaemonBatchQueueTitle(
  * (after the trash). These small buttons are rendered into `QueueSortToolbar`'s
  * `leading` / `actions` slots by `QueuePanel`.
  */
-export function BatchQueueBackButton({ onBack }: { onBack: () => void }) {
+export function OperationQueueBackButton({ onBack }: { onBack: () => void }) {
   return (
     <button
       type="button"
@@ -49,7 +49,7 @@ export function BatchQueueBackButton({ onBack }: { onBack: () => void }) {
 }
 
 /** Toggle the right-pane batch screenshot preview. Placed after the trash. */
-export function BatchQueuePreviewButton({
+export function OperationQueuePreviewButton({
   active,
   memberCount,
   onOpen,
@@ -83,7 +83,7 @@ export function BatchQueuePreviewButton({
 }
 
 /** Jump to the OCR/prep review for a prep batch. Shown only for prep anchors. */
-export function BatchQueuePrepReviewButton({ onOpen }: { onOpen: () => void }) {
+export function OperationQueuePrepReviewButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
@@ -99,11 +99,11 @@ export function BatchQueuePrepReviewButton({ onOpen }: { onOpen: () => void }) {
 
 /**
  * Scrollable list of **batch member** rows. Each row is a normal {@link EntryItem}.
- * Do not render {@link DelegationRow} / {@link DaemonBatchRow} here — batch mode is
- * one level deep; nested batch navigation is blocked in `App` (`handleEnterBatchQueue`)
+ * Do not render {@link DelegationRow} or operation rows here — operation drill-in mode is
+ * one level deep; nested operation-drill-in navigation is blocked in `App` (`handleEnterOperationQueue`)
  * until the operator uses Back to return to the main queue.
  */
-export function BatchQueueMemberList({
+export function OperationQueueMemberList({
   members,
   projections,
   selectedId,

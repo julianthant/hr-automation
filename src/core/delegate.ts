@@ -38,11 +38,11 @@
  * `renderAs` controls how delegated child rows relate to the parent:
  *   - (omitted) → delegated single row (the default; no separate "flat" hint).
  *   - "preview" → child renders as a preview card row.
- *   - "batch"   → child is stamped as a batch-member under the parent row.
+ *   - "operation"   → child is stamped as a operation-member under the parent row.
  *
  * The kernel always derives the row archetype via
- * `deriveRowArchetype(child.archetype, parentRunId, opts)`. Only `"batch"`
- * changes the derivation (→ `batch-member`); an omitted `renderAs` and the
+ * `deriveRowArchetype(child.archetype, parentRunId, opts)`. Only `"operation"`
+ * changes the derivation (→ `operation-member`); an omitted `renderAs` and the
  * legacy `"flat"` were identical no-ops, so `"flat"` was removed.
  */
 import type {
@@ -122,12 +122,12 @@ function resolveDelegateArchetype<TData, TSteps extends readonly string[]>(
   return deriveRowArchetype(
     resolveArchetype(child.config, input),
     parentRunId,
-    renderAs === "batch" ? { member: true } : undefined,
+    renderAs === "operation" ? { member: true } : undefined,
   )
 }
 
 function withOperationMemberRuntimeOptions<TInput>(input: TInput, renderAs?: DelegateRenderAs): TInput {
-  if (renderAs !== "batch" || !input || typeof input !== "object" || Array.isArray(input)) {
+  if (renderAs !== "operation" || !input || typeof input !== "object" || Array.isArray(input)) {
     return input
   }
   const current = (input as Record<string, unknown>).__runtimeOptions

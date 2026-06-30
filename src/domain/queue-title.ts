@@ -1,4 +1,4 @@
-export type QueueTitleKind = "single" | "batch" | "delegation";
+export type QueueTitleKind = "single" | "operation" | "delegation";
 
 export interface QueueTitle {
   kind: QueueTitleKind;

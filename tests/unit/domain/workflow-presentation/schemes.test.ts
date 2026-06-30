@@ -8,7 +8,7 @@ describe("resolveTitle", () => {
   it("person-name → name", () => expect(resolveTitle(vars, { scheme: "person-name" })).toBe("Jane Doe"));
   it("pdf-filename → pdf name", () => expect(resolveTitle(vars, { scheme: "pdf-filename" })).toBe("oath.pdf"));
   it("catalog-label → label", () => expect(resolveTitle(vars, { scheme: "catalog-label" })).toBe("Onboarding Roster"));
-  it("batch-anchor → empty (count badge identifies it)", () => expect(resolveTitle(vars, { scheme: "batch-anchor" })).toBe(""));
+  it("operation-anchor → empty (count badge identifies it)", () => expect(resolveTitle(vars, { scheme: "operation-anchor" })).toBe(""));
   it("custom-template renders", () => expect(resolveTitle(vars, { scheme: "custom-template", template: "{name} #{emplId}" })).toBe("Jane Doe #10012345"));
 });
 
@@ -21,7 +21,7 @@ describe("resolveSubtitle", () => {
 describe("SCHEME_LIBRARY", () => {
   it("lists every title scheme id with a label", () => {
     const ids = SCHEME_LIBRARY.title.map((s) => s.id);
-    expect(ids).toEqual(expect.arrayContaining(["person-name", "pdf-filename", "catalog-label", "batch-anchor", "custom-template"]));
+    expect(ids).toEqual(expect.arrayContaining(["person-name", "pdf-filename", "catalog-label", "operation-anchor", "custom-template"]));
     expect(SCHEME_LIBRARY.title.every((s) => s.label.length > 0)).toBe(true);
   });
 });

@@ -126,7 +126,7 @@ describe("buildWorkflowActionRequest", () => {
 });
 
 describe("buildBulkWorkflowActionRequest", () => {
-  it("builds batch-view visible-view retry requests with per-target workflow ids", () => {
+  it("builds operation-view visible-view retry requests with per-target workflow ids", () => {
     assert.deepEqual(
       buildBulkWorkflowActionRequest({
         transport: "retry-bulk",
@@ -142,7 +142,7 @@ describe("buildBulkWorkflowActionRequest", () => {
           targets: [],
           enabled: true,
         },
-        source: "batch-view",
+        source: "operation-view",
         scope: "visible-view",
         items: [
           { workflowId: "eid-lookup", id: "employee-id", runId: "eid-run" },
@@ -155,7 +155,7 @@ describe("buildBulkWorkflowActionRequest", () => {
           workflow: "oath-upload",
           date: "2026-05-21",
           parentRunId: "batch",
-          source: "batch-view",
+          source: "operation-view",
           scope: "visible-view",
           items: [
             { workflowId: "eid-lookup", id: "employee-id", runId: "eid-run" },
@@ -166,14 +166,14 @@ describe("buildBulkWorkflowActionRequest", () => {
     );
   });
 
-  it("builds batch-view visible-view delete requests with per-target workflow ids", () => {
+  it("builds operation-view visible-view delete requests with per-target workflow ids", () => {
     assert.deepEqual(
       buildBulkWorkflowActionRequest({
         transport: "delete-bulk",
         kind: "delete",
         workflow: "oath-upload",
         date: "2026-05-21",
-        source: "batch-view",
+        source: "operation-view",
         scope: "visible-view",
         items: [
           { workflowId: "oath-signature", id: "10000001", runId: "signature-run" },
@@ -184,7 +184,7 @@ describe("buildBulkWorkflowActionRequest", () => {
         body: {
           workflow: "oath-upload",
           date: "2026-05-21",
-          source: "batch-view",
+          source: "operation-view",
           scope: "visible-view",
           items: [
             { workflowId: "oath-signature", id: "10000001", runId: "signature-run" },

@@ -16,8 +16,8 @@ export interface DelegationRowProps {
   delegatedEntries: TrackerEntry[];
   projection?: WorkflowRunProjection;
   /** Whether the batch queue view is showing this parent's members. */
-  isBatchQueueFocused: boolean;
-  onEnterBatchQueue: (parentRunId: string) => void;
+  isOperationQueueFocused: boolean;
+  onEnterOperationQueue: (parentRunId: string) => void;
   /** Tracker date — required for delete. */
   date?: string;
   /** Called after deleting the prep parent row. */
@@ -26,18 +26,18 @@ export interface DelegationRowProps {
    * When false, the row is display-only (no drill-in). Nested batch navigation
    * is unsupported; keep this true only on the main queue list.
    */
-  batchDrillInEnabled?: boolean;
+  operationDrillInEnabled?: boolean;
 }
 
 export function DelegationRow({
   parent,
   delegatedEntries,
   projection,
-  isBatchQueueFocused,
-  onEnterBatchQueue,
+  isOperationQueueFocused,
+  onEnterOperationQueue,
   date,
   onDelete,
-  batchDrillInEnabled = true,
+  operationDrillInEnabled = true,
 }: DelegationRowProps) {
   const runId = parent.runId ?? parent.id;
   const title = parent.data?.pdfOriginalName ?? readQueueTitle(parent.data) ?? "Prep batch";
@@ -56,15 +56,15 @@ export function DelegationRow({
       footerSecondaryId={projection?.subtitle}
       firstTimestamp={parent.timestamp}
       elapsedEntries={[parent, ...delegatedEntries]}
-      isFocused={isBatchQueueFocused}
-      drillInEnabled={batchDrillInEnabled}
-      onEnter={onEnterBatchQueue}
+      isFocused={isOperationQueueFocused}
+      drillInEnabled={operationDrillInEnabled}
+      onEnter={onEnterOperationQueue}
       footerActions={
         <ApprovalDelegationFooterActions
           parent={parent}
           delegatedEntries={delegatedEntries}
           projection={projection}
-          batchParentRunId={runId}
+          operationParentRunId={runId}
           date={date}
           onDelete={onDelete}
         />

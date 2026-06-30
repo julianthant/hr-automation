@@ -11,9 +11,9 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { TopBar } from "./components/navigation/TopBar";
 import { QueuePanel } from "./components/queue-panel/QueuePanel";
 import { countQueuePanelTopLevelRows } from "./components/queue-panel/queue-surface-classifier";
-import { resolveDaemonBatchQueueTitle } from "./components/queue-panel/batch-queue-view";
+import { resolveDaemonOperationQueueTitle } from "./components/queue-panel/operation-queue-view";
 import { LogPanel } from "./components/log-panel/LogPanel";
-import { BatchScreenshotsPanel } from "./components/log-panel/BatchScreenshotsPanel";
+import { OperationScreenshotsPanel } from "./components/log-panel/OperationScreenshotsPanel";
 import {
   OcrReviewPrepProvider,
   OcrReviewPrepToolbar,
@@ -21,7 +21,7 @@ import {
 } from "./components/ocr/OcrReviewPane";
 import { TerminalDrawer } from "./components/terminal-drawer/TerminalDrawer";
 import { TerminalDrawerProvider } from "./components/hooks/useTerminalDrawer";
-import { BatchQueueParentRunIdProvider } from "./components/hooks/useBatchQueueContext";
+import { OperationQueueParentRunIdProvider } from "./components/hooks/useOperationQueueContext";
 import { useEntries } from "./components/hooks/useEntries";
 import { usePreflight } from "./components/hooks/usePreflight";
 import { prefetchRosters } from "./components/hooks/useRosters";
@@ -123,7 +123,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initial.selectedId);
   const [reviewingPrepId, setReviewingPrepId] = useState<string | null>(null);
   const [ocrPreviewVisible, setOcrPreviewVisible] = useState(false);
-  const [batchQueueParentRunId, setBatchQueueParentRunId] = useState<string | null>(null);
+  const [operationQueueParentRunId, setOperationQueueParentRunId] = useState<string | null>(null);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [runModalReuploadFor, setRunModalReuploadFor] = useState<{ sessionId: string; previousRunId: string } | undefined>(undefined);
   const [date, setDate] = useState(initial.date);
@@ -231,14 +231,14 @@ export function App() {
   );
 
   /** Tracker item ids delegated under the active batch-queue parent (if any). */
-  const batchMemberIds = useMemo(() => {
-    if (!batchQueueParentRunId) return null;
+  const operationMemberIds = useMemo(() => {
+    if (!operationQueueParentRunId) return null;
     const ids = new Set<string>();
     for (const e of entries) {
-      if (e.parentRunId === batchQueueParentRunId) ids.add(e.id);
+      if (e.parentRunId === operationQueueParentRunId) ids.add(e.id);
     }
     return ids;
-  }, [batchQueueParentRunId, entries]);
+  }, [operationQueueParentRunId, entries]);
 
   // If the URL `?id=` points to a sibling that's been folded into a primary,
   // redirect to the primary so the LogPanel actually loads. Without this,
@@ -250,23 +250,23 @@ export function App() {
   useEffect(() => {
     if (!selectedId) return;
     if (dedupedEntries.some((e) => e.id === selectedId)) return;
-    if (batchMemberIds?.has(selectedId)) return;
+    if (operationMemberIds?.has(selectedId)) return;
     for (const g of mergeGroups) {
       if (g.siblings.some((s) => s.id === selectedId)) {
         setSelectedId(g.primary.id);
         return;
       }
     }
-  }, [selectedId, dedupedEntries, mergeGroups, batchMemberIds]);
+  }, [selectedId, dedupedEntries, mergeGroups, operationMemberIds]);
 
   const selectedEntry = useMemo(() => {
     if (!selectedId) return null;
     if (
-      batchQueueParentRunId &&
-      batchMemberIds?.has(selectedId)
+      operationQueueParentRunId &&
+      operationMemberIds?.has(selectedId)
     ) {
       const hit = entries.find(
-        (e) => e.id === selectedId && e.parentRunId === batchQueueParentRunId,
+        (e) => e.id === selectedId && e.parentRunId === operationQueueParentRunId,
       );
       if (hit) return hit;
     }
@@ -277,8 +277,8 @@ export function App() {
     );
   }, [
     selectedId,
-    batchQueueParentRunId,
-    batchMemberIds,
+    operationQueueParentRunId,
+    operationMemberIds,
     entries,
     dedupedEntries,
   ]);
@@ -523,7 +523,7 @@ export function App() {
     setShowSettings(false);
     setWorkflow(wf);
     setSelectedId(null);
-    setBatchQueueParentRunId(null);
+    setOperationQueueParentRunId(null);
   }, []);
 
   // Rail "Dashboard" entry — land on the cross-workflow Overview.
@@ -560,7 +560,7 @@ export function App() {
 
   const handleDateChange = useCallback((d: string) => {
     setDate(d);
-    setBatchQueueParentRunId(null);
+    setOperationQueueParentRunId(null);
   }, []);
 
   // Global keyboard shortcuts (row-level ↑/↓/r/x live in QueuePanel). A "g t"
@@ -663,11 +663,11 @@ export function App() {
     },
     [],
   );
-  const handleEnterBatchQueue = useCallback((parentRunId: string) => {
+  const handleEnterOperationQueue = useCallback((parentRunId: string) => {
     // One batch view at a time — drilling into another batch while scoped would
     // nest batch context and break toolbar / bulk actions expectations.
-    if (batchQueueParentRunId !== null) {
-      if (batchQueueParentRunId === parentRunId) return;
+    if (operationQueueParentRunId !== null) {
+      if (operationQueueParentRunId === parentRunId) return;
       toast.warning("Already viewing a batch", {
         description: "Use Back to return to the queue before opening another batch.",
         duration: 5000,
@@ -677,12 +677,12 @@ export function App() {
     // Batch queue mode exits any open prep review and clears any selected child.
     setReviewingPrepId(null);
     setSelectedId(null);
-    setBatchQueueParentRunId(parentRunId);
-  }, [batchQueueParentRunId]);
-  const handleExitBatchQueue = useCallback(() => {
-    setBatchQueueParentRunId(null);
+    setOperationQueueParentRunId(parentRunId);
+  }, [operationQueueParentRunId]);
+  const handleExitOperationQueue = useCallback(() => {
+    setOperationQueueParentRunId(null);
   }, []);
-  const handleOpenBatchPreview = useCallback(() => {
+  const handleOpenOperationPreview = useCallback(() => {
     setReviewingPrepId(null);
     setSelectedId(null);
   }, []);
@@ -711,31 +711,31 @@ export function App() {
     [wfCounts, workflow, entriesKey, queuePanelTopLevelCount],
   );
 
-  const batchPreviewMembers = useMemo(
+  const operationPreviewMembers = useMemo(
     () =>
-      batchQueueParentRunId
-        ? dedupedEntries.filter((e) => e.parentRunId === batchQueueParentRunId)
+      operationQueueParentRunId
+        ? dedupedEntries.filter((e) => e.parentRunId === operationQueueParentRunId)
         : [],
-    [batchQueueParentRunId, dedupedEntries],
+    [operationQueueParentRunId, dedupedEntries],
   );
 
-  const sortedBatchPreviewMembers = useMemo(
+  const sortedOperationPreviewMembers = useMemo(
     () =>
-      batchQueueParentRunId
-        ? sortQueueEntriesForDisplay(batchPreviewMembers, queueSortMode, displayNames)
+      operationQueueParentRunId
+        ? sortQueueEntriesForDisplay(operationPreviewMembers, queueSortMode, displayNames)
         : [],
-    [batchQueueParentRunId, batchPreviewMembers, queueSortMode, displayNames],
+    [operationQueueParentRunId, operationPreviewMembers, queueSortMode, displayNames],
   );
 
-  const batchPreviewPanelTitle = useMemo(() => {
-    if (!batchQueueParentRunId) return `${wfLabel} batch preview`;
-    return `${resolveDaemonBatchQueueTitle(wfLabel, batchPreviewMembers, batchQueueParentRunId)} preview`;
-  }, [batchQueueParentRunId, batchPreviewMembers, wfLabel]);
+  const operationPreviewPanelTitle = useMemo(() => {
+    if (!operationQueueParentRunId) return `${wfLabel} batch preview`;
+    return `${resolveDaemonOperationQueueTitle(wfLabel, operationPreviewMembers, operationQueueParentRunId)} preview`;
+  }, [operationQueueParentRunId, operationPreviewMembers, wfLabel]);
 
   const primariesForBulkActions = useMemo(() => {
-    if (!batchQueueParentRunId) return dedupedEntries;
-    return entries.filter((e) => e.parentRunId === batchQueueParentRunId);
-  }, [batchQueueParentRunId, dedupedEntries, entries]);
+    if (!operationQueueParentRunId) return dedupedEntries;
+    return entries.filter((e) => e.parentRunId === operationQueueParentRunId);
+  }, [operationQueueParentRunId, dedupedEntries, entries]);
 
   const bulkActionEntries = useMemo(
     () => collectEntriesForMergedScope(mergeGroups, primariesForBulkActions),
@@ -775,7 +775,7 @@ export function App() {
   );
 
   return (
-    <BatchQueueParentRunIdProvider parentRunId={batchQueueParentRunId}>
+    <OperationQueueParentRunIdProvider parentRunId={operationQueueParentRunId}>
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
     <TerminalDrawerProvider>
     <div className="flex flex-col h-screen">
@@ -904,10 +904,10 @@ export function App() {
           onOpenReview={handleOpenReview}
           onReupload={handleReupload}
           onOpenOcrReview={handleOpenOcrReview}
-          batchQueueParentRunId={batchQueueParentRunId}
-          onEnterBatchQueue={handleEnterBatchQueue}
-          onExitBatchQueue={handleExitBatchQueue}
-          onOpenBatchPreview={handleOpenBatchPreview}
+          operationQueueParentRunId={operationQueueParentRunId}
+          onEnterOperationQueue={handleEnterOperationQueue}
+          onExitOperationQueue={handleExitOperationQueue}
+          onOpenOperationPreview={handleOpenOperationPreview}
           loading={loading}
           queueSortMode={queueSortMode}
           onQueueSortModeChange={setQueueSortMode}
@@ -924,7 +924,7 @@ export function App() {
                     ...(e.runId ? { runId: e.runId } : {}),
                   }))}
                 date={date}
-                parentRunId={batchQueueParentRunId ?? undefined}
+                parentRunId={operationQueueParentRunId ?? undefined}
               />
               <StopAllButton workflow={workflow} items={stopAllTargets} />
               <DeleteAllButton
@@ -947,12 +947,12 @@ export function App() {
           <ResizableHandle />
           <ResizablePanel id="detail" order={2} defaultSize={72} minSize={40} className="flex">
         {(() => {
-          if (batchQueueParentRunId && !selectedEntry) {
+          if (operationQueueParentRunId && !selectedEntry) {
             return (
-              <BatchScreenshotsPanel
-                members={sortedBatchPreviewMembers}
+              <OperationScreenshotsPanel
+                members={sortedOperationPreviewMembers}
                 displayNames={displayNames}
-                title={batchPreviewPanelTitle}
+                title={operationPreviewPanelTitle}
               />
             );
           }
@@ -1019,7 +1019,7 @@ export function App() {
     </div>
     </TerminalDrawerProvider>
     </TooltipProvider>
-    </BatchQueueParentRunIdProvider>
+    </OperationQueueParentRunIdProvider>
   );
 }
 

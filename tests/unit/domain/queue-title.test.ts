@@ -11,9 +11,9 @@ test("queueTitleData stamps title and kind", () => {
     __queueTitle: "Doe, Jane",
     __queueTitleKind: "single",
   });
-  assert.deepEqual(queueTitleData({ kind: "batch", title: "  Emergency Contact · #3456  " }), {
+  assert.deepEqual(queueTitleData({ kind: "operation", title: "  Emergency Contact · #3456  " }), {
     __queueTitle: "Emergency Contact · #3456",
-    __queueTitleKind: "batch",
+    __queueTitleKind: "operation",
   });
   assert.deepEqual(queueTitleData({ kind: "single", title: "   " }), {});
   assert.deepEqual(queueTitleData(undefined), {});

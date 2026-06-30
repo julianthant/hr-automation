@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const titlePart = z
   .strictObject({
-    scheme: z.enum(["person-name", "pdf-filename", "catalog-label", "batch-anchor", "custom-template"]),
+    scheme: z.enum(["person-name", "pdf-filename", "catalog-label", "operation-anchor", "custom-template"]),
     template: z.string().optional(),
   })
   .refine((p) => p.scheme !== "custom-template" || !!p.template, { message: "custom-template requires a template" });
