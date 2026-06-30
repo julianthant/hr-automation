@@ -365,7 +365,13 @@ function SettingsSectionContent({
     rawValue: string,
   ) {
     const current = (draft[sectionKey] as Record<string, unknown>)[field as string];
-    const newValue: unknown = typeof current === "number" ? Number(rawValue) : rawValue;
+    const parsed = Number(rawValue);
+    const newValue: unknown =
+      typeof current === "number"
+        ? rawValue === "" || !Number.isFinite(parsed)
+          ? current
+          : parsed
+        : rawValue;
     setDraft((prev) => ({
       ...prev,
       [sectionKey]: { ...prev[sectionKey], [field]: newValue },
@@ -1042,7 +1048,7 @@ export function SettingsDialog({
       setSaveStatus("Settings saved");
     } else {
       toast.error("Save failed");
-      setSaveStatus(error ?? "Save failed");
+      setSaveStatus("Save failed");
     }
   };
 
@@ -1062,7 +1068,7 @@ export function SettingsDialog({
       setSaveStatus("Reset to defaults");
     } else {
       toast.error("Reset failed");
-      setSaveStatus(error ?? "Reset failed");
+      setSaveStatus("Reset failed");
     }
   };
 
