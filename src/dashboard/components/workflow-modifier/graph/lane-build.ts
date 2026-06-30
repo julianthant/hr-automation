@@ -102,7 +102,7 @@ function varKey(v: string | undefined): string | null {
 
 /**
  * Derive lane→lane data-flow edges: a `scrape`/`assert` op that writes `{var}` in
- * one lane, linked to the FIRST later lane whose op READS that same `{var}` (a
+ * one lane, linked to EVERY later lane whose op READS that same `{var}` (a
  * fill/select/click input). One edge per producer→consumer lane pair + var (deduped),
  * labeled with the var. Within-lane flow is shown by the op rows' own in/out pills,
  * so a producer and consumer in the SAME lane emit no edge.
