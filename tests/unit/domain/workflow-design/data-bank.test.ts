@@ -36,6 +36,21 @@ describe("mergeSystemOperations", () => {
     assert.deepEqual([...merged.tags!].sort(), ["eid", "id"]); // unioned
   });
 
+  test("system op label wins over workflow op label when both carry different non-empty values", () => {
+    // Regression for mergeOp priority inversion: system ops come FIRST in the input
+    // array, so they become `prev`. A workflow op with a different (possibly shorter)
+    // label must NOT replace the richer system-catalog label.
+    const cats = mergeSystemOperations([
+      op({ id: "kuali.eid#fill", kind: "fill", system: "kuali", label: "System Label", role: "textbox" }),
+      op({ id: "kuali.eid#fill", kind: "fill", system: "kuali", label: "Workflow Label" }),
+    ]);
+    assert.equal(cats.length, 1);
+    assert.equal(cats[0].operations.length, 1);
+    const merged = cats[0].operations[0];
+    assert.equal(merged.label, "System Label"); // prev (system) wins
+    assert.equal(merged.role, "textbox"); // prev-only field is preserved
+  });
+
   test("does not let an empty/undefined later field erase an earlier value", () => {
     const cats = mergeSystemOperations([
       op({ id: "x.a#click", kind: "click", system: "x", label: "A", accessibleName: "Real" }),
