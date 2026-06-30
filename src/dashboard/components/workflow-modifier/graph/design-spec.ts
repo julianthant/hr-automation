@@ -227,6 +227,11 @@ export function designSpecToGraph(spec: WorkflowDesignSpec): DesignOverlay {
           data: actionDataFromBlock(n.action),
         });
       }
+    } else if (n.type === "action" && !n.action) {
+      // An action node without its action block is a schema violation (the
+      // designNode schema enforces this via superRefine). If it somehow reaches
+      // here it is silently dropped — warn so the operator can diagnose.
+      console.warn(`design spec: action node "${n.id}" has no action block; skipping`);
     } else if (n.type === "custom") {
       intentNodes.push({
         id: n.id,
