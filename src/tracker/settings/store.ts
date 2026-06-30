@@ -58,12 +58,12 @@ export function readOperatorSettingsOverride(
   }
 }
 
-/** Validate (fail loud) + persist the override, pretty-printed for git/diff. */
+/** Validate (fail loud) + persist the override, pretty-printed for git/diff. Returns the validated (trimmed) override. */
 export function writeOperatorSettings(
   repoRoot: string,
   override: OperatorSettingsOverride,
-): void {
-  const validated = OperatorSettingsOverrideSchema.parse(override);
+): OperatorSettingsOverride {
+  const validated = OperatorSettingsOverrideSchema.parse(override) as OperatorSettingsOverride;
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(
     operatorSettingsFile(repoRoot),
@@ -71,6 +71,7 @@ export function writeOperatorSettings(
     "utf8",
   );
   invalidateOperatorSettingsCache();
+  return validated;
 }
 
 /** Remove the override file (revert to all defaults). Returns whether it existed. */

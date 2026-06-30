@@ -60,15 +60,19 @@ export function registerSettingsRoutes(app: Hono, deps: DashboardHonoDeps): void
       return jsonResponse({ ok: false, error: parsed.error.issues }, 400);
     }
     try {
-      writeOperatorSettings(root, parsed.data);
-      return jsonResponse({ ok: true, settings: mergeOperatorSettings(parsed.data) });
+      const validated = writeOperatorSettings(root, parsed.data);
+      return jsonResponse({ ok: true, settings: mergeOperatorSettings(validated) });
     } catch (err) {
       return jsonResponse({ ok: false, error: String(err) }, 400);
     }
   });
 
   app.delete("/api/settings", () => {
-    const reverted = deleteOperatorSettings(root);
-    return jsonResponse({ ok: true, reverted, settings: mergeOperatorSettings(null) });
+    try {
+      const reverted = deleteOperatorSettings(root);
+      return jsonResponse({ ok: true, reverted, settings: mergeOperatorSettings(null) });
+    } catch (err) {
+      return jsonResponse({ ok: false, error: String(err) }, 400);
+    }
   });
 }
