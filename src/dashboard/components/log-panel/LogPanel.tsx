@@ -8,7 +8,7 @@ import { ExportMenu } from "./ExportMenu";
 import { RetryButton } from "@/components/shared/RetryButton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ScreenshotsPanel } from "./ScreenshotsPanel";
-import { BatchScreenshotsPanel } from "./BatchScreenshotsPanel";
+import { OperationScreenshotsPanel } from "./OperationScreenshotsPanel";
 import { EditDataTab } from "./EditDataTab";
 import { EidApprovalBanner } from "./EidApprovalBanner";
 import { ViewDataPanel } from "./ViewDataPanel";
@@ -18,7 +18,7 @@ import { useCoordinatorAggregatedLogs } from "@/components/hooks/useCoordinatorA
 import {
   COORDINATOR_LOG_SOURCE_LABEL,
   computeOperationPipelineView,
-  isOperationCoordinatorWorkflow,
+  isOperationCoordinatorRow,
   operationCoordinatorEffectiveStatus,
   type CoordinatorLogLine,
 } from "./coordinator-logs";
@@ -31,7 +31,6 @@ import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
 import { useWorkflow, useWorkflows } from "@/lib/workflows-context";
 import { hasDelegationRole } from "../../../domain/row-archetype.js";
-import type { DelegatedChild } from "./LogStream.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
 
@@ -100,9 +99,12 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
         : [],
     [allEntries, entry?.id, entry?.runId],
   );
-  const isOperationCoordinator = Boolean(
-    entry && isOperationCoordinatorWorkflow(entry.workflow) && entry.data?.archetype === "operation",
-  );
+  // Any operation-archetype row is a coordinator that owns the consolidated
+  // event-tracker detail panel — the OCR-backed set AND input-run operation
+  // shells (e.g. separations multi-person). Both fan out to member rows, so
+  // both show aggregated member screenshots, hide the (meaningless) person
+  // detail grid, and report member-rollup status. See `isOperationCoordinatorRow`.
+  const isOperationCoordinator = Boolean(entry && isOperationCoordinatorRow(entry));
   const registeredSteps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
@@ -139,10 +141,11 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   };
   const { logs, loading: logsLoading } = useLogs(logSourceWorkflow, activeItemId, activeRunId, date);
   const { events } = useRunEvents(logSourceWorkflow, activeItemId, activeRunId, date);
-  // Operation coordinator rows merge sparse lifecycle logs with OCR KEY events,
-  // member summaries, and (for input-run coordinators) daemon session events.
+  // Operation coordinator rows merge sparse lifecycle logs with OCR KEY events
+  // and member summaries. Daemon session-lifecycle events render once on their
+  // own (via the LogStream events merge below), so they are NOT folded in here.
   const { active: coordinatorAggregateActive, logs: coordinatorLogs } =
-    useCoordinatorAggregatedLogs({ entry, coordinatorLogs: logs, childEntries, date, sessionEvents: events });
+    useCoordinatorAggregatedLogs({ entry, coordinatorLogs: logs, childEntries, date });
   const screenshotEventCount = useMemo(
     () => events.reduce((n, e) => (e.type === "screenshot" ? n + 1 : n), 0),
     [events],
@@ -390,8 +393,6 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
 
       </>)}
 
-      {/* Delegated runs are surfaced in the "Delegated" LogStream tab — see below. */}
-
       <LogStream
         logs={displayedLogs}
         events={events}
@@ -399,10 +400,9 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
         delegationLabel={delegationLabel}
         failureBanner={failureBanner ?? eidApprovalBanner}
         sourceLabelOf={sourceLabelOf}
-        delegatedChildren={childEntries.length > 0 ? (childEntries as DelegatedChild[]) : undefined}
         screenshotsSlot={
           isOperationCoordinator ? (
-            <BatchScreenshotsPanel
+            <OperationScreenshotsPanel
               members={childEntries}
               displayNames={displayNames}
               title={resolveEntryName(entry, displayNames) || entry.id}

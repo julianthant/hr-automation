@@ -399,10 +399,19 @@ export const runEventsTopic: TopicEmitter<{
       const wfInstance =
         resolveInstanceForRun(trackerEntries, requestedRunId) ??
         resolveInstanceForOperationCoordinator(trackerEntries, requestedRunId);
+      // Operation coordinator: its member rows were supplemented into
+      // `trackerEntries` above. Pass their run ids so the coordinator timeline
+      // can include each member's `item_start` (the consolidated event tracker)
+      // — those events carry the member run id, not the coordinator's, so the
+      // runId/instance clauses alone would drop them. Empty for normal runs.
+      const memberRunIds = trackerEntries
+        .filter((t) => t.parentRunId === requestedRunId && typeof t.runId === "string" && t.runId.length > 0)
+        .map((t) => t.runId as string);
       try {
         const sqliteEvents = querySessionEventsForRun(deps.stateDb, {
           runId: requestedRunId,
           ...(wfInstance ? { workflowInstance: wfInstance } : {}),
+          ...(memberRunIds.length > 0 ? { memberRunIds } : {}),
         });
         allEvents = sqliteEvents;
       } catch (err) {

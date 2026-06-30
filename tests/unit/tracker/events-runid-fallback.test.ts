@@ -382,8 +382,10 @@ describe("filterEventsForRun — operation coordinator lifecycle attribution", (
     // - orphan lifecycle events (no runId) attributed via workflowInstance + time window
     // - direct events with runId === coordinatorRunId (there are none here — the
     //   coordinator is a display-only row; member item events carry memberRunId)
-    // Member item events (runId: "MEMBER-A") do NOT appear in the coordinator view
-    // because they have a different runId; they belong to the member's own log panel.
+    // - each member's `item_start` (runId: "MEMBER-A") — the coordinator is the
+    //   consolidated event tracker, so "member began processing" markers show
+    //   here too. Member `item_complete` is NOT pulled in (it would duplicate the
+    //   per-member summary line the log panel already folds in).
     const outCoordinator = filterEventsForRun(
       events,
       trackers,
@@ -398,6 +400,7 @@ describe("filterEventsForRun — operation coordinator lifecycle attribution", (
         { type: "browser_launch", runId: null },
         { type: "auth_start", runId: null },
         { type: "auth_complete", runId: null },
+        { type: "item_start", runId: "MEMBER-A" },
       ],
     );
   });
@@ -514,12 +517,14 @@ describe("/events/run-events operation coordinator SSE (HTTP)", () => {
     const data = messages.map((m) => JSON.parse(m)).flat();
 
     // Coordinator view must include daemon lifecycle events (workflow_start,
-    // browser_launch, auth_start) AND the member item_start.
-    assert.ok(data.length >= 3, `expected ≥3 events, got ${data.length}: ${JSON.stringify(data.map((e: {type: string}) => e.type))}`);
+    // browser_launch, auth_start) AND each member's item_start (the consolidated
+    // event tracker surfaces "member began processing" markers).
+    assert.ok(data.length >= 4, `expected ≥4 events, got ${data.length}: ${JSON.stringify(data.map((e: {type: string}) => e.type))}`);
     const types = (data as Array<{type: string}>).map((e) => e.type).sort();
     assert.ok(types.includes("workflow_start"), "coordinator SSE must include workflow_start");
     assert.ok(types.includes("browser_launch"), "coordinator SSE must include browser_launch");
     assert.ok(types.includes("auth_start"), "coordinator SSE must include auth_start");
+    assert.ok(types.includes("item_start"), "coordinator SSE must include the member item_start");
   });
 });
 

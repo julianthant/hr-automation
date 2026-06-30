@@ -4,9 +4,9 @@ import { ScreenshotTile } from "./ScreenshotTile";
 import {
   ALL_FILTER,
   buildScreenshotFilters,
-  filterScreenshotTiles,
-  flattenScreenshotTiles,
-  type ScreenshotTileData,
+  buildScreenshotGroups,
+  filterScreenshotGroups,
+  type ScreenshotGroup,
 } from "./screenshot-gallery";
 import { useRunScreenshots } from "@/components/hooks/useRunScreenshots";
 
@@ -29,11 +29,13 @@ export function ScreenshotsPanel({
   const [filter, setFilter] = useState<string>(ALL_FILTER);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
-  const tiles = useMemo(() => flattenScreenshotTiles(entries), [entries]);
-  const chips = useMemo(() => buildScreenshotFilters(tiles), [tiles]);
-  const visibleTiles = useMemo(
-    () => filterScreenshotTiles(tiles, filter),
-    [tiles, filter],
+  // One tile per capture EVENT: a multi-slice capture (8 page-slice chunks)
+  // collapses into a single folder tile so it never floods the grid.
+  const groups = useMemo(() => buildScreenshotGroups(entries), [entries]);
+  const chips = useMemo(() => buildScreenshotFilters(groups), [groups]);
+  const visibleGroups = useMemo(
+    () => filterScreenshotGroups(groups, filter),
+    [groups, filter],
   );
 
   // Self-heal: if the active filter's chip disappears (errors cleared, a system
@@ -42,14 +44,24 @@ export function ScreenshotsPanel({
     if (!chips.some((chip) => chip.id === filter)) setFilter(ALL_FILTER);
   }, [chips, filter]);
 
-  // The lightbox steps through the CURRENTLY VISIBLE set — what the operator
-  // sees is what arrow keys walk.
-  const flat = useMemo<LightboxItem[]>(
-    () => visibleTiles.map((tile) => ({ entry: tile.entry, fileIdx: tile.fileIdx })),
-    [visibleTiles],
-  );
+  // The lightbox steps through every slice of the CURRENTLY VISIBLE groups, in
+  // grid order. A folder's chunks sit contiguously, so opening one lands on its
+  // first slice and the operator pages through all of them like a gallery, then
+  // continues into the next capture. `groupOffset` maps a tile click to where
+  // its first slice sits in this flat queue.
+  const { flat, groupOffset } = useMemo(() => {
+    const flat: LightboxItem[] = [];
+    const groupOffset = new Map<string, number>();
+    for (const group of visibleGroups) {
+      groupOffset.set(group.key, flat.length);
+      group.entry.files.forEach((_file, fileIdx) => {
+        flat.push({ entry: group.entry, fileIdx });
+      });
+    }
+    return { flat, groupOffset };
+  }, [visibleGroups]);
 
-  if (tiles.length === 0) {
+  if (groups.length === 0) {
     return (
       <div className="px-6 py-4 text-sm text-muted-foreground">
         No screenshots captured for this run yet.
@@ -57,9 +69,9 @@ export function ScreenshotsPanel({
     );
   }
 
-  const openTile = (tile: ScreenshotTileData) => {
-    const idx = visibleTiles.findIndex((item) => item.key === tile.key);
-    if (idx >= 0) setLightboxIdx(idx);
+  const openGroup = (group: ScreenshotGroup) => {
+    const idx = groupOffset.get(group.key);
+    if (idx !== undefined) setLightboxIdx(idx);
   };
 
   return (
@@ -103,19 +115,19 @@ export function ScreenshotsPanel({
           })}
         </div>
         <p className="sr-only" aria-live="polite">
-          {visibleTiles.length} {visibleTiles.length === 1 ? "screenshot" : "screenshots"} shown
+          {visibleGroups.length} {visibleGroups.length === 1 ? "screenshot" : "screenshots"} shown
         </p>
       </div>
 
       <div className="px-6 py-4">
-        {visibleTiles.length === 0 ? (
+        {visibleGroups.length === 0 ? (
           <div className="rounded-md border border-dashed border-border bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
             No screenshots match this filter.
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
-            {visibleTiles.map((tile) => (
-              <ScreenshotTile key={tile.key} tile={tile} onOpen={openTile} />
+            {visibleGroups.map((group) => (
+              <ScreenshotTile key={group.key} group={group} onOpen={openGroup} />
             ))}
           </div>
         )}

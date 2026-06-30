@@ -5,6 +5,7 @@ import {
   COORDINATOR_LOG_SOURCE_LABEL,
   buildMemberSummaryLines,
   computeOperationPipelineView,
+  isOperationCoordinatorRow,
   isOperationCoordinatorWorkflow,
   mergeCoordinatorLogs,
   operationCoordinatorEffectiveStatus,
@@ -88,6 +89,73 @@ describe("operationCoordinatorEffectiveStatus", () => {
       },
     ];
     assert.equal(operationCoordinatorEffectiveStatus(parent, children), "running");
+  });
+
+  it("rolls up an INPUT-RUN operation (no OCR) by archetype, not workflow", () => {
+    // A separations multi-person operation shell is NOT in the OCR coordinator
+    // workflow set, but it carries the `operation` archetype — so its effective
+    // status must still roll up from its members.
+    const parent: TrackerEntry = {
+      workflow: "separations",
+      id: "op-shell",
+      runId: "op-run-1",
+      timestamp: "2026-06-30T15:00:00.000Z",
+      status: "running",
+      data: { archetype: "operation" },
+    };
+    const allDone: TrackerEntry[] = [
+      {
+        workflow: "separations",
+        id: "10884227",
+        runId: "member-run-1",
+        parentRunId: "op-run-1",
+        timestamp: "2026-06-30T15:17:00.000Z",
+        status: "done",
+        data: { archetype: "operation-member" },
+      },
+    ];
+    assert.equal(operationCoordinatorEffectiveStatus(parent, allDone), "done");
+    assert.equal(
+      operationCoordinatorEffectiveStatus(parent, [
+        ...allDone,
+        { ...allDone[0]!, id: "x", runId: "m2", status: "running" },
+      ]),
+      "running",
+    );
+  });
+
+  it("returns the row's own status for a non-operation (single) row", () => {
+    const single: TrackerEntry = {
+      workflow: "separations",
+      id: "10884227",
+      runId: "run-1",
+      timestamp: "2026-06-30T15:00:00.000Z",
+      status: "running",
+      data: { archetype: "single" },
+    };
+    assert.equal(operationCoordinatorEffectiveStatus(single, []), "running");
+  });
+});
+
+describe("isOperationCoordinatorRow", () => {
+  const row = (archetype: string | undefined, workflow = "separations"): TrackerEntry => ({
+    workflow,
+    id: "r1",
+    runId: "run-1",
+    timestamp: "2026-06-30T15:00:00.000Z",
+    status: "running",
+    data: archetype === undefined ? {} : { archetype },
+  });
+
+  it("is true for ANY operation-archetype row, regardless of workflow", () => {
+    assert.equal(isOperationCoordinatorRow(row("operation", "separations")), true);
+    assert.equal(isOperationCoordinatorRow(row("operation", "emergency-contact")), true);
+  });
+
+  it("is false for single / member / unstamped rows", () => {
+    assert.equal(isOperationCoordinatorRow(row("single")), false);
+    assert.equal(isOperationCoordinatorRow(row("operation-member")), false);
+    assert.equal(isOperationCoordinatorRow(row(undefined)), false);
   });
 });
 
@@ -189,6 +257,46 @@ describe("computeOperationPipelineView", () => {
       [],
     );
     assert.deepEqual(view, { steps: ["prepare", "review", "fan-out"], currentStep: "review", status: "failed" });
+  });
+
+  // Input-run operation shells (e.g. separations multi-person) have no OCR
+  // phase — they use the 2-stage dispatch → fan-out timeline.
+  const inputRunOp = (over: Partial<TrackerEntry>): TrackerEntry => ({
+    workflow: "separations",
+    id: "op-shell",
+    runId: "op-run-1",
+    timestamp: "2026-06-30T15:00:00.000Z",
+    status: "running",
+    data: { archetype: "operation" },
+    ...over,
+  });
+
+  it("input-run op with no members yet → active on dispatch", () => {
+    const view = computeOperationPipelineView(inputRunOp({}), []);
+    assert.deepEqual(view, { steps: ["dispatch", "fan-out"], currentStep: "dispatch", status: "running" });
+  });
+
+  it("input-run op with a member in flight → active on fan-out", () => {
+    const view = computeOperationPipelineView(inputRunOp({}), [
+      member({ data: { archetype: "operation-member" }, status: "running" }),
+    ]);
+    assert.deepEqual(view, { steps: ["dispatch", "fan-out"], currentStep: "fan-out", status: "running" });
+  });
+
+  it("input-run op with all members terminal → whole pipeline done", () => {
+    const view = computeOperationPipelineView(inputRunOp({}), [
+      member({ id: "a", runId: "m1", status: "done" }),
+      member({ id: "b", runId: "m2", status: "failed" }),
+    ]);
+    assert.deepEqual(view, { steps: ["dispatch", "fan-out"], currentStep: "fan-out", status: "done" });
+  });
+
+  it("input-run op that itself failed surfaces on the reached stage", () => {
+    const view = computeOperationPipelineView(
+      inputRunOp({ status: "failed", step: "cancelled" }),
+      [],
+    );
+    assert.deepEqual(view, { steps: ["dispatch", "fan-out"], currentStep: "dispatch", status: "failed" });
   });
 });
 

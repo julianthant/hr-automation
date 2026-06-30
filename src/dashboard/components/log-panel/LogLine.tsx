@@ -129,6 +129,35 @@ const EVENT_VISUAL: Record<RunEvent["type"], { icon: LucideIcon; colorClass: str
 // EventLine has no error boundary above it.
 const UNKNOWN_EVENT_VISUAL: { icon: LucideIcon; colorClass: string } = { icon: Dot, colorClass: "text-muted-foreground" };
 
+// Humanized labels so the Events timeline reads as a lifecycle narrative
+// ("Browser launched", "Authenticated") instead of raw snake_case event names.
+// Anything not mapped falls back to its de-underscored type, so a new backend
+// event still renders readably without a code change.
+const EVENT_LABEL: Partial<Record<RunEvent["type"], string>> = {
+  workflow_start: "Workflow started",
+  workflow_end: "Workflow ended",
+  session_create: "Session created",
+  session_close: "Session closed",
+  browser_launch: "Browser launched",
+  browser_close: "Browser closed",
+  auth_start: "Authenticating",
+  auth_complete: "Authenticated",
+  auth_failed: "Authentication failed",
+  duo_request: "Duo requested",
+  duo_start: "Duo prompt",
+  duo_complete: "Duo approved",
+  duo_timeout: "Duo timed out",
+  item_start: "Item started",
+  item_complete: "Item completed",
+  step_change: "Step changed",
+  idle_signal: "Idle refresh",
+  daemon_phase: "Daemon phase",
+};
+
+function humanizeEventType(type: RunEvent["type"]): string {
+  return EVENT_LABEL[type] ?? type.replace(/_/g, " ");
+}
+
 function EventLine({ event }: { event: RunEvent }) {
   const v = EVENT_VISUAL[event.type] ?? UNKNOWN_EVENT_VISUAL;
   const Icon = v.icon;
@@ -143,15 +172,26 @@ function EventLine({ event }: { event: RunEvent }) {
         minute: "2-digit",
         second: "2-digit",
       });
-  const detail = event.system ?? event.step ?? event.currentStep ?? event.currentItemId ?? "";
+  // Workflow/session lifecycle events carry no system/step — their useful
+  // context is WHICH daemon instance fired them ("Separation 1"). So
+  // `workflowInstance` is the final detail fallback, which is what hooks up
+  // the "which workflow started" line (workflow_start → "Workflow started
+  // Separation 1") that was previously rendering bare.
+  const detail =
+    event.system ??
+    event.step ??
+    event.currentStep ??
+    event.currentItemId ??
+    event.workflowInstance ??
+    "";
   const label = event.type === "screenshot"
     ? [
-        "screenshot",
+        "Screenshot",
         event.screenshotKind,
         event.screenshotLabel,
         event.screenshotFileCount != null ? `${event.screenshotFileCount}p` : null,
       ].filter(Boolean).join(" — ")
-    : event.type;
+    : humanizeEventType(event.type);
   const suffix = event.type !== "screenshot" && detail ? ` ${detail}` : "";
   return (
     <div className="flex items-start gap-3.5 px-6 py-[3px] font-mono text-[13px] leading-relaxed">
