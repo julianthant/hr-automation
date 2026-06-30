@@ -94,12 +94,13 @@ export function useSettings(): UseSettings {
     setSaving(true);
     try {
       const res = await fetch("/api/settings", { method: "DELETE" });
-      const body = (await res.json()) as { ok?: boolean; settings?: OperatorSettings };
+      const body = (await res.json()) as { ok?: boolean; settings?: OperatorSettings; error?: unknown };
       if (res.ok && body.ok && body.settings) {
         setSettings(body.settings);
         setError(null);
         return true;
       }
+      setError(typeof body.error === "string" ? body.error : "Reset failed");
       return false;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
