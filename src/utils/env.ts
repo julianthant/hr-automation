@@ -8,11 +8,18 @@ import { log } from "./log.js";
  * when the operator hasn't chosen) the result equals the original literal, so an
  * unconfigured install is behavior-neutral.
  */
-export function numEnv(key: string, fallback: number): number {
+export function numEnv(
+  key: string,
+  fallback: number,
+  opts?: { integer?: boolean; min?: number },
+): number {
   const raw = process.env[key];
   if (raw === undefined || raw.trim() === "") return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
+  if (!Number.isFinite(n)) return fallback;
+  if (opts?.integer && !Number.isInteger(n)) return fallback;
+  if (opts?.min !== undefined && n < opts.min) return fallback;
+  return n;
 }
 
 export class EnvValidationError extends Error {

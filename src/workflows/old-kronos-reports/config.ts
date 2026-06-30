@@ -26,7 +26,7 @@ export const SCREEN_HEIGHT = SCREEN.height;
 // ─── Workflow-specific values ────────────────────────────────
 
 /** Default number of parallel workers. Operator-tunable via Settings → "Concurrency". */
-export const DEFAULT_WORKERS = numEnv("HRAUTO_DEFAULT_WORKERS", 4);
+export const DEFAULT_WORKERS = numEnv("HRAUTO_DEFAULT_WORKERS", 4, { integer: true, min: 1 });
 
 /** Tracker Excel file path. */
 export const TRACKER_PATH = join(__dirname, "kronos-tracker.xlsx");

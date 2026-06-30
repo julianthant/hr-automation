@@ -6,13 +6,6 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Raw Playwright messages that mean the browser/page/context is gone. */
-const BROWSER_CLOSED_RAW_PATTERNS: RegExp[] = [
-  /Target page, context or browser has been closed/i,
-  /browser has been disconnected/i,
-  /Protocol error.*Target closed/i,
-]
-
 /** Common Playwright/workflow error patterns → concise dashboard-friendly messages. */
 const ERROR_PATTERNS: [RegExp, string][] = [
   [/Target page, context or browser has been closed/i, "Browser closed unexpectedly"],
@@ -32,6 +25,22 @@ const ERROR_PATTERNS: [RegExp, string][] = [
   [/Protocol error.*Target closed/i, "Browser closed during operation"],
 ];
 
+/**
+ * Subset of ERROR_PATTERNS whose classified messages indicate a browser/context
+ * closure. Derived from ERROR_PATTERNS so the two cannot drift: adding a new
+ * browser-closed shape to ERROR_PATTERNS automatically includes it here.
+ */
+const BROWSER_CLOSED_MESSAGES = new Set([
+  "Browser closed unexpectedly",
+  "Browser disconnected",
+  "Browser closed during operation",
+]);
+const BROWSER_CLOSED_ENTRIES = ERROR_PATTERNS.filter(([, msg]) =>
+  BROWSER_CLOSED_MESSAGES.has(msg),
+);
+/** Raw Playwright regexes that mean the browser/page/context is gone. */
+const BROWSER_CLOSED_RAW_PATTERNS = BROWSER_CLOSED_ENTRIES.map(([pat]) => pat);
+
 export interface ClassifyErrorOpts {
   /** When known, appended to browser-closed messages for operator triage. */
   systemId?: string
@@ -45,16 +54,8 @@ export function isBrowserClosedError(err: unknown): boolean {
 
 function appendSystemId(message: string, systemId: string | undefined): string {
   if (!systemId) return message
-  if (message.startsWith('Browser closed unexpectedly')) {
-    return `${message} (${systemId})`
-  }
-  if (message === 'Browser disconnected') {
-    return `${message} (${systemId})`
-  }
-  if (message === 'Browser closed during operation') {
-    return `${message} (${systemId})`
-  }
-  return message
+  const isBrowserClosed = BROWSER_CLOSED_ENTRIES.some(([, msg]) => message.startsWith(msg))
+  return isBrowserClosed ? `${message} (${systemId})` : message
 }
 
 /**

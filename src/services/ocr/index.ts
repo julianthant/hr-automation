@@ -49,7 +49,7 @@ function getProvider(): OcrProvider {
 
 // Operator-tunable via Settings → "OCR" (env populated only for an explicitly-set
 // field; unset = the literal default, so an unconfigured install is unchanged).
-const MAX_VALIDATION_RETRIES = numEnv("OCR_MAX_VALIDATION_RETRIES", 1); // 1 retry = 2 total attempts
+const MAX_VALIDATION_RETRIES = numEnv("OCR_MAX_VALIDATION_RETRIES", 1, { integer: true, min: 0 }); // 1 retry = 2 total attempts
 
 /**
  * Run OCR on a PDF and validate the result against a Zod schema.
