@@ -75,7 +75,14 @@ function effectiveTerminationWindowDays(): number {
     process.env.HRAUTO_SEPARATION_TERMINATION_WINDOW_DAYS ?? "",
     10,
   );
-  return Number.isInteger(n) && n >= 0 ? n : SEPARATION_TERMINATION_WINDOW_DAYS;
+  if (Number.isInteger(n) && n === 0) {
+    log.warn(
+      "[SS Smart HR] HRAUTO_SEPARATION_TERMINATION_WINDOW_DAYS is 0 — " +
+      "every TER effective date will be treated as a prior termination regardless of proximity; " +
+      `falling back to default ${SEPARATION_TERMINATION_WINDOW_DAYS} days`,
+    );
+  }
+  return Number.isInteger(n) && n > 0 ? n : SEPARATION_TERMINATION_WINDOW_DAYS;
 }
 
 /**
