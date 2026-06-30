@@ -28,6 +28,11 @@ export interface LaneInteraction {
   focusedId: string | null;
   /** Dry-run overlay state (off + empty by default). */
   dryRun: LaneDryRun;
+  /** Remove an op the operator dropped into a lane (by bare step + the op's id). */
+  removeAddedOp: (step: string, addedId: string) => void;
+  /** The bare step currently hovered as a Data Bank drop target (highlights the
+   *  lane), or null when nothing is being dragged over a lane. */
+  dropTargetStep: string | null;
 }
 
 const NOOP: LaneInteraction = {
@@ -35,6 +40,8 @@ const NOOP: LaneInteraction = {
   toggleCollapsed: () => {},
   focusedId: null,
   dryRun: { on: false, forStep: () => undefined },
+  removeAddedOp: () => {},
+  dropTargetStep: null,
 };
 
 export const LaneInteractionContext = createContext<LaneInteraction>(NOOP);

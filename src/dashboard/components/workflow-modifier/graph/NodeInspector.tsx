@@ -47,6 +47,7 @@ import {
   NODE_GROUP,
   type GraphNode,
   type ActionNodeData,
+  type AddedLaneOp,
 } from "./graph-types.js";
 import { opKindVisual } from "./op-kind-visuals.js";
 
@@ -61,6 +62,10 @@ interface NodeInspectorProps {
   onUpdateIntent: (id: string, patch: Record<string, unknown>) => void;
   /** Remove an intent node from the canvas. */
   onRemoveIntent: (id: string) => void;
+  /** Edit a step lane's dropped op (data-flow vars / note). */
+  onUpdateAddedOp: (step: string, addedId: string, patch: Partial<ActionNodeData>) => void;
+  /** Remove a step lane's dropped op. */
+  onRemoveAddedOp: (step: string, addedId: string) => void;
 }
 
 const INSPECTOR_TITLES: Record<string, string> = {
@@ -90,6 +95,8 @@ export function NodeInspector({
   onClose,
   onUpdateIntent,
   onRemoveIntent,
+  onUpdateAddedOp,
+  onRemoveAddedOp,
 }: NodeInspectorProps): JSX.Element {
   return (
     <aside
@@ -114,7 +121,14 @@ export function NodeInspector({
         {node.type === NODE_ROW ? (
           <RowInspector data={data} draft={draft} onChange={onChange} />
         ) : node.type === NODE_STEP ? (
-          <StepInspector node={node} data={data} draft={draft} onChange={onChange} />
+          <StepInspector
+            node={node}
+            data={data}
+            draft={draft}
+            onChange={onChange}
+            onUpdateAddedOp={onUpdateAddedOp}
+            onRemoveAddedOp={onRemoveAddedOp}
+          />
         ) : node.type === NODE_DELEGATION_COORDINATOR ? (
           <CoordinatorInspector data={data} draft={draft} onChange={onChange} />
         ) : node.type === NODE_PREP ? (
@@ -244,14 +258,19 @@ function StepInspector({
   data,
   draft,
   onChange,
+  onUpdateAddedOp,
+  onRemoveAddedOp,
 }: {
   node: GraphNode;
   data: WorkflowPresentationDetail;
   draft: WorkflowOverride;
   onChange: (next: WorkflowOverride) => void;
+  onUpdateAddedOp: (step: string, addedId: string, patch: Partial<ActionNodeData>) => void;
+  onRemoveAddedOp: (step: string, addedId: string) => void;
 }): JSX.Element {
   const step = node.type === NODE_STEP ? node.data.step : "";
   const ops = node.type === NODE_STEP ? node.data.ops ?? [] : [];
+  const addedOps = node.type === NODE_STEP ? node.data.addedOps ?? [] : [];
   const bankNote = node.type === NODE_STEP ? node.data.bankNote : undefined;
   const bankSourceRef = node.type === NODE_STEP ? node.data.bankSourceRef : undefined;
   const order = draft.presentation?.steps?.order ?? [...data.base.steps];
@@ -292,6 +311,22 @@ function StepInspector({
       </header>
 
       <StepReviewDetail ops={ops} bankNote={bankNote} bankSourceRef={bankSourceRef} />
+
+      {addedOps.length ? (
+        <section className="space-y-2.5 border-t border-border pt-4">
+          <SectionLabel hint="Ops you dropped into this step from the Data Bank — design intent captured in the scaffold, not the runtime.">
+            Added operations ({addedOps.length})
+          </SectionLabel>
+          {addedOps.map((op) => (
+            <AddedOpEditor
+              key={op.addedId}
+              op={op}
+              onUpdate={(patch) => onUpdateAddedOp(step, op.addedId, patch)}
+              onRemove={() => onRemoveAddedOp(step, op.addedId)}
+            />
+          ))}
+        </section>
+      ) : null}
 
       <section className="space-y-3 border-t border-border pt-4">
         <SectionLabel hint="How this step shows in the dashboard queue — does not touch the automation.">
@@ -696,7 +731,16 @@ function ActionInspector({
         />
       </Field>
 
-      {d.note ? <p className="text-[11px] text-muted-foreground">{d.note}</p> : null}
+      <Field label="Note">
+        <textarea
+          value={d.note ?? ""}
+          rows={2}
+          placeholder="A gotcha / caveat for this op"
+          aria-label="Operation note"
+          onChange={(e) => onUpdate(node.id, { note: e.target.value || undefined })}
+          className={`${TEXT_INPUT_CLASS} resize-y`}
+        />
+      </Field>
 
       <button
         type="button"
@@ -713,6 +757,75 @@ function ActionInspector({
 // ── Design-intent nodes (custom / note / group) ───────────────────────────────
 const TEXT_INPUT_CLASS =
   "w-full rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
+
+// ── A dropped-in op, edited inline from its step's inspector ───────────────────
+function AddedOpEditor({
+  op,
+  onUpdate,
+  onRemove,
+}: {
+  op: AddedLaneOp;
+  onUpdate: (patch: Partial<ActionNodeData>) => void;
+  onRemove: () => void;
+}): JSX.Element {
+  const v = opKindVisual(op.kind);
+  return (
+    <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/[0.06] p-2.5">
+      <div className="flex items-center gap-1.5">
+        <v.icon aria-hidden className={cn("h-3.5 w-3.5 shrink-0", v.accent)} />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={op.label}>
+          {op.label}
+        </span>
+        <span className="shrink-0 rounded-sm border border-border bg-secondary/60 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+          {op.system}
+        </span>
+        <button
+          type="button"
+          aria-label={`Remove ${op.label}`}
+          onClick={onRemove}
+          className="shrink-0 rounded p-0.5 text-muted-foreground outline-none transition-colors hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Trash2 aria-hidden className="h-3.5 w-3.5 shrink-0" />
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="space-y-0.5">
+          <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Fills from</span>
+          <input
+            type="text"
+            value={op.inputVar ?? ""}
+            placeholder="{var}"
+            aria-label={`Fills from variable for ${op.label}`}
+            onChange={(e) => onUpdate({ inputVar: e.target.value || undefined })}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <label className="space-y-0.5">
+          <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Scrapes into</span>
+          <input
+            type="text"
+            value={op.outputVar ?? ""}
+            placeholder="{var}"
+            aria-label={`Scrapes into variable for ${op.label}`}
+            onChange={(e) => onUpdate({ outputVar: e.target.value || undefined })}
+            className="w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+      </div>
+      <label className="space-y-0.5">
+        <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Note</span>
+        <textarea
+          value={op.note ?? ""}
+          rows={2}
+          placeholder="Why this op belongs here / a gotcha"
+          aria-label={`Note for ${op.label}`}
+          onChange={(e) => onUpdate({ note: e.target.value || undefined })}
+          className={`${TEXT_INPUT_CLASS} resize-y text-[12px]`}
+        />
+      </label>
+    </div>
+  );
+}
 
 function IntentInspector({
   node,

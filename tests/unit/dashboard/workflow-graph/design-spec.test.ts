@@ -8,15 +8,24 @@
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
 
-import { graphToDesignSpec, designSpecToGraph } from "../../../../src/dashboard/components/workflow-modifier/graph/design-spec.js";
+import {
+  graphToDesignSpec,
+  designSpecToGraph,
+  mergeAddedOpsIntoModel,
+} from "../../../../src/dashboard/components/workflow-modifier/graph/design-spec.js";
 import {
   NODE_ROW,
+  NODE_STEP,
   NODE_ACTION,
   NODE_CUSTOM,
   NODE_NOTE,
   NODE_GROUP,
+  EDGE_SEQUENCE,
+  EDGE_CUSTOM,
   type GraphModel,
   type GraphNode,
+  type GraphEdge,
+  type AddedLaneOp,
 } from "../../../../src/dashboard/components/workflow-modifier/graph/graph-types.js";
 
 function model(): GraphModel {
@@ -174,5 +183,105 @@ describe("designSpecToGraph", () => {
     assert.equal(rebuilt.data.inputVar, "eid");
     assert.equal(rebuilt.data.note, "8 digits");
     assert.deepEqual(rebuilt.position, { x: 50, y: 300 });
+  });
+
+  test("a step-parented action node restores as a lane-added op, NOT a free node", () => {
+    const spec = graphToDesignSpec(
+      {
+        nodes: [
+          {
+            id: "added-1",
+            type: NODE_ACTION,
+            position: { x: 360, y: 560 },
+            parentId: "step:prepare-import",
+            data: { opId: "onbase.import.docType#select", kind: "select", system: "onbase", label: "Select Document Type", inputVar: "documentType" },
+          } as GraphNode,
+        ],
+        edges: [],
+      },
+      "onbase",
+      "2026-01-01T00:00:00.000Z",
+    );
+    // The capture records the step association via parentGroup.
+    assert.equal(spec.nodes[0].parentGroup, "step:prepare-import");
+
+    const overlay = designSpecToGraph(spec);
+    // It is NOT a free intent node…
+    assert.equal(overlay.intentNodes.length, 0);
+    // …it is restored under its owning step.
+    assert.deepEqual(Object.keys(overlay.addedOps), ["prepare-import"]);
+    const added = overlay.addedOps["prepare-import"];
+    assert.equal(added.length, 1);
+    assert.equal(added[0].addedId, "added-1");
+    assert.equal(added[0].opId, "onbase.import.docType#select");
+    assert.equal(added[0].inputVar, "documentType");
+  });
+
+  test("restores operator-drawn (custom) edges but NOT derived sequence edges", () => {
+    const edges: GraphEdge[] = [
+      { id: "seq:row->step:a", source: "row", target: "step:a", type: EDGE_SEQUENCE },
+      { id: "custom:abc", source: "action-1", target: "step:a", type: EDGE_CUSTOM, label: "feeds" },
+    ];
+    const row: GraphNode = {
+      id: "row",
+      type: NODE_ROW,
+      position: { x: 0, y: 40 },
+      data: { workflowLabel: "Demo", title: { scheme: "pdf-filename" }, subtitle: { scheme: "eid-else-trace" }, trace: { scheme: "code-time-runid" }, sampleVars: {} },
+    };
+    const spec = graphToDesignSpec({ nodes: [row], edges }, "demo", "2026-01-01T00:00:00.000Z");
+    const overlay = designSpecToGraph(spec);
+
+    // Only the custom edge is restored (the sequence edge is re-derived from config).
+    assert.equal(overlay.customEdges.length, 1);
+    assert.equal(overlay.customEdges[0].id, "custom:abc");
+    assert.equal(overlay.customEdges[0].type, EDGE_CUSTOM);
+    assert.equal(overlay.customEdges[0].source, "action-1");
+    assert.equal(overlay.customEdges[0].target, "step:a");
+    assert.equal(overlay.customEdges[0].label, "feeds");
+    assert.equal(overlay.customEdges[0].deletable, true);
+  });
+});
+
+describe("mergeAddedOpsIntoModel", () => {
+  function stepNode(step: string, x: number): GraphNode {
+    return {
+      id: `step:${step}`,
+      type: NODE_STEP,
+      position: { x, y: 40 },
+      data: { step, stepIndex: 0, label: step, hidden: false, foldedSteps: [] },
+    } as GraphNode;
+  }
+
+  test("folds per-step added ops in as step-parented action nodes (round-trips to addedOps)", () => {
+    const op: AddedLaneOp = {
+      addedId: "a1",
+      opId: "kuali.x#fill",
+      kind: "fill",
+      system: "kuali",
+      label: "Fill X",
+      outputVar: "x",
+    };
+    const model: GraphModel = { nodes: [stepNode("collect", 360)], edges: [] };
+    const merged = mergeAddedOpsIntoModel(model, { collect: [op] });
+
+    // Original nodes preserved + one action node appended, parented to the step.
+    assert.equal(merged.nodes.length, 2);
+    const action = merged.nodes.find((n) => n.id === "a1");
+    assert.ok(action);
+    assert.equal(action?.type, NODE_ACTION);
+    assert.equal(action?.parentId, "step:collect");
+    // Position is derived from the step node's position (a stable design hint).
+    assert.equal(action?.position.x, 360);
+
+    // The full round trip recovers the added op under its step.
+    const overlay = designSpecToGraph(graphToDesignSpec(merged, "demo", "2026-01-01T00:00:00.000Z"));
+    assert.deepEqual(overlay.addedOps["collect"].map((o) => o.opId), ["kuali.x#fill"]);
+    assert.equal(overlay.addedOps["collect"][0].outputVar, "x");
+  });
+
+  test("is a no-op when there are no added ops", () => {
+    const model: GraphModel = { nodes: [stepNode("collect", 360)], edges: [] };
+    const merged = mergeAddedOpsIntoModel(model, {});
+    assert.deepEqual(merged, model);
   });
 });

@@ -13,7 +13,7 @@ import type { StepGraphNode } from "../graph-types.js";
  * draft edit doesn't reset it). Selecting the lane opens the inspector.
  */
 function StepNodeImpl({ id, data, selected }: NodeProps<StepGraphNode>): JSX.Element {
-  const { isCollapsed, toggleCollapsed, dryRun } = useLaneInteraction();
+  const { isCollapsed, toggleCollapsed, dryRun, removeAddedOp, dropTargetStep } = useLaneInteraction();
   const collapsed = isCollapsed(id);
   const eyebrow = data.stepIndex !== undefined ? `Step ${data.stepIndex + 1}` : "Step";
   return (
@@ -22,6 +22,9 @@ function StepNodeImpl({ id, data, selected }: NodeProps<StepGraphNode>): JSX.Ele
       eyebrow={eyebrow}
       title={data.label}
       ops={data.ops ?? []}
+      addedOps={data.addedOps ?? []}
+      onRemoveAddedOp={(addedId) => removeAddedOp(data.step, addedId)}
+      isDropTarget={dropTargetStep === data.step}
       collapsed={collapsed}
       onToggleCollapse={() => toggleCollapsed(id)}
       selected={selected}

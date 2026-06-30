@@ -88,6 +88,11 @@ export type StepNodeData = {
    *  Presentation-only — merged in the canvas layer, never set by the pure
    *  `overrideToGraph` projection, and ignored by `graphToOverride`. */
   ops?: ActionNodeData[];
+  /** Ops the operator DROPPED into this step from the Data Bank — design intent,
+   *  rendered as editable/removable rows beneath the mined ops and serialized to
+   *  the scaffold as action nodes parented to the step. Presentation-only (merged
+   *  in the canvas layer), ignored by `graphToOverride`. */
+  addedOps?: AddedLaneOp[];
   /** Data-bank step note (branches / gates / dry-run boundary / fan-out). */
   bankNote?: string;
   /** Data-bank step source file, e.g. "src/workflows/.../steps/foo.ts". */
@@ -140,6 +145,12 @@ export type ActionNodeData = {
   url?: string;
   note?: string;
 };
+
+/** An op the operator DROPPED into a step lane from the Data Bank: the action-op
+ *  data plus a stable `addedId` for remove/edit. It rides per-step editor state
+ *  (NOT a standalone React Flow node) — rendered as an extra row in the lane and
+ *  serialized to the scaffold as an action node parented to the step. */
+export type AddedLaneOp = ActionNodeData & { addedId: string };
 
 /** A display-only lane of mined ops with no matching presentation step. */
 export type OpsLaneNodeData = {
