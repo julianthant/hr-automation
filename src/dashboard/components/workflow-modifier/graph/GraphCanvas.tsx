@@ -366,8 +366,10 @@ function GraphCanvasInner({
   );
 
   // ── Inspector (single-selection) ──────────────────────────────────────────────
-  const selectedNodes = nodes.filter((n) => n.selected);
-  const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null;
+  const selectedNode = useMemo(() => {
+    const sel = nodes.filter((n) => n.selected);
+    return sel.length === 1 ? sel[0] : null;
+  }, [nodes]);
   const closeInspector = useCallback(() => {
     setNodes((curr) => curr.map((n) => (n.selected ? { ...n, selected: false } : n)));
     onClearFocus();
