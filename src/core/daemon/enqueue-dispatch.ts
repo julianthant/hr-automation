@@ -20,6 +20,7 @@ import type { RegisteredWorkflow } from "../kernel/types.js";
 import { splitPrefilled } from "../kernel/workflow.js";
 import { buildPendingTrackerData } from "../pending-data.js";
 import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype.js";
+import { resolveQueueRowKindFromValue } from "../../domain/queue-row-kind.js";
 import { buildTraceId } from "../../domain/queue-trace-id.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
@@ -292,9 +293,22 @@ export async function enqueueFromHttp(
         runId: operationCoordinatorRunId,
         at: new Date(now),
       });
+      // Derive the coordinator's queueRowKind from the workflow's inputSubject
+      // (via the normalized `wf.queueRowKind` resolver — the same field the
+      // per-member pending rows resolve through in `buildHttpPendingData`),
+      // rather than hardcoding "person". For a resolver-kind workflow
+      // (e.g. oath-signature: pdf→file, eid→person) this lets a non-person
+      // coordinator render its file/catalog label instead of an empty
+      // person-anchor title. Resolve against the cleaned first input.
+      const { cleaned: coordinatorInput } = splitPrefilled(inputs[0]);
+      const coordinatorQueueRowKind = resolveQueueRowKindFromValue(
+        wf.queueRowKind,
+        coordinatorInput,
+        wf.config.name,
+      );
       const coordinatorData: StampedData = {
         archetype: "operation",
-        queueRowKind: "person",
+        queueRowKind: coordinatorQueueRowKind,
         __id: coordinatorItemId,
         __traceId: coordinatorTraceId,
         ...(batchDisplayOrdinal !== undefined
