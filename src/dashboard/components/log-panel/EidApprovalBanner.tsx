@@ -31,8 +31,14 @@ interface Candidate {
   detail: string;
 }
 
-function candidateDetail(dept?: string, title?: string): string {
+export function candidateDetail(dept?: string, title?: string): string {
   return [title, dept].filter((s) => s && s.trim().length > 0).join(" · ");
+}
+
+/** True when `s` is a valid 8-digit EID (`/^\d{8}$/`). Used to gate the
+ *  "Use this EID" button — any candidate EID that doesn't match is disabled. */
+export function isValidEid(s: string): boolean {
+  return /^\d{8}$/.test(s);
 }
 
 export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerProps) {
