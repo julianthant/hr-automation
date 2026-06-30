@@ -274,6 +274,11 @@ export function graphToOverride(
   }
 
   // Step order is an override only when it diverges from the declared base order.
+  if (stepOrder.length !== baseSteps.length) {
+    console.warn(
+      `graphToOverride: step count mismatch (${stepOrder.length} vs ${baseSteps.length}); dropping order override`,
+    );
+  }
   const orderDiverges =
     stepOrder.length === baseSteps.length && stepOrder.some((s, i) => s !== baseSteps[i]);
   if (orderDiverges) steps.order = stepOrder;

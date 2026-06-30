@@ -14,14 +14,20 @@ export function useDataBank(): { bank: DataBank | null; loaded: boolean } {
   useEffect(() => {
     let live = true;
     fetch("/api/data-bank")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`data-bank ${r.status}`);
+        return r.json();
+      })
       .then((b: { ok?: boolean; bank?: DataBank | null }) => {
         if (!live) return;
         setBank(b.ok ? b.bank ?? null : null);
         setLoaded(true);
       })
-      .catch(() => {
-        if (live) setLoaded(true);
+      .catch((err: unknown) => {
+        if (live) {
+          console.warn("data-bank fetch failed", err);
+          setLoaded(true);
+        }
       });
     return () => {
       live = false;
