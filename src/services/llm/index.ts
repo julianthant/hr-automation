@@ -9,3 +9,15 @@ export { completeJson, completeText } from "./complete.js";
 export type { CompleteOptions, CompleteResult } from "./complete.js";
 export { buildTextPool, summarizeTextPool } from "./text-pool.js";
 export type { TextPoolKey, LlmProviderId } from "./text-pool.js";
+export {
+  normalizePhone,
+  normalizeUsState,
+  normalizeZip,
+  canonicalizeRelationship,
+  canonicalizeRelationshipRule,
+  splitAddressString,
+  normalizeEmergencyContactRecord,
+  summarizeNormalizationChanges,
+  CANONICAL_RELATIONSHIPS,
+} from "./normalize-contact.js";
+export type { NormalizationChange, CanonicalRelationship, NormalizableEcRecord } from "./normalize-contact.js";
