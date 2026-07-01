@@ -186,3 +186,21 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `ssSmartHRTransactions.transactionResultRow` (renamed from `transactionResultLink`)
 **Tags:** ss-smart-hr, transaction, drill-in, row, span, peoplesoft, effdt, prior-termination, live-verified
 **References:** `tests/unit/systems/ucpath/ss-smart-hr.test.ts`; `src/workflows/separations/CLAUDE.md` "Transaction check"
+
+## 2026-07-01 — Onboarding duplicate-hire probe: search SS Smart HR by NAME, not EID
+
+**Tried:** Reusing separations' EID-keyed existence check (`findTerminationTransactionStatus` / `findExistingTerminationTransaction`, which search SS Smart HR by Empl ID) for onboarding's pre-submit duplicate-hire guard.
+**Failed because:** A brand-new hire has **no Empl ID** — the Person ID column renders "NEW" until the Smart HR hire transaction is processed (documented on `clickSaveAndSubmit`). An EID search returns nothing, so the probe would never see the in-flight hire and a retry would re-file it. Onboarding also only reaches the transaction step for a person NOT already in UCPath (rehires short-circuit earlier), so there is no EID to key on at all.
+**Fix:** `findExistingHireTransaction` (`ss-smart-hr.ts`) searches the SS Smart HR Transactions page by the **Name** box (`ssSmartHRTransactions.nameInput`, `buildHireSearchName` → `"Last,First"`), reuses the shared `scanSsSmartHrResults` + `parseSsSmartHrRows` grid parse, and matches a `HIR`/`REH` action via the pure `pickHireRow` (the hire-family analogue of `pickTerminationRow`). Best-effort: a failure/empty-name degrades to `found:false` so a probe glitch never blocks a legit hire. The grid exposes no effdt/template column, so the match is name + hire-action (effdt/template are logged only).
+**Selector:** `ssSmartHRTransactions.nameInput` / `.searchButton` (reused) + `findExistingHireTransaction`/`pickHireRow`/`buildHireSearchName` in `ss-smart-hr.ts`
+**Tags:** ss-smart-hr, onboarding, hire, hir, reh, duplicate, idempotency, name-search, new-hire, no-eid
+**References:** `tests/unit/systems/ucpath/ss-smart-hr.test.ts`; `src/workflows/onboarding/CLAUDE.md` "Retry safety". **NEEDS LIVE VERIFY:** the Name search returns a pending hire and `Last,First` is the right key format.
+
+## 2026-07-01 — Person-search + submit outcome must wait for a DEFINITIVE signal, not sample once
+
+**Tried:** (a) `searchPerson` classified new-hire-vs-rehire from a SINGLE `dismissPeopleSoftDialog` probe taken right after `networkidle`; (b) `clickCreateTransaction` / `clickSaveAndSubmit` read `errorBanner.count()` once after a fixed `waitForTimeout` + short spinner wait.
+**Failed because:** Both sample a race at one instant. (a) If the probe reads the page before EITHER the confirmation dialog or the results grid has rendered, a real rehire (grid still painting) is misclassified as a new hire → onboarding creates a **duplicate person**. (b) A PeopleSoft error banner that renders LATE reads `count() === 0` at that instant, so a transaction that actually errored returns `{ success: true }`.
+**Fix:** RACE the two definitive outcomes and decide only once one is present. (a) `raceNewHireVsRehireSignal` polls {results grid with an employee-id row → rehire} vs {`#ICOK` dialog present → new hire} (grid checked first so it wins a tie), classified by the pure `classifyPersonSearchSignal`; `none` (timeout) falls back to the legacy single probe (never worse than before). Added non-destructive `isPeopleSoftDialogPresent`. (b) `waitForTransactionOutcome` polls {error banner visible} vs {success marker visible — reason-code dropdown for create, confirmation-OK for submit}, classified by the pure `classifyOutcomeSignals` (error wins a tie); timeout falls back to the legacy `count()` check.
+**Selector:** `personSearch.resultRows`, `#ICOK` (dialog) / `smartHR.errorBanner`, `smartHR.reasonCodeSelect`, `smartHR.confirmationOkButton`
+**Tags:** person-search, new-hire, rehire, race, error-banner, success-marker, transaction, submit, flakiness, duplicate-person
+**References:** `tests/unit/systems/ucpath/navigate.test.ts`, `tests/unit/systems/ucpath/transaction.test.ts`. **NEEDS LIVE VERIFY:** reason-code dropdown (create) + confirmation-OK (submit) are reliable success markers on the live Smart HR pages.
