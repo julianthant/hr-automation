@@ -49,6 +49,13 @@ daily budget and never blow each other's free-tier quota.
   (`… <record.json> [--workflow W] [--no-llm]`); the in-workflow home is right
   before an irreversible UCPath transaction / Kuali finalize, surfacing issues
   the same "suggest, human confirms" way OCR review does.
+- **`selector-suggest.ts`** — `suggestSelectors({snapshot, intent, current?})`
+  proposes candidate Playwright locators from a `playwright-cli` accessibility
+  snapshot, ranked most-likely first. A SUGGESTION engine for the selector-map
+  loop — never edits `selectors.ts`, never drives a browser. Consumed by
+  `src/scripts/ops/selector-suggest.ts`
+  (`playwright-cli --raw snapshot | tsx … selector-suggest.ts --intent "the Save button"`);
+  the operator still verifies each candidate live + `// verified <date>` + catalog regen.
 
 ## Notes
 
