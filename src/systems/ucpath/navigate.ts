@@ -77,6 +77,70 @@ export async function dismissPeopleSoftDialog(page: Page): Promise<boolean> {
   return false;
 }
 
+/**
+ * Non-destructive presence probe for the PeopleSoft #ICOK confirmation dialog —
+ * the read-only counterpart of {@link dismissPeopleSoftDialog} (it looks but does
+ * NOT click). Used to RACE the dialog against the results grid when classifying a
+ * person-search outcome, so we don't dismiss the dialog before we've decided.
+ */
+export async function isPeopleSoftDialogPresent(page: Page): Promise<boolean> {
+  for (const f of page.frames()) {
+    const present = await f
+      .evaluate(() => document.getElementById("#ICOK") !== null)
+      .catch(() => false);
+    if (present) return true;
+  }
+  return false;
+}
+
+/** Which definitive person-search outcome resolved first. */
+export type PersonSearchSignal = "duplicate-dialog" | "results-grid" | "none";
+
+/**
+ * Pure classification of a person-search outcome signal.
+ *
+ * - `"results-grid"` (the search results table listing matching people) →
+ *   REHIRE (`found: true`).
+ * - `"duplicate-dialog"` (the "no matching person" confirmation dialog raised
+ *   after Search) → NEW HIRE (`found: false`).
+ * - `"none"` (neither appeared within the bounded race) → AMBIGUOUS; the caller
+ *   must fall back to a conservative legacy probe rather than guessing.
+ *
+ * Extracted as a pure function so the new-hire-vs-rehire decision is unit-pinned
+ * without a live page.
+ */
+export function classifyPersonSearchSignal(
+  signal: PersonSearchSignal,
+): { found: boolean; ambiguous: boolean } {
+  if (signal === "results-grid") return { found: true, ambiguous: false };
+  if (signal === "duplicate-dialog") return { found: false, ambiguous: false };
+  return { found: false, ambiguous: true };
+}
+
+/**
+ * RACE the two definitive person-search outcomes — {results grid carrying an
+ * employee-id row} vs {#ICOK confirmation dialog present} — polling until one is
+ * actually there (bounded by `timeoutMs`). The grid is checked FIRST each tick so
+ * a real rehire's grid wins over a lingering post-magnify dialog: misclassifying
+ * a rehire as a new hire would create a DUPLICATE PERSON. Returns `"none"` if
+ * neither resolves in time (caller falls back to the legacy single probe).
+ */
+async function raceNewHireVsRehireSignal(
+  page: Page,
+  frame: FrameLocator,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<PersonSearchSignal> {
+  const { timeoutMs = 15_000, pollMs = 500 } = opts;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const gridRows = await personSearch.resultRows(frame).count().catch(() => 0);
+    if (gridRows > 0) return "results-grid";
+    if (await isPeopleSoftDialogPresent(page)) return "duplicate-dialog";
+    await page.waitForTimeout(pollMs);
+  }
+  return "none";
+}
+
 export interface PersonSearchResult {
   found: boolean;
   matches?: Array<{ emplId: string; firstName: string; lastName: string }>;
@@ -180,21 +244,39 @@ export async function searchPerson(
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   await debugScreenshot(page, "debug-ps-after-search", { fullPage: true });
 
-  // Determination: dialog after Search = new hire, results table = rehire.
-  const searchDialogDismissed = await dismissPeopleSoftDialog(page);
-  if (searchDialogDismissed) {
-    // Short settle after JS dialog dismiss; no networkidle signal available.
+  // Determination: RACE the two definitive outcomes — results grid (rehire) vs
+  // #ICOK confirmation dialog (new hire) — instead of sampling a single
+  // dismissPeopleSoftDialog probe right after networkidle. That single probe
+  // could read the page BEFORE either the dialog or the results grid had
+  // rendered and, finding no dialog yet, misclassify a real rehire as a new hire
+  // — which then creates a DUPLICATE PERSON. We now wait until one is actually
+  // present before deciding.
+  const signal = await raceNewHireVsRehireSignal(page, frame, { timeoutMs: 15_000 });
+  log.step(`Person-search outcome signal: ${signal}`);
+  const decision = classifyPersonSearchSignal(signal);
+  let found = decision.found;
+
+  if (decision.ambiguous) {
+    // Neither definitive signal resolved in the window — fall back to the legacy
+    // single-probe behavior so we never do WORSE than before: a dismissable
+    // dialog ⇒ new hire, otherwise assume the results grid (rehire).
+    log.warn("Person-search: neither dialog nor results grid resolved in time — using legacy dialog probe");
+    const legacyDialogDismissed = await dismissPeopleSoftDialog(page);
+    if (legacyDialogDismissed) await page.waitForTimeout(1_000);
+    found = !legacyDialogDismissed;
+  } else if (signal === "duplicate-dialog") {
+    // Confirmed new hire → dismiss the confirmation dialog before returning.
+    await dismissPeopleSoftDialog(page);
     await page.waitForTimeout(1_000);
   }
   await debugScreenshot(page, "debug-ps-search-result", { fullPage: true });
 
-  if (searchDialogDismissed) {
-    // Dialog appeared after Search → new hire
+  if (!found) {
     log.step("No duplicate found — person is a new hire");
     return { found: false };
   }
 
-  // No dialog after Search → results table appeared → rehire
+  // Results grid present → rehire
   log.step("Duplicate person found in UCPath!");
   try {
     const rows = await personSearch
