@@ -558,6 +558,16 @@ async function addVirtualAuthenticator(cdp: CDPSession, transport: DuoWebAuthnTr
  * it bails within ~3s instead of polling the whole timeout. Returns the clicked
  * factor's label, or `undefined` so the caller falls back to manual Duo.
  */
+// The factor-detection window for an ALREADY-RENDERED Duo prompt. Env-tunable so
+// the ISS-005 pre-prompt guard below can be exercised deterministically (shrink
+// it and the deadline reliably elapses before the prompt renders).
+const DUO_FACTOR_TIMEOUT_MS = numericEnv("HR_DUO_FACTOR_TIMEOUT_MS", 20_000);
+
+// Extra time beyond the factor-detection window to let a SLOW first-attempt
+// SSO→Duo transition actually render the prompt before falling back to manual
+// (the ISS-005 flake). Bounds the wait in selectDuoFactor.
+const DUO_FACTOR_PROMPT_RENDER_GRACE_MS = numericEnv("HR_DUO_PROMPT_RENDER_GRACE_MS", 25_000);
+
 async function selectDuoFactor(
   page: Page,
   factorRes: RegExp[],
@@ -617,7 +627,33 @@ async function selectDuoFactor(
   }
 
   // ── Phase 2: explicit factor selection (CRM, or an auto-fire that didn't land) ──
-  while (Date.now() < deadline) {
+  //
+  // ISS-005 guard: `timeoutMs` sizes the factor window for an ALREADY-RENDERED
+  // prompt. On a slow first-attempt SSO→Duo transition it can elapse while the
+  // page is STILL pre-prompt (on a5.ucsd.edu/tritON SSO — captured live: all Duo
+  // screens absent, only SSO login-page chrome present). Giving up there falls
+  // back to a dead manual wait (no prompt to approve, no push on a WebAuthn
+  // prompt) that burns the whole manual timeout before a warm attempt 2 recovers.
+  // So loop to an absolute `promptRenderCap` and only give up at the factor
+  // deadline once a Duo screen has actually rendered.
+  const promptRenderCap = Date.now() + Math.max(timeoutMs, 20_000) + DUO_FACTOR_PROMPT_RENDER_GRACE_MS;
+  let factorDeadline = deadline;
+  let extendedForRender = false;
+  const duoPromptRendered = async (): Promise<boolean> => {
+    if (hasSigned && (await hasSigned().catch(() => false))) return true;
+    const counts = await Promise.all([
+      page.getByText(/other options to log in|other options|other methods/i).count().catch(() => 0),
+      page.getByText(/use touch id|verify your identity using this device/i).count().catch(() => 0),
+      page.getByText(/insert your security key|use your security key/i).count().catch(() => 0),
+      page.getByText(/yes, this is my device/i).count().catch(() => 0),
+      page
+        .getByRole("link", { name: /duo push|passcode|bypass code|touch id|security key/i })
+        .count()
+        .catch(() => 0),
+    ]);
+    return counts.some((c) => c > 0);
+  };
+  while (Date.now() < promptRenderCap) {
     abortSignal?.throwIfAborted();
     try {
       // Auto-fire may still complete mid-click-path (e.g. CRM after Escape): if the
@@ -695,9 +731,32 @@ async function selectDuoFactor(
     } catch {
       // Page may be mid-navigation between SSO and the Duo prompt — retry.
     }
+
+    if (Date.now() >= factorDeadline) {
+      // The factor window elapsed. If NO Duo screen has rendered yet we're still
+      // pre-prompt (the ISS-005 slow-transition case) — keep waiting up to the
+      // absolute cap instead of falling back to a dead manual wait. Only give up
+      // once the prompt is genuinely up with no matching factor, or the cap trips.
+      if (!(await duoPromptRendered()) && Date.now() < promptRenderCap) {
+        if (!extendedForRender) {
+          log.step(
+            "Duo: prompt not rendered within the factor window — waiting for the SSO→Duo transition (ISS-005 guard)",
+          );
+          extendedForRender = true;
+        }
+        factorDeadline = Math.min(promptRenderCap, Date.now() + timeoutMs);
+      } else {
+        break; // prompt is up but no factor matched, or the hard cap tripped — real give-up
+      }
+    }
     await page.waitForTimeout(600);
   }
-  await snapshotDuoPromptState(page, "deadline elapsed before any factor matched (the ISS-005 first-attempt flake)");
+  await snapshotDuoPromptState(
+    page,
+    extendedForRender
+      ? "hard cap reached before a matching factor rendered (ISS-005 guard exhausted)"
+      : "deadline elapsed before any factor matched (the ISS-005 first-attempt flake)",
+  );
   return undefined;
 }
 
@@ -999,7 +1058,7 @@ export async function beginDuoWebAuthn(
   const factorLabel = await selectDuoFactor(
     page,
     preferenceOrder.map(factorPatternForTransport),
-    opts.factorTimeoutMs ?? 20_000,
+    opts.factorTimeoutMs ?? DUO_FACTOR_TIMEOUT_MS,
     opts.abortSignal,
     hasSigned,
   );
