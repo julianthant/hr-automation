@@ -93,6 +93,34 @@ export async function isPeopleSoftDialogPresent(page: Page): Promise<boolean> {
   return false;
 }
 
+/**
+ * Clear any PeopleSoft message dialog + its modal mask that would intercept the
+ * next click. The National Id lookup magnifier raises a "no prompt values for
+ * this field" dialog whose `#pt_modalMask` overlay then BLOCKS the Search button
+ * for the full click timeout (live: juzaw@ucsd.edu person-search — the dialog
+ * rendered client-side AFTER the one-shot dismiss and stayed up 10s+). Dismisses
+ * `#ICOK` if present, then waits a bounded time for the mask to go hidden.
+ * Best-effort: safe when no dialog/mask exists (the mask element is normally in
+ * the DOM but not visible), and the click's own actionability retry is the final
+ * backstop if a mask genuinely persists.
+ */
+async function ensureNoBlockingModal(
+  page: Page,
+  frame: FrameLocator,
+  timeoutMs = 6_000,
+): Promise<void> {
+  await dismissPeopleSoftDialog(page);
+  try {
+    // PeopleSoft modal-mask overlay — a spinner/mask probe, not a user-input
+    // selector. allow-inline-selector
+    const mask = frame.locator("#pt_modalMask, .ps_modalmask").first(); // allow-inline-selector
+    await mask.waitFor({ state: "hidden", timeout: timeoutMs });
+  } catch {
+    // Mask absent, already hidden, or still up past the wait — don't hard-fail;
+    // the subsequent safeClick actionability retry is the backstop.
+  }
+}
+
 /** Which definitive person-search outcome resolved first. */
 export type PersonSearchSignal = "duplicate-dialog" | "results-grid" | "none";
 
@@ -214,25 +242,43 @@ export async function searchPerson(
   });
   log.step("Search criteria filled");
 
-  // Click National Id magnifying glass — triggers PeopleSoft validation
-  log.step("Clicking National Id lookup...");
-  await safeClick(personSearch.ssnLookupButton(frame), {
-    timeout: 10_000,
-    label: "ucpath national id lookup button",
-  });
-  // The magnify button triggers a PeopleSoft dialog (or networkidle roundtrip).
-  // Guard with networkidle so we don't read a mid-flight DOM.
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  await debugScreenshot(page, "debug-ps-after-magnify", { fullPage: true });
+  // Click National Id magnifying glass — triggers PeopleSoft validation of the
+  // National Id field. It raises a "no prompt values for this field" message
+  // dialog (the field has no prompt table) that we then dismiss.
+  //
+  // SKIP it entirely when there is NO SSN (international students — SSN is
+  // optional): with an empty National Id there is nothing to validate, and the
+  // magnifier only raises the un-actionable dialog whose #pt_modalMask then
+  // blocks the Search click for the full timeout. Live failure: juzaw@ucsd.edu
+  // (no SSN) — the dialog stayed up and person-search timed out on the Search
+  // button. A record WITH an SSN keeps the validate-then-dismiss behavior.
+  if (ssn.trim()) {
+    log.step("Clicking National Id lookup...");
+    await safeClick(personSearch.ssnLookupButton(frame), {
+      timeout: 10_000,
+      label: "ucpath national id lookup button",
+    });
+    // The magnify button triggers a PeopleSoft dialog (or networkidle roundtrip).
+    // Guard with networkidle so we don't read a mid-flight DOM.
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    await debugScreenshot(page, "debug-ps-after-magnify", { fullPage: true });
 
-  // Dismiss dialog if present after magnifying glass (just a step to get through)
-  const magnifyDialogDismissed = await dismissPeopleSoftDialog(page);
-  if (magnifyDialogDismissed) {
-    log.step("Dismissed National Id dialog");
-    // Short settle after JS dialog dismiss — no networkidle signal available.
-    await page.waitForTimeout(1_000);
+    // Dismiss dialog if present after magnifying glass (just a step to get through)
+    const magnifyDialogDismissed = await dismissPeopleSoftDialog(page);
+    if (magnifyDialogDismissed) {
+      log.step("Dismissed National Id dialog");
+      // Short settle after JS dialog dismiss — no networkidle signal available.
+      await page.waitForTimeout(1_000);
+    }
+    await debugScreenshot(page, "debug-ps-after-magnify-ok", { fullPage: true });
+  } else {
+    log.step("No SSN — skipping National Id lookup (avoids the no-prompt-values dialog that blocks Search)");
   }
-  await debugScreenshot(page, "debug-ps-after-magnify-ok", { fullPage: true });
+
+  // Belt-and-suspenders across BOTH paths: a leftover dialog + #pt_modalMask
+  // intercepts pointer events and blocks the Search button click for the full
+  // timeout. Dismiss + wait for the mask to clear before clicking Search.
+  await ensureNoBlockingModal(page, frame);
 
   // Click Search
   log.step("Clicking Search...");
