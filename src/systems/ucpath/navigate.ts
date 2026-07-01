@@ -132,6 +132,53 @@ async function waitForPersonSearchButtonEnabled(
   );
 }
 
+/**
+ * Fire the National Id lookup magnifier, then clear the dialog it raises.
+ *
+ * The magnifier's click is LOAD-BEARING: it fires the PeopleSoft FieldChange
+ * postback that flips the Search button from `PSPUSHBUTTONDISABLED` to enabled.
+ * Live 2026-07-01 (real DAEMON flow): filling the criteria alone does NOT enable
+ * Search — the button stayed disabled and the click timed out ("Search button
+ * still disabled"). (An earlier interactive playwright-cli check enabled Search
+ * from the fills, but the automated back-to-back `safeFill` sequence does not
+ * commit the FieldChange the same way — the magnifier's postback does.)
+ *
+ * The National Id field has no prompt table, so the magnifier ALSO raises a
+ * "There are no prompt values currently available for this field" dialog whose
+ * `#ICOK` button and `#pt_modalMask` overlay both render on the MAIN page
+ * (z-index 210, OUTSIDE `#main_target_win0`). That mask intercepts the in-frame
+ * Search click until dismissed. The dialog renders client-side slightly AFTER the
+ * magnifier click (no reliable networkidle signal), so a one-shot dismiss raced
+ * it and left the mask up — we POLL for the dialog, dismiss the main-page `#ICOK`
+ * (`dismissPeopleSoftDialog` scans every frame incl. main), and confirm the
+ * main-page mask has cleared, retrying a few times.
+ */
+async function fireNationalIdLookupAndClearDialog(page: Page, frame: FrameLocator): Promise<void> {
+  await safeClick(personSearch.ssnLookupButton(frame), {
+    timeout: 10_000,
+    label: "ucpath national id lookup button",
+  });
+  const mask = page.locator("#pt_modalMask, .ps_modalmask").first(); // allow-inline-selector -- main-page PeopleSoft modal overlay
+  for (let attempt = 0; attempt < 4; attempt++) {
+    // Wait for the client-side dialog to actually render before dismissing it.
+    for (let i = 0; i < 10; i++) {
+      if (await isPeopleSoftDialogPresent(page)) break;
+      await page.waitForTimeout(300);
+    }
+    if (await dismissPeopleSoftDialog(page)) {
+      await page.waitForTimeout(500); // let closeMsg() tear the mask down
+    }
+    const cleared = await mask
+      .waitFor({ state: "hidden", timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (cleared) return;
+  }
+  log.warn(
+    "Person-search: National Id lookup dialog/mask may still be up after retries — proceeding (safeClick actionability is the backstop)",
+  );
+}
+
 /** Which definitive person-search outcome resolved first. */
 export type PersonSearchSignal = "duplicate-dialog" | "results-grid" | "none";
 
@@ -281,25 +328,13 @@ export async function searchPerson(
     );
   }
 
-  // Do NOT click the National Id magnifier. It is unnecessary AND harmful:
-  //  - Unnecessary — the Search button enables purely from the filled criteria.
-  //    Live-verified 2026-07-01: filling National Id + Legal First/Last + DOB
-  //    flips `DERIVED_HCR_SM_SM_SEARCH_BTN` from `PSPUSHBUTTONDISABLED` to
-  //    `PSPUSHBUTTON` and the click advances straight to the results grid, with
-  //    no magnifier click at all (each field fill's FieldChange roundtrip is what
-  //    enables it).
-  //  - Harmful — the National Id field has NO prompt table, so the magnifier
-  //    raises a "There are no prompt values currently available for this field"
-  //    dialog whose MAIN-PAGE `#pt_modalMask` (z-index 210, rendered OUTSIDE
-  //    `#main_target_win0`) then intercepts the in-frame Search click for the full
-  //    10 s. This reproduced even for a COMPLETE record (valid 9-digit NID + name
-  //    + DOB), so it was never about missing criteria. The old belt-and-suspenders
-  //    `ensureNoBlockingModal` waited for that mask INSIDE the iframe — where it
-  //    never exists — so it returned instantly and the click still hung.
-  //
-  // Instead: wait for the Search button to be ENABLED, then click it. (The
-  // `personSearchCriteriaSufficient` guard above already fails fast when the
-  // record has neither an SSN nor a DOB, so the button will enable here.)
+  // Fire the National Id lookup magnifier: its FieldChange postback is what
+  // ENABLES the Search button in the automated flow (filling the criteria alone
+  // does NOT — live daemon 2026-07-01: "Search button still disabled"). The
+  // magnifier also raises a "no prompt values" dialog whose MAIN-PAGE mask blocks
+  // the Search click; `fireNationalIdLookupAndClearDialog` dismisses it (main-page
+  // `#ICOK`) and waits for that mask to clear. Then confirm Search is enabled.
+  await fireNationalIdLookupAndClearDialog(page, frame);
   await waitForPersonSearchButtonEnabled(page, frame);
 
   // Click Search
