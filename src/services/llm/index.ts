@@ -36,3 +36,5 @@ export {
   checkRequired,
 } from "./sanity-check.js";
 export type { SanityIssue, SanityCheckOptions, CheckableRecord, RuleSpec } from "./sanity-check.js";
+export { suggestSelectors } from "./selector-suggest.js";
+export type { SelectorCandidate, SuggestSelectorsInput } from "./selector-suggest.js";
