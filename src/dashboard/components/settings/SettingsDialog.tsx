@@ -17,6 +17,7 @@ import {
   Network,
   Search,
   Settings2,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ import {
 import { useConfirm } from "@/components/shared/useConfirm";
 import { InputField, ToggleField } from "./SettingsField.js";
 import { ReferencePanel } from "./ReferencePanels.js";
+import { AiAssistSection } from "./AiAssistSection.js";
 
 // ── Section definitions ───────────────────────────────────────────────────────
 
@@ -59,6 +61,7 @@ type SectionId =
   | "paths"
   | "notifications"
   | "credentials"
+  | "ai-assist"
   // Read-only reference panels ("see what exists in the system").
   | "ref-rows"
   | "ref-workflows"
@@ -91,6 +94,7 @@ const SECTIONS: Section[] = [
   { id: "paths", label: "Paths", icon: FolderOpen, kind: "settings", settingsBacked: true, keywords: ["reports", "onboarding", "documents", "directory", "folder", "downloads"] },
   { id: "notifications", label: "Notifications", icon: Bell, kind: "settings", settingsBacked: false, keywords: ["desktop", "notify", "alerts", "failure", "review"] },
   { id: "credentials", label: "Credentials", icon: KeyRound, kind: "settings", settingsBacked: false, keywords: ["env", "ucpath", "i-9", "password", "credential", "roster"] },
+  { id: "ai-assist", label: "AI Assist", icon: Sparkles, kind: "settings", settingsBacked: false, keywords: ["ai", "llm", "assist", "triage", "sanity", "selector", "summarize", "explain", "gemini", "free", "model", "failure"] },
   // ── Reference (read-only "what exists in the system") ──
   { id: "ref-rows", label: "Row & queue model", icon: Layers, kind: "reference", settingsBacked: false, keywords: ["archetype", "row", "shape", "kind", "queue", "trace", "single", "operation", "preview", "person", "file", "catalog", "status", "reference"] },
   { id: "ref-workflows", label: "Workflows & OCR", icon: BookOpen, kind: "reference", settingsBacked: false, keywords: ["workflow", "code", "ocr", "form", "steps", "run", "registry", "reference", "index"] },
@@ -1154,6 +1158,8 @@ export function SettingsDialog({
                     />
                   ) : activeSection === "credentials" ? (
                     <CredentialsSection credentials={credentials} />
+                  ) : activeSection === "ai-assist" ? (
+                    <AiAssistSection />
                   ) : activeSection === "ref-rows" ||
                     activeSection === "ref-workflows" ||
                     activeSection === "ref-system" ||

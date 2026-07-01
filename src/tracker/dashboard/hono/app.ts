@@ -23,6 +23,7 @@ import { registerStaticRoutes } from "./routes/static.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerWorkflowPresentationRoutes } from "./routes/workflow-presentation.js";
 import { registerWorkflowDesignRoutes } from "./routes/workflow-design.js";
+import { registerAiAssistRoutes } from "./routes/ai-assist.js";
 
 export type { DashboardHonoDeps } from "./context.js";
 
@@ -52,6 +53,7 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   registerBaseRoutes(app, deps);
   registerWorkflowPresentationRoutes(app, deps);
   registerWorkflowDesignRoutes(app, deps);
+  registerAiAssistRoutes(app);
   registerSettingsRoutes(app, deps);
   registerSearchRoutes(app, deps);
   registerScreenshotRoutes(app, deps);
