@@ -24,6 +24,7 @@ import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerWorkflowPresentationRoutes } from "./routes/workflow-presentation.js";
 import { registerWorkflowDesignRoutes } from "./routes/workflow-design.js";
 import { registerAiAssistRoutes } from "./routes/ai-assist.js";
+import { isExternalCaptureRequest, isPublicCaptureRequestAllowed } from "./public-scope.js";
 
 export type { DashboardHonoDeps } from "./context.js";
 
@@ -45,6 +46,24 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
       log.warn(err.stack);
     }
     return jsonResponse({ ok: false, error: message }, 500);
+  });
+
+  // SECURITY: public-tunnel scoping. Must run BEFORE any route. The dashboard is
+  // unauthenticated, so when a phone-Capture tunnel is active (CAPTURE_PUBLIC_URL /
+  // `dashboard --tunnel`) its origin is public — restrict EXTERNAL requests to the
+  // phone's token-gated capture endpoints only; everything else (SPA, all other
+  // APIs, /events, operator-only capture routes) returns 404. Local operator
+  // access is never external, so it is unaffected. See public-scope.ts.
+  app.use("*", async (c, next) => {
+    const external = isExternalCaptureRequest({
+      hostHeader: c.req.header("host"),
+      publicUrl: process.env.CAPTURE_PUBLIC_URL,
+      cfConnectingIp: c.req.header("cf-connecting-ip"),
+    });
+    if (external && !isPublicCaptureRequestAllowed(c.req.method, c.req.path)) {
+      return c.text("Not found", 404);
+    }
+    return next();
   });
 
   registerProjectionRoutes(app, deps);
