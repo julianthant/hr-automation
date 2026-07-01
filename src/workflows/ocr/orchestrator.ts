@@ -55,6 +55,11 @@ import type {
 } from "../sharepoint-download/handler.js";
 import { runOcrPipeline, runOcrSecondOpinionPage } from "../../services/ocr/pipeline.js";
 import type { LookupSuggestion } from "../../services/ocr/lookup-suggestions.js";
+import {
+  normalizeEmergencyContactRecord,
+  summarizeNormalizationChanges,
+  type NormalizableEcRecord,
+} from "../../services/llm/normalize-contact.js";
 import { normalizeUcpathEmployeeId } from "../../domain/identity/eid.js";
 import { buildTraceId, tracePrefix } from "../../domain/queue-trace-id.js";
 import { runOptionsToDaemonFlags, serializeRunOptionsForData } from "../../domain/run-options.js";
@@ -757,6 +762,36 @@ export async function runOcrOrchestrator(
         } else {
           log.step(`[ocr/second-opinion] page ${pageNum}: re-read "${newName}" ranks no better than "${oldName}" — keeping the original`);
         }
+      }
+    }
+
+    // 3a-bis. Normalize EC contact fields — phones / US state / ZIP by rule, and
+    // (only when the rule table misses) relationship + one-line addresses via the
+    // shared free-tier LLM pool. Surfaced as review WARNINGS so the operator
+    // confirms at the approval gate — never a silent rewrite of UCPath-bound
+    // data. EC forms only (oath carries no contact fields). The common case makes
+    // rule-only changes and never touches an API key; the pool falls through
+    // providers on any rate-limit and degrades to "no change" on exhaustion.
+    if (spec.formType === "emergency-contact" || spec.formType === "onbase-emergency-contact") {
+      let normalizedCount = 0;
+      await raceOcrPrepWithDiscard(
+        id,
+        runId,
+        (async () => {
+          for (const rec of records) {
+            const changes = await normalizeEmergencyContactRecord(rec as NormalizableEcRecord);
+            if (changes.length === 0) continue;
+            normalizedCount += 1;
+            const warn = summarizeNormalizationChanges(changes);
+            if (warn) {
+              const r = rec as { warnings?: string[] };
+              r.warnings = [...(r.warnings ?? []), warn];
+            }
+          }
+        })(),
+      );
+      if (normalizedCount > 0) {
+        log.step(`[ocr] normalized contact fields on ${normalizedCount}/${records.length} record(s)`);
       }
     }
 
