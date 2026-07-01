@@ -40,6 +40,15 @@ daily budget and never blow each other's free-tier quota.
   (`tsx --env-file=.env src/scripts/ops/triage-failure.ts "<error>" [--workflow W] [--step S] [--system SYS]`);
   the natural future hot-path home is the dashboard's background failure-pattern
   scanner, not the emit path.
+- **`sanity-check.ts`** — `sanityCheckRecord(record, {rules, useLlm})` pre-submit
+  gate: deterministic rule checks (email / DOB / EID formats, required fields —
+  `inferRuleSpec` auto-detects field names) + an optional LLM cross-field pass
+  that flags mistyped / inconsistent / OCR-garbled values. Advisory (returns
+  `SanityIssue[]`, never blocks/throws; degrades to rule issues on pool
+  exhaustion). Consumed on-demand by `src/scripts/ops/sanity-check-record.ts`
+  (`… <record.json> [--workflow W] [--no-llm]`); the in-workflow home is right
+  before an irreversible UCPath transaction / Kuali finalize, surfacing issues
+  the same "suggest, human confirms" way OCR review does.
 
 ## Notes
 
