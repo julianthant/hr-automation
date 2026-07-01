@@ -1,4 +1,4 @@
-import { describe, it, afterAll, vi } from "vitest";
+import { describe, it, afterAll, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +8,7 @@ import {
   parseDuoWebAuthnCredential,
   parseDuoWebAuthnCredentials,
   factorPatternForTransport,
+  selectDuoFactor,
   nextSignCount,
   reserveDuoWebAuthnSignCounts,
   resyncDuoWebAuthnSignCounts,
@@ -469,5 +470,161 @@ describe("armDuoWebAuthn (stale-CDP re-arm)", () => {
       warn.mockRestore();
       env.restore();
     }
+  });
+});
+
+describe("selectDuoFactor — ISS-005 pre-prompt guard", () => {
+  // Regression pin for the first-attempt "Duo WebAuthn factor not found" flake
+  // (commit d250edb9): the factor-detection deadline could elapse while the page
+  // was STILL mid SSO→Duo transition (no Duo prompt rendered yet). The old code
+  // mis-read that as "no factor" and fell back to a dead ~180s manual wait. The
+  // fix keeps waiting past the factor deadline (up to an absolute
+  // `promptRenderCap`) WHILE no Duo screen is visible, and only gives up once the
+  // prompt is genuinely up with no matching factor. A live Duo soak cannot force
+  // a slow render (CRM's auto-fire signs before the deadline matters), so the
+  // guard's recovery-on-slow-render is pinned deterministically here.
+  //
+  // Determinism comes from an INJECTED virtual clock: `now()` reads a mutable
+  // counter that the fake page's `waitForTimeout(ms)` advances by `ms`, so time
+  // only moves at each ~600ms poll-loop sleep — no real waiting, no wall clock.
+
+  // These mirror the shipped code defaults (`selectDuoFactor` reads
+  // DUO_FACTOR_PROMPT_RENDER_GRACE_MS = 25_000 internally; the factor window is
+  // the `timeoutMs` argument). promptRenderCap = max(timeoutMs, 20_000) + grace.
+  const FACTOR_WINDOW_MS = 1_000;
+  const PROMPT_RENDER_GRACE_MS = 25_000;
+  const EXPECTED_CAP_FROM_START = Math.max(FACTOR_WINDOW_MS, 20_000) + PROMPT_RENDER_GRACE_MS; // 45_000
+  const CLOCK_BASE = 1_000_000;
+
+  const factorOrder = [factorPatternForTransport("internal"), factorPatternForTransport("usb")];
+
+  const matches = (candidate: string, name: RegExp | string): boolean =>
+    typeof name === "string" ? candidate.includes(name) : name.test(candidate);
+
+  // A minimal fake Playwright Page whose visible screen is a function of virtual
+  // time. `presentTexts`/`presentLinks` return what the DOM would show at clock
+  // `t` — letting a test model "SSO page now, Duo prompt after N virtual ms".
+  const makeFakePage = (opts: {
+    clock: { t: number };
+    presentTexts: (t: number) => string[];
+    presentLinks: (t: number) => string[];
+    clicks: string[];
+  }): import("playwright").Page => {
+    const { clock, presentTexts, presentLinks, clicks } = opts;
+
+    const labelLocator = (labels: string[]) => {
+      const self = {
+        or: () => self, // combined link|button — our scenarios never present these targets
+        first: () => self,
+        all: async () => labels.map((label) => ({ innerText: async () => label })),
+        count: async () => labels.length,
+        innerText: async () => labels[0] ?? "",
+        click: async () => {
+          if (labels[0]) clicks.push(labels[0]);
+        },
+      };
+      return self;
+    };
+
+    return {
+      url: () => "https://a5.ucsd.edu/tritON/profile/SAML2/Redirect/SSO?execution=e1s3",
+      keyboard: { press: async () => {} },
+      waitForTimeout: async (ms?: number) => {
+        clock.t += ms ?? 0;
+      },
+      getByText: (arg: RegExp | string) => ({
+        first() {
+          return this;
+        },
+        innerText: async () => "",
+        count: async () => presentTexts(clock.t).filter((tx) => matches(tx, arg)).length,
+      }),
+      getByRole: (role: string, o?: { name?: RegExp }) => {
+        const pool = role === "link" ? presentLinks(clock.t) : [];
+        const filtered = o?.name ? pool.filter((l) => o.name!.test(l)) : pool;
+        return labelLocator(filtered);
+      },
+    } as unknown as import("playwright").Page;
+  };
+
+  const guardExtended = (step: ReturnType<typeof vi.spyOn>): boolean =>
+    step.mock.calls.some((c: unknown[]) => String(c[0]).includes("prompt not rendered within the factor window"));
+
+  let step: ReturnType<typeof vi.spyOn>;
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    step = vi.spyOn(log, "step").mockImplementation(() => {});
+    warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    step.mockRestore();
+    warn.mockRestore();
+  });
+
+  it("(a) recovers when the deadline elapses PRE-PROMPT and the factor renders after it", async () => {
+    // No Duo screen until virtual t = base+3_000 — well past the base+1_000 factor
+    // deadline — then the preferred Touch ID factor appears.
+    const clock = { t: CLOCK_BASE };
+    const clicks: string[] = [];
+    const renderAt = CLOCK_BASE + 3_000;
+    const page = makeFakePage({
+      clock,
+      clicks,
+      presentTexts: () => [],
+      presentLinks: (t) => (t >= renderAt ? ["Touch ID"] : []),
+    });
+
+    const label = await selectDuoFactor(page, factorOrder, FACTOR_WINDOW_MS, undefined, undefined, () => clock.t);
+
+    assert.equal(label, "Touch ID", "must return the factor that rendered AFTER the initial deadline, not undefined");
+    assert.deepEqual(clicks, ["Touch ID"], "clicks the recovered preferred factor exactly once");
+    assert.equal(guardExtended(step), true, "the ISS-005 guard must extend past the factor deadline while pre-prompt");
+    assert.ok(clock.t >= renderAt, "kept polling until the prompt actually rendered");
+  });
+
+  it("(b) gives up (undefined) WITHOUT extending when a Duo screen is up but no factor matches", async () => {
+    // A Duo screen IS rendered the whole time (the "Use Touch ID" instruction is
+    // visible) but there is no clickable factor link that matches our transports.
+    // The guard must NOT extend — this is the real give-up.
+    const clock = { t: CLOCK_BASE };
+    const clicks: string[] = [];
+    const page = makeFakePage({
+      clock,
+      clicks,
+      presentTexts: () => ["Use Touch ID"],
+      presentLinks: () => [],
+    });
+
+    const label = await selectDuoFactor(page, factorOrder, FACTOR_WINDOW_MS, undefined, undefined, () => clock.t);
+
+    assert.equal(label, undefined, "prompt is up with no matching factor → genuine give-up");
+    assert.deepEqual(clicks, [], "no factor to click");
+    assert.equal(guardExtended(step), false, "guard must NOT extend when the Duo prompt has already rendered");
+    assert.ok(
+      clock.t < CLOCK_BASE + EXPECTED_CAP_FROM_START,
+      "gave up at the factor deadline, nowhere near the render cap",
+    );
+  });
+
+  it("(c) waits to promptRenderCap then gives up (undefined) when the prompt NEVER renders", async () => {
+    // Pre-prompt forever: no Duo screen ever appears. The guard extends until the
+    // absolute cap (factor window + grace), then gives up — bounded, not infinite.
+    const clock = { t: CLOCK_BASE };
+    const clicks: string[] = [];
+    const page = makeFakePage({
+      clock,
+      clicks,
+      presentTexts: () => [],
+      presentLinks: () => [],
+    });
+
+    const label = await selectDuoFactor(page, factorOrder, FACTOR_WINDOW_MS, undefined, undefined, () => clock.t);
+
+    assert.equal(label, undefined, "never-rendered prompt still ends in a give-up");
+    assert.equal(guardExtended(step), true, "guard extended past the initial deadline");
+    assert.ok(
+      clock.t >= CLOCK_BASE + EXPECTED_CAP_FROM_START,
+      "waited to the absolute promptRenderCap (factor window + render grace) before giving up",
+    );
   });
 });

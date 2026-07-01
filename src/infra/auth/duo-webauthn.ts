@@ -568,14 +568,19 @@ const DUO_FACTOR_TIMEOUT_MS = numericEnv("HR_DUO_FACTOR_TIMEOUT_MS", 20_000);
 // (the ISS-005 flake). Bounds the wait in selectDuoFactor.
 const DUO_FACTOR_PROMPT_RENDER_GRACE_MS = numericEnv("HR_DUO_PROMPT_RENDER_GRACE_MS", 25_000);
 
-async function selectDuoFactor(
+export async function selectDuoFactor(
   page: Page,
   factorRes: RegExp[],
   timeoutMs: number,
   abortSignal?: AbortSignal,
   hasSigned?: () => Promise<boolean>,
+  // Injectable clock — defaults to the wall clock. The ISS-005 pre-prompt guard
+  // is timing-dependent (factor deadline vs. an absolute render cap), so a unit
+  // test drives it deterministically by advancing virtual time (see
+  // duo-webauthn.test.ts) instead of sleeping through the real ~45s window.
+  now: () => number = Date.now,
 ): Promise<string | undefined> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = now() + timeoutMs;
   let revealedList = false;
   let steppedBack = false;
   let listFirstSeenAt = 0;
@@ -601,8 +606,8 @@ async function selectDuoFactor(
   // to the click path early only for CRM's roaming-key native dialog, which won't
   // self-answer.
   if (hasSigned) {
-    const graceDeadline = Math.min(deadline, Date.now() + 12_000);
-    while (Date.now() < graceDeadline) {
+    const graceDeadline = Math.min(deadline, now() + 12_000);
+    while (now() < graceDeadline) {
       abortSignal?.throwIfAborted();
       try {
         // The authenticator answered the auto-fired ceremony — authoritative.
@@ -636,7 +641,7 @@ async function selectDuoFactor(
   // prompt) that burns the whole manual timeout before a warm attempt 2 recovers.
   // So loop to an absolute `promptRenderCap` and only give up at the factor
   // deadline once a Duo screen has actually rendered.
-  const promptRenderCap = Date.now() + Math.max(timeoutMs, 20_000) + DUO_FACTOR_PROMPT_RENDER_GRACE_MS;
+  const promptRenderCap = now() + Math.max(timeoutMs, 20_000) + DUO_FACTOR_PROMPT_RENDER_GRACE_MS;
   let factorDeadline = deadline;
   let extendedForRender = false;
   const duoPromptRendered = async (): Promise<boolean> => {
@@ -653,7 +658,7 @@ async function selectDuoFactor(
     ]);
     return counts.some((c) => c > 0);
   };
-  while (Date.now() < promptRenderCap) {
+  while (now() < promptRenderCap) {
     abortSignal?.throwIfAborted();
     try {
       // Auto-fire may still complete mid-click-path (e.g. CRM after Escape): if the
@@ -689,8 +694,8 @@ async function selectDuoFactor(
           if (clicked) return clicked;
         }
         // List is open but none of our factors are present — brief grace, then bail.
-        if (!listFirstSeenAt) listFirstSeenAt = Date.now();
-        else if (Date.now() - listFirstSeenAt > 3_000) {
+        if (!listFirstSeenAt) listFirstSeenAt = now();
+        else if (now() - listFirstSeenAt > 3_000) {
           await snapshotDuoPromptState(page, "method list open but none of our factors present");
           return undefined;
         }
@@ -732,19 +737,19 @@ async function selectDuoFactor(
       // Page may be mid-navigation between SSO and the Duo prompt — retry.
     }
 
-    if (Date.now() >= factorDeadline) {
+    if (now() >= factorDeadline) {
       // The factor window elapsed. If NO Duo screen has rendered yet we're still
       // pre-prompt (the ISS-005 slow-transition case) — keep waiting up to the
       // absolute cap instead of falling back to a dead manual wait. Only give up
       // once the prompt is genuinely up with no matching factor, or the cap trips.
-      if (!(await duoPromptRendered()) && Date.now() < promptRenderCap) {
+      if (!(await duoPromptRendered()) && now() < promptRenderCap) {
         if (!extendedForRender) {
           log.step(
             "Duo: prompt not rendered within the factor window — waiting for the SSO→Duo transition (ISS-005 guard)",
           );
           extendedForRender = true;
         }
-        factorDeadline = Math.min(promptRenderCap, Date.now() + timeoutMs);
+        factorDeadline = Math.min(promptRenderCap, now() + timeoutMs);
       } else {
         break; // prompt is up but no factor matched, or the hard cap tripped — real give-up
       }
