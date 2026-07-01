@@ -1,0 +1,47 @@
+# LLM Service (shared free-tier text client)
+
+`completeJson` / `completeText` run a single text prompt across the **whole**
+free-tier provider pool with automatic rate-limit fall-through — the text
+sibling of `services/ocr`'s vision pool. This is the "use any available agent;
+if one is rate-limited, use the next" primitive for every **non-OCR** LLM use.
+
+## Contract
+
+- `completeText(opts) → CompleteResult | null` — raw model text + which cell served it.
+- `completeJson<T>({ ...opts, schema }) → T | null` — parsed + Zod-validated.
+- **Graceful, not throwing:** returns `null` when the pool is exhausted
+  (every key rate-limited / quota-out / dead / absent), the reply isn't JSON, or
+  it fails schema validation. Callers degrade to "no LLM result" — an LLM
+  suggestion must never fail the surrounding HR operation.
+- Reuses `../ocr` infra: `buildTextPool` (env keys), `usage-tracker` (admission
+  control + `reserve/commit/penalize`), `rate-limit-headers` (precise retry
+  parsing). Providers/limits/model chains are the shared registry in
+  `../ocr/provider-limits.ts` (Gemini → Groq → Mistral → OpenRouter → SambaNova).
+
+## Rate-limit fall-through
+
+`completeText` reserves the best available (provider, key, model) cell, calls it,
+and on a 429 / quota / transient error `penalize`s that cell and moves to the
+next model in the chain → next key → next provider, until one succeeds or
+`maxWaitMs` (default 20s) is spent. State (RPD/RPM/cooldown/dead) is shared with
+OCR at `cacheDir` default `.tracker/runtime`, so text + OCR respect one per-key
+daily budget and never blow each other's free-tier quota.
+
+## Notes
+
+- Text token magnitude ≠ image tokens, so candidates override `limit.imgTokens`
+  with a text estimate (`estTokens`, default from prompt length). Pass a bigger
+  `estTokens` for long inputs (error logs, rosters).
+- JSON mode is provider-gated (`cfg.jsonMode`) exactly like the vision pool:
+  Groq/OpenRouter get no `response_format`, so `completeJson` relies on the
+  prompt asking for JSON + `parseJsonLoose` tolerance.
+- **Future text-only providers:** Cerebras (excluded from OCR — no image input)
+  is a candidate to add here for text post-processing. It would slot into
+  `provider-limits.ts` as a text-capable provider once the pool distinguishes
+  text-only vs vision-capable cells.
+- **PII:** prompts go to third-party free tiers (may train on free-tier data).
+  Keep prompts minimal and redact where possible; this is the same exposure the
+  OCR path already carries, extended to new call sites — treat as a policy call.
+- Tests: inject a fake `pool` + isolated `cacheDir`, and
+  `__resetUsageTrackerForTests()` between cases (see
+  `tests/unit/services/llm/complete.test.ts`).
