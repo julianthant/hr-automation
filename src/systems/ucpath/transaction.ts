@@ -19,6 +19,50 @@ import { log } from "../../utils/log.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 
+// ─── Transaction outcome verification (error banner vs success marker) ───────
+
+/**
+ * Pure decision for one poll tick of {@link waitForTransactionOutcome}: given
+ * whether the error banner and the success marker are currently visible,
+ * classify this tick. An error banner takes precedence over a success marker (a
+ * PeopleSoft form can briefly paint both mid-render; the error banner is the
+ * authoritative failure signal). Unit-pinned.
+ */
+export function classifyOutcomeSignals(
+  errorVisible: boolean,
+  successVisible: boolean,
+): "error" | "success" | "pending" {
+  if (errorVisible) return "error";
+  if (successVisible) return "success";
+  return "pending";
+}
+
+/**
+ * Poll for a DEFINITIVE transaction outcome — the error banner appearing OR a
+ * success marker (a positive next-page element) appearing — instead of sampling
+ * `errorBanner.count()` ONCE right after a fixed sleep. A banner that renders
+ * late read `count() === 0` at that single instant and wrongly returned
+ * `{ success: true }` for a transaction that actually errored. Returns
+ * `"timeout"` when neither resolves in the window so callers can fall back to
+ * the legacy point-in-time check (behavior never regresses below today's).
+ */
+export async function waitForTransactionOutcome(
+  errorLocator: Locator,
+  successLocator: Locator,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<"error" | "success" | "timeout"> {
+  const { timeoutMs = 20_000, pollMs = 500 } = opts;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const errorVisible = (await errorLocator.count().catch(() => 0)) > 0;
+    const successVisible = await successLocator.first().isVisible().catch(() => false);
+    const signal = classifyOutcomeSignals(errorVisible, successVisible);
+    if (signal !== "pending") return signal;
+    await sleep(pollMs);
+  }
+  return "timeout";
+}
+
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 
 /**
@@ -114,17 +158,18 @@ export async function clickCreateTransaction(
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
-  // Check for errors
+  // Decide on a DEFINITIVE outcome — error banner vs the reason-code page (the
+  // next step's dropdown) rendering — rather than sampling errorBanner.count()
+  // once (a late-rendering banner read 0 at that instant and returned success
+  // for a failed create). On timeout, fall back to the legacy point-in-time
+  // check so behavior never regresses.
   const errorLocator = smartHR.errorBanner(frame);
-  try {
-    const errorCount = await errorLocator.count();
-    if (errorCount > 0) {
-      const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 });
-      log.error(`Transaction creation error: ${errorText ?? "Unknown error"}`);
-      return { success: false, error: errorText ?? "Unknown error" };
-    }
-  } catch {
-    // No error elements — good
+  const successMarker = smartHR.reasonCodeSelect(frame);
+  const outcome = await waitForTransactionOutcome(errorLocator, successMarker, { timeoutMs: 20_000 });
+  if (outcome === "error" || (outcome === "timeout" && (await errorLocator.count().catch(() => 0)) > 0)) {
+    const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 }).catch(() => null);
+    log.error(`Transaction creation error: ${errorText ?? "Unknown error"}`);
+    return { success: false, error: errorText ?? "Unknown error" };
   }
 
   log.success("Transaction created");
@@ -584,17 +629,20 @@ export async function clickSaveAndSubmit(
   await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
-  // Check for errors
+  // Decide on a DEFINITIVE outcome — error banner vs the post-submit confirmation
+  // OK dialog — rather than sampling errorBanner.count() once after a fixed sleep
+  // (a banner that renders late read 0 at that instant and returned
+  // { success: true } for a submit that actually errored). On timeout, fall back
+  // to the legacy point-in-time check so behavior never regresses. On success the
+  // confirmation OK is already visible, so the txn# readback flow below proceeds
+  // immediately.
   const errorLocator = smartHR.errorBanner(frame);
-  try {
-    const errorCount = await errorLocator.count();
-    if (errorCount > 0) {
-      const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 });
-      log.error(`Save and Submit error: ${errorText ?? "Unknown error"}`);
-      return { success: false, error: errorText ?? "Unknown error" };
-    }
-  } catch {
-    // No error elements — good
+  const okMarker = smartHR.confirmationOkButton(frame);
+  const outcome = await waitForTransactionOutcome(errorLocator, okMarker, { timeoutMs: 20_000 });
+  if (outcome === "error" || (outcome === "timeout" && (await errorLocator.count().catch(() => 0)) > 0)) {
+    const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 }).catch(() => null);
+    log.error(`Save and Submit error: ${errorText ?? "Unknown error"}`);
+    return { success: false, error: errorText ?? "Unknown error" };
   }
 
   log.success("Transaction saved and submitted");
