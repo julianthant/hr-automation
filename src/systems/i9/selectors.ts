@@ -3,65 +3,56 @@ import type { Page, Locator } from "playwright";
 /**
  * I-9 Complete (Tracker I-9 by Mitratech) selector registry.
  *
- * Email/password auth (no Duo). Form fields use accessible names
- * consistently. No grid-index mutation issues.
+ * Auth is UCSD campus SSO: the UCOP portal (`i9complete.ucop.edu`) launch link
+ * fires a SAML flow through the `samlproxy.ucop.edu` identity-provider picker
+ * (WAYF) → UCSD TritON Shibboleth → Duo. The SSO form + Duo prompt are the
+ * shared UCSD selectors (handled by `src/infra/auth/sso-fields.ts`); only the
+ * UCOP-specific landing + WAYF steps live here. Post-login the app host is the
+ * same `wwwe.i9complete.com` UI as before.
  */
 
-// ─── Login flow ────────────────────────────────────────────────────────────
+// ─── Login flow (UCOP portal → SAML WAYF → UCSD SSO) ─────────────────────────
 
 export const login = {
   /**
-   * Email / username textbox. verified 2026-03-16
-   * @tags username, email, login, textbox, i9
+   * "Tracker I-9 Complete Application" launch link on the UCOP portal landing
+   * page (`i9complete.ucop.edu`). Clicking it starts the campus-SSO SAML flow.
+   * verified 2026-07-01
+   * @tags launch, application, sso, link, login, i9
    */
-  usernameInput: (page: Page): Locator =>
-    page.getByRole("textbox", { name: "Username or Email*" }),
+  appLaunchLink: (page: Page): Locator =>
+    page.getByRole("link", { name: "Tracker I-9 Complete Application" }),
 
   /**
-   * Next button (email-first login flow). verified 2026-03-16
-   * @tags next, login, button, i9
+   * Identity-provider (campus) picker on the `samlproxy.ucop.edu` WAYF page —
+   * a native `<select>` listing every UC campus. Select "University of
+   * California, San Diego" by label. verified 2026-07-01
+   * @tags wayf, idp, campus, select, dropdown, login, i9
    */
-  nextButton: (page: Page): Locator =>
-    page.getByRole("button", { name: "Next" }),
+  idpSelect: (page: Page): Locator =>
+    page.locator("#dropdownlist").or(page.getByRole("combobox")),
 
   /**
-   * Password textbox. verified 2026-03-16
-   * @tags password, login, textbox, i9
+   * "Select" button on the WAYF page — submits the chosen campus and redirects
+   * to the UCSD TritON SSO form. verified 2026-07-01
+   * @tags wayf, idp, select, submit, button, login, i9
    */
-  passwordInput: (page: Page): Locator =>
-    page.getByRole("textbox", { name: "Password*" }),
+  idpSelectButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Select" }),
 
   /**
-   * Log in button. verified 2026-03-16
-   * @tags login, submit, button, i9
-   */
-  loginButton: (page: Page): Locator =>
-    page.getByRole("button", { name: "Log in" }),
-
-  /**
-   * Training-notification dismiss button. verified 2026-03-16
+   * Training-notification dismiss button (post-login popup). verified 2026-07-01
    * @tags training, notification, dismiss, button, i9
    */
   dismissNotificationButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Dismiss the Notification" }),
 
   /**
-   * Training-notification confirm "Yes". verified 2026-03-16
+   * Training-notification confirm "Yes". verified 2026-07-01
    * @tags training, notification, confirm, yes, button, i9
    */
   confirmYesButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Yes" }),
-
-  /**
-   * Login validation error shown on /Account/Login when the submit is refused
-   * (e.g. "The username or password provided was incorrect."). Anchored on the
-   * credential-rejection message text observed live. Lets `loginToI9` fail FAST
-   * and LOUD on a bad credential instead of waiting out the post-login
-   * navigation timeout. verified 2026-06-24
-   * @tags login, error, validation, incorrect, invalid, credentials, i9
-   */
-  loginError: (page: Page): Locator =>
-    page.getByText(/username or password.*(incorrect|invalid)/i).first(),
 };
 
 // ─── Dashboard → Create new employee ──────────────────────────────────────

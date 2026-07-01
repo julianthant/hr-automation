@@ -7,6 +7,7 @@ import {
   loginToNewKronos,
   loginToServiceNow,
 } from "./login.js";
+import { loginToI9 } from "../../systems/i9/login.js";
 import { KUALI_SPACE_URL } from "../../config.js";
 
 export interface DuoLoginFlow {
@@ -24,12 +25,12 @@ export interface DuoLoginFlow {
  *
  * With `HR_AUTOMATION_DUO_WEBAUTHN=1` every flow here approves Duo hands-off via
  * the shared WebAuthn path (arm at `clickSsoSubmit` → `selectDuoFactor`). i9
- * Complete is intentionally absent: it uses plain email/password auth on
- * i9complete.com (third-party Mitratech vendor), not UCSD Shibboleth/Duo.
+ * Complete joined this list on 2026-07-01: it now authenticates through the UCOP
+ * portal via UCSD Shibboleth SSO + Duo (was standalone email/password before).
  *
  * Single source of truth for both the `test-login` CLI smoke (`src/cli.ts`) and
- * the live auth integration test (`tests/live/auth.test.ts`): adding a 7th Duo
- * flow here automatically extends both.
+ * the live auth integration test (`tests/live/auth.test.ts`): adding a Duo flow
+ * here automatically extends both.
  */
 export const DUO_LOGIN_FLOWS: ReadonlyArray<DuoLoginFlow> = [
   { key: "ucpath", label: "UCPath", run: (page) => loginToUCPath(page) },
@@ -38,4 +39,5 @@ export const DUO_LOGIN_FLOWS: ReadonlyArray<DuoLoginFlow> = [
   { key: "kuali", label: "Kuali Build", run: (page) => loginToKuali(page, KUALI_SPACE_URL) },
   { key: "newkronos", label: "New Kronos (WFD)", run: (page) => loginToNewKronos(page) },
   { key: "servicenow", label: "ServiceNow", run: (page) => loginToServiceNow(page) },
+  { key: "i9", label: "I-9 Complete", run: (page) => loginToI9(page) },
 ];

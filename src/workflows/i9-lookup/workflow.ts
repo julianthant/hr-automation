@@ -86,9 +86,10 @@ export const i9LookupWorkflow = defineWorkflow({
   systems: [
     {
       id: "i9",
-      // I9 Complete uses email + password auth (no Duo). Login is fast enough
-      // that deferring it to a handler step is not needed — let the kernel
-      // authenticate eagerly at session launch.
+      // I-9 Complete authenticates through the UCOP portal via UCSD Shibboleth
+      // SSO + Duo (since 2026-07-01) — the shared SSO path, UCPath credentials.
+      // Single-system launch, so the kernel authenticates eagerly at session
+      // launch (one Duo prompt, no stagger).
       login: requireLogin(loginToI9, "I9 authentication failed"),
     },
   ],

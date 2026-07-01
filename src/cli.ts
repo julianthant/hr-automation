@@ -20,7 +20,7 @@ program
 
 // ─── test-login ───
 
-// `DUO_LOGIN_FLOWS` (the six UCSD Shibboleth/Duo SSO flows) lives in
+// `DUO_LOGIN_FLOWS` (the seven UCSD Shibboleth/Duo SSO flows) lives in
 // `src/infra/auth/duo-login-flows.ts` — shared with the live auth test.
 
 const DEFAULT_DUO_FLOW_KEYS = ["ucpath", "crm"];

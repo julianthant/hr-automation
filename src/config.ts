@@ -123,8 +123,23 @@ export const UCPATH_SMART_HR_URL =
 
 // --- I9 ---
 
-/** I9 Complete login URL. */
-export const I9_URL = SETTINGS.urls.i9 || "https://stse.i9complete.com";
+/**
+ * I-9 Complete entry URL — the UCOP portal landing page. Its "Tracker I-9
+ * Complete Application" link fires the campus SSO SAML flow
+ * (samlproxy.ucop.edu WAYF → UCSD TritON Shibboleth → Duo), which lands on the
+ * authenticated app host `I9_APP_URL`. This replaced the old direct vendor
+ * login (`stse.i9complete.com`) on 2026-07-01 — auth is now UCSD SSO + Duo,
+ * not a standalone i9 email/password. See `src/systems/i9/login.ts`.
+ */
+export const I9_URL = SETTINGS.urls.i9 || "https://i9complete.ucop.edu";
+
+/**
+ * Authenticated I-9 Complete application host. Stable regardless of the entry
+ * portal — the SAML flow always lands here post-Duo. Used for deep-links (e.g.
+ * the employee-profile `saveAndContinue` navigation in `create.ts`) that must
+ * target the app host directly rather than the UCOP landing page.
+ */
+export const I9_APP_URL = "https://wwwe.i9complete.com";
 
 // --- UKG (Kronos) ---
 

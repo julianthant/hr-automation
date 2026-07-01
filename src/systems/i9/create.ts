@@ -8,7 +8,7 @@ import {
   closeAllKendoWindows,
   snapshotKendoWindows,
 } from "./navigate.js";
-import { I9_URL } from "../../config.js";
+import { I9_APP_URL } from "../../config.js";
 import { safeClick, safeFill } from "../common/index.js";
 
 /**
@@ -91,7 +91,7 @@ export async function createI9Employee(
         return { success: false, profileId: null, error: "Could not extract profile ID after duplicate selection" };
       }
       // Navigate with saveAndContinue param to reveal the Create I-9 radio section
-      await page.goto(`${I9_URL.replace("stse.", "wwwe.")}/employee/profile/${profileId}?saveAndContinue=true`, { timeout: 10_000 });
+      await page.goto(`${I9_APP_URL}/employee/profile/${profileId}?saveAndContinue=true`, { timeout: 10_000 });
       await page.waitForTimeout(1_000);
       log.step(`Using existing profile: ${profileId}`);
     } else if (isOk) {
