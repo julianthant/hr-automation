@@ -544,7 +544,7 @@ Used by: `separations` (4 systems, 1 Duo per system up front, then sequential do
 
 Used by: `onboarding` (parallel mode), `old-kronos-reports`.
 
-**Important property:** pool-mode gives you N sessions = N×M Duo prompts (M systems per workflow). Onboarding with `poolSize: 4` = 4 workers × 2 Duos (CRM + UCPath, I9 has no Duo) = 8 Duo approvals at startup.
+**Important property:** pool-mode gives you N sessions = N×M Duo prompts (M systems per workflow). Onboarding with `poolSize: 4` = 4 workers × 3 Duos (CRM + UCPath + I9 — I9 became a UCSD SSO + Duo flow via the UCOP portal on 2026-07-01) = 12 Duo approvals at startup.
 
 ### Mode 4: Daemon mode — persistent long-lived worker processes
 
@@ -643,7 +643,9 @@ sequenceDiagram
     U-->>B2: approve
     K->>B3: bringToFront
     K->>B3: login
-    Note over B3: I9 = SSO no Duo
+    B3->>U: Duo push
+    U-->>B3: approve
+    Note over B3: I9 = UCOP portal → UCSD SSO + Duo
     K->>K: all readyPromises resolve
 ```
 
