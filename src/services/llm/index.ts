@@ -23,3 +23,16 @@ export {
 export type { NormalizationChange, CanonicalRelationship, NormalizableEcRecord } from "./normalize-contact.js";
 export { triageFailure, summarizeTriage, TRIAGE_CATEGORIES } from "./triage.js";
 export type { TriageResult, TriageInput, TriageCategory } from "./triage.js";
+export {
+  sanityCheckRecord,
+  llmCrossFieldCheck,
+  runRuleChecks,
+  inferRuleSpec,
+  hasBlockingIssue,
+  summarizeSanityIssues,
+  checkEmail,
+  checkDob,
+  checkEid,
+  checkRequired,
+} from "./sanity-check.js";
+export type { SanityIssue, SanityCheckOptions, CheckableRecord, RuleSpec } from "./sanity-check.js";
