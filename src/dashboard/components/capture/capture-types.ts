@@ -81,5 +81,11 @@ export interface CaptureStartResponse {
   qrSvg?: string;
   shortcode?: string;
   expiresAt?: number;
+  /**
+   * Set when the QR fell back to a LAN IP a phone probably can't reach (CGNAT /
+   * link-local) and no `CAPTURE_PUBLIC_URL` was configured. The panel surfaces
+   * it so the operator isn't left with a QR that scans but never loads.
+   */
+  reachabilityWarning?: string;
   error?: string;
 }
