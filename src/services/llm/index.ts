@@ -21,3 +21,5 @@ export {
   CANONICAL_RELATIONSHIPS,
 } from "./normalize-contact.js";
 export type { NormalizationChange, CanonicalRelationship, NormalizableEcRecord } from "./normalize-contact.js";
+export { triageFailure, summarizeTriage, TRIAGE_CATEGORIES } from "./triage.js";
+export type { TriageResult, TriageInput, TriageCategory } from "./triage.js";
