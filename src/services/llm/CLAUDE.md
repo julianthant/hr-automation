@@ -27,6 +27,20 @@ next model in the chain → next key → next provider, until one succeeds or
 OCR at `cacheDir` default `.tracker/runtime`, so text + OCR respect one per-key
 daily budget and never blow each other's free-tier quota.
 
+## Consumers
+
+- **`normalize-contact.ts`** — EC contact-field normalization (rules + LLM), wired
+  as a gated OCR-orchestrator phase (see `src/workflows/ocr/CLAUDE.md`).
+- **`triage.ts`** — `triageFailure(...)` explains the long-tail failures the
+  deterministic `classifyError` (`src/utils/errors.ts`) can't map: category +
+  cause + suggested recovery + retriable. Advisory + `null`-graceful; reads/writes
+  nothing. Deliberately **not** wired into `tracked-workflow.ts`'s terminal-emit
+  catch (single-terminal-write invariants — VQ-003/E2E-101/ISS-007). Consumed
+  on-demand by `src/scripts/ops/triage-failure.ts`
+  (`tsx --env-file=.env src/scripts/ops/triage-failure.ts "<error>" [--workflow W] [--step S] [--system SYS]`);
+  the natural future hot-path home is the dashboard's background failure-pattern
+  scanner, not the emit path.
+
 ## Notes
 
 - Text token magnitude ≠ image tokens, so candidates override `limit.imgTokens`
