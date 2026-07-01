@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import type { CaptureSession, CaptureSessionStore } from "./sessions.js";
 import { qrSvgFor } from "./qr.js";
 import { bundlePhotosToPdf } from "./pdf-bundle.js";
+import { classifyLanIp, isPhoneUnreachableLanIp } from "./lan-ip.js";
 import { log } from "../../utils/log.js";
 
 export interface RouteResult {
@@ -153,6 +154,16 @@ export async function handleStart(
   const qrSvg = await qrSvgFor(captureUrl);
   const shortcode = genShortcode();
 
+  // When the QR falls back to a LAN IP that a phone on a normal network can't
+  // reach (CGNAT 100.64/10, link-local 169.254/16), the scan succeeds but the
+  // page never loads. Warn loudly instead of handing out a silently-dead QR —
+  // an explicit `CAPTURE_PUBLIC_URL` (or `npm run dashboard:tunneled`) fixes it.
+  const reachabilityWarning =
+    !ctx.publicUrl && ctx.lanIp && isPhoneUnreachableLanIp(ctx.lanIp)
+      ? `The QR points to ${ctx.lanIp} (a ${classifyLanIp(ctx.lanIp)} address), which a phone on a normal network usually can't reach. Start the dashboard with \`npm run dashboard:tunneled\`, or set CAPTURE_PUBLIC_URL to a tunnel/public origin.`
+      : undefined;
+  if (reachabilityWarning) log.warn(`capture: ${reachabilityWarning}`);
+
   return {
     status: 200,
     body: {
@@ -163,6 +174,7 @@ export async function handleStart(
       qrSvg,
       shortcode,
       expiresAt: session.expiresAt,
+      ...(reachabilityWarning ? { reachabilityWarning } : {}),
     },
   };
 }

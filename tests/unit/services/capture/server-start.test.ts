@@ -1,7 +1,8 @@
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import { handleStart } from "../../../../src/services/capture/server.js";
 import { createSessionStore } from "../../../../src/services/capture/sessions.js";
+import { log } from "../../../../src/utils/log.js";
 
 const onFinalize = async (): Promise<void> => {};
 
@@ -78,5 +79,50 @@ describe("handleStart", () => {
     assert.equal(r.status, 200);
     const body = r.body as { captureUrl: string };
     assert.match(body.captureUrl, /^https:\/\/abc\.trycloudflare\.com\/capture\//);
+  });
+
+  it("warns when the QR falls back to a CGNAT LAN IP a phone can't reach", async (t) => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    t.onTestFinished(() => warn.mockRestore());
+    const store = createSessionStore();
+    const r = await handleStart(
+      { workflow: "oath-signature" },
+      { store, lanIp: "100.64.71.114", port: 3838, onFinalize },
+    );
+    assert.equal(r.status, 200);
+    const body = r.body as { captureUrl: string; reachabilityWarning?: string };
+    // Still hands out a working-shaped URL — the warning is advisory, not a block.
+    assert.match(body.captureUrl, /^http:\/\/100\.64\.71\.114:3838\/capture\//);
+    assert.equal(typeof body.reachabilityWarning, "string");
+    assert.match(body.reachabilityWarning!, /100\.64\.71\.114/);
+    assert.match(body.reachabilityWarning!, /cgnat/);
+    assert.match(body.reachabilityWarning!, /dashboard:tunneled|CAPTURE_PUBLIC_URL/);
+    assert.equal(warn.mock.calls.length, 1);
+  });
+
+  it("does NOT warn for a private LAN IP", async () => {
+    const store = createSessionStore();
+    const r = await handleStart(
+      { workflow: "oath-signature" },
+      { store, lanIp: "192.168.1.50", port: 3838, onFinalize },
+    );
+    const body = r.body as { reachabilityWarning?: string };
+    assert.equal(body.reachabilityWarning, undefined);
+  });
+
+  it("does NOT warn when publicUrl overrides an unreachable lanIp", async () => {
+    const store = createSessionStore();
+    const r = await handleStart(
+      { workflow: "oath-signature" },
+      {
+        store,
+        lanIp: "100.64.71.114",
+        port: 3838,
+        publicUrl: "https://abc.trycloudflare.com",
+        onFinalize,
+      },
+    );
+    const body = r.body as { reachabilityWarning?: string };
+    assert.equal(body.reachabilityWarning, undefined);
   });
 });

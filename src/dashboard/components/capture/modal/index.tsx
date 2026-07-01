@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AlertTriangle } from "lucide-react";
 import { toast } from "@/lib/notify";
 import { CapturePhotoLightbox } from "../CapturePhotoLightbox.js";
 import { useCaptureSession } from "../../hooks/useCaptureSession.js";
@@ -86,6 +87,8 @@ export interface StartedSession {
   captureUrl: string;
   qrSvg: string;
   expiresAt: number;
+  /** Present when the QR points at a LAN IP a phone likely can't reach. */
+  reachabilityWarning?: string;
 }
 
 const discardSession = (sessionId: string, reason: string): void => {
@@ -251,6 +254,7 @@ export const CapturePanel = forwardRef<CapturePanelHandle, CapturePanelProps>(fu
           captureUrl: data.captureUrl,
           qrSvg: data.qrSvg,
           expiresAt: data.expiresAt,
+          reachabilityWarning: data.reachabilityWarning,
         });
         setPhase("session");
       } catch (err) {
@@ -480,6 +484,26 @@ export const CapturePanel = forwardRef<CapturePanelHandle, CapturePanelProps>(fu
             />
           </div>
         </div>
+
+        {started?.reachabilityWarning && (
+          <div
+            role="alert"
+            aria-live="polite"
+            className="mt-4 flex items-start gap-2.5 rounded-md p-3 text-[12px] leading-relaxed"
+            style={{
+              border: "1px solid var(--capture-border-subtle)",
+              borderLeft: "2px solid var(--capture-warn)",
+              color: "var(--capture-fg-body)",
+            }}
+          >
+            <AlertTriangle
+              aria-hidden
+              className="mt-[1px] h-4 w-4 shrink-0"
+              style={{ color: "var(--capture-warn)" }}
+            />
+            <span>{started.reachabilityWarning}</span>
+          </div>
+        )}
 
         {started && (
           <div className="mt-4 flex gap-9">

@@ -40,6 +40,9 @@ export { bundlePhotosToPdf } from "./pdf-bundle.js";
 export {
   pickLanIp,
   pickLanIpFrom,
+  classifyLanIp,
+  isPhoneUnreachableLanIp,
+  type LanIpClass,
   __resetLanIpCacheForTests,
 } from "./lan-ip.js";
 export { qrSvgFor } from "./qr.js";
