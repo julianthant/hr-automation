@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   extractSmartHrTransactionNumber,
   rowMatchesTerminationEid,
+  classifyOutcomeSignals,
 } from "../../../../src/systems/ucpath/transaction.js";
 
 test("extractSmartHrTransactionNumber reads the lower Transaction ID field", () => {
@@ -70,5 +71,30 @@ describe("rowMatchesTerminationEid", () => {
       ),
       false,
     );
+  });
+});
+
+/**
+ * The per-tick decision behind `waitForTransactionOutcome`. The bug it guards:
+ * a late-rendering error banner read `count() === 0` at a single sampled instant
+ * and returned `{ success: true }` for a transaction that actually errored. The
+ * decision now requires a positive success marker OR treats a visible error
+ * banner as authoritative — with the error banner winning even a tie.
+ */
+describe("classifyOutcomeSignals", () => {
+  test("error banner visible → 'error' (even when the success marker is also visible)", () => {
+    assert.equal(classifyOutcomeSignals(true, true), "error");
+  });
+
+  test("error banner only → 'error'", () => {
+    assert.equal(classifyOutcomeSignals(true, false), "error");
+  });
+
+  test("success marker only → 'success'", () => {
+    assert.equal(classifyOutcomeSignals(false, true), "success");
+  });
+
+  test("neither signal yet → 'pending' (keep polling, do not conclude success)", () => {
+    assert.equal(classifyOutcomeSignals(false, false), "pending");
   });
 });
