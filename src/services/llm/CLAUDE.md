@@ -56,6 +56,11 @@ daily budget and never blow each other's free-tier quota.
   `src/scripts/ops/selector-suggest.ts`
   (`playwright-cli --raw snapshot | tsx … selector-suggest.ts --intent "the Save button"`);
   the operator still verifies each candidate live + `// verified <date>` + catalog regen.
+- **`summarize-run.ts`** — `summarizeRun({logText, workflow?})` turns a run's log
+  lines into a plain-English digest (`{summary, outcome, highlights}`): what the
+  run did, how it ended, why it failed. Read-only, `null`-graceful. Consumed by
+  `src/scripts/ops/summarize-run.ts` (feed a `.tracker/logs/*.jsonl` slice or
+  grep one run out); the future home is a dashboard "explain this run" affordance.
 
 ## Notes
 

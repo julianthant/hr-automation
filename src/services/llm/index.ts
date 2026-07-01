@@ -38,3 +38,5 @@ export {
 export type { SanityIssue, SanityCheckOptions, CheckableRecord, RuleSpec } from "./sanity-check.js";
 export { suggestSelectors } from "./selector-suggest.js";
 export type { SelectorCandidate, SuggestSelectorsInput } from "./selector-suggest.js";
+export { summarizeRun, RUN_OUTCOMES } from "./summarize-run.js";
+export type { RunSummary, RunOutcome, SummarizeRunInput } from "./summarize-run.js";
