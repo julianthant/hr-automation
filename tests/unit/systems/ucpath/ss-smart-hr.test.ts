@@ -2,6 +2,8 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import {
   pickTerminationRow,
+  pickHireRow,
+  buildHireSearchName,
   parseSsSmartHrRows,
   isWithinSeparationWindow,
   SEPARATION_TERMINATION_WINDOW_DAYS,
@@ -66,6 +68,84 @@ describe("pickTerminationRow", () => {
 
   it("returns null on an empty grid", () => {
     assert.equal(pickTerminationRow([]), null);
+  });
+});
+
+/**
+ * Onboarding's pre-submit duplicate-hire probe: the hire-family analogue of
+ * `pickTerminationRow`. A `HIR`/`REH` row for the searched person means a hire
+ * is already in flight, so the submit must be skipped.
+ */
+describe("pickHireRow", () => {
+  it("returns null when there is no hire row (only TER/XFR)", () => {
+    const rows = [
+      row("TER", "T002999999", "Approved"),
+      row("XFR", "T001221113", "Approved"),
+    ];
+    assert.equal(pickHireRow(rows), null);
+  });
+
+  it("finds the HIR row among other actions", () => {
+    const rows = [
+      row("TER", "T002168945", "Pending"),
+      row("XFR", "T001861336", "Approved"),
+      row("HIR", "T001191954", "Pending"),
+    ];
+    const picked = pickHireRow(rows);
+    assert.ok(picked);
+    assert.equal(picked.transactionId, "T001191954");
+    assert.equal(picked.approvalStatus, "Pending");
+  });
+
+  it("also matches a REH (rehire) action", () => {
+    const rows = [row("REH", "T001195324", "Saved")];
+    const picked = pickHireRow(rows);
+    assert.ok(picked);
+    assert.equal(picked.action, "REH");
+  });
+
+  it("is case- and whitespace-insensitive on the action code", () => {
+    const picked = pickHireRow([row(" hir ", "T002000000", "Pending")]);
+    assert.ok(picked);
+    assert.equal(picked.transactionId, "T002000000");
+  });
+
+  it("returns the first hire row when more than one exists (newest-first grid)", () => {
+    const rows = [
+      row("HIR", "T002222222", "Pending"),
+      row("HIR", "T002111111", "Approved"),
+    ];
+    const picked = pickHireRow(rows);
+    assert.ok(picked);
+    assert.equal(picked.transactionId, "T002222222");
+  });
+
+  it("returns null on an empty grid", () => {
+    assert.equal(pickHireRow([]), null);
+  });
+});
+
+describe("buildHireSearchName", () => {
+  it("builds the PeopleSoft Last,First key", () => {
+    assert.equal(buildHireSearchName("Jane", "Doe"), "Doe,Jane");
+  });
+
+  it("trims surrounding whitespace on each part", () => {
+    assert.equal(buildHireSearchName("  Jane ", " Doe  "), "Doe,Jane");
+  });
+
+  it("falls back to the last name alone when first is missing", () => {
+    assert.equal(buildHireSearchName("", "Doe"), "Doe");
+    assert.equal(buildHireSearchName("   ", "Doe"), "Doe");
+  });
+
+  it("falls back to the first name alone when last is missing", () => {
+    assert.equal(buildHireSearchName("Jane", ""), "Jane");
+  });
+
+  it("returns an empty string when neither name is present", () => {
+    assert.equal(buildHireSearchName("", ""), "");
+    assert.equal(buildHireSearchName("  ", "  "), "");
   });
 });
 

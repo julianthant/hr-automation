@@ -35,9 +35,13 @@ export type { PersonalDataInput, JobDataInput, ExistingTerminationResult } from 
 export {
   navigateToSsSmartHrTransactions,
   findTerminationTransactionStatus,
+  findExistingHireTransaction,
   pickTerminationRow,
+  pickHireRow,
+  buildHireSearchName,
+  HIRE_ACTION_CODES,
 } from "./ss-smart-hr.js";
-export type { SsSmartHrRow, TerminationTransactionStatus } from "./ss-smart-hr.js";
+export type { SsSmartHrRow, TerminationTransactionStatus, HireTransactionStatus } from "./ss-smart-hr.js";
 export {
   navigateToWorkforceJobSummary,
   searchJobSummary,

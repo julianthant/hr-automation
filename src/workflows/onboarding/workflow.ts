@@ -18,6 +18,7 @@ import {
 } from "../../systems/crm/index.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
+import { findExistingHireTransaction } from "../../systems/ucpath/index.js";
 import { loginToI9, createI9Employee, searchI9Employee } from "../../systems/i9/index.js";
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
@@ -71,8 +72,10 @@ export const onboardingWorkflow = defineWorkflow({
     },
     {
       id: "i9",
-      // I9 has no Duo MFA — `instance` and `abortSignal` are not used; the
-      // requireLogin wrapper passes them through and loginToI9 ignores them.
+      // I-9 Complete now authenticates via UCSD Shibboleth SSO + Duo through the
+      // UCOP portal (2026-07-01), so `instance` + `abortSignal` ARE used —
+      // requireLogin passes them through and loginToI9 joins the global Duo
+      // queue (UCPath + I-9 = two staggered Duos here).
       login: requireLogin(loginToI9, "I-9 Complete authentication failed"),
     },
   ],
@@ -382,7 +385,7 @@ export const onboardingWorkflow = defineWorkflow({
 
     await ctx.step("transaction", async () => {
       const t0 = Date.now();
-      const txnExit = "<empty>";
+      let txnExit = "<empty>";
       let failedAtStep: string | null = null;
       try {
         if (!data) throw new Error("extraction did not produce data");
@@ -403,6 +406,35 @@ export const onboardingWorkflow = defineWorkflow({
           log.success(
             "DRY RUN: reached Smart HR transaction — submit skipped (no UCPath mutation)",
           );
+          return;
+        }
+
+        // ── Duplicate-hire idempotency probe (before the irreversible submit) ──
+        // A prior run can submit the Smart HR hire server-side yet die before
+        // writing the terminal tracker row; a kernel retry re-runs the handler
+        // from step 0 and would re-file the hire (person-search still returns
+        // "new hire" because an unprocessed Smart HR hire creates no searchable
+        // person yet). New hires have no EID (Person ID renders "NEW"), so probe
+        // the SS Smart HR Transactions list by NAME + a HIRE (HIR/REH) action —
+        // mirroring separations' pre-submit findExistingTerminationTransaction.
+        const existingHire = await findExistingHireTransaction(ucpathPage, {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          effectiveDate: data.effectiveDate,
+          templateId: TEMPLATE_ID,
+        });
+        if (existingHire.found) {
+          txnExit = existingHire.transactionId || "<already-submitted>";
+          log.warn(
+            `[Onboarding Txn] A hire transaction (#${existingHire.transactionId || "unknown"}, `
+            + `${existingHire.approvalStatus || "unknown status"}) already exists on the Smart HR `
+            + `list for ${data.firstName} ${data.lastName} — skipping submit to avoid a duplicate hire.`,
+          );
+          ctx.updateData({
+            status: "Already Submitted",
+            existingHireTxn: existingHire.transactionId,
+          });
+          await ctx.screenshot({ kind: "form", label: "onboarding-existing-hire-transaction" });
           return;
         }
 

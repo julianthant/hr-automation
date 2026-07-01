@@ -57,6 +57,16 @@ export interface TerminationTransactionStatus {
   priorTerminationSkipped?: boolean;
 }
 
+/** Result of a hire-transaction existence probe (onboarding idempotency). */
+export interface HireTransactionStatus {
+  /** True when a hire-family (HIR/REH) transaction already exists for the person. */
+  found: boolean;
+  /** Transaction number of the existing hire (empty when not found). */
+  transactionId: string;
+  /** Approval status of the existing hire (empty when not found). */
+  approvalStatus: string;
+}
+
 /**
  * How close (in days) a TER's effective date must be to the Kuali separation
  * date for the TER to count as THIS separation rather than a prior termination
@@ -93,6 +103,43 @@ function effectiveTerminationWindowDays(): number {
  */
 export function pickTerminationRow(rows: SsSmartHrRow[]): SsSmartHrRow | null {
   return rows.find((r) => r.action.trim().toUpperCase() === "TER") ?? null;
+}
+
+/**
+ * PeopleSoft action codes that represent a hire-family Smart HR transaction:
+ * `HIR` (new hire — what `UC_FULL_HIRE` produces) and `REH` (rehire). Onboarding
+ * matches either when probing for an already-filed hire.
+ */
+export const HIRE_ACTION_CODES = ["HIR", "REH"] as const;
+
+/**
+ * Pick the hire (Action = "HIR" or "REH") row from a parsed results grid — the
+ * hire-family analogue of {@link pickTerminationRow}. When more than one exists,
+ * the first (newest — the grid lists newest first) wins. Pure + order-insensitive
+ * on whitespace/case so it is unit testable without a browser.
+ *
+ * Used by onboarding's pre-submit duplicate-hire probe: a HIR/REH row for the
+ * searched person on the SS Smart HR Transactions list means a hire is already
+ * in flight (a prior run submitted it), so the submit must be skipped.
+ */
+export function pickHireRow(rows: SsSmartHrRow[]): SsSmartHrRow | null {
+  const codes = new Set<string>(HIRE_ACTION_CODES);
+  return rows.find((r) => codes.has(r.action.trim().toUpperCase())) ?? null;
+}
+
+/**
+ * Build the PeopleSoft "Name" search key (`Last,First`) for the SS Smart HR
+ * Transactions search page. New hires have no Empl ID yet (the Person ID column
+ * renders "NEW" until the transaction is processed — see `clickSaveAndSubmit`),
+ * so onboarding's hire probe must search by name rather than EID. Pure +
+ * unit-pinned. Returns just the last (or first) name when only one is present,
+ * `""` when neither is.
+ */
+export function buildHireSearchName(firstName: string, lastName: string): string {
+  const last = (lastName ?? "").trim();
+  const first = (firstName ?? "").trim();
+  if (last && first) return `${last},${first}`;
+  return last || first;
 }
 
 /** Parse `YYYY-MM-DD` (ISO) or `MM/DD/YYYY` (US) to a UTC day number, else null. */
@@ -255,6 +302,86 @@ export async function findTerminationTransactionStatus(
     `a fresh transaction is needed`,
   );
   return { found: false, transactionId: "", approvalStatus: "", effectiveDate, priorTerminationSkipped: true };
+}
+
+/**
+ * Probe the SS Smart HR Transactions list for an EXISTING hire (HIR/REH)
+ * transaction for a person, keyed by NAME. Onboarding's pre-submit idempotency
+ * guard: a prior run can submit the Smart HR hire server-side yet die before
+ * writing the terminal tracker row, and a kernel retry re-runs the handler from
+ * step 0 — person-search still returns "new hire" (an unprocessed Smart HR hire
+ * creates no searchable person record yet), so without this probe the retry
+ * re-files the hire. The hire-family analogue of {@link findTerminationTransactionStatus};
+ * matches a `HIR`/`REH` action via the pure {@link pickHireRow}.
+ *
+ * **Keyed by NAME, not EID.** A brand-new hire has no Empl ID — the Person ID
+ * column renders "NEW" until the transaction processes (see `clickSaveAndSubmit`).
+ * Onboarding reaches its transaction step ONLY for a person who was NOT found in
+ * UCPath (rehires short-circuit earlier), so any HIR/REH row under this exact
+ * name on the SS Smart HR list is almost certainly this workflow's own prior
+ * (duplicate) submission. `effectiveDate` / `templateId` are logged for the audit
+ * trail (the results grid exposes neither as a column, so the match is
+ * name + hire-action).
+ *
+ * Best-effort: a navigation/parse failure (or an empty name) degrades to
+ * `found: false` so a transient probe glitch never BLOCKS a legitimate hire —
+ * mirroring separations' `findExistingTerminationTransaction` philosophy.
+ *
+ * NEEDS LIVE VERIFICATION: that the SS Smart HR "Name" search returns a pending
+ * hire, and that the `Last,First` key format ({@link buildHireSearchName}) is
+ * the right one for that search box.
+ */
+export async function findExistingHireTransaction(
+  page: Page,
+  opts: { firstName: string; lastName: string; effectiveDate?: string; templateId?: string },
+): Promise<HireTransactionStatus> {
+  const none: HireTransactionStatus = { found: false, transactionId: "", approvalStatus: "" };
+  const searchName = buildHireSearchName(opts.firstName, opts.lastName);
+  try {
+    if (!searchName) {
+      log.warn("[SS Smart HR] Empty name — skipping pre-submit hire existence check");
+      return none;
+    }
+    log.step(
+      `[SS Smart HR] Checking for an existing hire transaction: name='${searchName}' ` +
+      `effDate='${opts.effectiveDate ?? "<none>"}' template='${opts.templateId ?? "<none>"}'`,
+    );
+    await navigateToSsSmartHrTransactions(page);
+    const frame = getContentFrame(page);
+
+    await safeFill(ssSmartHRTransactions.nameInput(frame), searchName, {
+      timeout: 10_000,
+      label: "ss smart hr name input (hire probe)",
+    });
+    await safeClick(ssSmartHRTransactions.searchButton(frame), {
+      timeout: 10_000,
+      label: "ss smart hr search button (hire probe)",
+    });
+    await page.waitForTimeout(3_000);
+    await waitForPeopleSoftProcessing(frame, 15_000);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+
+    const rows = await scanSsSmartHrResults(frame);
+    log.debug(
+      `[SS Smart HR] Hire probe scanned ${rows.length} row(s): ` +
+      (rows.map((r) => `${r.transactionId}=${r.action}/${r.approvalStatus}`).join(", ") || "<none>"),
+    );
+    const hire = pickHireRow(rows);
+    if (!hire) {
+      log.step(`[SS Smart HR] No existing hire (HIR/REH) transaction for name='${searchName}' — safe to submit`);
+      return none;
+    }
+    log.warn(
+      `[SS Smart HR] Existing hire transaction for name='${searchName}': ` +
+      `txn='${hire.transactionId}' action='${hire.action}' status='${hire.approvalStatus}'`,
+    );
+    return { found: true, transactionId: hire.transactionId, approvalStatus: hire.approvalStatus };
+  } catch (e) {
+    log.warn(
+      `[SS Smart HR] Hire existence probe threw (treating as no existing hire — will proceed with submit): ${errorMessage(e)}`,
+    );
+    return none;
+  }
 }
 
 /**
