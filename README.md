@@ -42,7 +42,7 @@ npm run crm-doc-download:stop
 npm run dashboard                            # SSE backend (:3838) + Vite dev (:5173)
 npm run dashboard:watch                      # Same, but tsx watch restarts SSE backend on src/ changes
 npm run dashboard:prod                       # Serve pre-built dashboard from SSE only
-npm run dashboard:tunneled                   # Dashboard with tunnel support
+npm run dashboard:tunneled                   # Force a fresh Cloudflare quick tunnel for phone Capture (= dashboard --tunnel)
 ```
 
 Open **http://localhost:5173** to monitor live workflow progress.

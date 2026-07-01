@@ -10,6 +10,8 @@ import "./workflows/ocr/index.js";
 import { exportToExcel } from "./tracker/exports/export-excel.js";
 import { startDashboard } from "./tracker/dashboard.js";
 import { stopDaemons } from "./core/index.js";
+import { pickLanIp, isPhoneUnreachableLanIp } from "./services/capture/lan-ip.js";
+import { startQuickTunnel } from "./services/capture/tunnel.js";
 
 const program = new Command();
 
@@ -128,7 +130,18 @@ program
   .option("-p, --port <port>", "SSE server port", (v) => parsePositiveInt(v, "--port"))
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
-  .action(async (opts: { port?: number; prod?: boolean; clean?: boolean }) => {
+  .option(
+    "--tunnel",
+    "Front the dashboard with a fresh, throwaway Cloudflare quick tunnel so the phone-Capture QR is reachable (never uses a named tunnel in ~/.cloudflared)",
+  )
+  .option("--no-tunnel", "Never auto-start a Capture tunnel, even if the LAN IP looks unreachable")
+  .action(
+    async (opts: {
+      port?: number;
+      prod?: boolean;
+      clean?: boolean;
+      tunnel?: boolean;
+    }) => {
     // Dashboard runs default to hands-off Duo. Without it, a daemon login
     // (person-lookup, oath-signature, …) stalls on Duo's native "insert your
     // security key and touch it" dialog — Duo defaults to the security-key
@@ -173,6 +186,49 @@ program
       await vite.listen();
       vite.printUrls();
       log.step(`SSE backend on port ${port}`);
+    }
+
+    // Phone-Capture reachability: the QR encodes the LAN IP by default, which a
+    // phone can't reach when the laptop has only a CGNAT/link-local address (or
+    // is on a different network). Auto-start a FRESH, throwaway Cloudflare quick
+    // tunnel in that case so Capture "just works" — it is fully isolated from
+    // ~/.cloudflared, so it never touches a named tunnel / account. Precedence:
+    // an explicit CAPTURE_PUBLIC_URL always wins; `--tunnel` forces it on;
+    // `--no-tunnel` forces it off; otherwise it's automatic only when the LAN IP
+    // looks unreachable — a normal LAN gets no tunnel and stays fully local.
+    const lanIp = pickLanIp();
+    const lanUnreachable = !lanIp || isPhoneUnreachableLanIp(lanIp);
+    const wantTunnel =
+      opts.tunnel === true ||
+      (opts.tunnel !== false && !process.env.CAPTURE_PUBLIC_URL && lanUnreachable);
+    if (process.env.CAPTURE_PUBLIC_URL) {
+      log.step(`Capture QR will use CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL}`);
+    } else if (wantTunnel) {
+      log.step(
+        opts.tunnel === true
+          ? "Starting a Cloudflare quick tunnel for phone Capture (--tunnel)…"
+          : `LAN IP ${lanIp ?? "unavailable"} isn't reachable from a phone (CGNAT/link-local) — starting a Cloudflare quick tunnel for Capture…`,
+      );
+      const tunnel = await startQuickTunnel(port);
+      if (tunnel) {
+        // The capture route reads process.env.CAPTURE_PUBLIC_URL per request, so
+        // setting it here (before any operator opens Capture) points the QR at
+        // the tunnel with no restart.
+        process.env.CAPTURE_PUBLIC_URL = tunnel.url;
+        log.success(`Capture tunnel ready: ${tunnel.url} (the phone QR encodes this)`);
+        const stop = tunnel.stop;
+        for (const sig of ["SIGINT", "SIGTERM"] as const) {
+          process.once(sig, () => {
+            stop();
+            process.exit(0);
+          });
+        }
+        process.once("exit", () => stop());
+      } else {
+        log.warn(
+          "Couldn't start a Cloudflare quick tunnel (cloudflared missing or the network blocked it). The Capture QR will fall back to the LAN IP — install cloudflared (`brew install cloudflared`) or set CAPTURE_PUBLIC_URL manually.",
+        );
+      }
     }
 
     // Keep process alive
