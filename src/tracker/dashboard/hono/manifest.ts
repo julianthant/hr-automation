@@ -1,10 +1,13 @@
 export interface DashboardHonoRouteManifestEntry {
-  method: "GET" | "POST" | "DELETE" | "OPTIONS";
+  method: "GET" | "POST" | "DELETE" | "OPTIONS" | "ALL";
   path: string;
 }
 
 const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] = [
   { method: "OPTIONS", path: "*" },
+  // Public-tunnel scoping middleware (app.use("*") → registered as ALL *). Runs
+  // first and restricts external Capture-tunnel requests to phone endpoints.
+  { method: "ALL", path: "*" },
   { method: "GET", path: "/api/v2/projection/health" },
   { method: "GET", path: "/api/v2/entries" },
   { method: "GET", path: "/api/v2/runs" },
@@ -98,6 +101,11 @@ const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] 
   { method: "POST", path: "/api/capture/validate" },
   { method: "GET", path: "/api/capture/registry" },
   { method: "GET", path: "/capture-assets/heic2any.min.js" },
+  { method: "GET", path: "/api/ai-assist/status" },
+  { method: "POST", path: "/api/ai-assist/triage" },
+  { method: "POST", path: "/api/ai-assist/sanity" },
+  { method: "POST", path: "/api/ai-assist/selector" },
+  { method: "POST", path: "/api/ai-assist/summarize" },
   { method: "GET", path: "/events/hub" },
   { method: "GET", path: "/" },
   { method: "GET", path: "/index.html" },
