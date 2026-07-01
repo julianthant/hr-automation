@@ -146,6 +146,19 @@ export function classifyPersonSearchSignal(
 }
 
 /**
+ * Can UCPath person search even run with these criteria? UCPath offers only
+ * NID-based or DOB-based search orders (live page: "NID Only" / "Legal Name +
+ * Bday + NID" / "Legal First Name + DOB"). A record with NEITHER a National ID
+ * (SSN) NOR a Date of Birth satisfies none of them, so the Search button stays
+ * DISABLED and any click just times out. Pure predicate so the "can we even
+ * search?" gate is unit-pinned. (Live: juzaw@ucsd.edu — no SSN + no DOB → Search
+ * greyed out; the click timed out 10s ×2 before this guard existed.)
+ */
+export function personSearchCriteriaSufficient(ssn: string, dob: string): boolean {
+  return ssn.trim().length > 0 || dob.trim().length > 0;
+}
+
+/**
  * RACE the two definitive person-search outcomes — {results grid carrying an
  * employee-id row} vs {#ICOK confirmation dialog present} — polling until one is
  * actually there (bounded by `timeoutMs`). The grid is checked FIRST each tick so
@@ -241,6 +254,21 @@ export async function searchPerson(
     label: "ucpath person search dob",
   });
   log.step("Search criteria filled");
+
+  // Fail LOUD + actionable when the record can't be searched at all. UCPath
+  // person search needs an SSN or a DOB (see personSearchCriteriaSufficient); a
+  // name-only record leaves the Search button DISABLED, so clicking it just
+  // times out 10s ×2 and the run fails with an opaque "Timed out" error. Bail
+  // early with a message the operator can act on (live: juzaw@ucsd.edu).
+  if (!personSearchCriteriaSufficient(ssn, dob)) {
+    await debugScreenshot(page, "debug-ps-insufficient-criteria", { fullPage: true });
+    throw new Error(
+      `Cannot check UCPath for a duplicate person: the record for `
+      + `"${firstName} ${lastName}" has neither an SSN nor a Date of Birth, and `
+      + `UCPath person search requires a National ID or Date of Birth. `
+      + `Add a DOB or SSN to the CRM record and re-run.`,
+    );
+  }
 
   // Click National Id magnifying glass — triggers PeopleSoft validation of the
   // National Id field. It raises a "no prompt values for this field" message
