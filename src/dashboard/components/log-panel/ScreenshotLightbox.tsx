@@ -66,6 +66,8 @@ export function ScreenshotLightbox({
         return (
           <img
             src={file.url}
+            srcSet={file.url}
+            sizes="6rem"
             alt=""
             loading="lazy"
             decoding="async"
