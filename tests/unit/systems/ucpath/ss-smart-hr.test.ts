@@ -7,6 +7,10 @@ import {
   parseSsSmartHrRows,
   isWithinSeparationWindow,
   SEPARATION_TERMINATION_WINDOW_DAYS,
+  isHireInFlightStatus,
+  hireEffectiveDateMatches,
+  decideHireDuplicateSkip,
+  HIRE_IN_FLIGHT_APPROVAL_STATUSES,
 } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 import type { SsSmartHrRow } from "../../../../src/systems/ucpath/ss-smart-hr.js";
 
@@ -255,5 +259,126 @@ describe("isWithinSeparationWindow", () => {
   it("handles month/year boundaries correctly", () => {
     assert.equal(isWithinSeparationWindow("2026-01-05", "12/28/2025"), true, "8 days across year end");
     assert.equal(isWithinSeparationWindow("2026-03-01", "02/20/2026"), true, "9 days across month end");
+  });
+});
+
+/**
+ * Onboarding's duplicate-hire skip was originally a NAME + hire-action match with
+ * NO approval-status or effective-date disambiguation. Two real defects:
+ *   1. A DIFFERENT same-named person's stale HIR row made today's onboarding of a
+ *      different "Nguyen,John" wrongly match → "Already Submitted" → the real
+ *      person was never hired (fires on the FIRST run, not just retries).
+ *   2. A prior Denied/Error/Pushed-Back hire (one that did NOT go through and
+ *      legitimately needs resubmitting) also tripped the skip and could never be
+ *      resubmitted.
+ * The gate now skips ONLY on a HIGH-CONFIDENCE match, biasing to SUBMIT on any
+ * uncertainty (a false skip — never hiring someone — is worse than the
+ * probe-guarded double-submit risk).
+ */
+describe("isHireInFlightStatus", () => {
+  it("treats Pending / Approved / Manually Processed as in-flight/succeeded (skip-eligible)", () => {
+    assert.deepEqual(
+      [...HIRE_IN_FLIGHT_APPROVAL_STATUSES],
+      ["Pending", "Approved", "Manually Processed"],
+    );
+    assert.equal(isHireInFlightStatus("Pending"), true);
+    assert.equal(isHireInFlightStatus("Approved"), true);
+    assert.equal(isHireInFlightStatus("Manually Processed"), true);
+  });
+
+  it("treats terminal-FAILED statuses as NOT in-flight (they must be resubmitted)", () => {
+    assert.equal(isHireInFlightStatus("Denied"), false);
+    assert.equal(isHireInFlightStatus("Error"), false);
+    assert.equal(isHireInFlightStatus("Pushed Back"), false);
+    assert.equal(isHireInFlightStatus("Recycled"), false);
+    assert.equal(isHireInFlightStatus("Cancelled"), false);
+  });
+
+  it("is case- and whitespace-insensitive", () => {
+    assert.equal(isHireInFlightStatus("  pending "), true);
+    assert.equal(isHireInFlightStatus("MANUALLY   PROCESSED"), true);
+    assert.equal(isHireInFlightStatus(""), false);
+  });
+});
+
+describe("hireEffectiveDateMatches", () => {
+  it("matches the SAME day across ISO (drill-in) and US (run) formats", () => {
+    assert.equal(hireEffectiveDateMatches("2026-07-01", "07/01/2026"), true);
+    assert.equal(hireEffectiveDateMatches("07/01/2026", "07/01/2026"), true);
+    assert.equal(hireEffectiveDateMatches("2026-7-1", "07/01/2026"), true);
+  });
+
+  it("does NOT match a DIFFERENT hire date (a different hire event / stale row)", () => {
+    assert.equal(hireEffectiveDateMatches("2026-06-24", "07/01/2026"), false);
+    assert.equal(hireEffectiveDateMatches("2025-07-01", "07/01/2026"), false);
+  });
+
+  it("is an EXACT match — even one day off does not match (unlike the separation window)", () => {
+    assert.equal(hireEffectiveDateMatches("2026-07-02", "07/01/2026"), false);
+    assert.equal(hireEffectiveDateMatches("2026-06-30", "07/01/2026"), false);
+  });
+
+  it("returns false on an unreadable / missing date (fail-open at the caller)", () => {
+    assert.equal(hireEffectiveDateMatches("", "07/01/2026"), false);
+    assert.equal(hireEffectiveDateMatches("Effdt unknown", "07/01/2026"), false);
+    assert.equal(hireEffectiveDateMatches("2026-07-01", ""), false);
+  });
+});
+
+describe("decideHireDuplicateSkip", () => {
+  const RUN = "07/01/2026";
+  const hire = (action: string, approvalStatus: string): SsSmartHrRow =>
+    row(action, "T002100000", approvalStatus);
+
+  it("SKIPS a Pending HIR whose effdt matches this run (the genuine retry duplicate)", () => {
+    const d = decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-07-01", RUN);
+    assert.equal(d.skip, true);
+  });
+
+  it("SKIPS an Approved / Manually Processed / REH hire with a matching effdt", () => {
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Approved"), "07/01/2026", RUN).skip, true);
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Manually Processed"), "2026-07-01", RUN).skip, true);
+    assert.equal(decideHireDuplicateSkip(hire("REH", "Pending"), "2026-07-01", RUN).skip, true);
+  });
+
+  it("does NOT skip when there is no hire row (null candidate → submit)", () => {
+    const d = decideHireDuplicateSkip(null, "2026-07-01", RUN);
+    assert.equal(d.skip, false);
+  });
+
+  // Defect #1 — the false positive that silently skipped a legit hire.
+  it("does NOT skip a same-named person's STALE hire row (effdt differs → submit)", () => {
+    const d = decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-06-24", RUN);
+    assert.equal(d.skip, false, "a different-dated hire is a different hire event / different person");
+  });
+
+  // Defect #2 — the status-blind skip that blocked resubmitting a failed hire.
+  it("does NOT skip a terminal-FAILED hire even with a matching effdt (must resubmit)", () => {
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Denied"), "2026-07-01", RUN).skip, false);
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Error"), "2026-07-01", RUN).skip, false);
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Pushed Back"), "2026-07-01", RUN).skip, false);
+  });
+
+  // Fail-open on ambiguity — uncertainty must resolve to SUBMIT, never skip.
+  it("does NOT skip when the drilled effdt is unreadable (fail-open → submit)", () => {
+    const d = decideHireDuplicateSkip(hire("HIR", "Pending"), "", RUN);
+    assert.equal(d.skip, false);
+  });
+
+  it("does NOT skip when this run has no effective date to disambiguate against", () => {
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-07-01", undefined).skip, false);
+    assert.equal(decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-07-01", "").skip, false);
+  });
+
+  it("does NOT skip a non-hire action even if it slipped in (defensive)", () => {
+    assert.equal(decideHireDuplicateSkip(hire("TER", "Approved"), "2026-07-01", RUN).skip, false);
+    assert.equal(decideHireDuplicateSkip(hire("XFR", "Approved"), "2026-07-01", RUN).skip, false);
+  });
+
+  it("carries a human-readable reason for the audit log on every branch", () => {
+    assert.match(decideHireDuplicateSkip(null, "", RUN).reason, /no hire/i);
+    assert.match(decideHireDuplicateSkip(hire("HIR", "Denied"), "2026-07-01", RUN).reason, /in-flight|resubmit|status/i);
+    assert.match(decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-06-24", RUN).reason, /effdt|effective/i);
+    assert.match(decideHireDuplicateSkip(hire("HIR", "Pending"), "2026-07-01", RUN).reason, /2026-07-01|match/i);
   });
 });

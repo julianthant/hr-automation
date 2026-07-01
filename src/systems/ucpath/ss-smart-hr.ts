@@ -59,12 +59,23 @@ export interface TerminationTransactionStatus {
 
 /** Result of a hire-transaction existence probe (onboarding idempotency). */
 export interface HireTransactionStatus {
-  /** True when a hire-family (HIR/REH) transaction already exists for the person. */
+  /**
+   * True ONLY when a HIGH-CONFIDENCE duplicate hire exists (matching hire action
+   * + in-flight/approved status + exact effective-date match). A same-named
+   * person's stale hire row or a terminal-failed hire returns `false` — see
+   * {@link decideHireDuplicateSkip}.
+   */
   found: boolean;
   /** Transaction number of the existing hire (empty when not found). */
   transactionId: string;
   /** Approval status of the existing hire (empty when not found). */
   approvalStatus: string;
+  /**
+   * Effective date read from the drilled-in hire detail page (`""` when not
+   * found / unread) — carried for the audit trail; the display grid exposes no
+   * effdt column so this is the drilled value.
+   */
+  effectiveDate?: string;
 }
 
 /**
@@ -125,6 +136,119 @@ export const HIRE_ACTION_CODES = ["HIR", "REH"] as const;
 export function pickHireRow(rows: SsSmartHrRow[]): SsSmartHrRow | null {
   const codes = new Set<string>(HIRE_ACTION_CODES);
   return rows.find((r) => codes.has(r.action.trim().toUpperCase())) ?? null;
+}
+
+/**
+ * Approval statuses that count as a hire being **in flight / succeeded** for the
+ * onboarding duplicate-hire skip. These are the SS Smart HR "Approval Status"
+ * values (the combobox exposes exactly `Approved`, `Denied`, `Error`, `Manually
+ * Processed`, `Pending`, `Pushed Back`) that mean a submitted hire is genuinely
+ * in the pipeline. A terminal-FAILED hire (`Denied`/`Error`/`Pushed Back`, and
+ * the `Recycled`/`Cancelled` variants the parser also recognizes) is NOT here —
+ * such a hire did NOT go through and legitimately needs resubmitting, so it must
+ * never trip the "already submitted → skip" guard.
+ */
+export const HIRE_IN_FLIGHT_APPROVAL_STATUSES = [
+  "Pending",
+  "Approved",
+  "Manually Processed",
+] as const;
+
+/**
+ * Is an SS Smart HR approval status one of the in-flight/succeeded set
+ * ({@link HIRE_IN_FLIGHT_APPROVAL_STATUSES})? Case- and whitespace-insensitive.
+ * Anything else (terminal-failed, blank, or unrecognized) is `false` — the gate
+ * biases to SUBMIT on any status it does not positively recognize as in-flight.
+ * Pure + unit-pinned.
+ */
+export function isHireInFlightStatus(approvalStatus: string): boolean {
+  const norm = (approvalStatus ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return HIRE_IN_FLIGHT_APPROVAL_STATUSES.some((s) => s.toLowerCase() === norm);
+}
+
+/**
+ * Does a drilled-in hire row's effective date match THIS run's hire effective
+ * date **exactly** (same calendar day)? Accepts the row effdt in ISO
+ * (`2026-07-01`, the detail-page "Effdt:" form) or US (`07/01/2026`, the grid
+ * "Start Date" form) and the run date in either form. Unlike separations'
+ * termination window ({@link isWithinSeparationWindow}), a hire date is exact —
+ * the onboarding run knows the precise date it submitted, so only the SAME day
+ * proves the row is THIS hire (a different-dated hire is a different hire event,
+ * often a different same-named person). Returns `false` on any unparseable/blank
+ * date so the caller fails open (→ submit). Pure + unit-pinned.
+ */
+export function hireEffectiveDateMatches(rowEffdt: string, runEffectiveDate: string): boolean {
+  const a = toDayNumber(rowEffdt);
+  const b = toDayNumber(runEffectiveDate);
+  if (a === null || b === null) return false;
+  return a === b;
+}
+
+/** Outcome of the pure duplicate-hire skip gate ({@link decideHireDuplicateSkip}). */
+export interface HireSkipDecision {
+  /** `true` → treat as an already-submitted duplicate and SKIP the submit. */
+  skip: boolean;
+  /** Human-readable reason for the log + audit trail (populated on both branches). */
+  reason: string;
+}
+
+/**
+ * PURE decision: should onboarding SKIP the Smart HR hire submit because a
+ * HIGH-CONFIDENCE duplicate already exists on the SS Smart HR list?
+ *
+ * Conservative by design — biases to SUBMIT (`skip:false`) on ANY uncertainty.
+ * This is irreversible UCPath hire logic: a false SKIP means a legitimate new
+ * hire is silently never filed, which is worse than the (probe-guarded)
+ * double-submit risk the guard exists to prevent. So `skip:true` requires ALL of:
+ *
+ *   (a) a hire-family (`HIR`/`REH`) row matched                 [candidate != null + hire action]
+ *   (b) its approval status is in-flight/succeeded (Pending / Approved / Manually
+ *       Processed) — NOT a terminal-failed hire (Denied/Error/Pushed Back) that
+ *       must be resubmitted                                     [isHireInFlightStatus]
+ *   (c) its effective date matches THIS run's hire date EXACTLY — proving it is
+ *       THIS hire, not a DIFFERENT same-named person's stale hire row
+ *       [hireEffectiveDateMatches]
+ *
+ * A blank/undefined run date, an unreadable row effdt, a non-matching effdt, a
+ * non-hire action, or a terminal-failed status all resolve to `skip:false`.
+ * The hire-action analogue of {@link pickHireRow}; keeps the browser glue in
+ * {@link findExistingHireTransaction} thin.
+ */
+export function decideHireDuplicateSkip(
+  candidate: Pick<SsSmartHrRow, "action" | "approvalStatus"> | null,
+  rowEffectiveDate: string,
+  runEffectiveDate: string | undefined,
+): HireSkipDecision {
+  if (!candidate) {
+    return { skip: false, reason: "no hire (HIR/REH) row on the SS Smart HR list" };
+  }
+  const action = candidate.action.trim().toUpperCase();
+  if (!new Set<string>(HIRE_ACTION_CODES).has(action)) {
+    return { skip: false, reason: `row action '${candidate.action}' is not a hire (HIR/REH) action` };
+  }
+  if (!isHireInFlightStatus(candidate.approvalStatus)) {
+    return {
+      skip: false,
+      reason:
+        `hire status '${candidate.approvalStatus || "<blank>"}' is not in-flight/approved ` +
+        `(terminal-failed hires must be resubmitted, not skipped)`,
+    };
+  }
+  if (!runEffectiveDate) {
+    return { skip: false, reason: "no run effective date to disambiguate the hire against" };
+  }
+  if (!hireEffectiveDateMatches(rowEffectiveDate, runEffectiveDate)) {
+    return {
+      skip: false,
+      reason:
+        `hire effdt '${rowEffectiveDate || "<unreadable>"}' does not exactly match this run's ` +
+        `effective date '${runEffectiveDate}' (different hire event / possibly a different same-named person)`,
+    };
+  }
+  return {
+    skip: true,
+    reason: `high-confidence duplicate: ${action}/${candidate.approvalStatus} with matching effdt ${rowEffectiveDate}`,
+  };
 }
 
 /**
@@ -317,19 +441,36 @@ export async function findTerminationTransactionStatus(
  * **Keyed by NAME, not EID.** A brand-new hire has no Empl ID — the Person ID
  * column renders "NEW" until the transaction processes (see `clickSaveAndSubmit`).
  * Onboarding reaches its transaction step ONLY for a person who was NOT found in
- * UCPath (rehires short-circuit earlier), so any HIR/REH row under this exact
- * name on the SS Smart HR list is almost certainly this workflow's own prior
- * (duplicate) submission. `effectiveDate` / `templateId` are logged for the audit
- * trail (the results grid exposes neither as a column, so the match is
- * name + hire-action).
+ * UCPath (rehires short-circuit earlier). But a NAME search is a PeopleSoft
+ * begins-with match, so it can also return a DIFFERENT same-named person's hire
+ * row — which is why the match is NOT name+action alone.
  *
- * Best-effort: a navigation/parse failure (or an empty name) degrades to
- * `found: false` so a transient probe glitch never BLOCKS a legitimate hire —
- * mirroring separations' `findExistingTerminationTransaction` philosophy.
+ * **HIGH-CONFIDENCE gate (mirrors separations' effdt-gated TER reuse).** `found:
+ * true` is returned ONLY when the matched hire is a confident duplicate of THIS
+ * run, decided by the pure {@link decideHireDuplicateSkip}:
+ *   1. a `HIR`/`REH` row exists ({@link pickHireRow}); AND
+ *   2. its approval status is in-flight/approved (Pending/Approved/Manually
+ *      Processed — {@link isHireInFlightStatus}); a terminal-failed hire
+ *      (Denied/Error/Pushed Back) did NOT go through and must be resubmitted; AND
+ *   3. the hire's effective date — read by drilling the row into Transaction
+ *      Details ({@link readHireEffectiveDate}, mirroring separations'
+ *      `readTerminationEffectiveDate`) — matches this run's `effectiveDate`
+ *      EXACTLY ({@link hireEffectiveDateMatches}). A different-dated hire is a
+ *      different hire event / a different same-named person.
+ *
+ * **Fail-open on uncertainty → SUBMIT.** A navigation/parse failure, an empty
+ * name, an unreadable effdt, a non-matching effdt, or a terminal-failed status
+ * all degrade to `found: false`. This is irreversible hire logic: a false SKIP
+ * (never hiring someone) is worse than the probe-guarded double-submit risk, so
+ * any uncertainty resolves to "submit," never "skip." `templateId` is logged for
+ * the audit trail (the results grid exposes no template column).
  *
  * NEEDS LIVE VERIFICATION: that the SS Smart HR "Name" search returns a pending
- * hire, and that the `Last,First` key format ({@link buildHireSearchName}) is
- * the right one for that search box.
+ * hire, that the `Last,First` key format ({@link buildHireSearchName}) is the
+ * right one for that search box, and that a HIR row drills into a detail page
+ * exposing `Effdt:` (the drill-in ROW selector + `Effdt:` read were live-verified
+ * for a TER on 2026-06-24; a HIR row uses the same grid + detail shape but the
+ * HIR path itself is not yet live-exercised).
  */
 export async function findExistingHireTransaction(
   page: Page,
@@ -367,15 +508,44 @@ export async function findExistingHireTransaction(
       (rows.map((r) => `${r.transactionId}=${r.action}/${r.approvalStatus}`).join(", ") || "<none>"),
     );
     const hire = pickHireRow(rows);
-    if (!hire) {
-      log.step(`[SS Smart HR] No existing hire (HIR/REH) transaction for name='${searchName}' — safe to submit`);
+
+    // Only an IN-FLIGHT/succeeded hire is worth drilling into for the effdt
+    // check. A terminal-failed hire (or no hire at all) is decided immediately —
+    // biasing straight to submit — without a wasted drill-in round-trip. The
+    // pure gate is still the single source of truth for the skip.
+    if (!hire || !isHireInFlightStatus(hire.approvalStatus)) {
+      const decision = decideHireDuplicateSkip(hire ?? null, "", opts.effectiveDate);
+      log.step(
+        `[SS Smart HR] No high-confidence duplicate hire for name='${searchName}' ` +
+        `(${decision.reason}) — safe to submit`,
+      );
+      return none;
+    }
+
+    // In-flight hire → drill into the row and read its effective date so the skip
+    // is gated on THIS run's exact hire date (a same-named person's stale hire row
+    // carries a different effdt and must NOT trip the skip). Read-only drill-in.
+    const rowEffdt = await readHireEffectiveDate(page, frame, hire.transactionId);
+    const decision = decideHireDuplicateSkip(hire, rowEffdt, opts.effectiveDate);
+    if (!decision.skip) {
+      log.warn(
+        `[SS Smart HR] A ${hire.action}/${hire.approvalStatus} hire (txn='${hire.transactionId}', ` +
+        `effdt='${rowEffdt || "<unreadable>"}') exists for name='${searchName}' but is NOT a ` +
+        `high-confidence duplicate of this run (${decision.reason}) — proceeding with submit`,
+      );
       return none;
     }
     log.warn(
-      `[SS Smart HR] Existing hire transaction for name='${searchName}': ` +
-      `txn='${hire.transactionId}' action='${hire.action}' status='${hire.approvalStatus}'`,
+      `[SS Smart HR] High-confidence existing hire for name='${searchName}': ` +
+      `txn='${hire.transactionId}' action='${hire.action}' status='${hire.approvalStatus}' ` +
+      `effdt='${rowEffdt}' (${decision.reason}) — skipping submit to avoid a duplicate hire`,
     );
-    return { found: true, transactionId: hire.transactionId, approvalStatus: hire.approvalStatus };
+    return {
+      found: true,
+      transactionId: hire.transactionId,
+      approvalStatus: hire.approvalStatus,
+      effectiveDate: rowEffdt,
+    };
   } catch (e) {
     log.warn(
       `[SS Smart HR] Hire existence probe threw (treating as no existing hire — will proceed with submit): ${errorMessage(e)}`,
@@ -385,12 +555,15 @@ export async function findExistingHireTransaction(
 }
 
 /**
- * Drill into a TER transaction from the results grid and read its effective
- * date. The detail page's approval strip reads `… Effdt: 2023-10-08, …` (ISO);
- * the Hire Details grid shows a `Start Date` cell (`MM/DD/YYYY`) as a fallback.
- * Read via page text + regex so it doesn't hinge on an exact cell selector.
- * Read-only (drilling into a detail view) — safe in dry-run. Returns "" if the
- * transaction couldn't be opened or no date was found.
+ * Drill into a transaction from the SS Smart HR results grid (by its Transaction
+ * ID) and read its effective date. SHARED browser glue for both the termination
+ * effdt read (separations' approved-reuse gate) and the hire effdt read
+ * (onboarding's duplicate-hire gate). The detail page's approval strip reads
+ * `… Effdt: 2023-10-08, …` (ISO); a `Start Date` cell (`MM/DD/YYYY`) is the
+ * fallback. Read via page text + regex so it doesn't hinge on an exact cell
+ * selector. Read-only (drilling into a detail view) — safe in dry-run. Returns
+ * "" if the transaction couldn't be opened or no date was found. `label` only
+ * tunes the log wording.
  *
  * The results-grid drill-in target (`transactionResultRow`) and the detail
  * page's `Effdt:` text were live-verified via playwright-cli on 2026-06-24
@@ -399,10 +572,11 @@ export async function findExistingHireTransaction(
  * display-only `<span>`, which is why the old link selector timed out and the
  * step silently fell back to reusing a prior-job TER.
  */
-async function readTerminationEffectiveDate(
+async function readTransactionEffdt(
   page: Page,
   frame: FrameLocator,
   transactionId: string,
+  label: string,
 ): Promise<string> {
   try {
     await safeClick(ssSmartHRTransactions.transactionResultRow(frame, transactionId), {
@@ -412,7 +586,7 @@ async function readTerminationEffectiveDate(
     await page.waitForTimeout(2_000);
     await waitForPeopleSoftProcessing(frame, 10_000);
     const text = await frame
-      .locator("body") // allow-inline-selector -- body text read for the TER detail effdt
+      .locator("body") // allow-inline-selector -- body text read for the transaction detail effdt
       .evaluate((b) => (b as HTMLElement).innerText ?? "")
       .catch(() => "");
     const iso = text.match(/Effdt:\s*(\d{4}-\d{1,2}-\d{1,2})/i);
@@ -420,9 +594,38 @@ async function readTerminationEffectiveDate(
     const us = text.match(/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/);
     return us ? us[1] : "";
   } catch (e) {
-    log.warn(`[SS Smart HR] Could not open TER ${transactionId} to read its effective date: ${errorMessage(e)}`);
+    log.warn(`[SS Smart HR] Could not open ${label} ${transactionId} to read its effective date: ${errorMessage(e)}`);
     return "";
   }
+}
+
+/**
+ * Termination-flavored effdt read (separations' approved-reuse gate) — thin
+ * wrapper over {@link readTransactionEffdt}. See that helper for the live-verified
+ * drill-in mechanism.
+ */
+async function readTerminationEffectiveDate(
+  page: Page,
+  frame: FrameLocator,
+  transactionId: string,
+): Promise<string> {
+  return readTransactionEffdt(page, frame, transactionId, "TER");
+}
+
+/**
+ * Hire-flavored effdt read (onboarding's duplicate-hire gate) — thin wrapper over
+ * {@link readTransactionEffdt}, mirroring {@link readTerminationEffectiveDate}. A
+ * HIR row uses the same results grid + detail-page shape as a TER, so the same
+ * drill-in ROW selector + `Effdt:` read apply. Read-only — safe in dry-run.
+ * NEEDS LIVE VERIFICATION on a real HIR detail page (the TER path is verified;
+ * the HIR path is not yet live-exercised).
+ */
+async function readHireEffectiveDate(
+  page: Page,
+  frame: FrameLocator,
+  transactionId: string,
+): Promise<string> {
+  return readTransactionEffdt(page, frame, transactionId, "hire");
 }
 
 /** PeopleSoft transaction id, e.g. "T002168976". */

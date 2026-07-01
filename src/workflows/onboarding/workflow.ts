@@ -415,8 +415,13 @@ export const onboardingWorkflow = defineWorkflow({
         // from step 0 and would re-file the hire (person-search still returns
         // "new hire" because an unprocessed Smart HR hire creates no searchable
         // person yet). New hires have no EID (Person ID renders "NEW"), so probe
-        // the SS Smart HR Transactions list by NAME + a HIRE (HIR/REH) action —
-        // mirroring separations' pre-submit findExistingTerminationTransaction.
+        // the SS Smart HR Transactions list by NAME. The probe is HIGH-CONFIDENCE
+        // gated (findExistingHireTransaction → decideHireDuplicateSkip): it flags
+        // `found` ONLY for an in-flight/approved HIR/REH whose effective date
+        // matches THIS run exactly. A DIFFERENT same-named person's stale hire row
+        // (name is a begins-with match) or a terminal-failed hire fails open →
+        // `found:false` → we SUBMIT. A false skip would silently never hire the
+        // real person, which is worse than the probe-guarded double-submit risk.
         const existingHire = await findExistingHireTransaction(ucpathPage, {
           firstName: data.firstName,
           lastName: data.lastName,
@@ -427,8 +432,9 @@ export const onboardingWorkflow = defineWorkflow({
           txnExit = existingHire.transactionId || "<already-submitted>";
           log.warn(
             `[Onboarding Txn] A hire transaction (#${existingHire.transactionId || "unknown"}, `
-            + `${existingHire.approvalStatus || "unknown status"}) already exists on the Smart HR `
-            + `list for ${data.firstName} ${data.lastName} — skipping submit to avoid a duplicate hire.`,
+            + `${existingHire.approvalStatus || "unknown status"}, effdt ${existingHire.effectiveDate || "unknown"}) `
+            + `already exists on the Smart HR list for ${data.firstName} ${data.lastName} `
+            + `(effdt matches this run) — skipping submit to avoid a duplicate hire.`,
           );
           ctx.updateData({
             status: "Already Submitted",
