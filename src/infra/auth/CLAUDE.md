@@ -29,7 +29,7 @@ The ≥2-system parallel-staggered path is exercised live (real concurrent Duos,
 
 ## Login Flows
 
-Seven UCSD Shibboleth SSO flows, all gated by Duo MFA and all sharing one auth
+Eight UCSD Shibboleth SSO flows, all gated by Duo MFA and all sharing one auth
 path: `fillSsoCredentials` → `clickSsoSubmit` → `pollDuoApproval` /
 `requestDuoApproval`. They land on the same `a5.ucsd.edu` Duo prompt, so the
 hands-off WebAuthn path (below) covers every one of them identically.
@@ -43,10 +43,15 @@ hands-off WebAuthn path (below) covers every one of them identically.
 | `loginToNewKronos` | WFD Kronos | Yes (180s) | No | 10s nav |
 | `loginToServiceNow` | ServiceNow HR (support.ucsd.edu) | Yes (300s) | No | 15s nav |
 | `loginToOnBase` | OnBase (Hyland) | Yes (180s) | No | 15s nav |
+| `loginToI9` | I-9 Complete (UCOP portal) | Yes (180s) | No | 15s nav |
 
-**Not Duo:** `loginToI9` (`src/systems/i9/login.ts`) authenticates to i9 Complete
-(third-party Mitratech vendor) with plain email/password — no Shibboleth, no Duo,
-so the WebAuthn path does not apply to it.
+**`loginToI9` lives in `src/systems/i9/login.ts`, not this module** — it adds the
+UCOP-portal-specific landing + SAML WAYF campus-picker hops before joining the
+shared SSO path (`fillSsoCredentials` / `clickSsoSubmit` / `pollDuoApproval`).
+Since **2026-07-01** it authenticates through the UCOP portal
+(`i9complete.ucop.edu`) via UCSD Shibboleth + Duo, reusing UCPath credentials —
+the old standalone `stse.i9complete.com` email/password vendor login (no Duo) was
+retired. The WebAuthn hands-off path now covers it like the seven above.
 
 **Smoke test:** `npm run test-login` (default UCPath + CRM). Add `--all` to sweep
 every Duo flow, or `--systems ucpath,kuali,ukg,…` for a subset; each runs in a

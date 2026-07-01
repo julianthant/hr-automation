@@ -2,6 +2,10 @@
 
 Automates I9 Complete (Tracker I-9 by Mitratech) for employment verification: login, employee creation, search, and Section 2 signer lookup.
 
+## Auth (UCOP portal → UCSD SSO + Duo)
+
+Since **2026-07-01** I-9 login goes through the **UCOP portal** (`I9_URL` = `https://i9complete.ucop.edu`), **not** the old standalone `stse.i9complete.com` email/password vendor login. `loginToI9` (`login.ts`) drives: UCOP landing → click "Tracker I-9 Complete Application" → `samlproxy.ucop.edu` WAYF (select "University of California, San Diego") → UCSD TritON Shibboleth SSO (`a5.ucsd.edu`) → **Duo** → lands on the app host `I9_APP_URL` (`https://wwwe.i9complete.com`). It reuses the shared UCSD SSO helpers (`fillSsoCredentials` / `clickSsoSubmit` / `pollDuoApproval` / `requestDuoApproval`) and **UCPath credentials** — so hands-off Duo WebAuthn covers it like every other UCSD system, and there are no I-9-specific env credentials anymore. Deep-links (e.g. `create.ts`'s `saveAndContinue`) use `I9_APP_URL` directly (previously derived via `I9_URL.replace("stse.","wwwe.")`, which the UCOP entry URL broke).
+
 ## Before mapping a new selector
 
 1. Run `npm run selector:search "<your intent>"` and review the top matches across all systems.
@@ -24,7 +28,7 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 ## Gotchas
 
-- Login detects success via domain change: `stse.i9complete.com` → `wwwe.i9complete.com`. A **rejected** login (e.g. stale `I9_PASSWORD`) bounces back to `stse.i9complete.com/Account/Login` with "username or password … incorrect" — `loginToI9` races the success redirect against `login.loginError` and fails LOUD via `classifyI9LoginResult` (clear ".env credential" message) instead of an opaque `waitForURL: Timeout`. See LESSONS.md 2026-06-24.
+- Login success = Duo clears and the page lands back on `wwwe.i9complete.com` (`successUrlMatch: url.includes("i9complete.com") && !duosecurity`). A bad **campus SSO** credential is rejected on the `a5.ucsd.edu` TritON form (never reaches Duo) → `pollDuoApproval` returns false → `requireLogin` throws — the same failure path as every other UCSD SSO system (the old i9-specific `classifyI9LoginResult` / `stse.i9complete.com/Account/Login` bounce was retired 2026-07-01 with the vendor login).
 - Training notification popup appears post-login — must dismiss with 2-step click (gracefully handles if absent)
 - Worksite dropdown options formatted as `6-{deptNum} DESCRIPTION` — matched via regex
 - If no worksite matches department number, throws before saving (manual recovery needed)

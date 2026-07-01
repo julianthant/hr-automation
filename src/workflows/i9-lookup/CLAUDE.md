@@ -5,7 +5,7 @@ Resolves **who signed Section 2 of an employee's I-9 form** — the "authorized 
 ## What it does
 
 1. Accepts a person identified by last + first name (I-9 Complete's search is name-based, not EID-based).
-2. Authenticates to I9 Complete via `loginToI9` (email + password; no Duo MFA).
+2. Authenticates to I-9 Complete via `loginToI9` — UCSD Shibboleth SSO + Duo through the UCOP portal (since 2026-07-01; reuses UCPath credentials).
 3. Searches I9 Complete for the employee using `searchI9Employee` (invoked internally by `lookupSection2Signer`).
 4. Navigates to the I-9 record summary and reads the "Signed Section 2" audit row.
 5. Emits `signerName` (who signed, or empty string if unsigned/error) and `i9Status` ("signed" | "unsigned" | "historical" | "not-found" | "unable-to-access" | "error").
