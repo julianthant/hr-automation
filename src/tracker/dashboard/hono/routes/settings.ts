@@ -19,8 +19,6 @@ function credentialStatus(): CredentialStatus {
   return {
     ucpathUser: has("UCPATH_USER_ID"),
     ucpathPassword: has("UCPATH_PASSWORD"),
-    i9User: has("I9_USER_ID"),
-    i9Password: has("I9_PASSWORD"),
     timekeeperName: has("TIMEKEEPER_NAME"),
     onboardingRosterUrl: has("ONBOARDING_ROSTER_URL"),
   };

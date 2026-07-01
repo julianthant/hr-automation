@@ -191,8 +191,6 @@ interface CredentialRow {
 const CREDENTIAL_ROWS: CredentialRow[] = [
   { id: "ucpathUser", label: "UCPath user ID" },
   { id: "ucpathPassword", label: "UCPath login credential" },
-  { id: "i9User", label: "I-9 user ID" },
-  { id: "i9Password", label: "I-9 login credential" },
   { id: "timekeeperName", label: "Timekeeper name" },
   { id: "onboardingRosterUrl", label: "Onboarding roster URL" },
 ];
@@ -750,7 +748,7 @@ function SettingsSectionContent({
               value={draft.urls.i9}
               changed={chg("urls", "i9")}
               onChange={(v) => patch("urls", "i9", v)}
-              placeholder="Default: stse.i9complete.com"
+              placeholder="Default: i9complete.ucop.edu"
               mono
             />
             <InputField

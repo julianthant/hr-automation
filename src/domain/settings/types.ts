@@ -341,8 +341,6 @@ export function cloneOperatorSettings(s: OperatorSettings): OperatorSettings {
 export interface CredentialStatus {
   ucpathUser: boolean;
   ucpathPassword: boolean;
-  i9User: boolean;
-  i9Password: boolean;
   timekeeperName: boolean;
   onboardingRosterUrl: boolean;
 }
