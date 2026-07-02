@@ -429,11 +429,20 @@ function emitRow(args: {
   // own label rather than re-deriving from parentSubject).
   const priorName = (args.row.data?.__name as string | undefined) ?? "OCR";
   const priorParentSubject = args.row.data?.parentSubject as string | undefined;
+  // `__traceId` (frozen at pre-emit) and `queueRowKind` ride EVERY OCR row so the
+  // dashboard can trace a re-run back to its parent and title it by file-kind.
+  // retry-page rebuilds `base` explicitly (does NOT spread the prior row's data),
+  // so it MUST re-stamp them here or the re-emitted row loses the shared trace and
+  // file-kind title — unlike force-research/verify-relookup which spread `latest.data`.
+  const priorTraceId = args.row.data?.__traceId as string | undefined;
+  const priorQueueRowKind = (args.row.data?.queueRowKind as string | undefined) ?? "file";
   // Re-emit via the shared OCR preview-row envelope (BM-5). Running → done pair.
   // Pass the explicit base fields retry-page rebuilds (it does NOT spread the
   // latest row's data); the envelope adds mode/archetype/__id/__name/parentSubject.
   const snapshotArgs = {
     base: {
+      ...(priorTraceId ? { __traceId: priorTraceId } : {}),
+      queueRowKind: priorQueueRowKind,
       formType: args.formType,
       pdfOriginalName: args.pdfOriginalName,
       ...(args.pdfFileId ? { pdfFileId: args.pdfFileId } : {}),
