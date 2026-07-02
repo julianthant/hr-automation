@@ -111,7 +111,7 @@ export const onboardingWorkflow = defineWorkflow({
     ...(input.dryRun ? { dryRun: true } : {}),
   }),
   operatorSubject: (input) =>
-    buildOperatorSubject({ kind: "email", value: input.email, prefix: "Onboarding" }),
+    buildOperatorSubject({ kind: "email", value: input.email }),
   handler: async (ctx, input) => {
     const email = input.email;
     let data: EmployeeData | null = null;

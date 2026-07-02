@@ -67,8 +67,8 @@ export const crmDocDownloadWorkflow = defineWorkflow({
   deriveItemId: (input) => deriveCrmDocDownloadItemId(input),
   operatorSubject: (input) =>
     input.emplId
-      ? buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "CRM Docs" })
-      : buildOperatorSubject({ kind: "email", value: input.email, prefix: "CRM Docs" }),
+      ? buildOperatorSubject({ kind: "eid", value: input.emplId })
+      : buildOperatorSubject({ kind: "email", value: input.email }),
   handler: async (ctx, input) => {
     ctx.updateData({
       ...(input.email ? { email: input.email } : {}),

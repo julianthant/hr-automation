@@ -369,7 +369,7 @@ export const separationsWorkflow = defineWorkflow({
   getName: (d) => d.name ?? "",
   getId: (d) => d.docId ?? "",
   operatorSubject: (input) =>
-    buildOperatorSubject({ kind: "document", value: input.docId, prefix: "Separation" }),
+    buildOperatorSubject({ kind: "document", value: input.docId }),
   handler: async (ctx, input) => {
     const { docId } = input;
 

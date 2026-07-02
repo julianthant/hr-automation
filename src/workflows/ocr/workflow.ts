@@ -79,7 +79,6 @@ export const ocrWorkflow = defineWorkflow({
     buildOperatorSubject({
       kind: "pdf",
       value: input.pdfOriginalName ?? input.pdfPath ?? input.sessionId,
-      prefix: "OCR",
     }),
   handler: ocrKernelHandler,
 });

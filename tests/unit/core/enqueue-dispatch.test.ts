@@ -49,7 +49,10 @@ test("buildHttpPendingData stamps a single separation enqueue as a single row", 
   const data = buildHttpPendingData(separationsWorkflow, { docId: "4025" });
 
   assert.equal(data.docId, "4025");
-  assert.equal(data.__subject, "Separation 4025");
+  // Operator subject is JUST the input value — the "Separation" workflow-name
+  // prefix was removed 2026-07-01 (titles show what the row is about, not the
+  // workflow). See src/domain/operator-subject.ts.
+  assert.equal(data.__subject, "4025");
   assert.equal(data.archetype, "single");
 });
 
