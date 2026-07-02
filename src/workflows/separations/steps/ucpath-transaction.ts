@@ -162,10 +162,10 @@ export async function runUcpathTransaction(
       // Worked → Comments → the `Transaction ID: T…` readback at the very bottom —
       // is captured, proving the transaction number. LIVE-VERIFIED 2026-06-25
       // (dry-run): the nested iframe's bottom status box + footer buttons are
-      // present. `stitch: true` composites the scrolled bands into ONE continuous
-      // image (the whole Smart HR transaction as a single screenshot) instead of
-      // separate -cNN slices — operator request for UCPath transactions. See
-      // src/core/CLAUDE.md.
+      // present. The scrolled bands composite into ONE continuous image (the whole
+      // Smart HR transaction as a single screenshot). The kernel stitches every
+      // capture by default now (2026-07-01), so `stitch: true` is redundant here —
+      // kept explicit to document the intent. See src/core/CLAUDE.md.
       await ctx.screenshot({ kind: 'form', label: 'ucpath-transaction-submitted', systems: ['ucpath'], stitch: true });
     } catch (e) {
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so

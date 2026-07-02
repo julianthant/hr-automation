@@ -297,6 +297,15 @@ export class Session {
   private authInProgress = false
   /** Systems whose Chromium process disconnected during this session lifetime. */
   private browserDisconnectIds = new Set<string>()
+  /**
+   * True once this session is DELIBERATELY tearing down (`close` /
+   * `closeWorkerPages` / `killChrome` / `killChromeHard`). A `disconnected`
+   * event that fires while this is set is OUR own browser kill, not a fault, so
+   * the disconnect handler suppresses the `failed` health emit — otherwise an
+   * operator stopping a daemon from the session card gets a red "browser
+   * failed" toast for a manual stop. A worker view defers to its parent.
+   */
+  private closing = false
 
   private constructor(private state: SessionState) {}
 
@@ -311,6 +320,15 @@ export class Session {
    */
   private isAuthInProgress(): boolean {
     return this.authInProgress || (this.parent?.isAuthInProgress() ?? false)
+  }
+
+  /**
+   * True when this session OR (for a worker view) its parent is deliberately
+   * tearing down. Mirrors `isAuthInProgress` — a worker shares the parent's
+   * browser lifetime, so the parent's teardown counts as the worker closing too.
+   */
+  private isClosing(): boolean {
+    return this.closing || (this.parent?.isClosing() ?? false)
   }
 
   /**
@@ -391,6 +409,12 @@ export class Session {
     // here on the root so it fires for every run, independent of whether the
     // daemon also wires its own disconnect→shutdown handler.
     session.onBrowserDisconnect((systemId) => {
+      // A `disconnected` during a DELIBERATE teardown (operator stop / SIGINT /
+      // graceful close) is our own browser kill, not a fault — suppress the
+      // `failed` health emit so a manual stop doesn't surface a red "browser
+      // failed" toast in the dashboard. The disconnect is still RECORDED (in
+      // onBrowserDisconnect's listener) for the daemon's reassign/fail logic.
+      if (session.isClosing()) return
       const st = session.ensureHealthState(systemId)
       st.lastStatus = 'failed'
       session.emitHealth(systemId, 'failed', 'browser disconnected')
@@ -619,6 +643,7 @@ export class Session {
    * cascaded into the "8 chrome windows after retry" bug.
    */
   killChromeHard(gracePeriodMs = 2_000): Promise<number> {
+    this.markClosing()
     const pids = Object.values(this.chromePids)
     if (pids.length === 0) return Promise.resolve(0)
     let killed = 0
@@ -674,9 +699,21 @@ export class Session {
     return { seq: this.pageAccessSeq, system: this.lastAccessedSystem }
   }
 
-  async close(): Promise<void> {
+  /**
+   * Flag this session as deliberately tearing down and stop the background
+   * timers (idle refresh + health monitor) so neither they nor the
+   * `disconnected` listener surface our OWN browser kill as a `failed` fault.
+   * Idempotent — every teardown entry point (`close`, `closeWorkerPages`,
+   * `killChrome`, `killChromeHard`) calls it first.
+   */
+  private markClosing(): void {
+    this.closing = true
     this.stopIdleRefreshTimers()
     this.stopHealthMonitor()
+  }
+
+  async close(): Promise<void> {
+    this.markClosing()
     for (const slot of this.state.browsers.values()) {
       await slot.context.close()
       if (slot.browser) await slot.browser.close()
@@ -689,8 +726,7 @@ export class Session {
    * Best-effort: a close failure on one page never blocks siblings.
    */
   async closeWorkerPages(): Promise<void> {
-    this.stopIdleRefreshTimers()
-    this.stopHealthMonitor()
+    this.markClosing()
     for (const slot of this.state.browsers.values()) {
       try {
         if (!slot.page.isClosed()) await slot.page.close()
@@ -1188,6 +1224,7 @@ export class Session {
 
   async killChrome(): Promise<void> {
     // SIGINT teardown — force-close all browsers without awaiting graceful shutdown.
+    this.markClosing()
     for (const slot of this.state.browsers.values()) {
       try { await slot.browser?.close() } catch { /* ignore */ }
     }
@@ -1230,11 +1267,12 @@ export class Session {
    *
    * `slicePath(null)` names a single-image capture; `slicePath(i)` names slice i.
    *
-   * `opts.stitch` composites the bands into ONE continuous image (written to
-   * `slicePath(null)`) instead of emitting them as separate `-cNN` slices — see
-   * `stitchCaptureBands`. A short (single-band) page is one image either way; a
-   * compositing failure degrades to writing the raw slices, so a capture is
-   * never lost.
+   * Stitching is the DEFAULT: the bands are composited into ONE continuous image
+   * (written to `slicePath(null)`) via `stitchCaptureBands` rather than emitted
+   * as separate `-cNN` chunk slices — so every capture is a single screenshot,
+   * never a chunked set. Pass `opts.stitch === false` to force the raw `-cNN`
+   * slices. A short (single-band) page is one image either way; a compositing
+   * failure degrades to writing the raw slices, so a capture is never lost.
    */
   static async captureFullPage(
     page: Page,
@@ -1289,11 +1327,14 @@ export class Session {
         return written
       }
 
-      // Stitch mode: scroll-capture each band to a buffer, then composite them
-      // into ONE continuous image (overlap removed by exact scroll geometry)
-      // instead of writing separate `-cNN` slices. Also auto-stitch when the
-      // final band pair is heavily over-overlapped (slightly-taller-than-one-band).
-      if (opts?.stitch || autoStitch) {
+      // Stitch by DEFAULT: scroll-capture each band to a buffer, then composite
+      // them into ONE continuous image (overlap removed by exact scroll geometry)
+      // instead of writing separate `-cNN` chunk slices — every capture is one
+      // screenshot, never a chunked set. Only an explicit `stitch: false` opts
+      // back into slices, and even then an over-overlapped final band pair
+      // (slightly-taller-than-one-band) still auto-stitches to avoid near-dupes.
+      const stitch = opts?.stitch !== false
+      if (stitch || autoStitch) {
         const bands: Array<{ buffer: Buffer; offsetCss: number; clipHeightCss: number | null }> = []
         for (let i = 0; i < offsets.length; i++) {
           const clip = await Session.scrollCaptureTo(page, offsets[i])

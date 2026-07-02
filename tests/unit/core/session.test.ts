@@ -31,6 +31,57 @@ test('session: onBrowserDisconnect records system id for classification', () => 
   assert.deepEqual([...s.disconnectedSystems()], ['new-kronos'])
 })
 
+/** Launch fake whose `browser` is a real EventEmitter so a `disconnected` event
+ *  reaches the health-emitting listener that `Session.launch` registers. */
+function emitterBrowserLaunch(page: import('playwright').Page): {
+  browser: EventEmitter
+  launchFn: () => Promise<{ page: import('playwright').Page; context: import('playwright').BrowserContext; browser: import('playwright').Browser }>
+} {
+  const browser = Object.assign(new EventEmitter(), { close: async () => {} })
+  const context = { close: async () => {}, newPage: async () => page } as unknown as import('playwright').BrowserContext
+  return {
+    browser,
+    launchFn: async () => ({ page, context, browser: browser as unknown as import('playwright').Browser }),
+  }
+}
+
+test('session: a SPONTANEOUS browser disconnect surfaces `failed` (genuine crash)', async () => {
+  const emits: Array<{ status: string; reason?: string }> = []
+  const { browser, launchFn } = emitterBrowserLaunch(makeHealthPage())
+  const s = await Session.launch([{ id: 'kuali', login: async () => {} }], {
+    launchFn,
+    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
+  })
+  try {
+    browser.emit('disconnected') // chromium died on its own — a real fault
+    const failed = emits.find((e) => e.status === 'failed')
+    assert.ok(failed, `a real crash must surface failed: ${JSON.stringify(emits)}`)
+    assert.equal(failed!.reason, 'browser disconnected')
+  } finally {
+    await s.close()
+  }
+})
+
+test('session: a disconnect during DELIBERATE teardown does NOT surface `failed` (manual stop)', async () => {
+  const emits: Array<{ status: string; reason?: string }> = []
+  const { browser, launchFn } = emitterBrowserLaunch(makeHealthPage())
+  const s = await Session.launch([{ id: 'kuali', login: async () => {} }], {
+    launchFn,
+    observer: { onBrowserHealth: (_id, status, reason) => emits.push({ status, ...(reason ? { reason } : {}) }) },
+  })
+  // Operator stop → the force-stop path flags the session closing BEFORE chromium
+  // dies; the resulting `disconnected` is OUR kill, not a fault.
+  await s.killChromeHard(0)
+  browser.emit('disconnected')
+  assert.equal(
+    emits.filter((e) => e.status === 'failed').length,
+    0,
+    `a manual stop must not emit a browser failed event: ${JSON.stringify(emits)}`,
+  )
+  // …but the disconnect is still RECORDED for the daemon's reassign/fail logic.
+  assert.deepEqual([...s.disconnectedSystems()], ['kuali'])
+})
+
 test('session: systemIds returns declared ids in order', () => {
   const systems = [makeSystem('ucpath'), makeSystem('kuali')]
   const s = Session.forTesting({ systems, browsers: new Map(), readyPromises: new Map() })

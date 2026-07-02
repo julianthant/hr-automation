@@ -85,11 +85,11 @@ export async function runKualiFinalize(
   // proof of what we finalized; capturing here also sidesteps the post-save
   // navigation back to the Kuali Home apps directory.
   //
-  // Written as readable `-cNN` page slices (NO `stitch`) of the ENTIRE
-  // finalization form, so the operator steps through it field-by-field in the
-  // Screenshots tab (top → … → the Final Transactions section) rather than
-  // scrolling one giant tile. The Kuali Build apps catalog stays MOUNTED behind
-  // the document view (a ~16000px `overflow:auto` grid); the kernel's
+  // Captured as ONE stitched image of the ENTIRE finalization form (the kernel
+  // stitches by default — top → … → the Final Transactions section), so the
+  // operator reviews one continuous screenshot rather than a chunked set. The
+  // Kuali Build apps catalog stays MOUNTED behind the document view (a ~16000px
+  // `overflow:auto` grid); the kernel's
   // `planScrollCapture` occlusion-rejects it (it is painted BEHIND the form, so
   // it is never the top `elementFromPoint`) and picks the visible document
   // scroll container, scroll-capturing its painted bands top-to-bottom so the
