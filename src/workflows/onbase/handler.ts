@@ -11,12 +11,14 @@ import {
   selectFileType,
   ensureKeyset,
   chooseFile,
-  enterUcpathIdAndTab,
+  lookupEmployeeViaKeyset,
   readRequiredKeywordValues,
   fillKeyword,
   setDocumentName,
-  isImportEnabled,
+  waitForImportEnabled,
   clickImport,
+  classifyOnbasePage,
+  OnbasePageStateError,
   ONBASE_PDF_FILE_TYPE,
   ONBASE_EMPLOYEE_LOOKUP_KEYSET,
 } from "../../systems/onbase/index.js";
@@ -78,10 +80,12 @@ function resolvePdfPath(input: OnbaseInput, trackerDir: string | undefined): str
  * Import one person's Emergency Contact document into OnBase.
  *
  * Happy path: open Import Document → select doc type + File Type PDF + Employee
- * Lookup keyset → attach this person's single page → type UCPath ID + Tab (the
- * keyset autofills every keyword) → set Document Name constant → verify the
- * required keywords are filled → Import. If the keyset returns nothing, fill the
- * required keywords from the OCR / person-lookup fallback data first.
+ * Lookup keyset → attach this person's single page (confirmed via the Document
+ * Queue) → run the Employee Lookup MODAL (`lookupEmployeeViaKeyset` — fill the
+ * modal's UCPath ID → Find → Select Employee, which autofills every keyword) →
+ * set Document Name constant → verify the required keywords are filled →
+ * Import. On a genuine keyset no-match, fill what fallback data can supply and
+ * fail loud on anything still missing (Department/VC come only from the keyset).
  */
 export async function onbaseHandler(
   ctx: Ctx<OnbaseSteps, OnbaseInput>,
@@ -124,7 +128,10 @@ export async function onbaseHandler(
 
   let autofilled = false;
   await ctx.step("fill-keywords", async () => {
-    autofilled = await enterUcpathIdAndTab(page, input.ucpathId);
+    // "no-match" is a DATA outcome (unknown/mis-OCR'd UCPath ID). A stalled
+    // keyset postback THROWS inside lookupEmployeeViaKeyset instead, so a slow
+    // cluster is retried by the kernel — never mislabeled "person not found".
+    autofilled = (await lookupEmployeeViaKeyset(page, input.ucpathId)) === "selected";
     await setDocumentName(page, input.documentName);
 
     if (!autofilled) {
@@ -135,35 +142,61 @@ export async function onbaseHandler(
     }
 
     // Fail loud if any required ("red") keyword is still blank — never import an
-    // incompletely-keyed document.
+    // incompletely-keyed document. Department Name/Code + Vice Chancellor +/code
+    // come ONLY from the keyset, so a keyset miss (unknown/mis-OCR'd UCPath ID)
+    // cannot be recovered from OCR fallback — say so explicitly.
     const values = await readRequiredKeywordValues(page);
     const missing = Object.entries(values)
       .filter(([, v]) => !v.trim())
       .map(([label]) => label);
     if (missing.length > 0) {
       throw new Error(
-        `OnBase: required keyword(s) still empty after autofill+fallback for UCPath ID ${input.ucpathId}: ${missing.join(", ")} (keyset autofilled=${autofilled})`,
+        autofilled
+          ? `OnBase: required keyword(s) still empty after Employee Lookup for UCPath ID ${input.ucpathId}: ${missing.join(", ")}`
+          : `OnBase: UCPath ID ${input.ucpathId} was not found in the Employee Lookup keyset (no matching employee), and OCR fallback cannot supply keyset-only fields: ${missing.join(", ")}`,
       );
     }
     ctx.updateData({ keysetAutofilled: autofilled ? "true" : "false" });
   });
 
   await ctx.step("import", async () => {
+    // Wait-for-enabled (not a single sample): enablement commits via an async
+    // postback after the attach, and a transient disabled read would fail a
+    // valid import. Asserted in dry runs too — a dry run proves the form was
+    // genuinely importable, minus the click.
+    const importReady = await waitForImportEnabled(page);
     if (input.dryRun) {
       await ctx.screenshot({ kind: "form", label: "onbase-dry-run-pre-import" });
+      if (!importReady) {
+        throw new Error(
+          `OnBase: Import button never enabled for UCPath ID ${input.ucpathId} (dry run) — form is not importable.`,
+        );
+      }
       ctx.updateData({ status: "Dry Run Complete" });
       log.success(
         `OnBase dry run complete for UCPath ID ${input.ucpathId} — Import skipped.`,
       );
       return;
     }
-    if (!(await isImportEnabled(page))) {
+    if (!importReady) {
       throw new Error(
         `OnBase: Import button disabled for UCPath ID ${input.ucpathId} — refusing to import.`,
       );
     }
     await clickImport(page);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+
+    // Assert the Import postback did NOT land on an ASP.NET error page. OnBase's
+    // clustered WebForms backend intermittently returns a ViewState-MAC failure
+    // (or 403 / session logout) on postback; without this check the run would
+    // falsely report "Imported" for a document that never filed. Throwing lets
+    // the kernel retry the item from a fresh auth + fresh form.
+    const landing = await classifyOnbasePage(page);
+    if (landing !== "authenticated" && landing !== "unknown") {
+      await ctx.screenshot({ kind: "form", label: "onbase-import-error" });
+      throw new OnbasePageStateError(landing, "import");
+    }
+
     await ctx.screenshot({ kind: "form", label: "onbase-imported" });
     ctx.updateData({ status: "Imported" });
     log.success(`OnBase: imported Emergency Contact for UCPath ID ${input.ucpathId}`);

@@ -8,11 +8,12 @@ import {
  * One OnBase import = one person = one page of the combined PDF. The OCR approve
  * fan-out enqueues one of these per approved record.
  *
- * The only field the import strictly needs is `ucpathId` — typing it + Tab
- * fires the Employee Lookup keyset which autofills every other keyword. The
- * `*Fallback` fields (from OCR + person-lookup) are used ONLY when the keyset
- * comes up empty (bad/unknown UCPath ID). `pdfFileId` + `sourcePage` resolve the
- * person's single page from the combined PDF for OnBase's file picker.
+ * The only field the import strictly needs is `ucpathId` — running the Employee
+ * Lookup keyset MODAL with it (`lookupEmployeeViaKeyset`; NOT typing + Tab)
+ * autofills every other keyword. The `*Fallback` fields (from OCR +
+ * person-lookup) are used ONLY when the keyset finds no match (bad/unknown
+ * UCPath ID). `pdfFileId` + `sourcePage` resolve the person's single page from
+ * the combined PDF for OnBase's file picker.
  */
 export const OnbaseInputSchema = z.object({
   /** UCPath employee id — the keyset primary key. */
