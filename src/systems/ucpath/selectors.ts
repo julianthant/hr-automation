@@ -1606,11 +1606,19 @@ export const oathSignature = {
 
   /**
    * Oath Signature Date textbox inside the "Add New Oath Signature Date"
-   * sub-form. Defaults to today's date on open. verified 2026-04-22
-   * @tags oath, signature, date, textbox, person-profile
+   * sub-form. Defaults to today's date on open. It is a PeopleSoft
+   * effective-date input (`id="EFFDT$0"`) with NO accessible name, so the
+   * old `getByRole("textbox", { name: "Oath Signature Date" })` matched
+   * nothing — the editable `EFFDT` input is the real anchor (only the oath
+   * row is in add-mode during this flow, so it's the sole editable EFFDT).
+   * Role selector kept as a rename-proof fallback. verified 2026-07-01 (EID 10618178)
+   * @tags oath, signature, date, textbox, person-profile, effdt
    */
   oathDateInput: (f: FrameLocator): Locator =>
-    f.getByRole("textbox", { name: "Oath Signature Date" }),
+    f
+      .locator('input[id^="EFFDT"]')
+      .or(f.getByRole("textbox", { name: "Oath Signature Date" }))
+      .first(),
 
   /**
    * OK button on the oath-detail sub-form — applies the row and returns to
@@ -1645,11 +1653,19 @@ export const oathSignature = {
 
   /**
    * Employee name display on the loaded Person Profile — visible near the
-   * Empl ID header. Extracted for tracker rows + dashboard. verified 2026-04-22
+   * Empl ID header. Extracted for tracker rows + dashboard. The live element
+   * is `span#PERSON_NAME_NAME_DISPLAY` (class `PABOLD11TEXT`); the previous
+   * `UC_JPM_PRS_I_PERSON_NAME` / `PSXLATITEM_XLATLONGNAME` anchors matched
+   * NOTHING, so the employee name was never recorded. Kept as trailing
+   * fallbacks. verified 2026-07-01 (EID 10618178 → "Lisette Ochoa")
    * @tags employee, name, display, person-profile
    */
   employeeNameDisplay: (f: FrameLocator): Locator =>
-    f.locator('[id*="UC_JPM_PRS_I_PERSON_NAME"], [id*="PSXLATITEM_XLATLONGNAME"]').first(),
+    f
+      .locator(
+        '[id*="PERSON_NAME_NAME_DISPLAY"], [id*="UC_JPM_PRS_I_PERSON_NAME"], [id*="PSXLATITEM_XLATLONGNAME"]',
+      )
+      .first(),
 };
 
 // ─── Barrel: grouped namespace export ──────────────────────────────────────

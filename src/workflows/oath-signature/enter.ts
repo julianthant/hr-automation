@@ -10,10 +10,29 @@ export interface OathSignatureContext {
   employeeName: string;
   /** Flipped to true when the existing-oath sentinel is absent on profile load. */
   alreadyHasOath: boolean;
+  /**
+   * The oath signature date actually committed — the value read back from the
+   * date field after fill (an operator override) or, when kept, UCPath's
+   * today prefill. Empty until the add/fill step runs (skip path leaves it "").
+   */
+  oathDate: string;
 }
 
+/**
+ * Audit-screenshot + commit hooks. The handler wires these to `ctx.screenshot`
+ * so the visual trail lands at the RIGHT moments (person found → oath staged →
+ * saved), never after Return-to-Search — which is why the old single shot only
+ * ever captured the empty search form.
+ */
 export interface OathSignaturePlanOptions {
+  /** After the profile loads + name/existing-oath probe (all paths). */
+  onProfileLoaded?: () => Promise<void>;
+  /** After the staged oath row is applied via OK (add path only). */
+  onOathStaged?: () => Promise<void>;
+  /** Dry-run only: right before the (skipped) Save click. */
   beforeCommit?: () => Promise<void>;
+  /** After a real Save commits the oath, before returning to search. */
+  onSaved?: () => Promise<void>;
 }
 
 export function shouldCommitOathSignature(
@@ -151,19 +170,32 @@ async function clickAddNewOath(page: Page, frame: FrameLocator): Promise<void> {
   await waitForPageReady(page);
 }
 
-async function fillOathDateIfProvided(
+async function fillOathDateAndCapture(
   frame: FrameLocator,
   date: string | undefined,
+  ctx: OathSignatureContext,
 ): Promise<void> {
-  if (!date) {
-    log.step("Keeping default oath date (today) from UCPath prefill.");
-    return;
-  }
-  log.step(`Setting oath date to ${date}...`);
   const input = oathSignature.oathDateInput(frame);
-  await input.click({ timeout: 10_000 }).catch(() => {});
-  await input.fill("", { timeout: 10_000 }).catch(() => {});
-  await input.fill(date, { timeout: 10_000 });
+  if (date) {
+    log.step(`Setting oath date to ${date}...`);
+    await input.click({ timeout: 10_000 }).catch(() => {});
+    await input.fill("", { timeout: 10_000 }).catch(() => {});
+    await input.fill(date, { timeout: 10_000 });
+  } else {
+    log.step("Keeping default oath date (today) from UCPath prefill.");
+  }
+  // Read the committed value back so the tracker row records the actual oath
+  // date (the override, or UCPath's today prefill) — previously never captured,
+  // so the "Signature Date" field stayed blank on every default-date run.
+  try {
+    const value = (await input.inputValue({ timeout: 3_000 }))?.trim() ?? "";
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+      ctx.oathDate = value;
+      log.step(`Oath date on form: ${value}`);
+    }
+  } catch {
+    /* best-effort — handler falls back to input.date / today */
+  }
 }
 
 async function clickOk(page: Page, frame: FrameLocator): Promise<void> {
@@ -178,6 +210,15 @@ async function clickSave(page: Page, frame: FrameLocator): Promise<void> {
   // Save writes to DB — networkidle guards completion; fixed sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   log.success("Save clicked");
+}
+
+/**
+ * Handler-facing cleanup: return to the search form for the next daemon EID.
+ * Called AFTER the transaction step (not inside the plan) so the step's
+ * end-of-step audit screenshot captures the saved oath, not this search form.
+ */
+export async function returnToSearchForNextItem(page: Page): Promise<void> {
+  await returnToSearch(page, oathSignature.getPersonProfileFrame(page));
 }
 
 /**
@@ -203,11 +244,17 @@ export async function returnToSearch(page: Page, frame: FrameLocator): Promise<v
  *  1. Navigate to Person Profiles (direct URL)
  *  2. Search for the EID
  *  3. Extract the employee name + probe for existing oath (idempotency)
+ *     → `onProfileLoaded` audit shot (person found)
  *  4. Click "Add New Oath Signature Date" (skipped if already present)
- *  5. Fill the date if overridden (else keep UCPath prefill)
- *  6. Click OK to stage the row
- *  7. Click Save to commit
- *  8. Return to search (so the daemon reuses this browser for the next EID)
+ *  5. Fill the date if overridden (else keep UCPath prefill) + read it back
+ *  6. Click OK to stage the row → `onOathStaged` audit shot
+ *  7. Click Save to commit → `onSaved` audit shot
+ *
+ * Return-to-Search is deliberately NOT in the plan: it runs in the handler
+ * AFTER the transaction step ends, so the step's end-of-step audit screenshot
+ * captures the SAVED oath instead of the empty search form (the reported bug).
+ * `betweenItems: ["reset"]` + `ensurePersonProfilesSearchForm` handle inter-item
+ * cleanup regardless.
  */
 export function buildOathSignaturePlan(
   input: OathSignerInput,
@@ -228,6 +275,7 @@ export function buildOathSignaturePlan(
   plan.add("Extract employee name + probe existing oath", async () => {
     await extractEmployeeName(getFrame(), ctx);
     await probeExistingOath(getFrame(), ctx);
+    await options.onProfileLoaded?.();
   });
 
   plan.add("Click Add New Oath Signature Date (skip if already present)", async () => {
@@ -239,13 +287,14 @@ export function buildOathSignaturePlan(
     input.date ? `Fill oath date: ${input.date}` : "Keep default oath date (today)",
     async () => {
       if (ctx.alreadyHasOath) return;
-      await fillOathDateIfProvided(getFrame(), input.date);
+      await fillOathDateAndCapture(getFrame(), input.date, ctx);
     },
   );
 
   plan.add("Click OK (stage oath row)", async () => {
     if (ctx.alreadyHasOath) return;
     await clickOk(page, getFrame());
+    await options.onOathStaged?.();
   });
 
   plan.add("Click Save (commit oath)", async () => {
@@ -256,10 +305,7 @@ export function buildOathSignaturePlan(
       return;
     }
     await clickSave(page, getFrame());
-  });
-
-  plan.add("Return to Search (clean state for next EID)", async () => {
-    await returnToSearch(page, getFrame());
+    await options.onSaved?.();
   });
 
   return plan;
