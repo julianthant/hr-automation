@@ -312,7 +312,12 @@ function queueSharePointDownloadJob(
     throw new Error(`${spec.envVar} env var not set. Add it to .env (see .env.example) and restart the dashboard.`);
   }
 
-  const defaultOutDir = options.outDir ?? resolve(process.cwd(), sharepointDir(".tracker"));
+  // Honor the isolated tracker root so a dashboard booted at an isolated dir
+  // (HRAUTO_TRACKER_DIR) doesn't leak roster downloads into the real `.tracker/`.
+  // Prefer an explicitly-threaded trackerDir; fall back to the process env — this
+  // handler runs in-process in the dashboard, matching config.ts's TRACKER_DIR.
+  const effectiveTrackerDir = options.trackerDir ?? process.env.HRAUTO_TRACKER_DIR ?? ".tracker";
+  const defaultOutDir = options.outDir ?? resolve(process.cwd(), sharepointDir(effectiveTrackerDir));
   let resolveJob!: (result: SharePointDownloadResult) => void;
   let rejectJob!: (error: unknown) => void;
   const promise = new Promise<SharePointDownloadResult>((resolveJobPromise, rejectJobPromise) => {
