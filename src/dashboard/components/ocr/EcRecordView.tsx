@@ -2,8 +2,8 @@ import type { PreviewRecord } from "./types";
 import { RELATIONSHIP_OPTIONS } from "./types";
 import { RecordField, recordFieldMissing } from "./shared/RecordField";
 import {
+  mergeOcrPersonNameParts,
   readOcrPersonNameParts,
-  resolveOcrPersonDisplayName,
 } from "../../../domain/identity/ocr-person-name.js";
 
 export interface EcRecordViewProps {
@@ -47,13 +47,22 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
   });
 
   const setEmployee = (patch: Partial<PreviewRecord["employee"]>): void => {
-    const nextEmployee = { ...record.employee, ...patch };
-    nextEmployee.name = resolveOcrPersonDisplayName({
-      firstName: nextEmployee.firstName,
-      lastName: nextEmployee.lastName,
-      fullName: nextEmployee.name,
+    onChange({ ...record, employee: { ...record.employee, ...patch } });
+  };
+  const setEmployeeName = (patch: { firstName?: string; lastName?: string }): void => {
+    const merged = mergeOcrPersonNameParts(
+      {
+        firstName: record.employee.firstName,
+        lastName: record.employee.lastName,
+        fullName: record.employee.name,
+      },
+      patch,
+    );
+    setEmployee({
+      firstName: merged.firstName,
+      lastName: merged.lastName,
+      name: merged.name,
     });
-    onChange({ ...record, employee: nextEmployee });
   };
   const setContact = (patch: Partial<PreviewRecord["emergencyContact"]>): void => {
     onChange({
@@ -77,7 +86,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
           <input
             type="text"
             value={employeeNameParts.firstName}
-            onChange={(e) => setEmployee({ firstName: e.target.value })}
+            onChange={(e) => setEmployeeName({ firstName: e.target.value })}
             className="form-input"
           />
         </RecordField>
@@ -88,7 +97,7 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
           <input
             type="text"
             value={employeeNameParts.lastName}
-            onChange={(e) => setEmployee({ lastName: e.target.value })}
+            onChange={(e) => setEmployeeName({ lastName: e.target.value })}
             className="form-input"
           />
         </RecordField>
