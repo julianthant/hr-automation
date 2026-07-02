@@ -23,7 +23,7 @@
     "onbase:stop": "tsx --env-file=.env src/cli.ts daemon-stop onbase",
     "dashboard": "tsx --env-file=.env src/cli.ts dashboard --capture-ngrok",
     "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
-    "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard",
+    "dashboard:watch": "tsx watch --env-file=.env src/cli.ts dashboard --capture-ngrok",
     "dev:dashboard": "vite --config vite.dashboard.config.ts",
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
     "setup": "tsx --env-file=.env src/scripts/ops/setup.ts",
