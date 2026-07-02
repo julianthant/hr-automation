@@ -677,7 +677,17 @@
             blurFlagged: !!p.blurFlagged,
             blank: false, // server doesn't track blank; assumed false on reload
             dataUrl: local && local.dataUrl ? local.dataUrl : null,
+            previewUrl: local && local.previewUrl ? local.previewUrl : null,
           });
+        });
+        // Object-URL invariant: every previewUrl minted in handleAddPhoto /
+        // handleRetakePhoto is either carried into the merged set above or
+        // revoked right here as its local entry is dropped — otherwise each
+        // reconcile would orphan a full-resolution blob URL until unload.
+        // (Retake / blank / delete revoke-and-null theirs before this runs,
+        // so nothing here can double-revoke.)
+        state.photos.forEach(function (p) {
+          if (!serverByIndex[p.index]) revokeObjectUrl(p.previewUrl);
         });
         state.photos = merged.sort(function (a, b) { return a.index - b.index; });
         persistManifest();
