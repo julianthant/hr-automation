@@ -11,7 +11,13 @@ import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
 import { PATHS } from '../../config.js'
 import { idleRefreshCadence } from '../../domain/idle-refresh.js'
 import { classifyBrowserHealth, isLoginLikeUrl, type BrowserHealthVerdict } from '../../domain/browser-health.js'
-import { stitchCaptureBands, type CaptureBand } from './capture-stitch.js'
+import {
+  stitchCaptureBands,
+  estimateStitchedPixels,
+  shouldStitchComposite,
+  MAX_STITCH_PIXELS,
+  type CaptureBand,
+} from './capture-stitch.js'
 
 /**
  * Per-system idle-refresh runtime state. One entry per system in this
@@ -1273,6 +1279,11 @@ export class Session {
    * never a chunked set. Pass `opts.stitch === false` to force the raw `-cNN`
    * slices. A short (single-band) page is one image either way; a compositing
    * failure degrades to writing the raw slices, so a capture is never lost.
+   * A composite whose estimated canvas exceeds `MAX_STITCH_PIXELS` (very tall
+   * pages) also degrades to the raw `-cNN` slices — compositing decodes every
+   * band and allocates/deflates the full-page RGBA canvas synchronously on the
+   * daemon event loop, so an unbounded stitch stalls Duo polling / health /
+   * abort handling. The degradation is logged.
    */
   static async captureFullPage(
     page: Page,
@@ -1349,12 +1360,25 @@ export class Session {
           const p = slicePath(null)
           try { await fs.writeFile(p, bands[0].buffer); written.push(p) } catch { /* best-effort */ }
         } else if (bands.length > 1 && bands.every((b) => b.clipHeightCss && b.clipHeightCss > 0)) {
-          try {
-            const stitched = stitchCaptureBands(bands as CaptureBand[])
-            const p = slicePath(null)
-            await fs.writeFile(p, stitched)
-            written.push(p)
-          } catch { /* compositing failed — degrade to raw slices below */ }
+          // Cap the composite: stitching decodes every band, allocates the
+          // full-page RGBA canvas (4 bytes/px), and deflates it synchronously
+          // on the daemon event loop — a very tall page stalls Duo polling /
+          // health / abort for seconds. Estimate the canvas from the band PNG
+          // headers (no decode) and degrade to the -cNN slices above the cap.
+          const estPixels = estimateStitchedPixels(bands as CaptureBand[])
+          if (!shouldStitchComposite(estPixels)) {
+            log.warn({
+              message: `[Session] Capture stitch skipped — estimated composite ${estPixels}px exceeds cap ${MAX_STITCH_PIXELS}px; degrading to ${bands.length} -cNN page slices`,
+              count: bands.length,
+            })
+          } else {
+            try {
+              const stitched = stitchCaptureBands(bands as CaptureBand[])
+              const p = slicePath(null)
+              await fs.writeFile(p, stitched)
+              written.push(p)
+            } catch { /* compositing failed — degrade to raw slices below */ }
+          }
         }
         // Degrade: stitch couldn't run (missing clip / decode failure). Write the
         // captured bands as the usual `-cNN` slices so the capture is never lost.
