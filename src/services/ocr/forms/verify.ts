@@ -293,8 +293,10 @@ export function applyPersonLookupToVerifyRecord(
 ): VerifyPreviewRecord {
   const emplId = nonEmpty(data?.emplId);
   if (emplId) rec.employeeId = emplId;
-  applyPersonLookupNameToOcrRecord(rec as unknown as Record<string, unknown>, data);
-  const resolvedName = nonEmpty(data?.resolvedName) ?? nonEmpty(data?.searchName);
+  const resolvedName = applyPersonLookupNameToOcrRecord(
+    rec as unknown as Record<string, unknown>,
+    data,
+  );
   if (resolvedName) rec.name = resolvedName;
   else if (!nonEmpty(rec.name)) rec.name = nonEmpty(rec.printedName) ?? "";
   const activeStatus = nonEmpty(data?.activeStatus);
