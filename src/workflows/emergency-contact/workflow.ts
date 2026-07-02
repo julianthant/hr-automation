@@ -19,6 +19,8 @@ import {
 import type { EmergencyContactContext } from "./enter.js";
 import {
   applyPrefilledToEmergencyContactRecord,
+  buildContactAddressSummary,
+  buildContactPhoneSummary,
   hasEmergencyContactPrefilledOverrides,
 } from "./prefilled-record.js";
 import { RecordSchema } from "./schema.js";
@@ -149,14 +151,10 @@ export const emergencyContactWorkflow = defineWorkflow({
     // to subsequent running rows' data via the ctx merge.
     {
       const c = effectiveRecord.emergencyContact;
-      const phoneSummary = c.cellPhone || c.homePhone || c.workPhone || "";
-      const contactAddress = c.sameAddressAsEmployee
-        ? "(same as employee)"
-        : c.address
-          ? [c.address.street, c.address.city, c.address.state, c.address.zip]
-              .filter((s): s is string => Boolean(s))
-              .join(", ")
-          : "(none)";
+      // Shared with prefilled-record.ts: the same builders let an edit-data
+      // rerun recognize (and skip) values that merely round-trip these summaries.
+      const phoneSummary = buildContactPhoneSummary(c);
+      const contactAddress = buildContactAddressSummary(c);
       ctx.updateData({
         emplId: effectiveRecord.employee.employeeId,
         employeeName: effectiveRecord.employee.name,
