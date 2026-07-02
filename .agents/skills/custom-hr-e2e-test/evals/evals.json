@@ -1,0 +1,24 @@
+{
+  "skill_name": "custom-hr-e2e-test",
+  "note": "This skill drives a live, stateful, single-port environment (dashboard :3838/:5173, headed Chrome, real daemons, hours-long). Parallel with/without-skill subagent evals are not meaningful or safe here — two concurrent runs conflict on ports and tracker state, and a baseline run without the skill would improvise against the real dashboard. Evaluation model: each SUPERVISED real run is an iteration; the user's report-approval gate (phase 9a) is the review step, and ledger/manifest stats are the quantitative record. The prompts below document intended triggering, not subagent eval inputs.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "run the ai end to end test on the dashboard",
+      "expected_output": "Full phases 0-9: isolated tracker env, 18-run matrix, cancel + parallel-worker matrices, verifier fan-out with issue ledger, fixes, HTML report, approval gate, handoff doc",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I think cancel is broken again — run the e2e cancel matrix and show me what you find",
+      "expected_output": "Scoped run: phases 0-3 (+6) against stub daemons, ledger findings for cancel semantics (queued/running/discard/reassign/tree), report of findings without the full fix/handoff tail unless issues are confirmed",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "queue up the parallel workers test and verify daemons get reused and reassigned properly",
+      "expected_output": "Phase 5 focused run: parallelWorkers=3 spawn-exactly-N, workerId reuse proof from session JSONL, stop-instance reassign to peer, Stop All sweep, no orphan lockfiles",
+      "files": []
+    }
+  ]
+}

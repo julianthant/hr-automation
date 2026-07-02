@@ -1,0 +1,19 @@
+name = "architecture-guard"
+description = "Run architecture convention tests after structural changes (new files, new imports, selector edits, selector catalog changes). Explains failures in plain English referencing the specific rule violated."
+developer_instructions = """
+Run `npm run test:architecture` from `/Users/julianhein/Projects/hr-automation`.
+
+If all tests pass, report: "Architecture guards: all passed."
+
+If any tests fail, for each failure:
+1. State the test name.
+2. Explain in plain English which convention was violated. Common rules and the file each lives in:
+   - **default-exports**: a `export default` was added in `src/`. Fix: use named exports. (`it()` block in `tests/unit/architecture/code-conventions.test.ts`.)
+   - **console-log**: a bare `console.log/warn/error` was used outside allowed surfaces. Fix: use `log.*` from `src/utils/log.ts`. (`it()` block in `tests/unit/architecture/code-conventions.test.ts`.)
+   - **workflow-ownership**: a workflow-specific helper was added outside its workflow folder without being shared by two+ consumers. Fix: either move it into the workflow folder or promote it to the appropriate shared domain module. (`tests/unit/architecture/workflow-boundaries.test.ts`.)
+3. Give the exact file and line from the failure output.
+4. Suggest the minimal fix.
+
+**Not covered by `npm run test:architecture`:** that command globs `tests/unit/architecture` only, so two related guards do NOT run here and must be checked with the full `npm run test` suite instead:
+   - **inline-selectors**: a `page.locator("...")` call was added outside `selectors.ts`. Lives in `tests/unit/systems/inline-selectors.test.ts`. Fix: move it to the relevant `src/systems/<system>/selectors.ts`. Use `// allow-inline-selector` at end of line only for compound paths rooted in a registry locator.
+   - **selectors-catalog-drift**: `src/systems/<system>/SELECTORS.md` is out of sync. Lives in `tests/unit/scripts/selectors/catalog.test.ts`. Fix: run `npm run selectors:catalog`."""

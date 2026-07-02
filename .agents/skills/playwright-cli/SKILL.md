@@ -6,6 +6,8 @@ allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 
 # Browser Automation with playwright-cli
 
+> **HR-automation note:** UCPath/PeopleSoft-specific browser gotchas (the `#main_target_win0` iframe / `getContentFrame`, modal mask timing, HR Tasks sidebar overlay) are documented in the `custom-hr-selector-map` skill, not here. This skill is generic.
+
 ## Quick start
 
 ```bash
