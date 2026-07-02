@@ -343,6 +343,12 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
           ],
         };
       }
+      // `skipLookup` already implies `nameTier != null` (see its definition above).
+      const trusted = skipLookup && nameTier ? trustedRosterMatchFields(nameTier) : null;
+      const scoreWarnings =
+        top.score < 1.0
+          ? [`Single roster candidate "${top.name}" accepted (score ${top.score.toFixed(2)}); active-check will verify`]
+          : [];
       return {
         ...record,
         employee: { ...record.employee, employeeId: top.eid },
@@ -354,12 +360,8 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
-        warnings: skipLookup
-          ? trustedRosterMatchFields(nameTier!).warnings
-          : top.score < 1.0
-            ? [`Single roster candidate "${top.name}" accepted (score ${top.score.toFixed(2)}); active-check will verify`]
-            : [],
-        ...(skipLookup && nameTier ? trustedRosterMatchFields(nameTier) : {}),
+        warnings: trusted ? trusted.warnings : scoreWarnings,
+        ...(trusted ?? {}),
       };
     }
     return {
