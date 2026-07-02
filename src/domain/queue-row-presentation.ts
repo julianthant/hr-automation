@@ -81,7 +81,7 @@ function resolveEid(data: Record<string, string>): string {
  * name resolves (caller supplies the pending typed-input fallback).
  */
 function resolvePersonName(data: Record<string, string>): string {
-  const direct = firstNonBlank(data.name, data.employeeName, data.searchName);
+  const direct = firstNonBlank(data.name, data.employeeName, data.resolvedName, data.searchName);
   if (direct) return direct;
   const subjectKind = data.__subjectKind;
   if (subjectKind === "person" || subjectKind === "eid" || subjectKind === "email") {

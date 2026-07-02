@@ -25,6 +25,7 @@ import {
   patchOcrRecordFromEidLookupOutcome,
   patchOcrRecordUnresolved,
 } from "../eid-lookup-results.js";
+import { applyPersonLookupNameToOcrRecord } from "../../../domain/identity/ocr-person-name.js";
 import { type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
 import {
   isOcrPrepareAbortRequested,
@@ -292,8 +293,9 @@ export function applyPersonLookupToVerifyRecord(
 ): VerifyPreviewRecord {
   const emplId = nonEmpty(data?.emplId);
   if (emplId) rec.employeeId = emplId;
-  const searchName = nonEmpty(data?.searchName);
-  if (searchName) rec.name = searchName;
+  applyPersonLookupNameToOcrRecord(rec as unknown as Record<string, unknown>, data);
+  const resolvedName = nonEmpty(data?.resolvedName) ?? nonEmpty(data?.searchName);
+  if (resolvedName) rec.name = resolvedName;
   else if (!nonEmpty(rec.name)) rec.name = nonEmpty(rec.printedName) ?? "";
   const activeStatus = nonEmpty(data?.activeStatus);
   if (activeStatus) rec.activeStatus = activeStatus;
