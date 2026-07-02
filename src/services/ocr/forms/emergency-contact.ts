@@ -11,8 +11,12 @@ import {
   matchAgainstRoster,
   compareUsAddresses,
   normalizeEid,
+  evaluateRosterIdentityTrust,
+  shouldSkipPersonLookupForRosterTrust,
 } from "../../matching/index.js";
+import type { NameSimilarityTier } from "../../matching/match.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
+import { resolveOcrPersonDisplayName } from "../../../domain/identity/ocr-person-name.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import type { EmergencyContactRecord } from "../../../workflows/emergency-contact/schema.js";
 import {
@@ -111,6 +115,8 @@ const PermissiveEmergencyContactOcrSchema = z
 
 const PermissiveEmployeeSchema = z.object({
   name: z.string().nullable().optional(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
   employeeId: z
     .string()
     .nullable()
@@ -159,6 +165,8 @@ export const PreviewRecordSchema = PermissiveRecordSchema.extend({
     .array(z.object({ eid: z.string(), name: z.string(), score: z.number() }))
     .optional(),
   addressMatch: z.enum(["match", "differ", "missing"]).optional(),
+  /** When set to same/similar, person-lookup is skipped — roster EID+name are trusted. */
+  rosterNameTrust: z.enum(["same", "similar"]).optional(),
   documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
   verification: VerificationSchema.optional(),
@@ -205,6 +213,19 @@ Field-level rules:
 
 const ROSTER_AUTO_ACCEPT = 0.85;
 
+function trustedRosterMatchFields(tier: NameSimilarityTier): Pick<
+  PreviewRecord,
+  "rosterNameTrust" | "warnings"
+> {
+  return {
+    rosterNameTrust: tier === "same" ? "same" : "similar",
+    warnings:
+      tier === "similar"
+        ? ["Roster EID + similar name — skipping person lookup"]
+        : [],
+  };
+}
+
 // ─── Spec ──────────────────────────────────────────────────
 
 export const emergencyContactOcrFormSpec: OcrFormSpec<
@@ -222,22 +243,66 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   schemaName: "emergency-contact-batch",
 
   async matchRecord({ record, roster }): Promise<PreviewRecord> {
-    // Stage 1: form-EID. If the operator transcribed an EID on the paper,
-    // trust it (subject to verification later).
+    const ocrName = record.employee.name ?? "";
+
+    // Stage 1: form-EID — cross-check against the SharePoint roster by EID
+    // and compare names with classifyNameSimilarity (same/se similar → trust).
     const formEid = normalizeUcpathEmployeeId(normalizeEid(record.employee.employeeId));
     if (formEid) {
+      const trust = evaluateRosterIdentityTrust(ocrName, formEid, roster);
+      if (trust && shouldSkipPersonLookupForRosterTrust(trust.tier)) {
+        const rosterRow = trust.row;
+        const addressMatch =
+          rosterRow.street
+            ? compareUsAddresses(
+                record.employee.homeAddress as { street: string } | null | undefined,
+                {
+                  street: rosterRow.street,
+                  city: rosterRow.city,
+                  state: rosterRow.state,
+                  zip: rosterRow.zip,
+                },
+              )
+            : undefined;
+        return {
+          ...record,
+          employee: { ...record.employee, employeeId: formEid },
+          matchState: "matched",
+          matchSource: "form",
+          matchConfidence: trust.tier === "same" ? 1.0 : 0.9,
+          addressMatch,
+          documentType: record.documentType ?? "expected",
+          originallyMissing: [],
+          selected: true,
+          ...trustedRosterMatchFields(trust.tier),
+        };
+      }
+      if (trust?.tier === "different") {
+        return {
+          ...record,
+          employee: { ...record.employee, employeeId: formEid },
+          matchState: "lookup-pending",
+          matchSource: "form",
+          documentType: record.documentType ?? "expected",
+          originallyMissing: [],
+          selected: true,
+          warnings: [
+            `EID ${formEid} on roster as "${trust.row.name}" but OCR name "${ocrName}" differs — person lookup will verify`,
+          ],
+        };
+      }
       return {
         ...record,
         employee: { ...record.employee, employeeId: formEid },
-        matchState: "matched",
+        matchState: "lookup-pending",
         matchSource: "form",
-        matchConfidence: 1.0,
         documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
-        warnings: [],
+        warnings: [`EID ${formEid} extracted from form but not in roster — verifying`],
       };
     }
+
     // Stage 2: roster match by name. Auto-accept only when the matched
     // roster row carries a UCPath EID — when the SharePoint roster has
     // no UCPath ID for that person yet (column blank or absent), fall
@@ -251,6 +316,10 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
     ) {
       const top = result.candidates[0];
       const rosterRow = roster.find((r) => r.eid === top.eid);
+      const nameTier = rosterRow
+        ? evaluateRosterIdentityTrust(ocrName, top.eid, roster)?.tier
+        : undefined;
+      const skipLookup = nameTier != null && shouldSkipPersonLookupForRosterTrust(nameTier);
       // `compareUsAddresses` checks `!a.street` internally and returns "missing"
       // when the street is blank — safe to cast the permissive address here.
       const addressMatch =
@@ -260,6 +329,20 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
               { street: rosterRow.street, city: rosterRow.city, state: rosterRow.state, zip: rosterRow.zip },
             )
           : undefined;
+      if (nameTier === "different") {
+        return {
+          ...record,
+          employee: { ...record.employee, employeeId: top.eid },
+          matchState: "lookup-pending",
+          rosterCandidates: result.candidates.slice(0, 3),
+          documentType: record.documentType ?? "expected",
+          originallyMissing: [],
+          selected: true,
+          warnings: [
+            `Roster EID ${top.eid} matched by fuzzy name but OCR name "${ocrName}" differs from roster "${top.name}" — person lookup will verify`,
+          ],
+        };
+      }
       return {
         ...record,
         employee: { ...record.employee, employeeId: top.eid },
@@ -271,10 +354,12 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
         documentType: record.documentType ?? "expected",
         originallyMissing: [],
         selected: true,
-        warnings:
-          top.score < 1.0
+        warnings: skipLookup
+          ? trustedRosterMatchFields(nameTier!).warnings
+          : top.score < 1.0
             ? [`Single roster candidate "${top.name}" accepted (score ${top.score.toFixed(2)}); active-check will verify`]
             : [],
+        ...(skipLookup && nameTier ? trustedRosterMatchFields(nameTier) : {}),
       };
     }
     return {
@@ -308,8 +393,15 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
 
   needsLookup(record): LookupKind {
     if (record.verification) return null;
-    if (record.matchState === "lookup-pending") return "name";
-    if (record.matchState === "matched" && normalizeUcpathEmployeeId(record.employee.employeeId)) return "verify";
+    if (record.rosterNameTrust === "same" || record.rosterNameTrust === "similar") return null;
+    if (record.matchState === "lookup-pending") {
+      const eid = normalizeUcpathEmployeeId(record.employee.employeeId);
+      if (eid && record.matchSource === "form") return "verify";
+      return "name";
+    }
+    if (record.matchState === "matched" && normalizeUcpathEmployeeId(record.employee.employeeId)) {
+      return "verify";
+    }
     return null;
   },
 
@@ -349,10 +441,16 @@ export const emergencyContactOcrFormSpec: OcrFormSpec<
   approveTo: {
     workflow: "emergency-contact",
     deriveInput(record): EmergencyContactRecord {
+      const employeeName = resolveOcrPersonDisplayName({
+        firstName: record.employee.firstName,
+        lastName: record.employee.lastName,
+        fullName: record.employee.name,
+      });
       return {
         sourcePage: record.sourcePage,
         employee: {
           ...record.employee,
+          name: employeeName || record.employee.name,
           employeeId: record.employee.employeeId,
         },
         emergencyContact: record.emergencyContact,

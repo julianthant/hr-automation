@@ -8,7 +8,7 @@ const roster: RosterRow[] = [
   { eid: "10005678", name: "James Wong" },
 ];
 
-test("matchRecord: form-EID present → matched (form-eid first)", async () => {
+test("matchRecord: form-EID present + roster same name → matched, skip lookup", async () => {
   const ocr = {
     formKind: "emergency-contact" as const,
     sourcePage: 1,
@@ -20,10 +20,39 @@ test("matchRecord: form-EID present → matched (form-eid first)", async () => {
   assert.equal(preview.matchState, "matched");
   assert.equal(preview.matchSource, "form");
   assert.equal(preview.employee.employeeId, "10001234");
+  assert.equal(preview.rosterNameTrust, "same");
   assert.equal(preview.selected, true);
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), null);
 });
 
-test("matchRecord: no form-EID, high roster name match → matched (roster)", async () => {
+test("matchRecord: form-EID + similar roster name → matched, skip lookup", async () => {
+  const ocr = {
+    formKind: "emergency-contact" as const,
+    sourcePage: 1,
+    employee: { name: "Maria Garica", employeeId: "10001234" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.rosterNameTrust, "similar");
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), null);
+});
+
+test("matchRecord: form-EID + different roster name → lookup-pending verify", async () => {
+  const ocr = {
+    formKind: "emergency-contact" as const,
+    sourcePage: 1,
+    employee: { name: "Wrong Person", employeeId: "10001234" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "lookup-pending");
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), "verify");
+});
+
+test("matchRecord: no form-EID, high roster name match → matched (roster), skip lookup", async () => {
   const ocr = {
     formKind: "emergency-contact" as const,
     sourcePage: 2,
@@ -35,6 +64,8 @@ test("matchRecord: no form-EID, high roster name match → matched (roster)", as
   assert.equal(preview.matchState, "matched");
   assert.equal(preview.matchSource, "roster");
   assert.equal(preview.employee.employeeId, "10001234");
+  assert.equal(preview.rosterNameTrust, "same");
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), null);
 });
 
 test("matchRecord: no form-EID, one fuzzy roster candidate below ROSTER_AUTO_ACCEPT → lookup-pending", async () => {
@@ -94,12 +125,17 @@ test("matchRecord: no form-EID, no roster match → lookup-pending", async () =>
   assert.equal(preview.employee.employeeId, "");
 });
 
-test("needsLookup: matched-via-form → 'verify'", async () => {
-  const r = { matchState: "matched", matchSource: "form", employee: { employeeId: "10001234" } } as any;
-  assert.equal(emergencyContactOcrFormSpec.needsLookup(r), "verify");
+test("needsLookup: matched-via-form with roster trust → null", async () => {
+  const r = { matchState: "matched", matchSource: "form", rosterNameTrust: "same", employee: { employeeId: "10001234" } } as any;
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(r), null);
 });
 
-test("needsLookup: matched-via-roster → 'verify'", async () => {
+test("needsLookup: matched-via-roster with roster trust → null", async () => {
+  const r = { matchState: "matched", matchSource: "roster", rosterNameTrust: "similar", employee: { employeeId: "10001234" } } as any;
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: matched-via-roster without trust → 'verify'", async () => {
   const r = { matchState: "matched", matchSource: "roster", employee: { employeeId: "10001234" } } as any;
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), "verify");
 });

@@ -7,6 +7,8 @@ import {
   normalizeUsAddress,
   compareUsAddresses,
   matchAgainstRoster,
+  evaluateRosterIdentityTrust,
+  shouldSkipPersonLookupForRosterTrust,
   type RosterRow,
 } from "../../../../src/services/matching/match.js";
 
@@ -143,6 +145,24 @@ describe("matchAgainstRoster", () => {
     for (let i = 1; i < r.candidates.length; i++) {
       assert.ok(r.candidates[i - 1].score >= r.candidates[i].score);
     }
+  });
+});
+
+describe("evaluateRosterIdentityTrust", () => {
+  it("returns same tier when OCR name matches roster row at EID", () => {
+    const roster = [{ eid: "10001234", name: "Maria Garcia" }];
+    const trust = evaluateRosterIdentityTrust("Maria Garcia", "10001234", roster);
+    assert.ok(trust);
+    assert.equal(trust!.tier, "same");
+    assert.equal(shouldSkipPersonLookupForRosterTrust(trust!.tier), true);
+  });
+
+  it("returns similar tier for spelling variants and skips lookup", () => {
+    const roster = [{ eid: "10001234", name: "Maria Garcia" }];
+    const trust = evaluateRosterIdentityTrust("Maria Garica", "10001234", roster);
+    assert.ok(trust);
+    assert.equal(trust!.tier, "similar");
+    assert.equal(shouldSkipPersonLookupForRosterTrust(trust!.tier), true);
   });
 });
 

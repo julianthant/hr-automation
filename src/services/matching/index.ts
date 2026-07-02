@@ -9,6 +9,9 @@ export {
   compareUsAddresses,
   matchAgainstRoster,
   precomputeRoster,
+  findRosterRowByEid,
+  evaluateRosterIdentityTrust,
+  shouldSkipPersonLookupForRosterTrust,
 } from "./match.js";
 export type {
   NameMatchResult,
