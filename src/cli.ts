@@ -183,11 +183,15 @@ program
       }
     }
 
+    // No public URL configured at all: the dashboard still serves — Capture
+    // degrades loudly instead of blocking startup. /api/capture/start already
+    // fails with a 503 when publicUrl is absent (src/services/capture/server.ts),
+    // so no QR can ever encode a LAN URL. Only an explicitly requested ngrok
+    // tunnel that FAILED (handled above) remains a hard startup error.
     if (!process.env.CAPTURE_PUBLIC_URL) {
-      log.error(
-        "Capture has no public URL. Start with `npm run dashboard` so ngrok can provide one, or set CAPTURE_PUBLIC_URL manually. No LAN fallback will be used.",
+      log.warn(
+        "Capture disabled: no public URL (start with --capture-ngrok or set CAPTURE_PUBLIC_URL). /api/capture/start will return 503; everything else works.",
       );
-      process.exit(1);
     }
 
     // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.
@@ -215,7 +219,9 @@ program
       log.step(`SSE backend on port ${port}`);
     }
 
-    log.step(`Capture QR will use CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL}`);
+    if (process.env.CAPTURE_PUBLIC_URL) {
+      log.step(`Capture QR will use CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL}`);
+    }
 
     // Keep process alive
     await new Promise(() => {});
