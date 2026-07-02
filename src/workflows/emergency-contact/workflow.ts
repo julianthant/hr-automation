@@ -17,6 +17,10 @@ import {
   type ContactMatch,
 } from "./enter.js";
 import type { EmergencyContactContext } from "./enter.js";
+import {
+  applyPrefilledToEmergencyContactRecord,
+  hasEmergencyContactPrefilledOverrides,
+} from "./prefilled-record.js";
 import { RecordSchema } from "./schema.js";
 import type { EmergencyContactRecord } from "./schema.js";
 
@@ -104,20 +108,21 @@ export const emergencyContactWorkflow = defineWorkflow({
     preEmitPending: true,
     betweenItems: ["reset"],
   },
-  // OCR approval populates these fields up front so the dashboard shows rich
-  // rows from the pending state onward. The handler only refreshes employeeName
-  // after the iframe extraction succeeds. These are DISPLAY-only (not `editable`):
-  // emergency-contact is not opted into the dashboard's Edit Data tab — its
-  // inputs come from OCR approval, not an edit-and-resume override. Only
-  // separations is opted in (see src/workflows/CLAUDE.md "Opt-Ins"). Removing
-  // `editable` here is what scopes the Edit Data tab to separations only.
+  matchKey: "emplId",
   detailFields: [
-    { key: "employeeName", label: "Employee" },
-    { key: "emplId", label: "Empl ID" },
-    { key: "contactName", label: "Contact" },
-    { key: "relationship", label: "Relationship" },
-    { key: "contactPhone", label: "Contact Phone", conditional: true },
-    { key: "contactAddress", label: "Contact Address", conditional: true },
+    { key: "employeeName", label: "Name", editable: true, group: "Employee" },
+    { key: "emplId", label: "Empl ID", editable: true, group: "Employee", inputKind: "id" },
+    { key: "contactName", label: "Name", editable: true, group: "Contact" },
+    { key: "relationship", label: "Relationship", editable: true, group: "Contact" },
+    { key: "contactPhone", label: "Contact Phone", conditional: true, editable: true, group: "Contact" },
+    {
+      key: "contactAddress",
+      label: "Contact Address",
+      conditional: true,
+      editable: true,
+      multiline: true,
+      group: "Contact",
+    },
   ],
   getName: (d) => d.employeeName ?? "",
   getId: (d) => d.emplId ?? "",
@@ -125,17 +130,25 @@ export const emergencyContactWorkflow = defineWorkflow({
     buildOperatorSubject({
       kind: "person",
       value: input.employee.name || input.employee.employeeId,
-      prefix: "Emergency Contact",
     }),
   handler: async (ctx, record) => {
     const page = await ctx.page("ucpath");
+    const usingEditData = hasEmergencyContactPrefilledOverrides(record, ctx.data);
+    const effectiveRecord = applyPrefilledToEmergencyContactRecord(record, ctx.data);
+    if (usingEditData) {
+      log.step(
+        `[emergency-contact] Using manual input from edit-data ` +
+        `(emplId='${effectiveRecord.employee.employeeId}' employee='${effectiveRecord.employee.name}' ` +
+        `contact='${effectiveRecord.emergencyContact.name}')`,
+      );
+    }
 
     // Populate dashboard fields synchronously from the input so the kernel's
     // post-handler check stops warning about declared-but-unpopulated fields.
     // onPreEmitPending writes these to the *pending* row; this writes them
     // to subsequent running rows' data via the ctx merge.
     {
-      const c = record.emergencyContact;
+      const c = effectiveRecord.emergencyContact;
       const phoneSummary = c.cellPhone || c.homePhone || c.workPhone || "";
       const contactAddress = c.sameAddressAsEmployee
         ? "(same as employee)"
@@ -145,13 +158,13 @@ export const emergencyContactWorkflow = defineWorkflow({
               .join(", ")
           : "(none)";
       ctx.updateData({
-        emplId: record.employee.employeeId,
-        employeeName: record.employee.name,
+        emplId: effectiveRecord.employee.employeeId,
+        employeeName: effectiveRecord.employee.name,
         contactName: c.name,
         relationship: c.relationship,
         contactPhone: phoneSummary,
         contactAddress,
-        ...(record.dryRun ? { dryRun: true } : {}),
+        ...(effectiveRecord.dryRun ? { dryRun: true } : {}),
       });
     }
 
@@ -162,11 +175,11 @@ export const emergencyContactWorkflow = defineWorkflow({
       const authOk = await loginToUCPath(page, ctx.workflowInstance, ctx.signal);
       if (!authOk) throw new Error("UCPath authentication failed");
 
-      await navigateToEmergencyContact(page, record.employee.employeeId);
+      await navigateToEmergencyContact(page, effectiveRecord.employee.employeeId);
 
-      const discoveredCtx: EmergencyContactContext = { employeeName: record.employee.name };
+      const discoveredCtx: EmergencyContactContext = { employeeName: effectiveRecord.employee.name };
       await extractEmployeeName(page, discoveredCtx);
-      if (discoveredCtx.employeeName) {
+      if (discoveredCtx.employeeName && !usingEditData) {
         ctx.updateData({ employeeName: discoveredCtx.employeeName });
       }
 
@@ -175,7 +188,7 @@ export const emergencyContactWorkflow = defineWorkflow({
       //   - isExact: existing record is already current → skip the plan.
       //   - fuzzy (distance 1-2): likely historical typo of the same person →
       //     demote the existing primary, then add new as primary.
-      const existing = await findExistingContactDuplicate(page, record.emergencyContact.name);
+      const existing = await findExistingContactDuplicate(page, effectiveRecord.emergencyContact.name);
       if (existing && existing.isExact) {
         ctx.updateData({
           skipped: "true",
@@ -186,21 +199,21 @@ export const emergencyContactWorkflow = defineWorkflow({
       }
       if (existing && !existing.isExact) {
         // Fuzzy match — demote the existing row and continue with normal add.
-        if (shouldDemoteExistingContactForRun(existing, record.dryRun)) {
+        if (shouldDemoteExistingContactForRun(existing, effectiveRecord.dryRun)) {
           log.step(
             `Fuzzy duplicate "${existing.name}" (distance ${existing.distance}) — demoting and adding new as primary.`,
           );
           await demoteExistingContact(page, existing.name);
           // After save+return, navigate back into the editor for this employee
           // so the subsequent fill-form step starts from the right place.
-          await navigateToEmergencyContact(page, record.employee.employeeId);
+          await navigateToEmergencyContact(page, effectiveRecord.employee.employeeId);
         } else {
           log.step(
             `Dry run: would demote fuzzy duplicate "${existing.name}" (distance ${existing.distance}) before adding new primary contact.`,
           );
         }
         ctx.updateData({
-          fuzzyDemote: record.dryRun ? "would-run" : "true",
+          fuzzyDemote: effectiveRecord.dryRun ? "would-run" : "true",
           fuzzyDemoteName: existing.name,
         });
       }
@@ -214,11 +227,11 @@ export const emergencyContactWorkflow = defineWorkflow({
     }
 
     await ctx.step("fill-form", async () => {
-      const planCtx: EmergencyContactContext = { employeeName: record.employee.name };
-      const plan = buildEmergencyContactPlan(record, page, planCtx);
+      const planCtx: EmergencyContactContext = { employeeName: effectiveRecord.employee.name };
+      const plan = buildEmergencyContactPlan(effectiveRecord, page, planCtx);
       try {
         await plan.execute();
-        if (record.dryRun) {
+        if (effectiveRecord.dryRun) {
           await ctx.screenshot({ kind: "form", label: "emergency-contact-dry-run-pre-save" });
         }
       } catch (err) {
@@ -233,9 +246,9 @@ export const emergencyContactWorkflow = defineWorkflow({
     });
 
     await ctx.step("save", async () => {
-      if (record.dryRun) {
+      if (effectiveRecord.dryRun) {
         ctx.updateData({ status: "Dry Run Complete" });
-        log.success(`Dry run complete for ${record.employee.name} — UCPath Save was skipped.`);
+        log.success(`Dry run complete for ${effectiveRecord.employee.name} — UCPath Save was skipped.`);
         return;
       }
       await dismissPeopleSoftModalMask(page);
@@ -246,7 +259,7 @@ export const emergencyContactWorkflow = defineWorkflow({
       // networkidle guards the PeopleSoft save roundtrip; sleep was redundant.
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
       await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
-      log.success(`Saved emergency contact for ${record.employee.name}`);
+      log.success(`Saved emergency contact for ${effectiveRecord.employee.name}`);
     });
   },
 });
