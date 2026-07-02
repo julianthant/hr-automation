@@ -9,6 +9,13 @@ import { gotoWithRetry } from "../browser/launch.js";
 import { debugScreenshot } from "../../utils/screenshot.js";
 import { hrInquiry } from "../../systems/servicenow/selectors.js";
 import { HR_INQUIRY_FORM_URL } from "../../systems/servicenow/navigate.js";
+import { onbaseSelectors } from "../../systems/onbase/selectors.js";
+import {
+  isOnbaseForbidden,
+  isOnbaseViewstateError,
+  isOnbaseSessionClosed,
+  isOnbaseSessionContention,
+} from "../../systems/onbase/page-state.js";
 
 type SsoPrepareResult = boolean | "already_logged_in";
 
@@ -291,13 +298,136 @@ export const loginToACTCrm = defineSsoLogin<[instance?: string, abortSignal?: Ab
   submit: loginToACTCrmFlow,
 });
 
+/** True when NavPanel is loaded with the nine-squares Main Menu (not Login.aspx). */
+async function isOnbaseAuthenticated(page: Page): Promise<boolean> {
+  if (page.url().includes("Login.aspx")) return false;
+  return onbaseSelectors.nav
+    .mainMenuButton(page)
+    .isVisible({ timeout: 5_000 })
+    .catch(() => false);
+}
+
+/**
+ * Poll until OnBase lands on a recognized page — NavPanel (authenticated),
+ * SSO, Duo, the single-session contention dialog, or one of the cluster's
+ * transient error landings (403 / ViewState-MAC failure / logout) — rather
+ * than spinning on a blank redirect hop. The cheap URL/title/menu checks run
+ * first so the happy path never reads page content; the text-based error
+ * checks only fire once the page is genuinely stuck on an unrecognized page.
+ *
+ * Deliberately does NOT return on the bare `Login.aspx` URL: Login.aspx is a
+ * ROUTER page ("Please Wait…") that either redirects onward to SSO or renders
+ * the "Another session is currently active" contention dialog a beat later —
+ * returning on its URL races both outcomes.
+ */
+async function waitForOnbaseAuthLanding(page: Page, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const url = page.url();
+    if (url.includes("a5.ucsd.edu") || url.includes("duosecurity.com")) return;
+    if (await isOnbaseForbidden(page)) return;
+    if (await isOnbaseAuthenticated(page)) return;
+    if (await isSsoFormReady(page)) return;
+    if (await isOnbaseViewstateError(page)) return;
+    if (await isOnbaseSessionClosed(page)) return;
+    if (await isOnbaseSessionContention(page)) return;
+    await page.waitForTimeout(400);
+  }
+}
+
+/**
+ * Clear a stale OnBase app session holding the account's SINGLE session slot.
+ *
+ * OnBase allows one app session per identity. A daemon/browser that died
+ * without logging out leaves the slot held server-side; every new login then
+ * hits the abort-only "Another session is currently active" dialog on
+ * Login.aspx, and direct NavPanel GETs serve a PERSISTENT 403 (verified live
+ * 2026-07-02). `Logout.aspx` terminates the stale app session, and re-entering
+ * through `Login.aspx` rides the still-valid identity-server session straight
+ * back in (or falls to the normal SSO form when there is none). Idempotent —
+ * Logout.aspx with no active session is a harmless "Session Ended" no-op.
+ */
+async function clearOnbaseActiveSession(page: Page, reason: string): Promise<void> {
+  log.step(`OnBase: ${reason} — clearing the stale app session via Logout.aspx`);
+  await page
+    .goto(ONBASE_URL.replace(/NavPanel\.aspx$/i, "Logout.aspx"), {
+      waitUntil: "domcontentloaded",
+      timeout: 15_000,
+    })
+    .catch(() => undefined);
+  await page.waitForTimeout(1_000);
+  await page
+    .goto(ONBASE_URL.replace(/NavPanel\.aspx$/i, "Login.aspx"), {
+      waitUntil: "domcontentloaded",
+      timeout: 15_000,
+    })
+    .catch(() => undefined);
+  await waitForOnbaseAuthLanding(page);
+}
+
+async function reloadOnbaseNavPanelAfterError(
+  page: Page,
+  reason: string,
+  attempt: number,
+): Promise<void> {
+  log.step(
+    `OnBase NavPanel returned ${reason} after SSO — reloading NavPanel.aspx (${attempt}/2)`,
+  );
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 }).catch(async () => {
+    await page.goto(ONBASE_URL, { waitUntil: "domcontentloaded", timeout: 15_000 });
+  });
+  await waitForOnbaseAuthLanding(page, 5_000);
+}
+
+function buildOnbaseSuccessCheck(): (page: Page) => Promise<boolean> {
+  let recoveryReloads = 0;
+  let logoutHops = 0;
+  return async (page: Page): Promise<boolean> => {
+    if (await isOnbaseAuthenticated(page)) return true;
+
+    // Single-session contention post-Duo, or a 403 that plain reloads cannot
+    // clear (the slot-held limbo): take the Logout.aspx hop once. The IdP
+    // session exists at this point, so the Login.aspx re-entry is silent.
+    const contention = await isOnbaseSessionContention(page);
+    if (logoutHops < 1 && (contention || recoveryReloads >= 2)) {
+      const forbidden = contention ? false : await isOnbaseForbidden(page);
+      if (contention || forbidden) {
+        logoutHops += 1;
+        await clearOnbaseActiveSession(
+          page,
+          contention ? "another session is active post-Duo" : "NavPanel 403 persists post-Duo",
+        );
+        return await isOnbaseAuthenticated(page);
+      }
+    }
+
+    if (recoveryReloads < 2) {
+      // Both a post-Duo 403 and a ViewState-MAC failure land at the NavPanel URL
+      // and recover the same way — a fresh reload rebuilds ViewState/routing on
+      // the current farm node.
+      const forbidden = await isOnbaseForbidden(page);
+      const viewstate = forbidden ? false : await isOnbaseViewstateError(page);
+      if (forbidden || viewstate) {
+        recoveryReloads += 1;
+        await reloadOnbaseNavPanelAfterError(
+          page,
+          forbidden ? "403" : "a ViewState MAC error",
+          recoveryReloads,
+        );
+        return await isOnbaseAuthenticated(page);
+      }
+    }
+    return false;
+  };
+}
+
 /**
  * Authenticate to OnBase (Hyland) via UCSD Shibboleth SSO with Duo MFA.
  *
  * Flow: Navigate to the OnBase NavPanel → it redirects straight to the
  *       a5.ucsd.edu SSO form (Active Directory, no campus-discovery hop) →
  *       fill credentials → submit → wait for Duo → land back on
- *       ucsd.hylandcloud.com.
+ *       NavPanel.aspx with the Main Menu visible.
  *
  * Same `fillSsoCredentials` path as every other UCSD system (reuses
  * UCPATH_USER_ID / UCPATH_PASSWORD), so the hands-off WebAuthn Duo path
@@ -310,24 +440,46 @@ async function loginToOnBaseFlow(
   abortSignal?: AbortSignal,
 ): Promise<boolean> {
   log.step("Navigating to OnBase...");
-  await page.goto(ONBASE_URL, {
+  const navResponse = await page.goto(ONBASE_URL, {
     waitUntil: "domcontentloaded",
     timeout: 15_000,
   });
+  // Let the SAML redirect chain settle without blocking on networkidle — OnBase
+  // keeps background requests open and networkidle can hang for the full timeout.
+  await waitForOnbaseAuthLanding(page);
 
-  // Already authenticated? OnBase keeps us on hylandcloud.com when a live
-  // session exists; an expired session bounces to a5.ucsd.edu for SSO.
-  const currentUrl = page.url();
-  if (currentUrl.includes("hylandcloud.com")) {
+  if (await isOnbaseForbidden(page, navResponse?.status())) {
+    log.step("OnBase NavPanel returned 403 — retrying via Login.aspx");
+    await page.goto(ONBASE_URL.replace(/NavPanel\.aspx$/i, "Login.aspx"), {
+      waitUntil: "domcontentloaded",
+      timeout: 15_000,
+    });
+    await waitForOnbaseAuthLanding(page);
+  } else if (await isOnbaseViewstateError(page)) {
+    // A ViewState-MAC error at the fresh NavPanel landing — a clean re-nav
+    // rebuilds ViewState on the current farm node before we probe for SSO.
+    log.step("OnBase NavPanel returned a ViewState MAC error — re-navigating NavPanel.aspx");
+    await page.goto(ONBASE_URL, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await waitForOnbaseAuthLanding(page);
+  }
+
+  // A stale session holds the account's single app-session slot (the Login.aspx
+  // hop above surfaces this as the abort-only contention dialog). Clear it via
+  // Logout.aspx and re-enter — the flow then continues on whatever renders:
+  // NavPanel (IdP session still valid) or the SSO form.
+  if (await isOnbaseSessionContention(page)) {
+    await clearOnbaseActiveSession(page, "another session is currently active");
+  }
+
+  if (await isOnbaseAuthenticated(page)) {
     log.success("OnBase already authenticated");
     return true;
   }
 
   // Wait for the Shibboleth SSO form to paint (the SAML redirect chain may
   // still be in flight), then fill + submit.
-  await waitForSsoForm(page);
-  if (!(await isSsoFormReady(page))) {
-    log.error("OnBase SSO form did not render");
+  if (!(await waitForSsoForm(page, 15_000)) || !(await isSsoFormReady(page))) {
+    log.error(`OnBase SSO form did not render (URL: ${page.url()})`);
     return false;
   }
   await fillSsoCredentials(page);
@@ -335,7 +487,11 @@ async function loginToOnBaseFlow(
 
   const duoOptions = {
     timeoutSeconds: 180,
-    successUrlMatch: (url: string) => url.includes("hylandcloud.com"),
+    successUrlMatch: (url: string) =>
+      url.includes("hylandcloud.com") &&
+      !url.includes("Login.aspx") &&
+      !url.includes("duosecurity"),
+    successCheck: buildOnbaseSuccessCheck(),
     systemLabel: "OnBase",
     abortSignal,
   };
@@ -345,6 +501,11 @@ async function loginToOnBaseFlow(
 
   if (!approved) {
     log.error("OnBase Duo approval timed out");
+    return false;
+  }
+
+  if (!(await isOnbaseAuthenticated(page))) {
+    log.warn(`OnBase post-Duo landing verification failed; URL=${page.url()}`);
     return false;
   }
 

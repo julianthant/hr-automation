@@ -65,10 +65,24 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       if (!existsSync(file)) return { status: 404, body: { ok: false, error: "OCR row not found" } };
       const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
       let row: TrackerEntry | null = null;
+      // `pdfPath`/`rosterPath` are immutable inputs stamped on the PENDING row only.
+      // OCR snapshot rows re-stamp `pdfFileId` (the stable ref) but NOT `pdfPath`
+      // (a transient local FS path), so reading them off the LATEST matching row
+      // 400s every re-OCR past the pending phase. Capture them from whichever
+      // matching row carries them while `row` still tracks the latest for
+      // form/trace/records.
+      let capturedPdfPath: string | undefined;
+      let capturedRosterPath: string | undefined;
       for (const line of lines) {
         try {
           const e: TrackerEntry = JSON.parse(line);
-          if (e.id === input.sessionId && e.runId === input.runId) row = e;
+          if (e.id === input.sessionId && e.runId === input.runId) {
+            row = e;
+            const p = e.data?.pdfPath as unknown as string | undefined;
+            if (p) capturedPdfPath = p;
+            const rp = e.data?.rosterPath as unknown as string | undefined;
+            if (rp) capturedRosterPath = rp;
+          }
         } catch { /* tolerate */ }
       }
       if (!row) return { status: 404, body: { ok: false, error: "OCR row not found" } };
@@ -77,9 +91,9 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       const spec = getFormSpec(formType);
       if (!spec) return { status: 400, body: { ok: false, error: `Unknown formType "${formType}"` } };
 
-      const pdfPath = row.data?.pdfPath as unknown as string | undefined;
+      const pdfPath = capturedPdfPath ?? (row.data?.pdfPath as unknown as string | undefined);
       if (!pdfPath) return { status: 400, body: { ok: false, error: "Row missing pdfPath" } };
-      const rosterPath = (row.data?.rosterPath as unknown as string | undefined) ?? "";
+      const rosterPath = capturedRosterPath ?? (row.data?.rosterPath as unknown as string | undefined) ?? "";
 
       const { runOcrWholePdf } = await import("../../../services/ocr/pipeline.js");
       const ocrResult = await runOcrWholePdf({
