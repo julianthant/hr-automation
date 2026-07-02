@@ -152,6 +152,19 @@ export function setOcrDownstreamRenderer(
 const noopRenderer: OcrDownstreamConfig["renderEditor"] = (_args) => null;
 
 /**
+ * Display name for an EC-shaped record (employee first/last/full name).
+ * Shared by the `ocr` and `emergency-contact` registrations below.
+ */
+const employeeRecordName: OcrDownstreamConfig["recordName"] = (r) =>
+  (r.formKind === "emergency-contact"
+    ? resolveOcrPersonDisplayName({
+        firstName: (r as PreviewRecord).employee?.firstName,
+        lastName: (r as PreviewRecord).employee?.lastName,
+        fullName: (r as PreviewRecord).employee?.name,
+      })
+    : "") || "(no name)";
+
+/**
  * The OCR workflow's own prep row. Uses the EC record shape (current
  * downstream is hardcoded to emergency-contact) but with session-scoped
  * edits storage so the operator's edits survive a row reupload.
@@ -173,14 +186,7 @@ registerOcrDownstream("ocr", {
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: true,
-  recordName: (r) =>
-    (r.formKind === "emergency-contact"
-      ? resolveOcrPersonDisplayName({
-          firstName: (r as PreviewRecord).employee?.firstName,
-          lastName: (r as PreviewRecord).employee?.lastName,
-          fullName: (r as PreviewRecord).employee?.name,
-        })
-      : "") || "(no name)",
+  recordName: employeeRecordName,
   renderEditor: noopRenderer,
 });
 
@@ -193,14 +199,7 @@ registerOcrDownstream("emergency-contact", {
   cursorKey: ({ runId }) => `ec-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: false,
-  recordName: (r) =>
-    (r.formKind === "emergency-contact"
-      ? resolveOcrPersonDisplayName({
-          firstName: (r as PreviewRecord).employee?.firstName,
-          lastName: (r as PreviewRecord).employee?.lastName,
-          fullName: (r as PreviewRecord).employee?.name,
-        })
-      : "") || "(no name)",
+  recordName: employeeRecordName,
   renderEditor: noopRenderer,
 });
 
