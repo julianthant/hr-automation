@@ -47,8 +47,10 @@ npm run dashboard:prod                       # Serve pre-built dashboard from SS
 Open **http://localhost:5173** to monitor live workflow progress. The standard
 `npm run dashboard` command starts ngrok and uses the assigned HTTPS URL for
 phone Capture QR links while the public host remains scoped to token-gated phone
-Capture endpoints. Capture does not use LAN QR fallbacks; direct dashboard starts
-without `--capture-ngrok` require `CAPTURE_PUBLIC_URL`.
+Capture endpoints. Capture does not use LAN QR fallbacks; a dashboard started
+without `--capture-ngrok` or `CAPTURE_PUBLIC_URL` (e.g. `dashboard:prod`) still
+boots — Capture is disabled and `/api/capture/start` returns 503 until a public
+URL is provided.
 
 ### Export / Utilities
 ```bash
