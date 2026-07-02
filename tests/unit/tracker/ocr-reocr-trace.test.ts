@@ -102,4 +102,68 @@ describe("reocr-whole-pdf re-fan trace propagation", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("resolves pdfPath from the pending row when the latest snapshot dropped it (item-4a regression)", async () => {
+    vi.resetModules();
+    mocks.delegateCalls.length = 0;
+    const { rowFilePath, rowsDir } = await import("../../../src/tracker/paths.js");
+    const dir = join(tmpdir(), `ocr-reocr-pdfpath-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rowsDir(dir), { recursive: true });
+    try {
+      const ocrFile = rowFilePath("ocr", dateLocalForTest(), dir);
+      // The PENDING row carries pdfPath; the LATER snapshot re-stamps pdfFileId but
+      // DROPS pdfPath (a transient FS path is not in the re-stamp set). Reading
+      // pdfPath off the LATEST matching row 400'd every re-OCR past pending.
+      const pending = JSON.stringify({
+        workflow: "ocr", id: "s-pp", runId: "r-pp", status: "pending", step: "loading-roster",
+        timestamp: "2026-06-11T00:00:00Z",
+        data: {
+          formType: "oath", pdfPath: "/tmp/fake.pdf", pdfFileId: "pf-pp",
+          pdfOriginalName: "fake.pdf", sessionId: "s-pp", __traceId: "ou-090553-abcd",
+        },
+      });
+      const snapshot = JSON.stringify({
+        workflow: "ocr", id: "s-pp", runId: "r-pp", status: "done", step: "awaiting-approval",
+        timestamp: "2026-06-11T00:01:00Z",
+        data: {
+          formType: "oath", pdfFileId: "pf-pp", pdfOriginalName: "fake.pdf", sessionId: "s-pp",
+          __traceId: "ou-090553-abcd", records: JSON.stringify([]), failedPages: JSON.stringify([]),
+          pageStatusSummary: JSON.stringify({ total: 1, succeeded: 1, failed: 0 }),
+        },
+      });
+      writeFileSync(ocrFile, pending + "\n" + snapshot + "\n", "utf-8");
+
+      const { buildOcrReocrWholePdfHandler, _resetSessionLockForTests } = await import(
+        "../../../src/tracker/dashboard/ocr/index.js"
+      );
+      _resetSessionLockForTests();
+
+      const handler = buildOcrReocrWholePdfHandler({
+        trackerDir: dir,
+        _emitOverride: () => {},
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        _wholePdfOverride: (async () => ({
+          data: [{
+            sourcePage: 1, rowIndex: 0, printedName: "Alice One",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [],
+          }],
+          provider: "whole-pdf-stub", attempts: 1, cached: false,
+        })) as any,
+        _loadRosterOverride: async () => [],
+        _watchChildRunsOverride: async () => [],
+      });
+
+      const res = await handler({ sessionId: "s-pp", runId: "r-pp" });
+      assert.notEqual(
+        res.status,
+        400,
+        `must not 400 'Row missing pdfPath' when only the pending row has pdfPath (got ${JSON.stringify(res.body)})`,
+      );
+      assert.equal(res.body.ok, true);
+      assert.equal(mocks.delegateCalls.length, 1, "re-fan proceeded past the pdfPath check");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

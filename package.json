@@ -20,6 +20,7 @@
     "person-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop person-lookup",
     "emergency-contact:stop": "tsx --env-file=.env src/cli.ts daemon-stop emergency-contact",
     "i9-lookup:stop": "tsx --env-file=.env src/cli.ts daemon-stop i9-lookup",
+    "onbase:stop": "tsx --env-file=.env src/cli.ts daemon-stop onbase",
     "dashboard": "tsx --env-file=.env src/cli.ts dashboard",
     "dashboard:prod": "tsx --env-file=.env src/cli.ts dashboard --prod",
     "dashboard:tunneled": "tsx --env-file=.env src/cli.ts dashboard --tunnel",
