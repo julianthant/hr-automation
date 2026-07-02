@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { resolveOcrPersonDisplayName } from "../../domain/identity/ocr-person-name.js";
 import type { OcrRecordLookupTracker } from "../components/ocr/lookup-status";
 import {
   parseOathPrepareRowData,
@@ -174,7 +175,11 @@ registerOcrDownstream("ocr", {
   supportsForceResearch: true,
   recordName: (r) =>
     (r.formKind === "emergency-contact"
-      ? (r as PreviewRecord).employee?.name
+      ? resolveOcrPersonDisplayName({
+          firstName: (r as PreviewRecord).employee?.firstName,
+          lastName: (r as PreviewRecord).employee?.lastName,
+          fullName: (r as PreviewRecord).employee?.name,
+        })
       : "") || "(no name)",
   renderEditor: noopRenderer,
 });
@@ -190,7 +195,11 @@ registerOcrDownstream("emergency-contact", {
   supportsForceResearch: false,
   recordName: (r) =>
     (r.formKind === "emergency-contact"
-      ? (r as PreviewRecord).employee?.name
+      ? resolveOcrPersonDisplayName({
+          firstName: (r as PreviewRecord).employee?.firstName,
+          lastName: (r as PreviewRecord).employee?.lastName,
+          fullName: (r as PreviewRecord).employee?.name,
+        })
       : "") || "(no name)",
   renderEditor: noopRenderer,
 });
@@ -207,7 +216,14 @@ registerOcrDownstream("oath-signature", {
   // Narrow by SHAPE (printedName presence), not formKind: the EC PreviewRecord's
   // formKind is now the same 3-way union, so `=== "oath"` no longer discriminates
   // the union member. An oath OCR run always produces oath-shaped records here.
-  recordName: (r) => ("printedName" in r ? (r as OathPreviewRecord).printedName : "") || "(no name)",
+  recordName: (r) =>
+    ("printedName" in r
+      ? resolveOcrPersonDisplayName({
+          firstName: (r as OathPreviewRecord).firstName,
+          lastName: (r as OathPreviewRecord).lastName,
+          fullName: (r as OathPreviewRecord).printedName,
+        })
+      : "") || "(no name)",
   renderEditor: noopRenderer,
 });
 

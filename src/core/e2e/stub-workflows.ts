@@ -171,16 +171,16 @@ const personLookupScript: StepDataFn = (input) => {
   // Echo a resolved name back onto the row. Name inputs keep the typed name;
   // EID-only inputs synthesize one from the EID (mirrors the real handler
   // stamping the UCPath-resolved name onto `searchName`).
+  const searchName = str(r.name) ?? emplId;
   const resolvedName = str(r.name) ?? stubNameForEid(emplId);
   return {
     searching: compact({
-      searchName: resolvedName,
+      searchName,
+      resolvedName,
     }),
     "cross-verification": compact({
       emplId,
-      name: resolvedName,
       department: "E2E Department",
-      payrollTitle: "E2E Analyst",
     }),
     "active-status": {
       hrStatus: "Active",

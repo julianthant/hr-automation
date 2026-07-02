@@ -71,10 +71,10 @@ describe("person-lookup workflow helper", () => {
       fields.map((field) => [field.key, field.label]),
       [
         ["searchName", "Search"],
+        ["resolvedName", "Name"],
         ["emplId", "EID"],
         ["department", "Dept"],
         ["hrStatus", "HR Status"],
-        ["payrollTitle", "Payroll Title"],
         ["startDate", "Start Date"],
         ["terminationDate", "End Date"],
         ["terminationReason", "Term Reason"],

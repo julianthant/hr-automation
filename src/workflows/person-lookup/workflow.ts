@@ -39,19 +39,21 @@ import {
   searchCrmByName,
   searchCrmByEidOrName,
   pickCrmStartDate,
-  pickCrmPayrollTitle,
   datesWithinDays,
   type CrmRecord,
 } from "./crm-search.js";
+import {
+  normalizeName,
+  toLastFirstName,
+} from "../../domain/identity/person-name.js";
+import { prepareNames } from "../../domain/identity/person-name-batch.js";
 import {
   PersonLookupItemSchema,
   derivePersonLookupItemId,
   displayPersonLookupInput,
   isEidInput,
-  normalizeName,
   type PersonLookupItem,
 } from "./schema.js";
-import { prepareNames } from "../../domain/identity/person-name.js";
 
 export interface LookupResult {
   name: string;
@@ -132,7 +134,7 @@ async function searchingStep<TSteps extends readonly string[]>(
       `EID ${result.emplId} resolved → ${result.name} | ${result.department ?? "?"} | ${result.hrStatus}`,
     );
     ctx.updateData({
-      searchName: result.name,
+      resolvedName: toLastFirstName(result.name, result.lastName),
       emplId: result.emplId,
       department: result.department ?? "",
       hrStatus: result.hrStatus,
@@ -168,7 +170,6 @@ async function searchingStep<TSteps extends readonly string[]>(
     );
     throw err;
   }
-  ctx.updateData({ searchName: lookup.selection.searchName });
   if (lookup.results.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
     // No EID resolved — leave `emplId` unset so the subtitle falls through to the
@@ -188,6 +189,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     `Found ${lookup.results.length} result(s) for "${input.name}": EID ${first.emplId} | ${first.department ?? "?"} | ${first.jobCodeDescription}`,
   );
   ctx.updateData({
+    resolvedName: toLastFirstName(first.name, first.lastName),
     emplId: first.emplId,
     department: first.department ?? "",
     hrStatus: first.hrStatus,
@@ -248,8 +250,7 @@ async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
   resolvedEid?: string,
 ): Promise<void> {
   const startDate = pickCrmStartDate(crmRecords, resolvedEid);
-  const payrollTitle = pickCrmPayrollTitle(crmRecords, resolvedEid);
-  ctx.updateData({ startDate, payrollTitle });
+  ctx.updateData({ startDate });
   if (crmRecords.length === 0) {
     log.step("CRM start date: no CRM record — Start Date left blank");
     // Capture the empty CRM search result so the operator has evidence of what the lookup saw.
@@ -286,7 +287,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 
   // EID inputs: search CRM by EID or name purely to source the Start Date.
   if (isEidInput(input)) {
-    const { lastName, firstName } = splitResolvedName(String(ctx.data.searchName ?? ""));
+    const { lastName, firstName } = splitResolvedName(String(ctx.data.resolvedName ?? ctx.data.searchName ?? ""));
     let crmRecords: CrmRecord[] = [];
     try {
       crmRecords = await searchCrmByEidOrName(crmPage, {
@@ -311,7 +312,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     parsed = parseNameInput(searchName);
   } catch (err) {
     log.error(`CRM cross-verify: invalid name "${searchName}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
+    ctx.updateData({ crmMatch: "", startDate: "" });
     return;
   }
 
@@ -320,7 +321,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {
     log.error(`CRM cross-verify: search failed for "${searchName}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
+    ctx.updateData({ crmMatch: "", startDate: "" });
     // Capture whatever the CRM page shows after the failure so the operator has evidence.
     await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
       systems: ["crm"],
@@ -330,7 +331,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 
   if (crmRecords.length === 0) {
     log.step(`CRM: no records for "${searchName}"`);
-    ctx.updateData({ crmMatch: "", startDate: "", payrollTitle: "" });
+    ctx.updateData({ crmMatch: "", startDate: "" });
     // Capture the empty CRM search result so the operator has evidence of what the lookup saw.
     await ctx.captureAndStampScreenshot("no CRM record", "crmSearchScreenshot", {
       systems: ["crm"],
@@ -381,6 +382,7 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
     hrStatus: outcome.hrStatus,
     department: outcome.department,
     ...(outcome.emplId ? { emplId: outcome.emplId } : {}),
+    ...(outcome.name ? { resolvedName: outcome.name } : {}),
     // Start Date is sourced from CRM (First Day of Service) in
     // cross-verification — do NOT write it here, or active-status (which runs
     // after cross-verification) would clobber the CRM value with UCPath's Last
@@ -473,7 +475,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
 async function crmDatesStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
 ): Promise<void> {
-  const name = String(ctx.data.searchName ?? "").trim();
+  const name = String(ctx.data.resolvedName ?? ctx.data.searchName ?? "").trim();
   if (!name) {
     log.step("CRM dates: no resolved name available — skipping");
     return;
@@ -550,10 +552,10 @@ export const personLookupWorkflow = defineWorkflow({
   batch: { mode: "shared-context-pool", poolSize: 4, preEmitPending: true },
   detailFields: [
     { key: "searchName", label: "Search" },
+    { key: "resolvedName", label: "Name" },
     { key: "emplId", label: "EID" },
     { key: "department", label: "Dept" },
     { key: "hrStatus", label: "HR Status" },
-    { key: "payrollTitle", label: "Payroll Title" },
     { key: "startDate", label: "Start Date" },
     { key: "terminationDate", label: "End Date", conditional: true },
     { key: "terminationReason", label: "Term Reason", conditional: true },
@@ -604,7 +606,7 @@ export async function runPersonLookup(input: PersonLookupItem): Promise<void> {
   await runWorkflow(personLookupWorkflow, input);
 }
 
-export { dedupeNames, prepareNames } from "../../domain/identity/person-name.js";
+export { dedupeNames, prepareNames } from "../../domain/identity/person-name-batch.js";
 
 /**
  * Internal daemon-mode adapter.

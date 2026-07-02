@@ -50,6 +50,8 @@ export interface Address {
 
 export interface PreviewEmployee {
   name: string;
+  firstName?: string | null;
+  lastName?: string | null;
   employeeId: string;
   pid?: string | null;
   jobTitle?: string | null;
@@ -492,6 +494,8 @@ export interface OathPreviewRecord {
   sourcePage: number;
   rowIndex: number;
   printedName: string;
+  firstName?: string | null;
+  lastName?: string | null;
   employeeSigned: boolean;
   officerSigned?: boolean | null;
   dateSigned: string | null;

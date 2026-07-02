@@ -1,6 +1,10 @@
 import type { PreviewRecord } from "./types";
 import { RELATIONSHIP_OPTIONS } from "./types";
 import { RecordField, recordFieldMissing } from "./shared/RecordField";
+import {
+  readOcrPersonNameParts,
+  resolveOcrPersonDisplayName,
+} from "../../../domain/identity/ocr-person-name.js";
 
 export interface EcRecordViewProps {
   record: PreviewRecord;
@@ -11,7 +15,8 @@ export interface EcRecordViewProps {
 
 const FIELD_LABELS = {
   emplId: "Empl ID",
-  employeeName: "Lived Employee Name",
+  employeeFirstName: "First Name",
+  employeeLastName: "Last Name",
   contactName: "Contact Name",
   relationship: "Relationship",
   sameAddress: "Same address as employee",
@@ -35,9 +40,20 @@ const FIELD_LABELS = {
 export function EcRecordView({ record, onChange }: EcRecordViewProps) {
   const sameAddress = record.emergencyContact.sameAddressAsEmployee;
   const address = record.emergencyContact.address ?? null;
+  const employeeNameParts = readOcrPersonNameParts({
+    firstName: record.employee.firstName,
+    lastName: record.employee.lastName,
+    fullName: record.employee.name,
+  });
 
   const setEmployee = (patch: Partial<PreviewRecord["employee"]>): void => {
-    onChange({ ...record, employee: { ...record.employee, ...patch } });
+    const nextEmployee = { ...record.employee, ...patch };
+    nextEmployee.name = resolveOcrPersonDisplayName({
+      firstName: nextEmployee.firstName,
+      lastName: nextEmployee.lastName,
+      fullName: nextEmployee.name,
+    });
+    onChange({ ...record, employee: nextEmployee });
   };
   const setContact = (patch: Partial<PreviewRecord["emergencyContact"]>): void => {
     onChange({
@@ -53,17 +69,30 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <RecordField
-        label={FIELD_LABELS.employeeName}
-        missing={recordFieldMissing(record, "employee.name")}
-      >
-        <input
-          type="text"
-          value={record.employee.name}
-          onChange={(e) => setEmployee({ name: e.target.value })}
-          className="form-input"
-        />
-      </RecordField>
+      <div className="grid grid-cols-2 gap-3">
+        <RecordField
+          label={FIELD_LABELS.employeeFirstName}
+          missing={recordFieldMissing(record, "employee.name")}
+        >
+          <input
+            type="text"
+            value={employeeNameParts.firstName}
+            onChange={(e) => setEmployee({ firstName: e.target.value })}
+            className="form-input"
+          />
+        </RecordField>
+        <RecordField
+          label={FIELD_LABELS.employeeLastName}
+          missing={recordFieldMissing(record, "employee.name")}
+        >
+          <input
+            type="text"
+            value={employeeNameParts.lastName}
+            onChange={(e) => setEmployee({ lastName: e.target.value })}
+            className="form-input"
+          />
+        </RecordField>
+      </div>
       <RecordField
         label={FIELD_LABELS.emplId}
         missing={recordFieldMissing(record, "employee.employeeId")}

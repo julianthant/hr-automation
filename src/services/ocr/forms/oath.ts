@@ -9,10 +9,8 @@ import { z } from "zod/v4";
 import { matchAgainstRoster } from "../../matching/index.js";
 import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
-import {
-  normalizePersonNameForCompare,
-  displayPersonName,
-} from "../../../domain/identity/person-name.js";
+import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
+import { resolveOcrPersonDisplayName } from "../../../domain/identity/ocr-person-name.js";
 import type {
   OcrFormSpec,
   LookupKind,
@@ -43,6 +41,8 @@ export const OathRosterOcrRecordSchema = z.object({
   // documentType tolerant-coercion precedent. dateSigned/officerSigned are
   // already nullable below.
   printedName: z.string().nullable().optional(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
   confidence: z.number().min(0).max(1).optional(),
   employeeId: z.string().nullable().optional(),
   employeeSigned: z.boolean().nullable().optional(),
@@ -454,8 +454,8 @@ export function hasOathSignerInput(rec: unknown): boolean {
 /**
  * Read an approved OCR record's printed name / employeeId / dateSigned and
  * build the `oath-signature` signer input. Returns null when the record is
- * not selected or has no valid 5+-digit employee id. Normalizes the name via
- * `displayPersonName` and the date via `normalizeOathDate`.
+ * not selected or has no valid 5+-digit employee id. Resolves the name via the
+ * OCR person-name helper and the date via `normalizeOathDate`.
  *
  * Moved here from `oath-signature/workflow.ts` (the old PDF branch's
  * `readApprovedSignerInputs`) — it's now only used by the OCR approve fan-out.
@@ -469,8 +469,11 @@ export function buildOathSignerInputFromApprovedRecord(
   if (r.selected !== true) return null;
   const emplId = typeof r.employeeId === "string" ? r.employeeId : "";
   if (!/^\d{5,}$/.test(emplId)) return null;
-  const printedName = typeof r.printedName === "string" ? r.printedName : "";
-  const displayName = displayPersonName(printedName);
+  const displayName = resolveOcrPersonDisplayName({
+    firstName: typeof r.firstName === "string" ? r.firstName : undefined,
+    lastName: typeof r.lastName === "string" ? r.lastName : undefined,
+    fullName: typeof r.printedName === "string" ? r.printedName : undefined,
+  });
   const dateSigned = typeof r.dateSigned === "string" ? r.dateSigned : null;
   const normalizedDate = normalizeOathDate(dateSigned);
   return {

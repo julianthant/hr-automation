@@ -1,5 +1,9 @@
 import type { OathPreviewRecord } from "./types";
 import { RecordField, recordFieldMissing } from "./shared/RecordField";
+import {
+  readOcrPersonNameParts,
+  resolveOcrPersonDisplayName,
+} from "../../../domain/identity/ocr-person-name.js";
 
 export interface OathRecordViewProps {
   record: OathPreviewRecord;
@@ -18,6 +22,22 @@ export interface OathRecordViewProps {
 export function OathRecordView({ record, onChange }: OathRecordViewProps) {
   const officerApplicable =
     record.officerSigned !== null && record.officerSigned !== undefined;
+  const nameParts = readOcrPersonNameParts({
+    firstName: record.firstName,
+    lastName: record.lastName,
+    fullName: record.printedName,
+  });
+
+  const setNameParts = (patch: { firstName?: string; lastName?: string }): void => {
+    const firstName = patch.firstName ?? nameParts.firstName;
+    const lastName = patch.lastName ?? nameParts.lastName;
+    onChange({
+      ...record,
+      firstName,
+      lastName,
+      printedName: resolveOcrPersonDisplayName({ firstName, lastName, fullName: record.printedName }),
+    });
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -29,14 +49,24 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
           className="form-input font-mono"
         />
       </RecordField>
-      <RecordField label="Printed Name" missing={recordFieldMissing(record, "printedName")}>
-        <input
-          type="text"
-          value={record.printedName}
-          onChange={(e) => onChange({ ...record, printedName: e.target.value })}
-          className="form-input"
-        />
-      </RecordField>
+      <div className="grid grid-cols-2 gap-3">
+        <RecordField label="First Name" missing={recordFieldMissing(record, "printedName")}>
+          <input
+            type="text"
+            value={nameParts.firstName}
+            onChange={(e) => setNameParts({ firstName: e.target.value })}
+            className="form-input"
+          />
+        </RecordField>
+        <RecordField label="Last Name" missing={recordFieldMissing(record, "printedName")}>
+          <input
+            type="text"
+            value={nameParts.lastName}
+            onChange={(e) => setNameParts({ lastName: e.target.value })}
+            className="form-input"
+          />
+        </RecordField>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <RecordField label="Date Signed" missing={recordFieldMissing(record, "dateSigned")}>
           <input

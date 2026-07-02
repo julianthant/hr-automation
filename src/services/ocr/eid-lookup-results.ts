@@ -1,5 +1,6 @@
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import type { ChildOutcome } from "../../tracker/delegation/watch-child-runs.js";
+import { applyPersonLookupNameToOcrRecord } from "../../domain/identity/ocr-person-name.js";
 
 export type OcrLookupKind = "name" | "verify" | "verify-only";
 
@@ -82,6 +83,10 @@ export function patchOcrRecordFromEidLookupOutcome(
     terminationDate: outcome.data?.terminationDate,
   });
   rec.verification = verification;
+
+  if (outcome.status === "done") {
+    applyPersonLookupNameToOcrRecord(rec, outcome.data);
+  }
 
   if (kind === "name") {
     if (verification.state === "inactive") {
