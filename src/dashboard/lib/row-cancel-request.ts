@@ -5,6 +5,7 @@ import {
   type WorkflowActionHttpRequest,
 } from "@/components/hooks/useWorkflowActionDispatcher";
 import type { WorkflowActionDescriptor } from "../../domain/workflow-runtime/types.js";
+import { readOcrPrepCancelContext } from "../../domain/ocr-prep-cancel.js";
 import { findEnabledAction } from "@/lib/workflow-action-utils";
 
 export interface RowCancelRequestArgs {
@@ -23,37 +24,8 @@ export interface RowCancelRequestArgs {
   status?: string;
 }
 
-interface OcrPrepContext {
-  ocrSessionId: string;
-  ocrRunId: string;
-  formType?: string;
-}
-
-/**
- * OCR statuses (the operation row's denormalized `data.ocrStatus`) for which
- * the × still means "discard the OCR prep". Once the prep is approved or
- * terminal, the coordinator's cancel falls through to the ordinary cancel
- * path instead of discarding an already-decided prep.
- */
-const DISCARDABLE_OCR_STATUSES = new Set(["running", "preparing", "awaiting-review"]);
-
-function ocrPrepContext(entry: TrackerEntry | undefined): OcrPrepContext | null {
-  const data = entry?.data;
-  if (
-    data?.mode === "prepare" &&
-    typeof data.ocrSessionId === "string" &&
-    typeof data.ocrRunId === "string"
-  ) {
-    if (typeof data.ocrStatus === "string" && !DISCARDABLE_OCR_STATUSES.has(data.ocrStatus)) {
-      return null;
-    }
-    return {
-      ocrSessionId: data.ocrSessionId,
-      ocrRunId: data.ocrRunId,
-      formType: typeof data.formType === "string" ? data.formType : undefined,
-    };
-  }
-  return null;
+function ocrPrepContext(entry: TrackerEntry | undefined) {
+  return readOcrPrepCancelContext(entry?.data ?? undefined);
 }
 
 /** True when the row's × routes through the OCR prep discard handler. */
@@ -158,6 +130,7 @@ export function buildOperationTreeCancelRequest(
       id,
       ...(runId !== undefined ? { runId } : {}),
       scope: "tree",
+      treeExcludeRoots: true,
     },
   };
 }

@@ -26,6 +26,7 @@ describe("buildOperationTreeCancelRequest (E2E-102)", () => {
           id: "ocr-session-1",
           runId: "coordinator-run-1",
           scope: "tree",
+          treeExcludeRoots: true,
         },
       },
     );
@@ -45,6 +46,7 @@ describe("buildOperationTreeCancelRequest (E2E-102)", () => {
           id: "ec-session-2",
           runId: "ec-coord-run-2",
           scope: "tree",
+          treeExcludeRoots: true,
         },
       },
     );
@@ -62,6 +64,7 @@ describe("buildOperationTreeCancelRequest (E2E-102)", () => {
           workflow: "oath-signature",
           id: "ocr-session-3",
           scope: "tree",
+          treeExcludeRoots: true,
         },
       },
     );

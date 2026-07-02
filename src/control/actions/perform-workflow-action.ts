@@ -20,7 +20,11 @@ import {
   buildDeleteEntryHandler,
   buildQueueBumpHandler,
 } from "../ops/index.js";
+import { findInheritedPriorEntry } from "../ops/emit-inherited.js";
+import { openControlStores, emitDashboardCancelTrackerRow } from "../ops/shared.js";
 import { buildOcrDiscardHandler } from "../ocr/discard.js";
+import { resolveRowArchetype } from "../../domain/row-archetype.js";
+import { readOcrPrepCancelContext, type OcrPrepCancelContext } from "../../domain/ocr-prep-cancel.js";
 import { resolveActionTargets, type ResolvedActionTarget } from "./resolve-targets.js";
 import type {
   WorkflowActionRequest,
@@ -127,6 +131,158 @@ async function cancelTarget(
   return failTarget(t, r.error, r.status);
 }
 
+async function discardOcrPrepForTarget(
+  t: ResolvedActionTarget,
+  ctx: OcrPrepCancelContext,
+  deps: PerformWorkflowActionDeps,
+  reason?: string,
+): Promise<WorkflowActionTargetResult> {
+  const r = await buildOcrDiscardHandler({ trackerDir: deps.dir })({
+    sessionId: ctx.ocrSessionId,
+    runId: ctx.ocrRunId,
+    reason: reason ?? `Cancelled from ${t.workflow} queue`,
+    parentWorkflow: t.workflow,
+    ...(t.runId ? { parentRunId: t.runId } : {}),
+    parentItemId: t.id,
+    ...(ctx.formType ? { formType: ctx.formType } : {}),
+  });
+  return r.body.ok
+    ? okTarget(t)
+    : failTarget(t, r.body.error ?? "OCR discard failed", r.status);
+}
+
+function readTrackerOcrPrepCancelContext(
+  t: ResolvedActionTarget,
+  deps: PerformWorkflowActionDeps,
+): OcrPrepCancelContext | null {
+  const stores = openControlStores(deps.dir);
+  const prior = findInheritedPriorEntry({
+    workflow: t.workflow,
+    trackerDir: deps.dir,
+    id: t.id,
+    ...(t.runId ? { runId: t.runId } : {}),
+    db: stores.taskStore.db,
+  });
+  return readOcrPrepCancelContext(prior?.data ?? undefined);
+}
+
+function isSqliteTaskNotFound(error: string | undefined): boolean {
+  return error === "task not found in SQLite control store";
+}
+
+function isTerminalTrackerStatus(status: string | undefined): boolean {
+  return status === "done" || status === "failed" || status === "skipped";
+}
+
+/**
+ * Resolve a stranded display-only OPERATION coordinator whose cancel found no
+ * SQLite task and no live descendants to cancel.
+ *
+ * An `operation` coordinator is a display row with no daemon task of its own
+ * (by design — see `src/control/actions/types.ts` `treeExcludeRoots`). When its
+ * fan-out members are already terminal, or were completed/never projected into
+ * the `runs` table (e.g. a CLI / file-queue run), the descendant tree walk
+ * finds nothing. Without this, cancel dead-ends with "task not found in SQLite
+ * control store" and the coordinator is stranded in the queue forever — a
+ * pending row offers no delete affordance, so there is no working way to clear
+ * it. Terminalize the display row instead (the standard operator-cancel
+ * terminal shape: `failed` + `step:"cancelled"`) so the projection drops it out
+ * of the queue.
+ *
+ * Returns null — leaving the caller's original error to surface — when the
+ * target is NOT a stranded operation coordinator:
+ *   - no prior tracker row to inherit from (a genuinely missing item → keep the
+ *     honest 404 rather than fabricate a phantom terminal row);
+ *   - the prior row is not an `operation` coordinator (a normal single/preview
+ *     row's task-not-found is a real error / enqueue race, not this case);
+ *   - the prior row is already terminal (don't overwrite a real done/failed).
+ *
+ * Guarded so this protects every workflow that produces an operation
+ * coordinator (oath-signature / emergency-contact / onbase + any multi-person
+ * input-run anchor), not just the one that surfaced the bug.
+ */
+function terminalizeStrandedCoordinator(
+  t: ResolvedActionTarget,
+  deps: PerformWorkflowActionDeps,
+): WorkflowActionTargetResult | null {
+  const prior = findInheritedPriorEntry({
+    workflow: t.workflow,
+    trackerDir: deps.dir,
+    id: t.id,
+    ...(t.runId ? { runId: t.runId } : {}),
+  });
+  if (!prior) return null;
+  if (resolveRowArchetype(prior) !== "operation") return null;
+  if (isTerminalTrackerStatus(prior.status)) return null;
+  try {
+    emitDashboardCancelTrackerRow(t.workflow, t.id, t.runId, deps.dir);
+  } catch {
+    // No prior row to inherit (PriorTrackerRowNotFoundError) or emit failure —
+    // fall back to the caller's original error rather than claiming success.
+    return null;
+  }
+  return okTarget(t, { detail: { terminalizedCoordinator: true } });
+}
+
+async function cancelDescendantTargets(
+  req: WorkflowActionRequest,
+  root: ResolvedActionTarget,
+  deps: PerformWorkflowActionDeps,
+): Promise<WorkflowActionTargetResult[]> {
+  if (!root.runId) return [];
+  const childResolved = resolveActionTargets(
+    {
+      ...req,
+      scope: "tree",
+      treeExcludeRoots: true,
+      targets: [{
+        workflowId: root.workflow,
+        id: root.id,
+        runId: root.runId,
+        ...(root.date ? { date: root.date } : {}),
+        ...(root.status ? { status: root.status } : {}),
+      }],
+    },
+    deps.dir,
+  );
+  if (!childResolved.ok || childResolved.targets.length === 0) return [];
+  const results: WorkflowActionTargetResult[] = [];
+  for (const child of childResolved.targets) {
+    results.push(await cancelResolvedTarget(req, child, deps));
+  }
+  return results;
+}
+
+async function cancelResolvedTarget(
+  req: WorkflowActionRequest,
+  t: ResolvedActionTarget,
+  deps: PerformWorkflowActionDeps,
+): Promise<WorkflowActionTargetResult> {
+  const prepContext = readTrackerOcrPrepCancelContext(t, deps);
+  if (prepContext) {
+    return discardOcrPrepForTarget(t, prepContext, deps, req.reason);
+  }
+
+  const direct = await cancelTarget(req, t, deps);
+  if (direct.ok) return direct;
+  if (!isSqliteTaskNotFound(direct.error) || !t.runId) return direct;
+
+  const childResults = await cancelDescendantTargets(req, t, deps);
+
+  const succeeded = childResults.filter((r) => r.ok);
+  if (succeeded.length > 0) {
+    return okTarget(t, { detail: { cancelledDescendants: succeeded.length } });
+  }
+  if (childResults.length > 0) {
+    return failTarget(t, childResults[0]?.error ?? direct.error ?? "cancel failed", childResults[0]?.status);
+  }
+
+  // No task and no live descendants. For a stranded display-only operation
+  // coordinator this is the terminal case, not a failure — terminalize the
+  // display row so it leaves the queue instead of dead-ending forever.
+  return terminalizeStrandedCoordinator(t, deps) ?? direct;
+}
+
 /** OCR prep cancel is file-scope: route to the discard-prepare service path. */
 async function discardOcrPrep(
   req: WorkflowActionRequest,
@@ -181,7 +337,7 @@ export async function performWorkflowAction(
     const resolved = resolveActionTargets(req, deps.dir);
     if (!resolved.ok) return empty(resolved.error);
     for (const t of resolved.targets) {
-      results.push(await cancelTarget(req, t, deps));
+      results.push(await cancelResolvedTarget(req, t, deps));
     }
   } else if (req.action === "retry") {
     const resolved = resolveActionTargets(req, deps.dir);
