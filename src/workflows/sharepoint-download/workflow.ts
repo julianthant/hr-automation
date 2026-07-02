@@ -143,7 +143,7 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
   getName: (d) => d.label ?? "",
   getId: (d) => d.id ?? "",
   operatorSubject: (input) =>
-    buildOperatorSubject({ kind: "roster", value: input.label || input.id, prefix: "SharePoint" }),
+    buildOperatorSubject({ kind: "roster", value: input.label || input.id }),
   handler: async (ctx, input) => {
     // Seed the dashboard row with the human-readable label immediately so
     // the queue doesn't flash a blank name while auth runs. `path` and
@@ -171,7 +171,11 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
     // download — File → Create a Copy (hover) → Download a Copy, capture
     // the Download event, saveAs into outDir.
     await ctx.step("download", async () => {
-      const outDir = input.outDir ?? sharepointDir(".tracker");
+      // Fallback for callers that don't thread an explicit outDir: honor the
+      // isolated tracker root (HRAUTO_TRACKER_DIR) instead of hardcoding the real
+      // `.tracker/`. The dashboard handler sets input.outDir; this covers direct
+      // callers (OCR rosterMode=download, CLI) — see handler.ts's effectiveTrackerDir.
+      const outDir = input.outDir ?? sharepointDir(process.env.HRAUTO_TRACKER_DIR ?? ".tracker");
       const { path: saved, filename } = await captureExcelDownload(page, outDir, {
         filenameBase: input.filenameBase,
       });
