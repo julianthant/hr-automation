@@ -205,23 +205,30 @@ function terminalizeStrandedCoordinator(
   t: ResolvedActionTarget,
   deps: PerformWorkflowActionDeps,
 ): WorkflowActionTargetResult | null {
+  // Pass the process-cached SQLite handle so the prior-row lookup uses the
+  // indexed `runs`/`items` projection instead of a synchronous 30-day JSONL
+  // scan — this runs per task-not-found target inside the cancel loop, on the
+  // SSE backend event loop (see `emit-inherited.ts`: bulk-loop callers MUST
+  // pass `db`).
+  const stores = openControlStores(deps.dir);
   const prior = findInheritedPriorEntry({
     workflow: t.workflow,
     trackerDir: deps.dir,
     id: t.id,
     ...(t.runId ? { runId: t.runId } : {}),
+    db: stores.taskStore.db,
   });
   if (!prior) return null;
   if (resolveRowArchetype(prior) !== "operation") return null;
   if (isTerminalTrackerStatus(prior.status)) return null;
   try {
-    emitDashboardCancelTrackerRow(t.workflow, t.id, t.runId, deps.dir);
+    emitDashboardCancelTrackerRow(t.workflow, t.id, t.runId, deps.dir, stores.taskStore.db);
   } catch {
     // No prior row to inherit (PriorTrackerRowNotFoundError) or emit failure —
     // fall back to the caller's original error rather than claiming success.
     return null;
   }
-  return okTarget(t, { detail: { terminalizedCoordinator: true } });
+  return okTarget(t, { terminalizedCoordinator: true });
 }
 
 async function cancelDescendantTargets(
@@ -271,7 +278,7 @@ async function cancelResolvedTarget(
 
   const succeeded = childResults.filter((r) => r.ok);
   if (succeeded.length > 0) {
-    return okTarget(t, { detail: { cancelledDescendants: succeeded.length } });
+    return okTarget(t, { cancelledDescendants: succeeded.length });
   }
   if (childResults.length > 0) {
     return failTarget(t, childResults[0]?.error ?? direct.error ?? "cancel failed", childResults[0]?.status);
