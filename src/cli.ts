@@ -10,8 +10,7 @@ import "./workflows/ocr/index.js";
 import { exportToExcel } from "./tracker/exports/export-excel.js";
 import { startDashboard } from "./tracker/dashboard.js";
 import { stopDaemons } from "./core/index.js";
-import { pickLanIp, isPhoneUnreachableLanIp } from "./services/capture/lan-ip.js";
-import { startQuickTunnel } from "./services/capture/tunnel.js";
+import { startNgrokTunnel, type NgrokTunnel } from "./services/capture/ngrok.js";
 
 const program = new Command();
 
@@ -103,7 +102,7 @@ program
   )
   .option(
     "--systems <list>",
-    "Comma-separated subset: ucpath,crm,ukg,kuali,newkronos,servicenow",
+    "Comma-separated subset: ucpath,crm,ukg,kuali,newkronos,servicenow,onbase,i9",
   )
   .action(async (opts: { all?: boolean; systems?: string }) => {
     requireEnv();
@@ -130,17 +129,15 @@ program
   .option("-p, --port <port>", "SSE server port", (v) => parsePositiveInt(v, "--port"))
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
-  .option(
-    "--tunnel",
-    "Front the dashboard with a fresh, throwaway Cloudflare quick tunnel so the phone-Capture QR is reachable (never uses a named tunnel in ~/.cloudflared)",
-  )
-  .option("--no-tunnel", "Never auto-start a Capture tunnel, even if the LAN IP looks unreachable")
+  .option("--capture-ngrok", "Start ngrok and use its public URL for phone Capture QR links")
+  .option("--capture-ngrok-url <url>", "Optional static ngrok URL/domain to pass to ngrok --url")
   .action(
     async (opts: {
       port?: number;
       prod?: boolean;
       clean?: boolean;
-      tunnel?: boolean;
+      captureNgrok?: boolean;
+      captureNgrokUrl?: string;
     }) => {
     // Dashboard runs default to hands-off Duo. Without it, a daemon login
     // (person-lookup, oath-signature, …) stalls on Duo's native "insert your
@@ -157,6 +154,42 @@ program
     }
     const handsOffDuo = process.env.HR_AUTOMATION_DUO_WEBAUTHN === "1";
     const port = opts.port ?? 3838;
+    log.step(
+      handsOffDuo
+        ? "Hands-off Duo ON — daemon logins auto-approve via the enrolled WebAuthn key (set HR_AUTOMATION_DUO_WEBAUTHN=0 to require manual approval)."
+        : "Hands-off Duo OFF — daemon logins require manual Duo approval.",
+    );
+
+    const captureNgrokUrl = opts.captureNgrokUrl ?? process.env.CAPTURE_NGROK_URL;
+    const shouldStartNgrok =
+      Boolean(opts.captureNgrok || captureNgrokUrl || process.env.CAPTURE_NGROK === "1");
+    if (shouldStartNgrok) {
+      if (process.env.CAPTURE_PUBLIC_URL) {
+        log.step(
+          `CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL} will be replaced by the ngrok URL for this dashboard process.`,
+        );
+      }
+      log.step(`Starting ngrok tunnel for Capture: https://ngrok → http://localhost:${port}`);
+      const captureNgrokTunnel = await startNgrokTunnel(port, { url: captureNgrokUrl });
+      if (captureNgrokTunnel) {
+        process.env.CAPTURE_PUBLIC_URL = captureNgrokTunnel.url;
+        registerTunnelCleanup(captureNgrokTunnel);
+        log.success(`Capture QR will use ngrok URL ${captureNgrokTunnel.url}`);
+      } else {
+        log.error(
+          "Capture ngrok tunnel did not start. Capture requires ngrok or CAPTURE_PUBLIC_URL; no LAN fallback will be used. Check `ngrok config check` / your auth token and restart.",
+        );
+        process.exit(1);
+      }
+    }
+
+    if (!process.env.CAPTURE_PUBLIC_URL) {
+      log.error(
+        "Capture has no public URL. Start with `npm run dashboard` so ngrok can provide one, or set CAPTURE_PUBLIC_URL manually. No LAN fallback will be used.",
+      );
+      process.exit(1);
+    }
+
     // Commander's --no-clean sets opts.clean === false; default is `undefined` → clean = true.
     startDashboard("all", port, {
       noClean: opts.clean === false,
@@ -166,12 +199,6 @@ program
       // real `.tracker/` while daemons write the isolated root (split-brain).
       dir: process.env.HRAUTO_TRACKER_DIR,
     });
-
-    log.step(
-      handsOffDuo
-        ? "Hands-off Duo ON — daemon logins auto-approve via the enrolled WebAuthn key (set HR_AUTOMATION_DUO_WEBAUTHN=0 to require manual approval)."
-        : "Hands-off Duo OFF — daemon logins require manual Duo approval.",
-    );
 
     if (opts.prod) {
       // Production mode: serve built HTML from SSE server only
@@ -188,52 +215,29 @@ program
       log.step(`SSE backend on port ${port}`);
     }
 
-    // Phone-Capture reachability: the QR encodes the LAN IP by default, which a
-    // phone can't reach when the laptop has only a CGNAT/link-local address (or
-    // is on a different network). Auto-start a FRESH, throwaway Cloudflare quick
-    // tunnel in that case so Capture "just works" — it is fully isolated from
-    // ~/.cloudflared, so it never touches a named tunnel / account. Precedence:
-    // an explicit CAPTURE_PUBLIC_URL always wins; `--tunnel` forces it on;
-    // `--no-tunnel` forces it off; otherwise it's automatic only when the LAN IP
-    // looks unreachable — a normal LAN gets no tunnel and stays fully local.
-    const lanIp = pickLanIp();
-    const lanUnreachable = !lanIp || isPhoneUnreachableLanIp(lanIp);
-    const wantTunnel =
-      opts.tunnel === true ||
-      (opts.tunnel !== false && !process.env.CAPTURE_PUBLIC_URL && lanUnreachable);
-    if (process.env.CAPTURE_PUBLIC_URL) {
-      log.step(`Capture QR will use CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL}`);
-    } else if (wantTunnel) {
-      log.step(
-        opts.tunnel === true
-          ? "Starting a Cloudflare quick tunnel for phone Capture (--tunnel)…"
-          : `LAN IP ${lanIp ?? "unavailable"} isn't reachable from a phone (CGNAT/link-local) — starting a Cloudflare quick tunnel for Capture…`,
-      );
-      const tunnel = await startQuickTunnel(port);
-      if (tunnel) {
-        // The capture route reads process.env.CAPTURE_PUBLIC_URL per request, so
-        // setting it here (before any operator opens Capture) points the QR at
-        // the tunnel with no restart.
-        process.env.CAPTURE_PUBLIC_URL = tunnel.url;
-        log.success(`Capture tunnel ready: ${tunnel.url} (the phone QR encodes this)`);
-        const stop = tunnel.stop;
-        for (const sig of ["SIGINT", "SIGTERM"] as const) {
-          process.once(sig, () => {
-            stop();
-            process.exit(0);
-          });
-        }
-        process.once("exit", () => stop());
-      } else {
-        log.warn(
-          "Couldn't start a Cloudflare quick tunnel (cloudflared missing or the network blocked it). The Capture QR will fall back to the LAN IP — install cloudflared (`brew install cloudflared`) or set CAPTURE_PUBLIC_URL manually.",
-        );
-      }
-    }
+    log.step(`Capture QR will use CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL}`);
 
     // Keep process alive
     await new Promise(() => {});
   });
+
+function registerTunnelCleanup(tunnel: NgrokTunnel): void {
+  let stopped = false;
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    tunnel.stop();
+  };
+  process.once("exit", stop);
+  process.once("SIGINT", () => {
+    stop();
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    stop();
+    process.exit(143);
+  });
+}
 
 // ─── export ───
 

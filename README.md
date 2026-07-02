@@ -39,13 +39,16 @@ npm run crm-doc-download:stop
 
 ### Dashboard
 ```bash
-npm run dashboard                            # SSE backend (:3838) + Vite dev (:5173)
+npm run dashboard                            # SSE backend (:3838) + Vite dev (:5173) + ngrok for phone Capture QR links
 npm run dashboard:watch                      # Same, but tsx watch restarts SSE backend on src/ changes
 npm run dashboard:prod                       # Serve pre-built dashboard from SSE only
-npm run dashboard:tunneled                   # Force a fresh Cloudflare quick tunnel for phone Capture (= dashboard --tunnel)
 ```
 
-Open **http://localhost:5173** to monitor live workflow progress.
+Open **http://localhost:5173** to monitor live workflow progress. The standard
+`npm run dashboard` command starts ngrok and uses the assigned HTTPS URL for
+phone Capture QR links while the public host remains scoped to token-gated phone
+Capture endpoints. Capture does not use LAN QR fallbacks; direct dashboard starts
+without `--capture-ngrok` require `CAPTURE_PUBLIC_URL`.
 
 ### Export / Utilities
 ```bash
