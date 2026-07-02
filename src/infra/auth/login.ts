@@ -65,6 +65,19 @@ async function retrySelectCampus(
   return false;
 }
 
+export function isAuthenticatedUcpathAppUrl(rawUrl: string): boolean {
+  const url = rawUrl.toLowerCase();
+  return (
+    url.includes("universityofcalifornia.edu") &&
+    !url.includes("ucpathdiscovery/disco") &&
+    !url.includes("duosecurity.com") &&
+    !url.includes("a5.ucsd.edu") &&
+    !url.includes("/login") &&
+    !url.includes("shibboleth") &&
+    !url.startsWith("chrome-error")
+  );
+}
+
 /**
  * Authenticate to UCPath through UCSD Shibboleth SSO with Duo MFA.
  *
@@ -80,7 +93,12 @@ async function retrySelectCampus(
  * Submit button ready to click. Idempotent — safe to call again on a stale
  * form (the nav resets the Shibboleth token automatically).
  */
-export async function ucpathNavigateAndFill(page: Page): Promise<boolean> {
+export async function ucpathNavigateAndFill(page: Page): Promise<SsoPrepareResult> {
+  if (isAuthenticatedUcpathAppUrl(page.url())) {
+    log.success("UCPath already authenticated — reusing existing session");
+    return "already_logged_in";
+  }
+
   log.step("Navigating to UCPath...");
   await page.goto("https://ucpath.ucsd.edu", {
     waitUntil: "domcontentloaded",

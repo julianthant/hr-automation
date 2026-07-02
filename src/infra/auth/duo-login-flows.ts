@@ -6,6 +6,7 @@ import {
   loginToKuali,
   loginToNewKronos,
   loginToServiceNow,
+  loginToOnBase,
 } from "./login.js";
 import { loginToI9 } from "../../systems/i9/login.js";
 import { KUALI_SPACE_URL } from "../../config.js";
@@ -39,5 +40,6 @@ export const DUO_LOGIN_FLOWS: ReadonlyArray<DuoLoginFlow> = [
   { key: "kuali", label: "Kuali Build", run: (page) => loginToKuali(page, KUALI_SPACE_URL) },
   { key: "newkronos", label: "New Kronos (WFD)", run: (page) => loginToNewKronos(page) },
   { key: "servicenow", label: "ServiceNow", run: (page) => loginToServiceNow(page) },
+  { key: "onbase", label: "OnBase", run: (page) => loginToOnBase(page) },
   { key: "i9", label: "I-9 Complete", run: (page) => loginToI9(page) },
 ];

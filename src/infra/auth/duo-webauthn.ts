@@ -616,14 +616,11 @@ export async function selectDuoFactor(
         // is pre-prompt, not post-success.)
         if (await hasSigned()) return "auto";
         if ((await page.getByText(/yes, this is my device/i).count().catch(() => 0)) > 0) return "auto";
-        if (
-          (await page
-            .getByText(/insert your security key|use your security key/i)
-            .count()
-            .catch(() => 0)) > 0
-        ) {
-          break; // CRM roaming key — needs the explicit click path below.
-        }
+        // OnBase / CRM may auto-fire a security-key ceremony on prompt load. Do
+        // NOT bail to the click path the instant the screen appears — the pre-armed
+        // `usb` virtual authenticator can answer it hands-off (same as Touch ID
+        // auto-fire for UCPath). Phase 2 (Escape → Other options → factor) is the
+        // fallback when the grace window expires without a signature.
       } catch {
         /* page mid-navigation between SSO and the prompt — keep waiting */
       }
