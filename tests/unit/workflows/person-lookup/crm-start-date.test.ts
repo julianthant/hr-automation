@@ -7,7 +7,11 @@ import {
   payrollTitleFromTitleCode,
   type CrmRecord,
 } from "../../../../src/workflows/person-lookup/crm-search.js";
-import { matchCrmEid, splitResolvedName } from "../../../../src/workflows/person-lookup/workflow.js";
+import {
+  matchCrmEid,
+  resolveCrmSearchNameParts,
+  splitResolvedName,
+} from "../../../../src/workflows/person-lookup/workflow.js";
 import type { EidResult } from "../../../../src/systems/ucpath/person-org-summary.js";
 
 function crmRecord(patch: Partial<CrmRecord> = {}): CrmRecord {
@@ -170,5 +174,37 @@ describe("splitResolvedName", () => {
   it("handles a single token and empty input", () => {
     assert.deepEqual(splitResolvedName("Cher"), { lastName: "Cher", firstName: "" });
     assert.deepEqual(splitResolvedName("   "), { lastName: "", firstName: "" });
+  });
+});
+
+describe("resolveCrmSearchNameParts", () => {
+  it("parses a comma-format resolvedName (as stamped by toLastFirstName) without swapping parts", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Langley, Leo"), {
+      lastName: "Langley",
+      firstName: "Leo",
+    });
+  });
+
+  it("drops the middle name from a comma-format name", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Sanchez, Raquel Victoria"), {
+      lastName: "Sanchez",
+      firstName: "Raquel",
+    });
+  });
+
+  it("falls back to the whitespace split for First [Middle] Last input", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Raquel Victoria Sanchez"), {
+      lastName: "Sanchez",
+      firstName: "Raquel",
+    });
+    assert.deepEqual(resolveCrmSearchNameParts("Leo Langley"), {
+      lastName: "Langley",
+      firstName: "Leo",
+    });
+  });
+
+  it("handles single-token and empty input via the fallback split", () => {
+    assert.deepEqual(resolveCrmSearchNameParts("Cher"), { lastName: "Cher", firstName: "" });
+    assert.deepEqual(resolveCrmSearchNameParts(""), { lastName: "", firstName: "" });
   });
 });
