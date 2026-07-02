@@ -73,6 +73,11 @@ export function isAuthenticatedUcpathAppUrl(rawUrl: string): boolean {
     !url.includes("duosecurity.com") &&
     !url.includes("a5.ucsd.edu") &&
     !url.includes("/login") &&
+    // PeopleSoft classic-PIA session expiry lands on the signon URL
+    // `…/psp/<site>/?cmd=login` (or `?cmd=expire`) — same domain, and the
+    // "/login" path exclusion above does not match the query-string shape.
+    !url.includes("cmd=login") &&
+    !url.includes("cmd=expire") &&
     !url.includes("shibboleth") &&
     !url.startsWith("chrome-error")
   );
@@ -144,6 +149,10 @@ export async function ucpathSubmitAndWaitForDuo(
   if (!(await isSsoFormReady(page))) {
     log.warn("UCPath SSO form gone stale — re-preparing before submit");
     const ok = await ucpathNavigateAndFill(page);
+    // Tri-state: a warm page reports "already_logged_in" — there is no SSO
+    // form to submit, so falling through to clickSsoSubmit would be a
+    // guaranteed TimeoutError. Short-circuit as success instead.
+    if (ok === "already_logged_in") return true;
     if (!ok) return false;
   }
 

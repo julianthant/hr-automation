@@ -628,3 +628,106 @@ describe("selectDuoFactor — ISS-005 pre-prompt guard", () => {
     );
   });
 });
+
+describe("selectDuoFactor — Phase 1 security-key auto-fire (no early bail)", () => {
+  // Regression pin for the removed Phase-1 early break: the old code bailed
+  // straight to the Phase-2 click path (Escape → "Other options" → factor) the
+  // instant the security-key screen text appeared, assuming CRM's roaming-key
+  // native dialog could never self-answer. The shipped behavior instead stays in
+  // the Phase-1 grace loop — the pre-armed `usb` virtual authenticator CAN answer
+  // an auto-fired security-key ceremony hands-off — and returns "auto" the moment
+  // `hasSigned` flips. Same virtual-clock fake-page pattern as the ISS-005 block:
+  // `waitForTimeout(ms)` advances the injected clock, so no real waiting.
+  const FACTOR_WINDOW_MS = 20_000;
+  const PHASE1_GRACE_MS = 12_000; // Phase-1 grace window: min(deadline, now + 12_000)
+  const CLOCK_BASE = 2_000_000;
+
+  const factorOrder = [factorPatternForTransport("internal"), factorPatternForTransport("usb")];
+
+  const matches = (candidate: string, name: RegExp | string): boolean =>
+    typeof name === "string" ? candidate.includes(name) : name.test(candidate);
+
+  // Minimal fake page on the Duo prompt showing the security-key screen the
+  // whole time. Records every factor/option click AND every keyboard press —
+  // the old early-bail path pressed Escape and clicked "Other options", so an
+  // empty recording proves Phase 1 never handed off to the click path.
+  const makeSecurityKeyPromptPage = (opts: {
+    clock: { t: number };
+    clicks: string[];
+    keyPresses: string[];
+  }): import("playwright").Page => {
+    const { clock, clicks, keyPresses } = opts;
+    const presentTexts = ["Use your security key"];
+    const presentLinks = ["Other options"];
+
+    const labelLocator = (labels: string[]) => {
+      const self = {
+        or: () => self,
+        first: () => self,
+        all: async () => labels.map((label) => ({ innerText: async () => label })),
+        count: async () => labels.length,
+        innerText: async () => labels[0] ?? "",
+        click: async () => {
+          if (labels[0]) clicks.push(labels[0]);
+        },
+      };
+      return self;
+    };
+
+    return {
+      url: () => "https://api-0000.duosecurity.com/frame/v4/auth/prompt",
+      keyboard: {
+        press: async (key: string) => {
+          keyPresses.push(key);
+        },
+      },
+      waitForTimeout: async (ms?: number) => {
+        clock.t += ms ?? 0;
+      },
+      getByText: (arg: RegExp | string) => ({
+        first() {
+          return this;
+        },
+        innerText: async () => "",
+        count: async () => presentTexts.filter((tx) => matches(tx, arg)).length,
+      }),
+      getByRole: (role: string, o?: { name?: RegExp }) => {
+        const pool = role === "link" ? presentLinks : [];
+        const filtered = o?.name ? pool.filter((l) => o.name!.test(l)) : pool;
+        return labelLocator(filtered);
+      },
+    } as unknown as import("playwright").Page;
+  };
+
+  it("waits out the auto-fired ceremony on the security-key screen and returns 'auto' once hasSigned flips", async () => {
+    const clock = { t: CLOCK_BASE };
+    const clicks: string[] = [];
+    const keyPresses: string[] = [];
+    const page = makeSecurityKeyPromptPage({ clock, clicks, keyPresses });
+
+    // The pre-armed authenticator signs the auto-fired ceremony a few poll
+    // iterations in — well AFTER the point where the old code would already
+    // have bailed to the click path (it broke on the very first sighting of
+    // the security-key screen text).
+    const signedAt = CLOCK_BASE + 2_000;
+    const hasSigned = async (): Promise<boolean> => clock.t >= signedAt;
+
+    const step = vi.spyOn(log, "step").mockImplementation(() => {});
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    try {
+      const label = await selectDuoFactor(page, factorOrder, FACTOR_WINDOW_MS, undefined, hasSigned, () => clock.t);
+
+      assert.equal(label, "auto", "must report the hands-off auto-fire result once the authenticator signs");
+      assert.deepEqual(clicks, [], "no early bail: never clicks 'Other options' or a factor mid-ceremony");
+      assert.deepEqual(keyPresses, [], "no early bail: never presses Escape to dismiss the security-key dialog");
+      assert.ok(clock.t >= signedAt, "polled until the signature landed");
+      assert.ok(
+        clock.t < CLOCK_BASE + PHASE1_GRACE_MS,
+        "returned inside the Phase-1 grace window — never fell through to Phase 2",
+      );
+    } finally {
+      step.mockRestore();
+      warn.mockRestore();
+    }
+  });
+});
