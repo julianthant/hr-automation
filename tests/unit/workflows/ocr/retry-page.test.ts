@@ -337,3 +337,63 @@ test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)",
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("runOcrRetryPage preserves __traceId + queueRowKind on the re-emitted row (item-4b regression)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-tr",
+    runId: "run-tr",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-tr",
+      sessionId: "session-tr",
+      // The frozen trace id + queue-row kind ride EVERY OCR row; retry-page rebuilds
+      // `base` explicitly, so it must re-stamp them or the re-run is untraceable.
+      __traceId: "os-120000-abcd",
+      queueRowKind: "file",
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-tr", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-tr", 1);
+
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-tr", runId: "run-tr", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        records: [{
+          sourcePage: 1, rowIndex: 0, printedName: "Zoe",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000005", name: "Zoe" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval, "fresh awaiting-approval entry written");
+  assert.equal(approval!.data!.__traceId, "os-120000-abcd", "__traceId must ride the re-emitted row (traceable to parent)");
+  assert.equal(approval!.data!.queueRowKind, "file", "queueRowKind must ride the re-emitted row");
+
+  rmSync(dir, { recursive: true, force: true });
+});
