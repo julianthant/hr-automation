@@ -55,6 +55,12 @@ export interface WorkflowActionRequest {
   date?: string;
   /** Stamps re-enqueued runs under this batch / delegation parent (retry). */
   parentRunId?: string;
+  /**
+   * When `scope` is `tree`, use the provided targets only as BFS roots and do
+   * not cancel the roots themselves. Operation coordinators are display-only
+   * rows with no SQLite task — tree cancel must touch descendants only.
+   */
+  treeExcludeRoots?: boolean;
   /** When set on a `cancel`, routes to OCR file-scope discard. */
   ocrSessionId?: string;
   /** OCR discard only — explicit parent row context for mirrored discard rows. */

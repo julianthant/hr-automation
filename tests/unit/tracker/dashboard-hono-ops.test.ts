@@ -171,6 +171,169 @@ test("Hono /api/cancel-queued routes OCR discard context through workflow action
   assert.equal(parent.error, "Cancelled from oath-upload queue");
 });
 
+test("Hono /api/cancel-queued auto-routes emergency-contact operation prep rows to OCR discard", async () => {
+  const date = dateLocal();
+  trackEventForDate({
+    workflow: "ocr",
+    timestamp: new Date().toISOString(),
+    id: "ec-ocr-session",
+    runId: "ec-ocr-run",
+    status: "running",
+    step: "preparing",
+    data: {
+      archetype: "operation",
+      mode: "prepare",
+      formType: "emergency-contact",
+      operationWorkflow: "emergency-contact",
+    },
+  }, date, dir);
+  trackEventForDate({
+    workflow: "emergency-contact",
+    timestamp: new Date().toISOString(),
+    id: "ocr-prep-ec-ocr-session",
+    runId: "ec-coord-run",
+    status: "running",
+    step: "ocr-prep",
+    data: {
+      archetype: "operation",
+      mode: "prepare",
+      formType: "emergency-contact",
+      ocrSessionId: "ec-ocr-session",
+      ocrRunId: "ec-ocr-run",
+      ocrStatus: "preparing",
+      pdfOriginalName: "contacts.pdf",
+    },
+  }, date, dir);
+
+  const res = await app().request("/api/cancel-queued", jsonRequest({
+    workflow: "emergency-contact",
+    id: "ocr-prep-ec-ocr-session",
+    runId: "ec-coord-run",
+    status: "running",
+  }));
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+
+  const ecFile = rowFilePath("emergency-contact", date, dir);
+  const ecLines = readFileSync(ecFile, "utf-8").split("\n").filter(Boolean);
+  const ecRow = JSON.parse(ecLines[ecLines.length - 1]);
+  assert.equal(ecRow.status, "failed");
+  assert.equal(ecRow.step, "discarded");
+});
+
+test("Hono /api/cancel-queued treeExcludeRoots cancels member tasks under a display-only coordinator", async () => {
+  openStateDb(dir);
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  try {
+    const date = "2026-05-21";
+    const [child] = taskStore.enqueueTasks({
+      workflow: "emergency-contact",
+      inputs: [{ emplId: "10000002" }],
+      deriveItemId: (input) => input.emplId,
+      runIds: ["ec-member-run"],
+      parentRunId: "ec-coord-run-2",
+    });
+    trackEventForDate({
+      workflow: "emergency-contact",
+      timestamp: "2026-05-21T10:00:00.000Z",
+      id: "input-run-ec-coord",
+      runId: "ec-coord-run-2",
+      status: "pending",
+      data: { archetype: "operation" },
+    }, date, dir);
+    trackEventForDate({
+      workflow: "emergency-contact",
+      timestamp: "2026-05-21T10:01:00.000Z",
+      id: "10000002",
+      runId: "ec-member-run",
+      parentRunId: "ec-coord-run-2",
+      status: "pending",
+      data: { archetype: "operation-member" },
+    }, date, dir);
+
+    const res = await app().request("/api/cancel-queued", jsonRequest({
+      workflow: "emergency-contact",
+      id: "input-run-ec-coord",
+      runId: "ec-coord-run-2",
+      scope: "tree",
+      treeExcludeRoots: true,
+      status: "pending",
+    }));
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(taskStore.getTask(child.taskId)?.state, "cancelled");
+  } finally {
+    taskStore.close();
+  }
+});
+
+test("Hono /api/cancel-queued terminalizes a stranded operation coordinator with no task and no live descendants", async () => {
+  // Reproduces the real-world orphan: an operation coordinator is a display-only
+  // row with NO SQLite task of its own (by design), and its fan-out members
+  // already completed off-projection (or were never projected) — so a single-row
+  // × finds no task AND no live descendants. Before the fix this dead-ended with
+  // "task not found in SQLite control store" and stranded the row in the queue
+  // forever (a pending row offers no delete affordance). Cancel must instead
+  // terminalize the display row so it leaves the queue. Protects every workflow
+  // that produces an operation coordinator (oath-signature / emergency-contact /
+  // onbase + any multi-person input run), not just the one that surfaced it.
+  openStateDb(dir);
+  const date = dateLocal();
+  trackEventForDate({
+    workflow: "oath-signature",
+    timestamp: new Date().toISOString(),
+    id: "input-run-orphan",
+    runId: "coord-run-orphan",
+    status: "pending",
+    data: { archetype: "operation", queueRowKind: "person" },
+  }, date, dir);
+
+  // Single-row × → scope defaults to "row", no treeExcludeRoots. No task was
+  // ever enqueued for the coordinator, and no descendant rows exist.
+  const res = await app().request("/api/cancel-queued", jsonRequest({
+    workflow: "oath-signature",
+    id: "input-run-orphan",
+    runId: "coord-run-orphan",
+    date,
+  }));
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+
+  const file = rowFilePath("oath-signature", date, dir);
+  const lines = readFileSync(file, "utf-8").split("\n").filter(Boolean);
+  const last = JSON.parse(lines[lines.length - 1]) as {
+    id: string; runId: string; status: string; step: string; data: { archetype: string };
+  };
+  assert.equal(last.id, "input-run-orphan");
+  assert.equal(last.runId, "coord-run-orphan");
+  assert.equal(last.status, "failed");
+  assert.equal(last.step, "cancelled");
+  assert.equal(last.data.archetype, "operation");
+});
+
+test("Hono /api/cancel-queued still 404s a genuinely missing item (no phantom terminal row)", async () => {
+  // The terminalize path must NOT fabricate a cancelled row when there is no
+  // prior tracker row to inherit from — a missing item with a runId keeps the
+  // honest not-found error rather than silently "succeeding".
+  openStateDb(dir);
+  mkdirSync(join(dir, "daemons"), { recursive: true });
+  writeFileSync(queueFilePath("separations", dir), "");
+
+  const res = await app().request("/api/cancel-queued", jsonRequest({
+    workflow: "separations",
+    id: "ghost",
+    runId: "ghost-run",
+  }));
+
+  assert.equal(res.status, 404);
+  const body = await res.json() as { ok: boolean; error: string };
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "task not found in SQLite control store");
+});
+
 test("Hono /api/cancel-queued returns not-found shape for missing queue item", async () => {
   mkdirSync(join(dir, "daemons"), { recursive: true });
   writeFileSync(queueFilePath("separations", dir), "");

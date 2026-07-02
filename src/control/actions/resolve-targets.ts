@@ -108,7 +108,9 @@ export function resolveActionTargets(
     return { ok: true, targets: base };
   }
   const merged = new Map<string, ResolvedActionTarget>();
-  for (const t of base) merged.set(targetKey(t), t);
+  if (!req.treeExcludeRoots) {
+    for (const t of base) merged.set(targetKey(t), t);
+  }
   const rootRunIds = base
     .map((t) => t.runId)
     .filter((runId): runId is string => Boolean(runId));

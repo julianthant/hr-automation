@@ -73,6 +73,10 @@ function parseRowCancelScope(value: unknown): WorkflowActionScope {
   return value === "tree" ? "tree" : "row";
 }
 
+function parseTreeExcludeRoots(value: unknown): boolean | undefined {
+  return value === true ? true : undefined;
+}
+
 function parseBulkActionSource(value: unknown): Extract<WorkflowActionSource, "queue-panel" | "operation-view"> {
   return value === "operation-view" ? "operation-view" : "queue-panel";
 }
@@ -142,6 +146,7 @@ type RowCancelRequest = {
   runId?: string;
   status?: "pending" | "running";
   scope: WorkflowActionScope;
+  treeExcludeRoots?: boolean;
 } & Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason">;
 
 function parseRowCancelStatus(value: unknown): "pending" | "running" | undefined {
@@ -155,6 +160,7 @@ function parseRowCancelRequest(body: Record<string, unknown>): RowCancelRequest 
     ...compact({ runId: body.runId ? String(body.runId) : undefined }),
     ...compact({ status: parseRowCancelStatus(body.status) }),
     scope: parseRowCancelScope(body.scope),
+    ...compact({ treeExcludeRoots: parseTreeExcludeRoots(body.treeExcludeRoots) }),
     ...parseOcrCancelContext(body),
   };
 }
@@ -174,6 +180,7 @@ function buildCancelRoute(deps: DashboardHonoDeps): (c: Context) => Promise<Resp
       source: "queue-panel",
       workflowId: req.workflow,
       ...compact({
+        treeExcludeRoots: req.treeExcludeRoots,
         ocrSessionId: req.ocrSessionId,
         parentWorkflow: req.parentWorkflow,
         parentRunId: req.parentRunId,

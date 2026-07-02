@@ -444,4 +444,31 @@ describe("resolveActionTargets — tree scope descendant resolution", () => {
     assert.ok(runIds.includes("running-grand"), "non-terminal grandchild must still be reached via BFS");
     assert.equal(resolved.targets.length, 2);
   });
+
+  it("excludes tree roots when treeExcludeRoots is set (display-only operation coordinators)", () => {
+    seedRunRow({ workflow: "emergency-contact", date: DATE, itemId: "coord-1", runId: "coord-run", latestStatus: "pending" });
+    seedRunRow({
+      workflow: "emergency-contact",
+      date: DATE,
+      itemId: "member-1",
+      runId: "member-run",
+      parentRunId: "coord-run",
+      latestStatus: "pending",
+    });
+
+    const req: WorkflowActionRequest = {
+      action: "cancel",
+      scope: "tree",
+      treeExcludeRoots: true,
+      source: "queue-panel",
+      workflowId: "emergency-contact",
+      targets: [{ workflowId: "emergency-contact", id: "coord-1", runId: "coord-run", status: "pending" }],
+    };
+    const resolved = resolveActionTargets(req, dir);
+    assert.ok(resolved.ok);
+    const runIds = resolved.targets.map((t) => t.runId);
+    assert.ok(!runIds.includes("coord-run"), "display-only coordinator root must be excluded");
+    assert.ok(runIds.includes("member-run"), "pending member must be included");
+    assert.equal(resolved.targets.length, 1);
+  });
 });
