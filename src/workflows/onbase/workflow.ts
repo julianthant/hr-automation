@@ -5,6 +5,7 @@ import { errorMessage } from "../../utils/errors.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
+import { ONBASE_URL } from "./config.js";
 import { OnbaseInputSchema, type OnbaseInput } from "./schema.js";
 import { onbaseHandler, onbaseSteps } from "./handler.js";
 
@@ -37,7 +38,8 @@ export const ONBASE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
  * enqueues one of these per approved record (stamped `operation-member` under
  * the OnBase operation coordinator). `betweenItems: ["reset"]` resets the
  * OnBase browser to about:blank between people so a stuck import form from
- * person N doesn't leak into person N+1.
+ * person N doesn't leak into person N+1. `resetUrl` navigates back to
+ * NavPanel.aspx (not about:blank) so the next item starts from the Main Menu.
  *
  * `deferAuth` + `authSteps: false`: the fan-out child only Duos at the
  * `authenticate` step, AFTER OCR approval, so the operator isn't prompted
@@ -55,6 +57,7 @@ export const onbaseWorkflow = defineWorkflow({
     {
       id: "onbase",
       deferAuth: true,
+      resetUrl: ONBASE_URL,
     },
   ],
   authSteps: false,
@@ -81,7 +84,6 @@ export const onbaseWorkflow = defineWorkflow({
     buildOperatorSubject({
       kind: "person",
       value: input.employeeName || input.ucpathId,
-      prefix: "OnBase",
     }),
   handler: async (ctx, input) => {
     await onbaseHandler(ctx, input);

@@ -15,7 +15,8 @@ import type { Page, FrameLocator, Locator } from "playwright";
  *
  * Field accessible-names map 1:1 to the OnBase Keyword labels (e.g.
  * "UCPath ID", "Document Name"). The `Employee Lookup` keyset autofills every
- * keyword from the UCPath ID + Tab — only "Document Name" is left to set.
+ * keyword via its MODAL search (`keysetLookup.*` below — NOT UCPath ID + Tab,
+ * which does nothing) — only "Document Name" is left to set.
  *
  * Every selector verified live 2026-06-22 against the production tenant.
  */
@@ -123,8 +124,8 @@ export const importForm = {
     frame.getByRole("combobox", { name: label, exact: true }),
 
   /**
-   * The UCPath ID keyword textbox — the primary key; type it + Tab to fire the
-   * Employee Lookup keyset autofill. verified 2026-06-22
+   * The UCPath ID keyword textbox — the primary key. Autofill runs through the
+   * keyset MODAL (`keysetLookup.*`), not by typing here + Tab. verified 2026-07-02
    * @tags onbase, import, ucpath-id, keyword, primary, autofill
    */
   ucpathIdInput: (frame: FrameLocator): Locator =>
@@ -162,4 +163,123 @@ export const importForm = {
     frame.getByRole("button", { name: "Clear All" }),
 };
 
-export const onbaseSelectors = { nav, importForm };
+// ─── Employee Lookup keyset MODAL (top-page dialog + nested iframe) ─────────
+//
+// The keyset is NOT an inline autofill on Tab (the old assumption). Clicking the
+// key-icon (`importForm.keysetApplyButton`) opens an "Employee Lookup" dialog on
+// the TOP page whose search form lives in a nested `ReverseKeysetLookup.aspx`
+// iframe. You fill the modal's UCPath ID, click Find, and on a match the results
+// row auto-selects and "Select Employee" (on the dialog) enables — clicking it
+// closes the dialog and autofills every keyword on the import form. A miss shows
+// a "No matching records were found" alert. Verified live 2026-07-02.
+
+export const keysetLookup = {
+  /**
+   * The "Employee Lookup" modal dialog (top page), opened by the key-icon.
+   * verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, dialog
+   */
+  dialog: (page: Page): Locator => page.getByRole("dialog", { name: "Employee Lookup" }),
+
+  /**
+   * The modal's search-form iframe (`ReverseKeysetLookup.aspx`). The OBToken in
+   * the src varies, so match on the stable page path. verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, iframe, frame
+   */
+  frame: (page: Page): FrameLocator =>
+    page.frameLocator('iframe[src*="ReverseKeysetLookup.aspx"]'),
+
+  /**
+   * The modal's OWN UCPath ID search field (distinct from the import form's).
+   * verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, ucpath-id, search, textbox
+   */
+  ucpathIdInput: (frame: FrameLocator): Locator =>
+    frame.getByRole("textbox", { name: "UCPath ID", exact: true }),
+
+  /**
+   * The modal's Find button (runs the employee search). verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, find, search, button
+   */
+  findButton: (frame: FrameLocator): Locator =>
+    frame.getByRole("button", { name: "Find", exact: true }),
+
+  /**
+   * "Select Employee" — enabled once a result row is selected; clicking it
+   * autofills the import form and closes the dialog. verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, select, button
+   */
+  selectEmployeeButton: (page: Page): Locator =>
+    page.getByRole("dialog", { name: "Employee Lookup" }).getByRole("button", {
+      name: "Select Employee",
+    }),
+
+  /**
+   * "Close Dialog" — dismiss the Employee Lookup modal without selecting.
+   * verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, close, cancel, button
+   */
+  closeButton: (page: Page): Locator =>
+    page.getByRole("dialog", { name: "Employee Lookup" }).getByRole("button", {
+      name: "Close Dialog",
+    }),
+
+  /**
+   * The "No matching records were found" message (search returned nothing =
+   * bad/unknown UCPath ID). verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, no-match, message
+   */
+  noMatchMessage: (page: Page): Locator =>
+    page.getByText("No matching records were found"),
+
+  /**
+   * OK button on the no-match alert dialog. verified 2026-07-02
+   * @tags onbase, keyset, employee-lookup, modal, no-match, ok, button
+   */
+  noMatchOkButton: (page: Page): Locator =>
+    page.getByRole("alertdialog", { name: "Message" }).getByRole("button", { name: "OK" }),
+};
+
+// ─── Document Queue panel (sibling top-page iframe `frmViewer`) ─────────────
+//
+// After a file is attached, the right-hand "Document Queue (N)" panel lists it
+// with status "Pending Import" — the authoritative attach confirmation. The
+// panel lives in the `frmViewer` iframe (`FileUploadEnhancedRightPage.aspx`), a
+// SIBLING of NavPanelIFrame on the top page, NOT nested inside the import form.
+// Queue rows are page-scoped (a fresh Import Document load starts empty —
+// verified live 2026-07-02) but they survive same-page retries, so leftover
+// rows must be removed before attaching or Import would file duplicates.
+
+export const documentQueue = {
+  /**
+   * The Document Queue iframe (`frmViewer`, src `FileUploadEnhancedRightPage.aspx`)
+   * — a top-page sibling of NavPanelIFrame. verified 2026-07-02
+   * @tags onbase, import, document-queue, iframe, frame, frmviewer
+   */
+  frame: (page: Page): FrameLocator =>
+    page.frameLocator('iframe[name="frmViewer"]'),
+
+  /**
+   * A queued document's row by filename (cell text). Appearing with status
+   * "Pending Import" confirms the attach landed. verified 2026-07-02
+   * @tags onbase, import, document-queue, row, pending-import, attach, confirm
+   */
+  queuedRow: (frame: FrameLocator, fileName: string): Locator =>
+    frame.getByRole("row", { name: new RegExp(escapeForRegExp(fileName), "i") }),
+
+  /**
+   * Every "Remove" button in the queue — used to clear leftover rows from a
+   * failed prior attempt before attaching (duplicate-import defense).
+   * verified 2026-07-02
+   * @tags onbase, import, document-queue, remove, clear, button
+   */
+  removeButtons: (frame: FrameLocator): Locator =>
+    frame.getByRole("button", { name: "Remove" }),
+};
+
+/** Escape a literal filename for use inside a RegExp accessible-name match. */
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export const onbaseSelectors = { nav, importForm, keysetLookup, documentQueue };

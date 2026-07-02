@@ -1,15 +1,30 @@
-export { onbaseSelectors, nav, importForm } from "./selectors.js";
+export { onbaseSelectors, nav, importForm, documentQueue } from "./selectors.js";
+export {
+  classifyOnbasePage,
+  isOnbaseMainMenuReady,
+  isOnbaseViewstateError,
+  isOnbaseSessionClosed,
+  isOnbaseForbidden,
+  isOnbaseLoginUrl,
+  isOnbaseSessionContention,
+  onbaseStateNeedsReauth,
+  OnbasePageStateError,
+  type OnbasePageState,
+} from "./page-state.js";
 export {
   openImportDocument,
+  installOnbaseDialogGuard,
   selectDocumentType,
   selectFileType,
   ensureKeyset,
   chooseFile,
-  enterUcpathIdAndTab,
+  lookupEmployeeViaKeyset,
+  type KeysetLookupResult,
   readRequiredKeywordValues,
   fillKeyword,
   setDocumentName,
   isImportEnabled,
+  waitForImportEnabled,
   clickImport,
   ONBASE_EC_DOCUMENT_TYPE,
   ONBASE_PDF_FILE_TYPE,
