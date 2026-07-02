@@ -20,13 +20,17 @@ export interface OperatorSubject {
 export function buildOperatorSubject(input: {
   kind: OperatorSubjectKind;
   value: string | number | null | undefined;
-  prefix?: string;
 }): OperatorSubject {
+  // The operator subject is JUST the input value (person name / EID / doc id /
+  // filename), identity-normalized — NEVER prefixed with the workflow name.
+  // Queue-row / coordinator / delegation-group titles all read this, so a row
+  // shows what it's ABOUT, not which workflow owns it (that's the rail + the
+  // session card). The `prefix` argument was removed 2026-07-01 per operator
+  // request ("the title should just be the input, without the workflow name").
   const raw = input.value == null ? "" : String(input.value).trim();
   let label = raw;
   if (input.kind === "person") label = displayPersonName(raw);
   if (input.kind === "eid") label = displayEid(raw);
-  if (input.prefix && label) label = `${input.prefix} ${label}`;
   return {
     kind: label ? input.kind : "unknown",
     label,

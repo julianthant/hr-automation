@@ -75,7 +75,6 @@ export const oathUploadWorkflow = defineWorkflow({
     buildOperatorSubject({
       kind: "pdf",
       value: input.pdfOriginalName ?? input.pdfPath ?? input.sessionId,
-      prefix: "Oath Upload",
     }),
   handler: async (ctx, input) => {
     await oathUploadHandler(ctx, input);

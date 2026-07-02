@@ -197,7 +197,7 @@ export const kronosReportsWorkflow = defineWorkflow({
   getName: (d) => d.name ?? "",
   getId: (d) => d.id ?? "",
   operatorSubject: (input) =>
-    buildOperatorSubject({ kind: "report", value: input.employeeId, prefix: "Kronos" }),
+    buildOperatorSubject({ kind: "report", value: input.employeeId }),
   handler: async (ctx, item) => {
     const { employeeId } = item;
     const rt = requireRuntime();

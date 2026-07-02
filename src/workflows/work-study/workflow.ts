@@ -55,7 +55,7 @@ export const workStudyWorkflow = defineWorkflow({
   getName: (d) => d.name ?? "",
   getId: (d) => d.emplId ?? "",
   operatorSubject: (input) =>
-    buildOperatorSubject({ kind: "eid", value: input.emplId, prefix: "Work Study" }),
+    buildOperatorSubject({ kind: "eid", value: input.emplId }),
   handler: async (ctx, input) => {
     const wsCtx: WorkStudyContext = { employeeName: "" };
 
