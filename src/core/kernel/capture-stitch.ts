@@ -21,6 +21,76 @@ export interface CaptureBand {
 }
 
 /**
+ * Hard cap on the stitched composite canvas, in total DEVICE pixels.
+ *
+ * Stitching decodes every band with pngjs, allocates the full-page RGBA canvas
+ * (4 bytes/px), and pure-JS-deflates it — all SYNCHRONOUSLY on the daemon
+ * event loop. Above this cap the transient allocation (a 2560×30k-device-px
+ * page is ~300MB) and deflate stall Duo polling / health probes / abort
+ * handling / session emits for seconds, so the capture degrades to the
+ * existing `-cNN` band slices instead (nothing is lost — the composite is
+ * simply not built).
+ */
+export const MAX_STITCH_PIXELS = 40_000_000 // ~2560 x 15.6k device px ≈ 160MB RGBA canvas
+
+/**
+ * Width/height straight from a PNG buffer's IHDR header — signature check plus
+ * two 32-bit reads, no image-data decode. Returns null when the buffer isn't a
+ * readable PNG header.
+ */
+function readPngHeaderSize(buffer: Buffer): { width: number; height: number } | null {
+  // 8-byte signature, 4-byte IHDR length, 4-byte "IHDR", then width + height.
+  if (buffer.length < 24) return null
+  if (buffer[0] !== 0x89 || buffer[1] !== 0x50 || buffer[2] !== 0x4e || buffer[3] !== 0x47) return null
+  const width = buffer.readUInt32BE(16)
+  const height = buffer.readUInt32BE(20)
+  if (!(width > 0) || !(height > 0)) return null
+  return { width, height }
+}
+
+/**
+ * Pure: the total device pixels the stitched composite canvas would allocate
+ * for these bands — the same width/height math as {@link stitchCaptureBands}
+ * (scale from band 0, geometry-placed tops), but computed from each band PNG's
+ * IHDR header alone: no decode, no canvas. Returns `NaN` when a band header is
+ * unreadable — the caller then attempts the stitch anyway and relies on its
+ * decode-failure degrade path.
+ */
+export function estimateStitchedPixels(
+  bands: ReadonlyArray<Pick<CaptureBand, 'buffer' | 'offsetCss' | 'clipHeightCss'>>,
+): number {
+  if (bands.length === 0) return Number.NaN
+  const head0 = readPngHeaderSize(bands[0].buffer)
+  if (!head0 || !(bands[0].clipHeightCss > 0)) return Number.NaN
+  const scale = head0.height / bands[0].clipHeightCss
+  const baseOffset = bands[0].offsetCss
+  let canvasWidth = 0
+  let canvasHeight = 0
+  for (const b of bands) {
+    const h = readPngHeaderSize(b.buffer)
+    if (!h) return Number.NaN
+    const top = Math.max(0, Math.round((b.offsetCss - baseOffset) * scale))
+    canvasWidth = Math.max(canvasWidth, h.width)
+    canvasHeight = Math.max(canvasHeight, top + h.height)
+  }
+  return canvasWidth * canvasHeight
+}
+
+/**
+ * Pure decision: composite the bands into one stitched image, or degrade to
+ * the `-cNN` band slices? True unless the estimated composite AFFIRMATIVELY
+ * exceeds the pixel cap — an unknown estimate (`NaN`, from an unreadable band
+ * header) still attempts the stitch, whose own decode-failure handling
+ * degrades to slices.
+ */
+export function shouldStitchComposite(
+  estPixels: number,
+  maxPixels: number = MAX_STITCH_PIXELS,
+): boolean {
+  return !(Number.isFinite(estPixels) && estPixels > maxPixels)
+}
+
+/**
  * Composite scroll-captured bands of a tall page into ONE continuous PNG, with
  * the band-to-band overlap removed — the single stitched image a UCPath
  * transaction (or any `stitch:true`) capture writes instead of N `-cNN` slices.

@@ -149,6 +149,90 @@ describe("performWorkflowAction — cancel scope", () => {
     }
   });
 
+  it("terminalizing a stranded operation coordinator reports a FLAT detail (no detail.detail nesting)", async () => {
+    // A display-only operation coordinator: prior tracker row, but no SQLite
+    // task and no descendants. Cancel terminalizes it — and the target result's
+    // `detail` must be the flat object passed to okTarget (okTarget already
+    // wraps its second argument in `{ detail }`; double-wrapping produced a
+    // malformed `detail.detail.terminalizedCoordinator`).
+    trackEvent(
+      {
+        workflow: "oath-signature",
+        timestamp: new Date().toISOString(),
+        id: "input-run-orphan",
+        runId: "coord-run-orphan",
+        status: "pending",
+        data: { archetype: "operation", queueRowKind: "person" },
+      },
+      dir,
+    );
+
+    const result = await performWorkflowAction({
+      action: "cancel",
+      scope: "row",
+      source: "queue-panel",
+      workflowId: "oath-signature",
+      targets: [{
+        workflowId: "oath-signature",
+        id: "input-run-orphan",
+        runId: "coord-run-orphan",
+        status: "pending",
+      }],
+    }, { dir });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.count, 1);
+    assert.deepEqual(result.results[0]?.detail, { terminalizedCoordinator: true });
+  });
+
+  it("cancel falling through to descendants reports a FLAT cancelledDescendants detail", async () => {
+    // Coordinator with no SQLite task of its own, but one live queued member:
+    // the direct cancel misses ("task not found"), the tree walk cancels the
+    // member, and the coordinator's result carries the flat descendant count.
+    const store = createTaskStore(openControlDb({ trackerDir: dir }));
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const [member] = store.enqueueTasks({
+        workflow: "emergency-contact",
+        inputs: [{ emplId: "10000009" }],
+        deriveItemId: (input) => input.emplId,
+        runIds: ["member-run-9"],
+        parentRunId: "coord-run-9",
+      });
+      seedPriorRow("emergency-contact", "10000009", "member-run-9");
+      // Project the member into the runs table so the tree BFS finds it under
+      // the coordinator runId.
+      seedRunRow({
+        workflow: "emergency-contact",
+        date: today,
+        itemId: "10000009",
+        runId: "member-run-9",
+        parentRunId: "coord-run-9",
+        latestStatus: "pending",
+      });
+
+      const result = await performWorkflowAction({
+        action: "cancel",
+        scope: "row",
+        source: "queue-panel",
+        workflowId: "emergency-contact",
+        targets: [{
+          workflowId: "emergency-contact",
+          id: "input-run-ec-coord-9",
+          runId: "coord-run-9",
+          status: "pending",
+        }],
+      }, { dir });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.count, 1);
+      assert.deepEqual(result.results[0]?.detail, { cancelledDescendants: 1 });
+      assert.equal(store.getTask(member.taskId)?.state, "cancelled");
+    } finally {
+      store.close();
+    }
+  });
+
   it("routes an OCR prep cancel to file-scope discard", async () => {
     trackEvent(
       {

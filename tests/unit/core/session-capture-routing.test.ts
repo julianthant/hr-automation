@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PNG } from 'pngjs'
 import { Session, formatCaptureFilename, computeSliceOffsets, shouldAutoStitchOffsets, CAPTURE } from '../../../src/core/kernel/session.js'
+import { estimateStitchedPixels, shouldStitchComposite, MAX_STITCH_PIXELS } from '../../../src/core/kernel/capture-stitch.js'
 import { makeScreenshotFn } from '../../../src/core/kernel/screenshot.js'
 import type { CaptureFileOpts } from '../../../src/core/kernel/types.js'
 
@@ -374,6 +375,60 @@ test('captureFullPage: degrades to -cNN slices when a band cannot be composited 
 
   assert.ok(written.length > 1, 'no capture lost — degrades to the raw slices')
   assert.ok(written.every((p, i) => p.endsWith(`-c${String(i + 1).padStart(2, '0')}.png`)), 'slice names preserved')
+})
+
+test('shouldStitchComposite: pure cap decision — over-cap degrades, unknown estimate still stitches', () => {
+  assert.equal(shouldStitchComposite(1280 * 1200), true, 'a normal composite stitches')
+  assert.equal(shouldStitchComposite(MAX_STITCH_PIXELS), true, 'exactly at the cap is allowed')
+  assert.equal(shouldStitchComposite(MAX_STITCH_PIXELS + 1), false, 'above the cap degrades to slices')
+  assert.equal(shouldStitchComposite(Number.NaN), true,
+    'unknown estimate (unreadable band header) still attempts the stitch — its decode-failure degrade handles bad bands')
+  assert.equal(shouldStitchComposite(50, 40), false, 'explicit cap override applies')
+  assert.equal(shouldStitchComposite(40, 40), true)
+})
+
+test('estimateStitchedPixels: mirrors the stitch canvas sizing from PNG headers alone', () => {
+  const solid = (w: number, h: number): Buffer => PNG.sync.write(new PNG({ width: w, height: h }))
+  // Two 1280×1200 bands at 1× DPR, second at CSS offset 1080 → canvas 1280 × (1080 + 1200).
+  const bands = [
+    { buffer: solid(1280, 1200), offsetCss: 0, clipHeightCss: 1200 },
+    { buffer: solid(1280, 1200), offsetCss: 1080, clipHeightCss: 1200 },
+  ]
+  assert.equal(estimateStitchedPixels(bands), 1280 * (1080 + 1200))
+  // 2× DPR: decoded band height is 2× the CSS clip height, so tops scale by 2 too.
+  const retina = [
+    { buffer: solid(2560, 2400), offsetCss: 0, clipHeightCss: 1200 },
+    { buffer: solid(2560, 2400), offsetCss: 1080, clipHeightCss: 1200 },
+  ]
+  assert.equal(estimateStitchedPixels(retina), 2560 * (2160 + 2400))
+  // An unreadable band buffer → NaN (caller attempts the stitch and lets decode failure degrade).
+  assert.ok(Number.isNaN(estimateStitchedPixels([
+    { buffer: Buffer.from('PNGSTUB'), offsetCss: 0, clipHeightCss: 1200 },
+  ])))
+  assert.ok(Number.isNaN(estimateStitchedPixels([])))
+})
+
+test('captureFullPage: a VERY tall page degrades to -cNN slices instead of one over-cap composite', async (t) => {
+  const dir = await fs.mkdtemp(join(tmpdir(), 'stitch-cap-'))
+  t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })
+  // 40,000 CSS px tall at 1280 wide, 1200px bands → maxSlices (30) bands, estimated
+  // composite ≈ 1280 × 32,520 ≈ 41.6M px > MAX_STITCH_PIXELS → the default stitch
+  // must NOT build the giant canvas; the capture degrades to the band slices.
+  const fullHeight = 40_000
+  const clientHeight = 1200
+  const { page } = makeRealPngFakePage({ fullHeight, docWidth: 1280, clientHeight, mode: 'window' })
+  const base = join(dir, 'huge.png')
+  const slicePath = (chunk: number | null): string =>
+    chunk === null ? base : base.replace(/\.png$/, `-c${String(chunk + 1).padStart(2, '0')}.png`)
+
+  const written = await Session.captureFullPage(page, slicePath)
+
+  const offsets = computeSliceOffsets(fullHeight, clientHeight, CAPTURE.sliceOverlap, CAPTURE.maxSlices)
+  assert.ok(1280 * (offsets[offsets.length - 1] + clientHeight) > MAX_STITCH_PIXELS,
+    'the fixture really is over the composite cap')
+  assert.equal(written.length, offsets.length, 'every band survives as a slice — no capture lost')
+  assert.ok(written.every((p, i) => p.endsWith(`-c${String(i + 1).padStart(2, '0')}.png`)),
+    'cap degradation writes the -cNN slice names, not one composite')
 })
 
 test('makeScreenshotFn: stitch flows through to captureAll', async () => {
