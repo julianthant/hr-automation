@@ -1,3 +1,4 @@
+import { normalizeEid } from "../../domain/identity/eid.js";
 import { levenshteinDistance } from "./levenshtein.js";
 
 // ─── Name match ────────────────────────────────────────────
@@ -97,6 +98,35 @@ export const TOKEN_VARIANT_MAX = 2;
  * mismatch.
  */
 export type NameSimilarityTier = "same" | "similar" | "different";
+
+/** Find a roster row by normalized EID (digit-only compare). */
+export function findRosterRowByEid(
+  roster: readonly RosterRow[],
+  eid: string,
+): RosterRow | undefined {
+  const needle = normalizeEid(eid);
+  if (!needle) return undefined;
+  return roster.find((row) => normalizeEid(row.eid) === needle);
+}
+
+/**
+ * Compare an OCR name against the SharePoint roster row at `eid`.
+ * Returns null when the EID is absent from the roster.
+ */
+export function evaluateRosterIdentityTrust(
+  ocrName: string,
+  eid: string,
+  roster: readonly RosterRow[],
+): { row: RosterRow; tier: NameSimilarityTier } | null {
+  const row = findRosterRowByEid(roster, eid);
+  if (!row?.eid) return null;
+  return { row, tier: classifyNameSimilarity(ocrName ?? "", row.name) };
+}
+
+/** Same/similar roster name tiers skip downstream person-lookup enrichment. */
+export function shouldSkipPersonLookupForRosterTrust(tier: NameSimilarityTier): boolean {
+  return tier === "same" || tier === "similar";
+}
 
 export function classifyNameSimilarity(a: string, b: string): NameSimilarityTier {
   const at = tokenize(a);
