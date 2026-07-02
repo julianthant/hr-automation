@@ -73,8 +73,10 @@ function makeFakePage(opts: { fullHeight?: number; docWidth?: number; clientHeig
 function makeRealPngFakePage(opts: { fullHeight?: number; docWidth?: number; clientHeight?: number; mode?: 'window' | 'iframe' } = {}): {
   page: any
   shots: Shot[]
+  scrollOffsets: number[]
 } {
   const shots: Shot[] = []
+  const scrollOffsets: number[] = []
   const fullHeight = opts.fullHeight ?? 3000
   const width = opts.docWidth ?? 1280
   const clientHeight = opts.clientHeight ?? 1200
@@ -90,7 +92,7 @@ function makeRealPngFakePage(opts: { fullHeight?: number; docWidth?: number; cli
       if (src.includes('scrollIntoView')) return undefined
       if (src.includes('docWidth')) return { innerWidth: width, innerHeight: 900, docWidth: width }
       if (src.includes('MIN_OVERFLOW')) return { mode, scrollHeight: fullHeight, clientHeight }
-      if (src.includes('contentWindow')) return { x: 0, y: 0, width, height: clientHeight }
+      if (src.includes('contentWindow')) { scrollOffsets.push(arg as number); return { x: 0, y: 0, width, height: clientHeight } }
       if (src.includes('__hrcapRestore')) return undefined
       return undefined
     },
@@ -105,7 +107,7 @@ function makeRealPngFakePage(opts: { fullHeight?: number; docWidth?: number; cli
       return buf
     },
   }
-  return { page, shots }
+  return { page, shots, scrollOffsets }
 }
 
 test('formatCaptureFilename: canonical single-file name, and -cNN for a page slice', () => {
@@ -191,28 +193,30 @@ test('captureFullPage: a SHORT window page is ONE tight single-image fullPage sh
   assert.equal(shots[0].fullPage, true, 'a short window page is captured tight via fullPage')
 })
 
-test('captureFullPage: a TALL page is split into N readable -cNN painted-viewport slices, top→bottom', async (t) => {
-  const dir = await fs.mkdtemp(join(tmpdir(), 'tall-'))
+test('captureFullPage: a TALL page stitches to ONE image BY DEFAULT (no -cNN chunks), top→bottom', async (t) => {
+  const dir = await fs.mkdtemp(join(tmpdir(), 'tall-default-stitch-'))
   t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })
   const fullHeight = 3000
   const clientHeight = 1200
-  const { page, shots, scrollOffsets } = makeFakePage({ fullHeight, docWidth: 1280, clientHeight, mode: 'window' })
+  const { page, shots, scrollOffsets } = makeRealPngFakePage({ fullHeight, docWidth: 1280, clientHeight, mode: 'window' })
   const base = join(dir, 'rec.png')
   const slicePath = (chunk: number | null): string =>
     chunk === null ? base : base.replace(/\.png$/, `-c${String(chunk + 1).padStart(2, '0')}.png`)
 
+  // No stitch opt → the DEFAULT composites every band into one image (never a chunked set).
   const written = await Session.captureFullPage(page, slicePath)
 
+  assert.deepEqual(written, [base], 'default stitch collapses all bands to one file — no -cNN chunks')
   const expectedOffsets = computeSliceOffsets(fullHeight, clientHeight, CAPTURE.sliceOverlap, CAPTURE.maxSlices)
-  assert.equal(written.length, expectedOffsets.length, 'one file per slice')
-  assert.ok(written.length > 1, 'a 3000px page splits into multiple slices')
-  // Every slice carries a -cNN suffix and sorts top→bottom.
-  assert.ok(written.every((p, i) => p.endsWith(`-c${String(i + 1).padStart(2, '0')}.png`)))
-  // The target was scrolled to each expected offset, top→bottom.
+  assert.ok(expectedOffsets.length > 1, 'the 3000px page really is multi-band')
+  // The target was still scroll-captured band by band, top→bottom.
   assert.deepEqual(scrollOffsets, expectedOffsets, 'scrolled to each band offset in order')
-  // Each band is a painted-VIEWPORT clip shot — NOT a fullPage render.
+  // Each band is a painted-VIEWPORT clip buffer (no path) — NOT a fullPage render.
   assert.equal(shots.length, expectedOffsets.length)
   assert.ok(shots.every((s) => s.fullPage === undefined && s.clip?.x === 0))
+  // The stitched PNG spans the whole page (last offset + band height) at 1× scale.
+  const png = PNG.sync.read(await fs.readFile(base))
+  assert.equal(png.height, expectedOffsets[expectedOffsets.length - 1] + clientHeight, 'one continuous image spanning the page')
 })
 
 test('captureViewportCenteredOnElement: scrolls + captures viewport-only (NOT fullPage)', async (t) => {
@@ -252,10 +256,10 @@ test('captureAll: the default route is the unified capture — short page → ON
   assert.equal(shots[0].fullPage, true)
 })
 
-test('captureAll: a TALL page emits N -cNN slice files, in scroll order', async (t) => {
+test('captureAll: a TALL page is ONE stitched file BY DEFAULT (no -cNN chunks)', async (t) => {
   const dir = await fs.mkdtemp(join(tmpdir(), 'capall-tall-'))
   t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })
-  const { page } = makeFakePage({ fullHeight: 4000, docWidth: 1280 })
+  const { page } = makeRealPngFakePage({ fullHeight: 4000, docWidth: 1280 })
   const session = Session.forTesting({
     systems: [{ id: 'crm', login: async () => {} }],
     browsers: new Map([['crm', { page: page as never, browser: null as never, context: null as never }]]),
@@ -266,10 +270,9 @@ test('captureAll: a TALL page emits N -cNN slice files, in scroll order', async 
     workflow: 'person-lookup', itemId: 'Jane', kind: 'form',
     label: 'crm-record', ts: 1776712000000, systems: ['crm'],
   })
-  assert.ok(res.length >= 2, 'a 4000px page produces multiple slice files')
-  assert.ok(res.every((f) => /-crm-record-crm-\d+-c\d{2}\.png$/.test(f.path)))
-  const suffixes = res.map((f) => f.path.match(/-c(\d{2})\.png$/)![1])
-  assert.deepEqual(suffixes, [...suffixes].sort(), 'slices sort top→bottom')
+  assert.equal(res.length, 1, 'a tall page is one stitched file, not a chunked set')
+  assert.match(res[0].path, /-crm-record-crm-\d+\.png$/, 'single-image name')
+  assert.doesNotMatch(res[0].path, /-c\d{2}\.png$/, 'no -cNN chunk suffix')
 })
 
 test('captureAll: centerSelector route emits ONE viewport-only file (the Kronos exception)', async (t) => {
@@ -357,18 +360,19 @@ test('captureFullPage stitch:true — a TALL page becomes ONE composited image (
   assert.equal(png.height, offsets[offsets.length - 1] + clientHeight, 'one continuous image spanning the page')
 })
 
-test('captureFullPage stitch:true — degrades to -cNN slices when a band cannot be decoded', async (t) => {
+test('captureFullPage: degrades to -cNN slices when a band cannot be composited (default path)', async (t) => {
   const dir = await fs.mkdtemp(join(tmpdir(), 'stitch-degrade-'))
   t.onTestFinished(async () => { await fs.rm(dir, { recursive: true, force: true }) })
-  // The PNGSTUB fake returns invalid PNG bytes → compositing throws → fall back to slices.
+  // The PNGSTUB fake returns invalid PNG bytes → the DEFAULT stitch throws → fall back
+  // to raw slices, so a chunked set only survives as the compositing-failure safety net.
   const { page } = makeFakePage({ fullHeight: 3000, docWidth: 1280, clientHeight: 1200, mode: 'window' })
   const base = join(dir, 'txn.png')
   const slicePath = (chunk: number | null): string =>
     chunk === null ? base : base.replace(/\.png$/, `-c${String(chunk + 1).padStart(2, '0')}.png`)
 
-  const written = await Session.captureFullPage(page, slicePath, { stitch: true })
+  const written = await Session.captureFullPage(page, slicePath)
 
-  assert.ok(written.length > 1, 'no stitched image lost — degrades to the raw slices')
+  assert.ok(written.length > 1, 'no capture lost — degrades to the raw slices')
   assert.ok(written.every((p, i) => p.endsWith(`-c${String(i + 1).padStart(2, '0')}.png`)), 'slice names preserved')
 })
 

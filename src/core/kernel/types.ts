@@ -715,14 +715,14 @@ export interface ScreenshotOpts {
    */
   centerSelector?: string
   /**
-   * Stitch a TALL capture into ONE continuous image instead of N `-cNN` page
-   * slices. The unified capture still scroll-captures the page band by band, but
-   * the bands are composited (by exact scroll geometry) into a single tall PNG.
-   * Used for the separations UCPath transaction captures, where the operator
-   * wants the whole Smart HR transaction as one image rather than partial
-   * scrolled shots. A short (one-band) page is unaffected (already one file), and
-   * a compositing failure degrades to the normal slices (capture never lost).
-   * Ignored when `centerSelector` is set (the virtual-scroll exception).
+   * Force the raw N `-cNN` page slices instead of the DEFAULT one stitched image.
+   * Stitching is on for EVERY capture: the unified capture scroll-captures the
+   * page band by band and composites the bands (by exact scroll geometry) into a
+   * single tall PNG, so a tall page is one screenshot — never a chunked set. Set
+   * `stitch: false` only when you specifically want the operator to step through
+   * page-height slices. A short (one-band) page is one file either way; a
+   * compositing failure degrades to the slices (capture never lost). Ignored when
+   * `centerSelector` is set (the virtual-scroll exception).
    */
   stitch?: boolean
 }
@@ -746,6 +746,6 @@ export interface CaptureFileOpts {
   pages?: Page[]
   /** Virtual-scroll viewport capture (the Kronos exception — see ScreenshotOpts.centerSelector). */
   centerSelector?: string
-  /** Stitch a tall capture into ONE image instead of `-cNN` slices (see ScreenshotOpts.stitch). */
+  /** Force raw `-cNN` slices instead of the default one stitched image (see ScreenshotOpts.stitch). */
   stitch?: boolean
 }
