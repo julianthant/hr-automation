@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
   applyPersonLookupNameToOcrRecord,
+  mergeOcrPersonNameParts,
   readOcrPersonNameParts,
   resolveOcrPersonDisplayName,
   splitOcrPersonName,
@@ -30,14 +31,73 @@ describe("applyPersonLookupNameToOcrRecord", () => {
     assert.equal(employee.name, "Garcia Solis, Gema");
   });
 
-  it("patches oath printedName and first/last from resolvedName", () => {
+  it("does NOT overwrite a present paper printedName but still fills first/last", () => {
     const rec: Record<string, unknown> = { printedName: "Gema Garcia Solis", employeeId: "10883754" };
     applyPersonLookupNameToOcrRecord(rec, {
       resolvedName: "Garcia Solis, Gema",
     });
     assert.equal(rec.firstName, "Gema");
     assert.equal(rec.lastName, "Garcia Solis");
+    // printedName is the PAPER side of the verify name check — enrichment
+    // must never clobber it, or the check compares the lookup to itself.
+    assert.equal(rec.printedName, "Gema Garcia Solis");
+  });
+
+  it("still stamps printedName when it is blank", () => {
+    const rec: Record<string, unknown> = { printedName: "   ", employeeId: "10883754" };
+    applyPersonLookupNameToOcrRecord(rec, {
+      resolvedName: "Garcia Solis, Gema",
+    });
+    assert.equal(rec.firstName, "Gema");
+    assert.equal(rec.lastName, "Garcia Solis");
     assert.equal(rec.printedName, "Garcia Solis, Gema");
+  });
+
+  it("still stamps printedName when it is missing", () => {
+    const rec: Record<string, unknown> = { printedName: null, employeeId: "10883754" };
+    applyPersonLookupNameToOcrRecord(rec, {
+      resolvedName: "Garcia Solis, Gema",
+    });
+    assert.equal(rec.printedName, "Garcia Solis, Gema");
+  });
+
+  it("returns the raw resolved name for callers to reuse", () => {
+    const rec: Record<string, unknown> = { printedName: null };
+    assert.equal(
+      applyPersonLookupNameToOcrRecord(rec, { resolvedName: "Garcia Solis, Gema" }),
+      "Garcia Solis, Gema",
+    );
+    assert.equal(
+      applyPersonLookupNameToOcrRecord(rec, { searchName: "Gema Garcia Solis" }),
+      "Gema Garcia Solis",
+    );
+    assert.equal(applyPersonLookupNameToOcrRecord(rec, undefined), undefined);
+  });
+});
+
+describe("mergeOcrPersonNameParts", () => {
+  it("patching firstName on a fullName-only record preserves the split-derived lastName", () => {
+    const merged = mergeOcrPersonNameParts(
+      { fullName: "Garcia Solis, Gema" },
+      { firstName: "Gemma" },
+    );
+    assert.deepEqual(merged, {
+      firstName: "Gemma",
+      lastName: "Garcia Solis",
+      name: "Garcia Solis, Gemma",
+    });
+  });
+
+  it("patching lastName keeps the current firstName and resolves the display name", () => {
+    const merged = mergeOcrPersonNameParts(
+      { firstName: "Gema", lastName: "Garcia Solis" },
+      { lastName: "Garcia" },
+    );
+    assert.deepEqual(merged, {
+      firstName: "Gema",
+      lastName: "Garcia",
+      name: "Garcia, Gema",
+    });
   });
 });
 

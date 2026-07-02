@@ -286,6 +286,23 @@ describe("applyPersonLookupToVerifyRecord", () => {
     assert.equal(rec.name, "Roe, Sam");
   });
 
+  it("paper printedName survives person-lookup enrichment (name check compares paper vs found)", () => {
+    const rec = makePreview({ formKind: "oath", name: "", printedName: "Smyth, Jane" });
+    applyPersonLookupToVerifyRecord(rec, {
+      emplId: "10000006",
+      searchName: "Smyth, Jane",
+      resolvedName: "Smith, Jane A",
+    });
+    // Paper side untouched; found side gets the resolved name — the check
+    // must surface the paper/lookup discrepancy, not compare lookup to itself.
+    assert.equal(rec.printedName, "Smyth, Jane");
+    assert.equal(rec.name, "Smith, Jane A");
+    const nameCheck = findCheck(buildVerifyChecks(rec), "name");
+    assert.equal(nameCheck.paperValue, "Smyth, Jane");
+    assert.equal(nameCheck.foundValue, "Smith, Jane A");
+    assert.equal(nameCheck.status, "present");
+  });
+
   it("tolerates undefined data", () => {
     const rec = makePreview({ formKind: "oath", name: "Jane Doe", employeeId: "10000005" });
     applyPersonLookupToVerifyRecord(rec, undefined);

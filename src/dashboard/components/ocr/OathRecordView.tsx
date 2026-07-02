@@ -1,8 +1,8 @@
 import type { OathPreviewRecord } from "./types";
 import { RecordField, recordFieldMissing } from "./shared/RecordField";
 import {
+  mergeOcrPersonNameParts,
   readOcrPersonNameParts,
-  resolveOcrPersonDisplayName,
 } from "../../../domain/identity/ocr-person-name.js";
 
 export interface OathRecordViewProps {
@@ -29,13 +29,19 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
   });
 
   const setNameParts = (patch: { firstName?: string; lastName?: string }): void => {
-    const firstName = patch.firstName ?? nameParts.firstName;
-    const lastName = patch.lastName ?? nameParts.lastName;
+    const merged = mergeOcrPersonNameParts(
+      {
+        firstName: record.firstName,
+        lastName: record.lastName,
+        fullName: record.printedName,
+      },
+      patch,
+    );
     onChange({
       ...record,
-      firstName,
-      lastName,
-      printedName: resolveOcrPersonDisplayName({ firstName, lastName, fullName: record.printedName }),
+      firstName: merged.firstName,
+      lastName: merged.lastName,
+      printedName: merged.name,
     });
   };
 
