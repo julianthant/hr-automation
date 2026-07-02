@@ -44,6 +44,7 @@ import {
 } from "./crm-search.js";
 import {
   normalizeName,
+  parseLastFirstName,
   toLastFirstName,
 } from "../../domain/identity/person-name.js";
 import { prepareNames } from "../../domain/identity/person-name-batch.js";
@@ -210,6 +211,20 @@ export function splitResolvedName(fullName: string): { lastName: string; firstNa
 }
 
 /**
+ * Resolve CRM search name parts from a resolved name that may be in comma
+ * format ("Last, First [Middle]" — how searchingStep stamps `resolvedName`
+ * via toLastFirstName) or natural "First [Middle] Last" order. Comma form is
+ * parsed first; otherwise falls back to the whitespace split.
+ */
+export function resolveCrmSearchNameParts(
+  resolved: string,
+): { lastName: string; firstName: string } {
+  const parsed = parseLastFirstName(resolved);
+  if (parsed) return { lastName: parsed.lastName, firstName: parsed.firstName };
+  return splitResolvedName(resolved);
+}
+
+/**
  * Resolve the CRM cross-verification match for a name search against the
  * UCPath SDCMP candidates. Pure — drives `crmMatch` / `crmMatchedEmplId`:
  *  - "direct" — a CRM record's UCPath EID equals an SDCMP candidate's EID
@@ -287,7 +302,9 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 
   // EID inputs: search CRM by EID or name purely to source the Start Date.
   if (isEidInput(input)) {
-    const { lastName, firstName } = splitResolvedName(String(ctx.data.resolvedName ?? ctx.data.searchName ?? ""));
+    const { lastName, firstName } = resolveCrmSearchNameParts(
+      String(ctx.data.resolvedName ?? ctx.data.searchName ?? ""),
+    );
     let crmRecords: CrmRecord[] = [];
     try {
       crmRecords = await searchCrmByEidOrName(crmPage, {
