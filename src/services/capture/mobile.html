@@ -767,9 +767,10 @@
     tile.setAttribute("data-index", String(p.index));
     tile.setAttribute("aria-label", "Photo " + (p.index + 1) + (p.blurFlagged ? " (flagged blurry)" : ""));
 
-    if (!p.blank && p.dataUrl) {
+    var displaySrc = photoDisplaySrc(p);
+    if (!p.blank && displaySrc) {
       var img = document.createElement("img");
-      img.src = p.dataUrl;
+      img.src = displaySrc;
       img.alt = "";
       img.draggable = false;
       tile.appendChild(img);
@@ -880,8 +881,8 @@
       els.lightboxImg.alt = "blank page";
       els.lightboxImg.src = "";
       els.lightbox.style.background = "#FFFFFF";
-    } else if (p.dataUrl) {
-      els.lightboxImg.src = p.dataUrl;
+    } else if (photoDisplaySrc(p)) {
+      els.lightboxImg.src = photoDisplaySrc(p);
       els.lightboxImg.alt = "Photo " + (photoIndex + 1);
       els.lightbox.style.background = "#000";
     } else {
@@ -998,6 +999,19 @@
     });
   }
 
+  // Instant preview: an object URL from the picked file renders immediately
+  // (iOS Safari decodes HEIC natively), so the tile shows the photo the moment
+  // it's taken — no waiting on HEIC conversion + base64 read + blur scan.
+  function safeObjectUrl(file) {
+    try { return URL.createObjectURL(file); } catch (e) { return null; }
+  }
+  function revokeObjectUrl(url) {
+    if (url) { try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ } }
+  }
+  function photoDisplaySrc(p) {
+    return p.previewUrl || p.dataUrl || null;
+  }
+
   // ─── Upload pipeline ────────────────────────────────────────────────
   // Each photo flows: pick → maybeConvertHeic → blur scan + thumbnail →
   // optimistic add to state with status "uploading" → POST upload →
@@ -1023,6 +1037,7 @@
       blurFlagged: false,
       blank: false,
       dataUrl: null,
+      previewUrl: safeObjectUrl(file), // instant preview before convert/upload
       retryCount: 0,
       provisional: true,
     };
@@ -1061,6 +1076,9 @@
     photo.status = "converting";
     photo.blank = false;
     photo.blurFlagged = false;
+    revokeObjectUrl(photo.previewUrl);
+    photo.previewUrl = safeObjectUrl(file); // instant preview of the retake
+    photo.dataUrl = null;
     renderAll();
 
     maybeConvertHeic(file)
@@ -1169,6 +1187,8 @@
       photo.status = "uploading";
       photo.blurFlagged = false;
       photo.blank = true;
+      revokeObjectUrl(photo.previewUrl);
+      photo.previewUrl = null;
       photo.dataUrl = null;
       renderAll();
 
@@ -1202,7 +1222,10 @@
       body: JSON.stringify({ token: TOKEN, index: targetIndex }),
     }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
-      state.photos = state.photos.filter(function (p) { return p.index !== targetIndex; });
+      state.photos = state.photos.filter(function (p) {
+        if (p.index === targetIndex) { revokeObjectUrl(p.previewUrl); return false; }
+        return true;
+      });
       persistManifest();
       // Re-fetch manifest so server-assigned indices match if any reshuffle.
       reconcileManifest();

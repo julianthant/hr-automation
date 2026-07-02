@@ -52,12 +52,11 @@ export function CapturePhotoLightbox({
         <img
           src={resolveSrc(item)}
           srcSet={resolveSrc(item)}
-          sizes="88vw"
+          sizes="90vw"
           alt={`Photo ${item.index + 1} from capture session`}
           loading="lazy"
           decoding="async"
-          className="max-h-[88vh] max-w-[88vw] rounded-md object-contain"
-          style={{ boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}
+          className="block max-h-[88vh] max-w-[90vw] rounded-lg object-contain"
         />
       )}
     />

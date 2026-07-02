@@ -323,82 +323,94 @@ function CaptureLightboxShell({
   onNext: () => void;
   children: ReactNode;
 }) {
+  const roundBtn =
+    "inline-flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2";
+  const roundBtnStyle = {
+    backgroundColor: "var(--capture-bg-raised)",
+    color: "var(--capture-fg-primary)",
+    ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+  };
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ backgroundColor: "color-mix(in srgb, var(--background) 92%, transparent)" }}
     >
-      <button
-        type="button"
-        aria-label="Close preview"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-        className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
+      {/*
+        Frame shrinks to the image (inline-flex → fit-content), so the border is
+        exactly the image's size — not a full-screen box. Chrome is positioned
+        relative to THIS frame (not the viewport), so the close/counter/arrows
+        track the image edges instead of floating at disconnected screen corners.
+      */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative inline-flex max-h-[92vh] max-w-[94vw] items-center justify-center rounded-xl border p-2"
         style={{
+          borderColor: "var(--capture-border-subtle)",
           backgroundColor: "var(--capture-bg-raised)",
-          color: "var(--capture-fg-primary)",
-          ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+          boxShadow: "0 12px 48px rgba(0,0,0,0.55)",
         }}
       >
-        <X aria-hidden className="h-5 w-5" />
-      </button>
+        {children}
 
-      <span
-        className="absolute left-1/2 top-4 -translate-x-1/2 rounded-md px-3 py-1 font-mono text-xs tabular-nums"
-        style={{
-          backgroundColor: "var(--capture-bg-raised)",
-          color: "var(--capture-fg-secondary)",
-        }}
-        aria-live="polite"
-      >
-        {index + 1} / {itemsLength}
-      </span>
-
-      {itemsLength > 1 && (
         <button
           type="button"
-          aria-label="Previous photo"
+          aria-label="Close preview"
           onClick={(e) => {
             e.stopPropagation();
-            onPrev();
+            onClose();
           }}
-          className="absolute left-4 top-1/2 inline-flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
+          className={`absolute right-2.5 top-2.5 h-9 w-9 ${roundBtn}`}
+          style={roundBtnStyle}
+        >
+          <X aria-hidden className="h-5 w-5" />
+        </button>
+
+        <span
+          className="absolute bottom-2.5 left-1/2 -translate-x-1/2 rounded-md px-2.5 py-1 font-mono text-xs tabular-nums"
           style={{
             backgroundColor: "var(--capture-bg-raised)",
-            color: "var(--capture-fg-primary)",
-            ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
+            color: "var(--capture-fg-secondary)",
           }}
+          aria-live="polite"
         >
-          <ChevronLeft aria-hidden className="h-6 w-6" />
-        </button>
-      )}
+          {index + 1} / {itemsLength}
+        </span>
 
-      <div onClick={(e) => e.stopPropagation()}>{children}</div>
+        {itemsLength > 1 && (
+          <button
+            type="button"
+            aria-label="Previous photo"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrev();
+            }}
+            className={`absolute left-2.5 top-1/2 h-11 w-11 -translate-y-1/2 ${roundBtn}`}
+            style={roundBtnStyle}
+          >
+            <ChevronLeft aria-hidden className="h-6 w-6" />
+          </button>
+        )}
 
-      {itemsLength > 1 && (
-        <button
-          type="button"
-          aria-label="Next photo"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNext();
-          }}
-          className="absolute right-4 top-1/2 inline-flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2"
-          style={{
-            backgroundColor: "var(--capture-bg-raised)",
-            color: "var(--capture-fg-primary)",
-            ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
-          }}
-        >
-          <ChevronRight aria-hidden className="h-6 w-6" />
-        </button>
-      )}
+        {itemsLength > 1 && (
+          <button
+            type="button"
+            aria-label="Next photo"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNext();
+            }}
+            className={`absolute right-2.5 top-1/2 h-11 w-11 -translate-y-1/2 ${roundBtn}`}
+            style={roundBtnStyle}
+          >
+            <ChevronRight aria-hidden className="h-6 w-6" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
