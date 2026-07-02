@@ -24,25 +24,36 @@ file picker — no temp file (uploads the bytes directly).
 ## What OCR actually needs to extract
 
 The OnBase **Employee Lookup keyset autofills every keyword** (names, department,
-vice chancellor, titles, dates) the instant you type the **UCPath ID** and Tab.
-The ONLY required field it leaves blank is **Document Name** (constant
-`EMERGENCY CONTACT INFORMATION`). So OCR's real job is to read the **UCPath ID**
-per page; the `*` fallback fields on `OnbaseInput` (names, dept, VC) are used
-ONLY when the keyset returns nothing (bad/unknown ID). Department/VC normally
-come straight from the keyset, NOT from OCR — see
-`src/systems/onbase/CLAUDE.md`.
+vice chancellor, titles, dates) once you run its **modal** (key-icon → fill
+UCPath ID → Find → Select Employee — NOT typing the UCPath ID + Tab, which does
+nothing; see `src/systems/onbase/LESSONS.md` 2026-07-02). The ONLY required field
+it leaves blank is **Document Name** (constant `EMERGENCY CONTACT INFORMATION`).
+So OCR's real job is to read the **UCPath ID** per page; the `*` fallback fields
+on `OnbaseInput` (names, dept, VC) are used ONLY when the keyset returns nothing
+(bad/unknown ID) — but note Department/VC come ONLY from the keyset, so a keyset
+miss is unrecoverable, not fallback-fillable. See `src/systems/onbase/CLAUDE.md`.
 
 ## Handler steps
 
-1. `authenticate` — deferred `loginToOnBase` (idempotent; daemon Duos once).
-2. `prepare-import` — open Import Document; select doc type + File Type
-   `PDF (.pdf)` + `Employee Lookup` keyset; split + attach this person's page.
-3. `fill-keywords` — type UCPath ID + Tab (`enterUcpathIdAndTab` returns whether
-   the keyset autofilled); set Document Name; if the keyset was empty, fill the
-   required keywords from fallback data; then **fail loud** if any required
-   ("red") keyword is still blank.
-4. `import` — dry-run screenshots and skips; otherwise verify the Import button
-   is enabled and click it.
+1. `authenticate` — deferred `loginToOnBase` (idempotent; daemon Duos once;
+   self-heals a stale single-session slot via the Logout.aspx hop — see
+   `src/systems/onbase/LESSONS.md` 2026-07-02).
+2. `prepare-import` — open Import Document (clears any leftover Document-Queue
+   rows — duplicate-import defense); select doc type + File Type `PDF (.pdf)` +
+   `Employee Lookup` keyset; split + attach this person's page (confirmed via
+   the Document Queue "Pending Import" row, not fire-and-forget).
+3. `fill-keywords` — run the Employee Lookup keyset **modal**
+   (`lookupEmployeeViaKeyset`: key-icon → dialog → fill UCPath ID → Find →
+   Select Employee, which autofills every keyword; NOT Tab-autofill — see
+   `src/systems/onbase/LESSONS.md` 2026-07-02). Tri-state semantics: `selected`
+   → proceed; `no-match` (a DATA problem) → fill what fallback can supply, then
+   **fail loud** on anything still blank (Department/Vice-Chancellor come only
+   from the keyset); a STALLED postback **throws** (kernel-retryable) — a slow
+   cluster is never mislabeled "person not found". Then set Document Name.
+4. `import` — `waitForImportEnabled` (enablement commits via an async postback;
+   a single sample can read a transient disabled state). Dry-run screenshots,
+   asserts the form was importable, and skips the click; otherwise click Import
+   and assert the post-import landing is not an error page.
 
 ## Selector intelligence
 
@@ -67,7 +78,11 @@ commits a document.
   (the emergency-contact model), not a single born-at-upload task (the
   oath-upload model, which files ONE ticket for the whole PDF). The operation
   coordinator row is display-only; these member rows do the real OnBase imports.
-- **2026-06-22: The keyset does the heavy lifting — OCR only needs the UCPath ID.**
-  Verified live: typing the UCPath ID + Tab autofills names, department + code,
-  vice chancellor (`VCCFO`) + code, titles, hire dates, status. Only Document
-  Name is left to set. Treat OCR-extracted names/dept/VC as fallback only.
+- **2026-07-02: The keyset does the heavy lifting — but it's a MODAL, not Tab-autofill (corrects the 2026-06-22 claim).**
+  Running the Employee Lookup modal (key-icon → fill UCPath ID → Find → Select
+  Employee) autofills names, department + code, vice chancellor + code, titles,
+  hire dates, status. Only Document Name is left to set. Treat OCR-extracted
+  names/dept/VC as fallback only — but a keyset miss (no OnBase match) is
+  terminal, since Dept/VC come ONLY from the keyset. **Typing the UCPath ID + Tab
+  does nothing** (the old `enterUcpathIdAndTab` was wrong; now
+  `lookupEmployeeViaKeyset`). See `src/systems/onbase/LESSONS.md` (2026-07-02).
