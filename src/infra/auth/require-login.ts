@@ -37,6 +37,13 @@ export function requireLogin(
  *
  * `"already_logged_in"` and `true` are both treated as success (truthy), so
  * callers that return the full `SsoPrepareResult` union are handled correctly.
+ *
+ * Note the string is DISCARDED here by design — `SystemConfig.prepareLogin`
+ * returns `Promise<void>`, so the kernel cannot skip the subsequent `login`
+ * phase based on it. The warm-page short-circuit therefore lives in the paired
+ * submit helper (`ucpathSubmitAndWaitForDuo` / `kualiSubmitAndWaitForDuo` /
+ * `newKronosSubmitAndWaitForDuo`), each of which returns `true` without
+ * clicking submit when its stale-form re-prepare reports `"already_logged_in"`.
  */
 export function requirePrepareLogin(
   prepareFn: (page: Page) => Promise<boolean | string>,
