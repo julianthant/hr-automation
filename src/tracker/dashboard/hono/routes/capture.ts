@@ -13,7 +13,6 @@ import {
   handleStart,
   handleUpload,
   handleValidate,
-  pickLanIp,
 } from "../../../../services/capture/index.js";
 import {
   CAPTURE_PHOTOS_DIR,
@@ -40,8 +39,6 @@ export function registerCaptureRoutes(app: Hono, deps: DashboardHonoDeps): void 
       },
       {
         store: captureStore,
-        lanIp: pickLanIp(),
-        port: deps.port ?? 3838,
         publicUrl: process.env.CAPTURE_PUBLIC_URL || undefined,
         onFinalize: makeCaptureFinalize(deps.dir),
       },

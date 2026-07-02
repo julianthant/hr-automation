@@ -38,11 +38,10 @@ export {
 
 export { bundlePhotosToPdf } from "./pdf-bundle.js";
 export {
-  pickLanIp,
-  pickLanIpFrom,
-  classifyLanIp,
-  isPhoneUnreachableLanIp,
-  type LanIpClass,
-  __resetLanIpCacheForTests,
-} from "./lan-ip.js";
+  extractNgrokError,
+  extractNgrokTunnelUrl,
+  startNgrokTunnel,
+  type NgrokTunnel,
+  type StartNgrokTunnelOptions,
+} from "./ngrok.js";
 export { qrSvgFor } from "./qr.js";

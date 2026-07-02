@@ -5,7 +5,6 @@ import { randomBytes } from "node:crypto";
 import type { CaptureSession, CaptureSessionStore } from "./sessions.js";
 import { qrSvgFor } from "./qr.js";
 import { bundlePhotosToPdf } from "./pdf-bundle.js";
-import { classifyLanIp, isPhoneUnreachableLanIp } from "./lan-ip.js";
 import { log } from "../../utils/log.js";
 
 export interface RouteResult {
@@ -93,15 +92,9 @@ export interface HandleStartInput {
 
 export interface HandleStartContext {
   store: CaptureSessionStore;
-  /** LAN IP for the QR URL. Undefined + no `publicUrl` → 503. */
-  lanIp: string | undefined;
-  /** Server port, e.g. 3838. */
-  port: number;
   /**
-   * Optional full origin (e.g. `https://abc.trycloudflare.com`) that overrides
-   * `http://${lanIp}:${port}` for the capture URL. Use for tunneled dev or
-   * deployments where the phone can't reach the laptop's LAN IP.
-   * Trailing slash is tolerated. Wins over `lanIp` when both are present.
+   * Required full origin (ngrok HTTPS URL or manually forwarded origin) for
+   * phone Capture. Trailing slash is tolerated.
    */
   publicUrl?: string;
   /**
@@ -128,21 +121,17 @@ export async function handleStart(
       },
     };
   }
-  const baseUrl = ctx.publicUrl
-    ? ctx.publicUrl.replace(/\/+$/, "")
-    : ctx.lanIp
-      ? `http://${ctx.lanIp}:${ctx.port}`
-      : null;
-  if (!baseUrl) {
+  if (!ctx.publicUrl) {
     return {
       status: 503,
       body: {
         ok: false,
         error:
-          "no LAN IPv4 detected — set CAPTURE_PUBLIC_URL to a tunnel/public origin or connect to a network",
+          "Capture requires ngrok or CAPTURE_PUBLIC_URL; no LAN fallback is available. Restart with npm run dashboard or set CAPTURE_PUBLIC_URL manually.",
       },
     };
   }
+  const baseUrl = ctx.publicUrl.replace(/\/+$/, "");
 
   const session = ctx.store.create({
     workflow: input.workflow,
@@ -154,16 +143,6 @@ export async function handleStart(
   const qrSvg = await qrSvgFor(captureUrl);
   const shortcode = genShortcode();
 
-  // When the QR falls back to a LAN IP that a phone on a normal network can't
-  // reach (CGNAT 100.64/10, link-local 169.254/16), the scan succeeds but the
-  // page never loads. Warn loudly instead of handing out a silently-dead QR —
-  // an explicit `CAPTURE_PUBLIC_URL` (or `npm run dashboard:tunneled`) fixes it.
-  const reachabilityWarning =
-    !ctx.publicUrl && ctx.lanIp && isPhoneUnreachableLanIp(ctx.lanIp)
-      ? `The QR points to ${ctx.lanIp} (a ${classifyLanIp(ctx.lanIp)} address), which a phone on a normal network usually can't reach. Start the dashboard with \`npm run dashboard:tunneled\`, or set CAPTURE_PUBLIC_URL to a tunnel/public origin.`
-      : undefined;
-  if (reachabilityWarning) log.warn(`capture: ${reachabilityWarning}`);
-
   return {
     status: 200,
     body: {
@@ -174,7 +153,6 @@ export async function handleStart(
       qrSvg,
       shortcode,
       expiresAt: session.expiresAt,
-      ...(reachabilityWarning ? { reachabilityWarning } : {}),
     },
   };
 }

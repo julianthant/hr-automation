@@ -1,15 +1,15 @@
 /**
- * Public-tunnel access scoping for the dashboard.
+ * Public/forwarded Capture access scoping for the dashboard.
  *
- * The dashboard has NO authentication and, when a phone-Capture tunnel is active
- * (`CAPTURE_PUBLIC_URL` / `dashboard --tunnel`), its origin becomes reachable
- * from the public internet. Without scoping, that would expose the ENTIRE
+ * The dashboard has NO authentication and, when CAPTURE_PUBLIC_URL points at a
+ * forwarded/public phone-Capture origin, that origin can become reachable beyond
+ * the operator's laptop. Without scoping, that would expose the ENTIRE
  * dashboard — all PII, queue data, workflow controls, settings, logs, and
- * screenshots — to anyone who has (or guesses/leaks) the tunnel URL.
+ * screenshots — to anyone who has (or guesses/leaks) the forwarded URL.
  *
- * This module restricts EXTERNAL (tunnel) requests to exactly the phone's
+ * This module restricts EXTERNAL forwarded-origin requests to exactly the phone's
  * capture endpoints, each already gated server-side by the 96-bit per-session
- * token. Local operator access (localhost / LAN, no Cloudflare edge header) is
+ * token. Local operator access (localhost / LAN, no forwarded-origin signal) is
  * never treated as external, so the operator's own dashboard is unaffected.
  */
 
@@ -55,11 +55,11 @@ function hostOnly(hostHeader: string | null | undefined): string | undefined {
 }
 
 /**
- * Whether a request arrived via the public Capture origin (vs. local operator
- * access). External iff a public origin is configured AND the request either
- * carries a Cloudflare edge header (`cf-connecting-ip`, added to every proxied
- * request) OR its Host matches the public origin's host. Both signals are
- * present on a real cloudflared request; either alone is enough to fail safe.
+ * Whether a request arrived via the configured public/forwarded Capture origin
+ * (vs. local operator access). External iff a public origin is configured AND
+ * the request either carries a known proxy edge header (`cf-connecting-ip`) OR
+ * its Host matches the public origin's host. Either signal is enough to fail
+ * safe.
  * A local request (localhost / LAN, no cf header, Host ≠ the public host) is
  * never external.
  */

@@ -1,8 +1,7 @@
-import { describe, it, vi } from "vitest";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { handleStart } from "../../../../src/services/capture/server.js";
 import { createSessionStore } from "../../../../src/services/capture/sessions.js";
-import { log } from "../../../../src/utils/log.js";
 
 const onFinalize = async (): Promise<void> => {};
 
@@ -11,7 +10,11 @@ describe("handleStart", () => {
     const store = createSessionStore();
     const r = await handleStart(
       { workflow: "oath-signature", contextHint: "Roster 1" },
-      { store, lanIp: "192.168.1.50", port: 3838, onFinalize },
+      {
+        store,
+        publicUrl: "https://capture.example.test",
+        onFinalize,
+      },
     );
     assert.equal(r.status, 200);
     const body = r.body as {
@@ -21,7 +24,7 @@ describe("handleStart", () => {
       qrSvg: string;
     };
     assert.equal(typeof body.sessionId, "string");
-    assert.match(body.captureUrl, /^http:\/\/192\.168\.1\.50:3838\/capture\//);
+    assert.match(body.captureUrl, /^https:\/\/capture\.example\.test\/capture\//);
     assert.match(body.qrSvg, /<svg/);
     const session = store.getById(body.sessionId)!;
     assert.equal(body.captureUrl.endsWith(session.token), true);
@@ -31,98 +34,65 @@ describe("handleStart", () => {
     const store = createSessionStore();
     const r = await handleStart(
       { workflow: "" },
-      { store, lanIp: "192.168.1.50", port: 3838, onFinalize },
+      { store, publicUrl: "https://capture.example.test", onFinalize },
     );
     assert.equal(r.status, 400);
   });
 
-  it("returns 503 when no LAN IP is available", async () => {
+  it("returns 503 when no publicUrl is available", async () => {
     const store = createSessionStore();
     const r = await handleStart(
       { workflow: "x" },
-      { store, lanIp: undefined, port: 3838, onFinalize },
+      { store, onFinalize },
     );
     assert.equal(r.status, 503);
+    const body = r.body as { error?: string };
+    assert.match(body.error ?? "", /requires ngrok or CAPTURE_PUBLIC_URL/);
+    assert.match(body.error ?? "", /no LAN fallback/);
   });
 
-  it("uses publicUrl override and ignores lanIp:port when both present", async () => {
+  it("uses publicUrl as the capture origin", async () => {
     const store = createSessionStore();
     const r = await handleStart(
       { workflow: "oath-signature" },
       {
         store,
-        lanIp: "192.168.1.50",
-        port: 3838,
-        publicUrl: "https://abc.trycloudflare.com",
+        publicUrl: "https://capture.example.test",
         onFinalize,
       },
     );
     assert.equal(r.status, 200);
     const body = r.body as { captureUrl: string };
-    assert.match(body.captureUrl, /^https:\/\/abc\.trycloudflare\.com\/capture\//);
-    assert.ok(!body.captureUrl.includes("192.168.1.50"));
-    assert.ok(!body.captureUrl.includes(":3838"));
+    assert.match(body.captureUrl, /^https:\/\/capture\.example\.test\/capture\//);
   });
 
-  it("publicUrl alone is enough — no lanIp needed", async () => {
+  it("trims a trailing slash from publicUrl", async () => {
     const store = createSessionStore();
     const r = await handleStart(
       { workflow: "oath-signature" },
       {
         store,
-        lanIp: undefined,
-        port: 3838,
-        publicUrl: "https://abc.trycloudflare.com/",
+        publicUrl: "https://capture.example.test/",
         onFinalize,
       },
     );
     assert.equal(r.status, 200);
     const body = r.body as { captureUrl: string };
-    assert.match(body.captureUrl, /^https:\/\/abc\.trycloudflare\.com\/capture\//);
+    assert.match(body.captureUrl, /^https:\/\/capture\.example\.test\/capture\//);
   });
 
-  it("warns when the QR falls back to a CGNAT LAN IP a phone can't reach", async (t) => {
-    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
-    t.onTestFinished(() => warn.mockRestore());
-    const store = createSessionStore();
-    const r = await handleStart(
-      { workflow: "oath-signature" },
-      { store, lanIp: "100.64.71.114", port: 3838, onFinalize },
-    );
-    assert.equal(r.status, 200);
-    const body = r.body as { captureUrl: string; reachabilityWarning?: string };
-    // Still hands out a working-shaped URL — the warning is advisory, not a block.
-    assert.match(body.captureUrl, /^http:\/\/100\.64\.71\.114:3838\/capture\//);
-    assert.equal(typeof body.reachabilityWarning, "string");
-    assert.match(body.reachabilityWarning!, /100\.64\.71\.114/);
-    assert.match(body.reachabilityWarning!, /cgnat/);
-    assert.match(body.reachabilityWarning!, /dashboard:tunneled|CAPTURE_PUBLIC_URL/);
-    assert.equal(warn.mock.calls.length, 1);
-  });
-
-  it("does NOT warn for a private LAN IP", async () => {
-    const store = createSessionStore();
-    const r = await handleStart(
-      { workflow: "oath-signature" },
-      { store, lanIp: "192.168.1.50", port: 3838, onFinalize },
-    );
-    const body = r.body as { reachabilityWarning?: string };
-    assert.equal(body.reachabilityWarning, undefined);
-  });
-
-  it("does NOT warn when publicUrl overrides an unreachable lanIp", async () => {
+  it("uses publicUrl as the only capture origin", async () => {
     const store = createSessionStore();
     const r = await handleStart(
       { workflow: "oath-signature" },
       {
         store,
-        lanIp: "100.64.71.114",
-        port: 3838,
-        publicUrl: "https://abc.trycloudflare.com",
+        publicUrl: "https://capture.example.test",
         onFinalize,
       },
     );
-    const body = r.body as { reachabilityWarning?: string };
-    assert.equal(body.reachabilityWarning, undefined);
+    assert.equal(r.status, 200);
+    const body = r.body as { captureUrl: string };
+    assert.match(body.captureUrl, /^https:\/\/capture\.example\.test\/capture\//);
   });
 });

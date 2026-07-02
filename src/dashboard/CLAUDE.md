@@ -50,7 +50,6 @@ npm run build:dashboard
 npm run dashboard
 npm run dashboard:watch
 npm run dashboard:prod
-npm run dashboard:tunneled
 ```
 
 ## Lessons Learned

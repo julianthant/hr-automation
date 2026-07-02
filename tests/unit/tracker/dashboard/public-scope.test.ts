@@ -51,12 +51,12 @@ describe("isPublicCaptureRequestAllowed", () => {
 });
 
 describe("isExternalCaptureRequest", () => {
-  const publicUrl = "https://districts-reaches-saved-slideshow.trycloudflare.com";
+  const publicUrl = "https://capture.example.test";
 
   it("is never external when no public origin is configured", () => {
     assert.equal(
       isExternalCaptureRequest({
-        hostHeader: "districts-reaches-saved-slideshow.trycloudflare.com",
+        hostHeader: "capture.example.test",
         publicUrl: undefined,
         cfConnectingIp: "203.0.113.7",
       }),
@@ -64,7 +64,7 @@ describe("isExternalCaptureRequest", () => {
     );
   });
 
-  it("is external when the Cloudflare edge header is present", () => {
+  it("is external when a supported proxy edge header is present", () => {
     assert.equal(
       isExternalCaptureRequest({ hostHeader: "anything", publicUrl, cfConnectingIp: "203.0.113.7" }),
       true,
@@ -74,7 +74,7 @@ describe("isExternalCaptureRequest", () => {
   it("is external when the Host matches the public origin's host", () => {
     assert.equal(
       isExternalCaptureRequest({
-        hostHeader: "districts-reaches-saved-slideshow.trycloudflare.com",
+        hostHeader: "capture.example.test",
         publicUrl,
         cfConnectingIp: null,
       }),
