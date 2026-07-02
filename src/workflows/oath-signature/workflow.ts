@@ -10,7 +10,11 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
-import { buildOathSignaturePlan, type OathSignatureContext } from "./enter.js";
+import {
+  buildOathSignaturePlan,
+  returnToSearchForNextItem,
+  type OathSignatureContext,
+} from "./enter.js";
 import {
   OathSignatureInputSchema,
   type OathSignatureInput,
@@ -118,7 +122,6 @@ export const oathSignatureWorkflow = defineWorkflow({
     buildOperatorSubject({
       kind: "eid",
       value: input.emplId,
-      prefix: "Oath Signature",
     }),
   handler: async (ctx, input) => {
     await runSignerBranch(ctx, input);
@@ -133,7 +136,11 @@ async function runSignerBranch(
   ctx: Parameters<typeof oathSignatureWorkflow.config.handler>[0],
   input: OathSignerInput,
 ): Promise<void> {
-  const oathCtx: OathSignatureContext = { employeeName: input.name ?? "", alreadyHasOath: false };
+  const oathCtx: OathSignatureContext = {
+    employeeName: input.name ?? "",
+    alreadyHasOath: false,
+    oathDate: "",
+  };
 
   ctx.updateData({
     emplId: input.emplId,
@@ -152,6 +159,12 @@ async function runSignerBranch(
     if (!ok) throw new Error("UCPath authentication failed");
   });
 
+  // Audit shot of the ONE ucpath page at each meaningful moment. Wired into the
+  // plan so the visual trail is person-found → oath-staged → saved — never the
+  // empty search form.
+  const shot = (label: string): Promise<void> =>
+    ctx.screenshot({ kind: "form", label, systems: ["ucpath"] }).then(() => undefined);
+
   await ctx.step("transaction", async () => {
     // The live-page probe inside buildOathSignaturePlan still skips the
     // OK/Save steps when an oath already exists on the profile — that's
@@ -159,19 +172,28 @@ async function runSignerBranch(
     // 2026-04-23 per user direction (fail-loud / no silent skip-by-record).
     let dryRunProofCaptured = false;
     const plan = buildOathSignaturePlan(input, page, oathCtx, {
+      onProfileLoaded: () => shot("oath-signature-profile"),
+      onOathStaged: () => shot("oath-signature-oath-entered"),
       beforeCommit: async () => {
-        await ctx.screenshot({ kind: "form", label: "oath-signature-dry-run-pre-save" });
+        await shot("oath-signature-dry-run-pre-save");
         dryRunProofCaptured = true;
       },
+      onSaved: () => shot("oath-signature-saved"),
     });
     await plan.execute();
-    if (!input.dryRun) {
-      await ctx.screenshot({ kind: "form", label: "oath-signature-saved" });
-    }
 
+    // Record the resolved employee name + the committed oath date. Both were
+    // previously missing: the name selector matched nothing, and the date was
+    // stamped only when explicitly overridden. `oathCtx.oathDate` is read back
+    // from the form (today's prefill or the override); fall back to the input /
+    // today so the "Signature Date" field is never blank on a successful add.
     if (oathCtx.employeeName) {
       ctx.updateData({ name: oathCtx.employeeName });
     }
+    if (!oathCtx.alreadyHasOath) {
+      ctx.updateData({ date: oathCtx.oathDate || input.date || todayMmDdYyyy() });
+    }
+
     if (oathCtx.alreadyHasOath) {
       ctx.updateData({ status: "Skipped (Existing Oath)" });
       log.success(
@@ -195,6 +217,20 @@ async function runSignerBranch(
       `Oath signature added for ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""}.`,
     );
   });
+
+  // Clean state for the next daemon EID — OUTSIDE the transaction step so its
+  // end-of-step audit screenshot captures the saved oath, not this search form.
+  // Best-effort: a post-save cleanup hiccup must never fail a committed oath
+  // (`betweenItems: ["reset"]` also resets the page between items).
+  await returnToSearchForNextItem(page).catch(() => {});
+}
+
+/** Today's date in PeopleSoft's MM/DD/YYYY format (oath-date fallback). */
+function todayMmDdYyyy(): string {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${now.getFullYear()}`;
 }
 
 /**
