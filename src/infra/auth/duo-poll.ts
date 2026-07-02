@@ -313,6 +313,18 @@ async function triggerDuoPushFromFactorScreen(page: Page, abortSignal?: AbortSig
         .catch(() => 0)) > 0;
     if (!onFactorScreen) return false;
 
+    // Chrome's native "insert your security key" dialog blocks page-level clicks
+    // on "Other options" / Duo Push — dismiss it first (same as selectDuoFactor).
+    const onSecurityKeyScreen =
+      (await page
+        .getByText(/insert your security key|use your security key/i)
+        .count()
+        .catch(() => 0)) > 0;
+    if (onSecurityKeyScreen) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.waitForTimeout(500);
+    }
+
     const pushLink = (): ReturnType<Page["getByRole"]> =>
       page
         .getByRole("link", { name: /duo push|send me a push/i })

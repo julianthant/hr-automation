@@ -27,6 +27,7 @@ interface FakeState {
   otherClicked: boolean;
   pushClicked: boolean;
   clicks: string[];
+  escapePressed: boolean;
 }
 
 function targetFor(name: RegExp): "other" | "push" | undefined {
@@ -69,7 +70,8 @@ function makeFakePage(state: FakeState): import("playwright").Page {
 
   const visibleText = (): string => {
     if (state.pushClicked || state.screen === "pushPending") return "Pushed a login request to your device";
-    return "Use Touch ID\nVerify your identity using this device";
+    if (state.escapePressed) return "Use Touch ID\nVerify your identity using this device";
+    return "Use your security key\nInsert your security key and touch it";
   };
 
   const textMatcher = (arg: RegExp | string) => ({
@@ -86,6 +88,11 @@ function makeFakePage(state: FakeState): import("playwright").Page {
     addInitScript: async () => {},
     evaluate: async () => {},
     locator: () => empty,
+    keyboard: {
+      press: async (key: string) => {
+        if (key === "Escape") state.escapePressed = true;
+      },
+    },
     getByRole: (_role: string, opts?: { name?: RegExp }) => (opts?.name ? roleMatcher(opts.name) : empty),
     getByText: (arg: RegExp | string) => textMatcher(arg),
     waitForTimeout: (ms?: number) => new Promise<void>((r) => setTimeout(r, Math.min(ms ?? 1, 1))),
@@ -113,7 +120,13 @@ describe("pollDuoApproval — auto Duo Push when Duo defaults to a device factor
   });
 
   it("clicks Other options → Duo Push, then approves on the resulting success URL", async () => {
-    const state: FakeState = { screen: "factor", otherClicked: false, pushClicked: false, clicks: [] };
+    const state: FakeState = {
+      screen: "factor",
+      otherClicked: false,
+      pushClicked: false,
+      clicks: [],
+      escapePressed: false,
+    };
     const page = makeFakePage(state);
 
     const approved = await pollDuoApproval(page, {
@@ -133,7 +146,13 @@ describe("pollDuoApproval — auto Duo Push when Duo defaults to a device factor
   });
 
   it("does not touch the prompt when a push is already pending (normal auto-push prompt)", async () => {
-    const state: FakeState = { screen: "pushPending", otherClicked: false, pushClicked: false, clicks: [] };
+    const state: FakeState = {
+      screen: "pushPending",
+      otherClicked: false,
+      pushClicked: false,
+      clicks: [],
+      escapePressed: false,
+    };
     const page = makeFakePage(state);
 
     const approved = await pollDuoApproval(page, {
@@ -146,5 +165,28 @@ describe("pollDuoApproval — auto Duo Push when Duo defaults to a device factor
 
     assert.equal(approved, false, "no success URL → times out");
     assert.deepEqual(state.clicks, [], "must not click Other options / Duo Push when a push is already pending");
+  });
+
+  it("presses Escape on the security-key screen before revealing Duo Push", async () => {
+    const state: FakeState = {
+      screen: "factor",
+      otherClicked: false,
+      pushClicked: false,
+      clicks: [],
+      escapePressed: false,
+    };
+    const page = makeFakePage(state);
+
+    const approved = await pollDuoApproval(page, {
+      successUrlMatch: SUCCESS_URL,
+      timeoutSeconds: 5,
+      preCheckMs: 0,
+      initialCodeWaitMs: 0,
+      pollIntervalMs: 1,
+    });
+
+    assert.equal(approved, true);
+    assert.equal(state.escapePressed, true, "should dismiss the native security-key dialog first");
+    assert.deepEqual(state.clicks, ["other", "push"]);
   });
 });
