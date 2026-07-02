@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/julianhein/Projects/hr-automation/.codex/hooks/warn-large-files.sh'"
+          },
+          {
+            "type": "command",
+            "command": "bash '/Users/julianhein/Projects/hr-automation/.codex/hooks/scan-secrets.sh'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // \"\"'); echo \"$f\" | grep -qE '/src/.*\\.ts$' || exit 0; npm run typecheck 2>&1 | tail -50",
+            "timeout": 60,
+            "statusMessage": "Running typecheck..."
+          }
+        ]
+      }
+    ]
+  }
+}
