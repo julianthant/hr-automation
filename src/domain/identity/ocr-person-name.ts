@@ -74,28 +74,65 @@ export function readOcrPersonNameParts(parts: {
   return splitOcrPersonName(parts.fullName);
 }
 
-/** Stamp first/last (+ legacy full name) from a person-lookup outcome onto an OCR record. */
+/**
+ * Merge an edited first/last patch into a record's current name fields.
+ * Materializes BOTH displayed parts (a legacy fullName-only record gets its
+ * split-derived counterpart written out, so editing one part never loses the
+ * other) and resolves the display name from the merged parts.
+ */
+export function mergeOcrPersonNameParts(
+  current: {
+    firstName?: string | null;
+    lastName?: string | null;
+    fullName?: string | null;
+  },
+  patch: { firstName?: string; lastName?: string },
+): { firstName: string; lastName: string; name: string } {
+  const parts = readOcrPersonNameParts(current);
+  const firstName = patch.firstName ?? parts.firstName;
+  const lastName = patch.lastName ?? parts.lastName;
+  return {
+    firstName,
+    lastName,
+    name: resolveOcrPersonDisplayName({
+      firstName,
+      lastName,
+      fullName: current.fullName,
+    }),
+  };
+}
+
+/**
+ * Stamp first/last (+ legacy full name) from a person-lookup outcome onto an
+ * OCR record. `printedName` is the PAPER side of the verify name check, so a
+ * present value is never overwritten — only a blank/missing one is filled.
+ * Returns the raw resolved name (resolvedName ?? searchName) so callers can
+ * reuse it (e.g. to stamp the found-side `name`) instead of recomputing.
+ */
 export function applyPersonLookupNameToOcrRecord(
   rec: Record<string, unknown>,
   data: Record<string, string> | undefined,
-): void {
+): string | undefined {
   const resolvedName = nonEmpty(data?.resolvedName) ?? nonEmpty(data?.searchName);
-  if (!resolvedName) return;
+  if (!resolvedName) return undefined;
 
   const { firstName, lastName, display } = splitOcrPersonName(resolvedName);
-  if (!display) return;
+  if (!display) return resolvedName;
 
   if ("employee" in rec && rec.employee && typeof rec.employee === "object") {
     const employee = rec.employee as Record<string, unknown>;
     employee.firstName = firstName;
     employee.lastName = lastName;
     employee.name = display;
-    return;
+    return resolvedName;
   }
 
   if ("printedName" in rec || !("employee" in rec)) {
     rec.firstName = firstName;
     rec.lastName = lastName;
-    rec.printedName = display;
+    if (typeof rec.printedName !== "string" || !rec.printedName.trim()) {
+      rec.printedName = display;
+    }
   }
+  return resolvedName;
 }
