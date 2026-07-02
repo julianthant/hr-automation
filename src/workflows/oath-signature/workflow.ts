@@ -6,6 +6,7 @@ import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { loginToUCPath } from "../../infra/auth/login.js";
+import { todayMmDdYyyy } from "../../domain/dates.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
@@ -223,14 +224,6 @@ async function runSignerBranch(
   // Best-effort: a post-save cleanup hiccup must never fail a committed oath
   // (`betweenItems: ["reset"]` also resets the page between items).
   await returnToSearchForNextItem(page).catch(() => {});
-}
-
-/** Today's date in PeopleSoft's MM/DD/YYYY format (oath-date fallback). */
-function todayMmDdYyyy(): string {
-  const now = new Date();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${mm}/${dd}/${now.getFullYear()}`;
 }
 
 /**

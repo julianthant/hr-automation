@@ -1,4 +1,9 @@
 import { z } from "zod/v4";
+import { formatMmDdYyyy, todayMmDdYyyy } from "../../domain/dates.js";
+
+// Re-exported so existing importers (workflow.ts, tests) keep their public API;
+// the implementation now lives in the shared domain layer.
+export { todayMmDdYyyy };
 
 /** Validated separation data extracted from Kuali + UCPath. */
 export const SeparationDataSchema = z.object({
@@ -226,24 +231,6 @@ export function getInitials(fullName: string): string {
 function parseDate(dateStr: string): Date {
   const [m, d, y] = dateStr.split("/").map(Number);
   return new Date(y, m - 1, d);
-}
-
-/**
- * Format a Date as zero-padded MM/DD/YYYY (matching the Kuali / UCPath wire format).
- */
-function formatMmDdYyyy(d: Date): string {
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${mm}/${dd}/${d.getFullYear()}`;
-}
-
-/**
- * Today's date as zero-padded MM/DD/YYYY (local time). Used for the
- * duplicate-termination comment's date stamp. `now` is injectable so tests can
- * pin a fixed date — handlers call it argument-less.
- */
-export function todayMmDdYyyy(now: Date = new Date()): string {
-  return formatMmDdYyyy(now);
 }
 
 /**
