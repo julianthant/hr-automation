@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
-
-export type MediaLightboxChrome = "screenshot" | "capture";
+import { createPortal } from "react-dom";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export interface MediaLightboxProps<T> {
   items: T[];
@@ -11,20 +10,26 @@ export interface MediaLightboxProps<T> {
   renderItem: (item: T, index: number) => ReactNode;
   renderCaption?: (item: T, index: number) => ReactNode;
   /**
-   * When provided (and there are 2+ items), the screenshot chrome shows a
-   * macOS-Preview-style vertical thumbnail rail on the left — one small preview
-   * per item, the current one highlighted, click to jump. Ignored by the
-   * capture chrome.
+   * When provided (and there are 2+ items), shows a macOS-Preview-style vertical
+   * thumbnail rail on the left — one small preview per item, the current one
+   * highlighted, click to jump.
    */
   renderThumbnail?: (item: T, index: number) => ReactNode;
-  /** When false, render nothing. Capture wrapper uses this for closed state. */
+  /** When false, render nothing. */
   open?: boolean;
-  /** Chrome layout — thin wrappers set screenshot vs capture. */
-  chrome?: MediaLightboxChrome;
   wrapNavigation?: boolean;
   preventDefaultOnKeys?: boolean;
   enableHomeEnd?: boolean;
+  /**
+   * Accessible name for the dialog overlay (screen readers announce it on
+   * open). Defaults to "Media viewer".
+   */
   ariaLabel?: string;
+  /**
+   * The noun used in nav-control labels ("Previous screenshot" / "Previous
+   * photo"). Defaults to "screenshot" (the Screenshots-tab consumer).
+   */
+  mediaNoun?: string;
 }
 
 export function MediaLightbox<T>({
@@ -36,11 +41,11 @@ export function MediaLightbox<T>({
   renderCaption,
   renderThumbnail,
   open = true,
-  chrome = "screenshot",
   wrapNavigation = false,
   preventDefaultOnKeys = false,
   enableHomeEnd = false,
-  ariaLabel,
+  ariaLabel = "Media viewer",
+  mediaNoun = "screenshot",
 }: MediaLightboxProps<T>) {
   const navigate = useCallback(
     (delta: number) => {
@@ -112,21 +117,6 @@ export function MediaLightbox<T>({
   const hasPrev = wrapNavigation ? items.length > 1 : index > 0;
   const hasNext = wrapNavigation ? items.length > 1 : index < items.length - 1;
 
-  if (chrome === "capture") {
-    return (
-      <CaptureLightboxShell
-        index={index}
-        itemsLength={items.length}
-        ariaLabel={ariaLabel}
-        onClose={onClose}
-        onPrev={() => navigate(-1)}
-        onNext={() => navigate(1)}
-      >
-        {renderItem(current, index)}
-      </CaptureLightboxShell>
-    );
-  }
-
   const sidebar =
     renderThumbnail && items.length > 1 ? (
       <ThumbnailRail
@@ -137,8 +127,16 @@ export function MediaLightbox<T>({
       />
     ) : undefined;
 
-  return (
-    <ScreenshotOverlay onClose={onClose}>
+  // Portal to <body> so the fullscreen overlay escapes any transformed / clipped
+  // ancestor. Critical when the lightbox is opened from inside a Radix Dialog
+  // (e.g. the capture panel in the Run modal): DialogContent centers itself with
+  // a CSS transform, which makes it the containing block for `position: fixed`
+  // descendants — so an un-portaled overlay would be trapped inside the dialog
+  // ("inside the capture") instead of covering the viewport. No-op for callers
+  // already at the body level (e.g. the Screenshots tab).
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <ScreenshotOverlay onClose={onClose} ariaLabel={ariaLabel}>
       <ScreenshotLightboxShell
         itemsLength={items.length}
         hasPrev={hasPrev}
@@ -148,10 +146,12 @@ export function MediaLightbox<T>({
         onNext={() => hasNext && onIndexChange(index + 1)}
         caption={renderCaption ? renderCaption(current, index) : undefined}
         sidebar={sidebar}
+        mediaNoun={mediaNoun}
       >
         {renderItem(current, index)}
       </ScreenshotLightboxShell>
-    </ScreenshotOverlay>
+    </ScreenshotOverlay>,
+    document.body,
   );
 }
 
@@ -180,7 +180,7 @@ function ThumbnailRail<T>({
     <div
       role="tablist"
       aria-orientation="vertical"
-      aria-label="Screenshot pages"
+      aria-label="Pages"
       className="flex max-h-full w-[7rem] shrink-0 flex-col gap-2 overflow-y-auto pr-1"
     >
       {items.map((item, i) => {
@@ -215,14 +215,22 @@ function ThumbnailRail<T>({
 
 function ScreenshotOverlay({
   onClose,
+  ariaLabel,
   children,
 }: {
   onClose: () => void;
+  ariaLabel: string;
   children: ReactNode;
 }) {
   return (
     <div
-      className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel}
+      // pointer-events-auto: when opened from inside a Radix modal dialog, Radix
+      // sets `pointer-events: none` on <body>, which this body-portaled overlay
+      // would otherwise inherit — swallowing every click. Re-enable it here.
+      className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 pointer-events-auto"
       onClick={onClose}
     >
       {children}
@@ -239,6 +247,7 @@ function ScreenshotLightboxShell({
   onNext,
   caption,
   sidebar,
+  mediaNoun,
   children,
 }: {
   itemsLength: number;
@@ -249,6 +258,7 @@ function ScreenshotLightboxShell({
   onNext: () => void;
   caption?: ReactNode;
   sidebar?: ReactNode;
+  mediaNoun: string;
   children: ReactNode;
 }) {
   return (
@@ -278,7 +288,7 @@ function ScreenshotLightboxShell({
             <button
               type="button"
               disabled={!hasPrev}
-              aria-label="Previous screenshot"
+              aria-label={`Previous ${mediaNoun}`}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
               onClick={onPrev}
             >
@@ -292,7 +302,7 @@ function ScreenshotLightboxShell({
             <button
               type="button"
               disabled={!hasNext}
-              aria-label="Next screenshot"
+              aria-label={`Next ${mediaNoun}`}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground disabled:opacity-30 hover:bg-accent transition-colors"
               onClick={onNext}
             >
@@ -300,116 +310,6 @@ function ScreenshotLightboxShell({
             </button>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-
-function CaptureLightboxShell({
-  index,
-  itemsLength,
-  ariaLabel,
-  onClose,
-  onPrev,
-  onNext,
-  children,
-}: {
-  index: number;
-  itemsLength: number;
-  ariaLabel?: string;
-  onClose: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-  children: ReactNode;
-}) {
-  const roundBtn =
-    "inline-flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2";
-  const roundBtnStyle = {
-    backgroundColor: "var(--capture-bg-raised)",
-    color: "var(--capture-fg-primary)",
-    ["--tw-ring-color" as string]: "var(--capture-focus-ring)",
-  };
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={ariaLabel}
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ backgroundColor: "color-mix(in srgb, var(--background) 92%, transparent)" }}
-    >
-      {/*
-        Frame shrinks to the image (inline-flex → fit-content), so the border is
-        exactly the image's size — not a full-screen box. Chrome is positioned
-        relative to THIS frame (not the viewport), so the close/counter/arrows
-        track the image edges instead of floating at disconnected screen corners.
-      */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="relative inline-flex max-h-[92vh] max-w-[94vw] items-center justify-center rounded-xl border p-2"
-        style={{
-          borderColor: "var(--capture-border-subtle)",
-          backgroundColor: "var(--capture-bg-raised)",
-          boxShadow: "0 12px 48px rgba(0,0,0,0.55)",
-        }}
-      >
-        {children}
-
-        <button
-          type="button"
-          aria-label="Close preview"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose();
-          }}
-          className={`absolute right-2.5 top-2.5 h-9 w-9 ${roundBtn}`}
-          style={roundBtnStyle}
-        >
-          <X aria-hidden className="h-5 w-5" />
-        </button>
-
-        <span
-          className="absolute bottom-2.5 left-1/2 -translate-x-1/2 rounded-md px-2.5 py-1 font-mono text-xs tabular-nums"
-          style={{
-            backgroundColor: "var(--capture-bg-raised)",
-            color: "var(--capture-fg-secondary)",
-          }}
-          aria-live="polite"
-        >
-          {index + 1} / {itemsLength}
-        </span>
-
-        {itemsLength > 1 && (
-          <button
-            type="button"
-            aria-label="Previous photo"
-            onClick={(e) => {
-              e.stopPropagation();
-              onPrev();
-            }}
-            className={`absolute left-2.5 top-1/2 h-11 w-11 -translate-y-1/2 ${roundBtn}`}
-            style={roundBtnStyle}
-          >
-            <ChevronLeft aria-hidden className="h-6 w-6" />
-          </button>
-        )}
-
-        {itemsLength > 1 && (
-          <button
-            type="button"
-            aria-label="Next photo"
-            onClick={(e) => {
-              e.stopPropagation();
-              onNext();
-            }}
-            className={`absolute right-2.5 top-1/2 h-11 w-11 -translate-y-1/2 ${roundBtn}`}
-            style={roundBtnStyle}
-          >
-            <ChevronRight aria-hidden className="h-6 w-6" />
-          </button>
-        )}
       </div>
     </div>
   );

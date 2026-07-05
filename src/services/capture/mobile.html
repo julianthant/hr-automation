@@ -780,6 +780,12 @@
     var displaySrc = photoDisplaySrc(p);
     if (!p.blank && displaySrc) {
       var img = document.createElement("img");
+      // Safety net for the brief window before the converted JPEG exists: if the
+      // placeholder preview can't decode (e.g. a HEIC blob), swap to the JPEG the
+      // moment it's ready (renderAll re-renders with dataUrl preferred anyway).
+      img.onerror = function () {
+        if (p.dataUrl && img.src !== p.dataUrl) img.src = p.dataUrl;
+      };
       img.src = displaySrc;
       img.alt = "";
       img.draggable = false;
@@ -888,10 +894,17 @@
     var p = state.photos.find(function (x) { return x.index === photoIndex; });
     if (!p) return;
     if (p.blank) {
+      els.lightboxImg.onerror = null;
       els.lightboxImg.alt = "blank page";
       els.lightboxImg.src = "";
       els.lightbox.style.background = "#FFFFFF";
     } else if (photoDisplaySrc(p)) {
+      // One-shot safety net: if the shown source can't decode, retry with the
+      // converted JPEG (photoDisplaySrc already prefers it once ready).
+      els.lightboxImg.onerror = function () {
+        els.lightboxImg.onerror = null;
+        if (p.dataUrl && els.lightboxImg.src !== p.dataUrl) els.lightboxImg.src = p.dataUrl;
+      };
       els.lightboxImg.src = photoDisplaySrc(p);
       els.lightboxImg.alt = "Photo " + (photoIndex + 1);
       els.lightbox.style.background = "#000";
@@ -1009,9 +1022,12 @@
     });
   }
 
-  // Instant preview: an object URL from the picked file renders immediately
-  // (iOS Safari decodes HEIC natively), so the tile shows the photo the moment
-  // it's taken — no waiting on HEIC conversion + base64 read + blur scan.
+  // Instant preview placeholder: an object URL from the picked file. It renders
+  // immediately ONLY on browsers that decode the camera's native format — an
+  // iPhone shoots HEIC, and many browsers (including some iOS Safari builds)
+  // render a HEIC blob as a BLANK image, often without firing <img> onerror. So
+  // it's a best-effort placeholder shown until the converted JPEG is ready, NOT
+  // the source of truth (see photoDisplaySrc).
   function safeObjectUrl(file) {
     try { return URL.createObjectURL(file); } catch (e) { return null; }
   }
@@ -1019,7 +1035,12 @@
     if (url) { try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ } }
   }
   function photoDisplaySrc(p) {
-    return p.previewUrl || p.dataUrl || null;
+    // Prefer the converted JPEG (`dataUrl`) the moment it exists — it renders on
+    // EVERY browser. The object-URL `previewUrl` is the raw camera file (a HEIC
+    // blob on iPhones) that can render blank, so it's only a placeholder shown
+    // until the conversion lands. Preferring previewUrl (the old behavior) left
+    // the tile blank forever on any browser that couldn't decode the blob.
+    return p.dataUrl || p.previewUrl || null;
   }
 
   // ─── Upload pipeline ────────────────────────────────────────────────
