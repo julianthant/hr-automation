@@ -57,7 +57,7 @@ export function splitPrefilled(input: unknown): SplitInput {
   if (!hasPrefilled && !hasRuntimeOptions) {
     return { cleaned: input, prefilled: null, runtimeOptions: null }
   }
-  const { prefilledData, __runtimeOptions, ...rest } = input as Record<string, unknown>
+  const { prefilledData, __runtimeOptions, ...rest } = input
   const prefilled = isPlainObject(prefilledData) ? prefilledData : null
   const runtimeOptions = isPlainObject(__runtimeOptions)
     ? normalizeRuntimeOptions(__runtimeOptions)

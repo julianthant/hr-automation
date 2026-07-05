@@ -78,27 +78,27 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
           const e: TrackerEntry = JSON.parse(line);
           if (e.id === input.sessionId && e.runId === input.runId) {
             row = e;
-            const p = e.data?.pdfPath as unknown as string | undefined;
+            const p = e.data?.pdfPath;
             if (p) capturedPdfPath = p;
-            const rp = e.data?.rosterPath as unknown as string | undefined;
+            const rp = e.data?.rosterPath;
             if (rp) capturedRosterPath = rp;
           }
         } catch { /* tolerate */ }
       }
       if (!row) return { status: 404, body: { ok: false, error: "OCR row not found" } };
-      const formType = row.data?.formType as unknown as string | undefined;
+      const formType = row.data?.formType;
       if (!formType) return { status: 400, body: { ok: false, error: "Row missing formType" } };
       const spec = getFormSpec(formType);
       if (!spec) return { status: 400, body: { ok: false, error: `Unknown formType "${formType}"` } };
 
-      const pdfPath = capturedPdfPath ?? (row.data?.pdfPath as unknown as string | undefined);
+      const pdfPath = capturedPdfPath ?? (row.data?.pdfPath);
       if (!pdfPath) return { status: 400, body: { ok: false, error: "Row missing pdfPath" } };
-      const rosterPath = capturedRosterPath ?? (row.data?.rosterPath as unknown as string | undefined) ?? "";
+      const rosterPath = capturedRosterPath ?? (row.data?.rosterPath) ?? "";
 
       const { runOcrWholePdf } = await import("../../../services/ocr/pipeline.js");
       const ocrResult = await runOcrWholePdf({
         pdfPath,
-        arraySchema: spec.ocrArraySchema as never,
+        arraySchema: spec.ocrArraySchema,
         prompt: spec.prompt,
         schemaName: spec.schemaName,
         _override: opts._wholePdfOverride,
@@ -109,7 +109,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       const roster = rosterPath ? (await loadRosterFn(rosterPath) as unknown[]) : [];
 
       const records = await Promise.all(
-        (ocrResult.data as unknown[]).map((r) => spec.matchRecord({ record: r, roster: roster as never })),
+        (ocrResult.data).map((r) => spec.matchRecord({ record: r, roster: roster as never })),
       );
 
       // Eid-lookup fan-out (mirror the orchestrator's lookup phase)
@@ -190,7 +190,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       const capturedEnqueueItems = enqueueItems;
       const parentSubject =
         readQueueTitle(capturedRow.data) ??
-        (capturedRow.data?.parentSubject as unknown as string | undefined);
+        (capturedRow.data?.parentSubject);
       const rootTracePrefix = rootTracePrefixFromRow(capturedRow);
       const runOptions = runOptionsFromRow(capturedRow);
       const emitDataSnapshot = (
@@ -251,7 +251,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
 
           if (spec.enrichRecords) {
             const enriched = await spec.enrichRecords({
-              records: records as never[],
+              records: records,
               runId: input.runId,
               sessionId: input.sessionId,
               trackerDir,
@@ -260,7 +260,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
               rootTracePrefix,
               runOptions,
               emitProgress: (recs: unknown[]) => emitDataSnapshot(recs, "running"),
-            }) as unknown[];
+            });
             enriched.forEach((rec, index) => {
               records[index] = rec;
             });
@@ -333,7 +333,7 @@ function buildReviewData(input: {
 }): StampedData {
   const { row, formType, sessionId, parentRunId, records } = input;
   const parentSubject =
-    readQueueTitle(row.data) ?? (row.data?.parentSubject as unknown as string | undefined);
+    readQueueTitle(row.data) ?? (row.data?.parentSubject);
   // Shared OCR preview-row envelope (BM-5): the canonical re-stamp set (mode/
   // archetype/__id/__name/parentSubject) overlaid on the explicit fields a
   // whole-PDF re-OCR rebuilds. failedPages/pageStatusSummary are cleared because
@@ -342,7 +342,7 @@ function buildReviewData(input: {
     base: {
       ...stringData(row.data),
       formType,
-      pdfOriginalName: (row.data?.pdfOriginalName as unknown as string | undefined) ?? "",
+      pdfOriginalName: (row.data?.pdfOriginalName) ?? "",
       sessionId,
       ...(parentRunId ? { parentRunId } : {}),
       recordCount: records.length,

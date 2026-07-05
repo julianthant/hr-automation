@@ -125,5 +125,5 @@ export async function runKronosSearch(
     + `newK found=${result.newK.status === "fulfilled"} `
     + `kualiTimekeeper ok=${result.kualiTimekeeper.status === "fulfilled"}`,
   );
-  return result as KronosSearchResult;
+  return result;
 }

@@ -511,7 +511,7 @@ export function EditDataTab({ workflow, entry, runId, date }: EditDataTabProps) 
             <CopyFromPriorButton
               workflow={workflow}
               workflowLabel={workflowLabel}
-              keyField={matchKey!}
+              keyField={matchKey}
               keyValue={matchValue}
               excludeId={entry.id}
               editableFields={editableFields.map((f) => f.key)}

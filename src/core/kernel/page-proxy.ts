@@ -40,7 +40,7 @@ import type { Frame, Locator, Page } from 'playwright'
  *     teardown is the daemon's job, not the kernel's.)
  */
 export function wrapPageWithSignal(page: Page, signal: AbortSignal): Page {
-  return createProxy(page, signal) as Page
+  return createProxy(page, signal)
 }
 
 // Methods that accept a `signal?: AbortSignal` option. Verified against the
@@ -184,10 +184,10 @@ function createProxy<T extends object>(target: T, signal: AbortSignal): T {
       // covers the getter form where Playwright exposes mainFrame as a
       // property rather than a method.
       if (PROXIED_SUBOBJECTS.has(prop) && value && typeof value === 'object') {
-        const cached = cache.get(value as object)
+        const cached = cache.get(value)
         if (cached) return cached
         const proxied = createProxy(value as object, signal)
-        cache.set(value as object, proxied)
+        cache.set(value, proxied)
         return proxied
       }
 
@@ -212,7 +212,7 @@ function createProxy<T extends object>(target: T, signal: AbortSignal): T {
   }
   // The Proxy preserves T's structural type, which is what `ctx.page(id)`
   // promises (`Promise<Page>`) so workflow handlers see no API change.
-  return new Proxy(target, handler) as T
+  return new Proxy(target, handler)
 }
 
 // Re-export type aliases so consumers can type-narrow without importing

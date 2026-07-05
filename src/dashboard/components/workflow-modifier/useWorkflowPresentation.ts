@@ -77,7 +77,7 @@ export function useWorkflowPresentation(): {
     fetch(`/api/workflow-presentation/${name}`)
       .then((r) => r.json())
       .then((b: WorkflowPresentationDetail | { ok?: false }) => {
-        if (b.ok) setData(b as WorkflowPresentationDetail);
+        if (b.ok) setData(b);
       })
       .catch(() => undefined);
   }, []);
@@ -92,7 +92,7 @@ export function useWorkflowPresentation(): {
           body: JSON.stringify(ov),
         });
         const b: PreviewResult | { ok?: false } = await r.json();
-        setPreviewResult(b.ok ? (b as PreviewResult) : null);
+        setPreviewResult(b.ok ? (b) : null);
       } catch {
         setPreviewResult(null);
       }

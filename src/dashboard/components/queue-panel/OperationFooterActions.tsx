@@ -137,7 +137,7 @@ export function OperationFooterActions({
           id: t,
           description:
             errors.length > 0
-              ? `${errors[0]!.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`
+              ? `${errors[0].error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`
               : body.error ?? result.error ?? `HTTP ${result.status}`,
         });
         return;
@@ -150,7 +150,7 @@ export function OperationFooterActions({
       } else {
         toast.warning("Some deletes failed", {
           id: t,
-          description: `${body.count} removed · ${errors.length} failed (${errors[0]!.error})`,
+          description: `${body.count} removed · ${errors.length} failed (${errors[0].error})`,
         });
         const failed = new Set(errors.map((x) => x.id));
         onDeletedIds?.(deleteIds.filter((id) => !failed.has(id)));

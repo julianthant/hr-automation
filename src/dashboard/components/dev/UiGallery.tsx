@@ -28,7 +28,6 @@ import { AUTO_WORKERS, type StepPreset, type WorkerChoice } from "@/lib/run-sett
 import { EmptyState } from "@/components/shared/EmptyState";
 import type { AuthState } from "@/components/shared/types";
 import { buildWorkflowRunProjection } from "../../../domain/workflow-runtime/projection.js";
-import type { TrackerEntry as TrackerEntryJsonl } from "../../../tracker/jsonl.js";
 import type { WorkflowRunProjection } from "../../../domain/workflow-runtime/types.js";
 
 /**
@@ -110,7 +109,7 @@ function row(partial: Partial<TrackerEntry> & { id: string }): TrackerEntry {
     status: "pending",
     _hash: partial.id,
     ...partial,
-  } as TrackerEntry;
+  };
 }
 
 /**
@@ -152,7 +151,7 @@ function Flat({ entry, selected = false }: { entry: TrackerEntry; selected?: boo
   return (
     <EntryItem
       entry={entry}
-      projection={buildWorkflowRunProjection(entry as unknown as TrackerEntryJsonl, {})}
+      projection={buildWorkflowRunProjection(entry, {})}
       displayNames={EMPTY_DISPLAY_NAMES}
       selected={selected}
       onSelect={NOOP}
@@ -806,7 +805,7 @@ function session(
     finalStatus: null,
     sessions: [],
     ...partial,
-  } as WorkflowInstanceState;
+  };
 }
 
 const sessInFlight = session({

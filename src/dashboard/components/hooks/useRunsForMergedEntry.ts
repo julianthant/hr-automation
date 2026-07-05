@@ -82,7 +82,7 @@ export function useRunsForMergedEntry({
 
     const myGen = ++fetchGeneration.current;
 
-    Promise.all(
+    void Promise.all(
       fetchItems.map((m) =>
         fetch(
           `/api/runs?workflow=${encodeURIComponent(runsWorkflow)}&id=${encodeURIComponent(m.id)}&date=${encodeURIComponent(date)}`,

@@ -25,7 +25,7 @@ export function validateAndPrepareItems<TData, TSteps extends readonly string[]>
   validate: (item: TData) => void,
 ): PerItem<TData>[] {
   for (let i = 0; i < items.length; i++) {
-    const item = items[i]!
+    const item = items[i]
     try {
       validate(item)
     } catch (err) {

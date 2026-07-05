@@ -49,7 +49,7 @@ function runDisplayStatus(workflow: string, run: RunInfo): string {
   return queueStatusDisplayLabel({
     workflow,
     status: run.status,
-    data: run.data as Record<string, unknown> | undefined,
+    data: run.data,
   });
 }
 

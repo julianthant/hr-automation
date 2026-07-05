@@ -326,7 +326,7 @@ export const onboardingWorkflow = defineWorkflow({
         const i9Page = await ctx.page("i9");
 
         // Search for existing profile first — avoids duplicate creation on re-runs.
-        const ssnWithDashes = data.ssn!.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
+        const ssnWithDashes = data.ssn.replace(/(\d{3})(\d{2})(\d{4})/, "$1-$2-$3");
         const searchResults = await ctx.retry(
           () => searchI9Employee(i9Page, { ssn: ssnWithDashes }),
           { attempts: 2 },

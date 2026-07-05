@@ -509,7 +509,7 @@ export function QueuePanel({
       const delta = e.key === "ArrowDown" ? 1 : -1;
       const nextIdx = idx + delta;
       if (nextIdx < 0 || nextIdx >= ids.length) return;
-      const nextId = ids[nextIdx]!;
+      const nextId = ids[nextIdx];
       onSelectRef.current(nextId);
       requestAnimationFrame(() => scrollEntryIntoView(nextId));
     };

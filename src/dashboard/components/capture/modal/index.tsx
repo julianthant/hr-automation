@@ -225,7 +225,7 @@ export const CapturePanel = forwardRef<CapturePanelHandle, CapturePanelProps>(fu
   useEffect(() => {
     if (!active || started || phase !== "starting") return;
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const resp = await fetch("/api/capture/start", {
           method: "POST",

@@ -17,5 +17,5 @@ export function extractOcrRecordEid(record: unknown): string {
  * Extract the carry-forward name from an OCR record using the form spec.
  */
 export function extractOcrRecordName(record: unknown, spec: AnyOcrFormSpec): string {
-  return spec.carryForwardKey(record as never);
+  return spec.carryForwardKey(record);
 }

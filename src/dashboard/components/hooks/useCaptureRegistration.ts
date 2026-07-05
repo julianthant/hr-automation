@@ -25,13 +25,13 @@ function loadRegistry(): Promise<RegistryResponse> {
   pendingFetch = fetch("/api/capture/registry")
     .then((r) => (r.ok ? r.json() : {}))
     .then((data) => {
-      cachedRegistry = (data ?? {}) as RegistryResponse;
+      cachedRegistry = (data ?? {});
       pendingFetch = null;
       return cachedRegistry;
     })
     .catch(() => {
       pendingFetch = null;
-      return {} as RegistryResponse;
+      return {};
     });
   return pendingFetch;
 }
@@ -47,7 +47,7 @@ export function useCaptureRegistration(workflow: string): CaptureRegistration | 
 
   useEffect(() => {
     let cancelled = false;
-    loadRegistry().then((data) => {
+    void loadRegistry().then((data) => {
       if (cancelled) return;
       const entry = data[workflow];
       setRegistration(

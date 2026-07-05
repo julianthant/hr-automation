@@ -89,6 +89,6 @@ export function queryPriorEntriesByKey(
     step: row.latest_step,
     timestamp: row.latest_ts,
     date: row.tracker_date,
-    data: parseJsonObject(row.latest_data_json, {} as Record<string, unknown>),
+    data: parseJsonObject(row.latest_data_json, {}),
   }));
 }

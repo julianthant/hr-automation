@@ -17,9 +17,6 @@ import type {
   StepDisplayConfig,
   StepDisplayRule,
   DelegationDisplayConfig,
-  TitleSchemeId,
-  SubtitleSchemeId,
-  TraceSchemeId,
 } from "../../../../domain/workflow-presentation/types.js";
 import { formatStepName } from "../../shared/types.js";
 import {
@@ -115,10 +112,10 @@ export function overrideToGraph(
     position: { ...ROW_POS },
     data: {
       workflowLabel: label,
-      title: draftNaming.title ?? baseNaming.title ?? { scheme: DEFAULT_TITLE_SCHEME as TitleSchemeId },
+      title: draftNaming.title ?? baseNaming.title ?? { scheme: DEFAULT_TITLE_SCHEME },
       subtitle:
-        draftNaming.subtitle ?? baseNaming.subtitle ?? { scheme: DEFAULT_SUBTITLE_SCHEME as SubtitleSchemeId },
-      trace: draftNaming.trace ?? baseNaming.trace ?? { scheme: DEFAULT_TRACE_SCHEME as TraceSchemeId },
+        draftNaming.subtitle ?? baseNaming.subtitle ?? { scheme: DEFAULT_SUBTITLE_SCHEME },
+      trace: draftNaming.trace ?? baseNaming.trace ?? { scheme: DEFAULT_TRACE_SCHEME },
       titleOverride: draftNaming.title,
       subtitleOverride: draftNaming.subtitle,
       traceOverride: draftNaming.trace,
@@ -192,7 +189,7 @@ export function overrideToGraph(
       type: NODE_PREP,
       position: { ...PREP_POS },
       data: {
-        prepTitle: del.prepTitle ?? baseDel.prepTitle ?? { scheme: DEFAULT_PREP_TITLE_SCHEME as TitleSchemeId },
+        prepTitle: del.prepTitle ?? baseDel.prepTitle ?? { scheme: DEFAULT_PREP_TITLE_SCHEME },
         prepTitleOverride: del.prepTitle,
         sampleVars,
       },
@@ -203,10 +200,10 @@ export function overrideToGraph(
       position: { ...MEMBER_POS },
       data: {
         memberTitle:
-          del.memberTitle ?? baseDel.memberTitle ?? { scheme: DEFAULT_MEMBER_TITLE_SCHEME as TitleSchemeId },
+          del.memberTitle ?? baseDel.memberTitle ?? { scheme: DEFAULT_MEMBER_TITLE_SCHEME },
         memberSubtitle:
           del.memberSubtitle ??
-          baseDel.memberSubtitle ?? { scheme: DEFAULT_MEMBER_SUBTITLE_SCHEME as SubtitleSchemeId },
+          baseDel.memberSubtitle ?? { scheme: DEFAULT_MEMBER_SUBTITLE_SCHEME },
         memberTitleOverride: del.memberTitle,
         memberSubtitleOverride: del.memberSubtitle,
         sampleVars,

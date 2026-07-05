@@ -133,7 +133,7 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
   } catch (err) {
     // `parentRunId` is kernel-owned (top-level); keep it out of `data`.
     const { parentRunId: _parentRunId, ...reviewData } = lastReviewData ?? {};
-    ctx.updateData({ ...reviewData, mode: "prepare" } as Partial<OcrInput & Record<string, unknown>>);
+    ctx.updateData({ ...reviewData, mode: "prepare" });
     throw err;
   }
   if (result.status === "complete") {
@@ -158,7 +158,7 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
       ...reviewData,
       ...(frozenTraceId ? { __traceId: frozenTraceId } : {}),
       mode: "prepare",
-    } as Partial<OcrInput & Record<string, unknown>>);
+    });
     return;
   }
   if (result.status !== "awaiting-approval") {
@@ -202,5 +202,5 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
     update.fannedOutItemIds = JSON.stringify(payload.fannedOutItemIds);
     update.fannedOutCount = String(payload.fannedOutItemIds.length);
   }
-  ctx.updateData(update as Partial<OcrInput & Record<string, unknown>>);
+  ctx.updateData(update);
 }

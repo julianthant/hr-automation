@@ -328,7 +328,7 @@ function readLatestOcrApprovalState(
       const kind = classifyApprovalRow(row);
       if (kind === null) continue;
       if (!latest || latest.ts < row.timestamp) {
-        latest = { ts: row.timestamp, row: row as ApprovalRow };
+        latest = { ts: row.timestamp, row: row };
       }
     }
   }
@@ -385,13 +385,13 @@ function parseRecordsField(value: unknown): unknown[] {
 
 function parseStringArrayField(value: unknown): string[] | undefined {
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
-    return value as string[];
+    return value;
   }
   if (typeof value !== "string") return undefined;
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) && parsed.every((v) => typeof v === "string")
-      ? (parsed as string[])
+      ? (parsed)
       : undefined;
   } catch {
     return undefined;

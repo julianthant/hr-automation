@@ -206,14 +206,14 @@ export function mergeDisplayItems(logs: CollapsedLogEntry[], events: RunEvent[])
   let j = 0;
 
   while (i < logItems.length && j < eventItems.length) {
-    if (displayItemTimestamp(logItems[i]!) <= displayItemTimestamp(eventItems[j]!)) {
-      result.push(logItems[i++]!);
+    if (displayItemTimestamp(logItems[i]) <= displayItemTimestamp(eventItems[j])) {
+      result.push(logItems[i++]);
     } else {
-      result.push(eventItems[j++]!);
+      result.push(eventItems[j++]);
     }
   }
-  while (i < logItems.length) result.push(logItems[i++]!);
-  while (j < eventItems.length) result.push(eventItems[j++]!);
+  while (i < logItems.length) result.push(logItems[i++]);
+  while (j < eventItems.length) result.push(eventItems[j++]);
   return result;
 }
 
@@ -343,7 +343,7 @@ export function LogStream({
   const previewHeader = previewVisible ? renderMaybeFactory(previewHeaderSlot) : undefined;
   const previewBody = previewVisible ? renderMaybeFactory(previewSlot) : undefined;
 
-  const activeCategory = CATEGORIES.find((c) => c.key === category) ?? CATEGORIES[0]!;
+  const activeCategory = CATEGORIES.find((c) => c.key === category) ?? CATEGORIES[0];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -538,7 +538,7 @@ export function LogStream({
             }}
           >
             {virtualItems.map((virtualRow) => {
-              const item = visible[virtualRow.index]!;
+              const item = visible[virtualRow.index];
               return (
                 <div
                   key={virtualRow.key}

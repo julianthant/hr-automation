@@ -330,7 +330,7 @@ export function buildOcrPrepareHandler(
       // ticket — threaded into the orchestrator so the delegated OCR run
       // COMPOSES it instead of minting its own HHMMSS (VQ-1).
       let delegationRootTracePrefix = operationRef
-        ? tracePrefix(operationRef.baseData.__traceId!)
+        ? tracePrefix(operationRef.baseData.__traceId)
         : undefined;
       try {
         if (isOathUploadTarget) {
@@ -611,7 +611,7 @@ async function defaultEnqueueOathUploadAtPrepare(
               uploadMode: "full",
               status: "ocr-prep",
               __id: emittedItemId,
-              __traceId: capturedTraceId!,
+              __traceId: capturedTraceId,
               ...serializeRunOptionsForData(args.runOptions),
               ...(args.dryRun ? { dryRun: "true" } : {}),
             },

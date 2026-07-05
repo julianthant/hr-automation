@@ -88,7 +88,7 @@ function uniqueCandidateEids(results: PersonLookupResult[]): string[] {
 }
 
 function selectPreferredResult(results: PersonLookupResult[]): PersonLookupResult {
-  return [...results].sort(comparePreferredResult)[0] ?? results[0]!;
+  return [...results].sort(comparePreferredResult)[0] ?? results[0];
 }
 
 export function derivePersonLookupSelection(

@@ -43,7 +43,6 @@ import {
   type GraphEdge,
   type GraphModel,
   type StepGraphNode,
-  type OpsLaneGraphNode,
   type ActionNodeData,
   type AddedLaneOp,
 } from "./graph-types.js";
@@ -242,8 +241,8 @@ function GraphCanvasInner({
               bankNote: stepMeta.get(n.data.step)?.note,
               bankSourceRef: stepMeta.get(n.data.step)?.sourceRef,
             },
-          } as GraphNode)
-        : ({ ...n, deletable: false } as GraphNode),
+          })
+        : ({ ...n, deletable: false }),
     );
     const stepCount = nodes.filter((n) => n.type === NODE_STEP).length;
     laneOps.extraLanes.forEach((ex, i) => {
@@ -253,7 +252,7 @@ function GraphCanvasInner({
         position: { x: STEP_X0 + (stepCount + i) * STEP_DX, y: STEP_Y },
         deletable: false,
         data: { step: ex.step, label: ex.label, ops: ex.ops, bankNote: ex.note, bankSourceRef: ex.sourceRef },
-      } as GraphNode);
+      });
     });
     return { nodes, edges: projected.edges };
   }, [data.base, draft, workflowName, laneOps, stepMeta, addedOps]);
@@ -349,7 +348,7 @@ function GraphCanvasInner({
     steps.sort((a, b) => a.data.stepIndex - b.data.stepIndex);
     for (const n of steps) lanes.push({ nodeId: n.id, ops: n.data.ops ?? [] });
     for (const n of configModel.nodes) {
-      if (n.type === NODE_OPS_LANE) lanes.push({ nodeId: n.id, ops: (n as OpsLaneGraphNode).data.ops });
+      if (n.type === NODE_OPS_LANE) lanes.push({ nodeId: n.id, ops: (n).data.ops });
     }
     return buildDataFlowEdges(lanes);
   }, [configModel]);
@@ -357,7 +356,7 @@ function GraphCanvasInner({
   const displayNodes = useMemo(() => {
     if (!focusedId) return nodes;
     return nodes.map((n) =>
-      n.id === focusedId ? n : ({ ...n, style: { ...n.style, opacity: 0.4 } } as GraphNode),
+      n.id === focusedId ? n : ({ ...n, style: { ...n.style, opacity: 0.4 } }),
     );
   }, [nodes, focusedId]);
   const displayEdges = useMemo(

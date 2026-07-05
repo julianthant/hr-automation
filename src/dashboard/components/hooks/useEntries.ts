@@ -231,10 +231,10 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         }
         prevHashRef.current = hash;
 
-        const dedupedBase = dedupeLatestByIdWithCarriedEmplId(raw as TrackerEntry[]);
+        const dedupedBase = dedupeLatestByIdWithCarriedEmplId(raw);
 
         const sorted = [...dedupedBase]
-          .sort((a, b) => entrySortKey(a as WithFirstLog) - entrySortKey(b as WithFirstLog));
+          .sort((a, b) => entrySortKey(a) - entrySortKey(b));
 
         // Per-id ref cache: reuse the same object reference for rows whose render
         // hash hasn't changed. This lets EntryItem's React.memo bail out on
@@ -243,7 +243,7 @@ export function useEntries(workflow: string, date: string): UseEntriesResult {
         const cache = entryRefCacheRef.current;
         const nextCache = new Map<string, TrackerEntry & { _hash: string }>();
         const deduped = sorted.map((entry) => {
-          const hash = entryRenderHash(entry as WithFirstLog);
+          const hash = entryRenderHash(entry);
           const cached = cache.get(entry.id);
           if (cached && cached._hash === hash) {
             nextCache.set(entry.id, cached);

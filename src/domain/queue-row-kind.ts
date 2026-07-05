@@ -42,7 +42,7 @@ export function resolveQueueRowKindFromValue<TInput>(
   input: TInput,
   workflowName: string,
 ): QueueRowKind {
-  const result = typeof kind === "function" ? (kind as QueueRowKindResolver<TInput>)(input) : kind;
+  const result = typeof kind === "function" ? (kind)(input) : kind;
   if (!isQueueRowKind(result)) {
     throw new Error(
       `resolveQueueRowKind: workflow '${workflowName}' produced ${JSON.stringify(result)}, ` +
@@ -113,7 +113,7 @@ export function queueRowKindFromInputSubject<TInput>(
   subject: InputSubjectOrResolver<TInput>,
 ): QueueRowKindOrResolver<TInput> {
   if (typeof subject === "function") {
-    const resolver = subject as InputSubjectResolver<TInput>;
+    const resolver = subject;
     return (input: TInput) => subjectToQueueRowKind(resolver(input));
   }
   return subjectToQueueRowKind(subject);

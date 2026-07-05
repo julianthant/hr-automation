@@ -159,7 +159,7 @@ function CheckRow({
           </span>
         </div>
         {canRelookup && (
-          <RelookupButton label={check.label} pending={pending} onClick={() => onRelookup!(lookupKind)} />
+          <RelookupButton label={check.label} pending={pending} onClick={() => onRelookup(lookupKind)} />
         )}
       </div>
     );
@@ -207,7 +207,7 @@ function CheckRow({
             <RelookupButton
               label={check.label}
               pending={pending}
-              onClick={() => onRelookup!(lookupKind)}
+              onClick={() => onRelookup(lookupKind)}
             />
           )}
         </div>

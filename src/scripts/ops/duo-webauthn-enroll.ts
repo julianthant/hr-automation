@@ -110,7 +110,7 @@ async function setupVirtualAuthenticator(cdp: CDPSession, transport: DuoWebAuthn
           isUserVerified: true,
           automaticPresenceSimulation: true,
         },
-      })) as { authenticatorId: string }
+      }))
     ).authenticatorId;
   try {
     return await addOnce();

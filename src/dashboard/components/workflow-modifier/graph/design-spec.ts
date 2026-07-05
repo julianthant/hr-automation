@@ -31,7 +31,6 @@ import {
   type GraphModel,
   type GraphNode,
   type GraphEdge,
-  type StepGraphNode,
   type AddedLaneOp,
   type ActionNodeData,
 } from "./graph-types.js";
@@ -290,7 +289,7 @@ export function mergeAddedOpsIntoModel(
 ): GraphModel {
   const stepPos = new Map<string, { x: number; y: number }>();
   for (const n of model.nodes) {
-    if (n.type === NODE_STEP) stepPos.set((n as StepGraphNode).data.step, n.position);
+    if (n.type === NODE_STEP) stepPos.set((n).data.step, n.position);
   }
   const extra: GraphNode[] = [];
   for (const [step, ops] of Object.entries(addedOps)) {

@@ -34,7 +34,7 @@ export function splitOcrPersonName(fullName: string | null | undefined): OcrName
   if (parts.length >= 2) {
     return {
       firstName: parts.slice(0, -1).join(" "),
-      lastName: parts[parts.length - 1]!,
+      lastName: parts[parts.length - 1],
       display,
     };
   }

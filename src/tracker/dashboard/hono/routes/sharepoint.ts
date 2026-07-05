@@ -24,7 +24,7 @@ export function registerSharePointRoutes(app: Hono): void {
       if (!parsed.ok) {
         return jsonResponse({ ok: false, error: parsed.error }, 400);
       }
-      const { status, body } = await handler(parsed.body as { id?: string });
+      const { status, body } = await handler(parsed.body);
       return jsonResponse(body, status);
     } catch (err) {
       return jsonResponse({ ok: false, error: errorMessage(err) }, 500);

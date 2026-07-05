@@ -235,6 +235,6 @@ registerOcrDownstream("verify", {
   cursorKey: ({ runId }) => `verify-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: false,
-  recordName: (r) => ("checks" in r ? (r as VerifyPreviewRecord).name || "(no name)" : "(no name)"),
+  recordName: (r) => ("checks" in r ? (r).name || "(no name)" : "(no name)"),
   renderEditor: noopRenderer,
 });

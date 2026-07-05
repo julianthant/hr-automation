@@ -205,8 +205,8 @@ export function buildOcrApproveHandler(
       // per-record itemIds stay in sync with what is actually enqueued.
       input.records.forEach((rec, index) => {
         if (!isSelectedRecord(rec)) return;
-        if (approveTo.canFanOut && !approveTo.canFanOut(rec as never)) return;
-        const baseFanInput = approveTo.deriveInput(rec as never, recordContext);
+        if (approveTo.canFanOut && !approveTo.canFanOut(rec)) return;
+        const baseFanInput = approveTo.deriveInput(rec, recordContext);
         const logicalFanInput =
           baseFanInput && typeof baseFanInput === "object"
             ? {
@@ -222,7 +222,7 @@ export function buildOcrApproveHandler(
                 fanMemberShape,
               )
             : logicalFanInput;
-        const itemId = approveTo.deriveItemId(rec as never, input.runId, index);
+        const itemId = approveTo.deriveItemId(rec, input.runId, index);
         enqueueInputs.push(fanInput);
         logicalEnqueueInputs.push(logicalFanInput);
         itemIds.push(itemId);
@@ -242,7 +242,7 @@ export function buildOcrApproveHandler(
           sessionId: input.sessionId,
           runId: input.runId,
           perRecordItemIds: [],
-        } as never),
+        }),
       });
     }
 
@@ -400,7 +400,7 @@ export function buildOcrApproveHandler(
             approveDocumentTo.deriveInput(doc as never),
             ocrRootTracePrefix,
           );
-          docFanItemId = approveDocumentTo.deriveItemId(doc as never);
+          docFanItemId = approveDocumentTo.deriveItemId(doc);
           docDispatchResult = await enqueueDocFanOut({
             workflow: approveDocumentTo.workflow,
             input: docInput,
@@ -749,8 +749,8 @@ export function buildFanOutItemIdResolver(
   logicalInputs.forEach((inp, idx) => {
     const key = JSON.stringify(inp);
     const queue = queueByInputJson.get(key);
-    if (queue) queue.push(itemIds[idx]!);
-    else queueByInputJson.set(key, [itemIds[idx]!]);
+    if (queue) queue.push(itemIds[idx]);
+    else queueByInputJson.set(key, [itemIds[idx]]);
   });
   return (input: unknown): string => {
     const itemId = queueByInputJson.get(JSON.stringify(input))?.shift();
