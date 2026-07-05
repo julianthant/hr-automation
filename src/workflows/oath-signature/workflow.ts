@@ -5,22 +5,66 @@ import {
 import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { loginToUCPath } from "../../infra/auth/login.js";
+import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { todayMmDdYyyy } from "../../domain/dates.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
+import { oathSignatureStatusExtensions } from "../../domain/oath-signature-status.js";
 import {
   buildOathSignaturePlan,
   returnToSearchForNextItem,
   type OathSignatureContext,
 } from "./enter.js";
+import { verifyOathInCrm, decideCrmGate, type CrmGateDecision } from "./crm-verify.js";
 import {
   OathSignatureInputSchema,
   type OathSignatureInput,
   type OathSignerInput,
 } from "./schema.js";
+
+/**
+ * Normalize a date value pulled off tracker data / input to MM/DD/YYYY.
+ *
+ * Accepts M/D/YYYY (single digits padded — an operator typing "7/1/2026" in
+ * Edit Data must not have the override silently dropped). Empty/absent → "".
+ * Any other non-empty shape THROWS: silently discarding an operator's date
+ * override and substituting the CRM date (or today) is exactly the
+ * plausible-but-wrong-value class the fail-loud rule forbids.
+ * Exported for unit tests.
+ */
+export function asMmDdYyyy(value: unknown): string {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (s.length === 0) return "";
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) {
+    throw new Error(
+      `Oath signature date "${s}" is not M/D/YYYY — fix the Signature Date value (it will NOT be silently ignored)`,
+    );
+  }
+  return `${m[1].padStart(2, "0")}/${m[2].padStart(2, "0")}/${m[3]}`;
+}
+
+/**
+ * An operator "CRM Onboarding" override that forces the CRM gate to pass.
+ *
+ * STRICT allowlist — exact positive tokens, or the workflow's own
+ * "Verified (<stage>)" label (carried through edit-and-resume). A substring
+ * match here was a real bug: /verif/i also matched "Not verified" /
+ * "Unverified", silently bypassing the gate on a NEGATIVE annotation.
+ * Anything not on the allowlist (including negations and free text) leaves
+ * the gate ON, so the CRM check simply re-runs — the safe direction.
+ * Exported for unit tests.
+ */
+export function isForceVerifiedOverride(value: unknown): boolean {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (s.length === 0) return false;
+  return (
+    /^(verified|verify|override|yes|true|approved|confirm|confirmed|force)$/i.test(s) ||
+    /^verified\s*\(/i.test(s)
+  );
+}
 
 /**
  * Oath Signature runtime policy.
@@ -49,7 +93,7 @@ export const OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
 };
 
 const WORKFLOW = "oath-signature";
-const oathSignatureSteps = ["ucpath-auth", "transaction"] as const;
+const oathSignatureSteps = ["crm-verify", "ucpath-auth", "transaction"] as const;
 
 /**
  * Kernel definition for the Oath Signature workflow — **EID-only**.
@@ -78,6 +122,13 @@ export const oathSignatureWorkflow = defineWorkflow({
   iconName: "ClipboardSignature",
   systems: [
     {
+      // CRM onboarding is checked FIRST (the `crm-verify` step). deferAuth so a
+      // fan-out signer child only Duos when it actually reaches CRM, and an
+      // Edit-Data override that bypasses the gate never touches CRM at all.
+      id: "crm",
+      deferAuth: true,
+    },
+    {
       id: "ucpath",
       // deferAuth: UCPath auth is deferred to the `ucpath-auth` step so a
       // fan-out signer child only Duos AFTER OCR approval, when it actually
@@ -90,16 +141,24 @@ export const oathSignatureWorkflow = defineWorkflow({
   steps: oathSignatureSteps,
   schema: OathSignatureInputSchema,
   runtimePolicy: OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY,
+  statusExtensions: oathSignatureStatusExtensions,
   queueTitle: { kind: "single" },
   batch: {
     mode: "sequential",
     preEmitPending: true,
     betweenItems: ["reset"],
   },
+  // Edit Data (opt-in via `editable`): override the CRM result (flip a
+  // "Skipped — No CRM Record" row to Verified to force the oath through), the
+  // signature date, and the EID, then re-run without re-checking CRM. Signature
+  // Time is CRM-derived display only.
+  matchKey: "emplId",
   detailFields: [
     { key: "name", label: "Employee", conditional: true },
-    { key: "emplId", label: "Empl ID" },
-    { key: "date", label: "Signature Date", conditional: true },
+    { key: "emplId", label: "Empl ID", editable: true, inputKind: "id", group: "Employee" },
+    { key: "crmOnboarding", label: "CRM Onboarding", conditional: true, editable: true, group: "Verification" },
+    { key: "date", label: "Signature Date", conditional: true, editable: true, inputKind: "date", group: "Verification" },
+    { key: "signatureTime", label: "Signature Time", conditional: true },
   ],
   initialData: (input) => ({
     emplId: input.emplId,
@@ -141,19 +200,88 @@ async function runSignerBranch(
     employeeName: input.name ?? "",
     alreadyHasOath: false,
     oathDate: "",
+    existingOathDate: "",
   };
 
+  // Effective values read from ctx.data (which already has any Edit-Data
+  // prefilled overrides merged in — see handler-runner) with the raw input as
+  // the fallback, so an operator EID / date / CRM-result override reaches the
+  // search + gate. The handler's own updateData must therefore use these
+  // EFFECTIVE values, never input.* (which would clobber the prefill).
+  const data = ctx.data;
+  const effectiveEmplId =
+    (typeof data.emplId === "string" && data.emplId.trim()) || input.emplId;
+  const effectiveName =
+    (typeof data.name === "string" ? data.name.trim() : "") || (input.name ?? "");
+  const dateOverride = asMmDdYyyy(data.date) || asMmDdYyyy(input.date);
+  const forceVerified = isForceVerifiedOverride(data.crmOnboarding);
+
   ctx.updateData({
-    emplId: input.emplId,
-    ...(input.name ? { name: input.name } : {}),
-    ...(input.date ? { date: input.date } : {}),
+    emplId: effectiveEmplId,
+    ...(effectiveName ? { name: effectiveName } : {}),
+    ...(dateOverride ? { date: dateOverride } : {}),
     ...(input.dryRun ? { dryRun: true } : {}),
   });
+  oathCtx.employeeName = effectiveName;
 
-  // UCPath auth is deferred from session launch to here (the system's `login`
-  // is a no-op). `loginToUCPath` is idempotent ("already_logged_in" → true), so
-  // on a daemon only the first item shows Duo and the rest reuse the warm
-  // session.
+  // ── Step 1: CRM onboarding verification (the gate) ───────────────────────
+  // Confirm the employee completed onboarding in ACT CRM (has a record whose
+  // UCPath ID matches, with a "Witness Ceremony Oath New Hire Signed" event) and
+  // read that authoritative signature date. No record / not signed → skip. An
+  // Edit-Data "CRM Onboarding = Verified" override bypasses this step entirely
+  // (no CRM Duo), so an operator can force a mis-skipped row through.
+  let gate: CrmGateDecision | null = null;
+  if (forceVerified) {
+    ctx.skipStep("crm-verify");
+    const label =
+      typeof data.crmOnboarding === "string" && data.crmOnboarding.trim()
+        ? data.crmOnboarding.trim()
+        : "Verified (override)";
+    ctx.updateData({ crmOnboarding: label });
+    log.step(`CRM check bypassed via Edit Data override for ${effectiveEmplId}.`);
+  } else {
+    gate = await ctx.step("crm-verify", async (): Promise<CrmGateDecision> => {
+      const crmPage = await ctx.page("crm");
+      const ok = await loginToACTCrm(crmPage, ctx.workflowInstance, ctx.signal);
+      if (!ok) throw new Error("ACT CRM authentication failed");
+      const verification = await verifyOathInCrm(
+        crmPage,
+        effectiveEmplId,
+        effectiveName || undefined,
+      );
+      const decision = decideCrmGate(verification);
+      ctx.updateData({
+        crmOnboarding: decision.crmOnboarding,
+        ...(decision.signedTime ? { signatureTime: decision.signedTime } : {}),
+      });
+      return decision;
+    });
+
+    if (gate.skip) {
+      ctx.updateData({
+        skipped: "true",
+        skipReason: gate.skipReason ?? "Skipped",
+        status: `Skipped (${gate.skipReason ?? "no CRM record"})`,
+      });
+      // No UCPath work — mark the remaining steps skipped so the pipeline reads
+      // clean (crm-verify done → ucpath-auth / transaction skipped).
+      ctx.skipStep("ucpath-auth");
+      ctx.skipStep("transaction");
+      log.success(
+        `Skipped ${effectiveEmplId}${effectiveName ? ` (${effectiveName})` : ""} — ${gate.skipReason}.`,
+      );
+      return;
+    }
+  }
+
+  // The CRM "New Hire Signed" date is the signature date entered into UCPath,
+  // unless an explicit operator/upstream date override was supplied.
+  const crmSignedDate = gate ? asMmDdYyyy(gate.signedDate) : "";
+  const effectiveDate = dateOverride || crmSignedDate;
+
+  // ── Step 2: UCPath auth ──────────────────────────────────────────────────
+  // `loginToUCPath` is idempotent ("already_logged_in" → true), so on a daemon
+  // only the first item shows Duo and the rest reuse the warm session.
   const page = await ctx.page("ucpath");
   await ctx.step("ucpath-auth", async () => {
     const ok = await loginToUCPath(page, undefined, ctx.signal);
@@ -166,13 +294,20 @@ async function runSignerBranch(
   const shot = (label: string): Promise<void> =>
     ctx.screenshot({ kind: "form", label, systems: ["ucpath"] }).then(() => undefined);
 
+  // ── Step 3: UCPath transaction ───────────────────────────────────────────
   await ctx.step("transaction", async () => {
-    // The live-page probe inside buildOathSignaturePlan still skips the
-    // OK/Save steps when an oath already exists on the profile — that's
-    // the sole duplicate guard now. Tracker-side idempotency was removed
-    // 2026-04-23 per user direction (fail-loud / no silent skip-by-record).
+    // planInput carries the effective EID + effective date (operator override →
+    // CRM signed date → else UCPath's today prefill). The live-page probe inside
+    // buildOathSignaturePlan still skips OK/Save when an oath already exists —
+    // that's the sole duplicate guard (tracker idempotency removed 2026-04-23).
+    const planInput: OathSignerInput = {
+      ...input,
+      emplId: effectiveEmplId,
+      date: effectiveDate || undefined,
+    };
+
     let dryRunProofCaptured = false;
-    const plan = buildOathSignaturePlan(input, page, oathCtx, {
+    const plan = buildOathSignaturePlan(planInput, page, oathCtx, {
       onProfileLoaded: () => shot("oath-signature-profile"),
       onOathStaged: () => shot("oath-signature-oath-entered"),
       beforeCommit: async () => {
@@ -183,22 +318,29 @@ async function runSignerBranch(
     });
     await plan.execute();
 
-    // Record the resolved employee name + the committed oath date. Both were
-    // previously missing: the name selector matched nothing, and the date was
-    // stamped only when explicitly overridden. `oathCtx.oathDate` is read back
-    // from the form (today's prefill or the override); fall back to the input /
-    // today so the "Signature Date" field is never blank on a successful add.
     if (oathCtx.employeeName) {
       ctx.updateData({ name: oathCtx.employeeName });
     }
-    if (!oathCtx.alreadyHasOath) {
-      ctx.updateData({ date: oathCtx.oathDate || input.date || todayMmDdYyyy() });
+
+    // Record the signature date on BOTH paths. Add path: the value read back
+    // from the form (override / CRM date / today prefill). Skip-existing path:
+    // the CRM/override date, else the existing grid date — recorded even though
+    // someone else entered the oath (the dashboard showed "—" before).
+    const recordedDate = oathCtx.alreadyHasOath
+      ? effectiveDate || oathCtx.existingOathDate
+      : oathCtx.oathDate || effectiveDate || todayMmDdYyyy();
+    if (recordedDate) {
+      ctx.updateData({ date: recordedDate });
     }
 
     if (oathCtx.alreadyHasOath) {
-      ctx.updateData({ status: "Skipped (Existing Oath)" });
+      ctx.updateData({
+        skipped: "true",
+        skipReason: "Oath already on file",
+        status: "Skipped (Existing Oath)",
+      });
       log.success(
-        `Skipped ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — oath already on file.`,
+        `Skipped ${effectiveEmplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — oath already on file${recordedDate ? ` (${recordedDate})` : ""}.`,
       );
       return;
     }
@@ -209,13 +351,13 @@ async function runSignerBranch(
         dryRunProofCaptured: String(dryRunProofCaptured),
       });
       log.success(
-        `Dry run complete for ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — UCPath Save was skipped.`,
+        `Dry run complete for ${effectiveEmplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""} — UCPath Save was skipped.`,
       );
       return;
     }
 
     log.success(
-      `Oath signature added for ${input.emplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""}.`,
+      `Oath signature added for ${effectiveEmplId}${oathCtx.employeeName ? ` (${oathCtx.employeeName})` : ""}${recordedDate ? ` (${recordedDate})` : ""}.`,
     );
   });
 

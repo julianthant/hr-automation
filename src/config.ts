@@ -112,6 +112,7 @@ export const CRM_SEARCH_URL =
 /** ACT CRM section URL mappings — record ID appended as ?id= param. */
 export const CRM_SECTION_URLS: Record<string, string> = {
   "UCPath Entry Sheet": "https://act-crm.my.site.com/hr/ONB_PPSEntrySheet",
+  "Onboarding History": "https://act-crm.my.site.com/hr/ONB_ShowOnboardingHistory",
 };
 
 // --- UCPath ---

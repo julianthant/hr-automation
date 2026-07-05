@@ -18,8 +18,10 @@
 import { registerWorkflowStatusExtensions } from "./queue-row-status.js";
 import { personLookupStatusExtensions } from "./person-lookup-status.js";
 import { separationsStatusExtensions } from "./separations-status.js";
+import { oathSignatureStatusExtensions } from "./oath-signature-status.js";
 import { ocrStatusExtensions } from "../tracker/dashboard/ocr-status.js";
 
 registerWorkflowStatusExtensions("person-lookup", personLookupStatusExtensions);
 registerWorkflowStatusExtensions("separations", separationsStatusExtensions);
+registerWorkflowStatusExtensions("oath-signature", oathSignatureStatusExtensions);
 registerWorkflowStatusExtensions("ocr", ocrStatusExtensions);

@@ -19,6 +19,8 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 ## Gotchas
 
+- **`ONB_SearchOnboardings?q=` is a FUZZY relevance search, not an exact match.** A numeric EID that belongs to nobody still returns a plausible-but-wrong person (live-confirmed 2026-07-02: `?q=99999999` → "Ngo, Thienan"; `?q=00000000` → 5 unrelated rows), and only a truly junk query (`?q=zzqxjunk`) returns zero rows. So "≥1 result" is NOT proof the record belongs to the target, and "0 results" is NOT a reliable "no record" signal for a real EID. **Any EID-driven lookup must open the matched record and confirm its `UCPath Employee ID` field equals the target EID before trusting it** (see `oath-signature/crm-verify.ts` — `extractField(page, "UCPath Employee ID")` gate). A real EID returns exactly the right single row.
+- **Onboarding history reader** (`history.ts` — `readOnboardingOathHistory` / pure `findOathSignedTransition` + `parseCrmHistoryTimestamp`): reads the `ONB_ShowOnboardingHistory` `ProcessStageText` transition log (a `table.detailList`; data rows are `Date | Created By | Field | Old Value | New Value`). The oath is signed the moment a row transitions **to** `"Witness Ceremony Oath New Hire Signed"` (`WITNESS_OATH_NEW_HIRE_SIGNED`); that row's Date cell (`M/D/YYYY H:MM AM/PM`) is the authoritative signature timestamp. **Match the NEW VALUE column only** — the same string is the OLD value of the next (HR-Counter-Signed) row. Navigate via `navigateToSection(page, "Onboarding History")` (direct URL, `CRM_SECTION_URLS`) or the `onboardingHistory.showHistoryButton`.
 - Hardcoded column indices in search results: "Offer Sent On" is column index 1
 - Date parsing is lenient (`new Date(dateText)`) — silently skips invalid dates
 - If all dates are unparseable, throws a distinct error: "CRM returned search rows but no parsable Offer Sent On date — check table format or locale" (separate from the genuine zero-row "No search results found" error)
@@ -31,4 +33,4 @@ Example intents for `npm run selector:search`: [`common-intents.txt`](./common-i
 
 ## Lessons Learned
 
-*(Add entries here when CRM bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-07-02: CRM `?q=` search is fuzzy — a wrong-EID lookup silently returns a wrong person; gate on the record's `UCPath Employee ID`.** Added the onboarding-history reader (`history.ts`) + `onboardingHistory` selectors + the `"Onboarding History"` `CRM_SECTION_URLS` mapping for oath-signature's CRM verification. Live-mapped on EID 10883906 / 10883915: the history grid is `table.detailList` with 5-direct-cell data rows; the oath-signed event is the `→ "Witness Ceremony Oath New Hire Signed"` transition. Because the search is fuzzy (see Gotchas), the reader is only ever reached after `verifyOathInCrm` confirms the opened record's `UCPath Employee ID` equals the target EID — never trust a bare search hit.

@@ -118,8 +118,33 @@ export const sectionNav = {
       .or(page.getByRole("tab", { name: new RegExp(sectionName, "i") })),
 };
 
+// ─── Onboarding history (/hr/ONB_ShowOnboardingHistory?id=...) ─────────────
+
+export const onboardingHistory = {
+  /**
+   * "Show Onboarding History" button on the ViewOnboarding record page. Opens
+   * the ProcessStageText transition log. Direct URL nav (`CRM_SECTION_URLS`)
+   * is preferred; this button is the click fallback. verified 2026-07-02
+   * @tags onboarding, history, button, show, crm
+   */
+  showHistoryButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Show Onboarding History" }),
+
+  /**
+   * Every row of the onboarding-history detail table(s). The history grid is a
+   * `table.detailList`; each DATA row has exactly 5 direct `td`/`th` cells —
+   * `Date | Created By | Field (ProcessStageText) | Old Value | New Value`.
+   * The reader (`history.ts`) scopes to the 5-direct-cell rows and matches the
+   * New Value column, so this locator can safely span the header/wrapper rows.
+   * verified 2026-07-02 (EID 10883906 / 10883915)
+   * @tags onboarding, history, rows, table, detaillist, crm
+   */
+  historyRows: (page: Page): Locator => page.locator("table.detailList tr"),
+};
+
 export const crmSelectors = {
   search,
   record,
   sectionNav,
+  onboardingHistory,
 };
