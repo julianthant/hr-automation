@@ -1,6 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
-import { oathSignature } from "../../systems/ucpath/selectors.js";
+import { oathSignature, smartHR } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_PERSON_PROFILES_URL } from "./config.js";
 import type { OathSignerInput } from "./schema.js";
@@ -16,6 +16,13 @@ export interface OathSignatureContext {
    * today prefill. Empty until the add/fill step runs (skip path leaves it "").
    */
   oathDate: string;
+  /**
+   * The date of the oath row ALREADY on the profile, read from the display-only
+   * grid cell when `alreadyHasOath` is true (someone else entered it). Recorded
+   * on the skip-existing path so the tracker's "Signature Date" is never blank.
+   * Empty when there is no existing oath. MM/DD/YYYY.
+   */
+  existingOathDate: string;
 }
 
 /**
@@ -147,18 +154,49 @@ async function extractEmployeeName(
  * "There are currently no Oath Signature Date for this profile..."
  * sentinel when the section is empty; presence of the sentinel means safe
  * to add. If absent, an oath row is already present — the handler skips.
+ *
+ * Fail loud on an INCONCLUSIVE probe (frame detached, strict-mode
+ * violation, etc.) — a thrown check must never resolve to
+ * `alreadyHasOath = true`, which would silently SKIP a REQUIRED oath
+ * filing. `isVisible` doesn't throw on ordinary "not found before
+ * timeout"; only a genuine page-state anomaly reaches the catch, which is
+ * exactly the case we must not guess through.
  */
 async function probeExistingOath(
   frame: FrameLocator,
   ctx: OathSignatureContext,
 ): Promise<void> {
-  const sentinelVisible = await oathSignature
-    .noOathSentinel(frame)
-    .isVisible({ timeout: 3_000 })
-    .catch(() => false);
+  let sentinelVisible: boolean;
+  try {
+    sentinelVisible = await oathSignature.noOathSentinel(frame).isVisible({ timeout: 3_000 });
+  } catch (err) {
+    throw new Error(
+      `Existing-oath sentinel check failed — cannot determine whether an oath signature is already on file, refusing to guess (a false "already exists" would skip a required filing). Cause: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
   ctx.alreadyHasOath = !sentinelVisible;
   if (ctx.alreadyHasOath) {
-    log.warn("Oath signature already exists — handler will skip add+save.");
+    // Read the existing (display-only) oath date so the tracker records it even
+    // though we skip add+save — the dashboard showed "—" before when someone
+    // else had entered the oath.
+    ctx.existingOathDate = await readExistingOathDate(frame);
+    log.warn(
+      `Oath signature already exists${ctx.existingOathDate ? ` (${ctx.existingOathDate})` : ""} — handler will skip add+save.`,
+    );
+  }
+}
+
+/**
+ * Read the already-saved oath date from the display-only grid cell. Best-effort:
+ * a miss leaves it empty and the handler falls back to the CRM signed date.
+ */
+async function readExistingOathDate(frame: FrameLocator): Promise<string> {
+  try {
+    const raw = (await oathSignature.existingOathDate(frame).textContent({ timeout: 3_000 }))?.trim() ?? "";
+    return /^\d{2}\/\d{2}\/\d{4}$/.test(raw) ? raw : "";
+  } catch {
+    return "";
   }
 }
 
@@ -204,11 +242,46 @@ async function clickOk(page: Page, frame: FrameLocator): Promise<void> {
   await waitForPageReady(page);
 }
 
-async function clickSave(page: Page, frame: FrameLocator): Promise<void> {
+/**
+ * Click Save and verify the commit before reporting success — previously
+ * logged success purely from the click not throwing, with no confirmation
+ * / error readback (mirrors the fail-loud submit verify in
+ * systems/ucpath/transaction.ts and onbase's classifyOnbasePage).
+ * NEEDS LIVE VERIFY: Person Profile has no mapped, page-specific
+ * confirmation/error selector yet — this reuses the generic PeopleSoft
+ * `smartHR.errorBanner` (.PSERROR/#ALERTMSG/.ps_alert-error) inside the
+ * oath signature frame, plus the post-save reappearance of
+ * `returnToSearchButton`, as the best available signal pending a live
+ * mapping session against a real Save failure.
+ */
+async function clickSave(page: Page, frame: FrameLocator, emplId: string): Promise<void> {
   log.step("Clicking Save to commit...");
   await oathSignature.saveButton(frame).click({ timeout: 10_000 });
   // Save writes to DB — networkidle guards completion; fixed sleep was redundant.
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+
+  const errorCount = await smartHR.errorBanner(frame).count().catch(() => 0);
+  if (errorCount > 0) {
+    const errorText = await smartHR
+      .errorBanner(frame)
+      .nth(0)
+      .textContent({ timeout: 3_000 })
+      .catch(() => null);
+    throw new Error(`Save failed for EID ${emplId}: ${errorText?.trim() ?? "UCPath reported an error"}`);
+  }
+
+  // A clean networkidle + no error banner is NOT a confirmation. Require the
+  // page to have actually returned to the profile view before declaring
+  // success — a hang/silent no-op must not be reported as a committed save.
+  const confirmed = await oathSignature
+    .returnToSearchButton(frame)
+    .isVisible({ timeout: 5_000 })
+    .catch(() => false);
+  if (!confirmed) {
+    throw new Error(
+      `Save for EID ${emplId} did not return to the Person Profile view — UCPath's outcome is unknown, refusing to report success.`,
+    );
+  }
   log.success("Save clicked");
 }
 
@@ -304,7 +377,7 @@ export function buildOathSignaturePlan(
       log.success("Dry run: skipped UCPath Save for oath signature.");
       return;
     }
-    await clickSave(page, getFrame());
+    await clickSave(page, getFrame(), input.emplId);
     await options.onSaved?.();
   });
 

@@ -44,7 +44,13 @@ export type QueueRowDerivedStatus =
   | "awaitingApproval"
   // operator reviewed an awaitingApproval row and chose NOT to re-queue (will
   // fix the Kuali form by hand). Neutral terminal — not a failure.
-  | "dismissed";
+  | "dismissed"
+  // oath-signature intentionally did nothing (no CRM onboarding record, oath not
+  // yet signed in the onboarding ceremony, or an oath already on file). The run
+  // is mechanically `done`; the row displays the muted "Skipped" badge. `data.skipped`
+  // drives it; `data.skipReason` explains which case. Maps to the base `skipped`
+  // STATUS_CONFIG entry.
+  | "skipped";
 
 /** A supplemental status chip (rendered beside, not instead of, the badge). */
 export interface QueueRowStatusTag {
