@@ -488,7 +488,7 @@ export function computeOcrPipelineView(
   if (after.length === 0) {
     return { steps: visible, currentStep: null, status: "done" };
   }
-  return { steps: visible, currentStep: after[0]!, status };
+  return { steps: visible, currentStep: after[0], status };
 }
 
 /**
