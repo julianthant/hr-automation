@@ -1763,3 +1763,104 @@ test("delegated orchestrator composes the coordinator's trace prefix and stamps 
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("buildEidLookupItemIdResolver: two records sharing a logical input (same extracted name/EID) keep DISTINCT itemIds instead of collapsing onto the first match", async () => {
+  const { buildEidLookupItemIdResolver } = await import("../../../../src/workflows/ocr/orchestrator.js");
+
+  // Two OCR records both resolved to the same name — a real-world collision
+  // (duplicate/near-duplicate signatures on one roster page). Each must keep
+  // its OWN itemId so an outcome for one never patches the other's record.
+  const logicalInputs = [{ name: "Smith, John" }, { name: "Smith, John" }, { emplId: "10000002" }];
+  const itemIds = ["ocr-oath-run-1-r0", "ocr-oath-run-1-r1", "ocr-oath-run-1-r2"];
+  const resolve = buildEidLookupItemIdResolver(logicalInputs, itemIds);
+
+  // delegateToAllImpl invokes deriveItemId once per input, in enqueue order —
+  // the first two calls receive the identical logical input.
+  assert.equal(resolve({ name: "Smith, John" }), "ocr-oath-run-1-r0");
+  assert.equal(resolve({ name: "Smith, John" }), "ocr-oath-run-1-r1");
+  assert.equal(resolve({ emplId: "10000002" }), "ocr-oath-run-1-r2");
+});
+
+test("buildEidLookupItemIdResolver: a genuine miss THROWS a legible error instead of returning a fabricated ocr-fallback id", async () => {
+  const { buildEidLookupItemIdResolver } = await import("../../../../src/workflows/ocr/orchestrator.js");
+
+  const resolve = buildEidLookupItemIdResolver([{ name: "Smith, John" }], ["ocr-oath-run-1-r0"]);
+
+  // A third call (past the single queued entry) or an input that was never
+  // keyed must fail loud — never silently hand back a collapsing fallback id.
+  assert.throws(
+    () => resolve({ name: "Unrelated, Person" }),
+    /deriveItemId lookup missed for a person-lookup input/,
+  );
+  resolve({ name: "Smith, John" }); // drains the one queued entry
+  assert.throws(
+    () => resolve({ name: "Smith, John" }),
+    /deriveItemId lookup missed for a person-lookup input/,
+  );
+});
+
+test("buildEidLookupItemIdResolver: pinned through the REAL withRootRuntimeOptions -> splitPrefilled round-trip (the actual fan-out wrap/strip) — distinct itemIds, key-order preserved, no spurious throw", async () => {
+  // Neither the isolated resolver unit tests above nor any orchestrator test
+  // drives the round-trip the fix's correctness actually depends on:
+  // `delegateToAllImpl` (via `dispatchToDaemonAndWait`) wraps every fan-out
+  // input with `withRootRuntimeOptions` (appending `__runtimeOptions` LAST)
+  // before handing it to the daemon enqueue, whose `idFn` strips it back via
+  // `splitPrefilled` and calls `deriveItemId(cleaned)`. The resolver's
+  // JSON-keyed map only works if `JSON.stringify(cleaned) === JSON.stringify(
+  // originalInput)` — i.e. the wrap→strip round-trip preserves key order.
+  // Composing the REAL `withRootRuntimeOptions` (production helper, widened
+  // to exported for this test) -> REAL `splitPrefilled` -> the resolver pins
+  // that exact contract without mocking the daemon dispatch boundary.
+  const { buildEidLookupItemIdResolver } = await import("../../../../src/workflows/ocr/orchestrator.js");
+  const { withRootRuntimeOptions } = await import("../../../../src/core/delegate.js");
+  const { splitPrefilled } = await import("../../../../src/core/kernel/workflow.js");
+
+  // Two logical inputs sharing an identical extracted name (the real-world
+  // collision this fix targets — duplicate signatures on one roster page),
+  // plus one distinct EID-only input. Mirrors the two `eidLookupEnqueueItems`
+  // shapes orchestrator.ts actually builds (name-kind vs emplId-kind).
+  const logicalInputs = [
+    { name: "Smith, John", taskGroupId: "session-1" },
+    { name: "Smith, John", taskGroupId: "session-1" },
+    { emplId: "10000002", taskGroupId: "session-1", keepNonHdh: true },
+  ];
+  const itemIds = ["ocr-oath-run-1-r0", "ocr-oath-run-1-r1", "ocr-oath-run-1-r2"];
+  const resolve = buildEidLookupItemIdResolver(logicalInputs, itemIds);
+
+  // withRootRuntimeOptions is exactly what dispatchToDaemonAndWait applies to
+  // every child input before it reaches ensureDaemonsAndEnqueue — using a
+  // realistic runtimeOptions arg (rootTracePrefix), mirroring the real
+  // orchestrator fan-out call (`rootTracePrefix: tracePrefix(traceId)`).
+  const wrapped = logicalInputs.map((input) =>
+    withRootRuntimeOptions(input, { rootTracePrefix: "os-143012" }),
+  );
+  for (const w of wrapped) {
+    assert.ok(
+      (w as Record<string, unknown>).__runtimeOptions,
+      "withRootRuntimeOptions must actually append __runtimeOptions for this realistic opts arg " +
+        "(otherwise this test would trivially pass with no wrapping at all)",
+    );
+  }
+
+  // ensureDaemonsAndEnqueue's idFn strips prefilledData + __runtimeOptions via
+  // splitPrefilled BEFORE calling deriveItemId — this IS the `cleaned` value
+  // the resolver sees in production.
+  const cleaned = wrapped.map((w) => splitPrefilled(w).cleaned);
+
+  // (b) Key-order preserved through the wrap→strip round-trip: the cleaned
+  // input must stringify IDENTICALLY to the original logical input, or the
+  // resolver's JSON-keyed map misses and throws.
+  cleaned.forEach((c, i) => {
+    assert.equal(
+      JSON.stringify(c),
+      JSON.stringify(logicalInputs[i]),
+      `cleaned input #${i} must stringify identically to the original logical input`,
+    );
+  });
+
+  // (a) Two records sharing the same logical input resolve to DISTINCT
+  // itemIds (FIFO, no collision) — and no spurious throw along the way.
+  assert.equal(resolve(cleaned[0]), "ocr-oath-run-1-r0");
+  assert.equal(resolve(cleaned[1]), "ocr-oath-run-1-r1");
+  assert.equal(resolve(cleaned[2]), "ocr-oath-run-1-r2");
+});

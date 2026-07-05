@@ -433,37 +433,51 @@ async function extractSingleResultDetail(
   // Extract assignment details (same logic as drillInAndGetDetails)
   const assignment = await extractPreferredAssignmentFromBody(frame);
 
-  const selectedTermDate = assignment && !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
+  if (!assignment) {
+    // We already confirmed a real person (personIdLocator matched, EID
+    // parsed) — a rendered single-result detail page always has at least
+    // one Employment Instances row, so a missing assignment here means the
+    // table failed to PARSE, not that the person genuinely has no business
+    // unit. Fail loud instead of fabricating businessUnit "SDCMP" /
+    // emplRecord "0" / a termDate-guessed hrStatus: `searchByName` filters
+    // candidates on `businessUnit === "SDCMP"`, so a fabricated "SDCMP"
+    // here would force a non-SDCMP person (or a parse failure of any kind)
+    // into the SDCMP search funnel and risk resolving as a false EID match.
+    throw new Error(
+      `Person Org Summary: failed to parse Employment Instances for EID ${emplId}` +
+        `${fullName ? ` (${fullName})` : ""} — refusing to fabricate businessUnit/emplRecord/hrStatus`,
+    );
+  }
+
+  const selectedTermDate = !isInactiveHrStatus(assignment.hrStatus) ? "" : termDate;
   const selectedTermReason = selectedTermDate ? termReason : "";
-  const selectedStartDate = startDate || assignment?.effectiveDate || "";
+  const selectedStartDate = startDate || assignment.effectiveDate || "";
   const endDate = selectedTermDate || "Active";
   const nameParts = fullName?.split(" ") ?? [];
   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
 
   log.step(`  Name: ${fullName} | Start: ${startDate} | End: ${endDate}`);
-  if (assignment) {
-    log.step(`  Dept: ${assignment.department} | BU: ${assignment.businessUnit} | Job: ${assignment.jobCodeDescription}`);
-  }
+  log.step(`  Dept: ${assignment.department} | BU: ${assignment.businessUnit} | Job: ${assignment.jobCodeDescription}`);
 
   return {
     emplId,
-    emplRecord: assignment?.emplRecord ?? "0",
-    hrStatus: assignment?.hrStatus ?? (termDate ? "Inactive" : "Active"),
-    businessUnit: assignment?.businessUnit ?? "SDCMP",
-    jobCode: assignment?.jobCode ?? "",
-    jobCodeDescription: assignment?.jobCodeDescription ?? "",
+    emplRecord: assignment.emplRecord,
+    hrStatus: assignment.hrStatus,
+    businessUnit: assignment.businessUnit,
+    jobCode: assignment.jobCode,
+    jobCodeDescription: assignment.jobCodeDescription,
     lastName,
     name: fullName ?? "",
-    department: assignment?.department,
-    deptId: assignment?.deptId,
-    positionNumber: assignment?.positionNumber,
+    department: assignment.department,
+    deptId: assignment.deptId,
+    positionNumber: assignment.positionNumber,
     startDate: selectedStartDate,
-    effectiveDate: assignment?.effectiveDate ?? "",
+    effectiveDate: assignment.effectiveDate,
     terminationDate: selectedTermDate,
     terminationReason: selectedTermReason,
-    expectedJobEndDate: assignment?.expectedJobEndDate,
-    fte: assignment?.fte,
-    emplClass: assignment?.emplClass,
+    expectedJobEndDate: assignment.expectedJobEndDate,
+    fte: assignment.fte,
+    emplClass: assignment.emplClass,
   };
 }
 

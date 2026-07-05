@@ -31,18 +31,18 @@ export function selectRetryInputFromEntries(
     .filter((e) => e.status === "pending" && Boolean(e.input))
     .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
   if (pendingWithInput.length > 0) {
-    return pendingWithInput[0]!.input as Record<string, unknown>;
+    return pendingWithInput[0].input;
   }
 
   const anyWithInput = entries
     .filter((e) => Boolean(e.input))
     .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
   if (anyWithInput.length > 0) {
-    return anyWithInput[0]!.input as Record<string, unknown>;
+    return anyWithInput[0].input;
   }
 
   const sorted = [...entries].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  const data = sorted[0]!.data;
+  const data = sorted[0].data;
   if (data && typeof data === "object") {
     const input: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data)) {
@@ -91,13 +91,15 @@ export function findRetryInputFromTaskStore(
 }
 
 function findTaskInput(runId: string, dir: string): Record<string, unknown> | null {
-  try {
-    const store = createTaskStore(openControlDb({ trackerDir: dir }));
-    const input = store.findInputForRunId(runId);
-    return input && typeof input === "object" && !Array.isArray(input)
-      ? (input as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+  const store = createTaskStore(openControlDb({ trackerDir: dir }));
+  // No row for this runId is a real, expected absence (returned as `null` by
+  // `findInputForRunId` itself) — but a row whose `input_json` is corrupted
+  // makes `parseJson` throw. That throw must NOT be swallowed here: a
+  // corrupted retry-replay source silently falling back to JSONL
+  // reconstruction is exactly the "fail loud" violation this codebase
+  // forbids (see root CLAUDE.md). Let it propagate.
+  const input = store.findInputForRunId(runId);
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : null;
 }

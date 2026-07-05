@@ -397,3 +397,152 @@ test("runOcrRetryPage preserves __traceId + queueRowKind on the re-emitted row (
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("runOcrRetryPage: two re-OCR'd records sharing the SAME name do not collide — both get the correct outcome (itemId collision fix)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-collide",
+    runId: "run-collide",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-collide",
+      sessionId: "session-collide",
+      recordCount: 0,
+      verifiedCount: 0,
+      records: JSON.stringify([]),
+      failedPages: JSON.stringify([
+        { page: 1, error: "rate limit", attemptedKeys: ["gemini-1"], pageImagePath: join(dir, "page-images", "session-collide", "page-01.png"), attempts: 1 },
+      ]),
+      pageStatusSummary: JSON.stringify({ total: 1, succeeded: 0, failed: 1 }),
+    },
+  }) + "\n", "utf-8");
+
+  ensurePdfCachePagePng(dir, "pf-collide", 1);
+
+  let expectedItemIdsSeen: string[] = [];
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+  await runOcrRetryPage(
+    { sessionId: "session-collide", runId: "run-collide", pageNum: 1 },
+    {
+      trackerDir: dir,
+      date: "2026-05-01",
+      _emitOverride: (e) => writtenEntries.push(e as never),
+      _ocrPageOverride: async () => ({
+        // Two DIFFERENT people who share a printed name on the retried page —
+        // both fall through to name-based lookup (empty roster below), so
+        // both dispatch the IDENTICAL fanOutAndWatch input.
+        records: [
+          { sourcePage: 1, rowIndex: 0, printedName: "Smith, John", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026", notes: [], documentType: "expected", originallyMissing: [] },
+          { sourcePage: 1, rowIndex: 1, printedName: "Smith, John", employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026", notes: [], documentType: "expected", originallyMissing: [] },
+        ],
+        stillFailed: false,
+      }),
+      _loadRosterOverride: async () => [],
+      // Without this override, a fan-out with no `dispatch` override falls
+      // through to the REAL delegateToAllImpl → daemon spawn — this test only
+      // wants to pin the collision-safe grouping, not exercise real daemon
+      // dispatch (which every other test in this file also stubs out).
+      _enqueueEidLookupOverride: async () => { /* no-op — watch override below supplies the outcome */ },
+      _watchChildRunsOverride: async (opts) => {
+        expectedItemIdsSeen = [...opts.expectedItemIds];
+        return [{
+          workflow: "eid-lookup",
+          itemId: opts.expectedItemIds[0]!,
+          runId: "lr-collide",
+          status: "done",
+          data: { emplId: "10999999", activeStatus: "active", hrStatus: "Active", department: "HDH" },
+        }];
+      },
+    },
+  );
+
+  // Collision-proof by construction: only ONE child dispatched for the
+  // shared name, not two (deduped, not a collided pair).
+  assert.equal(expectedItemIdsSeen.length, 1, "only one fan-out child dispatched for the shared name");
+
+  const approval = writtenEntries.find((e) => (e.status === "running" || e.status === "done") && e.step === "awaiting-approval");
+  assert.ok(approval);
+  const records = JSON.parse(approval!.data!.records!) as Array<{ printedName?: string; employeeId?: string; matchState?: string }>;
+  const smiths = records.filter((r) => r.printedName === "Smith, John");
+  assert.equal(smiths.length, 2, "both Smith, John records survive");
+  for (const rec of smiths) {
+    assert.equal(rec.employeeId, "10999999", "BOTH records get the shared lookup outcome — not just the dispatched one");
+    assert.equal(rec.matchState, "resolved");
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage fails loud when data.records is PRESENT but not valid JSON (does not silently truncate the batch)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-badjson",
+    runId: "run-badjson",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-badjson",
+      sessionId: "session-badjson",
+      records: "{not valid json",
+    },
+  }) + "\n", "utf-8");
+
+  await assert.rejects(
+    () => runOcrRetryPage(
+      { sessionId: "session-badjson", runId: "run-badjson", pageNum: 1 },
+      { trackerDir: dir, date: "2026-05-01" },
+    ),
+    /not valid JSON/,
+    "a present-but-corrupt data.records must throw, not silently return []",
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("runOcrRetryPage fails loud when data.records parses to a non-array (does not silently truncate the batch)", async () => {
+  const { dir } = setup();
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr",
+    id: "session-notarray",
+    runId: "run-notarray",
+    status: "done",
+    step: "awaiting-approval",
+    timestamp: "2026-05-01T00:00:00Z",
+    data: {
+      formType: "oath",
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "fake.pdf",
+      pdfFileId: "pf-notarray",
+      sessionId: "session-notarray",
+      records: JSON.stringify({ oops: "this is an object, not an array" }),
+    },
+  }) + "\n", "utf-8");
+
+  await assert.rejects(
+    () => runOcrRetryPage(
+      { sessionId: "session-notarray", runId: "run-notarray", pageNum: 1 },
+      { trackerDir: dir, date: "2026-05-01" },
+    ),
+    /non-array/,
+    "a present-but-wrongly-shaped data.records must throw, not silently return []",
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});

@@ -114,16 +114,64 @@ describe("createCachedResource", () => {
     assert.deepEqual(resource.peek(), ["two"]);
   });
 
-  it("settles to the fallback when the fetch rejects", async () => {
+  it("does NOT settle the cache to fallback when the fetch rejects — stays null and flags peekError()", async () => {
     const resource = createCachedResource<string[]>({
       fetcher: async () => {
         throw new Error("network down");
       },
       fallback: [],
     });
+    assert.equal(resource.peekError(), false);
     resource.prefetch();
     await flush();
-    assert.deepEqual(resource.peek(), []);
+    // A failed fetch with nothing ever cached must NOT read the same as a
+    // confirmed-empty result ([]) — that's the exact bug (a transient
+    // failure looking identical to "genuinely empty"). It stays `null`.
+    assert.equal(resource.peek(), null);
+    assert.equal(resource.peekError(), true);
+  });
+
+  it("keeps the last good value on a later failed refresh — never overwritten with fallback", async () => {
+    let shouldThrow = false;
+    const resource = createCachedResource<string[]>({
+      fetcher: async () => {
+        if (shouldThrow) throw new Error("network down");
+        return ["kept"];
+      },
+      fallback: [],
+    });
+    resource.prefetch();
+    await flush();
+    assert.deepEqual(resource.peek(), ["kept"]);
+    assert.equal(resource.peekError(), false);
+
+    shouldThrow = true;
+    resource.refresh();
+    await flush();
+    // The prior confirmed value survives a subsequent failed fetch.
+    assert.deepEqual(resource.peek(), ["kept"]);
+    assert.equal(resource.peekError(), true);
+  });
+
+  it("clears peekError() back to false once a fetch succeeds again", async () => {
+    let shouldThrow = true;
+    const resource = createCachedResource<string[]>({
+      fetcher: async () => {
+        if (shouldThrow) throw new Error("network down");
+        return ["ok"];
+      },
+      fallback: [],
+    });
+    resource.prefetch();
+    await flush();
+    assert.equal(resource.peek(), null);
+    assert.equal(resource.peekError(), true);
+
+    shouldThrow = false;
+    resource.refresh();
+    await flush();
+    assert.deepEqual(resource.peek(), ["ok"]);
+    assert.equal(resource.peekError(), false);
   });
 });
 

@@ -47,23 +47,36 @@ export function usePostAction<TBody = Record<string, unknown>>(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
-      const body = (await res.json().catch(() => ({}))) as TBody;
-      if (!res.ok) {
-        const msg = readError(body, res.status);
+      // Fail loud: every bulk-action route responds with an explicit `ok`
+      // flag, so a malformed/unparseable 2xx body must NOT read as success —
+      // a parse failure or a stray `{}` would otherwise act on / purge every
+      // targeted row as "success, 0 errors" with the real per-item outcome
+      // unknown.
+      let body: TBody | undefined;
+      try {
+        body = (await res.json()) as TBody;
+      } catch {
+        body = undefined;
+      }
+      const bodyOk = Boolean(body && typeof body === "object" && (body as { ok?: unknown }).ok === true);
+      if (!res.ok || !bodyOk) {
+        const msg = body === undefined ? "Malformed server response" : readError(body, res.status);
         const errToast = parseToastMessage(toasts.error(msg, res.status));
         toast.error(errToast.message, { id: toastId, description: errToast.description });
         return { ok: false, body, error: msg, status: res.status };
       }
+      // bodyOk (checked above) guarantees `body` is a well-formed TBody here.
+      const okBody = body as TBody;
       const formatter =
-        toasts.partial && toasts.isPartial?.(body) ? toasts.partial : toasts.success;
+        toasts.partial && toasts.isPartial?.(okBody) ? toasts.partial : toasts.success;
       if (formatter) {
-        const okToast = parseToastMessage(formatter(body));
-        const fn = toasts.partial && toasts.isPartial?.(body) ? toast.warning : toast.success;
+        const okToast = parseToastMessage(formatter(okBody));
+        const fn = toasts.partial && toasts.isPartial?.(okBody) ? toast.warning : toast.success;
         fn(okToast.message, { id: toastId, description: okToast.description });
       } else {
         toast.dismiss(toastId);
       }
-      return { ok: true, body, status: res.status };
+      return { ok: true, body: okBody, status: res.status };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const errToast = parseToastMessage(toasts.error(msg));

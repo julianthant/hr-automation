@@ -75,8 +75,16 @@ type EntryReEnqueueRequest = RetryRequest | RunWithDataRequest;
 const IN_PROCESS_WORKFLOWS = new Set(["ocr", "sharepoint-download"]);
 
 export function resolveRetryRosterPath(dir: string, storedRosterPath: string | undefined): string | undefined {
-  if (storedRosterPath && existsSync(storedRosterPath)) return storedRosterPath;
-  return findLatestDownloadedRosterPath(dir);
+  if (!storedRosterPath) return findLatestDownloadedRosterPath(dir);
+  if (existsSync(storedRosterPath)) return storedRosterPath;
+  // Fail loud (root CLAUDE.md "Fail loud"): the original roster this run
+  // recorded is gone. Silently substituting the most-recently-downloaded
+  // roster here would resolve the retry against a DIFFERENT person's
+  // record — never guess; force the operator to restore/re-fetch the
+  // original roster before retrying.
+  throw new Error(
+    `retry: stored roster path no longer exists at "${storedRosterPath}" — refusing to substitute the most-recently-downloaded roster, which could resolve this retry against a different person's roster`,
+  );
 }
 
 function findLatestDownloadedRosterPath(dir: string): string | undefined {
@@ -117,7 +125,7 @@ function extractLatestParentRunId(rows: TrackerEntry[]): string | undefined {
   if (rows.length === 0) return undefined;
   const sorted = [...rows].sort(byTimestampAsc);
   for (let i = sorted.length - 1; i >= 0; i--) {
-    const p = sorted[i]!.parentRunId;
+    const p = sorted[i].parentRunId;
     if (typeof p === "string" && p.length > 0) return p;
   }
   return undefined;
@@ -559,7 +567,15 @@ async function reEnqueueOcrEntry(
   const pdfOriginalName = merged.pdfOriginalName ?? "";
   const formType = merged.formType ?? "";
   const sessionId = merged.sessionId || id;
-  const retryRosterPath = resolveRetryRosterPath(dir, merged.rosterPath || undefined);
+  let retryRosterPath: string | undefined;
+  try {
+    retryRosterPath = resolveRetryRosterPath(dir, merged.rosterPath || undefined);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "OCR retry: failed to resolve roster path",
+    };
+  }
   const rosterMode: "existing" | "download" = retryRosterPath ? "existing" : "download";
 
   if (!pdfPath || !pdfOriginalName || !formType) {

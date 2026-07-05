@@ -237,6 +237,14 @@ async function waitForDetailPage(page: Page, timeoutMs: number): Promise<boolean
  * selectors guessed classic `SEARCH_RESULT`/`PSLEVEL1GRID`/`a[id*=EMPLID]` ids
  * that the Fluid layout never emits, so BOTH returned 0 and this threw for every
  * multi-row EID (6 EIDs on 2026-06-24). Selectors re-mapped against the live grid.
+ *
+ * Multiple NON-terminated rows (2+ concurrent jobs for one EID — see the
+ * "concurrent jobs" case above) are a GENUINE ambiguity, not a rehire: a rehire
+ * leaves old rows Terminated and only the new one active, but concurrent jobs
+ * are simultaneously active. Picking "the first" would silently choose which
+ * job's Work Location/Job Information gets read/separated. Rows are scanned
+ * for status BEFORE any click, and 2+ non-terminated rows throws rather than
+ * drilling into an arbitrary one.
  */
 async function ensureJobSummaryDetailPage(
   page: Page,
@@ -246,34 +254,46 @@ async function ensureJobSummaryDetailPage(
   // Single-result auto-redirect (the common case): already on the detail page.
   if (await waitForDetailPage(page, 3_000)) return;
 
-  // Not on the detail page → drill into the first non-terminated result row.
+  // Not on the detail page → find the non-terminated result row. Scan EVERY
+  // row's status first (no click yet) so a 2+-concurrent-job ambiguity is
+  // caught before committing to a row.
   const scopedRows = jobSummary.searchResultRows(root);
   const scopedTotal = await scopedRows.count().catch(() => 0);
   if (scopedTotal > 0) {
-    log.step(`[Job Summary] Search-results grid for EID ${emplId} (${scopedTotal} row(s)) — drilling into the first non-terminated row`);
-    let drilled = false;
+    log.step(`[Job Summary] Search-results grid for EID ${emplId} (${scopedTotal} row(s)) — scanning row statuses`);
+    const statuses: string[] = [];
+    const nonTerminated: number[] = [];
     for (let i = 0; i < scopedTotal; i++) {
       const row = scopedRows.nth(i);
       const statusText = (
         await jobSummary.rowHrStatusCell(row).textContent({ timeout: 2_000 }).catch(() => "")
       )?.trim() ?? "";
+      statuses.push(statusText || "unknown");
       if (/terminat/i.test(statusText)) {
         log.debug(`[Job Summary] Row ${i + 1}/${scopedTotal} terminated — skipping`);
         continue;
       }
-      log.step(`[Job Summary] Drilling into row ${i + 1}/${scopedTotal} (status='${statusText || "unknown"}')`);
-      await safeClick(jobSummary.rowDrillInLink(row), {
-        timeout: 10_000,
-        label: "ucpath job summary row drill-in link",
-      });
-      drilled = true;
-      break;
+      nonTerminated.push(i);
     }
-    if (!drilled) {
+    if (nonTerminated.length === 0) {
       throw new Error(
         `[Job Summary] Multi-row grid for EID ${emplId}: all ${scopedTotal} rows were Terminated — no actionable row to drill into. Verify the EID in Kuali Build, or the employee may already be fully separated.`,
       );
     }
+    if (nonTerminated.length > 1) {
+      throw new Error(
+        `[Job Summary] Multi-row grid for EID ${emplId}: ${nonTerminated.length} non-terminated rows found `
+        + `(concurrent jobs) — row statuses: ${statuses.join(", ")}. Cannot determine which job is being `
+        + `separated without disambiguation; resolve the correct position/job manually before re-running.`,
+      );
+    }
+    const rowIndex = nonTerminated[0];
+    const row = scopedRows.nth(rowIndex);
+    log.step(`[Job Summary] Drilling into row ${rowIndex + 1}/${scopedTotal} (status='${statuses[rowIndex]}')`);
+    await safeClick(jobSummary.rowDrillInLink(row), {
+      timeout: 10_000,
+      label: "ucpath job summary row drill-in link",
+    });
     if (await waitForDetailPage(page, 10_000)) return;
   }
 
@@ -332,8 +352,11 @@ export const workLocationDateKey = effectiveDateKey;
  *
  * Fallbacks (in order):
  *   - No rows                       → null.
- *   - No row carries a usable date  → the FIRST row (legacy behavior; the in-row
- *     date scan found nothing — see the per-tab frozen-column note).
+ *   - No row carries a usable date  → THROWS. A total date-parse miss (every
+ *     row's Effective Date failed both the in-row read and the frozen-column
+ *     zip) means there is no basis to pick ANY row — silently returning
+ *     `rows[0]` would ship an arbitrary row's department/job-code to the
+ *     HDH gate / Kuali. Fail loud so the grid/selector gets fixed instead.
  *   - No `separationDate` supplied  → the row with the LATEST effective date
  *     (= the current state), for non-separations callers.
  *   - Every row is AFTER the sep date → the EARLIEST row (sep date precedes the
@@ -348,7 +371,14 @@ export function pickEffectiveDatedRow<T extends { effectiveDate: string }>(
     .map((r) => ({ r, key: effectiveDateKey(r.effectiveDate) }))
     .filter((x): x is { r: T; key: number } => x.key !== null);
 
-  if (dated.length === 0) return rows[0];
+  if (dated.length === 0) {
+    throw new Error(
+      `pickEffectiveDatedRow: none of the ${rows.length} row(s) had a parseable Effective Date `
+      + `(expected MM/DD/YYYY) — cannot determine which row is in effect. Row effectiveDate values: `
+      + `${rows.map((r) => JSON.stringify(r.effectiveDate)).join(", ")}. `
+      + `The Work Location/Job Information grid or its frozen-column date zip likely needs re-mapping.`,
+    );
+  }
 
   const sepKey = separationDate ? effectiveDateKey(separationDate) : null;
   if (sepKey === null) {
@@ -385,8 +415,9 @@ export function pickWorkLocationRow(
  * Dept ID = +3, Department Description = +4. The Effective Date is read in-row
  * when present; if the grid renders its left columns (Effective Date) in a
  * parallel frozen table — common in PeopleSoft — a count-exact zip recovers the
- * dates, and if neither yields dates the picker falls back to the first row
- * (today's behavior — no regression).
+ * dates. If NEITHER yields a date for ANY row, `pickWorkLocationRow` (via
+ * `pickEffectiveDatedRow`) throws rather than guessing a row — a blank/wrong
+ * department must not silently reach the HDH gate or Kuali.
  *
  * NEEDS LIVE VERIFY: confirm the Effective Date is read (logs show a non-empty
  * date per row). If every row logs effectiveDate="" on a live multi-state
@@ -495,7 +526,7 @@ export async function extractWorkLocation(
     // a mismatched/unrelated table can never produce a wrong date↔dept pairing.
     if (jobRows.length > 0 && !jobRows.some((r) => r.effectiveDate)) {
       for (const table of Array.from(document.querySelectorAll("table"))) {
-        const trs = Array.from((table as HTMLTableElement).rows);
+        const trs = Array.from((table).rows);
         let col = -1;
         for (const tr of trs) {
           const idx = Array.from(tr.cells).findIndex((c) =>
@@ -604,9 +635,10 @@ export async function pollForJobInfoScan(
  * Uses cell indices: cells[0] = Job Code, cells[1] = Description. The Effective
  * Date is read in-row when present; otherwise — as on the Work Location tab —
  * the grid renders its left columns (incl. Effective Date) in a parallel frozen
- * table, so a count-exact zip recovers the per-row dates. If neither yields
- * dates the picker falls back to the first job-coded row (today's behavior — no
- * regression).
+ * table, so a count-exact zip recovers the per-row dates. If NEITHER yields a
+ * date for ANY row, `pickEffectiveDatedRow` throws rather than guessing a
+ * job-coded row — a wrong Payroll Title Code/Title must not silently reach
+ * Kuali.
  *
  * The grid loads lazily on tab activation, so the DOM scan is POLLED (see
  * `pollForJobInfoScan`) rather than run once — a single post-click scan raced
@@ -684,7 +716,7 @@ export async function extractJobInfo(
         // so a mismatched/unrelated table can never produce a wrong date↔job pairing.
         if (jobRows.length > 0 && !jobRows.some((r) => r.effectiveDate)) {
           for (const table of Array.from(document.querySelectorAll("table"))) {
-            const trs = Array.from((table as HTMLTableElement).rows);
+            const trs = Array.from((table).rows);
             let col = -1;
             for (const tr of trs) {
               const idx = Array.from(tr.cells).findIndex((c) =>
@@ -788,6 +820,22 @@ export async function getJobSummaryIdentity(
   // effect AS OF the separation date, so a post-separation promotion /
   // reclassification never ships a wrong Payroll Title Code / Payroll Title.
   const jobInfo = await extractJobInfo(page, { separationDate: opts.separationDate });
+
+  // A found, active employee always has a Dept ID + Department Description on
+  // the Work Location tab. Blank ones after extraction are a GENUINE
+  // extraction failure on a found record (no Work Location rows rendered, or
+  // none matched the separation date) — not a valid state, since a blank
+  // department would silently ship to the HDH/non-HDH kronos-skip gate and the
+  // Kuali department fill. Fail loud rather than returning incomplete data,
+  // same contract as the jobCode check below.
+  if (!workLocation.deptId || !workLocation.departmentDescription) {
+    throw new Error(
+      `Workforce Job Summary found EID '${emplId}' but could not extract a Department ID / Description `
+      + `from the Work Location tab (deptId='${workLocation.deptId || "<empty>"}', departmentDescription='${workLocation.departmentDescription || "<empty>"}'). `
+      + `The Work Location grid likely did not render in time, or no row matched the separation date. `
+      + `Re-run; if it recurs, re-verify the Work Location tab selector / grid layout on the live page.`,
+    );
+  }
 
   // A found, active employee always has a job code on the Job Information tab.
   // An empty one after polling is a GENUINE extraction failure on a found

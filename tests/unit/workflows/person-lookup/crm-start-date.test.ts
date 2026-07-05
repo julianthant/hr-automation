@@ -60,16 +60,24 @@ describe("pickCrmStartDate", () => {
     assert.equal(pickCrmStartDate(records, "10526678"), "10/12/2021");
   });
 
-  it("falls back to the first record when no EID matches", () => {
+  it("returns blank instead of a different person's record when the EID doesn't match (fail loud)", () => {
     const records = [
       crmRecord({ ucpathEmployeeId: "10999999", firstDayOfService: "01/01/2020" }),
     ];
-    assert.equal(pickCrmStartDate(records, "10526678"), "01/01/2020");
+    assert.equal(pickCrmStartDate(records, "10526678"), "");
   });
 
   it("uses the first record when no EID is supplied", () => {
     const records = [crmRecord({ firstDayOfService: "03/03/2023" })];
     assert.equal(pickCrmStartDate(records), "03/03/2023");
+  });
+
+  it("returns blank when no EID is supplied and multiple records are ambiguous (fail loud)", () => {
+    const records = [
+      crmRecord({ ucpathEmployeeId: "10999999", firstDayOfService: "01/01/2020" }),
+      crmRecord({ ucpathEmployeeId: "10111111", firstDayOfService: "02/02/2022" }),
+    ];
+    assert.equal(pickCrmStartDate(records), "");
   });
 
   it("returns blank when there are no records (CRM-only, no fallback)", () => {
@@ -115,9 +123,9 @@ describe("pickCrmPayrollTitle", () => {
     assert.equal(pickCrmPayrollTitle(records, "10526678"), "STDT 2");
   });
 
-  it("falls back to the first record when no EID matches", () => {
+  it("returns blank instead of a different person's record when the EID doesn't match (fail loud)", () => {
     const records = [crmRecord({ ucpathEmployeeId: "10999999", titleCode: "4921 - STDT 2" })];
-    assert.equal(pickCrmPayrollTitle(records, "10526678"), "STDT 2");
+    assert.equal(pickCrmPayrollTitle(records, "10526678"), "");
   });
 
   it("returns blank when there are no records", () => {

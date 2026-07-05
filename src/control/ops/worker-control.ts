@@ -28,7 +28,7 @@ import {
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import { openControlStores } from "./shared.js";
-import { emitInheritedRow } from "./emit-inherited.js";
+import { emitInheritedRow, PriorTrackerRowNotFoundError } from "./emit-inherited.js";
 
 export interface WorkerCommandRequest {
   workerId: string;
@@ -614,21 +614,20 @@ async function failDirectKilledInstanceClaim(
     const runId = task.currentRunId;
     const failReason =
       "Daemon was stopped (direct kill — lockfile already gone); its in-flight item was failed.";
-    try {
-      await markItemFailed(workflow, task.itemId, failReason, runId, dir);
-    } catch {
-      /* best-effort — the tracker row below is the user-visible signal */
-    }
+    // These three terminal writes are load-bearing: swallowing a genuine
+    // failure here while still returning `task.itemId` (truthy) would tell the
+    // caller the orphaned claim was handled when it may still be `running` in
+    // SQLite forever. Let a real failure propagate to the outer catch below
+    // (logs + returns null) instead of faking success. Only the documented
+    // PriorTrackerRowNotFoundError case (no prior row to inherit from) is a
+    // genuinely valid, expected state — everything else must surface.
+    await markItemFailed(workflow, task.itemId, failReason, runId, dir);
     if (task.currentAttemptId) {
-      try {
-        taskStore.markTaskFailed({
-          taskId: task.taskId,
-          attemptId: task.currentAttemptId,
-          error: failReason,
-        });
-      } catch {
-        /* best-effort */
-      }
+      taskStore.markTaskFailed({
+        taskId: task.taskId,
+        attemptId: task.currentAttemptId,
+        error: failReason,
+      });
     }
     try {
       emitInheritedRow({
@@ -641,9 +640,10 @@ async function failDirectKilledInstanceClaim(
         ...(task.parentRunId ? { parentRunId: task.parentRunId } : {}),
         db: taskStore.db,
       });
-    } catch {
-      // PriorTrackerRowNotFoundError (no row to inherit from) — nothing to
-      // emit; the queue-audit fail above is still the authoritative signal.
+    } catch (err) {
+      if (!(err instanceof PriorTrackerRowNotFoundError)) throw err;
+      // No prior row to inherit from — nothing to emit; the queue-audit fail
+      // above is still the authoritative signal.
     }
     return task.itemId;
   } catch (err) {
@@ -686,8 +686,15 @@ async function failDirectKilledInstanceQueue(
       let won: boolean;
       try {
         won = await markItemFailedIfActive(workflow, item.id, failReason, runId, dir);
-      } catch {
-        won = true;
+      } catch (err) {
+        // A thrown DB error is NOT a win — the terminal write may never have
+        // landed, so treat it like a lost race (skip) rather than pretending
+        // this worker terminalized the item; otherwise the item can stay
+        // `queued` in SQLite forever with no daemon left to claim it.
+        log.warn(
+          `[stop-instance] mark-terminal threw for queued item '${item.id}' in '${workflow}' — not treating as won: ${errorMessage(err)}`,
+        );
+        won = false;
       }
       if (!won) continue;
       try {
@@ -819,6 +826,16 @@ export function buildStopDaemonInstanceHandler(dir: string) {
     if (target) {
       // Graceful: the daemon's own cleanup reassigns or fails its in-flight
       // item. `reassign: true` is what flips it from the fail-on-stop default.
+      // CAVEAT (needs-live to fix): `stopDaemon` (client.ts) swallows every
+      // fetch error and never checks the response status, so it gives no
+      // signal here — `daemonStopped` can only mean "we found this daemon
+      // alive and sent it a stop request," not a confirmed shutdown. A
+      // correct value needs either `stopDaemon` to surface success/failure
+      // (out of scope: client.ts) or a `findAliveDaemons` re-check whose
+      // grace/poll timing is calibrated against a live daemon (like the
+      // workflow_end grace window below) — an immediate, unpolled re-check
+      // would almost always false-negative before the daemon finishes
+      // tearing down.
       await stopDaemon(target, force, true);
       daemonStopped = true;
     } else if (pid && pid !== process.pid) {

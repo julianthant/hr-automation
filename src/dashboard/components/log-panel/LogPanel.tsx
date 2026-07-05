@@ -64,6 +64,32 @@ interface LogPanelProps {
 }
 
 /**
+ * Resolves which entry the detail grid should render for.
+ *
+ * For the LIVE run, always render the (live) `entry`. For a HISTORICAL run
+ * selected via the RunSelector, prefer that run's OWN `data` snapshot
+ * (`RunInfo.data`) so switching the run pill repaints the grid with that
+ * run's actual values instead of the deduped entry's latest data.
+ *
+ * FAIL LOUD: when the historical run recorded no `data` (e.g. a
+ * very-early-cancelled run), this returns `null` rather than silently
+ * falling back to `entry` — `entry` is the LIVE run's data, which can belong
+ * to a different person under a merged sibling group. Showing it here would
+ * render the wrong person's fields under the operator's selected historical
+ * run. Callers must render a distinguishable "data unavailable" state for
+ * `null`, never substitute `entry`.
+ */
+export function resolveDetailEntry(
+  entry: TrackerEntry,
+  isViewingLiveRun: boolean,
+  activeRunData: Record<string, unknown> | undefined,
+): TrackerEntry | null {
+  if (isViewingLiveRun) return entry;
+  if (!activeRunData) return null;
+  return { ...entry, data: activeRunData as TrackerEntry["data"], typedData: undefined };
+}
+
+/**
  * The log-panel footer chip describes the run's DELEGATION rather than its row
  * shape: a delegated run (`parentRunId`) reads "from <Parent Workflow>" (resolved
  * by finding the parent run in `allEntries` and labeling its workflow), and a
@@ -282,11 +308,14 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   // per-run `data` we just substituted (e.g. showing "Not found" from
   // 10874572's last run while the operator is viewing Langley's earlier
   // successful run).
-  const detailEntry: TrackerEntry = !isViewingLiveRun && activeRun?.data
-    ? { ...entry, data: activeRun.data as TrackerEntry["data"], typedData: undefined }
-    : entry;
+  // FAIL LOUD: `resolveDetailEntry` returns `null` when the historical run
+  // recorded no data — never fall back to the live entry here, that would
+  // silently render a DIFFERENT run's (possibly a different person's) fields
+  // under the operator's selected historical run.
+  const detailEntry = resolveDetailEntry(entry, isViewingLiveRun, activeRun?.data);
 
-  const renderDetailValue = (key: string): string => formatTrackerValue(detailEntry, key);
+  const renderDetailValue = (key: string): string =>
+    detailEntry ? formatTrackerValue(detailEntry, key) : "";
 
   const Skeleton = ({ className }: { className?: string }) => (
     <div className={cn("rounded bg-muted motion-safe:animate-pulse", className)} />
@@ -298,6 +327,10 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
     Boolean(previewAvailable) ||
     hasDelegationRole(entry, "dispatch") ||
     isOperationCoordinator;
+  // FAIL LOUD: `detailEntry` is null exactly when the operator is viewing a
+  // HISTORICAL run that recorded no `data` — render a distinguishable
+  // "unavailable" message in place of the grid rather than any fields.
+  const historicalDataUnavailable = !isViewingLiveRun && !detailEntry;
   // Run-level failure banner — elevates `entry.error` above the log wall with a
   // Retry. A cancelled run (failed + step="cancelled") is operator-stopped, not
   // a failure, so it gets no banner.
@@ -338,6 +371,12 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
           auto-adapts to any workflow's detailFields declaration. Wraps to
           rows of 4. */}
       {!hideDetailGrid && (
+        historicalDataUnavailable ? (
+          <div className="flex items-center gap-2 px-6 py-3 border-b border-border shrink-0 text-sm text-muted-foreground">
+            <TriangleAlert aria-hidden className="h-4 w-4 shrink-0 text-warning" />
+            <span>Data unavailable for this run — no fields were recorded.</span>
+          </div>
+        ) : (
         <div className="grid grid-cols-4 shrink-0">
           {allDetailFields.map((f) => {
             const value = renderDetailValue(f.key);
@@ -365,6 +404,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
             );
           })}
         </div>
+        )
       )}
 
       {/* Step pipeline — every row, including the operation coordinator, shows

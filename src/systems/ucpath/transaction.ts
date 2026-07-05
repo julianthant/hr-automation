@@ -172,6 +172,20 @@ export async function clickCreateTransaction(
     return { success: false, error: errorText ?? "Unknown error" };
   }
 
+  // A timeout is NOT a confirmation. If the poll window expired with no error
+  // banner, do one last direct check of the reason-code page itself before
+  // reporting success — a PeopleSoft hang with no visible error banner must
+  // not be reported as a successful transaction creation.
+  if (outcome === "timeout") {
+    const confirmed = await successMarker.first().isVisible().catch(() => false);
+    if (!confirmed) {
+      throw new Error(
+        "Create Transaction timed out with no error banner and no reason-code page " +
+        "confirmation — PeopleSoft's outcome is unknown, refusing to report success.",
+      );
+    }
+  }
+
   log.success("Transaction created");
   return { success: true };
 }
@@ -645,6 +659,22 @@ export async function clickSaveAndSubmit(
     return { success: false, error: errorText ?? "Unknown error" };
   }
 
+  // A timeout is NOT a confirmation. If the poll window expired with no error
+  // banner, do one last direct check of the confirmation OK button itself
+  // before reporting success — a PeopleSoft hang with no visible error banner
+  // must not be reported as a successful save/submit (this is the real UCPath
+  // termination/hire mutation).
+  if (outcome === "timeout") {
+    const confirmed = await okMarker.first().isVisible().catch(() => false);
+    if (!confirmed) {
+      throw new Error(
+        `Save and Submit timed out with no error banner and no confirmation OK dialog` +
+        `${employeeId ? ` (EID ${employeeId})` : ""} — PeopleSoft's outcome is unknown, ` +
+        "refusing to report success.",
+      );
+    }
+  }
+
   log.success("Transaction saved and submitted");
 
   // Mapped via playwright-cli 2026-04-01:
@@ -719,7 +749,16 @@ export async function readLatestTransactionNumber(
   const deadline = Date.now() + 15_000;
   let linkText = "";
   while (!linkText && Date.now() < deadline) {
-    linkText = (await findTransactionRowLinkByEid(txnFrame, employeeId)) ?? "";
+    // This poll is a best-effort post-submit readback (the transaction was
+    // already submitted) — retry on a transient scan error the same as a
+    // "not found yet" tick, rather than aborting the poll early. Unlike
+    // findExistingTerminationTransaction's pre-submit duplicate guard, a
+    // failure here does not risk a duplicate create.
+    try {
+      linkText = (await findTransactionRowLinkByEid(txnFrame, employeeId)) ?? "";
+    } catch (e) {
+      log.warn(`[Txn Readback] Row scan threw while polling for EID ${employeeId} — retrying: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (!linkText) await page.waitForTimeout(1_500);
   }
   if (!linkText) {
@@ -804,10 +843,12 @@ export interface ExistingTerminationResult {
  * missed duplicates and produced real dupes (EID 10794813 Aki Uchida,
  * 2026-04-24).
  *
- * Best-effort: `txnNumber` is `null` on any navigation / parse failure
- * rather than throwing, because a failed pre-check should degrade to "no
- * existing transaction found — proceed with submit". Real submit failures
- * surface through the subsequent `clickSaveAndSubmit` call.
+ * This is the pre-submit duplicate-termination guard, so a genuine scan
+ * that finds no matching row returns `{ txnNumber: null }` — but a THROWN
+ * navigation/scan/click error does NOT degrade to that same shape. Reading
+ * "the lookup failed" as "no existing transaction found" would clear the
+ * way for a second real duplicate termination, so an unresolved failure
+ * now propagates instead of being swallowed here.
  */
 export async function findExistingTerminationTransaction(
   page: Page,
@@ -866,8 +907,13 @@ export async function findExistingTerminationTransaction(
     log.warn(`[Txn Lookup] Matched row but couldn't extract Transaction ID from detail page — treating as no match`);
     return { txnNumber: null, alreadyAtSmartHR: false };
   } catch (e) {
-    log.warn(`[Txn Lookup] Lookup threw (treating as no match): ${e instanceof Error ? e.message : String(e)}`);
-    return { txnNumber: null, alreadyAtSmartHR: false };
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `[Txn Lookup] Existing-termination lookup threw for eid=${employeeId} effDate=${effectiveDate} — ` +
+      `result unknown, refusing to report "no existing transaction found" (would clear the way for a ` +
+      `duplicate termination): ${message}`,
+      { cause: e },
+    );
   }
 }
 
@@ -895,8 +941,12 @@ export async function findExistingTerminationTransaction(
  * clicks "Delete Selected Transactions" once (it deletes all checked rows), and
  * confirms the PeopleSoft dialog (#ICOK).
  *
- * Returns the COUNT of rows deleted (0 when no matching row was found or the
- * delete failed — best-effort; a failure here is logged, not thrown). The
+ * Returns the COUNT of rows deleted — `0` means a genuine "no matching pending
+ * row" scan. A THROWN error (navigation/click/scan failure) is NOT swallowed
+ * into that same `0`: this is the real duplicate guard the caller uses to
+ * decide whether it's safe to create a fresh transaction, so reading "the
+ * sweep failed" as "0 pending rows, nothing to delete" would leave a stale
+ * pending termination in place while a new one gets created on top of it. The
  * checkboxes are clicked inside `frame.evaluate` because PeopleSoft's overlay
  * can intercept a Playwright click — the same escape hatch used for the #ICOK
  * dialog.
@@ -949,8 +999,13 @@ export async function deletePendingTransaction(
     log.success(`[Txn Delete] Deleted ${checkedCount} pending termination row(s) for eid=${employeeId}`);
     return checkedCount;
   } catch (e) {
-    log.warn(`[Txn Delete] Delete threw (treating as nothing deleted): ${e instanceof Error ? e.message : String(e)}`);
-    return 0;
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `[Txn Delete] Pending-termination sweep threw for eid=${employeeId} — result unknown, refusing ` +
+      `to report "0 pending rows" (would leave a stale pending termination in place for a fresh ` +
+      `create to duplicate): ${message}`,
+      { cause: e },
+    );
   }
 }
 
@@ -962,6 +1017,13 @@ export async function deletePendingTransaction(
  *
  * Checks ALL matching rows (not just the first) so a single "Delete Selected
  * Transactions" submit clears every accumulated duplicate for the EID at once.
+ *
+ * A genuine scan that matches zero rows already returns `0` via the normal
+ * return path below — that's a real "nothing pending" result. A THROWN
+ * error (frame detached, evaluate failure, etc.) is NOT swallowed into that
+ * same `0`: this count backs the pending-termination sweep, so misreading
+ * "the scan failed" as "0 pending rows" would leave a stale pending
+ * termination in place while a new one gets created on top of it.
  */
 async function checkPendingTransactionRowsByEid(
   frame: FrameLocator,
@@ -972,7 +1034,7 @@ async function checkPendingTransactionRowsByEid(
       let checked = 0;
       const tables = body.querySelectorAll("table");
       for (const table of Array.from(tables)) {
-        for (const row of Array.from((table as HTMLTableElement).rows)) {
+        for (const row of Array.from((table).rows)) {
           const rowText = row.textContent ?? "";
           if (!/Terminat/i.test(rowText)) continue;
           const hasEidCell = Array.from(row.cells).some(
@@ -989,7 +1051,7 @@ async function checkPendingTransactionRowsByEid(
       return checked;
     },
     employeeId,
-  ).catch(() => 0);
+  );
 }
 
 /**
@@ -1057,6 +1119,15 @@ export async function scrollToTransactionReadbackArea(frame: FrameLocator): Prom
  * employeeId`) rather than substring-of-row-text to avoid false positives
  * from dept IDs / location codes that might incidentally contain the EID
  * digits.
+ *
+ * A genuine scan that finds no matching row returns `null` via the normal
+ * return path above. A THROWN scan error (frame detached, evaluate
+ * failure, etc.) is NOT swallowed into that same `null` here — one caller
+ * (`findExistingTerminationTransaction`) uses this as a pre-submit
+ * duplicate-termination guard, where "scan failed" misread as "no row"
+ * would clear the way for a duplicate create. Callers that want a
+ * best-effort degrade (e.g. `readLatestTransactionNumber`'s post-submit
+ * readback poll) catch locally at their own call site instead.
  */
 async function findTransactionRowLinkByEid(
   frame: FrameLocator,
@@ -1067,7 +1138,7 @@ async function findTransactionRowLinkByEid(
     (body, { eid, date, requireTerm }: { eid: string; date?: string; requireTerm?: boolean }) => {
       const tables = body.querySelectorAll("table");
       for (const table of Array.from(tables)) {
-        for (const row of Array.from((table as HTMLTableElement).rows)) {
+        for (const row of Array.from((table).rows)) {
           const rowText = row.textContent ?? "";
           if (date && !rowText.includes(date)) continue;
           if (requireTerm && !/Terminat/i.test(rowText)) continue;
@@ -1084,7 +1155,7 @@ async function findTransactionRowLinkByEid(
       return null;
     },
     { eid: employeeId, date: opts?.effectiveDate, requireTerm: opts?.requireTerminationAction },
-  ).catch(() => null);
+  );
 }
 
 // ─── Helpers ───
@@ -1094,8 +1165,29 @@ async function findTransactionRowLinkByEid(
  * e.g. "$17.75 per hour" → "17.75"
  */
 export function parsePayRate(wage: string): string {
-  const match = wage.match(/\$?([\d.]+)/);
-  return match?.[1] ?? wage;
+  // First number-like token, commas included — wages arrive as "$17.75 per
+  // hour", "$1,250.00 biweekly", or bare "20". The previous /[\d.]+/ stopped at
+  // the first comma, so "$1,250.00" silently parsed as "1" — a wrong rate typed
+  // into a real UCPath transaction.
+  const match = wage.match(/\$?\s*([\d,]*\d(?:\.\d+)?)/);
+  if (!match) {
+    // Fail loud: a non-numeric wage ("TBD", "Negotiable", "N/A") must NOT be
+    // typed verbatim into the UCPath Compensation Rate field. Surface it so the
+    // upstream CRM record gets fixed, rather than silently submitting garbage.
+    throw new Error(
+      `parsePayRate: no numeric rate found in wage string "${wage}" — refusing to submit an unparseable pay rate to UCPath`,
+    );
+  }
+  const token = match[1];
+  // Commas must be well-formed thousands groups ("1,250" / "12,345.67").
+  // Stripping the comma from a malformed token like "1,25.00" would silently
+  // submit 125 — refuse instead so the source record gets fixed.
+  if (token.includes(",") && !/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(token)) {
+    throw new Error(
+      `parsePayRate: ambiguous digit separators in wage string "${wage}" — refusing to submit an unparseable pay rate to UCPath`,
+    );
+  }
+  return token.replace(/,/g, "");
 }
 
 /**

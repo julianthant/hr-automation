@@ -26,7 +26,6 @@
  * `src/control/ocr/discard.ts`.
  */
 import { basename, join } from "node:path";
-import type { ZodType } from "zod/v4";
 import { loadRoster as realLoadRoster, precomputeRoster } from "../../services/matching/index.js";
 import type { RosterRow as MatchRosterRow } from "../../services/matching/match.js";
 import { watchChildRuns as realWatchChildRuns, type ChildOutcome, type WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
@@ -345,7 +344,7 @@ export async function runOcrOrchestrator(
     const result = await runOcrPipeline({
       pdfPath,
       pageImagesDir,
-      recordSchema: s.ocrRecordSchema as ZodType<unknown>,
+      recordSchema: s.ocrRecordSchema,
       schemaName: s.schemaName,
       prompt: s.prompt,
       // Skip re-rendering when we already rendered to seed placeholders.
@@ -354,7 +353,7 @@ export async function runOcrOrchestrator(
         : {}),
     });
     return {
-      data: result.data as unknown[],
+      data: result.data,
       provider: result.provider,
       attempts: result.attempts,
       cached: result.cached,
@@ -521,7 +520,7 @@ export async function runOcrOrchestrator(
       throw new Error("OCR: no roster path resolved");
     }
     const roster = resolvedRosterPath
-      ? (precomputeRoster((await loadRosterFn(resolvedRosterPath)) as MatchRosterRow[]) as OcrRosterRow[])
+      ? (precomputeRoster((await loadRosterFn(resolvedRosterPath))) as OcrRosterRow[])
       : [];
 
     // 1b. Pre-render PDF pages so we know page count + can show the page
@@ -636,7 +635,7 @@ export async function runOcrOrchestrator(
         preRenderedPages,
       }),
     );
-    log.success(`[ocr] OCR complete (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, records=${(ocrResult.data as unknown[]).length})`);
+    log.success(`[ocr] OCR complete (provider=${ocrResult.provider}, attempts=${ocrResult.attempts}, records=${(ocrResult.data).length})`);
     // Per-record extraction summary so operator can see exactly what came
     // out of the LLM before any matching/disambiguation runs on top.
     (ocrResult.data as Array<Record<string, unknown>>).forEach((rec, i) => {
@@ -648,7 +647,7 @@ export async function runOcrOrchestrator(
       const missing = Array.isArray(rec.originallyMissing) && rec.originallyMissing.length > 0
         ? ` missing=[${(rec.originallyMissing as string[]).join(",")}]`
         : "";
-      log.step(`[ocr] record ${i + 1}/${(ocrResult.data as unknown[]).length}: name="${name}" eid=${eid} date=${date} signed=${signed} type=${docType}${missing}`);
+      log.step(`[ocr] record ${i + 1}/${(ocrResult.data).length}: name="${name}" eid=${eid} date=${date} signed=${signed} type=${docType}${missing}`);
     });
 
     // Build per-page status summary from OCR result
@@ -682,7 +681,7 @@ export async function runOcrOrchestrator(
 
     // Snapshot the OCR-extracted records → Preview shows extracted
     // names/dates BEFORE matching runs.
-    emitSnapshot(ocrResult.data as unknown[], "ocr", "running", {
+    emitSnapshot(ocrResult.data, "ocr", "running", {
       rosterPath: resolvedRosterPath,
       ocrProvider: ocrResult.provider,
       ocrAttempts: ocrResult.attempts,
@@ -693,13 +692,13 @@ export async function runOcrOrchestrator(
     });
 
     // 3. Match
-    log.step(`[ocr] matching ${(ocrResult.data as unknown[]).length} OCR record(s) against roster`);
+    log.step(`[ocr] matching ${(ocrResult.data).length} OCR record(s) against roster`);
     log.step(`[ocr] roster has ${roster.length} row(s)${resolvedRosterPath ? ` loaded from ${resolvedRosterPath.split("/").pop()}` : " (no roster — rosterMode optional)"}`);
     let records = await raceOcrPrepWithDiscard(
       id,
       runId,
       Promise.all(
-        (ocrResult.data as unknown[]).map((r) =>
+        (ocrResult.data).map((r) =>
           spec.matchRecord({ record: r, roster }),
         ),
       ),
@@ -721,7 +720,7 @@ export async function runOcrOrchestrator(
         runOcrSecondOpinionPage({
           pageImagesDir,
           pageFilename: `page-${String(args.pageNum).padStart(3, "0")}.png`,
-          recordSchema: spec.ocrRecordSchema as ZodType<unknown>,
+          recordSchema: spec.ocrRecordSchema,
           prompt: spec.prompt,
           excludeModels: args.excludeModels,
         }));
@@ -1069,14 +1068,19 @@ export async function runOcrOrchestrator(
                   ...(cachedParentSubject ? { parentSubject: cachedParentSubject } : {}),
                 },
           );
-          const deriveChildItemId = (inp: { name?: string; emplId?: string }): string => {
-            const matched = eidLookupEnqueueItems.find((e) => {
-              if ("name" in inp && inp.name) return targetName(e, spec) === inp.name;
-              if ("emplId" in inp && inp.emplId) return lookupEnqueueEmplId(e) === inp.emplId;
-              return false;
-            });
-            return matched?.itemId ?? `ocr-fallback-${runId}-r0`;
-          };
+          // Collision-safe, fail-loud itemId resolution — mirrors the fixed
+          // sibling `buildFanOutItemIdResolver` (src/tracker/dashboard/ocr/approve.ts).
+          // `inputs` is built in the SAME order as `eidLookupEnqueueItems`, so
+          // this keys each logical input's JSON to a FIFO queue of itemIds:
+          // two records that share an extracted name/EID keep DISTINCT itemIds
+          // (positional, not first-match-wins) instead of collapsing onto one
+          // queue row, and a genuine miss throws instead of handing the
+          // unmatched record the same fabricated `ocr-fallback-…-r0` id (which
+          // silently hung the OTHER row to its watch timeout).
+          const deriveChildItemId = buildEidLookupItemIdResolver(
+            inputs,
+            eidLookupEnqueueItems.map((e) => e.itemId),
+          );
           type EidLookupChildInput = (typeof inputs)[number];
           await delegateToAllImpl<EidLookupChildInput, readonly string[]>({
             parentRunId: runId,
@@ -1109,7 +1113,7 @@ export async function runOcrOrchestrator(
               // wrong write order. The remaining buildHttpPendingData fields
               // are the ones that aren't part of the pending-data seed.
               const { __name: _n, __id: _i, archetype: _a, ...extras } = base as Record<string, unknown> & { __name?: string; __id?: string; archetype?: string };
-              return extras as Record<string, unknown>;
+              return extras;
             },
             ...(onPreparedItems
               ? {
@@ -1161,7 +1165,7 @@ export async function runOcrOrchestrator(
           runOptions: input.runOptions,
           emitProgress: (recs: unknown[]) =>
             emitSnapshot(recs, "person-lookup", "running", { failedPages, emptyPages, pageStatusSummary }),
-        }) as Promise<unknown[]>,
+        }),
       );
       enriched.forEach((r, i) => {
         records[i] = r;
@@ -1280,6 +1284,41 @@ export function operationTraceCode(operationWorkflow: string | undefined): strin
     case "onbase": return "ob";
     default: return undefined;
   }
+}
+
+/**
+ * Build the `deriveItemId` resolver for the OCR eid-lookup (person-lookup)
+ * fan-out. Mirrors `buildFanOutItemIdResolver`
+ * (src/tracker/dashboard/ocr/approve.ts): keyed by the JSON of each LOGICAL
+ * input, in the SAME order as the `itemIds` it was built from — two records
+ * with identical logical input (a shared extracted name/EID) still receive
+ * their OWN itemId (a per-key FIFO queue, consumed in enqueue order) instead
+ * of collapsing onto the first match. A miss THROWS instead of returning a
+ * fabricated `ocr-fallback-…` id — the old fallback handed every unmatched
+ * record the SAME id, collapsing distinct people into one queue row and
+ * hanging the other row to its watch timeout.
+ */
+export function buildEidLookupItemIdResolver(
+  logicalInputs: readonly unknown[],
+  itemIds: readonly string[],
+): (input: unknown) => string {
+  const queueByInputJson = new Map<string, string[]>();
+  logicalInputs.forEach((inp, idx) => {
+    const key = JSON.stringify(inp);
+    const queue = queueByInputJson.get(key);
+    if (queue) queue.push(itemIds[idx]);
+    else queueByInputJson.set(key, [itemIds[idx]]);
+  });
+  return (input: unknown): string => {
+    const itemId = queueByInputJson.get(JSON.stringify(input))?.shift();
+    if (!itemId) {
+      throw new Error(
+        `ocr eid-lookup fan-out: deriveItemId lookup missed for a person-lookup input — ` +
+          `${logicalInputs.length} inputs were keyed`,
+      );
+    }
+    return itemId;
+  };
 }
 
 interface FanOutChildSpec {
@@ -1513,7 +1552,7 @@ function readPreviousRecords(
   });
   if (!latest?.data?.records) return [];
   try {
-    const parsed = JSON.parse(latest.data.records as unknown as string);
+    const parsed = JSON.parse(latest.data.records);
     if (Array.isArray(parsed)) return parsed;
   } catch { /* tolerate */ }
   return [];

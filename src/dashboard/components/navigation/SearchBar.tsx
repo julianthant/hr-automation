@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, Loader2, X } from "lucide-react";
+import { Search, Loader2, X, TriangleAlert } from "lucide-react";
 import { SearchResults } from "./SearchResults";
 import type { SearchResultRow } from "@/components/shared/types";
 
@@ -26,6 +26,12 @@ export function SearchBar({ onSelect }: SearchBarProps) {
   const [rows, setRows] = useState<SearchResultRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  // FAIL LOUD: a FAILED search (non-2xx / network error) must render as a
+  // distinguishable "search failed" state — never silently collapse to `[]`,
+  // which is indistinguishable from a genuine zero-hit search. An operator
+  // reading a failed search as "no matches" could conclude a subject was
+  // never processed and re-run an irreversible HR transaction.
+  const [searchFailed, setSearchFailed] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -38,21 +44,29 @@ export function SearchBar({ onSelect }: SearchBarProps) {
     const id = ++reqIdRef.current;
     if (!query.trim()) {
       setRows(null);
+      setSearchFailed(false);
       setLoading(false);
       return;
     }
     setLoading(true);
+    setSearchFailed(false);
     fetch(`/api/search?q=${encodeURIComponent(query)}&limit=10`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: SearchResultRow[]) => {
+      .then((r) => {
+        if (!r.ok) throw new Error(`search request failed with status ${r.status}`);
+        return r.json() as Promise<SearchResultRow[]>;
+      })
+      .then((data) => {
         if (id !== reqIdRef.current) return; // a newer search has kicked off
         setRows(Array.isArray(data) ? data : []);
+        setSearchFailed(false);
         setLoading(false);
         setOpen(true);
       })
-      .catch(() => {
+      .catch((err) => {
         if (id !== reqIdRef.current) return;
-        setRows([]);
+        console.error("[SearchBar] search request failed", err);
+        setRows(null);
+        setSearchFailed(true);
         setLoading(false);
         setOpen(true);
       });
@@ -94,12 +108,14 @@ export function SearchBar({ onSelect }: SearchBarProps) {
     setOpen(false);
     setQ("");
     setRows(null);
+    setSearchFailed(false);
     onSelect(row);
   };
 
   const clearQuery = () => {
     setQ("");
     setRows(null);
+    setSearchFailed(false);
     setOpen(false);
     inputRef.current?.focus();
   };
@@ -117,7 +133,7 @@ export function SearchBar({ onSelect }: SearchBarProps) {
           placeholder="Search history (email, emplId, docId, name)..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onFocus={() => rows && setOpen(true)}
+          onFocus={() => (rows || searchFailed) && setOpen(true)}
           onKeyDown={onKey}
           className="flex-1 bg-transparent border-none outline-none text-foreground text-xs font-sans placeholder:text-muted-foreground min-w-0"
         />
@@ -134,7 +150,22 @@ export function SearchBar({ onSelect }: SearchBarProps) {
           </button>
         ) : null}
       </div>
-      {open && rows && (
+      {open && searchFailed && (
+        <div
+          role="alert"
+          className="dashboard-search-results-panel absolute top-full left-0 mt-1.5 z-50 overflow-hidden rounded-lg border border-destructive/30 bg-card text-card-foreground shadow-xl"
+        >
+          <div className="px-4 py-6 text-center">
+            <TriangleAlert aria-hidden className="w-4 h-4 mx-auto text-destructive" />
+            <div className="text-sm text-foreground font-medium mt-2">Search failed</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Could not reach the search service — this does NOT mean there are no matches.
+              Try again before concluding a subject was never processed.
+            </div>
+          </div>
+        </div>
+      )}
+      {open && !searchFailed && rows && (
         <SearchResults rows={rows} onPick={handlePick} query={q} />
       )}
     </div>

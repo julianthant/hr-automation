@@ -13,6 +13,11 @@ export async function bundlePhotosToPdf(
   imagePaths: string[],
   outPath: string,
 ): Promise<void> {
+  if (imagePaths.length === 0) {
+    throw new Error(
+      `bundlePhotosToPdf: no photos to bundle (0 image paths) for output "${outPath}" — refusing to synthesize a blank PDF`,
+    );
+  }
   mkdirSync(dirname(outPath), { recursive: true });
   const doc = await PDFDocument.create();
 
@@ -32,11 +37,6 @@ export async function bundlePhotosToPdf(
     }
     const page = doc.addPage([img.width, img.height]);
     page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
-  }
-
-  // Empty case: add a blank page so the PDF is structurally valid.
-  if (imagePaths.length === 0) {
-    doc.addPage();
   }
 
   const pdfBytes = await doc.save();

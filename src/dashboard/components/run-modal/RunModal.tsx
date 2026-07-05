@@ -20,7 +20,7 @@ import {
   resolveTargetWorkflow,
   type RunModalSubmitResponse,
 } from "@/lib/run-modal-registry";
-import { useRosters, refreshRosters, type RosterListing } from "@/components/hooks/useRosters";
+import { useRosters, useRostersError, refreshRosters } from "@/components/hooks/useRosters";
 import { useFormTypes, refreshFormTypes, type FormTypeOption } from "@/components/hooks/useFormTypes";
 import {
   ONBASE_DOCUMENT_TYPES,
@@ -152,6 +152,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   // overriding an operator's deliberate choice would be its own bug.
   const rosterModeSource = useRef<"auto" | "user">("auto");
   const rosters = useRosters();
+  // Whether the LAST /api/rosters fetch attempt failed. `rosters` alone can't
+  // distinguish "confirmed empty directory" from "the request errored" — both
+  // read as an empty/`null` value — so a transient failure must not be treated
+  // the same as a genuinely empty roster dir (fail-loud: see root CLAUDE.md).
+  const rostersError = useRostersError();
   const seenSharePointCompletionTs = useRef<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -203,7 +208,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
       return;
     }
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const buf = await file.arrayBuffer();
         const { PDFDocument } = await import("pdf-lib");
@@ -243,6 +248,11 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     Boolean(sharePointStatus?.inFlight) || Boolean(sharePointStatus?.queued.length);
 
   // Auto-flip away from invalid roster choices as local files/queue state changes.
+  // Safe to treat `rosters.length === 0` below as a CONFIRMED empty roster dir
+  // (not a swallowed fetch error): the cache underlying `useRosters()` is only
+  // ever populated from a successful response — a failed fetch leaves it as
+  // `null` (caught by the early return here) or unchanged from its last
+  // confirmed value, never collapsed to `[]` (see resource-factory.ts).
   useEffect(() => {
     if (!rosters) return;
     if (rosters.length === 0 && rosterMode === "existing") {
@@ -277,7 +287,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     }
     let cancelled = false;
     const checkedFiles = files;
-    (async () => {
+    void (async () => {
       try {
         const results = await Promise.all(
           checkedFiles.map(async (candidate) => {
@@ -437,6 +447,19 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   async function handleSubmit(): Promise<void> {
     if (!config || files.length === 0 || submitting) return;
     if ((showFormType || showOnbaseDocType) && !formType) return;
+    // Fail loud: never submit "use the existing roster" without a confirmed
+    // local roster to point at. A stuck default rosterMode of "existing" with
+    // no `latestRoster` means /api/rosters never confirmed one way or the
+    // other (e.g. the fetch failed — see `rostersError`) — silently sending
+    // rosterMode=existing with no rosterPath would leave the backend to guess.
+    if (effectiveShowRoster && rosterMode === "existing" && !latestRoster) {
+      setError(
+        rostersError
+          ? "Couldn't confirm a local roster (the roster check failed) — retry, or choose Download fresh from SharePoint."
+          : "No roster confirmed yet — wait for the roster check to finish, or choose Download fresh from SharePoint.",
+      );
+      return;
+    }
     setSubmitting(true);
     setProgress(0);
     setError(null);
@@ -535,16 +558,16 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     try {
       const results: RunModalSubmitResponse[] = [];
       for (let i = 0; i < uploadFiles.length; i += 1) {
-        const result = await uploadOne(uploadFiles[i]!, i);
+        const result = await uploadOne(uploadFiles[i], i);
         if (!result.ok) {
           setError(result.error ?? "Server error — try again or check the dashboard logs.");
           setSubmitting(false);
           return;
         }
-        uploadedByIndex.set(i, uploadFiles[i]!.size);
+        uploadedByIndex.set(i, uploadFiles[i].size);
         results.push(result);
       }
-      const t = config.buildSuccessToast(results[0]!, uploadFiles[0]!);
+      const t = config.buildSuccessToast(results[0], uploadFiles[0]);
       toast.success(
         uploadFiles.length > 1 ? `${uploadFiles.length} preparations started` : t.title,
         uploadFiles.length > 1
@@ -592,6 +615,16 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
         onEscapeKeyDown={(e) => {
           // Esc closes an open photo lightbox first (it's a custom overlay whose
           // preventDefault doesn't stop Radix from also closing this dialog).
+          if (captureMode && captureLightboxOpen) e.preventDefault();
+        }}
+        onPointerDownOutside={(e) => {
+          // The photo lightbox is portaled to <body> (to escape this dialog's
+          // centering transform), so a click on it reads as "outside" this
+          // dialog — Radix would otherwise dismiss the whole Run modal. Keep it
+          // open while the lightbox is up; the lightbox handles its own dismiss.
+          if (captureMode && captureLightboxOpen) e.preventDefault();
+        }}
+        onInteractOutside={(e) => {
           if (captureMode && captureLightboxOpen) e.preventDefault();
         }}
         style={
@@ -823,9 +856,14 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
                   hint={
                     hasRoster && latestRoster
                       ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
-                      : rosters === null
-                        ? "Loading rosters…"
-                        : "No roster on disk — pick the other option to fetch one."
+                      : rosters !== null
+                        // A confirmed (possibly stale) fetch says the dir is
+                        // genuinely empty — trust it even if a LATER refresh
+                        // attempt has since failed (rostersError).
+                        ? "No roster on disk — pick the other option to fetch one."
+                        : rostersError
+                          ? "Couldn't check for a local roster — the /api/rosters request failed. Retrying, or pick the other option."
+                          : "Loading rosters…"
                   }
                 />
                 {sharePointWaitAvailable ? (

@@ -44,8 +44,33 @@ import {
 
 // ─── OCR-pass record (one page / record of a mixed PDF) ─────
 
+const VERIFY_FORM_KINDS = ["oath", "emergency-contact", "unknown"] as const;
+
+/**
+ * `formKind` tolerant coercion — mirrors `DocumentTypeSchema`'s precedent
+ * (`./shared.ts`, 2026-06-04). `z.enum([...]).default("unknown")` only covers
+ * a MISSING (`undefined`) formKind: a PRESENT-but-unrecognized string (model
+ * hallucination/typo) still FAILS `safeParse`, and per-page `finalize()` drops
+ * the WHOLE record on any single-field failure — so a mis-labeled record
+ * silently VANISHES from operator review instead of surfacing for a human to
+ * catch (root CLAUDE.md "fail loud — no unverified silent fallbacks": losing
+ * the record is worse than one wrong-looking label on it). Coerce any
+ * unrecognized value to "unknown" and `log.warn` it so it's still visible in
+ * the run log; `undefined`/missing is the ordinary "model omitted the field"
+ * case and does not warn.
+ */
+const VerifyFormKindSchema = z.preprocess((v) => {
+  if (typeof v === "string" && (VERIFY_FORM_KINDS as readonly string[]).includes(v)) return v;
+  if (v !== undefined) {
+    log.warn(
+      `[verify] unrecognized formKind ${JSON.stringify(v)} — coercing to "unknown" so the record still surfaces for review`,
+    );
+  }
+  return "unknown";
+}, z.enum(VERIFY_FORM_KINDS));
+
 export const VerifyOcrRecordSchema = z.object({
-  formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("unknown"),
+  formKind: VerifyFormKindSchema,
   sourcePage: z.number().int().positive(),
   /** Employee name (both forms). */
   printedName: z.string().nullable().optional(),
@@ -294,7 +319,7 @@ export function applyPersonLookupToVerifyRecord(
   const emplId = nonEmpty(data?.emplId);
   if (emplId) rec.employeeId = emplId;
   const resolvedName = applyPersonLookupNameToOcrRecord(
-    rec as unknown as Record<string, unknown>,
+    rec,
     data,
   );
   if (resolvedName) rec.name = resolvedName;

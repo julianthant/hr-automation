@@ -29,8 +29,33 @@ import {
 
 // ─── OCR-pass record (one row of a paper roster) ──────────
 
+const OATH_FORM_KINDS = ["oath", "emergency-contact", "unknown"] as const;
+
+/**
+ * `formKind` tolerant coercion — mirrors `DocumentTypeSchema`'s precedent
+ * (`./shared.ts`, 2026-06-04). `z.enum([...]).default("oath")` only covers a
+ * MISSING (`undefined`) formKind: a PRESENT-but-unrecognized string (model
+ * hallucination/typo) still FAILS `safeParse`, and per-page `finalize()` drops
+ * the WHOLE record on any single-field failure — so a mis-labeled record
+ * silently VANISHES from operator review instead of surfacing for a human to
+ * catch (root CLAUDE.md "fail loud — no unverified silent fallbacks": losing
+ * the record is worse than one wrong-looking label on it). Coerce any
+ * unrecognized value to "oath" and `log.warn` it so it's still visible in the
+ * run log; `undefined`/missing is the ordinary "model omitted the field" case
+ * and does not warn.
+ */
+const OathFormKindSchema = z.preprocess((v) => {
+  if (typeof v === "string" && (OATH_FORM_KINDS as readonly string[]).includes(v)) return v;
+  if (v !== undefined) {
+    log.warn(
+      `[oath] unrecognized formKind ${JSON.stringify(v)} — coercing to "oath" so the record still surfaces for review`,
+    );
+  }
+  return "oath";
+}, z.enum(OATH_FORM_KINDS));
+
 export const OathRosterOcrRecordSchema = z.object({
-  formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("oath"),
+  formKind: OathFormKindSchema,
   sourcePage: z.number().int().positive(),
   rowIndex: z.number().int().nonnegative().optional(),
   // `nullable` because the prompt tells the model to NULL oath-specific fields
@@ -289,7 +314,7 @@ export const oathOcrFormSpec: OcrFormSpec<
     // Ambiguous: defer to the orchestrator's disambiguating phase.
     const closeSecond = second && top.score - second.score < NAME_AUTO_ACCEPT_GAP;
     const reason = closeSecond
-      ? `top ${top.score.toFixed(2)} too close to second ${second!.score.toFixed(2)} (gap < ${NAME_AUTO_ACCEPT_GAP})`
+      ? `top ${top.score.toFixed(2)} too close to second ${second.score.toFixed(2)} (gap < ${NAME_AUTO_ACCEPT_GAP})`
       : `${ranked.candidates.length} fuzzy candidates require LLM selection`;
     log.step(`[oath/match] → lookup-pending (will disambiguate via LLM): ${reason}`);
     return {
@@ -301,7 +326,7 @@ export const oathOcrFormSpec: OcrFormSpec<
       originallyMissing: [],
       selected: true,
       warnings: closeSecond
-        ? [`Top score ${top.score.toFixed(2)} but close second ${second!.score.toFixed(2)} — disambiguating`]
+        ? [`Top score ${top.score.toFixed(2)} but close second ${second.score.toFixed(2)} — disambiguating`]
         : [`Top score ${top.score.toFixed(2)} in disambiguation band — disambiguating`],
     };
   },
@@ -425,7 +450,7 @@ export const oathOcrFormSpec: OcrFormSpec<
         signerItemIds: doc.perRecordItemIds,
         mode: "full",
         ...(doc.dryRun ? { dryRun: true } : {}),
-      } as OathUploadInput;
+      };
     },
     deriveItemId(doc): string {
       return `ocr-oath-upload-${doc.runId}`;

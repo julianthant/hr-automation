@@ -235,12 +235,16 @@ describe("pickWorkLocationRow", () => {
     assert.strictEqual(picked?.departmentDescription, "Same-day", "at-or-before includes equality");
   });
 
-  it("falls back to the FIRST row when no row carries a usable date (legacy behavior)", () => {
+  it("THROWS when no row carries a usable date (total date-parse miss — fail loud, not an arbitrary row)", () => {
     const rows = [
       wlRow({ effectiveDate: "", departmentDescription: "First" }),
       wlRow({ effectiveDate: "", departmentDescription: "Second" }),
     ];
-    assert.strictEqual(pickWorkLocationRow(rows, "06/10/2026")?.departmentDescription, "First");
+    assert.throws(
+      () => pickWorkLocationRow(rows, "06/10/2026"),
+      /none of the 2 row\(s\) had a parseable Effective Date/,
+      "must fail loud instead of silently returning rows[0] — a blank department must not reach the HDH gate/Kuali",
+    );
   });
 
   it("picks the latest effective date when NO separation date is supplied (current dept)", () => {
@@ -313,12 +317,16 @@ describe("pickEffectiveDatedRow (Job Information / Payroll Title)", () => {
     assert.strictEqual(pickEffectiveDatedRow(rows)?.jobDescription, "Current");
   });
 
-  it("falls back to the FIRST job row when no row carries a usable date (legacy behavior)", () => {
+  it("THROWS when no job row carries a usable date (total date-parse miss — fail loud, not an arbitrary row)", () => {
     const rows = [
       jiRow({ effectiveDate: "", jobDescription: "First" }),
       jiRow({ effectiveDate: "", jobDescription: "Second" }),
     ];
-    assert.strictEqual(pickEffectiveDatedRow(rows, "06/10/2026")?.jobDescription, "First");
+    assert.throws(
+      () => pickEffectiveDatedRow(rows, "06/10/2026"),
+      /none of the 2 row\(s\) had a parseable Effective Date/,
+      "must fail loud instead of silently returning rows[0] — a wrong Payroll Title Code/Title must not reach Kuali",
+    );
   });
 
   it("returns null for no rows", () => {

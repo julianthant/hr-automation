@@ -190,7 +190,13 @@ export async function extractSeparationData(page: Page): Promise<KualiSeparation
   const termCombo = separationForm.terminationType(page);
   const terminationType = (await termCombo.evaluate((el) => {
     const select = el as HTMLSelectElement;
-    return select.options[select.selectedIndex]?.text ?? select.value;
+    const text = select.options[select.selectedIndex]?.text;
+    if (text === undefined) {
+      throw new Error(
+        `[Kuali] Type of Termination select has no option text at selectedIndex=${select.selectedIndex} (raw value="${select.value}") — refusing to guess`,
+      );
+    }
+    return text;
   })).trim();
   log.step(`  Type of Termination: ${terminationType}`);
 
@@ -429,7 +435,11 @@ export async function fillFinalTransactions(
       await deptCombo.selectOption({ index: matchIdx }, { timeout: 5_000 });
       log.step(`  Selected department: ${bestMatch}`);
     } else {
-      log.error(`  No matching department found for: ${opts.department}`);
+      throw new Error(
+        `[Kuali] No matching department option found for "${opts.department}"`
+        + (opts.deptId ? ` (deptId ${opts.deptId})` : "")
+        + ` — refusing to save with a blank required Department field`,
+      );
     }
   }
 
@@ -502,7 +512,14 @@ export async function fillTimekeeperComments(
 ): Promise<void> {
   if (!comments) return;
   const field = timekeeperTasks.timekeeperComments(page);
-  const existing = (await field.inputValue({ timeout: 5_000 }).catch(() => "")).trim();
+  let existing: string;
+  try {
+    existing = (await field.inputValue({ timeout: 5_000 })).trim();
+  } catch (err) {
+    throw new Error(
+      `[Kuali] Failed to read existing Timekeeper/Approver Comments before appending — refusing to write and risk blanking prior comments: ${(err as Error).message}`,
+    );
+  }
   const combined = existing ? `${existing}\n${comments}` : comments;
   log.step(
     `Filling Timekeeper/Approver Comments `

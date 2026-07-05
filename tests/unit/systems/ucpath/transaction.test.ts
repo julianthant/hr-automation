@@ -4,7 +4,35 @@ import {
   extractSmartHrTransactionNumber,
   rowMatchesTerminationEid,
   classifyOutcomeSignals,
+  parsePayRate,
 } from "../../../../src/systems/ucpath/transaction.js";
+
+describe("parsePayRate", () => {
+  test("extracts the numeric rate from a formatted wage", () => {
+    assert.equal(parsePayRate("$17.75 per hour"), "17.75");
+    assert.equal(parsePayRate("20"), "20");
+    assert.equal(parsePayRate("$18.50"), "18.50");
+  });
+  test("throws (fail loud) on a digit-free wage instead of submitting it verbatim", () => {
+    // "TBD"/"Negotiable"/"N/A" would previously be typed straight into the
+    // UCPath Compensation Rate field; now they fail loud.
+    assert.throws(() => parsePayRate("TBD"), /unparseable pay rate/);
+    assert.throws(() => parsePayRate("Negotiable"), /unparseable pay rate/);
+    assert.throws(() => parsePayRate("N/A"), /unparseable pay rate/);
+  });
+  test("handles comma-formatted wages instead of truncating at the comma", () => {
+    // The old /[\d.]+/ stopped at the first comma: "$1,250.00" → "1" — a wrong
+    // rate typed into a real UCPath transaction.
+    assert.equal(parsePayRate("$1,250.00"), "1250.00");
+    assert.equal(parsePayRate("$1,250.00 biweekly"), "1250.00");
+    assert.equal(parsePayRate("$12,345.67"), "12345.67");
+  });
+  test("throws on malformed digit-separator grouping instead of guessing", () => {
+    // Stripping the comma from "1,25.00" would silently submit 125.
+    assert.throws(() => parsePayRate("$1,25.00"), /ambiguous digit separators/);
+    assert.throws(() => parsePayRate("$12,3456"), /ambiguous digit separators/);
+  });
+});
 
 test("extractSmartHrTransactionNumber reads the lower Transaction ID field", () => {
   assert.equal(

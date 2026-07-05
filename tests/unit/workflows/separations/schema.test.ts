@@ -322,11 +322,16 @@ describe("mapReasonCode", () => {
     assert.equal(mapReasonCode("Some Completely Unrelated Reason xyz"), "Resign - No Reason Given");
   });
 
-  it("returns the first map entry for empty-string input (current fuzzy behavior)", () => {
-    // Documenting current behavior: every key contains "" as a substring, so the
-    // first REASON_CODE_MAP entry wins. This is a known quirk — upstream callers
-    // should never pass an empty terminationType (Zod schema requires min(1)).
-    assert.equal(mapReasonCode(""), "Resign - Accept Another Job");
+  it("falls back to 'Resign - No Reason Given' for empty-string input (not the first map entry)", () => {
+    // Every key contains "" as a substring, so an unguarded fuzzy loop would return
+    // whichever REASON_CODE_MAP entry happens to be first — an arbitrary wrong
+    // VOL_TERM reason on a live termination. Empty/whitespace-only input must be
+    // caught before the fuzzy loop and resolve to the documented default instead.
+    assert.equal(mapReasonCode(""), "Resign - No Reason Given");
+  });
+
+  it("falls back to 'Resign - No Reason Given' for whitespace-only input", () => {
+    assert.equal(mapReasonCode("   "), "Resign - No Reason Given");
   });
 });
 

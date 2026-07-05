@@ -31,6 +31,41 @@ test('session: onBrowserDisconnect records system id for classification', () => 
   assert.deepEqual([...s.disconnectedSystems()], ['new-kronos'])
 })
 
+test('session.hadBrowserDisconnect: SCOPED to the last-touched system — an unrelated system disconnecting must not reclassify a genuine failure on another system as cancelled', async () => {
+  const fakePage = (): import('playwright').Page =>
+    ({ close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page)
+  const kualiBrowser = Object.assign(new EventEmitter(), { close: async () => {} })
+  const ucpathBrowser = Object.assign(new EventEmitter(), { close: async () => {} })
+  const s = Session.forTesting({
+    systems: [makeSystem('kuali'), makeSystem('ucpath')],
+    browsers: new Map([
+      ['kuali', { page: fakePage(), browser: kualiBrowser as unknown as import('playwright').Browser, context: null as never }],
+      ['ucpath', { page: fakePage(), browser: ucpathBrowser as unknown as import('playwright').Browser, context: null as never }],
+    ]),
+    readyPromises: new Map([
+      ['kuali', Promise.resolve()],
+      ['ucpath', Promise.resolve()],
+    ]),
+  })
+  s.onBrowserDisconnect(() => {})
+  kualiBrowser.emit('disconnected') // only kuali disconnects — ucpath never does
+
+  // Touch the OTHER (never-disconnected) system last — the system whose
+  // Playwright call would actually have thrown the "Target closed"-shaped
+  // error. Before the fix this returned true (any-system disconnect), which
+  // would have downgraded a real ucpath handler bug to a cancelled row.
+  await s.page('ucpath')
+  assert.equal(
+    s.hadBrowserDisconnect(),
+    false,
+    "a real ucpath handler bug must not be reclassified as cancelled just because kuali disconnected earlier",
+  )
+
+  // Touching the system that ACTUALLY disconnected still reclassifies correctly.
+  await s.page('kuali')
+  assert.equal(s.hadBrowserDisconnect(), true)
+})
+
 /** Launch fake whose `browser` is a real EventEmitter so a `disconnected` event
  *  reaches the health-emitting listener that `Session.launch` registers. */
 function emitterBrowserLaunch(page: import('playwright').Page): {

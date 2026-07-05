@@ -69,27 +69,37 @@ test("enqueueFromHttp omits onPreparedItems when no supersedePriorRuns is suppli
   assert.equal(opts.onPreparedItems, undefined);
 });
 
-test("a throwing supersedePriorRuns does not break the enqueue (best-effort)", async () => {
-  // The wrapper logs a warn on failure; suppress it so the stderr audit stays
-  // clean while we assert the throw is swallowed.
-  const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
+test("a throwing supersedePriorRuns fails loud and blocks the enqueue (no duplicate run)", async () => {
+  // The wrapper logs an error on failure; suppress it so the stderr audit
+  // stays clean while we assert the throw propagates instead of being
+  // swallowed.
+  const errorSpy = vi.spyOn(log, "error").mockImplementation(() => {});
   try {
+    const mock = await enqueueMock();
+    // Simulate the kernel's real ensureDaemonsAndEnqueue: `onPreparedItems`
+    // is awaited directly, so a throw there rejects the enqueue call itself
+    // (mirrors client.ts — no pending row / task row is written on this path).
+    mock.mockImplementation(async (_wf, _inputs, _flags, opts) => {
+      await opts.onPreparedItems?.([{ itemId: "4025", runId: "run-1", input: { docId: "4025" } }]);
+      return { enqueued: [], daemons: [] };
+    });
+
     const result = await enqueueFromHttp("separations", [{ docId: "4025" }], {
       trackerDir: tempTrackerDir(),
       supersedePriorRuns: () => {
         throw new Error("boom");
       },
     });
-    assert.equal(result.ok, true);
 
-    const mock = await enqueueMock();
-    const [, , , opts] = mock.mock.calls[0] as [unknown, unknown[], unknown, PreparedHookOpts];
-    // The hook must swallow the error so the new run still enqueues.
-    await assert.doesNotReject(async () =>
-      opts.onPreparedItems?.([{ itemId: "4025", runId: "run-1", input: { docId: "4025" } }]),
-    );
-    assert.equal(warnSpy.mock.calls.length, 1);
+    // A failed supersede must not fall through to a duplicate enqueue: the
+    // call reports failure instead of {ok:true}.
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /supersedePriorRuns failed/);
+    assert.match(result.error ?? "", /boom/);
+    // Logged twice: once at the onPreparedItems raise site (names the items),
+    // once by enqueueFromHttp's outer catch (the generic per-call error log).
+    assert.equal(errorSpy.mock.calls.length, 2);
   } finally {
-    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   }
 });

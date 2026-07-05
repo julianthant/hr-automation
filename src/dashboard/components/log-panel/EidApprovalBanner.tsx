@@ -81,11 +81,24 @@ export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerPr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (res.ok && json.ok !== false) {
+      // Fail loud: this is the wrong-person EID re-queue (the highest-stakes
+      // separations gate). A malformed/unparseable 2xx body must NOT read as
+      // success — require an explicit `ok: true`, and treat a parse failure as a
+      // hard error, so the operator never believes the corrected identity was
+      // accepted when it may not have been.
+      let json: { ok?: boolean; error?: string } | null = null;
+      try {
+        json = (await res.json()) as { ok?: boolean; error?: string };
+      } catch {
+        json = null;
+      }
+      if (res.ok && json?.ok === true) {
         toast.success(okMsg, { id: t, description: id });
       } else {
-        toast.error("Couldn't complete", { id: t, description: json.error ?? `HTTP ${res.status}` });
+        toast.error("Couldn't complete", {
+          id: t,
+          description: json?.error ?? (json === null ? "Malformed server response" : `HTTP ${res.status}`),
+        });
       }
     } catch (err) {
       toast.error("Couldn't complete", { id: t, description: err instanceof Error ? err.message : String(err) });

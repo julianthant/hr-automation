@@ -1666,6 +1666,19 @@ export const oathSignature = {
         '[id*="PERSON_NAME_NAME_DISPLAY"], [id*="UC_JPM_PRS_I_PERSON_NAME"], [id*="PSXLATITEM_XLATLONGNAME"]',
       )
       .first(),
+
+  /**
+   * The EXISTING (already-saved) Oath Signature Date on the loaded profile — a
+   * display-only span `#EFFDT$0.PSEDITBOX_DISPONLY` shown when an oath row is
+   * already present. DISTINCT from `oathDateInput` (the editable `input[id^=EFFDT]`
+   * on the Add-New sub-form): before Add is clicked, only this display span
+   * exists. Read on the skip-existing path so the tracker records the signature
+   * date even when someone else entered the oath (dashboard showed "—" before).
+   * verified 2026-07-02 (EID 10883915 → "07/02/2026")
+   * @tags existing, oath, signature, date, display, person-profile, effdt
+   */
+  existingOathDate: (f: FrameLocator): Locator =>
+    f.locator('span[id^="EFFDT"]').first(),
 };
 
 // ─── Barrel: grouped namespace export ──────────────────────────────────────

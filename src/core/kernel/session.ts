@@ -826,8 +826,27 @@ export class Session {
    * Worker slots (browser: null) are skipped — the parent owns browser
    * lifetime in shared-context-pool mode.
    */
-  /** True when any launched browser emitted `disconnected` (this session or parent). */
+  /**
+   * True when a launched browser emitted `disconnected` (this session or parent).
+   * Callers (`Stepper`/`run-one-item`'s `mapEscapedHandlerError`/`isCancelledOutcome`)
+   * consult this to reclassify a "Target closed"-shaped Playwright error as a
+   * cancellation instead of a genuine failure. **Scoped to the system this
+   * Session last touched** (`lastAccessedSystem`, the same signal `pageAccess()`
+   * exposes and that `classifyError`'s `systemId` attribution already relies on)
+   * — only a disconnect on THAT system reclassifies. Without this scoping, any
+   * ONE system disconnecting once would silently downgrade every LATER genuine
+   * handler bug on every OTHER (never-disconnected) system to a cancelled row
+   * for the rest of the daemon's uptime, hiding a real failure as a cancel
+   * (fail-loud violation). Every real call site invokes this immediately after
+   * a `ctx.page(id)`-driven Playwright call throws, so `lastAccessedSystem` is
+   * the system whose call actually failed. Falls back to the legacy
+   * "any system ever disconnected" check only when no page has been accessed
+   * yet on this Session (no system to scope to — an edge case only synthetic
+   * tests exercise via a bare `hadBrowserDisconnect()` with no prior `page()` call).
+   */
   hadBrowserDisconnect(): boolean {
+    const systemId = this.lastAccessedSystem
+    if (systemId !== null) return this.disconnectedSystems().has(systemId)
     if (this.browserDisconnectIds.size > 0) return true
     return this.parent?.hadBrowserDisconnect() ?? false
   }
@@ -1587,13 +1606,13 @@ export class Session {
         const vw = window.innerWidth
         const vh = window.innerHeight
         let rect: { left: number; top: number; width: number; height: number } | null
-        const frame = document.querySelector('[data-hrcap-frame]') as HTMLIFrameElement | null
+        const frame = document.querySelector<HTMLIFrameElement>('[data-hrcap-frame]')
         if (frame) {
           try { frame.contentWindow?.scrollTo(0, offset) } catch { /* ignore */ }
           const r = frame.getBoundingClientRect()
           rect = { left: r.left, top: r.top, width: r.width, height: r.height }
         } else {
-          const el = document.querySelector('[data-hrcap]') as HTMLElement | null
+          const el = document.querySelector<HTMLElement>('[data-hrcap]')
           if (el) {
             el.scrollTop = offset
             const r = el.getBoundingClientRect()

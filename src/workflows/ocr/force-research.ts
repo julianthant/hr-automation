@@ -44,7 +44,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
   });
   if (!latest) throw new Error("OCR row not found in JSONL");
-  const formType = latest.data?.formType as unknown as string | undefined;
+  const formType = latest.data?.formType;
   if (!formType) throw new Error("formType missing on OCR row");
   // Hard-reject verify rows (N4). force-research is the oath/EC re-research path:
   // it CLEARS employeeId, re-fans person-lookup by NAME, and patches via
@@ -102,12 +102,36 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     trackerDir,
   );
 
+  // Two selected records can carry the IDENTICAL extracted name (a real
+  // occurrence — common names): dispatching them as two separate
+  // fanOutAndWatch children would collide inside its own
+  // JSON.stringify(input)-keyed itemId map (last-write-wins, NOT a per-key
+  // FIFO queue) and silently misapply ONE person's lookup outcome to a
+  // DIFFERENT record. Fix: group by the logical input BEFORE dispatch so
+  // fanOutAndWatch only ever sees ONE child per unique input — collision-proof
+  // by construction, since no duplicate key ever reaches it — then fan the
+  // single resolved outcome back out to every aliased record below. Identical
+  // input always resolves to the identical real-world lookup result, so this
+  // is exact (not an approximation) and also skips a redundant duplicate
+  // person-lookup dispatch for the same name.
+  type EidLookupChildInput = { name: string };
+  interface FanOutGroup { itemId: string; input: EidLookupChildInput; aliasItemIds: string[] }
+  const groupsByInputKey = new Map<string, FanOutGroup>();
+  enqueueInputs.forEach((inp, arrayPos) => {
+    const itemId = itemIds[arrayPos] ?? "";
+    const key = JSON.stringify(inp);
+    const existing = groupsByInputKey.get(key);
+    if (existing) existing.aliasItemIds.push(itemId);
+    else groupsByInputKey.set(key, { itemId, input: inp, aliasItemIds: [itemId] });
+  });
+  const groups = [...groupsByInputKey.values()];
+  const aliasItemIdsByDispatchedItemId = new Map(groups.map((g) => [g.itemId, g.aliasItemIds]));
+
   // Shared dispatch→watch→cascade-cancel pipeline (BM-1). force-research re-fans
   // person-lookup by NAME (it cleared employeeId above) and patches each outcome
   // with the name-resolution semantics. The `_enqueueOverride(itemIds, inputs)`
   // HTTP test seam maps to fanOutAndWatch's dispatch override; the cascade-cancel
   // on operator discard-abort lives in fanOutAndWatch.
-  type EidLookupChildInput = { name: string };
   const { personLookupWorkflow } = await import("../person-lookup/index.js");
   const { byItemId, missingItemIds } = await fanOutAndWatch<EidLookupChildInput>({
     sessionId: input.sessionId,
@@ -116,7 +140,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     trackerDir,
     date,
     child: personLookupWorkflow as never,
-    children: enqueueInputs.map((inp, idx) => ({ input: inp, itemId: itemIds[idx] ?? "" })),
+    children: groups.map((g) => ({ input: g.input, itemId: g.itemId })),
     timeoutMs: 30 * 60_000,
     ...(opts._enqueueOverride
       ? { dispatch: async (children) => opts._enqueueOverride!(children.map((c) => c.itemId), children.map((c) => c.input)) }
@@ -124,32 +148,49 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
     ...(opts._watchChildRunsOverride ? { watch: opts._watchChildRunsOverride } : {}),
   });
 
-  // Patch records from lookup outcomes before emitting the final state.
-  for (const [itemId, outcome] of byItemId) {
-    const idx = itemIdToRecordIdx.get(itemId);
-    if (idx === undefined) continue;
-    patchOcrRecordFromEidLookupOutcome(records, idx, outcome, "name");
+  // Patch records from lookup outcomes before emitting the final state — fan
+  // each unique-input outcome out to every original record that shared the
+  // lookup key (see grouping above). A dispatched itemId with no matching
+  // alias group is an invariant violation (fanOutAndWatch reported an id we
+  // never asked it to watch) — fail loud rather than silently dropping it.
+  for (const [dispatchedItemId, outcome] of byItemId) {
+    const aliasItemIds = aliasItemIdsByDispatchedItemId.get(dispatchedItemId);
+    if (!aliasItemIds) {
+      throw new Error(
+        `force-research: person-lookup outcome for unexpected itemId "${dispatchedItemId}" — ` +
+          `not one of the ${groups.length} dispatched fan-out children`,
+      );
+    }
+    for (const aliasItemId of aliasItemIds) {
+      const idx = itemIdToRecordIdx.get(aliasItemId);
+      if (idx === undefined) continue;
+      patchOcrRecordFromEidLookupOutcome(records, idx, outcome, "name");
+    }
   }
 
   // Any expected itemId that did not produce an outcome (timeout or skipped)
   // must be marked unresolved so the dashboard does not leave the record
-  // stuck in `lookup-pending`. Mirrors the orchestrator's safety net.
-  for (const itemId of missingItemIds) {
-    const idx = itemIdToRecordIdx.get(itemId);
-    if (idx === undefined) continue;
-    patchOcrRecordUnresolved(
-      records,
-      idx,
-      "eid-lookup timed out without a result",
-    );
+  // stuck in `lookup-pending`. Mirrors the orchestrator's safety net. Fan out
+  // to every aliased record sharing the same (never-resolved) lookup key.
+  for (const dispatchedItemId of missingItemIds) {
+    const aliasItemIds = aliasItemIdsByDispatchedItemId.get(dispatchedItemId) ?? [dispatchedItemId];
+    for (const aliasItemId of aliasItemIds) {
+      const idx = itemIdToRecordIdx.get(aliasItemId);
+      if (idx === undefined) continue;
+      patchOcrRecordUnresolved(
+        records,
+        idx,
+        "eid-lookup timed out without a result",
+      );
+    }
   }
 
   // Re-emit via the shared OCR preview-row envelope (BM-5) so the dashboard
   // resolves the row by archetype/__id/__name/parentSubject. Running → done pair.
-  const parentRunId = (latest.data?.parentRunId as unknown as string | undefined) ?? latest.parentRunId;
+  const parentRunId = (latest.data?.parentRunId) ?? latest.parentRunId;
   const parentSubject =
     readQueueTitle(latest.data) ??
-    (latest.data?.parentSubject as unknown as string | undefined);
+    (latest.data?.parentSubject);
   const snapshotArgs = {
     base: { ...(latest.data ?? {}) },
     sessionId: input.sessionId,

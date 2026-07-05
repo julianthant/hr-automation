@@ -19,6 +19,7 @@ npm run dashboard:prod       # Serve pre-built dashboard from SSE only
 npm run onboarding:stop
 npm run separation:stop
 npm run work-study:stop
+npm run kronos-pay-rule:stop
 npm run emergency-contact:stop
 npm run person-lookup:stop
 npm run oath-signature:stop
@@ -65,6 +66,23 @@ OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr
 - No `page.locator(...)` inline in system files (architecture guard enforces this).
 - Shared helpers used by 2+ workflows (or 1 workflow + tracker/dashboard/core/OCR) → promote out of `src/workflows/<workflow>/`. Shared homes listed in `src/workflows/CLAUDE.md`.
 - Use `log.*` with structured fields; no ad hoc `console.*` or toasts.
+- **No unverified silent fallbacks — fail loud.** See the section below; this is a correctness rule, not a style preference.
+
+## Fail loud — no unverified silent fallbacks
+
+**This is a single-operator tool that submits REAL HR transactions. Correctness beats graceful degradation every time.** A fallback that silently substitutes a plausible-but-wrong value when something fails is the single most dangerous pattern in this codebase — it hides the failure and can push wrong data (wrong pay rate, wrong person, wrong department, a blank/duplicate document, a false "submitted") into a live UCPath / Kuali / Kronos / OnBase / i9 transaction, or mislead the operator into acting on a lie. When it fails silently, we never find out; when it fails loud, we fix it.
+
+**The rule:** when an operation fails or an expected value is missing, do **NOT** substitute a default, an alternative selector/element, a cached-or-"latest" value, a fabricated constant, a "safe" guess, or a swallowed-error return and then continue as if nothing happened. **Throw with a legible message that names the offending value/EID/field**, so the error surfaces and gets corrected at the source. This generalizes the UCPath "No cross-source auto-fallbacks" rule (`src/systems/ucpath/CLAUDE.md`, 2026-04-23 — *"fail loudly with a clear error so upstream data gets corrected at the source"*) to the **entire** codebase.
+
+**A fallback is only acceptable when BOTH hold:**
+1. The fallback path is itself **verified correct** for the exact case it handles (live-verified for selectors/page state; test-pinned for pure logic) — and its verification is noted (a `// verified <date>` comment, a lesson, or a test), AND
+2. Absence/the fallback case is a **genuinely valid, expected state** (e.g. "no search results" is a real outcome; a documented default that is provably right).
+
+If you can't satisfy both, **fail loud** — do not add the fallback. When in doubt, throw.
+
+**Not a fallback (these are fine):** retrying the *same* operation on a transient error (Playwright timeout, auth flake) via `loginWithRetry` / `ctx.retry` — that re-runs the operation, it doesn't substitute data. Swallowing an error is fine only when the *action itself* is genuinely optional (`clickIfPresent` on a truly-optional dismiss) AND the caller does not treat the result as load-bearing.
+
+**When you catch, don't swallow:** a `catch` that returns a default/empty/`{}`/`null`/`0`/`true` and lets execution continue must instead re-throw (or at minimum `log.warn` AND propagate a distinguishable "unknown" the caller checks) — never let "the check failed" become indistinguishable from "the check passed / found nothing." `catch { won = true }`, `catch { return [] }`, `JSON.parse(...) catch { return {} }`, `.catch(() => ({ match: true }))`, and `?? "SDCMP"` / `?? "queued"` on corrupted input are all bugs, not resilience.
 
 ## Best Practices
 
@@ -77,7 +95,7 @@ OCR approval fan-out is form-spec driven: `OcrFormSpec.approveTo` lets `/api/ocr
 
 ## Live verification — standing pre-authorization (always available, never ask)
 
-**The live environment is always available, and reaching it for verification is pre-authorized. Never ask the user whether live access is up, whether to spend the live session, or to confirm a Duo prompt — assume yes and proceed.** This covers the whole range: a read-only selector `snapshot`, a `test-login` smoke check, a `tests/live/` collector, and a **full live workflow dry-run** (real UCPath / CRM / Kuali / ServiceNow / i9). Duo is cleared hands-off by Duo Autopilot on every verification/test path (`npm run sel:browser`, `tests/live/`, the e2e live lane), so there is no phone-approval step to wait on and nothing for the user to sign off. The safety boundary for live *workflow* runs is `dryRun=true` (no UCPath transaction, no Kuali finalization) — that, not gated access, is what keeps a live run safe. If a single live system is down (e.g. i9), skip that system and proceed with the rest; don't treat one outage as "the live env is unavailable."
+**The live environment is always available, and reaching it for verification is pre-authorized. Never ask the user whether live access is up, whether to spend the live session, or to confirm a Duo prompt — assume yes and proceed.** This covers the whole range: a read-only selector `snapshot`, a `test-login` smoke check, a `tests/live/` collector, and a **full live workflow dry-run** (real UCPath / CRM / Kuali / ServiceNow / i9). Duo is cleared hands-off by Duo Autopilot on every verification/test path (`npm run sel:browser`, `tests/live/`, the e2e live lane), so there is no phone-approval step to wait on and nothing for the user to sign off. The safety boundary for live *workflow* runs is `dryRun=true` (no UCPath transaction, no Kuali finalization) — that, not gated access, is what keeps a live run safe. If a single live system is genuinely down, skip that system and proceed with the rest; don't treat one outage as "the live env is unavailable." (No standing outages — all systems, including i9, are currently up.)
 
 Mapping or verifying a selector is **pre-approved** — do it whenever a fix, a selector edit, or any debugging needs it, and **never pause to ask**. A `snapshot` is a read-only view of a page; treat it like running a test, not like an action that needs sign-off.
 

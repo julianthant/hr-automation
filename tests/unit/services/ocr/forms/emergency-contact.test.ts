@@ -264,6 +264,27 @@ describe("PermissiveRecordSchema — formKind enum (EC run classifying non-EC pa
     assert.equal(parsed.data.formKind, "unknown");
   });
 
+  // Regression: `z.enum([...]).default("emergency-contact")` only covers
+  // `undefined` — a PRESENT-but-unrecognized formKind string (model
+  // hallucination/typo) still failed safeParse, so per-page finalize() dropped
+  // the WHOLE record. Mirrors the documentType tolerant-coercion precedent;
+  // formKind now coerces an unrecognized value to the safe default instead of
+  // vanishing the record.
+  it("coerces an unrecognized formKind string to 'emergency-contact' instead of dropping the record", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 5,
+      formKind: "unrecognized-label",
+      employee: { name: "Alex Johnson", employeeId: "10123456" },
+      emergencyContact: { name: "Pat Johnson", relationship: "Spouse", primary: true },
+      notes: [],
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(parsed.success, `record with an unrecognized formKind must survive validation: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
+    assert.equal(parsed.data.formKind, "emergency-contact");
+    assert.equal(parsed.data.employee.name, "Alex Johnson");
+  });
+
   // Regression (F13, 2026-06-07): the prompt tells the model to NULL EC-specific
   // fields (employee, emergencyContact) for non-EC pages. Those were non-nullable
   // objects, so a correctly classified oath/unknown page with them nulled was

@@ -255,14 +255,21 @@ export async function searchCrmByEidOrName(
 /**
  * Pick the single CRM record to read operator-facing fields from.
  *
- * Prefers the record whose UCPath Employee ID matches the resolved EID; falls
- * back to the first record. Returns undefined when there are no records.
+ * When an EID is supplied, ONLY a record whose UCPath Employee ID matches it
+ * qualifies — a CRM name search can return records for a DIFFERENT,
+ * similarly-named person, so silently falling back to the first record on a
+ * mismatch would read that other person's Start Date / Title (root
+ * CLAUDE.md "Fail loud"). Falls back to the sole record only when no EID was
+ * supplied to check against and there is exactly one candidate; returns
+ * undefined (no confident pick) when the EID doesn't match any record, or
+ * none was supplied and multiple records leave the choice ambiguous, or
+ * there are no records at all.
  */
 function pickCrmRecord(records: CrmRecord[], emplId?: string): CrmRecord | undefined {
   if (records.length === 0) return undefined;
   const eid = emplId?.trim();
-  const matched = eid ? records.find((r) => r.ucpathEmployeeId.trim() === eid) : undefined;
-  return matched ?? records[0];
+  if (eid) return records.find((r) => r.ucpathEmployeeId.trim() === eid);
+  return records.length === 1 ? records[0] : undefined;
 }
 
 /**

@@ -88,8 +88,14 @@ export async function readExistingContactNames(page: Page): Promise<string[]> {
       if (v.trim()) out.push(v.trim());
     }
     return out;
-  } catch {
-    return [];
+  } catch (err) {
+    // Fail loud: a genuine read failure must not be indistinguishable from
+    // "this employee has no existing contacts" — that misreading skips the
+    // duplicate guard and can add a duplicate contact record.
+    throw new Error(
+      `readExistingContactNames: failed to read existing Contact Name inputs — ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
   }
 }
 
@@ -141,7 +147,18 @@ export async function demoteExistingContact(
 
   const primaryCheckboxes = emergencyContact.primaryContactCheckboxes(page);
   const cb = primaryCheckboxes.nth(targetIndex);
-  const checked = await cb.isChecked({ timeout: 5_000 }).catch(() => false);
+  let checked: boolean;
+  try {
+    checked = await cb.isChecked({ timeout: 5_000 });
+  } catch (err) {
+    // Fail loud: a thrown isChecked() must not be silently treated as
+    // "already unchecked" — that would skip the demotion and this function
+    // still reports success, leaving the WRONG contact as Primary.
+    throw new Error(
+      `demoteExistingContact: could not read Primary Contact checkbox state for row ${targetIndex + 1} ("${existingName}") — ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
   if (checked) {
     await cb.uncheck({ timeout: 5_000 });
     await page.waitForTimeout(500);

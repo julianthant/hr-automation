@@ -6,7 +6,17 @@ export function parseJsonObject<T>(raw: string | null | undefined, fallback: T):
   if (!raw) return fallback;
   try {
     return JSON.parse(raw) as T;
-  } catch {
+  } catch (err) {
+    // Do NOT swallow silently: an unparseable data_json/input_json means a
+    // corrupted row, and returning the empty fallback makes "corrupted" look
+    // identical to "legitimately empty" (a missing archetype then renders as a
+    // plain `single` row). Reads must not throw (this path also serves possibly-
+    // legacy rows), but the corruption must be visible — mirror the log.warn the
+    // sibling validators in this file already emit.
+    log.warn(
+      `[queries] parseJsonObject: dropping unparseable JSON (${err instanceof Error ? err.message : String(err)}) ` +
+        `— this masks corrupted row data as empty; raw=${raw.slice(0, 200)}`,
+    );
     return fallback;
   }
 }

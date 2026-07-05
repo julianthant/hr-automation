@@ -127,6 +127,65 @@ describe("force-research patches records from eid-lookup outcomes", () => {
     assert.match((threw as Error).message, /verify/i, "error explains verify rows use verify-relookup");
   });
 
+  it("two selected records sharing the SAME extracted name do not collide — both get the correct outcome, not a misapplied one (itemId collision fix)", async () => {
+    const dir = makeDir();
+    const sessionId = "session-fr-collide";
+    const runId = "run-fr-collide";
+
+    // Two DIFFERENT people who happen to share a printed name — force-research
+    // clears employeeId and re-fans by name, so both records resolve to the
+    // IDENTICAL fan-out input. Before the fix this collided inside
+    // fanOutAndWatch's own JSON.stringify(input)-keyed map (last-write-wins)
+    // and only ONE of the two records would ever get patched.
+    const initialRecords = [
+      { printedName: "Smith, John", employeeId: "", matchState: "unresolved", forceResearch: false },
+      { printedName: "Smith, John", employeeId: "", matchState: "unresolved", forceResearch: false },
+    ];
+    writeOcrRow(dir, sessionId, runId, initialRecords);
+
+    let expectedItemIdsSeen: string[] = [];
+    const mockOutcome: ChildOutcome = {
+      workflow: "eid-lookup",
+      itemId: `ocr-force-${runId}-r0`,
+      runId: "eid-run-collide",
+      status: "done",
+      data: {
+        emplId: "10999999",
+        activeStatus: "active",
+        hrStatus: "Active",
+        department: "HDH",
+        isActive: "true",
+        isHdhAccepted: "true",
+        personOrgScreenshot: "",
+      },
+    };
+
+    await runForceResearch(
+      { sessionId, runId, recordIndices: [0, 1] },
+      {
+        trackerDir: dir,
+        _enqueueOverride: async () => { /* no-op */ },
+        _watchChildRunsOverride: async (opts) => {
+          expectedItemIdsSeen = [...opts.expectedItemIds];
+          return [mockOutcome];
+        },
+      },
+    );
+
+    // Collision-proof by construction: only ONE child dispatched for the
+    // shared name, not two (deduped, not a collided pair).
+    assert.deepEqual(expectedItemIdsSeen, [`ocr-force-${runId}-r0`]);
+
+    const lastEntry = readLastTrackerEntry(dir);
+    const records = JSON.parse((lastEntry["data"] as Record<string, string>)["records"] ?? "[]") as Array<Record<string, unknown>>;
+    assert.equal(records.length, 2);
+    // BOTH records — not just the dispatched one — must receive the outcome.
+    assert.equal(records[0]!["employeeId"], "10999999", "record 0 patched from the shared lookup outcome");
+    assert.equal(records[1]!["employeeId"], "10999999", "record 1 (aliased, same name) also patched — not left unresolved");
+    assert.equal(records[0]!["matchState"], "resolved");
+    assert.equal(records[1]!["matchState"], "resolved");
+  });
+
   it("emitted row has blank employeeId when lookup fails", async () => {
     const dir = makeDir();
     const sessionId = "session-fr-2";

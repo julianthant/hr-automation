@@ -113,6 +113,12 @@ export function canonicalizeRelationshipRule(
   const lower = trimmed.toLowerCase();
   if ((CANONICAL_RELATIONSHIPS as readonly string[]).includes(trimmed)) return "__already";
   if (RELATIONSHIP_RULES[lower]) return RELATIONSHIP_RULES[lower];
+  // "-in-law" (and "in law") is an affinity qualifier, not a blood relation —
+  // check it BEFORE the general substring pass below, since insertion order in
+  // RELATIONSHIP_RULES would otherwise match "mother"/"son"/"sister" etc. first
+  // and wrongly canonicalize "mother-in-law" → Parent, "son-in-law" → Child,
+  // "sister-in-law" → Sibling. Every in-law is Relative, never blood-tier.
+  if (lower.includes("in-law") || lower.includes("in law")) return "Relative";
   // Substring pass for compound phrases ("my older brother", "step-mother").
   for (const [needle, canon] of Object.entries(RELATIONSHIP_RULES)) {
     if (lower.includes(needle)) return canon;

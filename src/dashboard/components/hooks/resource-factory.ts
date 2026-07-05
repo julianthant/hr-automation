@@ -161,26 +161,56 @@ export interface CachedResource<T> {
   refresh: () => void;
   /** Read the current cache synchronously (`null` until first fetch resolves). */
   peek: () => T | null;
+  /**
+   * Subscribe to whether the MOST RECENT fetch attempt failed. A `null`/empty
+   * cache can mean either "we asked and there's genuinely nothing" or "the
+   * request itself failed and we don't actually know" — those are NOT the same
+   * state (fail-loud: no unverified silent fallbacks). Any consumer that treats
+   * an empty/absent cache as a meaningful result (e.g. "no roster on disk, fall
+   * back to downloading one") must check this first. Clears back to `false` on
+   * the next successful fetch.
+   */
+  useError: () => boolean;
+  /** Synchronous (non-reactive) read of the same failure flag as {@link useError}. */
+  peekError: () => boolean;
 }
 
 export interface CachedResourceConfig<T> {
-  /** Fetch the value once. A thrown/rejected fetch resolves the cache to {@link CachedResourceConfig.fallback}. */
+  /** Fetch the value once. */
   fetcher: () => Promise<T>;
-  /** Value the cache settles to when the fetch fails. */
+  /**
+   * Value used only as the resolved-promise result when a fetch fails and
+   * nothing has ever been cached yet. It is NEVER written into the cache — a
+   * failed fetch leaves the cache exactly as it was (`null` if nothing has
+   * succeeded yet) and flags {@link CachedResource.useError} instead, so an
+   * empty cache always means a genuinely-confirmed empty result, never a
+   * swallowed error.
+   */
   fallback: T;
 }
 
 /**
  * Build a fetch-once-with-refresh singleton resource. The cache is `null` until
- * the first fetch resolves; a failed fetch settles it to `fallback`.
+ * the first fetch resolves. A failed fetch does NOT settle the cache to
+ * `fallback` (that would be indistinguishable from a genuinely empty/absent
+ * result) — it leaves the cache untouched and flips {@link CachedResource.useError}
+ * so callers can tell "confirmed empty" apart from "unknown, the request failed".
  */
 export function createCachedResource<T>(config: CachedResourceConfig<T>): CachedResource<T> {
   let cache: T | null = null;
+  let hasError = false;
   let inflight: Promise<T> | null = null;
   const subscribers = new Set<(value: T | null) => void>();
+  const errorSubscribers = new Set<(hasError: boolean) => void>();
 
   function notify(): void {
     for (const cb of subscribers) cb(cache);
+  }
+
+  function setError(next: boolean): void {
+    if (hasError === next) return;
+    hasError = next;
+    for (const cb of errorSubscribers) cb(hasError);
   }
 
   function fetchOnce(): Promise<T> {
@@ -189,10 +219,15 @@ export function createCachedResource<T>(config: CachedResourceConfig<T>): Cached
       try {
         const data = await config.fetcher();
         cache = data;
+        setError(false);
         return data;
       } catch {
-        cache = config.fallback;
-        return config.fallback;
+        // Do NOT write `fallback` into `cache` here — that would make a
+        // transient fetch failure read identically to a confirmed-empty
+        // result. Keep whatever was cached before (possibly still `null`)
+        // and surface the failure via `hasError` instead.
+        setError(true);
+        return cache ?? config.fallback;
       } finally {
         inflight = null;
         notify();
@@ -203,6 +238,7 @@ export function createCachedResource<T>(config: CachedResourceConfig<T>): Cached
 
   onHotDispose(() => {
     subscribers.clear();
+    errorSubscribers.clear();
   });
 
   return {
@@ -217,6 +253,16 @@ export function createCachedResource<T>(config: CachedResourceConfig<T>): Cached
       }, []);
       return value;
     },
+    useError(): boolean {
+      const [value, setValue] = useState<boolean>(hasError);
+      useEffect(() => {
+        errorSubscribers.add(setValue);
+        return () => {
+          errorSubscribers.delete(setValue);
+        };
+      }, []);
+      return value;
+    },
     prefetch(): void {
       if (cache !== null || inflight) return;
       void fetchOnce();
@@ -226,6 +272,7 @@ export function createCachedResource<T>(config: CachedResourceConfig<T>): Cached
       void fetchOnce();
     },
     peek: () => cache,
+    peekError: () => hasError,
   };
 }
 

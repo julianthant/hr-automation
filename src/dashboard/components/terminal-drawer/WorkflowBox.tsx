@@ -773,31 +773,6 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
   const elapsed = useElapsed(startedAt ?? null);
   const isFocused = focusedInstance === instance;
 
-  if (workflow.crashedOnLaunch) {
-    return (
-      <button
-        type="button"
-        className={cn(
-          "shrink-0 w-[290px] rounded-xl border border-destructive/30 bg-destructive/5 p-2.5",
-          "flex flex-col cursor-pointer transition-colors text-left",
-          isFocused && "ring-1 ring-primary",
-        )}
-        onClick={() => setFocusedInstance(instance)}
-      >
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full shrink-0 bg-destructive" />
-          <span className="text-[14px] font-semibold text-foreground truncate flex-1" title={instance}>{displayInstance(instance)}</span>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive">
-            Launch failed
-          </span>
-        </div>
-        <p className="mt-1 text-[10.5px] text-destructive/80 leading-tight">
-          Check Queue row for details
-        </p>
-      </button>
-    );
-  }
-
   const browsers = sessions.flatMap((s) => s.browsers);
   const totalBrowsers = browsers.length;
   const authedBrowsers = browsers.filter((b) => b.authState === "authed").length;
@@ -828,6 +803,35 @@ export function WorkflowBox({ workflow, reassignable = false, queued }: Workflow
       }
     }
   }, [healthSig]);
+
+  // A daemon that crashed on launch has no live session to render. Bail out
+  // AFTER all hooks are declared so hook order stays identical across renders
+  // (Rules of Hooks) — a crashed daemon carries an empty `sessions` array, so
+  // the hooks above are harmless no-ops in that case.
+  if (workflow.crashedOnLaunch) {
+    return (
+      <button
+        type="button"
+        className={cn(
+          "shrink-0 w-[290px] rounded-xl border border-destructive/30 bg-destructive/5 p-2.5",
+          "flex flex-col cursor-pointer transition-colors text-left",
+          isFocused && "ring-1 ring-primary",
+        )}
+        onClick={() => setFocusedInstance(instance)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0 bg-destructive" />
+          <span className="text-[14px] font-semibold text-foreground truncate flex-1" title={instance}>{displayInstance(instance)}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-destructive">
+            Launch failed
+          </span>
+        </div>
+        <p className="mt-1 text-[10.5px] text-destructive/80 leading-tight">
+          Check Queue row for details
+        </p>
+      </button>
+    );
+  }
   const { subline, footerStep } = deriveSessionCardCopy({
     active: !!active,
     finalStatus: finalStatus ?? null,

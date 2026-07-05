@@ -206,16 +206,24 @@ export async function postWorkflowActionRequest<TBody = Record<string, unknown>>
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request.body),
     });
-    const body = (await res.json().catch(() => ({}))) as TBody;
-    const bodyOk = body && typeof body === "object" && "ok" in body
-      ? Boolean((body as { ok?: unknown }).ok)
-      : res.ok;
+    // Fail loud: every action route responds with an explicit `ok` flag, so a
+    // malformed/unparseable 2xx body must NOT read as success — require
+    // `ok === true` and treat a parse failure as a hard error (never fall
+    // back to `res.ok`), so bulk retry/delete/cancel never acts on every
+    // targeted row when the real per-item outcome is unknown.
+    let body: TBody | undefined;
+    try {
+      body = (await res.json()) as TBody;
+    } catch {
+      body = undefined;
+    }
+    const bodyOk = Boolean(body && typeof body === "object" && (body as { ok?: unknown }).ok === true);
     const ok = res.ok && bodyOk;
     return {
       ok,
       status: res.status,
-      body,
-      ...(ok ? {} : { error: readError(body, res.status) }),
+      body: (body ?? {}) as TBody,
+      ...(ok ? {} : { error: body === undefined ? "Malformed server response" : readError(body, res.status) }),
       request,
     };
   } catch (err) {

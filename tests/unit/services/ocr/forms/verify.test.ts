@@ -83,6 +83,23 @@ describe("VerifyOcrRecordSchema", () => {
     const parsed = VerifyOcrRecordSchema.parse({ sourcePage: 3 });
     assert.equal(parsed.formKind, "unknown");
   });
+
+  // Regression: `z.enum([...]).default("unknown")` only covers `undefined` — a
+  // PRESENT-but-unrecognized formKind string (model hallucination/typo) still
+  // failed safeParse, so per-page finalize() dropped the WHOLE record. Mirrors
+  // the documentType tolerant-coercion precedent; formKind now coerces an
+  // unrecognized value to the safe default instead of vanishing the record.
+  it("coerces an unrecognized formKind string to 'unknown' instead of dropping the record", () => {
+    const parsed = VerifyOcrRecordSchema.safeParse({
+      formKind: "bogus-page-type",
+      sourcePage: 4,
+      printedName: "Doe, Jane A",
+      employeeId: "10000001",
+    });
+    assert.ok(parsed.success, `record with an unrecognized formKind must survive validation: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
+    assert.equal(parsed.data.formKind, "unknown");
+    assert.equal(parsed.data.printedName, "Doe, Jane A");
+  });
 });
 
 describe("VerifyPreviewRecordSchema", () => {

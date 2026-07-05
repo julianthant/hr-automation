@@ -20,21 +20,6 @@ function mkTmp(): string {
   return dir;
 }
 
-// Wait for a condition with polling — used to await background bundle work.
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 2_000,
-  intervalMs = 20,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error("waitFor timeout");
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
-
 describe("handleFinalize", () => {
   let tmp: string;
   beforeEach(() => {
@@ -44,7 +29,7 @@ describe("handleFinalize", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("returns 200 immediately and bundles a (zero-photo) PDF in background", async () => {
+  it("rejects a zero-photo finalize (400) instead of bundling a blank PDF", async () => {
     let onFinalizeCalls = 0;
     const onFinalize = async (): Promise<void> => {
       onFinalizeCalls += 1;
@@ -56,15 +41,14 @@ describe("handleFinalize", () => {
       { token: s.token },
       { store, photosDir: tmp, uploadsDir: join(tmp, "uploads") },
     );
-    assert.equal(r.status, 200);
+    assert.equal(r.status, 400);
+    const body = r.body as { ok: boolean; error?: string };
+    assert.match(body.error ?? "", /no photos captured/i);
 
-    // Wait for background bundle + onFinalize.
-    await waitFor(() => store.getById(s.sessionId)?.state === "finalized");
-    assert.equal(onFinalizeCalls, 1);
-    const sess = store.getById(s.sessionId)!;
-    assert.equal(sess.state, "finalized");
-    assert.equal(typeof sess.pdfPath, "string");
-    assert.equal(existsSync(sess.pdfPath!), true);
+    // Session stays open — never enters finalizing/finalized, and onFinalize
+    // (and the downstream OCR/operation pipeline) never fires.
+    assert.equal(store.getById(s.sessionId)!.state, "open");
+    assert.equal(onFinalizeCalls, 0);
   });
 
   it("returns 404 for unknown token", async () => {

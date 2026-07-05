@@ -203,6 +203,13 @@ export function mapReasonCode(terminationType: string): string {
     return REASON_CODE_MAP[terminationType];
   }
 
+  // Empty/whitespace-only input has nothing to fuzzy-match — every entry's
+  // `kualiType.includes("")` is vacuously true, which would otherwise return
+  // whichever map entry happens to be first instead of the intended default.
+  if (!terminationType.trim()) {
+    return "Resign - No Reason Given";
+  }
+
   // Fuzzy match — find key containing the termination type text
   const lowerType = terminationType.toLowerCase();
   for (const [kualiType, ucpathReason] of Object.entries(REASON_CODE_MAP)) {

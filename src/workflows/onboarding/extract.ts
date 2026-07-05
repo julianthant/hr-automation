@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
 import { extractField } from "../../systems/crm/extract.js";
+import { ExtractionError } from "../../systems/crm/types.js";
 import { parseDepartmentNumber } from "../../tracker/index.js";
 
 /**
@@ -36,6 +37,27 @@ const FIELD_MAP: Record<string, string[]> = {
 };
 
 /**
+ * Parses just the appointment number out of a scraped Appointment label
+ * (e.g. "Casual/Restricted 5" → "5"). The result becomes `data.appointment`,
+ * which `enter.ts` fills verbatim into UCPath's live "Employee Classification"
+ * field on the Smart HR transaction -- an unmapped raw label must never ship
+ * downstream as a classification code, so a label with no recognizable number
+ * throws instead of silently passing the raw text through (fail loud, per
+ * root CLAUDE.md).
+ */
+export function parseAppointmentNumber(rawLabel: string): string {
+  const numMatch = rawLabel.match(/(\d+)/);
+  if (!numMatch?.[1]) {
+    throw new ExtractionError(
+      `Appointment label "${rawLabel}" has no recognizable appointment number -- `
+      + `refusing to pass the raw label through as employeeClassification`,
+      ["appointment"],
+    );
+  }
+  return numMatch[1];
+}
+
+/**
  * Extract all employee data fields from the current page.
  * Uses FIELD_MAP to try multiple label variants for each field.
  *
@@ -59,10 +81,8 @@ export async function extractRawFields(
       }
     }
 
-    // Appointment: extract just the number (e.g. "Casual/Restricted 5" → "5")
     if (field === "appointment" && value) {
-      const numMatch = value.match(/(\d+)/);
-      value = numMatch?.[1] ?? value;
+      value = parseAppointmentNumber(value);
     }
 
     if (value && matchedLabel) {

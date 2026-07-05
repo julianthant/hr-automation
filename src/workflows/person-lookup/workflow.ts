@@ -185,7 +185,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     );
     return [];
   }
-  const first = lookup.selection.selected ?? lookup.results[0]!;
+  const first = lookup.selection.selected ?? lookup.results[0];
   log.success(
     `Found ${lookup.results.length} result(s) for "${input.name}": EID ${first.emplId} | ${first.department ?? "?"} | ${first.jobCodeDescription}`,
   );
@@ -206,8 +206,8 @@ async function searchingStep<TSteps extends readonly string[]>(
 export function splitResolvedName(fullName: string): { lastName: string; firstName: string } {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return { lastName: "", firstName: "" };
-  if (parts.length === 1) return { lastName: parts[0]!, firstName: "" };
-  return { lastName: parts[parts.length - 1]!, firstName: parts[0]! };
+  if (parts.length === 1) return { lastName: parts[0], firstName: "" };
+  return { lastName: parts[parts.length - 1], firstName: parts[0] };
 }
 
 /**
@@ -228,17 +228,32 @@ export function resolveCrmSearchNameParts(
  * Resolve the CRM cross-verification match for a name search against the
  * UCPath SDCMP candidates. Pure — drives `crmMatch` / `crmMatchedEmplId`:
  *  - "direct" — a CRM record's UCPath EID equals an SDCMP candidate's EID
+ *               (unique — see ambiguity note below)
  *  - "date"   — a CRM firstDayOfService is within ±7d of an SDCMP date
  *  - "none"   — CRM returned records but nothing matched
+ *
+ * If MULTIPLE CRM records directly match DIFFERENT SDCMP candidate EIDs,
+ * picking the first would be an arbitrary, potentially wrong-person match —
+ * this returns "none" instead of trusting either (root CLAUDE.md "Fail loud").
  */
 export function matchCrmEid(
   sdcmp: EidResult[],
   crmRecords: CrmRecord[],
 ): { crmMatch: "direct" | "date" | "none"; crmMatchedEmplId?: string } {
-  for (const crec of crmRecords) {
-    if (!crec.ucpathEmployeeId) continue;
-    const match = sdcmp.find((r) => r.emplId === crec.ucpathEmployeeId);
-    if (match) return { crmMatch: "direct", crmMatchedEmplId: match.emplId };
+  const directMatchedEids = new Set(
+    crmRecords
+      .map((crec) => crec.ucpathEmployeeId)
+      .filter((eid): eid is string => Boolean(eid))
+      .filter((eid) => sdcmp.some((r) => r.emplId === eid)),
+  );
+  if (directMatchedEids.size === 1) {
+    return { crmMatch: "direct", crmMatchedEmplId: [...directMatchedEids][0] };
+  }
+  if (directMatchedEids.size > 1) {
+    log.step(
+      `CRM cross-verify: ${directMatchedEids.size} distinct direct EID matches — ambiguous, not resolving`,
+    );
+    return { crmMatch: "none" };
   }
   for (const crec of crmRecords) {
     const crmDate = crec.firstDayOfService;
@@ -283,11 +298,13 @@ async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
 /**
  * Cross-verify against CRM and source the operator-facing Start Date (CRM First
  * Day of Service). Emits `crmMatch` for name inputs as one of:
- *  - "direct"   — UCPath EID matched a CRM record's UCPath EID
- *  - "date"     — UCPath effective date matched a CRM firstDayOfService (±7d)
- *  - "crm-only" — CRM had an EID but UCPath returned no SDCMP results
- *  - "none"     — CRM returned records but none matched
- *  - ""         — CRM returned no records for this name
+ *  - "direct"    — UCPath EID matched a CRM record's UCPath EID
+ *  - "date"      — UCPath effective date matched a CRM firstDayOfService (±7d)
+ *  - "crm-only"  — CRM had an EID but UCPath returned no SDCMP results
+ *  - "ambiguous" — CRM-only path found MULTIPLE distinct EIDs with no UCPath
+ *                  cross-check possible — no identity is stamped
+ *  - "none"      — CRM returned records but none matched
+ *  - ""          — CRM returned no records for this name
  *
  * EID inputs skip name disambiguation (the EID already identifies the person)
  * and only fetch the CRM record — searching CRM by EID first, then by the
@@ -359,15 +376,29 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   // CRM-only path: UCPath returned no SDCMP results but CRM has an EID.
   // This surfaces the CRM-sourced EID so the dashboard shows it instead of "Not found".
   if (sdcmp.length === 0) {
-    const withEid = crmRecords.find((r) => r.ucpathEmployeeId);
-    if (withEid) {
-      log.success(`CRM-only EID: ${withEid.ucpathEmployeeId} (UCPath had no SDCMP match)`);
+    const withEid = crmRecords.filter((r) => r.ucpathEmployeeId);
+    const distinctEids = new Set(withEid.map((r) => r.ucpathEmployeeId));
+    if (distinctEids.size > 1) {
+      // Multiple CRM records carry DIFFERENT EIDs and UCPath returned nothing
+      // to cross-check against — stamping the first (a loose token-substring
+      // name match, zero UCPath verification) risks the wrong person's
+      // identity. Fail loud: flag ambiguous instead (root CLAUDE.md "Fail loud").
+      log.step(
+        `CRM-only: ${distinctEids.size} distinct EIDs found, no UCPath cross-check — ambiguous, not resolving`,
+      );
+      ctx.updateData({ crmMatch: "ambiguous" });
+      await stampCrmStartDateAndScreenshot(ctx, crmRecords);
+      return;
+    }
+    if (withEid.length > 0) {
+      const record = withEid[0];
+      log.success(`CRM-only EID: ${record.ucpathEmployeeId} (UCPath had no SDCMP match)`);
       ctx.updateData({
-        emplId: withEid.ucpathEmployeeId,
-        department: withEid.department ?? "",
+        emplId: record.ucpathEmployeeId,
+        department: record.department ?? "",
         crmMatch: "crm-only",
       });
-      await stampCrmStartDateAndScreenshot(ctx, crmRecords, withEid.ucpathEmployeeId);
+      await stampCrmStartDateAndScreenshot(ctx, crmRecords, record.ucpathEmployeeId);
       return;
     }
     // CRM returned records but none had an EID — can't verify anything
@@ -394,12 +425,24 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
   outcome: ActiveCheckOutcome,
 ): void {
+  // Ambiguous means the name search found multiple DISTINCT candidate EIDs
+  // with no way to pick the right one. `outcome.emplId`/`outcome.name` are
+  // already "" here, but the conditional-spread-when-truthy pattern below
+  // would otherwise SKIP the keys entirely, leaving an earlier arbitrary
+  // `results[0]` pick (stamped by `searchingStep`) riding the row under an
+  // "Ambiguous" status — a well-formed but unverified EID is worse than none
+  // (root CLAUDE.md "Fail loud"). Force-clear identity fields instead.
+  const isAmbiguous = outcome.activeStatus === "ambiguous";
   ctx.updateData({
     activeStatus: outcome.activeStatus,
     hrStatus: outcome.hrStatus,
     department: outcome.department,
-    ...(outcome.emplId ? { emplId: outcome.emplId } : {}),
-    ...(outcome.name ? { resolvedName: outcome.name } : {}),
+    ...(isAmbiguous
+      ? { emplId: "", resolvedName: "", jobTitle: "" }
+      : {
+          ...(outcome.emplId ? { emplId: outcome.emplId } : {}),
+          ...(outcome.name ? { resolvedName: outcome.name } : {}),
+        }),
     // Start Date is sourced from CRM (First Day of Service) in
     // cross-verification — do NOT write it here, or active-status (which runs
     // after cross-verification) would clobber the CRM value with UCPath's Last
@@ -522,9 +565,21 @@ async function crmDatesStep<TSteps extends readonly string[]>(
   }
 
   const resolvedEid = String(ctx.data.emplId ?? "").trim();
-  const primary =
-    (resolvedEid ? crmRecords.find((r) => r.ucpathEmployeeId === resolvedEid) : undefined)
-    ?? crmRecords[0]!;
+  const primary = resolvedEid
+    ? crmRecords.find((r) => r.ucpathEmployeeId === resolvedEid)
+    : (crmRecords.length === 1 ? crmRecords[0] : undefined);
+
+  if (!primary) {
+    // A resolved EID that matches no CRM record here (or no resolved EID with
+    // multiple same-name CRM candidates) leaves no confident single record to
+    // read dates from — stamping `crmRecords[0]` would silently pull a
+    // DIFFERENT person's dates (root CLAUDE.md "Fail loud"). This step is
+    // best-effort (see module CLAUDE.md), so log and skip instead of guessing.
+    log.step(
+      `CRM dates: no confident CRM record match for "${name}"${resolvedEid ? ` (EID ${resolvedEid})` : ""} — skipping`,
+    );
+    return;
+  }
 
   ctx.updateData({
     employmentDate: primary.firstDayOfService ?? "",

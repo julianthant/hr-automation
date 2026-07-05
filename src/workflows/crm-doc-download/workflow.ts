@@ -16,6 +16,7 @@ import {
   sanitizeOnboardingFolderName,
   downloadCrmIdocsDocuments,
   extractCrmPersonName,
+  extractField,
   navigateToSection,
   searchCrmOnboardingRecords,
   selectLatestResult,
@@ -97,6 +98,13 @@ export const crmDocDownloadWorkflow = defineWorkflow({
     await ctx.step("search-record", async () => {
       await ctx.retry(() => searchCrmOnboardingRecords(page, resolveCrmDocDownloadSearchQuery(input)), { attempts: 3 });
       await ctx.retry(() => selectLatestResult(page), { attempts: 3 });
+      // The CRM `?q=` search is fuzzy — a query that matches nobody exactly can
+      // still land on a plausible-but-wrong person's record (see
+      // src/systems/crm/CLAUDE.md fuzzy-search gotcha). Confirm the selected
+      // record actually belongs to the target identity BEFORE downloading
+      // anything (root CLAUDE.md "Fail loud" — never download another
+      // person's onboarding documents on an unverified match).
+      await assertSelectedRecordMatchesIdentity(page, input);
     });
 
     await ctx.step("download", async () => {
@@ -149,7 +157,7 @@ export const crmDocDownloadWorkflow = defineWorkflow({
       const archivePath = resolveArchivePath(finalFolder, input.parentRunId ?? ctx.parentRunId);
       await withFileLock(
         `${archivePath}.lock`,
-        () => zipFolderInto(archivePath, finalFolder!, { signal: ctx.signal }),
+        () => zipFolderInto(archivePath, finalFolder, { signal: ctx.signal }),
         { signal: ctx.signal },
       );
       await rm(finalFolder, { recursive: true, force: true });
@@ -209,6 +217,74 @@ async function extractNameForFolder(
     middleName: input.middleName ?? extracted.middleName,
     livedName: input.livedName ?? extracted.livedName,
   };
+}
+
+/**
+ * Confirm the CRM record `selectLatestResult` just landed on actually belongs
+ * to the target identity, mirroring the search-query precedence in
+ * {@link resolveCrmDocDownloadSearchQuery} (email over emplId). The CRM `?q=`
+ * search is fuzzy — a query that matches nobody exactly can still return a
+ * plausible-but-wrong person (`src/systems/crm/CLAUDE.md` fuzzy-search
+ * gotcha; same gate shape as oath-signature's `crm-verify.ts`). "UCPath
+ * Employee ID" / "UCSD Email Address" / "Personal Email Address" are the same
+ * record-page labels already live-verified by `oath-signature/crm-verify.ts`
+ * and `person-lookup/crm-search.ts` — not independently re-verified for THIS
+ * workflow's search flow, so treat as needs-live for a final confirmation.
+ *
+ * A mismatch throws rather than letting the run silently download someone
+ * else's onboarding documents (root CLAUDE.md "Fail loud").
+ */
+async function assertSelectedRecordMatchesIdentity(
+  page: Page,
+  input: CrmDocDownloadInput,
+): Promise<void> {
+  if (input.email) {
+    const [ucsdEmail, personalEmail] = await Promise.all([
+      extractField(page, "UCSD Email Address"),
+      extractField(page, "Personal Email Address"),
+    ]);
+    if (!emailMatchesIdentity([ucsdEmail, personalEmail], input.email)) {
+      throw new Error(
+        `CRM identity mismatch: search for email "${input.email}" opened a record whose UCSD/personal ` +
+          `email did not match — refusing to download another person's documents.`,
+      );
+    }
+    return;
+  }
+  if (input.emplId) {
+    const recordEmplId = await extractField(page, "UCPath Employee ID");
+    if (!emplIdMatchesIdentity(recordEmplId, input.emplId)) {
+      throw new Error(
+        `CRM identity mismatch: search for EID ${input.emplId} opened a record with UCPath Employee ID ` +
+          `"${recordEmplId ?? "(none)"}" — refusing to download another person's documents.`,
+      );
+    }
+    return;
+  }
+  // Schema requires email or emplId (CrmDocDownloadInputSchema .refine), so
+  // this branch is unreachable in practice.
+}
+
+/** Digits-only equality between a CRM record's EID field and the target EID. Pure + unit-tested. */
+export function emplIdMatchesIdentity(
+  recordEmplId: string | null | undefined,
+  targetEmplId: string,
+): boolean {
+  const record = onlyDigits(recordEmplId);
+  return record.length > 0 && record === onlyDigits(targetEmplId);
+}
+
+/** Case-insensitive match of the target email against any of the record's extracted email fields. Pure + unit-tested. */
+export function emailMatchesIdentity(
+  recordEmails: Array<string | null | undefined>,
+  targetEmail: string,
+): boolean {
+  const target = targetEmail.trim().toLowerCase();
+  return recordEmails.some((value) => (value ?? "").trim().toLowerCase() === target);
+}
+
+function onlyDigits(value: string | null | undefined): string {
+  return (value ?? "").replace(/\D/g, "");
 }
 
 /**

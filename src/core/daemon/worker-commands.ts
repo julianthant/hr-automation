@@ -66,7 +66,62 @@ export function createEmitWorkerHeartbeat<TData, TSteps extends readonly string[
       // THIS worker's current task (renewClaim's WHERE), so a reassigned or
       // terminalized task is never kept alive here.
       if (inFlight?.taskId) {
-        taskStore?.renewClaim({ taskId: inFlight.taskId, workerId: instanceId })
+        // `renewClaim` returns `false` (no throw) when its WHERE clause
+        // matches no row — a peer already reclaimed this task's lease, or it
+        // went terminal. A THROWN error is a separate, genuine DB fault — not
+        // a confirmed loss, but we still cannot verify the lease is held.
+        // Fail loud in both cases: do not let "renewal unverified" look like
+        // "renewal succeeded" and keep running an item a peer may already be
+        // executing (double execution against a real HR transaction). Abort
+        // THIS worker's in-flight run directly (see below) so it stops
+        // treating the lease as held.
+        let renewed: boolean
+        let renewErrorMessage: string | undefined
+        try {
+          renewed = taskStore?.renewClaim({ taskId: inFlight.taskId, workerId: instanceId }) ?? true
+        } catch (renewErr) {
+          renewed = false
+          renewErrorMessage = renewErr instanceof Error ? renewErr.message : String(renewErr)
+        }
+        if (!renewed) {
+          log.error(
+            `[Daemon ${ctx.wf.config.name}/${instanceId}] lease renewal failed for task ${inFlight.taskId} (runId=${inFlight.runId})${
+              renewErrorMessage ? `: ${renewErrorMessage}` : ' — lease no longer held (reassigned or terminal)'
+            }; aborting in-flight run to prevent double execution`,
+          )
+          // Abort THIS worker's own run handle DIRECTLY — the AbortController
+          // reference already held on `state.activeRun` — instead of routing
+          // through `requestCancel` → `runRegistry.cancel(runId)` (a registry-wide
+          // lookup keyed by runId). In production each daemon owns a separate
+          // `runRegistry` instance (a distinct OS process — see run-registry.ts's
+          // module doc), so a by-runId lookup can only ever resolve to this
+          // worker's own handle and the two approaches are equivalent there.
+          // But a lost lease means a PEER has re-claimed this EXACT runId
+          // (reassign preserves runId/attemptId across the hand-off), and
+          // `runRegistry.unregister` clears the per-runId cancel bookkeeping the
+          // instant this worker's own prior cancel (if any) unwinds — so a
+          // later by-runId `cancel(runId)` call no longer sees "already
+          // cancelled" and falls through to whatever handle is CURRENTLY
+          // registered for that key. If a runRegistry is ever shared across
+          // simulated daemons in one process (as
+          // `tests/delegation/daemon-teardown-soak.test.ts` does to model
+          // multiple daemons without multiple OS processes), the peer's fresh
+          // registration overwrites this runId's map entry, and that by-runId
+          // cancel would abort the PEER's run instead of this worker's own
+          // stale one — the reassigned run then never completes. Aborting the
+          // local `RunHandle` object this worker already holds can never
+          // target anyone else's run, no matter what the shared registry maps
+          // that runId to; it's also a no-op (guarded below) when this
+          // worker's run was already aborted via an explicit stop/reassign,
+          // which is the common case this heartbeat check races against.
+          if (!inFlight.controller.signal.aborted) {
+            inFlight.controller.abort(
+              new Error(
+                `lease lost for task ${inFlight.taskId} (runId=${inFlight.runId}) — reassigned or terminal`,
+              ),
+            )
+          }
+        }
       }
     } catch (err) {
       log.warn(

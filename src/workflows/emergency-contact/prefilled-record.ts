@@ -48,7 +48,17 @@ export function applyPrefilledToEmergencyContactRecord(
   const emergencyContact = { ...record.emergencyContact };
 
   if (typeof data.emplId === "string" && data.emplId.trim().length > 0) {
-    employee.employeeId = data.emplId.trim();
+    const emplId = data.emplId.trim();
+    // Fail loud: an operator-edited EID must clear the same numeric gate the
+    // schema enforces (EmployeeSchema.employeeId = /^\d{5,}$/). Accepting any
+    // non-empty string here would attach the contact to a malformed/wrong
+    // employee on rerun.
+    if (!/^\d{5,}$/.test(emplId)) {
+      throw new Error(
+        `Emergency contact rerun: operator-supplied Employee ID "${emplId}" is not a valid UCPath EID (expected 5+ digits) — refusing to attach the contact to a malformed/wrong employee`,
+      );
+    }
+    employee.employeeId = emplId;
   }
   if (typeof data.employeeName === "string" && data.employeeName.trim().length > 0) {
     employee.name = data.employeeName.trim();

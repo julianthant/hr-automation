@@ -307,9 +307,16 @@ function finalize<T>(
   for (const r of results) {
     if (!r.success || !r.rawRecords) continue;
     for (const [idx, rec] of r.rawRecords.entries()) {
+      // rowIndex is the record's real position on the page — a safe default when
+      // the model omits it. employeeSigned is DELIBERATELY not defaulted: the
+      // schema is `.nullable().optional()`, so an omitted value no longer drops
+      // the record — and defaulting it to `true` (signed) would let a blank
+      // signature line be recorded as signed and fan out as a real oath
+      // transaction. Omitted → undefined → downstream treats it as NOT signed
+      // (surfaced for review), which is the fail-safe direction.
       const withInjects =
         rec && typeof rec === "object"
-          ? { rowIndex: idx, employeeSigned: true, ...(rec as Record<string, unknown>), sourcePage: r.page }
+          ? { rowIndex: idx, ...(rec as Record<string, unknown>), sourcePage: r.page }
           : rec;
       const parsed = schema.safeParse(withInjects);
       if (!parsed.success) {
@@ -333,7 +340,7 @@ function finalize<T>(
         continue;
       }
       parsedPageNums.add(r.page);
-      records.push({ ...(parsed.data as T), sourcePage: r.page });
+      records.push({ ...(parsed.data), sourcePage: r.page });
     }
   }
 

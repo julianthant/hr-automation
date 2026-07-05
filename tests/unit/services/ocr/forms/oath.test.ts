@@ -79,6 +79,27 @@ describe("OathRosterOcrRecordSchema", () => {
     assert.equal(parsed.formKind, "oath");
   });
 
+  // Regression: `z.enum([...]).default("oath")` only covers `undefined` — a
+  // PRESENT-but-unrecognized formKind string (model hallucination/typo) still
+  // failed safeParse, so per-page finalize() dropped the WHOLE record. Mirrors
+  // the documentType tolerant-coercion fix above; formKind now coerces an
+  // unrecognized value to the safe default instead of vanishing the record.
+  it("coerces an unrecognized formKind string to 'oath' instead of dropping the record", () => {
+    const parsed = OathRosterOcrRecordSchema.safeParse({
+      sourcePage: 1,
+      rowIndex: 0,
+      printedName: "Marbell, Carlos, D",
+      employeeId: "000412",
+      employeeSigned: true,
+      officerSigned: true,
+      formKind: "sign-in-sheet",
+      documentType: "expected",
+    });
+    assert.ok(parsed.success, "record with an unrecognized formKind must survive validation");
+    assert.equal(parsed.data.formKind, "oath");
+    assert.equal(parsed.data.printedName, "Marbell, Carlos, D");
+  });
+
   // Regression (F13, 2026-06-07): the prompt tells the model to NULL
   // oath-specific fields (printedName, dateSigned, employeeSigned, officerSigned)
   // for non-oath pages. `z.string().optional()` / `z.boolean().optional()`

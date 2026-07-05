@@ -35,11 +35,12 @@ import {
   type OcrRecordLookupTracker,
 } from "./lookup-status";
 import { RecordScreenshotStrip } from "./RecordScreenshotStrip";
-import type { VerifyLookupKind, VerifyPreviewRecord } from "./types";
+import type { VerifyLookupKind } from "./types";
 import { PdfPagePreview } from "@/components/shared/PdfPagePreview";
 import { useConfirm } from "@/components/shared/useConfirm";
 import { usePrepCursor } from "@/components/hooks/usePrepCursor";
 import { useTaskDependencies } from "@/components/hooks/useTaskDependencies";
+import { derivePreviewApprovalGate, type PreviewPageStatus } from "./preview-gate";
 import {
   resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
@@ -126,7 +127,7 @@ function loadPrepStorage(rawKey: string): { edits: Record<number, AnyPreviewReco
       const v1 = p as PrepStorageV1;
       return { edits: v1.edits ?? {}, removed: new Set(v1.removed ?? []) };
     }
-    return { edits: p as Record<number, AnyPreviewRecord>, removed: new Set() };
+    return { edits: p, removed: new Set() };
   } catch {
     return { edits: {}, removed: new Set() };
   }
@@ -227,7 +228,7 @@ setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch,
 setOcrDownstreamRenderer("verify", ({ record, onRelookup, relookupPending, lookupTracker }) =>
   "checks" in record ? (
     <VerifyRecordView
-      record={record as VerifyPreviewRecord}
+      record={record}
       onRelookup={onRelookup}
       relookupPending={relookupPending}
       lookupTracker={lookupTracker}
@@ -299,9 +300,24 @@ function useOcrReviewPrepApi(
   const [relookupPending, setRelookupPending] = useState<Set<string>>(new Set());
   useEffect(() => { setRelookupPending(new Set()); }, [sessionId, runId]);
   const [markedBlankPages, setMarkedBlankPages] = useState<Set<number>>(new Set());
-  const { summary: dependencySummary, children: dependencyChildren } = useTaskDependencies(
-    prepActive && entry ? (entry.runId ?? entry.id) : undefined,
-  );
+  const {
+    summary: dependencySummary,
+    children: dependencyChildren,
+    unknown: dependenciesUnknown,
+  } = useTaskDependencies(prepActive && entry ? (entry.runId ?? entry.id) : undefined);
+
+  // Per-page "did the scanned source image actually render" status, fed by
+  // PdfPagePreview via onPreviewStatusChange (PrepReviewPair / PrepReviewMultiPair
+  // below). Feeds derivePreviewApprovalGate so Approve stays blocked until the
+  // operator can actually SEE the source they're approving against. Reset per
+  // prep session so a stale status from a previous OCR run can't leak in.
+  const [previewStatusByPage, setPreviewStatusByPage] = useState<
+    Record<number, PreviewPageStatus | undefined>
+  >({});
+  useEffect(() => { setPreviewStatusByPage({}); }, [sessionId, runId]);
+  const handlePreviewStatusChange = useCallback((page: number, status: PreviewPageStatus) => {
+    setPreviewStatusByPage((prev) => (prev[page] === status ? prev : { ...prev, [page]: status }));
+  }, []);
 
   // Persist edits — debounced 300ms so rapid keystrokes don't hit localStorage
   // synchronously on every character. Final write still lands; intermediate
@@ -472,7 +488,6 @@ function useOcrReviewPrepApi(
     }
     list.sort((a, b) => a.page - b.page);
     return list;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordRows, failedPages, emptyPages, markedBlankPages]);
 
   const renderListWithOrdinals = useMemo<PageRenderWithOrdinals[]>(() => {
@@ -494,6 +509,37 @@ function useOcrReviewPrepApi(
     [approvableRecords],
   );
   const hasPendingDependencies = (dependencySummary?.pending ?? 0) > 0;
+
+  // Pages that render a source-page preview and therefore gate approval (both
+  // single-record PrepReviewPair and multi-record PrepReviewMultiPair pages).
+  const requiredPreviewPages = useMemo(
+    () => renderList.filter((item) => item.kind === "records").map((item) => item.page),
+    [renderList],
+  );
+  const previewApprovalGate = useMemo(
+    () => derivePreviewApprovalGate({
+      requiredPages: requiredPreviewPages,
+      previewStatusByPage,
+      selectedCount,
+    }),
+    [requiredPreviewPages, previewStatusByPage, selectedCount],
+  );
+
+  // Single coherent Approve-disabled condition. Priority order (most severe /
+  // most "we genuinely don't know" first): unresolved or FAILED background
+  // lookups (fail loud — a poll error must never read as "0 pending" and
+  // silently unblock), OCR extraction failures on this run, then the
+  // source-preview render gate (blocks until every required page has actually
+  // rendered, not just been requested).
+  const approveBlockedReason: string | undefined = dependenciesUnknown
+    ? "Couldn't confirm background lookup status — wait for a successful check before approving."
+    : hasPendingDependencies
+      ? "Wait for OCR lookup retries to finish before approving."
+      : failedPages.length > 0
+        ? `${failedPages.length} OCR page${failedPages.length === 1 ? "" : "s"} failed extraction — retry or re-OCR before approving.`
+        : previewApprovalGate.blocked
+          ? previewApprovalGate.reason
+          : undefined;
 
   async function handleForceResearch(indices: number[]) {
     setResearchingIndices(new Set(indices));
@@ -621,12 +667,13 @@ function useOcrReviewPrepApi(
 
   async function handleApprove() {
     if (submitting || !cfg) return;
-    if (hasPendingDependencies) {
-      toast.error("OCR lookup retry is still running. Wait for the preview data to update before approving.");
-      return;
-    }
-    if (selectedCount <= 0) {
-      toast.error("Select at least one reviewed record before approving.");
+    // Fail loud: one coherent gate. approveBlockedReason is set whenever a
+    // background lookup status is unknown/pending, an OCR page failed
+    // extraction, no record is selected, or a source-page preview hasn't
+    // rendered — never let Approve fire a real downstream write on
+    // unconfirmed/incomplete data.
+    if (approveBlockedReason) {
+      toast.error(approveBlockedReason);
       return;
     }
     setSubmitting(true);
@@ -750,15 +797,9 @@ function useOcrReviewPrepApi(
                     <button
                       type="button"
                       onClick={handleApprove}
-                      disabled={submitting || selectedCount <= 0 || hasPendingDependencies}
+                      disabled={submitting || selectedCount <= 0 || approveBlockedReason !== undefined}
                       aria-label={`Approve ${selectedCount} ${selectedCount === 1 ? "record" : "records"}`}
-                      title={
-                        hasPendingDependencies
-                          ? "Wait for OCR lookup retries to finish before approving."
-                          : selectedCount <= 0
-                            ? "Select at least one approvable record (checkbox)."
-                            : undefined
-                      }
+                      title={approveBlockedReason}
                       className={cn(
                         "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold leading-none text-primary-foreground",
                         "transition-[background-color,transform] duration-150 ease-out",
@@ -847,6 +888,7 @@ function useOcrReviewPrepApi(
                       parentRunId={sessionId}
                       page={page}
                       fileId={data.pdfFileId}
+                      onPreviewStatusChange={handlePreviewStatusChange}
                       titleBar={renderFormCardNav({
                         record,
                         cfg,
@@ -854,7 +896,7 @@ function useOcrReviewPrepApi(
                         rowOrdinal,
                         lookupTracker: lookupTrackerByIndex.get(originalIndex)!,
                         onOperationSelectedChange: (selected) =>
-                          setRecord(originalIndex, { ...record, selected } as AnyPreviewRecord),
+                          setRecord(originalIndex, { ...record, selected }),
                       })}
                       screenshotStrip={
                         !isDelegation
@@ -927,6 +969,7 @@ function useOcrReviewPrepApi(
                   fileId={data.pdfFileId}
                   formCards={cards}
                   onAddRow={addBlankRow}
+                  onPreviewStatusChange={handlePreviewStatusChange}
                 />
               </section>
             );
@@ -1216,7 +1259,7 @@ function renderFormCard(args: {
       selectedDisabled={isUnknown}
       hideHeader={args.hideHeader}
       onSelectedChange={(next) =>
-        args.onChange({ ...r, selected: next } as AnyPreviewRecord)
+        args.onChange({ ...r, selected: next })
       }
     >
       {recordBody}

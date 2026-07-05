@@ -8,6 +8,7 @@ import { PATHS } from "../../config.js";
 import { tryRegisterDownloadedFile } from "../../tracker/files/register-download.js";
 import { reportsPage } from "./selectors.js";
 import { clickIfPresent } from "../common/index.js";
+import { UKGError } from "./types.js";
 
 /**
  * Try multiple selectors across multiple frames. Returns true if one was clicked.
@@ -342,6 +343,12 @@ async function downloadReportRow(
         const src = join(checkDir, newPdfs[0]);
         const nameMatch = newPdfs[0] === filename;
         log.step(`PDF: name "${newPdfs[0]}" ${nameMatch ? "matches" : "MISMATCHES"} expected "${filename}"`);
+        if (!nameMatch) {
+          throw new UKGError(
+            `[${employeeId}] Filesystem-fallback download name mismatch in ${checkDir}: found "${newPdfs[0]}" but expected "${filename}" — refusing to register another employee's report under employeeId ${employeeId}`,
+            "downloadReportRow",
+          );
+        }
         log.step(`Download: captured via filesystem fallback (diff in ${checkDir})`);
         if (src !== dest) {
           if (existsSync(dest)) await unlink(dest);
@@ -385,7 +392,7 @@ async function selectWorkspaceDropdown(
     const select = selects.nth(i);
     const rowText = await select.evaluate((el) => {
       const row = el.closest("tr") ?? el.closest("div") ?? el.parentElement;
-      return row ? (row as HTMLElement).innerText.substring(0, 200) : "";
+      return row ? (row).innerText.substring(0, 200) : "";
     });
     const options = select.locator("option"); // allow-inline-selector -- enumerating option elements inside a dropdown
     const optCount = await options.count();
@@ -483,7 +490,13 @@ export async function handleReportsPage(
         optionIndex === 1 &&
         (rowText.toLowerCase().includes("actual") || rowText.toLowerCase().includes("adjusted")),
     );
-    if (selected) log.step("Actual/Adjusted set");
+    if (!selected) {
+      throw new UKGError(
+        `[${employeeId}] Could not set Actual/Adjusted dropdown — no matching option found in khtmlReportWorkspace`,
+        "handleReportsPage",
+      );
+    }
+    log.step("Actual/Adjusted set");
   }
 
   // Step 4: Set Output Format to PDF — same pattern as Step 3.
@@ -494,7 +507,13 @@ export async function handleReportsPage(
       ({ optionText }) =>
         optionText.toLowerCase().includes("pdf") || optionText.toLowerCase().includes("acrobat"),
     );
-    if (selected) log.step(`Output format: ${selected}`);
+    if (!selected) {
+      throw new UKGError(
+        `[${employeeId}] Could not set Output Format to PDF — no matching option found in khtmlReportWorkspace`,
+        "handleReportsPage",
+      );
+    }
+    log.step(`Output format: ${selected}`);
   }
 
   await page.waitForTimeout(2_000);

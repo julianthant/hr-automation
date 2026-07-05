@@ -143,9 +143,11 @@ export async function setDateRange(
   log.step(`Found ${count} date inputs in dialog`);
 
   if (count < 2) {
-    log.error("Could not find date input fields");
     await debugScreenshot(page, "ukg-date-ERROR");
-    return;
+    throw new UKGError(
+      `Could not find date input fields in the date-range dialog (expected 2, found ${count}) — date range ${startDate} to ${endDate} was NOT set`,
+      "setDateRange",
+    );
   }
 
   // Fill start and end dates by typing digits (MMDDYYYY format, zero-padded)
@@ -190,6 +192,19 @@ export async function setDateRange(
   const startVal = await dateInputs.nth(0).inputValue();
   const endVal = await dateInputs.nth(1).inputValue();
   log.step(`Start: ${startVal}, End: ${endVal}`);
+
+  // Readback check: compare digits actually in the fields (ignoring the
+  // widget's own display formatting, e.g. inserted "/") against what we typed.
+  const expectedStartDigits = toDigits(startDate);
+  const expectedEndDigits = toDigits(endDate);
+  const startValDigits = startVal.replace(/\D/g, "");
+  const endValDigits = endVal.replace(/\D/g, "");
+  if (startValDigits !== expectedStartDigits || endValDigits !== expectedEndDigits) {
+    throw new UKGError(
+      `Date range readback mismatch: expected start=${startDate} end=${endDate}, but dialog shows start="${startVal}" end="${endVal}"`,
+      "setDateRange",
+    );
+  }
 
   // Click Apply (2-way .or() fallback)
   await safeClick(dateRange.applyButton(iframe).first(), {
@@ -396,7 +411,7 @@ export async function switchToPreviousPayPeriod(
     const clicked = await f.evaluate(() => {
       const input = document.getElementById("timeframe-selector-input");
       if (!input) return false;
-      (input as HTMLElement).click();
+      (input).click();
       return true;
     }).catch(() => false);
 
