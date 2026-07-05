@@ -26,6 +26,7 @@ import "../../../src/workflows/person-lookup/index.js";
 import "../../../src/workflows/separations/index.js";
 import "../../../src/workflows/sharepoint-download/index.js";
 import "../../../src/workflows/work-study/index.js";
+import "../../../src/workflows/kronos-pay-rule/index.js";
 import "../../../src/workflows/old-kronos-reports/index.js";
 import "../../../src/workflows/i9-lookup/index.js";
 

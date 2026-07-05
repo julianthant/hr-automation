@@ -44,6 +44,7 @@ const PREFERRED_CATEGORY_ORDER: readonly string[] = [
   "Onboarding",
   "Separations",
   "Work Study",
+  "Payroll",
   "Timekeeping",
   "Search",
   "Utils",

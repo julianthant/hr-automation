@@ -116,3 +116,47 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `verifyTimecardEmployee` in `navigate.ts`; `runNewKronosTimecard` in `src/workflows/separations/steps/kronos-search.ts`
 **Tags:** timecard, stale, wrong-person, employee-id, verify, go-to, fail-loud, page-text, separation
 **References:** `src/workflows/separations/CLAUDE.md` "Found-but-can't-open / wrong-person fails loud"
+
+## 2026-07-02 — People editor (Timekeeper / Pay Rule) renders in a `managePeople` frame, not the top-level page
+
+**Tried:** `people.*` selectors scoped to `page` with guessed `[data-automation-id='PayRule']` and `page.getByText("Pay Rule")` for expand checks.
+**Failed because:** Go To → People opens a child frame (`managePeople#/managePeople`). The jqx pay-rule grid (`#payRuleGrid`, `#row1payRuleGrid`) and Save toolbar live only inside that frame — top-level probes returned `count=0` even after navigation succeeded.
+**Fix:** Go To → People navigates to the `managePeople#/managePeople` route (usually a full-page navigation; sometimes a child frame). Use `resolvePeopleRoot(page)` / `peopleFrame(page)` — never top-level `page` alone. The Timekeeper accordion header is `.panel-heading[data-target="#TimekeeperPanelPlugin"]` (not a reliable `getByRole('link')`); `#TimekeeperPanelPlugin` itself is present-but-**hidden** when collapsed — do not `.or()` it into `timekeeperSection`. Pay-rule inline dropdown: click empty `#row1payRuleGrid` cell → DOM-click `.pe-search-button` Search affordance (jqx popup is `display:none` to Playwright) → one `getByRole('textbox')` appears in `modal-window-pe` → type code → click matching `.jqx-grid` row → DOM-click **OK** (not a Search button). Effective date: click `#row1payRuleGrid` date cell → `#datetimeeditorpayRuleGrideffectiveDate .jqx-icon-calendar` → pick day in `.jqx-calendar` (do **not** type into the input). Probe: `scripts/verify-kronos-add-pay-rule.ts`.
+**Selector:** `peopleFrame`, `people.*` in `selectors.ts`; `clickGoToPeople`, `expandTimekeeperSection`, `addPayRule` in `navigate.ts`
+**Tags:** people, managePeople, frame, pay-rule, timekeeper, jqx, go-to, kronos-pay-rule
+**References:** `src/workflows/kronos-pay-rule/CLAUDE.md`
+
+## 2026-07-02 — Batch pay-rule runs: a stale People editor can't switch in place — reset to home per item + verify identity via `.empName` (NOT whole-page text)
+
+**Tried:** After the first employee, `clickGoToPeople` for the next EID relied on (a) the slat selection "refreshing" the open editor and (b) `waitForPeopleEmployee` matching the searched EID anywhere in `document.body.innerText`.
+**Failed because:** BOTH assumptions were wrong (live 2026-07-02, 10604376 → 10416352). (a) Selecting the next employee in the global Employee Search does NOT refresh the open People editor — `.empName`/`#empNav` stayed on the previous person. (b) The searched EID lingers in the global search box/results, so the whole-`document.body` check FALSE-POSITIVED: `clickGoToPeople` reported the next EID "already open" while the editor still displayed KentHodge (10604376), so the pay rule was re-added to the PREVIOUS person ("does not go to the next person, keeps redoing the old one"). And once a People editor is open, Go To → People no longer renders a "People" option, so the stale editor genuinely cannot be switched in place.
+**Fix:** (1) `resetNewKronosToHome(page)` (gotoWithRetry to `/wfd/home`) at the START of each item so every employee runs the proven fresh flow (search → select → Go To → People). (2) `waitForPeopleEmployee` + `verifyPeopleEmployee` now read the editor's OWN `.empName` header (title "<Name> <EID>", inside `#peEmpList`) via the pure `peopleHeaderShowsEid` — NOT whole-page text. (3) The workflow calls `verifyPeopleEmployee` before add/save as a fail-loud identity gate (throws naming the wrong EID). Live-verified 2026-07-02: 10604376 → 10416352 both confirmed. Probe: `scripts/verify-kronos-people-batch.ts` (now asserts the loaded identity, not just clickGoToPeople's boolean).
+**Selector:** `people.loadedEmployeeName` (`.empName`); `resetNewKronosToHome`, `waitForPeopleEmployee`, `verifyPeopleEmployee`, `peopleHeaderShowsEid` in `navigate.ts`
+**Tags:** people, batch, go-to, managePeople, empName, identity, reset, kronos-pay-rule, fail-loud
+**References:** `src/workflows/kronos-pay-rule/CLAUDE.md`, `tests/unit/systems/new-kronos/navigate.test.ts`
+
+## 2026-07-02 — Pay-rule effective date: calendar day click must be committed with Enter
+
+**Tried:** `setPayRuleEffectiveDateViaCalendar` clicked the jqx calendar day and returned immediately.
+**Failed because:** jqx leaves the picked date in `#inputdatetimeeditorpayRuleGrideffectiveDate` only — the `#row1payRuleGrid` Effective Date **grid cell stays blank** until **Enter** commits the inline editor (live 2026-07-02 on EID 10416352). Save then persists a pay rule with no effective date.
+**Fix:** After the calendar day click, `effectiveDateInput(root).press("Enter")`, then poll `effectiveDateCell` until it matches the target MM/DD/YYYY (leading zeros optional) — throw if still blank after 5s.
+**Selector:** `people.effectiveDateInput`, `people.effectiveDateCell`; `setPayRuleEffectiveDateViaCalendar` in `navigate.ts`
+**Tags:** pay-rule, effective-date, calendar, jqx, enter, commit, kronos-pay-rule, fail-loud
+
+## 2026-07-02 — Pay-rule lookup: the OK click intermittently no-ops; gate on the code committing to the grid, not on the modal closing
+
+**Tried:** `addPayRule` clicked the result row once, DOM-clicked OK (`evaluate(el.click())`), then `payRuleSearchModal.waitFor({ state:"hidden", timeout:10_000 })` — no retry, no readback.
+**Failed because:** The raw `el.click()` on the jqx OK button intermittently fails to register (or the single result-row click never selected), so the lookup modal never closes → a hard `locator.waitFor: Timeout 10000ms exceeded` with the pay rule never committed (live 2026-07-02, EID 10416352; the same window showed general flakiness — a sibling EID needed 3 manual retries). Latent worse case: had OK ever closed the modal WITHOUT committing, Save would persist an empty/wrong pay rule into a real payroll record.
+**Fix:** `confirmPayRuleSelection(root, code)` retries row-select + OK up to 3× and gates success on the CODE landing in the row1 grid cell (`payRuleCodeCell` readback via the pure `payRuleCodeCommittedInCell`), polled to a short 5s deadline so a missed click retries fast instead of stalling 10s; after 3 misses it throws naming the code + cell text, aborting BEFORE Save. `clickToReveal` gives the two effective-date jqx opens (cell→editor, icon→picker) the same retry-once-then-fail-loud treatment. Re-verified live 2026-07-02, EID 10416352 (no Save) → "Pay rule SX-8Hol-8-OT-30 committed to grid".
+**Selector:** `people.payRuleCodeCell` (readback); `confirmPayRuleSelection`, `clickToReveal`, `payRuleCodeCommittedInCell` in `navigate.ts`
+**Tags:** pay-rule, lookup, ok, modal, jqx, retry, readback, commit, kronos-pay-rule, fail-loud
+**References:** `src/workflows/kronos-pay-rule/CLAUDE.md`, `tests/unit/systems/new-kronos/navigate.test.ts`
+
+## 2026-07-04 — People Save: overlay waits alone can false-report success; gate on the Save button returning to native-disabled
+
+**Tried:** `savePersonRecord` clicked Save, best-effort waited for the loading overlay to appear then disappear (both waits swallowed in `catch {}`), slept 1s, and logged "Person record saved".
+**Failed because:** Neither overlay wait proves the save COMMITTED — a jqx validation-error dialog, a rejected save, or a hang with no overlay all sail through the two best-effort waits, so the workflow stamped the row "Updated" for a pay rule that was never persisted (the one mutation in the pay-rule flow with no readback while OK/effective-date both had commit gates).
+**Fix:** Read-only live probe (`scripts/verify-kronos-save-state.ts`, EID 10403587, 2026-07-04) confirmed the state contract: the People editor's Save button carries a native `disabled` attribute whenever there are NO pending edits and enables once the editor holds unsaved changes — so a committed save returns it to `disabled`. `savePersonRecord` now polls `saveButton.isEnabled()` for up to 20s after the overlay waits and THROWS if it stays enabled ("edits still pending — the pay rule was NOT persisted") instead of logging success.
+**Selector:** `people.saveButton` (state contract documented in its JSDoc); `savePersonRecord` in `navigate.ts`
+**Tags:** people, save, readback, disabled, jqx, commit, kronos-pay-rule, fail-loud
+**References:** `src/workflows/kronos-pay-rule/CLAUDE.md`, `scripts/verify-kronos-save-state.ts`

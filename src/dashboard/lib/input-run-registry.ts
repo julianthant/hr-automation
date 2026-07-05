@@ -220,6 +220,13 @@ export const INPUT_RUN_REGISTRY: Record<DashboardInputRunWorkflow, InputRunConfi
     }),
     supportsDryRun: true,
   },
+  "kronos-pay-rule": {
+    placeholder: "Enter EIDs, comma-separated (e.g. 10873611, 10873075)",
+    parseInput: parseCommaSeparated("emplId", {
+      regex: /^\d{5,}$/,
+      message: "EID must be numeric (5+ digits)",
+    }),
+  },
 };
 
 export function getInputRunConfig(workflow: string): InputRunConfig | undefined {

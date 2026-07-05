@@ -1,4 +1,4 @@
-import type { Page, Locator, FrameLocator } from "playwright";
+import type { Page, Locator, FrameLocator, Frame } from "playwright";
 
 /**
  * New Kronos (WFD / Dayforce) selector registry.
@@ -189,6 +189,24 @@ export const goToMenu = {
       .or(f.getByRole("menuitem", { name }))
       .or(page.getByRole("menuitem", { name }));
   },
+
+  /**
+   * People menu item in the open Go To dropdown — used to navigate to the
+   * People page (Timekeeper / Pay Rule editing). Follows the same selector
+   * strategy as `timecardItem`: anchored role-name match so stale/hidden
+   * elements from the chrome behind the slideout never resolve.
+   * // verified 2026-07-02
+   * @tags people, menu, item, option, navigation, new-kronos
+   */
+  peopleItem: (page: Page): Locator => {
+    const f = searchFrame(page);
+    const name = /^\s*people\s*$/i;
+    return f
+      .getByRole("option", { name })
+      .or(page.getByRole("option", { name }))
+      .or(f.getByRole("menuitem", { name }))
+      .or(page.getByRole("menuitem", { name }));
+  },
 };
 
 // ─── Timecard view / pay period controls ──────────────────────────────────
@@ -276,6 +294,262 @@ export const timecard = {
     page.getByRole("button", { name: "Apply" }),
 };
 
+// ─── Go To → People page (Timekeeper / Pay Rule editing) ──────────────────
+
+/** Page or the managePeople iframe — Pay Rule UI renders in the latter. */
+export type PeopleRoot = Page | Frame;
+
+/**
+ * People editor content loads in the managePeople route — either as a full-page
+ * navigation or inside a child frame. Fail loud if neither is present.
+ * verified 2026-07-02
+ */
+export function peopleFrame(page: Page): Frame {
+  if (/managePeople/i.test(page.url())) {
+    return page.mainFrame();
+  }
+  const frame = page.frame({ url: /managePeople/i });
+  if (!frame) {
+    throw new Error(
+      "[New Kronos] managePeople frame not found — open Go To → People before editing pay rules",
+    );
+  }
+  return frame;
+}
+
+/** Page or managePeople frame — whichever currently hosts the People editor. */
+export function resolvePeopleRoot(page: Page): PeopleRoot | null {
+  if (/managePeople/i.test(page.url())) return page;
+  return page.frame({ url: /managePeople/i });
+}
+
+export const people = {
+  /**
+   * Expanded Timekeeper accordion panel on the People editor.
+   * verified 2026-07-02
+   * @tags timekeeper, section, accordion, panel, people, new-kronos
+   */
+  timekeeperPanel: (root: PeopleRoot): Locator =>
+    root.locator("#TimekeeperPanelPlugin"),
+
+  /**
+   * Timekeeper accordion header — the panel heading that toggles `#TimekeeperPanelPlugin`.
+   * The inner `<a>` is not reliably exposed as a link role; target `data-target` instead.
+   * verified 2026-07-02
+   * @tags timekeeper, section, accordion, expand, people, new-kronos
+   */
+  timekeeperSection: (root: PeopleRoot): Locator =>
+    root.locator('.panel-heading[data-target="#TimekeeperPanelPlugin"]'),
+
+  /**
+   * Pay Rule column header inside the jqx payRuleGrid — signals Timekeeper is expanded.
+   * verified 2026-07-02
+   * @tags pay-rule, column, header, grid, timekeeper, people, new-kronos
+   */
+  payRuleColumnHeader: (root: PeopleRoot): Locator =>
+    root.locator("#payRuleGrid .renderer-grid-header").filter({ hasText: /^Pay Rule$/ }),
+
+  /**
+   * Pay Rule jqx grid on the People → Timekeeper page.
+   * verified 2026-07-02
+   * @tags pay-rule, table, grid, jqx, timekeeper, people, new-kronos
+   */
+  payRuleGrid: (root: PeopleRoot): Locator => root.locator("#payRuleGrid"),
+
+  /**
+   * "+" Add Row control on the empty pay-rule row (row1).
+   * verified 2026-07-02
+   * @tags pay-rule, add, plus, button, timekeeper, people, new-kronos
+   */
+  payRuleAddButton: (root: PeopleRoot): Locator =>
+    root.locator("#row1payRuleGrid .iconBtn[title='Add Row']"),
+
+  /**
+   * Empty Pay Rule cell on row1 (below the current effective-dated rule).
+   * Column order: add | delete | pay rule | effective date.
+   * verified 2026-07-02
+   * @tags pay-rule, empty, cell, row, timekeeper, people, new-kronos
+   */
+  payRuleEmptyCell: (root: PeopleRoot): Locator =>
+    root.locator("#row1payRuleGrid [role='gridcell']").nth(2),
+
+  /**
+   * Same row1 Pay Rule cell as {@link payRuleEmptyCell}, read AFTER the lookup
+   * modal commits a selection — used to confirm the chosen code actually landed
+   * in the grid before Save (fail-loud readback; the modal closing alone does
+   * not prove the code committed).
+   * verified 2026-07-02
+   * @tags pay-rule, code, cell, readback, verify, timekeeper, people, new-kronos
+   */
+  payRuleCodeCell: (root: PeopleRoot): Locator =>
+    root.locator("#row1payRuleGrid [role='gridcell']").nth(2),
+
+  /**
+   * Inline pay-rule dropdown list opened after clicking the empty cell.
+   * verified 2026-07-02
+   * @tags pay-rule, dropdown, listbox, editor, timekeeper, people, new-kronos
+   */
+  payRuleDropdownList: (root: PeopleRoot): Locator =>
+    root.locator("[id^='innerListBoxdropdownlisteditorpayRuleGrid']"),
+
+  /**
+   * jqx dropdown popup shell for the pay-rule inline editor (hidden until the
+   * empty cell is activated).
+   * verified 2026-07-02
+   * @tags pay-rule, dropdown, popup, editor, timekeeper, people, new-kronos
+   */
+  payRuleDropdownPopup: (root: PeopleRoot): Locator =>
+    root.locator("[id^='listBoxdropdownlisteditorpayRuleGrid']"),
+
+  /**
+   * "Search..." affordance at the bottom of the pay-rule jqx dropdown — a
+   * `.pe-search-button` div, NOT a `[role=option]` (verified live 2026-07-02).
+   * verified 2026-07-02
+   * @tags pay-rule, search, option, dropdown, lookup, people, new-kronos
+   */
+  payRuleSearchOption: (root: PeopleRoot): Locator =>
+    root
+      .locator("[id^='innerListBoxdropdownlisteditorpayRuleGrid']")
+      .locator(".searchComponent.pe-search-button, .pe-search-button"),
+
+  /**
+   * Pay-rule lookup search input — after choosing Search, exactly one textbox
+   * appears on the People editor (verified live 2026-07-02).
+   * verified 2026-07-02
+   * @tags pay-rule, search, dialog, input, textbox, lookup, people, new-kronos
+   */
+  payRuleSearchInput: (root: PeopleRoot): Locator => root.getByRole("textbox"),
+
+  /**
+   * Pay-rule lookup modal shell (`modal-window-pe`).
+   * verified 2026-07-02
+   * @tags pay-rule, search, dialog, modal, lookup, people, new-kronos
+   */
+  payRuleSearchModal: (root: PeopleRoot): Locator =>
+    root.locator(".modal-window-pe, .pe-modal-container").first(),
+
+  /**
+   * Matching pay-rule row in the lookup modal grid after typing a code.
+   * verified 2026-07-02
+   * @tags pay-rule, search, dialog, result, grid, lookup, people, new-kronos
+   */
+  payRuleSearchResultRow: (root: PeopleRoot, code: string): Locator =>
+    root
+      .locator(".modal-window-pe, .pe-modal-container")
+      .first()
+      .locator(".jqx-grid")
+      .getByText(code, { exact: true })
+      .first(),
+
+  /**
+   * OK button in the pay-rule lookup overlay (confirms the selected row).
+   * verified 2026-07-02
+   * @tags pay-rule, search, dialog, ok, submit, button, lookup, people, new-kronos
+   */
+  payRuleSearchOk: (root: PeopleRoot): Locator =>
+    root.locator(".modal-window-pe, .pe-modal-container").first().getByRole("button", { name: /^OK$/i }),
+
+  /**
+   * Effective Date cell on the empty pay-rule row (row1).
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, cell, grid, timekeeper, people, new-kronos
+   */
+  effectiveDateCell: (root: PeopleRoot): Locator =>
+    root.locator("#row1payRuleGrid [role='gridcell']").nth(3),
+
+  /**
+   * Inline jqx datetime editor opened after clicking the effective-date cell.
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, editor, datetime, jqx, timekeeper, people, new-kronos
+   */
+  effectiveDateEditor: (root: PeopleRoot): Locator =>
+    root.locator("#datetimeeditorpayRuleGrideffectiveDate"),
+
+  /**
+   * Calendar icon inside the effective-date inline editor (opens the jqx picker).
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, calendar, icon, button, jqx, timekeeper, people, new-kronos
+   */
+  effectiveDateCalendarButton: (root: PeopleRoot): Locator =>
+    root.locator("#datetimeeditorpayRuleGrideffectiveDate .jqx-icon-calendar"),
+
+  /**
+   * jqx calendar popup for the pay-rule effective date.
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, calendar, picker, popup, jqx, timekeeper, people, new-kronos
+   */
+  payRuleDatePicker: (root: PeopleRoot): Locator =>
+    root.locator(".jqx-calendar").last(),
+
+  /**
+   * Month/year title on the jqx effective-date calendar (e.g. "July 2026").
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, calendar, title, month, jqx, timekeeper, people, new-kronos
+   */
+  payRuleDatePickerTitle: (root: PeopleRoot): Locator =>
+    root.locator(".jqx-calendar-title-content").last(),
+
+  /**
+   * Previous-month arrow on the jqx effective-date calendar.
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, calendar, prev, navigation, jqx, timekeeper, people, new-kronos
+   */
+  payRuleDatePickerPrevMonth: (root: PeopleRoot): Locator =>
+    root.locator(".jqx-icon-arrow-left").last(),
+
+  /**
+   * Next-month arrow on the jqx effective-date calendar.
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, calendar, next, navigation, jqx, timekeeper, people, new-kronos
+   */
+  payRuleDatePickerNextMonth: (root: PeopleRoot): Locator =>
+    root.locator(".jqx-icon-arrow-right").last(),
+
+  /**
+   * Day-of-month cell in the current month on the jqx effective-date calendar.
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, calendar, day, cell, jqx, timekeeper, people, new-kronos
+   */
+  payRuleDatePickerDay: (root: PeopleRoot, day: number): Locator =>
+    root
+      .locator(".jqx-calendar-cell-month:not(.jqx-calendar-cell-othermonth)")
+      .getByText(String(day), { exact: true })
+      .first(),
+
+  /**
+   * Inline editor input for Effective Date after the cell is activated.
+   * verified 2026-07-02
+   * @tags pay-rule, effective-date, input, editor, timekeeper, people, new-kronos
+   */
+  effectiveDateInput: (root: PeopleRoot): Locator =>
+    root.locator("#inputdatetimeeditorpayRuleGrideffectiveDate"),
+
+  /**
+   * Save button on the People editor toolbar. State contract (live-verified
+   * 2026-07-04, read-only probe `scripts/verify-kronos-save-state.ts`): the
+   * button carries a native `disabled` attribute whenever there are NO pending
+   * edits, and enables once the editor holds unsaved changes — so a committed
+   * save returns it to `disabled`. `savePersonRecord` uses that as its
+   * fail-loud post-save readback.
+   * verified 2026-07-04
+   * @tags save, button, toolbar, people, new-kronos
+   */
+  saveButton: (root: PeopleRoot): Locator =>
+    root.locator("#com\\.kronos\\.wfc\\.ngui\\.peopleeditor\\.save button[aria-label='Save']"),
+
+  /**
+   * The People editor's LOADED-employee header (`.empName`, inside `#peEmpList`).
+   * Its `title` reads "<Full Name> <EID>" (e.g. "KentHodge, Michele L 10604376")
+   * and its text shows the name + `employee.personNumber`. This is the editor's
+   * OWN identity — the authoritative "who is displayed" signal — distinct from
+   * the global Employee Search slide-out where the searched EID lingers. Use it
+   * (never whole-page text) to confirm a batch employee switch actually landed.
+   * verified 2026-07-02
+   * @tags employee, header, identity, loaded, empName, peEmpList, people, new-kronos
+   */
+  loadedEmployeeName: (root: PeopleRoot): Locator => root.locator(".empName"),
+};
+
 export const newKronosSelectors = {
   searchFrame,
   loadingOverlay,
@@ -283,4 +557,5 @@ export const newKronosSelectors = {
   search,
   goToMenu,
   timecard,
+  people,
 };

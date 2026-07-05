@@ -20,6 +20,8 @@ import {
   calendarDayLabelPattern,
   parseCalendarHeaderOrdinal,
   probeEidInTimecardText,
+  payRuleCodeCommittedInCell,
+  peopleHeaderShowsEid,
 } from "../../../../src/systems/new-kronos/navigate.js";
 import { log } from "../../../../src/utils/log.js";
 
@@ -46,6 +48,65 @@ describe("probeEidInTimecardText", () => {
     const probe = probeEidInTimecardText("Employee timecards\nLoading…", "10864213");
     assert.equal(probe.match, false);
     assert.equal(probe.otherEid, null);
+  });
+});
+
+/**
+ * Pins the pay-rule commit readback (fail-loud guard for the live 2026-07-02
+ * EID 10416352 failure: the lookup-modal OK click intermittently no-ops, so the
+ * modal-hidden wait timed out AND, worse, could have closed without committing
+ * the code — `addPayRule` now gates Save on this predicate matching the grid
+ * cell so an empty/wrong pay rule is never persisted).
+ */
+describe("payRuleCodeCommittedInCell", () => {
+  it("matches the chosen code regardless of surrounding whitespace/nested-span noise", () => {
+    assert.equal(payRuleCodeCommittedInCell("  SX-8Hol-8-OT-30 ", "SX-8Hol-8-OT-30"), true);
+    assert.equal(payRuleCodeCommittedInCell("SX-8Hol-8-OT-30\n", "SX-8Hol-8-OT-30"), true);
+  });
+
+  it("is case-insensitive (jqx can re-case the rendered label)", () => {
+    assert.equal(payRuleCodeCommittedInCell("sx-8hol-8-ot-30", "SX-8Hol-8-OT-30"), true);
+  });
+
+  it("is false for a blank cell (missed OK → nothing committed)", () => {
+    assert.equal(payRuleCodeCommittedInCell("", "SX-8Hol-8-OT-30"), false);
+    assert.equal(payRuleCodeCommittedInCell("   ", "SX-8Hol-8-OT-30"), false);
+  });
+
+  it("is false for a DIFFERENT code (wrong selection must not pass the gate)", () => {
+    assert.equal(payRuleCodeCommittedInCell("SX-8Hol-8-CT-30", "SX-8Hol-8-OT-30"), false);
+  });
+});
+
+/**
+ * Pins the batch employee-switch identity check (fail-loud guard for the live
+ * 2026-07-02 "redoes the old one" bug: `waitForPeopleEmployee` matched the
+ * searched EID anywhere in `document.body` — including the still-open global
+ * Employee Search box — so batch item 2 reported "already open" while the People
+ * editor still displayed the PREVIOUS person, re-adding the pay rule to them.
+ * The check now reads the editor's `.empName` header, whose title is
+ * "<Full Name> <EID>").
+ */
+describe("peopleHeaderShowsEid", () => {
+  it("matches the EID in the .empName title format '<Name> <EID>'", () => {
+    assert.equal(peopleHeaderShowsEid("KentHodge, Michele L 10604376", "10604376"), true);
+  });
+
+  it("matches the EID from the concatenated title + text node", () => {
+    assert.equal(
+      peopleHeaderShowsEid("KentHodge, Michele L 10604376 KentHodge, Michele L\n10604376", "10604376"),
+      true,
+    );
+  });
+
+  it("is false when the header shows a DIFFERENT employee (the previous person)", () => {
+    // The target 10416352 lingers elsewhere on the page, but the header is the previous person.
+    assert.equal(peopleHeaderShowsEid("KentHodge, Michele L 10604376", "10416352"), false);
+  });
+
+  it("word-boundary: an 8-digit EID does not partially match a longer number", () => {
+    assert.equal(peopleHeaderShowsEid("Someone 1041635200", "10416352"), false);
+    assert.equal(peopleHeaderShowsEid("", "10416352"), false);
   });
 });
 

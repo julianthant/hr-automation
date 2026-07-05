@@ -58,6 +58,10 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/i9-lookup/index.js");
     return mod.i9LookupWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  "kronos-pay-rule": async () => {
+    const mod = await import("../workflows/kronos-pay-rule/index.js");
+    return mod.kronosPayRuleWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 /**
