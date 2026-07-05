@@ -53,7 +53,6 @@ export function ScreenshotLightbox({
       index={idx}
       onIndexChange={onNavigate}
       onClose={onClose}
-      chrome="screenshot"
       enableHomeEnd
       renderItem={(item) => {
         const file = item.entry.files[item.fileIdx];
