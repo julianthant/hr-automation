@@ -1,0 +1,6 @@
+Employee Name,Employee ID,Employee Status,Employee Work Email Address,Dept Code,Department,Position Number,Reports To Employee,Reports To Employee ID,Reports To Employee Status,Reports To Position Number,Reports To Work Email Address,Job Code,Job Code Description,Employee Class,Union Code,Job FTE,Timeekeping System,Timekeeper,Pay Rule In UKG if applicable,Currect Election,"Election eff. 7/1/2026
+(CASH, CT, NONE)","Timekeeping System updated eff. 7/1/26
+(Yes, N/A)",Notes
+"Baltazar, Alfredo",10403587,Active,albaltazar@ucsd.edu,000412,HOUSING/DINING/HOSPITALITY,40842318,"Ponce Carrizoza, Cinthia Maria",10466619,Active,40651289,cponcecarrizoza@ucsd.edu,005116,CUSTODIAN SR,Staff: Career,SX,1.0000,UKG,Daniel,SX-8Hol-8-CT-30,Comp Time,,,
+"Estrada, Joey Tamayo",10726825,Active,jte001@ucsd.edu,000412,HOUSING/DINING/HOSPITALITY,41040878,"Torres, Rachel",10410852,Active,40643516,r2torres@ucsd.edu,004723,BLANK AST 2,Staff: Career,CX,1.0000,UKG,Daniel,99-8Hol-40-CT-30,Comp Time,Comp Time,,
+"Agbayani, Lionel A",10414168,Active,lagbayani@ucsd.edu,000412,HOUSING/DINING/HOSPITALITY,40702285,"Santos, Juancho S",10407355,Active,40644891,jss013@ucsd.edu,008106,PAINTER,Staff: Career,K6,1.0000,UKG,Daniel,K6-8Hol-8-OT-30,CASH,NONE,N/A,

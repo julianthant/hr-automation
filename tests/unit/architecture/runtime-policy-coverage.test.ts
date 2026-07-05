@@ -33,6 +33,7 @@ import "../../../src/workflows/old-kronos-reports/workflow.js";
 import "../../../src/workflows/separations/workflow.js";
 import "../../../src/workflows/sharepoint-download/workflow.js";
 import "../../../src/workflows/work-study/workflow.js";
+import "../../../src/workflows/kronos-pay-rule/workflow.js";
 
 const WORKFLOWS_DIR = join(process.cwd(), "src/workflows");
 

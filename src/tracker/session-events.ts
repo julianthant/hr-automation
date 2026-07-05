@@ -447,6 +447,7 @@ export const INSTANCE_LABELS: Record<string, string> = {
   "emergency-contact": "Emergency Contact",
   "sharepoint-download": "SharePoint Download",
   "crm-doc-download": "CRM Doc Download",
+  "kronos-pay-rule": "Kronos Paycodes",
   "oath-signature": "Oath Signature",
   "oath-upload": "Oath Upload",
   onbase: "OnBase Import",

@@ -6,6 +6,7 @@ export const DASHBOARD_INPUT_RUN_WORKFLOWS = [
   "oath-signature",
   "crm-doc-download",
   "onboarding",
+  "kronos-pay-rule",
 ] as const;
 
 export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [

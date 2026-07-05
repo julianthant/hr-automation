@@ -10,9 +10,14 @@ import {
   search as searchSelectors,
   goToMenu,
   timecard,
+  people,
+  peopleFrame,
+  resolvePeopleRoot,
   type SearchRoot,
+  type PeopleRoot,
 } from "./selectors.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
+import { gotoWithRetry } from "../../infra/browser/launch.js";
 import {
   formatTimecardDate,
   runTimecardCheck,
@@ -439,7 +444,11 @@ export async function verifyTimecardEmployee(
         const m = text.match(/\b\d{8}\b/);
         return { match: false, otherEid: m ? m[0] : null };
       }, eid)
-      .catch(() => ({ match: true as boolean, otherEid: null as string | null }));
+      // Fail SAFE, not open: a probe exception must NOT confirm the employee.
+      // This gate exists to stop a stale/wrong employee's timecard from being
+      // read into a separation — a thrown probe means "could not verify", which
+      // is `match: false` (the loop keeps polling, then the caller throws).
+      .catch(() => ({ match: false as boolean, otherEid: null as string | null }));
     if (probe.match) return { ok: true, shownEid: eid };
     shownEid = probe.otherEid;
     await page.waitForTimeout(500);
@@ -653,12 +662,12 @@ export async function getSeparationTimecardData(
     const sick: { mon: number; day: number }[] = [];
     const holiday: { mon: number; day: number }[] = [];
     for (let i = 0; i < Math.max(dRows.length, xRows.length); i++) {
-      const dt = dRows[i] ? dRows[i].textContent!.replace(/\s+/g, " ").trim() : "";
+      const dt = dRows[i] ? dRows[i].textContent.replace(/\s+/g, " ").trim() : "";
       const m = dt.match(/([A-Za-z]{3})\s+(\d+)\/(\d+)/);
       if (m) cur = { mon: +m[2], day: +m[3] };
       const cells = xRows[i]
         ? [...xRows[i].querySelectorAll("[role=gridcell]")].map((c) =>
-            c.textContent!.replace(/\s+/g, " ").trim(),
+            c.textContent.replace(/\s+/g, " ").trim(),
           )
         : [];
       const inOut = (cells[1] ?? "") + " " + (cells[2] ?? "");
@@ -961,3 +970,635 @@ export async function closeEmployeeSearch(page: Page): Promise<void> {
     }
   }
 }
+
+// ─── People page navigation (Pay Rule editing) ───────────────────────────
+//
+// Used by the Kronos Pay Rule workflow to navigate an employee to the People
+// page, expand the Timekeeper section, add/modify their pay rule, and save.
+// Follows the same selector + condition-based waiting patterns as the
+// timecard navigation above.
+
+/**
+ * True when the People editor's loaded-employee header (`.empName`, title
+ * "<Name> <EID>") shows the searched EID. Whole-page text is NOT a valid signal
+ * — the searched EID lingers in the global Employee Search box/results, so a
+ * `document.body` check false-positived while the editor still displayed the
+ * PREVIOUS employee (live 2026-07-02: batch item 2 for EID 10416352 reported
+ * "already open" while `#empNav`/`.empName` still showed KentHodge 10604376, so
+ * the pay rule was re-added to the previous person). Word-boundary match so an
+ * 8-digit EID can't partially match a longer number. Exported for unit tests.
+ */
+export function peopleHeaderShowsEid(headerText: string, eid: string): boolean {
+  return new RegExp(`\\b${eid}\\b`).test(headerText);
+}
+
+/**
+ * One pass over the People editor's `.empName` headers: does any show `eid`?
+ * Also captures the 8-digit id actually shown when it does NOT match, so a
+ * caller can fail loud naming the wrong person. Shared by
+ * {@link waitForPeopleEmployee} and {@link verifyPeopleEmployee} so the
+ * header-reading logic lives in one place.
+ */
+async function scanPeopleHeaders(
+  root: PeopleRoot,
+  eid: string,
+): Promise<{ matched: boolean; shownEid: string | null }> {
+  const headers = people.loadedEmployeeName(root);
+  const count = await headers.count().catch(() => 0);
+  let shownEid: string | null = null;
+  for (let i = 0; i < count; i++) {
+    const cell = headers.nth(i);
+    const title = (await cell.getAttribute("title").catch(() => null)) ?? "";
+    const text = (await cell.textContent().catch(() => null)) ?? "";
+    const combined = `${title} ${text}`;
+    if (peopleHeaderShowsEid(combined, eid)) return { matched: true, shownEid: eid };
+    const m = combined.match(/\b\d{8}\b/);
+    if (m) shownEid = m[0];
+  }
+  return { matched: false, shownEid };
+}
+
+/**
+ * Poll until the People editor (managePeople route) actually DISPLAYS the
+ * searched employee — checked against the editor's OWN `.empName` header, not
+ * whole-page text (see {@link peopleHeaderShowsEid}). When a batch reuses the
+ * same browser session the previous employee's editor stays open, so
+ * `resolvePeopleRoot` truthiness alone is not enough — the header EID must match.
+ */
+async function waitForPeopleEmployee(
+  page: Page,
+  eid: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const root = resolvePeopleRoot(page);
+    if (root && (await scanPeopleHeaders(root, eid)).matched) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+/**
+ * Confirm the OPEN People editor is displaying the searched employee before we
+ * add a pay rule — a fail-loud identity gate (mirrors `verifyTimecardEmployee`).
+ * Reads the editor's `.empName` header (title "<Name> <EID>"), NOT whole-page
+ * text, so a searched EID lingering in the global Employee Search box can't
+ * false-pass. Returns the 8-digit id actually shown when it does NOT match, so
+ * the caller can fail loud naming the wrong person.
+ */
+export async function verifyPeopleEmployee(
+  page: Page,
+  eid: string,
+): Promise<TimecardEmployeeCheck> {
+  await closeEmployeeSearch(page);
+  const root = resolvePeopleRoot(page);
+  if (!root) return { ok: false, shownEid: null };
+  const deadline = Date.now() + 8_000;
+  let shownEid: string | null = null;
+  while (Date.now() < deadline) {
+    const scan = await scanPeopleHeaders(root, eid);
+    if (scan.matched) return { ok: true, shownEid: eid };
+    if (scan.shownEid) shownEid = scan.shownEid;
+    await page.waitForTimeout(500);
+  }
+  return { ok: false, shownEid };
+}
+
+/**
+ * Click Go To dropdown and select People.
+ * Mirrors `clickGoToTimecard` but targets the People option. After clicking,
+ * waits for the People editor to show the searched EID — not merely for the
+ * managePeople route to exist (batch reuse can leave the route open).
+ */
+export async function clickGoToPeople(page: Page, eid: string): Promise<boolean> {
+  log.step("[New Kronos] Clicking Go To → People...");
+
+  const frame = searchFrame(page);
+  // Go To may render in the search frame OR top-level — poll for whichever
+  // context's button is visible AND ENABLED.
+  const candidates = [
+    goToMenu.goToButtonInFrame(frame).first(),
+    goToMenu.goToButtonOnPage(page).first(),
+  ];
+  let gotoButton: Locator | null = null;
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && !gotoButton) {
+    for (const loc of candidates) {
+      try {
+        if ((await loc.isVisible()) && (await loc.isEnabled())) {
+          gotoButton = loc;
+          break;
+        }
+      } catch {
+        // Not present in this context — try the next candidate.
+      }
+    }
+    if (!gotoButton) await page.waitForTimeout(500);
+  }
+
+  if (!gotoButton) {
+    log.error(
+      "[New Kronos] Go To button never became enabled — the employee selection " +
+      "did not register (no slat selected), so the People page cannot be opened",
+    );
+    return false;
+  }
+
+  if (await waitForPeopleEmployee(page, eid, 3_000)) {
+    log.success(
+      `[New Kronos] People editor already open for EID ${eid} — slat selection refreshed the page`,
+    );
+    await closeEmployeeSearch(page);
+    return true;
+  }
+
+  // Open the dropdown, then WAIT for the People option to render before clicking.
+  const peopleItem = goToMenu.peopleItem(page);
+  await gotoButton.click({ timeout: 5_000 });
+
+  const totalDeadline = Date.now() + 30_000;
+  let reopened = false;
+  while (Date.now() < totalDeadline) {
+    try {
+      await peopleItem
+        .first()
+        .waitFor({ state: "visible", timeout: reopened ? 6_000 : 5_000 });
+    } catch {
+      if (!reopened) {
+        log.warn("[New Kronos] People option not visible yet — re-opening the Go To dropdown");
+        reopened = true;
+        try {
+          await gotoButton.click({ timeout: 5_000 });
+        } catch {
+          // best-effort re-open
+        }
+        await page.waitForTimeout(500);
+        continue;
+      }
+      if (await waitForPeopleEmployee(page, eid, 5_000)) {
+        log.success(
+          `[New Kronos] People editor switched to EID ${eid} without Go To → People menu item`,
+        );
+        await closeEmployeeSearch(page);
+        return true;
+      }
+      break;
+    }
+
+    try {
+      await safeClick(peopleItem.first(), {
+        timeout: 5_000,
+        label: "new kronos people menu item",
+      });
+    } catch {
+      continue;
+    }
+
+    try {
+      await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 5_000 });
+    } catch {
+      // Overlay absent or selector drift — proceed.
+    }
+
+    if (await waitForPeopleEmployee(page, eid, 15_000)) {
+      log.success(`[New Kronos] Navigated to People page for EID ${eid}`);
+      await closeEmployeeSearch(page);
+      return true;
+    }
+
+    log.warn(
+      `[New Kronos] Go To → People clicked but the editor did not switch to EID ${eid} — retrying`,
+    );
+    try {
+      await gotoButton.click({ timeout: 5_000 });
+    } catch {
+      // best-effort re-open for another attempt
+    }
+    await page.waitForTimeout(500);
+  }
+
+  if (await waitForPeopleEmployee(page, eid, 3_000)) {
+    log.success(`[New Kronos] People editor confirmed for EID ${eid} after menu retries`);
+    await closeEmployeeSearch(page);
+    return true;
+  }
+
+  log.error(
+    `[New Kronos] Could not open the People editor for EID ${eid} ` +
+    `(Go To → People menu or managePeople load did not show the searched employee)`,
+  );
+  return false;
+}
+
+/**
+ * Return New Kronos to the home dashboard so the NEXT batch employee starts from
+ * a known-clean state.
+ *
+ * In a batch the previous employee's People editor stays open after Save, and
+ * once a People editor is open the global Employee Search **Go To → People**
+ * dropdown no longer offers a "People" option — so a stale editor cannot be
+ * switched in place, and the old code false-passed the switch and re-edited the
+ * PREVIOUS person (live 2026-07-02: EID 10416352 kept re-opening while the editor
+ * still showed KentHodge 10604376). Navigating home first makes every item run
+ * the same proven fresh-employee flow (search → select → Go To → People);
+ * live-verified 2026-07-02 (10604376 → 10416352 switched cleanly). Retries
+ * transient navigation failures via {@link gotoWithRetry}.
+ */
+export async function resetNewKronosToHome(page: Page): Promise<void> {
+  log.step("[New Kronos] Returning to home dashboard before next employee...");
+  await gotoWithRetry(page, NEW_KRONOS_URL, undefined, undefined, 30_000);
+  await page.waitForTimeout(1_000);
+}
+
+/**
+ * Expand the Timekeeper section on the People page if it's collapsed.
+ * The Timekeeper header is a clickable accordion that toggles the Pay Rule /
+ * Employment Terms tables. Click it if the Pay Rule table is not visible.
+ */
+export async function expandTimekeeperSection(page: Page): Promise<void> {
+  log.step("[New Kronos] Expanding Timekeeper section...");
+
+  const root = peopleFrame(page);
+  const timekeeperHeader = people.timekeeperSection(root);
+  try {
+    await timekeeperHeader.waitFor({ state: "visible", timeout: 45_000 });
+
+    const payRuleVisible = await people
+      .payRuleColumnHeader(root)
+      .isVisible()
+      .catch(() => false);
+
+    if (payRuleVisible) {
+      log.step("[New Kronos] Timekeeper section already expanded");
+      return;
+    }
+
+    await safeClick(timekeeperHeader, {
+      timeout: 5_000,
+      label: "new kronos timekeeper section header",
+    });
+    await people.payRuleColumnHeader(root).waitFor({ state: "visible", timeout: 15_000 });
+    log.step("[New Kronos] Timekeeper section expanded");
+  } catch (err) {
+    throw new Error(
+      `[New Kronos] Timekeeper section did not load on People page: ${String(err)}`,
+    );
+  }
+}
+
+const PAY_RULE_MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+function parseUsEffectiveDate(effectiveDate: string): {
+  month: number;
+  day: number;
+  year: number;
+  calendarTitle: string;
+} {
+  const [mm, dd, yyyy] = effectiveDate.split("/").map((part) => Number(part));
+  if (!mm || !dd || !yyyy) {
+    throw new Error(
+      `[New Kronos] Invalid pay-rule effective date "${effectiveDate}" — expected MM/DD/YYYY`,
+    );
+  }
+  return {
+    month: mm,
+    day: dd,
+    year: yyyy,
+    calendarTitle: `${PAY_RULE_MONTH_NAMES[mm - 1]} ${yyyy}`,
+  };
+}
+
+function parseCalendarTitle(title: string): { month: number; year: number } | null {
+  const match = title.trim().match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (!match) return null;
+  const monthIndex = PAY_RULE_MONTH_NAMES.findIndex(
+    (name) => name.toLowerCase() === match[1].toLowerCase(),
+  );
+  if (monthIndex < 0) return null;
+  return { month: monthIndex + 1, year: Number(match[2]) };
+}
+
+/** True when the pay-rule grid cell text matches MM/DD/YYYY (leading zeros optional). */
+function effectiveDateCommittedInCell(cellText: string, effectiveDate: string): boolean {
+  const { month, day, year } = parseUsEffectiveDate(effectiveDate);
+  const re = new RegExp(`\\b0?${month}\\/0?${day}\\/${year}\\b`);
+  return re.test(cellText.trim());
+}
+
+/**
+ * True when the row1 Pay Rule grid cell now shows the chosen code — the real
+ * signal that the lookup modal's OK committed the selection. Case-insensitive
+ * and whitespace-tolerant because jqx renders the code inside nested spans.
+ * Exported for unit tests (no live page needed).
+ */
+export function payRuleCodeCommittedInCell(cellText: string, payRuleCode: string): boolean {
+  return cellText.trim().toLowerCase().includes(payRuleCode.trim().toLowerCase());
+}
+
+/**
+ * Click `trigger`, then wait for `target` to appear. jqx inline editors
+ * intermittently swallow the FIRST activation click (the cell/icon is hit but
+ * the editor/popup never renders), which otherwise turns a transient miss into
+ * a hard 10s `waitFor` timeout and fails the whole run. Re-click the SAME
+ * trigger up to `attempts` times (re-running the same operation — allowed under
+ * the fail-loud rule; NOT a substitute selector) before throwing a legible
+ * error. Each attempt waits `perAttemptMs` for the target.
+ */
+async function clickToReveal(
+  trigger: Locator,
+  target: Locator,
+  opts: { label: string; attempts?: number; perAttemptMs?: number },
+): Promise<void> {
+  const { label, attempts = 3, perAttemptMs = 6_000 } = opts;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await safeClick(trigger, { timeout: 10_000, label });
+    try {
+      await target.waitFor({ state: "visible", timeout: perAttemptMs });
+      return;
+    } catch {
+      if (attempt < attempts) {
+        log.warn(
+          `[New Kronos] ${label}: target not visible after click (attempt ${attempt}/${attempts}) — retrying`,
+        );
+        continue;
+      }
+      throw new Error(
+        `[New Kronos] ${label}: element did not appear after ${attempts} click attempts`,
+      );
+    }
+  }
+}
+
+/**
+ * Confirm the pay-rule lookup selection: click the matching result row, click
+ * OK, and verify the chosen code actually committed to the row1 grid cell.
+ *
+ * The raw OK affordance is a jqx button clicked via `evaluate(el.click())`
+ * (verified 2026-07-02 — a Playwright click on it was unreliable). A single
+ * `el.click()` intermittently fails to register, leaving the modal open and the
+ * grid cell empty; the previous code then hit a hard 10s modal-hidden timeout
+ * with no retry (observed live 2026-07-02, EID 10416352). Here we retry the
+ * row-select + OK and gate success on the CODE landing in the grid — not merely
+ * on the modal closing — so we never Save an empty/wrong pay rule.
+ */
+async function confirmPayRuleSelection(
+  root: PeopleRoot,
+  payRuleCode: string,
+): Promise<void> {
+  const resultRow = people.payRuleSearchResultRow(root, payRuleCode);
+  const codeCell = people.payRuleCodeCell(root);
+  const modal = people.payRuleSearchModal(root);
+
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    // Re-select the row + OK while the lookup is still open (a missed OK leaves
+    // the result row visible). Once OK commits, the row disappears and the code
+    // poll below carries us out — so a stale row here just means "click again".
+    if (await resultRow.isVisible().catch(() => false)) {
+      await safeClick(resultRow, {
+        timeout: 15_000,
+        label: "new kronos pay rule search result row",
+      });
+      await people.payRuleSearchOk(root).evaluate((el) => (el as HTMLElement).click());
+    }
+
+    // Success is the CODE committed to the grid — the actual goal — polled to a
+    // short deadline so a missed click retries fast instead of stalling 10s.
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const cellText = await codeCell.innerText().catch(() => "");
+      if (payRuleCodeCommittedInCell(cellText, payRuleCode)) {
+        // Best-effort: let the modal finish closing before the next step.
+        await modal.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
+        log.step(`[New Kronos] Pay rule ${payRuleCode} committed to grid`);
+        return;
+      }
+      await root.waitForTimeout(250);
+    }
+
+    if (attempt < attempts) {
+      log.warn(
+        `[New Kronos] Pay rule ${payRuleCode} not committed after OK (attempt ${attempt}/${attempts}) — retrying`,
+      );
+    }
+  }
+
+  const finalCell = (await codeCell.innerText().catch(() => "")).trim();
+  throw new Error(
+    `[New Kronos] Pay rule ${payRuleCode} did not commit to the grid after ${attempts} OK attempts — ` +
+    `cell="${finalCell || "(blank)"}". Aborting before Save so no empty/wrong pay rule is persisted.`,
+  );
+}
+
+/** Pick an effective date via the inline editor's calendar icon (not typed entry). */
+async function setPayRuleEffectiveDateViaCalendar(
+  root: PeopleRoot,
+  effectiveDate: string,
+): Promise<void> {
+  const { day, calendarTitle } = parseUsEffectiveDate(effectiveDate);
+
+  // Each jqx open (cell → inline editor, calendar icon → picker) retries the
+  // click if the popup doesn't render — a single swallowed click otherwise
+  // stalls the full 10s before failing loud.
+  await clickToReveal(
+    people.effectiveDateCell(root),
+    people.effectiveDateEditor(root),
+    { label: "new kronos pay rule effective date cell" },
+  );
+  await clickToReveal(
+    people.effectiveDateCalendarButton(root),
+    people.payRuleDatePicker(root),
+    { label: "new kronos pay rule effective date calendar icon" },
+  );
+
+  const titleLoc = people.payRuleDatePickerTitle(root);
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const current = (await titleLoc.textContent())?.trim() ?? "";
+    if (current === calendarTitle) break;
+
+    const currentParts = parseCalendarTitle(current);
+    const targetParts = parseCalendarTitle(calendarTitle);
+    if (!currentParts || !targetParts) {
+      throw new Error(`[New Kronos] Could not parse pay-rule calendar title "${current}"`);
+    }
+
+    const currentIndex = currentParts.year * 12 + currentParts.month;
+    const targetIndex = targetParts.year * 12 + targetParts.month;
+    if (currentIndex === targetIndex) break;
+
+    if (currentIndex > targetIndex) {
+      await safeClick(people.payRuleDatePickerPrevMonth(root), {
+        timeout: 5_000,
+        label: "new kronos pay rule calendar prev month",
+      });
+    } else {
+      await safeClick(people.payRuleDatePickerNextMonth(root), {
+        timeout: 5_000,
+        label: "new kronos pay rule calendar next month",
+      });
+    }
+  }
+
+  const finalTitle = (await titleLoc.textContent())?.trim() ?? "";
+  if (finalTitle !== calendarTitle) {
+    throw new Error(
+      `[New Kronos] Pay-rule calendar stuck on "${finalTitle}" — expected "${calendarTitle}"`,
+    );
+  }
+
+  await safeClick(people.payRuleDatePickerDay(root, day), {
+    timeout: 10_000,
+    label: `new kronos pay rule effective date day ${day}`,
+  });
+
+  // jqx keeps the picked date in the inline input until Enter commits it to the grid cell
+  // (live 2026-07-02 — day click alone leaves the Effective Date column blank on Save).
+  await people.effectiveDateInput(root).press("Enter");
+
+  const commitDeadline = Date.now() + 5_000;
+  while (Date.now() < commitDeadline) {
+    const cellText = await people.effectiveDateCell(root).innerText();
+    if (effectiveDateCommittedInCell(cellText, effectiveDate)) {
+      log.step(`[New Kronos] Effective date committed to grid: ${cellText.trim()}`);
+      return;
+    }
+    await root.waitForTimeout(200);
+  }
+
+  const cellText = (await people.effectiveDateCell(root).innerText()).trim();
+  throw new Error(
+    `[New Kronos] Effective date calendar pick did not commit to the pay-rule grid — ` +
+    `expected ${effectiveDate}, cell="${cellText || "(blank)"}"`,
+  );
+}
+
+/**
+ * Add a new pay rule entry on the People → Timekeeper page.
+ *
+ * Flow (from the user's screenshots):
+ *   1. Click on the empty row / "+" button below existing pay rules
+ *   2. Click the search icon in the pay rule cell
+ *   3. Type the pay rule code in the search dialog
+ *   4. Click Search, then select the result
+ *   5. Set the effective date
+ *
+ * @param page - Playwright page on the People view
+ * @param payRuleCode - The full pay rule code (e.g. "SX-8Hol-8-OT-30")
+ * @param effectiveDate - MM/DD/YYYY format (e.g. "07/01/2026")
+ */
+export async function addPayRule(
+  page: Page,
+  payRuleCode: string,
+  effectiveDate: string,
+): Promise<void> {
+  log.step(`[New Kronos] Adding pay rule: ${payRuleCode} effective ${effectiveDate}`);
+
+  await closeEmployeeSearch(page);
+  const root = peopleFrame(page);
+
+  const emptyCell = people.payRuleEmptyCell(root);
+  try {
+    await safeClick(emptyCell, {
+      timeout: 10_000,
+      label: "new kronos pay rule empty cell",
+    });
+  } catch {
+    log.step("[New Kronos] Empty cell not found — clicking '+' to add new pay rule row");
+    await safeClick(people.payRuleAddButton(root), {
+      timeout: 10_000,
+      label: "new kronos pay rule add button",
+    });
+    await safeClick(people.payRuleEmptyCell(root), {
+      timeout: 10_000,
+      label: "new kronos pay rule empty cell (after add)",
+    });
+  }
+
+  await people.payRuleDropdownList(root).waitFor({ state: "attached", timeout: 15_000 });
+  // jqx dropdown Search affordance sits in a hidden popup shell — DOM click.
+  await people.payRuleSearchOption(root).evaluate((el) => (el as HTMLElement).click());
+  await people.payRuleSearchInput(root).waitFor({ state: "visible", timeout: 15_000 });
+
+  await safeFill(people.payRuleSearchInput(root), payRuleCode, {
+    timeout: 15_000,
+    label: "new kronos pay rule search input",
+  });
+
+  const resultRow = people.payRuleSearchResultRow(root, payRuleCode);
+  await resultRow.waitFor({ state: "visible", timeout: 15_000 });
+
+  // Select the row + OK, retrying the click and gating on the code committing
+  // to the grid (a single OK click intermittently no-ops — see the helper).
+  await confirmPayRuleSelection(root, payRuleCode);
+
+  await setPayRuleEffectiveDateViaCalendar(root, effectiveDate);
+
+  log.step(`[New Kronos] Pay rule ${payRuleCode} entered with effective date ${effectiveDate}`);
+}
+
+/**
+ * Click the Save button on the People page (top right) and VERIFY the save
+ * committed before reporting success.
+ *
+ * The readback contract (live-verified 2026-07-04, EID 10403587, read-only
+ * probe `scripts/verify-kronos-save-state.ts`): with no pending edits the Save
+ * button carries a native `disabled` attribute; editing enables it. A committed
+ * save returns the editor to the no-pending-edits state, so the button must
+ * read DISABLED again. If it stays enabled past the deadline (validation error
+ * dialog, rejected save, network hang), the edits are still pending — fail loud
+ * instead of stamping a payroll row "Updated" for a save that never landed.
+ */
+export async function savePersonRecord(page: Page): Promise<void> {
+  log.step("[New Kronos] Saving person record...");
+
+  const root = peopleFrame(page);
+  const saveButton = people.saveButton(root);
+  await safeClick(saveButton, {
+    timeout: 5_000,
+    label: "new kronos save button",
+  });
+
+  // Wait for save to complete — the loading overlay should appear then disappear.
+  try {
+    await loadingOverlay.overlay(page).waitFor({ state: "visible", timeout: 3_000 });
+  } catch {
+    // Overlay may not appear (fast save) — continue.
+  }
+  try {
+    await loadingOverlay.overlay(page).waitFor({ state: "hidden", timeout: 15_000 });
+  } catch {
+    // Overlay may have already cleared — continue.
+  }
+
+  // Fail-loud commit readback: poll for the Save button returning to its
+  // native-`disabled` no-pending-edits state.
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const enabled = await saveButton.isEnabled().catch(() => null);
+    if (enabled === false) {
+      log.success("[New Kronos] Person record saved (Save button returned to disabled)");
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    "[New Kronos] Save button is still enabled 20s after clicking Save — the edits are " +
+      "still pending (validation error or rejected save), so the pay rule was NOT persisted. " +
+      "Refusing to report the person record as saved.",
+  );
+}
+
