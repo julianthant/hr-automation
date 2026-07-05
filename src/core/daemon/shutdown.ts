@@ -463,13 +463,20 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
           // guarded SQLite mark (terminal_at IS NULL) is the only cross-process
           // authority — only the daemon that WINS the transition settles
           // dependencies and emits the row; the losers skip, so the item gets
-          // exactly ONE terminal row. A genuine mark ERROR (not a lost race)
-          // falls back to emitting the row, as the prior unconditional sweep did.
+          // exactly ONE terminal row. A genuine mark ERROR (not a lost race) is
+          // NOT a win — the terminal write may never have landed, so it's
+          // treated like a lost race (skip) instead of settling a dependency /
+          // emitting a row for a task that may still be sitting active.
           let won: boolean
           try {
             won = await markItemFailedIfActive(wf.config.name, item.id, failReason, runId, trackerDir)
-          } catch {
-            won = true
+          } catch (e) {
+            won = false
+            log.warn(
+              `[Daemon ${wf.config.name}/${instanceId}] mark-terminal threw for queued item '${item.id}' — not treating as won: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            )
           }
           if (!won) continue
           if (item.taskId) {

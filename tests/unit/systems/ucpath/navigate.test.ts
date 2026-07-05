@@ -11,7 +11,8 @@ import {
  * definitive UI outcomes and only decides once one is actually present:
  * - results grid → rehire (found)
  * - confirmation dialog → new hire (not found)
- * - neither (race timeout) → ambiguous → caller must fall back, never guess.
+ * - neither (race timeout) → ambiguous → caller must FAIL LOUD, never guess
+ *   (guessing risks misclassifying a rehire as a new hire → duplicate person).
  */
 describe("classifyPersonSearchSignal", () => {
   it("results-grid → rehire (found, not ambiguous)", () => {
@@ -28,7 +29,7 @@ describe("classifyPersonSearchSignal", () => {
     });
   });
 
-  it("none → not found + AMBIGUOUS (caller must use the legacy fallback probe)", () => {
+  it("none → not found + AMBIGUOUS (caller must fail loud, not guess)", () => {
     assert.deepEqual(classifyPersonSearchSignal("none"), {
       found: false,
       ambiguous: true,

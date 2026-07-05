@@ -64,23 +64,42 @@ async function searchEmployee(
   await page.waitForTimeout(5_000);
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
-  // Dismiss any PeopleSoft alert dialog (e.g. "payroll in progress" warning)
+  // Dismiss any PeopleSoft alert dialog (e.g. "payroll in progress" warning).
+  // Fail-loud rule: never OK an alert unread. No message-text selector is
+  // registered for this dialog (only the OK button), so we can't quote its
+  // contents here — NEEDS-LIVE: map the dialog's message-text element via
+  // playwright-cli, add it to `payPathActions` in selectors.ts, then log the
+  // actual text instead of this generic warning.
   const okBtn = payPathActions.alertOkButton(page);
   if (await okBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    log.step("Dismissing PeopleSoft alert dialog...");
+    log.warn(
+      `PeopleSoft alert dialog present for Empl ID ${emplId} — dismissing unread (no message-text selector available; see NEEDS-LIVE note above)`,
+    );
     await okBtn.click({ timeout: 5_000 });
     await page.waitForTimeout(2_000);
   }
 
-  // Extract employee name from Position Data header.
-  try {
-    const nameEl = payPathActions.employeeNameDisplay(frame);
-    const name = await nameEl.textContent({ timeout: 5_000 });
-    ctx.employeeName = name?.trim() ?? "";
-  } catch {
-    ctx.employeeName = "";
+  // Extract employee name from Position Data header. Fail-loud rule: an
+  // unreadable/empty identity readback must NOT be swallowed to '' and
+  // allowed to proceed toward a real PayPath submit — throw instead.
+  const nameEl = payPathActions.employeeNameDisplay(frame);
+  const name = await nameEl.textContent({ timeout: 5_000 }).catch(() => null);
+  const trimmedName = name?.trim() ?? "";
+  if (!trimmedName) {
+    throw new Error(
+      `Work-study identity check failed for Empl ID ${emplId}: employee name readback was empty or unreadable after search. Refusing to proceed to PayPath submit.`,
+    );
   }
-  log.success(`Employee record loaded${ctx.employeeName ? `: ${ctx.employeeName}` : ""}`);
+  ctx.employeeName = trimmedName;
+  log.success(`Employee record loaded: ${ctx.employeeName}`);
+
+  // NEEDS-LIVE: this only confirms *a* name was displayed, not that it's the
+  // right one. `payPathActions` has no Empl ID readback selector for the
+  // Position Data header (only NAME_DISPLAY), and `WorkStudyInput` carries no
+  // expected name to compare against — so a true identity-match assertion
+  // (displayed Empl ID === `emplId`) can't be grounded from this file today.
+  // Map that selector live, add it to selectors.ts, then compare it to
+  // `emplId` here and throw on mismatch before Save and Submit.
 }
 
 async function collapseSidebar(page: Page): Promise<void> {

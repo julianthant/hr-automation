@@ -190,7 +190,8 @@ export type PersonSearchSignal = "duplicate-dialog" | "results-grid" | "none";
  * - `"duplicate-dialog"` (the "no matching person" confirmation dialog raised
  *   after Search) → NEW HIRE (`found: false`).
  * - `"none"` (neither appeared within the bounded race) → AMBIGUOUS; the caller
- *   must fall back to a conservative legacy probe rather than guessing.
+ *   must FAIL LOUD (throw) rather than guess — guessing can misclassify a rehire
+ *   as a new hire and create a DUPLICATE PERSON.
  *
  * Extracted as a pure function so the new-hire-vs-rehire decision is unit-pinned
  * without a live page.
@@ -357,16 +358,21 @@ export async function searchPerson(
   const signal = await raceNewHireVsRehireSignal(page, frame, { timeoutMs: 15_000 });
   log.step(`Person-search outcome signal: ${signal}`);
   const decision = classifyPersonSearchSignal(signal);
-  let found = decision.found;
+  const found = decision.found;
 
   if (decision.ambiguous) {
-    // Neither definitive signal resolved in the window — fall back to the legacy
-    // single-probe behavior so we never do WORSE than before: a dismissable
-    // dialog ⇒ new hire, otherwise assume the results grid (rehire).
-    log.warn("Person-search: neither dialog nor results grid resolved in time — using legacy dialog probe");
-    const legacyDialogDismissed = await dismissPeopleSoftDialog(page);
-    if (legacyDialogDismissed) await page.waitForTimeout(1_000);
-    found = !legacyDialogDismissed;
+    // Neither definitive signal resolved in the window. Falling back to a
+    // one-shot legacy dialog probe here is the exact race this function was
+    // rewritten to avoid: a slow-rendering rehire results grid can still read
+    // as "no dialog" and get misclassified as a new hire — creating a
+    // DUPLICATE PERSON record. Fail loud instead of guessing.
+    await debugScreenshot(page, "debug-ps-ambiguous-outcome", { fullPage: true });
+    throw new Error(
+      `Cannot determine new-hire-vs-rehire for "${firstName} ${lastName}" in UCPath `
+      + `person search: neither the results grid nor the "no matching person" dialog `
+      + `appeared within the search window. Proceeding on a guess risks creating a `
+      + `DUPLICATE PERSON record. Re-run the search or verify manually in UCPath.`,
+    );
   } else if (signal === "duplicate-dialog") {
     // Confirmed new hire → dismiss the confirmation dialog before returning.
     await dismissPeopleSoftDialog(page);

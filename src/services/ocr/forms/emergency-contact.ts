@@ -6,6 +6,7 @@
  * (both deleted in Task 25).
  */
 import { z } from "zod/v4";
+import { log } from "../../../utils/log.js";
 import { normalizeUcpathEmployeeId } from "../../../domain/identity/eid.js";
 import {
   matchAgainstRoster,
@@ -133,8 +134,33 @@ const PermissiveEmployeeSchema = z.object({
   cellPhone: z.string().nullable().optional(),
 });
 
+const EC_FORM_KINDS = ["oath", "emergency-contact", "unknown"] as const;
+
+/**
+ * `formKind` tolerant coercion — mirrors `DocumentTypeSchema`'s precedent
+ * (`./shared.ts`, 2026-06-04). `z.enum([...]).default("emergency-contact")`
+ * only covers a MISSING (`undefined`) formKind: a PRESENT-but-unrecognized
+ * string (model hallucination/typo) still FAILS `safeParse`, and per-page
+ * `finalize()` drops the WHOLE record on any single-field failure — so a
+ * mis-labeled record silently VANISHES from operator review instead of
+ * surfacing for a human to catch (root CLAUDE.md "fail loud — no unverified
+ * silent fallbacks": losing the record is worse than one wrong-looking label
+ * on it). Coerce any unrecognized value to "emergency-contact" and `log.warn`
+ * it so it's still visible in the run log; `undefined`/missing is the
+ * ordinary "model omitted the field" case and does not warn.
+ */
+const EcFormKindSchema = z.preprocess((v) => {
+  if (typeof v === "string" && (EC_FORM_KINDS as readonly string[]).includes(v)) return v;
+  if (v !== undefined) {
+    log.warn(
+      `[emergency-contact] unrecognized formKind ${JSON.stringify(v)} — coercing to "emergency-contact" so the record still surfaces for review`,
+    );
+  }
+  return "emergency-contact";
+}, z.enum(EC_FORM_KINDS));
+
 export const PermissiveRecordSchema = z.object({
-  formKind: z.enum(["oath", "emergency-contact", "unknown"]).default("emergency-contact"),
+  formKind: EcFormKindSchema,
   sourcePage: z.number().int().positive(),
   // `z.preprocess(v => v ?? {}, …)` because the prompt tells the model to NULL
   // EC-specific fields (employee, emergencyContact) on non-EC pages (oath/unknown

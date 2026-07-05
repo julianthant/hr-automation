@@ -10,7 +10,7 @@
  * prior-row metadata), matching the buildCancelQueuedHandler tests in
  * tests/unit/tracker/dashboard-ops.test.ts.
  */
-import { describe, it, beforeEach, afterEach } from "vitest";
+import { describe, it, beforeEach, afterEach, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +21,7 @@ import { createTaskStore, type ControlTaskStore } from "../../../src/core/task-s
 import { createWorkerStore, type ControlWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { buildSupersedePriorRunsHandler } from "../../../src/control/ops/supersede.js";
+import * as cancelOps from "../../../src/control/ops/cancel.js";
 
 const WORKFLOW = "separations";
 
@@ -176,5 +177,31 @@ describe("buildSupersedePriorRunsHandler", () => {
   it("is a no-op for an empty item list", async () => {
     const result = await buildSupersedePriorRunsHandler(tmp)({ workflow: WORKFLOW, itemIds: [] });
     assert.equal(result.cancelled, 0);
+  });
+
+  it("fails loud when cancelling a prior run throws — never lets the new run enqueue as if the old one is gone", async () => {
+    seedQueued("3930", "run-1");
+
+    // Force the underlying cancel call to throw (e.g. an unexpected control-
+    // store error), instead of returning a documented `{ ok: false }` result.
+    const spy = vi
+      .spyOn(cancelOps, "buildCancelQueuedHandler")
+      .mockReturnValue(async () => {
+        throw new Error("boom");
+      });
+
+    try {
+      await assert.rejects(
+        () =>
+          buildSupersedePriorRunsHandler(tmp)({
+            workflow: WORKFLOW,
+            itemIds: ["3930"],
+            exceptRunIds: ["run-2"],
+          }),
+        /failed to cancel prior separations\/3930.*boom/s,
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

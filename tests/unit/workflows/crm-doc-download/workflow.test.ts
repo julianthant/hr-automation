@@ -5,7 +5,11 @@ import {
   CrmDocDownloadInputSchema,
   crmDocDownloadWorkflow,
 } from "../../../../src/workflows/crm-doc-download/index.js";
-import { resolveArchivePath } from "../../../../src/workflows/crm-doc-download/workflow.js";
+import {
+  resolveArchivePath,
+  emplIdMatchesIdentity,
+  emailMatchesIdentity,
+} from "../../../../src/workflows/crm-doc-download/workflow.js";
 import { PATHS } from "../../../../src/config.js";
 
 test("crm-doc-download schema accepts email-only utility runs", () => {
@@ -61,6 +65,49 @@ test("crm-doc-download workflow is a utility workflow with CRM auth", () => {
     crmDocDownloadWorkflow.config.deriveItemId?.({ emplId: "10873698" }),
     "10873698",
   );
+});
+
+describe("emplIdMatchesIdentity", () => {
+  test("matches when the record EID equals the target EID", () => {
+    assert.equal(emplIdMatchesIdentity("10873698", "10873698"), true);
+  });
+
+  test("matches through non-digit formatting on either side", () => {
+    assert.equal(emplIdMatchesIdentity(" 108-73698 ", "10873698"), true);
+  });
+
+  test("rejects a different EID (the CRM fuzzy-search wrong-person case)", () => {
+    assert.equal(emplIdMatchesIdentity("99999999", "10873698"), false);
+  });
+
+  test("rejects a null/empty record EID rather than treating it as a match", () => {
+    assert.equal(emplIdMatchesIdentity(null, "10873698"), false);
+    assert.equal(emplIdMatchesIdentity("", "10873698"), false);
+  });
+});
+
+describe("emailMatchesIdentity", () => {
+  test("matches when any candidate email equals the target, case-insensitively", () => {
+    assert.equal(
+      emailMatchesIdentity([null, "Jane.Doe@Example.EDU"], "jane.doe@example.edu"),
+      true,
+    );
+  });
+
+  test("matches on the first candidate even when others are null", () => {
+    assert.equal(emailMatchesIdentity(["jane@example.edu", null], "jane@example.edu"), true);
+  });
+
+  test("rejects when no candidate matches (the wrong-person case)", () => {
+    assert.equal(
+      emailMatchesIdentity(["someone.else@example.edu", null], "jane@example.edu"),
+      false,
+    );
+  });
+
+  test("rejects when both candidates are absent", () => {
+    assert.equal(emailMatchesIdentity([null, undefined], "jane@example.edu"), false);
+  });
 });
 
 describe("resolveArchivePath", () => {

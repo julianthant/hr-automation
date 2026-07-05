@@ -73,6 +73,16 @@ test("canonicalizeRelationshipRule maps synonyms, detects canonical, returns nul
   assert.equal(canonicalizeRelationshipRule(""), null);
 });
 
+test("canonicalizeRelationshipRule maps '-in-law' affinity qualifiers to Relative, never blood-tier", () => {
+  assert.equal(canonicalizeRelationshipRule("sister-in-law"), "Relative", "not Sibling");
+  assert.equal(canonicalizeRelationshipRule("son-in-law"), "Relative", "not Child");
+  assert.equal(canonicalizeRelationshipRule("mother-in-law"), "Relative", "not Parent");
+  assert.equal(canonicalizeRelationshipRule("father-in-law"), "Relative", "not Parent");
+  assert.equal(canonicalizeRelationshipRule("brother-in-law"), "Relative", "not Sibling");
+  assert.equal(canonicalizeRelationshipRule("daughter-in-law"), "Relative", "not Child");
+  assert.equal(canonicalizeRelationshipRule("mother in law"), "Relative", "no-hyphen variant");
+});
+
 test("canonicalizeRelationship takes the rule fast-path WITHOUT calling the LLM", async () => {
   __resetUsageTrackerForTests();
   const hit = { called: false };

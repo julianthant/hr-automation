@@ -129,7 +129,7 @@ test("runOcrPerPage synthesizes rowIndex from array position when LLM omits it",
   }
 });
 
-test("runOcrPerPage preserves LLM-supplied employeeSigned: false over the default", async () => {
+test("runOcrPerPage preserves LLM-supplied employeeSigned and does NOT default an omitted one to true", async () => {
   __setPerPageCallForTests(async () => ({
     json: [
       { name: "signed", employeeSigned: true },
@@ -139,10 +139,12 @@ test("runOcrPerPage preserves LLM-supplied employeeSigned: false over the defaul
     poolKeyId: "test-1",
   }));
   try {
+    // The real oath schema is `.nullable().optional()`, so an omitted value is
+    // KEPT (not dropped) — and must stay undefined, never forced to `true`.
     const Schema = z.object({
       sourcePage: z.number(),
       name: z.string(),
-      employeeSigned: z.boolean(),
+      employeeSigned: z.boolean().optional(),
     });
     const out = await runOcrPerPage({
       pagesAsImages: ["page-01.png"],
@@ -152,14 +154,18 @@ test("runOcrPerPage preserves LLM-supplied employeeSigned: false over the defaul
     });
     assert.equal(out.records.length, 3);
     assert.equal(out.records[0].employeeSigned, true);
-    assert.equal(out.records[1].employeeSigned, false, "LLM-supplied false beats default true");
-    assert.equal(out.records[2].employeeSigned, true, "default applies when omitted");
+    assert.equal(out.records[1].employeeSigned, false, "LLM-supplied false is preserved");
+    assert.equal(
+      out.records[2].employeeSigned,
+      undefined,
+      "omitted employeeSigned is NOT defaulted to true (fail-safe: absent = not signed)",
+    );
   } finally {
     __setPerPageCallForTests(undefined);
   }
 });
 
-test("runOcrPerPage defaults employeeSigned to true when LLM omits it", async () => {
+test("runOcrPerPage does NOT inject employeeSigned:true when the LLM omits it (fail-safe)", async () => {
   __setPerPageCallForTests(async () => ({
     json: [{ name: "x" }],
     poolKeyId: "test-1",
@@ -168,7 +174,7 @@ test("runOcrPerPage defaults employeeSigned to true when LLM omits it", async ()
     const Schema = z.object({
       sourcePage: z.number(),
       name: z.string(),
-      employeeSigned: z.boolean(),
+      employeeSigned: z.boolean().optional(),
     });
     const out = await runOcrPerPage({
       pagesAsImages: ["page-01.png"],
@@ -177,7 +183,11 @@ test("runOcrPerPage defaults employeeSigned to true when LLM omits it", async ()
       schema: Schema,
     });
     assert.equal(out.records.length, 1);
-    assert.equal(out.records[0].employeeSigned, true, "default is true when LLM omits");
+    assert.equal(
+      out.records[0].employeeSigned,
+      undefined,
+      "an omitted signature stays undefined — a blank signature line must never be recorded as signed",
+    );
   } finally {
     __setPerPageCallForTests(undefined);
   }

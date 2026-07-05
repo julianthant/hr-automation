@@ -153,14 +153,55 @@ export function mapAttemptRow(row: AttemptDbRow): AttemptRow {
     taskId: row.task_id,
     attemptNo: row.attempt_no,
     runId: row.run_id,
-    state: row.control_state ?? 'pending',
+    state: normalizeAttemptState(row),
   }
   if (row.worker_id) attempt.workerId = row.worker_id
   return attempt
 }
 
+const KNOWN_TASK_STATES: ReadonlySet<TaskState> = new Set<TaskState>([
+  'queued',
+  'waiting_dependencies',
+  'claimed',
+  'running',
+  'cancel_requested',
+  'cancelling',
+  'cancelled',
+  'done',
+  'failed',
+  'blocked',
+])
+
+const KNOWN_ATTEMPT_STATES: ReadonlySet<AttemptState> = new Set<AttemptState>([
+  'pending',
+  'claimed',
+  'running',
+  'cancel_requested',
+  'cancelled',
+  'done',
+  'failed',
+])
+
+// A NULL/unrecognized `control_state` must never be silently coerced into an
+// active-looking state ('queued'/'pending') — that would let a corrupted
+// terminal (e.g. 'done') row get treated as cancellable-as-queued (fail loud,
+// per root CLAUDE.md). Throw naming the offending row instead.
 export function normalizeTaskState(row: TaskDbRow): TaskState {
-  return row.control_state ?? 'queued'
+  const state = row.control_state
+  if (state !== null && KNOWN_TASK_STATES.has(state)) return state
+  throw new Error(
+    `normalizeTaskState: task ${row.id} has an invalid control_state (${JSON.stringify(state)}) — ` +
+      `refusing to silently treat a NULL/unrecognized state as 'queued'`,
+  )
+}
+
+export function normalizeAttemptState(row: AttemptDbRow): AttemptState {
+  const state = row.control_state
+  if (state !== null && KNOWN_ATTEMPT_STATES.has(state)) return state
+  throw new Error(
+    `normalizeAttemptState: attempt ${row.id} (task ${row.task_id}) has an invalid control_state ` +
+      `(${JSON.stringify(state)}) — refusing to silently treat a NULL/unrecognized state as 'pending'`,
+  )
 }
 
 export function isTerminalTaskState(state: TaskState): boolean {

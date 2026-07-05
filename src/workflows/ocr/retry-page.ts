@@ -13,7 +13,6 @@
 import { existsSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import { openStateDb, stateDbPath } from "../../tracker/state/db.js";
-import type { ZodType } from "zod/v4";
 import { runOcrPerPage } from "../../services/ocr/per-page.js";
 import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
 import { loadRoster as realLoadRoster } from "../../services/matching/index.js";
@@ -92,7 +91,7 @@ export async function runOcrRetryPage(
   if (row.status === "done" && (row.step === "approved" || row.step === undefined)) {
     throw new RetryPageError("row-not-mutable", `cannot retry approved row ${input.sessionId}`);
   }
-  const formType = row.data?.formType as unknown as string | undefined;
+  const formType = row.data?.formType;
   if (!formType) throw new RetryPageError("spec-missing", "Row missing formType");
   const spec = getFormSpec(formType);
   if (!spec) throw new RetryPageError("spec-missing", `Unknown formType "${formType}"`);
@@ -101,7 +100,7 @@ export async function runOcrRetryPage(
   const failedPages = parseFailedPages(row.data);
   const summary = parsePageSummary(row.data) ?? { total: 0, succeeded: 0, failed: 0 };
 
-  const pdfFileId = row.data?.pdfFileId as unknown as string | undefined;
+  const pdfFileId = row.data?.pdfFileId;
   if (!pdfFileId) {
     throw new RetryPageError("image-missing", `OCR retry requires pdfFileId (legacy page-images path removed)`);
   }
@@ -140,13 +139,13 @@ export async function runOcrRetryPage(
         attempts: 1,
       });
     }
-    const rosterPathForFailed = (row.data?.rosterPath as unknown as string | undefined) ?? "";
+    const rosterPathForFailed = (row.data?.rosterPath) ?? "";
     emitRow({ row, records, failedPages: newFailedPages, summary, emit, parentRunId: row.parentRunId, sessionId: input.sessionId, runId: input.runId, formType, pdfOriginalName: row.data?.pdfOriginalName as unknown as string ?? "", rosterPath: rosterPathForFailed, pdfFileId });
     return { ok: true, page: input.pageNum, recordsAdded: 0, stillFailed: true };
   }
 
   // 3. Match new records against the roster.
-  const rosterPath = (row.data?.rosterPath as unknown as string | undefined) ?? "";
+  const rosterPath = (row.data?.rosterPath) ?? "";
   const roster = rosterPath ? ((await loadRosterFn(rosterPath)) as OcrRosterRow[]) : [];
   const newRecords = await Promise.all(
     ocr.records.map((r) => spec.matchRecord({ record: r, roster })),
@@ -168,19 +167,43 @@ export async function runOcrRetryPage(
       kind: t.kind,
       itemId: `ocr-retry-${input.runId}-p${input.pageNum}-r${i}`,
     }));
-    // Shared dispatch→watch→cascade-cancel pipeline (BM-1). retry-page fans out a
-    // mix of name- and EID-input person-lookup children (one per re-OCR'd record
-    // that still needs a lookup); the per-record outcome patch picks the matching
-    // kind. The `_enqueueEidLookupOverride` HTTP test seam maps to fanOutAndWatch's
-    // dispatch override; the cascade-cancel on operator discard-abort lives in
-    // fanOutAndWatch.
     type EidLookupChildInput = { name?: string; emplId?: string; keepNonHdh?: boolean };
-    const fanChildren = enqueueItems.map((e) => ({
-      input: (e.kind === "name"
+
+    // Two re-OCR'd records can resolve to the IDENTICAL name/EID (duplicate
+    // handwriting reads, or the same person appearing twice on a retried
+    // page): dispatching them as separate fanOutAndWatch children would
+    // collide inside its own JSON.stringify(input)-keyed itemId map
+    // (last-write-wins, NOT a per-key FIFO queue) and silently misapply ONE
+    // record's lookup outcome to a DIFFERENT record. Fix: group by the
+    // logical input BEFORE dispatch so fanOutAndWatch only ever sees ONE
+    // child per unique input — collision-proof by construction — then fan
+    // the single resolved outcome back out to every aliased record below.
+    // Identical input always resolves to the identical real-world lookup
+    // result, so this is exact, and it also skips a redundant duplicate
+    // person-lookup dispatch.
+    interface FanOutGroup { itemId: string; input: EidLookupChildInput; aliasLocalIndices: number[] }
+    const groupsByInputKey = new Map<string, FanOutGroup>();
+    for (const e of enqueueItems) {
+      const fanInput: EidLookupChildInput = e.kind === "name"
         ? { name: extractOcrRecordName(e.record, spec) }
-        : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true }) as EidLookupChildInput,
-      itemId: e.itemId,
-    }));
+        : { emplId: extractOcrRecordEid(e.record), keepNonHdh: true };
+      const key = JSON.stringify(fanInput);
+      const existing = groupsByInputKey.get(key);
+      if (existing) existing.aliasLocalIndices.push(e.localIndex);
+      else groupsByInputKey.set(key, { itemId: e.itemId, input: fanInput, aliasLocalIndices: [e.localIndex] });
+    }
+    const groups = [...groupsByInputKey.values()];
+    const aliasLocalIndicesByDispatchedItemId = new Map(groups.map((g) => [g.itemId, g.aliasLocalIndices]));
+    const kindByLocalIndex = new Map(enqueueItems.map((e) => [e.localIndex, e.kind]));
+
+    // Shared dispatch→watch→cascade-cancel pipeline (BM-1). retry-page fans out a
+    // mix of name- and EID-input person-lookup children (one per unique lookup
+    // key still needed); the per-record outcome patch picks the matching kind.
+    // The `_enqueueEidLookupOverride` HTTP test seam maps to fanOutAndWatch's
+    // dispatch override (it still enumerates every enqueueItem, not the
+    // deduped groups — the test seam predates and is unaffected by the
+    // dedup fix); the cascade-cancel on operator discard-abort lives in
+    // fanOutAndWatch.
     const { personLookupWorkflow } = await import("../person-lookup/index.js");
     const { byItemId } = await fanOutAndWatch<EidLookupChildInput>({
       sessionId: input.sessionId,
@@ -189,7 +212,7 @@ export async function runOcrRetryPage(
       trackerDir,
       date,
       child: personLookupWorkflow as never,
-      children: fanChildren,
+      children: groups.map((g) => ({ input: g.input, itemId: g.itemId })),
       timeoutMs: opts.eidLookupTimeoutMs ?? 60 * 60_000,
       ...(opts._enqueueEidLookupOverride
         ? {
@@ -207,14 +230,25 @@ export async function runOcrRetryPage(
       ...(opts._watchChildRunsOverride ? { watch: opts._watchChildRunsOverride } : {}),
     });
 
-    for (const enq of enqueueItems) {
-      const outcome = byItemId.get(enq.itemId);
-      const idx = enq.localIndex;
-      if (!outcome) {
-        patchUnresolved(newRecords, idx);
-        continue;
+    // Fan each unique-input outcome (or timeout) out to every original
+    // record that shared the lookup key. An itemId with no matching alias
+    // group is an invariant violation — fail loud rather than silently
+    // dropping the outcome.
+    for (const [dispatchedItemId, aliasLocalIndices] of aliasLocalIndicesByDispatchedItemId) {
+      const outcome = byItemId.get(dispatchedItemId);
+      for (const idx of aliasLocalIndices) {
+        if (!outcome) {
+          patchUnresolved(newRecords, idx);
+          continue;
+        }
+        const kind = kindByLocalIndex.get(idx);
+        if (!kind) {
+          throw new Error(
+            `retry-page: person-lookup outcome for itemId "${dispatchedItemId}" has no matching enqueueItem kind (localIndex ${idx})`,
+          );
+        }
+        patchOcrRecordFromEidLookupOutcome(newRecords, idx, outcome, kind);
       }
-      patchOcrRecordFromEidLookupOutcome(newRecords, idx, outcome, enq.kind);
     }
   }
 
@@ -350,11 +384,29 @@ function readLatestRow(
 }
 
 function parseRecords(data: Record<string, string> | undefined): unknown[] {
+  // A genuinely-absent `data.records` (no key at all — a fresh/legacy row)
+  // is a valid, expected state: no prior records to carry forward.
   if (!data?.records) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(data.records);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
+    parsed = JSON.parse(data.records);
+  } catch (err) {
+    // A PRESENT-but-unparseable `data.records` must fail loud, not silently
+    // drop to []: the caller splices the retried page's fresh records into
+    // this return value (~replaces one page, keeps the rest), so a swallowed
+    // [] here is indistinguishable from "no prior records" and the operator
+    // would approve a batch that silently dropped every OTHER page's records.
+    throw new Error(
+      `retry-page: OCR row's data.records is present but not valid JSON — refusing to silently truncate the batch (${(err as Error).message})`,
+      { cause: err },
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `retry-page: OCR row's data.records parsed to a non-array (${typeof parsed}) — refusing to silently truncate the batch`,
+    );
+  }
+  return parsed;
 }
 
 function parseFailedPages(data: Record<string, string> | undefined): FailedPageEntry[] {
@@ -390,7 +442,7 @@ async function runSinglePageThroughPool(args: {
     pagesAsImages: [filename],
     pageImagesDir: dir,
     prompt: args.spec.prompt,
-    schema: args.spec.ocrRecordSchema as ZodType<unknown>,
+    schema: args.spec.ocrRecordSchema,
     pool,
   });
   const status = result.pages[0];
@@ -403,7 +455,7 @@ async function runSinglePageThroughPool(args: {
     };
   }
   const newRecords = result.records
-    .filter((r) => (r as { sourcePage: number }).sourcePage === 1)
+    .filter((r) => (r).sourcePage === 1)
     .map((r) => ({ ...(r as object), sourcePage: args.pageNum }));
   return { records: newRecords, stillFailed: false };
 }
@@ -427,15 +479,15 @@ function emitRow(args: {
   // affordance and batch label are preserved after a page retry. The prior
   // `__name` is passed as the displayName override (retry-page keeps the row's
   // own label rather than re-deriving from parentSubject).
-  const priorName = (args.row.data?.__name as string | undefined) ?? "OCR";
-  const priorParentSubject = args.row.data?.parentSubject as string | undefined;
+  const priorName = (args.row.data?.__name) ?? "OCR";
+  const priorParentSubject = args.row.data?.parentSubject;
   // `__traceId` (frozen at pre-emit) and `queueRowKind` ride EVERY OCR row so the
   // dashboard can trace a re-run back to its parent and title it by file-kind.
   // retry-page rebuilds `base` explicitly (does NOT spread the prior row's data),
   // so it MUST re-stamp them here or the re-emitted row loses the shared trace and
   // file-kind title — unlike force-research/verify-relookup which spread `latest.data`.
-  const priorTraceId = args.row.data?.__traceId as string | undefined;
-  const priorQueueRowKind = (args.row.data?.queueRowKind as string | undefined) ?? "file";
+  const priorTraceId = args.row.data?.__traceId;
+  const priorQueueRowKind = (args.row.data?.queueRowKind) ?? "file";
   // Re-emit via the shared OCR preview-row envelope (BM-5). Running → done pair.
   // Pass the explicit base fields retry-page rebuilds (it does NOT spread the
   // latest row's data); the envelope adds mode/archetype/__id/__name/parentSubject.
@@ -463,7 +515,7 @@ function emitRow(args: {
       ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
       ...(priorParentSubject ? { parentSubject: priorParentSubject } : {}),
     },
-    emit: (e: TrackerRowEmission) => args.emit(e as TrackerEntry),
+    emit: (e: TrackerRowEmission) => args.emit(e),
   } as const;
   emitOcrReviewSnapshot({ ...snapshotArgs, status: "running" });
   emitOcrReviewSnapshot({ ...snapshotArgs, status: "done" });

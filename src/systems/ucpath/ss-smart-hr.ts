@@ -346,9 +346,11 @@ export async function navigateToSsSmartHrTransactions(page: Page): Promise<void>
  * newer-unrelated-TER edge case). Without `opts.separationDate` (legacy callers)
  * the newest TER is used as-is.
  *
- * Best-effort scan: a parse failure degrades to `found: false` (the separations
+ * Scan behavior: a genuine "no TER row" returns `found: false` (the separations
  * `ucpath-transaction` step's own `findExistingTerminationTransaction` is the
- * backstop against duplicate submits) rather than throwing.
+ * backstop against duplicate submits). A results-grid READ failure now
+ * PROPAGATES (2026-07 fail-loud audit) rather than degrading to `found: false` —
+ * a failed read must not masquerade as "no existing termination".
  */
 export async function findTerminationTransactionStatus(
   page: Page,
@@ -699,7 +701,11 @@ export function parseSsSmartHrRows(rows: string[][]): SsSmartHrRow[] {
 /**
  * Scan the SS Smart HR Transactions results grid. The DOM step only collects a
  * cell-text matrix (each `<tr>`'s direct cells); the dual-pass parse is the pure
- * `parseSsSmartHrRows`. Returns `[]` on any failure.
+ * `parseSsSmartHrRows`. Returns `[]` when the grid genuinely has no rows (the
+ * `evaluate` resolves with an empty matrix). A THROWN `evaluate` (the DOM read
+ * itself failing) is NOT swallowed here — it propagates to the caller instead of
+ * masquerading as "no results found" (fail loud: a caller must not read a
+ * failed probe as a confident empty grid).
  */
 async function scanSsSmartHrResults(frame: FrameLocator): Promise<SsSmartHrRow[]> {
   const matrix = await frame.locator("body").evaluate((body) => { // allow-inline-selector -- body scan for SS Smart HR results grid
@@ -711,6 +717,6 @@ async function scanSsSmartHrResults(frame: FrameLocator): Promise<SsSmartHrRow[]
       if (cells.length) out.push(cells);
     }
     return out;
-  }).catch(() => [] as string[][]);
+  });
   return parseSsSmartHrRows(matrix);
 }

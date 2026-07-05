@@ -41,6 +41,19 @@ vi.mock("../../../src/control/actions/resolve-targets.js", () => ({
   resolveActionTargets: vi.fn(),
 }));
 
+// Descendant tree-cancel path (cancelResolvedTarget's task-not-found branch)
+// reads a prior tracker row before falling through to cancelTarget. Mock it
+// to "no prior row" so those tests exercise cancelDescendantTargets directly
+// without a real SQLite/tracker dir.
+vi.mock("../../../src/control/ops/emit-inherited.js", () => ({
+  findInheritedPriorEntry: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../../../src/control/ops/shared.js", () => ({
+  openControlStores: vi.fn().mockReturnValue({ taskStore: { db: undefined }, workerStore: {} }),
+  emitDashboardCancelTrackerRow: vi.fn(),
+}));
+
 // Import after mocks so the mocked versions are used
 import { performWorkflowAction } from "../../../src/control/actions/perform-workflow-action.js";
 import { resolveActionTargets } from "../../../src/control/actions/resolve-targets.js";
@@ -258,6 +271,63 @@ describe("performWorkflowAction — cancel action routing", () => {
     assert.equal(result.ok, false);
     assert.equal(mockCancelQueuedFn.mock.calls.length, 0);
     assert.match(result.errors[0]?.error ?? "", /waiting_dependencies/);
+  });
+});
+
+describe("performWorkflowAction — descendant tree-cancel (fail loud on partial cancel)", () => {
+  it("reports ok with cancelledDescendants count when ALL descendants cancel", async () => {
+    mockedResolveTargets
+      .mockReturnValueOnce({
+        ok: true,
+        targets: [
+          { workflow: "oath-signature", id: "coord-1", runId: "run-root", date: "2026-07-01", status: "pending" },
+        ],
+      })
+      .mockReturnValueOnce({
+        ok: true,
+        targets: [
+          { workflow: "oath-signature", id: "child-1", runId: "run-child-1", date: "2026-07-01", status: "pending" },
+          { workflow: "oath-signature", id: "child-2", runId: "run-child-2", date: "2026-07-01", status: "pending" },
+        ],
+      });
+    mockCancelQueuedFn
+      .mockResolvedValueOnce({ ok: false, error: "task not found in SQLite control store" }) // root
+      .mockResolvedValueOnce({ ok: true }) // child-1
+      .mockResolvedValueOnce({ ok: true }); // child-2
+
+    const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.results[0]?.detail?.cancelledDescendants, 2);
+  });
+
+  it("fails loud and names the still-live descendant when only SOME cancel (does not silently drop the failure)", async () => {
+    mockedResolveTargets
+      .mockReturnValueOnce({
+        ok: true,
+        targets: [
+          { workflow: "oath-signature", id: "coord-1", runId: "run-root", date: "2026-07-01", status: "pending" },
+        ],
+      })
+      .mockReturnValueOnce({
+        ok: true,
+        targets: [
+          { workflow: "oath-signature", id: "child-1", runId: "run-child-1", date: "2026-07-01", status: "pending" },
+          { workflow: "oath-signature", id: "child-2", runId: "run-child-2", date: "2026-07-01", status: "pending" },
+        ],
+      });
+    mockCancelQueuedFn
+      .mockResolvedValueOnce({ ok: false, error: "task not found in SQLite control store" }) // root
+      .mockResolvedValueOnce({ ok: true }) // child-1 cancels
+      .mockResolvedValueOnce({ ok: false, error: "browser crashed", status: 500 }); // child-2 stays live
+
+    const result = await performWorkflowAction(makeRequest({ action: "cancel" }), DEPS);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0]?.error ?? "", /1\/2 descendants failed to cancel/);
+    assert.match(result.errors[0]?.error ?? "", /child-2/);
+    assert.match(result.errors[0]?.error ?? "", /run-child-2/);
   });
 });
 

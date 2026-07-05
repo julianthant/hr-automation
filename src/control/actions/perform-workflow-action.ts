@@ -276,12 +276,21 @@ async function cancelResolvedTarget(
 
   const childResults = await cancelDescendantTargets(req, t, deps);
 
-  const succeeded = childResults.filter((r) => r.ok);
-  if (succeeded.length > 0) {
-    return okTarget(t, { cancelledDescendants: succeeded.length });
-  }
   if (childResults.length > 0) {
-    return failTarget(t, childResults[0]?.error ?? direct.error ?? "cancel failed", childResults[0]?.status);
+    const failed = childResults.filter((r) => !r.ok);
+    // All-or-nothing: only report ok when every descendant actually
+    // cancelled. Silently dropping the failed ones here would tell the
+    // operator "cancelled" while a still-live descendant keeps running and
+    // can submit a real transaction — fail loud and name what's still live.
+    if (failed.length === 0) {
+      return okTarget(t, { cancelledDescendants: childResults.length });
+    }
+    const stillLive = failed.map((c) => (c.runId ? `${c.id}:${c.runId}` : c.id)).join(", ");
+    return failTarget(
+      t,
+      `${failed.length}/${childResults.length} descendants failed to cancel (still live): ${stillLive}`,
+      failed[0]?.status,
+    );
   }
 
   // No task and no live descendants. For a stranded display-only operation

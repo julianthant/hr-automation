@@ -1,4 +1,5 @@
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
+import { basename } from "node:path";
 import { safeClick, safeFill } from "../../systems/common/index.js";
 import { hrInquiry } from "../../systems/servicenow/selectors.js";
 import { log } from "../../utils/log.js";
@@ -9,6 +10,28 @@ export interface HrInquiryFormValues {
   specifically: string;
   category: string;
   attachmentPath: string;
+}
+
+/**
+ * Read back a Select2 v3 choice anchor's displayed text and confirm it
+ * matches what we tried to select. Only called from the Enter-to-accept
+ * fallback (when the typed result never surfaced in the dropdown) — a blind
+ * keypress has no other confirmation that the highlighted match was the
+ * intended one, and an unverified value would silently ride into the
+ * submitted ticket. Fails loud instead (root CLAUDE.md "no unverified
+ * silent fallbacks").
+ */
+async function assertSelect2Choice(
+  fieldLabel: string,
+  choice: Locator,
+  expected: string,
+): Promise<void> {
+  const shown = ((await choice.textContent().catch(() => null)) ?? "").trim();
+  if (!shown || !shown.toLowerCase().includes(expected.trim().toLowerCase())) {
+    throw new Error(
+      `fillHrInquiryForm: ${fieldLabel} readback mismatch after Enter-to-accept — expected "${expected}", Select2 choice shows "${shown}"`,
+    );
+  }
 }
 
 /**
@@ -47,6 +70,7 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
       `[oath-upload] Specifically dropdown didn't surface "${v.specifically}" — pressing Enter to accept the highlighted match`,
     );
     await page.keyboard.press("Enter").catch(() => {});
+    await assertSelect2Choice("Specifically", hrInquiry.specificallyChoice(page), v.specifically);
   }
 
   // Category — Select2 v3 combobox. Try selectOption first (works if ServiceNow
@@ -70,13 +94,34 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
       });
     } catch {
       await page.keyboard.press("Enter").catch(() => {});
+      await assertSelect2Choice("Category", hrInquiry.categoryChoice(page), v.category);
     }
   }
 
   // Attachment — set on the hidden file input directly. Bypasses the
   // visible "Choose a file" button that would surface an OS picker.
+  const attachmentName = basename(v.attachmentPath);
   await hrInquiry.fileInput(page).setInputFiles(v.attachmentPath);
-  await page.waitForTimeout(1_000); // upload latency
+
+  // Verify the attachment actually registered before returning — a fixed
+  // sleep with no check would let the caller submit with the PDF MISSING if
+  // the upload lagged or silently failed (fail loud, root CLAUDE.md).
+  // needs-live: no confirmed ServiceNow attachment-confirmation selector
+  // exists yet in `servicenow/selectors.ts` — this uses a generic
+  // filename-text heuristic (attachment widgets normally surface the
+  // uploaded filename) as a stopgap pending live verification. Map the real
+  // confirmation element via playwright-cli and replace this with a
+  // registered `hrInquiry` selector.
+  try {
+    await page.getByText(attachmentName, { exact: false }).first().waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+  } catch {
+    throw new Error(
+      `fillHrInquiryForm: attached "${attachmentName}" but no confirmation of the upload appeared on the form — submitting now would file the ticket with the attachment MISSING`,
+    );
+  }
 }
 
 /**

@@ -23,9 +23,13 @@
  *     STATES` → drop in-flight cancellation if a re-run should never interrupt
  *     a live automation.
  *
- * Best-effort: a cancel that fails (e.g. the prior run terminated in the race
- * window, or its tracker row is missing) is logged and skipped — superseding a
- * prior run must never block the new run from enqueuing.
+ * A cancel call that returns a documented "already gone" result (prior run
+ * terminated in the race window, tracker row missing) is a genuinely safe,
+ * expected outcome — logged and skipped. But a cancel call that THROWS is not
+ * a known terminal state; the prior run's fate is unverified and it may still
+ * be active. Fail loud in that case: rethrow so the caller (enqueueFromHttp's
+ * `onPreparedItems`) blocks the new enqueue instead of letting an irreversible
+ * action's old + new run both stay live (see root CLAUDE.md "Fail loud").
  */
 import { buildCancelQueuedHandler, buildCancelRunningHandler } from "./cancel.js";
 import { openControlStores } from "./shared.js";
@@ -96,10 +100,18 @@ export function buildSupersedePriorRunsHandler(dir: string) {
             );
           }
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
           log.warn(
-            `[supersede] cancel threw for ${req.workflow}/${itemId} run=${task.runId ?? "?"}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
+            `[supersede] cancel threw for ${req.workflow}/${itemId} run=${task.runId ?? "?"}: ${message}`,
+          );
+          // Fail loud: an unverified cancel failure must not be treated as
+          // "the prior run is gone" — that would let two live runs transact
+          // the same entity. Rethrow so the caller blocks the new enqueue.
+          throw new Error(
+            `[supersede] failed to cancel prior ${req.workflow}/${itemId} run=${
+              task.runId ?? "?"
+            } — refusing to enqueue a new run while the old one may still be active: ${message}`,
+            { cause: err },
           );
         }
       }

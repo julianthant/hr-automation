@@ -146,9 +146,15 @@ export function buildTransactionPlan(
   );
 
   // Step 10: Fill job data
+  if (!data.appointment?.trim()) {
+    throw new Error(
+      `Cannot submit onboarding transaction without employeeClassification (data.appointment) `
+      + `for ${data.firstName} ${data.lastName}`,
+    );
+  }
   const jobData: JobDataInput = {
     positionNumber: data.positionNumber,
-    employeeClassification: data.appointment ?? "5",
+    employeeClassification: data.appointment,
     compRateCode: COMP_RATE_CODE,
     compensationRate: parsePayRate(data.wage),
     expectedJobEndDate: JOB_END_DATE,

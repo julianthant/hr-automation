@@ -470,6 +470,12 @@ export async function handleFinalize(
       body: { ok: false, error: `session is ${session.state}` },
     };
   }
+  if (session.photos.length === 0) {
+    return {
+      status: 400,
+      body: { ok: false, error: "cannot finalize: no photos captured" },
+    };
+  }
 
   ctx.store.setState(session.sessionId, "finalizing");
 

@@ -175,6 +175,19 @@ describe("openImportDocument recovery", () => {
     expect(mocks.safeClick).toHaveBeenCalledTimes(2); // Main Menu + Import Document only
   });
 
+  it("throws when the Document Queue count() itself fails — does not swallow to 'empty' (duplicate-import risk)", async () => {
+    const openImportDocument = await loadOpenImportDocument();
+    mocks.queueRemoveButtons.mockImplementation(() => ({
+      count: async () => {
+        throw new Error("frame detached");
+      },
+    }));
+    const page = fakePage({ menuVisible: true });
+    await expect(openImportDocument(page)).rejects.toThrow(
+      /could not read the Document Queue to check for leftover documents/,
+    );
+  });
+
   it("installs the beforeunload dialog guard on the page", async () => {
     const openImportDocument = await loadOpenImportDocument();
     const page = fakePage({ menuVisible: true });

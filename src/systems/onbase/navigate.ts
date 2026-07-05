@@ -110,7 +110,7 @@ async function ensureNavPanelReady(page: Page): Promise<void> {
 
     const backoff =
       NAV_PANEL_RECOVERY_BACKOFF_MS[attempt - 1] ??
-      NAV_PANEL_RECOVERY_BACKOFF_MS[NAV_PANEL_RECOVERY_BACKOFF_MS.length - 1]!;
+      NAV_PANEL_RECOVERY_BACKOFF_MS[NAV_PANEL_RECOVERY_BACKOFF_MS.length - 1];
     if (backoff > 0) await page.waitForTimeout(backoff);
 
     log.step(
@@ -197,7 +197,17 @@ export async function openImportDocument(page: Page): Promise<void> {
 async function clearLeftoverQueuedDocuments(page: Page): Promise<void> {
   const queueFrame = onbaseSelectors.documentQueue.frame(page);
   const removeButtons = onbaseSelectors.documentQueue.removeButtons(queueFrame);
-  const leftover = await removeButtons.count().catch(() => 0);
+  let leftover: number;
+  try {
+    leftover = await removeButtons.count();
+  } catch (err) {
+    // A count() failure is NOT the same as an empty queue — swallowing it to 0
+    // would silently skip the clear-out below and risk filing a leftover
+    // document as a duplicate. Fail loud instead.
+    throw new Error(
+      `OnBase: could not read the Document Queue to check for leftover documents — refusing to attach (duplicate-import risk): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   if (leftover === 0) return;
 
   log.warn(

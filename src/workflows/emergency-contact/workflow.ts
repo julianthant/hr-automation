@@ -5,10 +5,7 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
-import {
-  navigateToEmergencyContact,
-  demoteExistingContact,
-} from "../../systems/ucpath/personal-data.js";
+import { navigateToEmergencyContact, demoteExistingContact } from "../../systems/ucpath/personal-data.js";
 import { dismissPeopleSoftModalMask } from "../../systems/common/modal.js";
 import {
   buildEmergencyContactPlan,
@@ -256,6 +253,18 @@ export const emergencyContactWorkflow = defineWorkflow({
         .click({ timeout: 10_000 });
       // networkidle guards the PeopleSoft save roundtrip; sleep was redundant.
       await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+      // Fail loud: a rejected save (session timeout, validation error) renders a
+      // PeopleSoft error banner — never report a successful save while one is
+      // visible. needs-live: confirm the banner is reachable at the personal-data
+      // page top-level (vs the #main_target_win0 frame) and whether a POSITIVE
+      // save-confirmation marker exists to assert instead of error-absence.
+      const saveError = page.locator(".PSERROR, #ALERTMSG, .ps_alert-error").first();
+      if (await saveError.isVisible().catch(() => false)) {
+        const detail = (await saveError.textContent().catch(() => null))?.trim();
+        throw new Error(
+          `Emergency contact save for ${effectiveRecord.employee.name} (EID ${effectiveRecord.employee.employeeId}) reported a PeopleSoft error${detail ? `: ${detail}` : ""} — refusing to report success`,
+        );
+      }
       await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });
       log.success(`Saved emergency contact for ${effectiveRecord.employee.name}`);
     });

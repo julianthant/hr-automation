@@ -44,6 +44,8 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
     type: (v: string) => Promise<void>;
     selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
     isVisible: () => Promise<boolean>;
+    textContent: () => Promise<string>;
+    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
     first: () => FakeLocator;
     locator: (sel: string) => FakeLocator;
     filter: (opts: unknown) => FakeLocator;
@@ -58,6 +60,10 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
       return Promise.resolve();
     },
     isVisible: () => Promise.resolve(true),
+    // Select2 choice anchors show the chosen option's label as their text.
+    textContent: () => Promise.resolve(label),
+    // Attachment-confirmation readback (`getByText(...).first().waitFor(...)`).
+    waitFor: () => { calls.push(`waitFor[${label}]`); return Promise.resolve(); },
     first: () => fakeLocator(`${label}[0]`),
     // Select2 v3 helpers chain off getByRole (xpath ancestor) and page.locator
     // (`.filter({ hasText }).first()`); the fake mirrors that chaining.
@@ -66,6 +72,7 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
   });
   const fakePage = {
     getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+    getByText: (text: string) => fakeLocator(`text:${text}`),
     locator: (sel: string) => fakeLocator(sel),
     waitForTimeout: (_ms: number) => Promise.resolve(),
     url: () => "https://support.ucsd.edu/esc?id=ticket&number=HRC0999999",
@@ -101,6 +108,97 @@ test("fillHrInquiryForm: fills subject, description, attaches file, drives Speci
   assert.ok(
     calls.some((c) => c.includes("Category")),
     `expected Category interaction: ${calls.join(" | ")}`,
+  );
+});
+
+test("fillHrInquiryForm: throws if the attachment never shows a confirmation (fail loud, not a silent submit-ready)", async () => {
+  type FakeLocator = {
+    fill: (v: string) => Promise<void>;
+    click: (opts?: { timeout?: number }) => Promise<void>;
+    setInputFiles: (p: string) => Promise<void>;
+    selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+    textContent: () => Promise<string>;
+    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
+    first: () => FakeLocator;
+    locator: (sel: string) => FakeLocator;
+    filter: (opts: unknown) => FakeLocator;
+  };
+  const fakeLocator = (label: string): FakeLocator => ({
+    fill: async () => {},
+    click: async () => {},
+    setInputFiles: async () => {},
+    selectOption: async () => {},
+    textContent: () => Promise.resolve(label),
+    // The attachment confirmation never surfaces — simulates a failed/lagged upload.
+    waitFor: () => Promise.reject(new Error("timeout waiting for element")),
+    first: () => fakeLocator(`${label}[0]`),
+    locator: (sel) => fakeLocator(`${label}»${sel}`),
+    filter: () => fakeLocator(`${label}.filtered`),
+  });
+  const fakePage = {
+    getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+    getByText: (text: string) => fakeLocator(`text:${text}`),
+    locator: (sel: string) => fakeLocator(sel),
+    waitForTimeout: (_ms: number) => Promise.resolve(),
+  };
+
+  await assert.rejects(
+    () => fillHrInquiryForm(fakePage as never, {
+      subject: "HDH New Hire Oaths",
+      description: "Please see attached oaths for employees hired under HDH.",
+      specifically: "Signing Ceremony (Oath)",
+      category: "Payroll",
+      attachmentPath: "/tmp/oaths.pdf",
+    }),
+    /attached "oaths\.pdf" but no confirmation of the upload appeared/,
+  );
+});
+
+test("fillHrInquiryForm: throws on Select2 Enter-to-accept readback mismatch (blind keypress selected the wrong option)", async () => {
+  type FakeLocator = {
+    fill: (v: string) => Promise<void>;
+    click: (opts?: { timeout?: number }) => Promise<void>;
+    setInputFiles: (p: string) => Promise<void>;
+    selectOption: (v: unknown, opts?: { timeout?: number }) => Promise<void>;
+    textContent: () => Promise<string>;
+    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
+    first: () => FakeLocator;
+    locator: (sel: string) => FakeLocator;
+    filter: (opts: unknown) => FakeLocator;
+  };
+  const fakeLocator = (label: string): FakeLocator => ({
+    fill: async () => {},
+    click: async () => {
+      // The "option" locator always misses — forces the Enter-to-accept fallback.
+      if (label.includes("Select Specifically")) throw new Error("option not found");
+    },
+    setInputFiles: async () => {},
+    selectOption: async () => {},
+    // The Select2 choice anchor ends up showing something OTHER than what we
+    // typed — the blind Enter keypress landed on the wrong highlighted match.
+    textContent: () => Promise.resolve("Some Unrelated Option"),
+    waitFor: async () => {},
+    first: () => fakeLocator(`${label}[0]`),
+    locator: (sel) => fakeLocator(`${label}»${sel}`),
+    filter: () => fakeLocator(`${label}.filtered`),
+  });
+  const fakePage = {
+    getByRole: (_role: string, opts: { name: string }) => fakeLocator(opts.name),
+    getByText: (text: string) => fakeLocator(`text:${text}`),
+    locator: (sel: string) => fakeLocator(sel),
+    waitForTimeout: (_ms: number) => Promise.resolve(),
+    keyboard: { press: (_key: string) => Promise.resolve() },
+  };
+
+  await assert.rejects(
+    () => fillHrInquiryForm(fakePage as never, {
+      subject: "HDH New Hire Oaths",
+      description: "Please see attached oaths for employees hired under HDH.",
+      specifically: "Signing Ceremony (Oath)",
+      category: "Payroll",
+      attachmentPath: "/tmp/oaths.pdf",
+    }),
+    /Specifically readback mismatch after Enter-to-accept/,
   );
 });
 

@@ -1279,7 +1279,7 @@ describe("buildCancelRunningHandler", () => {
     workerStore.close();
   });
 
-  it("treats a missing-owner running tracker row as stale and emits a cancelled row", async () => {
+  it("fails loud (not a false ok:true) for a missing-owner running tracker row it cannot verify stopped", async () => {
     emitTrackerRow(
       {
         workflow: "oath-upload",
@@ -1305,18 +1305,30 @@ describe("buildCancelRunningHandler", () => {
       runId: "stale-oath-upload-run",
     });
 
-    assert.equal(result.ok, true);
-    assert.equal(result.mode, "stale-tracker");
+    // No SQLite worker owns the task and no in-process registry handle
+    // exists — but the tracker's last row still says "running". That is
+    // NOT proof the run stopped (a live daemon/browser could still own it
+    // outside this lookup), so the handler must not fabricate a cancelled
+    // row + ok:true. It surfaces a distinguishable "unverified" failure
+    // instead and leaves the tracker row untouched.
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "unverified");
+      assert.equal(result.status, 409);
+      assert.match(result.error, /cannot confirm run stopped/i);
+    }
 
     const rows = readFileSync(rowFilePath("oath-upload", dateLocal(), tmp), "utf-8")
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line) as { id?: string; runId?: string; status?: string; step?: string; parentRunId?: string; data?: Record<string, string> });
+    // Only the original "running" row exists — no fabricated cancelled row.
+    assert.equal(rows.length, 1);
     const latest = rows[rows.length - 1];
     assert.equal(latest.id, "ou-183816-0001");
     assert.equal(latest.runId, "stale-oath-upload-run");
-    assert.equal(latest.status, "failed");
-    assert.equal(latest.step, "cancelled");
+    assert.equal(latest.status, "running");
+    assert.equal(latest.step, "awaiting-approval");
     assert.equal(latest.parentRunId, "ocr-parent-run");
     assert.equal(latest.data?.pdfOriginalName, "single-oath.pdf");
   });

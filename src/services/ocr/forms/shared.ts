@@ -27,7 +27,7 @@ export function applyDisambiguationStd<R extends { warnings?: string[] }>(args: 
       matchState: "lookup-pending",
       matchSource: args.noMatch.matchSource,
       warnings: [...(record.warnings ?? []), args.noMatch.warning],
-    } as R;
+    };
   }
 
   if (result.confidence < LLM_HIGH_CONFIDENCE) {
@@ -40,7 +40,7 @@ export function applyDisambiguationStd<R extends { warnings?: string[] }>(args: 
         ...(record.warnings ?? []),
         `LLM picked EID ${resultEid} but low confidence (${result.confidence.toFixed(2)}) — review`,
       ],
-    } as R;
+    };
   }
 
   return {
@@ -49,7 +49,7 @@ export function applyDisambiguationStd<R extends { warnings?: string[] }>(args: 
     matchSource: "llm",
     matchConfidence: result.confidence,
     warnings: record.warnings ?? [],
-  } as R;
+  };
 }
 
 export const VerificationSchema = z.discriminatedUnion("state", [

@@ -13,10 +13,12 @@ import { bundlePhotosToPdf } from "../../../../src/services/capture/pdf-bundle.j
 // the minimum-viable hex test fixtures we can build inline. Generating real
 // JPEGs/PNGs at test time would require pulling in `sharp` or `canvas` — both
 // heavy native deps for an upstream-trusted code path. Instead we test the
-// shape of `bundlePhotosToPdf` (empty input, parent-dir creation, missing-file
-// behavior) and rely on end-to-end manual smoke for the actual JPEG/PNG embed
-// path. The image-bundling tests will be added once a real fixture is checked
-// into `tests/fixtures/`.
+// shape of `bundlePhotosToPdf` (empty-input rejection, missing-file behavior)
+// and rely on end-to-end manual smoke for the actual JPEG/PNG embed path
+// (parent-dir creation and the %PDF magic header need a real image and are no
+// longer covered here now that empty input throws instead of producing a
+// blank PDF). The image-bundling tests will be added once a real fixture is
+// checked into `tests/fixtures/`.
 
 function mkTmp(): string {
   const dir = join(os.tmpdir(), `capture-pdf-test-${Date.now()}-${Math.random()}`);
@@ -33,16 +35,13 @@ describe("bundlePhotosToPdf", () => {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("zero photos produces a one-page empty PDF (caller decides what to do)", async () => {
+  it("throws on zero photos instead of synthesizing a blank PDF", async () => {
     const out = join(tmp, "out.pdf");
-    await bundlePhotosToPdf([], out);
-    assert.equal(existsSync(out), true);
-  });
-
-  it("creates parent directory if missing (with empty input)", async () => {
-    const out = join(tmp, "deep/nested/out.pdf");
-    await bundlePhotosToPdf([], out);
-    assert.equal(existsSync(out), true);
+    await assert.rejects(
+      bundlePhotosToPdf([], out),
+      /no photos to bundle/i,
+    );
+    assert.equal(existsSync(out), false);
   });
 
   it("throws clearly when an image file is missing", async () => {
@@ -51,13 +50,5 @@ describe("bundlePhotosToPdf", () => {
       bundlePhotosToPdf([join(tmp, "nope.jpg")], out),
       /ENOENT|no such file/i,
     );
-  });
-
-  it("output starts with %PDF magic header", async () => {
-    const { readFileSync } = await import("node:fs");
-    const out = join(tmp, "out.pdf");
-    await bundlePhotosToPdf([], out);
-    const bytes = readFileSync(out);
-    assert.equal(bytes.slice(0, 4).toString("ascii"), "%PDF");
   });
 });

@@ -29,7 +29,17 @@ function parseDataJson(raw: string | null | undefined): Record<string, string> {
       else if (v !== null && v !== undefined) out[k] = String(v);
     }
     return out;
-  } catch {
+  } catch (err) {
+    // Do NOT swallow silently: this backs emitInheritedRow's prior-row
+    // reconstruction (cancel/retry/discard/approve re-emit). An unparseable
+    // latest_data_json here would silently produce a prior entry with no
+    // archetype/__traceId/display metadata — the ISS-006 lineage-sever class.
+    // Reads must not throw, but the corruption must be visible (matches the
+    // sibling rowStatusOrUndefined, which also logs).
+    log.warn(
+      `[find-latest-entry] parseDataJson: unparseable latest_data_json (${err instanceof Error ? err.message : String(err)}) ` +
+        `— prior-row reconstruction will be missing archetype/traceId/metadata; raw=${raw.slice(0, 200)}`,
+    );
     return {};
   }
 }

@@ -7,7 +7,7 @@ import { buildTraceId } from '../../domain/queue-trace-id.js'
 import { findFrozenTraceId } from '../../tracker/find-latest-entry.js'
 import { Session } from './session.js'
 import { Stepper } from './stepper.js'
-import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent } from '../../tracker/jsonl.js'
+import { emitTrackerRow, withTrackedWorkflow, emitScreenshotEvent, type StampedData } from '../../tracker/jsonl.js'
 import { withLogContext, log } from '../../utils/log.js'
 import { classifyError, isBrowserClosedError } from '../../utils/errors.js'
 import { splitPrefilled, buildInitialTrackerData, buildTrackerOpts, toRecord } from './workflow.js'
@@ -141,38 +141,98 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // recovers them verbatim, so the next run is idempotent without the
   // dashboard remembering it had to re-attach the channels.
   const { cleaned: cleanedItem, prefilled, runtimeOptions } = splitPrefilled(item)
-  // Validate skipSteps against the workflow's declared steps so a stale or
-  // hand-crafted runtime option can't silently no-op (e.g. typo'd step name).
-  // Auth steps are excluded — they're always required.
-  const skipStepsSet: Set<string> | undefined = (() => {
+  // --- Pre-registration validation (skipSteps + schema) ---------------------
+  // Both checks below run BEFORE the run is registered with `runRegistry` —
+  // no controller exists yet, no auth/browser work has started. A throw here
+  // is ALWAYS a genuine data/config bug (a stale/hand-crafted runtimeOptions
+  // value, a schema drift, a wrong-shape row) — NEVER a browser crash or a
+  // user cancellation. It must FAIL LOUD, not disappear or get mislabeled:
+  // left as a plain throw, a POOL worker's `Promise.allSettled` partial-
+  // failure branch swallows it with just a `log.warn` (no tracker row, item
+  // silently dropped), and in the DAEMON claim loop there is no catch around
+  // `await runOneItem` — the throw propagates all the way out, crashing the
+  // whole daemon process with NO terminal row for this one bad item (by the
+  // time the outer shutdown sweep runs, the per-item `finally` below has
+  // already nulled `state.activeRun`, so even that safety net sees nothing to
+  // report). So this section catches its own throws, writes a genuine FAILED
+  // tracker row itself (never a `step:"cancelled"` sentinel — this is not a
+  // cancellation), and returns `{ ok: false }` so both callers handle it
+  // through their normal non-ok bookkeeping (pool: `result.failed++` +
+  // `result.errors`; daemon: falls to the plain-failure branch → `markItemFailed`).
+  let handlerInput: TData
+  let skipStepsSet: Set<string> | undefined
+  try {
+    // Validate skipSteps against the workflow's declared steps so a stale or
+    // hand-crafted runtime option can't silently no-op (e.g. typo'd step name).
+    // Auth steps are excluded — they're always required.
     const requested = runtimeOptions?.skipSteps
-    if (!requested || requested.length === 0) return undefined
-    const declared = new Set<string>(wf.config.steps)
-    const unknown = requested.filter((s) => !declared.has(s))
-    if (unknown.length > 0) {
+    if (requested && requested.length > 0) {
+      const declared = new Set<string>(wf.config.steps)
+      const unknown = requested.filter((s) => !declared.has(s))
+      if (unknown.length > 0) {
+        throw new Error(
+          `runtimeOptions.skipSteps contains unknown step name(s) for workflow '${wf.config.name}': ${unknown.join(', ')}`,
+        )
+      }
+      skipStepsSet = new Set(requested)
+    }
+
+    // Validate the cleaned item against the workflow schema BEFORE handing it to
+    // the handler. Catches stale task_store rows whose shape predates a schema
+    // change, externally-mutated rows, and wrong-shape rows from older code
+    // versions. Use the PARSED return value so any .transform() / .default() /
+    // .coerce() declared in the schema is applied. The kernel classifies errors
+    // via /validation/i (see workflow.ts), so keep the literal "validation error"
+    // prefix lowercase.
+    try {
+      handlerInput = wf.config.schema.parse(cleanedItem)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
       throw new Error(
-        `runtimeOptions.skipSteps contains unknown step name(s) for workflow '${wf.config.name}': ${unknown.join(', ')}`,
+        `validation error in runOneItem (workflow=${wf.config.name}, itemId=${itemId}, runId=${runId}): ${msg}`,
+        { cause: err },
       )
     }
-    return new Set(requested)
-  })()
-
-  // Validate the cleaned item against the workflow schema BEFORE handing it to
-  // the handler. Catches stale task_store rows whose shape predates a schema
-  // change, externally-mutated rows, and wrong-shape rows from older code
-  // versions. Use the PARSED return value so any .transform() / .default() /
-  // .coerce() declared in the schema is applied. The kernel classifies errors
-  // via /validation/i (see workflow.ts), so keep the literal "validation error"
-  // prefix lowercase.
-  let handlerInput: TData
-  try {
-    handlerInput = wf.config.schema.parse(cleanedItem) as TData
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(
-      `validation error in runOneItem (workflow=${wf.config.name}, itemId=${itemId}, runId=${runId}): ${msg}`,
-      { cause: err },
+    const error = classifyError(err, { systemId: session.pageAccess().system ?? undefined })
+    log.error(
+      `[runOneItem] pre-registration check failed for ${wf.config.name}/${itemId} (runId=${runId}) — data/config bug, not a browser crash: ${error}`,
     )
+    if (!args.trackerStub) {
+      // Best-effort archetype derivation off the UNVALIDATED item — the very
+      // reason we're here is that it may not conform to the schema, so a
+      // resolver-function archetype could itself throw on missing fields.
+      // Fall back to the minimal stamp (mirrors `batch-lifecycle.ts`'s
+      // `buildRowData` fallback) rather than let that secondary failure hide
+      // the primary one.
+      let data: StampedData
+      try {
+        const concreteArchetype = resolveArchetype(wf.config, cleanedItem as TData)
+        data = {
+          archetype: deriveRowArchetype(
+            concreteArchetype,
+            args.parentRunId,
+            runtimeOptions?.rowShape ? { memberShape: runtimeOptions.rowShape } : undefined,
+          ),
+        }
+      } catch {
+        data = { archetype: 'single' }
+      }
+      emitTrackerRow(
+        {
+          workflow: wf.config.name,
+          timestamp: new Date().toISOString(),
+          id: itemId,
+          runId,
+          status: 'failed',
+          data,
+          ...(args.parentRunId ? { parentRunId: args.parentRunId } : {}),
+          error,
+        },
+        trackerDir,
+      )
+    }
+    return { ok: false, error }
   }
 
   // Per-run AbortController (Contract 5). The controller's signal is

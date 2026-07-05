@@ -55,8 +55,7 @@ export interface CancelActiveBulkItem {
 export type CancelRunningResult =
   | { ok: true; accepted: true; mode: "worker-command"; commandId: string }
   | { ok: true; accepted: true; mode: "in-process"; alreadyCancelled?: boolean }
-  | { ok: true; accepted: true; mode: "stale-tracker" }
-  | { ok: false; error: string; status?: number; code?: "wrong-state" };
+  | { ok: false; error: string; status?: number; code?: "wrong-state" | "unverified" };
 
 export interface KillBrowserRequest {
   browserProcessId?: string;
@@ -230,9 +229,28 @@ export function buildCancelRunningHandler(dir: string) {
       db: stores.taskStore.db,
     });
     if (latest?.status === "running") {
-      appendQueueFailedAudit(req.workflow, req.id, req.runId, DASHBOARD_CANCEL_ERROR, dir);
-      emitDashboardCancelTrackerRow(req.workflow, req.id, req.runId, dir, stores.taskStore.db);
-      return { ok: true, accepted: true, mode: "stale-tracker" };
+      // VERIFY-LIVE: no SQLite worker owns this task AND no in-process
+      // registry handle exists for this runId — but the tracker's own last
+      // row still says "running". That is NOT proof the run stopped; it can
+      // equally mean a live daemon/browser this lookup can't see (the exact
+      // gap `/api/ocr/prepare` had to work around by registering its own
+      // RunHandle — see the comment there). The prior behavior fabricated a
+      // `cancelled` tracker row and returned `ok: true` here with no
+      // independent stop check — a false success: nothing is aborted, so a
+      // genuinely still-running run keeps executing while the operator is
+      // told it was cancelled (fail-loud violation — see root CLAUDE.md).
+      // Fail loud instead: surface a distinguishable "unverified" result
+      // and do NOT stamp a cancelled row. Confidently distinguishing
+      // "confirmed gone" from "unknown" needs a live check (e.g. probing
+      // daemon/browser process state) — not added here; flagging as a
+      // follow-up rather than guessing.
+      return {
+        ok: false,
+        error:
+          `cannot confirm run stopped: workflow=${req.workflow} id=${req.id} runId=${req.runId} has no owning SQLite worker or in-process registry entry, but the tracker's last known status is still "running" — verify manually (daemon/browser state) before treating it as cancelled`,
+        status: 409,
+        code: "unverified",
+      };
     }
 
     return {

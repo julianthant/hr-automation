@@ -137,7 +137,17 @@ test('runOneItem: __runtimeOptions.skipSteps surfaces as ctx.shouldSkipStep + st
   assert.ok(skippedA, 'step-a skipped row emitted')
 })
 
-test('runOneItem: __runtimeOptions.skipSteps with unknown step name throws (validation)', async () => {
+// A pre-registration throw (skipSteps unknown-name / schema validation) is a
+// genuine data/config bug — never a browser crash or a cancellation — and
+// must FAIL LOUD as a distinguishable terminal failure rather than escape as
+// a rejected promise: left as a throw, a POOL worker's partial-failure branch
+// silently drops the item (log.warn only, no tracker row), and the DAEMON
+// claim loop has no catch around `await runOneItem`, so the throw crashes the
+// whole daemon with no terminal row for the offending item. `runOneItem` now
+// catches its own pre-registration throws and returns `{ ok: false }` (never
+// `kind: 'cancelled'`, never a `step:"cancelled"` row) so both callers handle
+// it through their normal non-ok bookkeeping.
+test('runOneItem: __runtimeOptions.skipSteps with unknown step name fails loud — returns ok:false, does not throw or classify as cancelled', async () => {
   const dir = TMP()
   const wf = defineWorkflow({
     name: 'skipsteps-unknown',
@@ -152,20 +162,58 @@ test('runOneItem: __runtimeOptions.skipSteps with unknown step name throws (vali
     browsers: new Map(),
     readyPromises: new Map([['ucpath', Promise.resolve()]]),
   })
-  await assert.rejects(
-    () =>
-      runOneItem({
-        wf,
-        session,
-        item: { __runtimeOptions: { skipSteps: ['typo-step'] } },
-        itemId: 'x',
-        runId: 'run-bad-skip',
-        trackerDir: dir,
-        callerPreEmits: false,
-        trackerStub: true,
-      }),
-    /skipSteps contains unknown step name/,
-  )
+  const result = await runOneItem({
+    wf,
+    session,
+    item: { __runtimeOptions: { skipSteps: ['typo-step'] } },
+    itemId: 'x',
+    runId: 'run-bad-skip',
+    trackerDir: dir,
+    callerPreEmits: false,
+    trackerStub: true,
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.kind, undefined, 'a config bug is a genuine failure, not a cancellation')
+  assert.match(result.ok === false ? result.error : '', /skipSteps contains unknown step name/)
+})
+
+test('runOneItem: schema validation failure fails loud — returns ok:false and writes a genuine FAILED row, distinct from a cancelled/browser-crash row', async () => {
+  const dir = TMP()
+  const wf = defineWorkflow({
+    name: 'schema-invalid-test',
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    steps: ['a'] as const,
+    schema: z.object({ docId: z.string() }),
+    authSteps: false,
+    handler: async () => {},
+  })
+  const session = Session.forTesting({
+    systems: wf.config.systems,
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+  const result = await runOneItem({
+    wf,
+    session,
+    // `docId` missing entirely — a genuine wrong-shape row (stale task_store
+    // entry / schema drift), not anything Playwright/browser related.
+    item: { notDocId: 'x' },
+    itemId: 'bad-shape',
+    runId: 'run-bad-schema',
+    trackerDir: dir,
+    callerPreEmits: false,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.kind, undefined, 'schema drift is a genuine failure, not a cancellation')
+  assert.match(result.ok === false ? result.error : '', /validation error in runOneItem/)
+
+  const entries = readTracker(dir, 'schema-invalid-test')
+  const failed = entries.find((e: any) => e.status === 'failed')
+  assert.ok(failed, 'a genuine failed row was written (not silently dropped)')
+  assert.notEqual(failed?.step, 'cancelled', 'must not be mislabeled as a cancellation')
+  assert.doesNotMatch(failed?.error ?? '', /browser closed or crashed/i, 'must not be mislabeled as a browser crash')
+  assert.match(failed?.error ?? '', /validation error in runOneItem/)
 })
 
 test('runOneItem: without authTimings, no synthetic auth entries are emitted', async () => {

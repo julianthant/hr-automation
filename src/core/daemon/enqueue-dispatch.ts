@@ -56,8 +56,10 @@ export interface EnqueueFromHttpOptions {
    * control layer (`src/control/ops/supersede.ts`), which `src/core/` must not
    * import. The dashboard `/api/enqueue` route supplies it; delegated /
    * batch-fan-out enqueue paths that call `ensureDaemonsAndEnqueue` directly do
-   * NOT, so an operation's members are never superseded. Best-effort: a throw
-   * here is logged and the new run proceeds regardless.
+   * NOT, so an operation's members are never superseded. Fail loud: a thrown
+   * supersede failure blocks the new enqueue (no pending row / task row is
+   * written — see the `onPreparedItems` wiring below) instead of risking two
+   * runs against the same entity.
    */
   supersedePriorRuns?: (
     items: Array<{ itemId: string; runId: string }>,
@@ -178,7 +180,7 @@ export function buildHttpPendingData<TData, TSteps extends readonly string[]>(
 ): StampedData {
   const baseData = buildTrackerDataForInput(input);
   const { cleaned, runtimeOptions } = splitPrefilled(input);
-  const handlerInput = wf.config.schema.parse(cleaned) as TData;
+  const handlerInput = wf.config.schema.parse(cleaned);
   const rowArchetype = runtimeOptions?.rowShape
     ? deriveRowArchetype(resolveArchetype(wf.config, handlerInput), parentRunId, {
         memberShape: runtimeOptions.rowShape,
@@ -339,8 +341,14 @@ export async function enqueueFromHttp(
         // Enforce "one active run per queue row": cancel prior non-terminal
         // runs for these items before the new pending row / task are written.
         // Fires here (after stable itemIds/runIds, before pre-emit + enqueue)
-        // so the supersede query sees only prior runs. Best-effort — a failure
-        // must not block the new run, so swallow + log and continue.
+        // so the supersede query sees only prior runs. Fail loud — a
+        // supersede failure means a prior run for this item may still be
+        // active, so it must BLOCK the new enqueue rather than risk two runs
+        // transacting the same entity. Throwing here propagates through
+        // `ensureDaemonsAndEnqueue`'s `onPreparedItems` call (client.ts),
+        // which fires before any pending row / task row is written, and is
+        // caught by the outer try/catch below — returning {ok:false, error}
+        // instead of enqueuing a duplicate.
         ...(supersedePriorRuns
           ? {
               onPreparedItems: async (prepared) => {
@@ -349,10 +357,14 @@ export async function enqueueFromHttp(
                     prepared.map((p) => ({ itemId: p.itemId, runId: p.runId })),
                   );
                 } catch (err) {
-                  log.warn(
-                    `enqueueFromHttp(${workflowName}): supersedePriorRuns failed (continuing): ${
-                      err instanceof Error ? err.message : String(err)
-                    }`,
+                  const message = err instanceof Error ? err.message : String(err);
+                  const itemIds = prepared.map((p) => p.itemId).join(", ");
+                  log.error(
+                    `enqueueFromHttp(${workflowName}): supersedePriorRuns failed for items [${itemIds}] — refusing to enqueue a duplicate run: ${message}`,
+                  );
+                  throw new Error(
+                    `supersedePriorRuns failed for workflow '${workflowName}' (items: ${itemIds}): ${message}`,
+                    { cause: err },
                   );
                 }
               },
