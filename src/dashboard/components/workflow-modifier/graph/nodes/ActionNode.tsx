@@ -1,7 +1,6 @@
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { NodeFrame } from "./NodeFrame.js";
 import { opKindVisual } from "../op-kind-visuals.js";
 import type { ActionGraphNode } from "../graph-types.js";

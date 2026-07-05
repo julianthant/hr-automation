@@ -51,7 +51,7 @@ export function readOperatorSettingsOverride(
       log.warn(`operator settings invalid; ignoring (${summary})`);
       return null;
     }
-    return parsed.data as OperatorSettingsOverride;
+    return parsed.data;
   } catch (err) {
     log.warn(`operator settings unreadable; ignoring (${String(err)})`);
     return null;
@@ -63,7 +63,7 @@ export function writeOperatorSettings(
   repoRoot: string,
   override: OperatorSettingsOverride,
 ): OperatorSettingsOverride {
-  const validated = OperatorSettingsOverrideSchema.parse(override) as OperatorSettingsOverride;
+  const validated = OperatorSettingsOverrideSchema.parse(override);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(
     operatorSettingsFile(repoRoot),

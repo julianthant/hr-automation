@@ -35,7 +35,7 @@ export function statusesEqual(
   if ((a.current?.state ?? null) !== (b.current?.state ?? null)) return false;
   if (a.queued.length !== b.queued.length) return false;
   for (let i = 0; i < a.queued.length; i += 1) {
-    if (a.queued[i]!.queueId !== b.queued[i]!.queueId) return false;
+    if (a.queued[i].queueId !== b.queued[i].queueId) return false;
   }
   if ((a.lastCompletion?.ts ?? null) !== (b.lastCompletion?.ts ?? null)) return false;
   if ((a.lastCompletion?.ok ?? null) !== (b.lastCompletion?.ok ?? null)) return false;

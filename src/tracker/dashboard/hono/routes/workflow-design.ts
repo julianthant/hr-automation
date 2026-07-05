@@ -31,7 +31,7 @@ export function registerWorkflowDesignRoutes(app: Hono, deps: DashboardHonoDeps)
   app.post("/api/workflow-design/:workflow", async (c) => {
     const name = c.req.param("workflow");
     if (!getByName(name)) return jsonResponse({ ok: false, error: `unknown workflow '${name}'` }, 404);
-    const body = (await c.req.json()) as Record<string, unknown>;
+    const body = (await c.req.json());
     // Stamp authoritatively server-side; the workflow always matches the route param.
     const stamped = { ...body, workflow: name, generatedAt: new Date().toISOString() };
     const parsed = WorkflowDesignSchema.safeParse(stamped);

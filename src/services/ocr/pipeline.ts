@@ -125,7 +125,7 @@ export async function runOcrSecondOpinionPage<T>(input: {
       log.warn(`[ocr/second-opinion] re-read failed for ${input.pageFilename}: ${page?.error ?? "no page outcome"}`);
       return null;
     }
-    return { records: perPage.records as T[], poolKeyId: page.poolKeyId };
+    return { records: perPage.records, poolKeyId: page.poolKeyId };
   } catch (err) {
     log.warn(`[ocr/second-opinion] re-read threw for ${input.pageFilename}: ${err instanceof Error ? err.message : String(err)}`);
     return null;

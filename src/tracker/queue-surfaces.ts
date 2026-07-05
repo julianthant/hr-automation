@@ -93,7 +93,7 @@ function runIdFor(entry: Pick<TrackerEntry, "id" | "runId">): string {
 }
 
 function buildSyntheticOperationParent(parentRunId: string, members: TrackerEntry[]): TrackerEntry {
-  const first = members[0]!;
+  const first = members[0];
   const memberTrace = first.data?.__traceId;
   const prefix =
     typeof memberTrace === "string" && memberTrace.length > 0 ? tracePrefix(memberTrace) : undefined;
@@ -286,8 +286,8 @@ export function buildTrackerQueueSurfaces(input: BuildTrackerQueueSurfacesInput)
     // A lone delegated child normally renders as a flat single row — unless its
     // workflow opts into `alwaysOperationDelegatedMembers` (oath-signature,
     // person-lookup), where even one member stays a one-member operation surface.
-    if (members.length === 1 && !forcesOperationWhenDelegated(members[0]!, input.runtimePolicies)) {
-      singleChildEntries.push(members[0]!);
+    if (members.length === 1 && !forcesOperationWhenDelegated(members[0], input.runtimePolicies)) {
+      singleChildEntries.push(members[0]);
       continue;
     }
     groupRows.push({

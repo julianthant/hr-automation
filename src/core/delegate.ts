@@ -149,8 +149,15 @@ function withOperationMemberRuntimeOptions<TInput>(input: TInput, renderAs?: Del
  * code; without `rootTracePrefix` the worker composes a fresh per-run id off the
  * child's own code instead of the shared operation prefix, breaking trace-id
  * propagation across the daemon boundary.
+ *
+ * Exported (beyond this module's own use in `dispatchToDaemonAndWait`) ONLY
+ * so a regression test can compose the exact wrap→strip round-trip a
+ * `deriveItemId` resolver depends on (`withRootRuntimeOptions` → the daemon
+ * enqueue's `splitPrefilled` → the resolver) without mocking the daemon
+ * dispatch boundary — see `orchestrator.test.ts`'s
+ * `buildEidLookupItemIdResolver` real-round-trip test.
  */
-function withRootRuntimeOptions<TInput>(
+export function withRootRuntimeOptions<TInput>(
   input: TInput,
   opts: { rootCode?: string; rootTracePrefix?: string },
 ): TInput {
@@ -515,7 +522,7 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
 
   await ensureDaemonsAndEnqueue(
     args.child,
-    queuedInputs as TChildData[],
+    queuedInputs,
     args.daemonFlags ?? {},
     {
       trackerDir: args.trackerDir,
@@ -527,15 +534,15 @@ async function dispatchToDaemonAndWait<TChildData, TChildSteps extends readonly 
         ? {
             onPreparedItems: async (prepared) =>
               args.onPreparedItems!(
-                prepared.map((p) => ({ itemId: p.itemId, runId: p.runId, input: p.input as TChildData })),
+                prepared.map((p) => ({ itemId: p.itemId, runId: p.runId, input: p.input })),
               ),
           }
         : {}),
       onPreEmitPending: (item, childRunId, parentRunIdFwd, itemId) => {
         expectedItemIds.push(itemId)
         expectedRunIds.push(childRunId)
-        const archetype = resolveDelegateArchetype(args.child, item as TChildData, args.parentRunId, args.renderAs)
-        const extras = args.buildPendingExtras?.(item as TChildData, itemId) ?? {}
+        const archetype = resolveDelegateArchetype(args.child, item, args.parentRunId, args.renderAs)
+        const extras = args.buildPendingExtras?.(item, itemId) ?? {}
         const data = buildPendingTrackerData({
           workflow: args.child,
           input: item,
@@ -769,8 +776,5 @@ export function buildDelegateApi(parent: {
     })
   }
 
-  return { delegateTo, delegateToAll } as unknown as Pick<
-    Ctx<readonly string[], unknown>,
-    "delegateTo" | "delegateToAll"
-  >
+  return { delegateTo, delegateToAll }
 }

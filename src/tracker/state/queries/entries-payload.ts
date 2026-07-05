@@ -275,7 +275,7 @@ export function queryEntriesPayload(
       data: patchItemDataWithCarriedEmpl(
         row.workflow,
         row.id,
-        parseJsonObject(row.data_json, {} as Record<string, string>),
+        parseJsonObject(row.data_json, {}),
         resolvedEmplFromDay,
       ),
       ...(row.error ? { error: row.error } : {}),

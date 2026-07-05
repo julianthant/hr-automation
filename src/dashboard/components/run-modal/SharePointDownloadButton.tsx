@@ -133,7 +133,7 @@ export function SharePointDownloadButton({ size = "h-8 w-8" }: { size?: string }
                 disabled={disabled}
                 onSelect={(event) => {
                   event.preventDefault();
-                  handleDownload(opt);
+                  void handleDownload(opt);
                 }}
                 className={cn(
                   "justify-between gap-2 cursor-pointer",

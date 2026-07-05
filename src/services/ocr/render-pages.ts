@@ -30,7 +30,7 @@ function withSuppressedPdfjsIndexingWarning<T>(fn: () => Promise<T>): Promise<T>
     if (typeof encodingOrCb === "function") encodingOrCb();
     else if (cb) cb();
     return true;
-  }) as typeof process.stderr.write;
+  });
   return fn().finally(() => {
     console.warn = prevWarn;
     process.stderr.write = prevWrite;

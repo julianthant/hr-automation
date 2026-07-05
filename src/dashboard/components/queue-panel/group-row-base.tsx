@@ -69,7 +69,7 @@ export function GroupRowBase({
   const rowTime = firstTimestamp ? formatEntryTime(firstTimestamp) : "";
   const runNumber = footerRunOrdinal && footerRunOrdinal > 0
     ? footerRunOrdinal
-    : getRunNumber(members[0] ?? ({ id: parentRunId, workflow: "", timestamp: "", status: "pending" } as TrackerEntry));
+    : getRunNumber(members[0] ?? ({ id: parentRunId, workflow: "", timestamp: "", status: "pending" }));
   const segs = computeProgressSegments(counts);
   // A person batch anchor carries no title — drop the empty header row and
   // move the count badge onto the status-counts line (right side, above the

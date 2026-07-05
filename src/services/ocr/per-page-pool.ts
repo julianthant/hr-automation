@@ -256,6 +256,6 @@ export function defaultModelChain(provider: VisionProviderId): ModelSpec[] {
 /** Describe the pool composition for log lines (no key material). */
 export function summarizePool(pool: PoolKey[]): string {
   const grouped = Object.groupBy(pool, (k) => k.providerId);
-  const parts = Object.entries(grouped).map(([p, keys]) => `${p}=${keys!.length}`);
+  const parts = Object.entries(grouped).map(([p, keys]) => `${p}=${keys.length}`);
   return parts.length > 0 ? parts.join(" ") : "(empty)";
 }

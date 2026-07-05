@@ -22,7 +22,7 @@ import type { WorkflowPresentationConfig } from "../../../domain/workflow-presen
  * etc.) so EntryItem's memo and queue sort keep working.
  */
 function toJsonlEntry(entry: TrackerEntry): TrackerEntryJsonl {
-  return entry as unknown as TrackerEntryJsonl;
+  return entry;
 }
 
 /**
@@ -31,7 +31,7 @@ function toJsonlEntry(entry: TrackerEntry): TrackerEntryJsonl {
  * runtime even though the JSONL type doesn't surface them.
  */
 function toDashboardEntry(entry: TrackerEntryJsonl): TrackerEntry {
-  return entry as unknown as TrackerEntry;
+  return entry;
 }
 
 function mapGroupSurface(surface: TrackerQueueGroupSurface): QueueGroupSurface {
@@ -165,7 +165,7 @@ export function buildQueueProjectionRows(input: BuildQueueSurfacesInput): QueueP
   const groupRows = surfaces.groupRows.map((surface) => ({
     surface,
     projection: buildProjectionFromQueueSurface(
-      surface as unknown as TrackerQueueGroupSurface,
+      surface,
       context,
     ),
     ...(surface.kind === "preview"

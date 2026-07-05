@@ -70,11 +70,11 @@ test("wrapped workflow keeps metadata but drops systems", () => {
   const stub = wrappedOathSignature();
   assert.equal(stub.config.name, "oath-signature");
   assert.equal(stub.code, "os");
-  assert.deepEqual([...stub.config.steps], ["ucpath-auth", "transaction"]);
+  assert.deepEqual([...stub.config.steps], ["crm-verify", "ucpath-auth", "transaction"]);
   assert.deepEqual(stub.config.systems, []);
   assert.notEqual(stub.config.handler, oathSignatureWorkflow.config.handler);
-  // The real registered workflow is untouched (clone, not mutation).
-  assert.equal(oathSignatureWorkflow.config.systems.length, 1);
+  // The real registered workflow is untouched (clone, not mutation) — crm + ucpath.
+  assert.equal(oathSignatureWorkflow.config.systems.length, 2);
 });
 
 test("scripted handler walks the real steps and stamps operator data from the input", async () => {
@@ -87,7 +87,7 @@ test("scripted handler walks the real steps and stamps operator data from the in
       { emplId: "10000001", name: "Doe, Jane", date: "06/11/2026", dryRun: true } as never,
     );
     const steps = calls.filter((c) => c.kind === "step").map((c) => c.step);
-    assert.deepEqual(steps, ["ucpath-auth", "transaction"]);
+    assert.deepEqual(steps, ["crm-verify", "ucpath-auth", "transaction"]);
     assert.equal(data.e2eStub, "true");
     assert.equal(data.emplId, "10000001");
     assert.equal(data.name, "Doe, Jane");
@@ -155,7 +155,7 @@ test("scripted handler throws at an armed fail gate, stamps no success data, the
     const retry = makeFakeCtx(dir);
     await stub.config.handler(retry.ctx as never, { emplId: "10000009", name: "Fail, Test", date: "06/12/2026" } as never);
     const steps = retry.calls.filter((c) => c.kind === "step").map((c) => c.step);
-    assert.deepEqual(steps, ["ucpath-auth", "transaction"]);
+    assert.deepEqual(steps, ["crm-verify", "ucpath-auth", "transaction"]);
     assert.equal(retry.data.emplId, "10000009", "retry stamps the step data the first run never reached");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -166,7 +166,7 @@ test("loadWorkflow wraps only when HRAUTO_E2E_STUBS=1", async () => {
   delete process.env.HRAUTO_E2E_STUBS;
   const real = await loadWorkflow("oath-signature");
   assert.ok(real);
-  assert.equal(real.config.systems.length, 1);
+  assert.equal(real.config.systems.length, 2);
 
   process.env.HRAUTO_E2E_STUBS = "1";
   const stub = await loadWorkflow("oath-signature");

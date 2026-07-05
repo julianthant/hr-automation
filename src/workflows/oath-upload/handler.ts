@@ -362,7 +362,7 @@ export function findPriorTicketForSession(
         if (pdfHash && typeof e.data?.pdfHash === "string" && e.data.pdfHash !== pdfHash) return false;
         return (
           typeof e.data?.ticketNumber === "string" &&
-          isFiledTicketNumber(e.data.ticketNumber as string)
+          isFiledTicketNumber(e.data.ticketNumber)
         );
       },
     });

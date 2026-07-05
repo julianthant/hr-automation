@@ -198,7 +198,7 @@ export function toReadonlyVerifyRecord(
           }
         : {}),
       // OathMatchState shares the MatchState string union.
-      matchState: record.matchState as VerifyPreviewRecord["matchState"],
+      matchState: record.matchState,
       selected: record.selected,
       warnings,
       checks,

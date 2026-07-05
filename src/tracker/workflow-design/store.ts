@@ -15,7 +15,7 @@ export function readDesign(repoRoot: string, workflow: string): WorkflowDesignSp
       log.warn(`workflow-design spec invalid for "${workflow}"; ignoring (${issuesSummary})`);
       return null; // fail-soft on READ; writes are validated hard
     }
-    return parsed.data as WorkflowDesignSpec;
+    return parsed.data;
   } catch (err) {
     log.warn(`workflow-design spec unreadable for "${workflow}"; ignoring (${String(err)})`);
     return null;
@@ -29,7 +29,7 @@ export interface WrittenDesign {
 
 /** Validate (fail loud), then write the JSON spec + the generated markdown brief. */
 export function writeDesign(repoRoot: string, workflow: string, spec: WorkflowDesignSpec): WrittenDesign {
-  const validated = WorkflowDesignSchema.parse(spec) as WorkflowDesignSpec; // throw on invalid WRITE
+  const validated = WorkflowDesignSchema.parse(spec); // throw on invalid WRITE
   mkdirSync(workflowDesignDir(repoRoot), { recursive: true });
   const jsonPath = workflowDesignFile(repoRoot, workflow);
   const mdPath = workflowDesignBriefFile(repoRoot, workflow);

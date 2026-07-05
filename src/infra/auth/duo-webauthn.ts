@@ -520,7 +520,7 @@ async function addVirtualAuthenticator(cdp: CDPSession, transport: DuoWebAuthnTr
       isUserVerified: true,
       automaticPresenceSimulation: true,
     },
-  })) as AddAuthenticatorResult;
+  }));
   return res.authenticatorId;
 }
 
@@ -681,7 +681,7 @@ export async function selectDuoFactor(
           .catch(() => 0)) > 0;
 
       // 1. Always try the most-preferred factor first, in any state.
-      const preferred = await clickFactor(factorRes[0]!);
+      const preferred = await clickFactor(factorRes[0]);
       if (preferred) return preferred;
 
       if (onMethodList || revealedList) {

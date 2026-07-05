@@ -46,7 +46,7 @@ export function CtaButton({ variant, className, children, style, ...rest }: CtaB
       }}
       onMouseOver={(e) => {
         if (!rest.disabled) {
-          (e.currentTarget as HTMLButtonElement).style.borderColor = isPrimary
+          (e.currentTarget).style.borderColor = isPrimary
             ? "var(--capture-border-cta-strong)"
             : "var(--capture-border-cta)";
         }
@@ -54,7 +54,7 @@ export function CtaButton({ variant, className, children, style, ...rest }: CtaB
       }}
       onMouseOut={(e) => {
         if (!rest.disabled) {
-          (e.currentTarget as HTMLButtonElement).style.borderColor = isPrimary
+          (e.currentTarget).style.borderColor = isPrimary
             ? "var(--capture-border-cta)"
             : "var(--capture-border-subtle)";
         }

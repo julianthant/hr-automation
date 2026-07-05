@@ -35,7 +35,7 @@ export function buildBatchPreEmitPending<TData>(opts: {
     // /validation/i classifier picks it up.
     let typed: TData;
     try {
-      typed = opts.workflow.config.schema.parse(item) as TData;
+      typed = opts.workflow.config.schema.parse(item);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(

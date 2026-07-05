@@ -14,7 +14,7 @@ export function readOverride(repoRoot: string, workflow: string): WorkflowOverri
       log.warn(`workflow-presentation override invalid for "${workflow}"; ignoring (${issuesSummary})`);
       return null; // fail-soft on READ so a bad file can't break the dashboard; writes are validated hard
     }
-    return parsed.data as WorkflowOverride;
+    return parsed.data;
   } catch (err) {
     log.warn(`workflow-presentation override unreadable for "${workflow}"; ignoring (${String(err)})`);
     return null;

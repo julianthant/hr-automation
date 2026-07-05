@@ -86,7 +86,7 @@ export async function runVerifyRelookup(
     predicate: (e) => e.id === input.sessionId && e.runId === input.runId,
   });
   if (!latest) throw new Error("OCR row not found in JSONL");
-  const formType = latest.data?.formType as unknown as string | undefined;
+  const formType = latest.data?.formType;
   if (formType !== "verify") {
     throw new Error(`verify-relookup only applies to verify rows (got formType "${String(formType)}")`);
   }
@@ -104,11 +104,11 @@ export async function runVerifyRelookup(
 
   // Trace propagation: descendants share the OCR root's prefix (see the
   // root-trace-id lesson). Derive it from the row's frozen `__traceId`.
-  const frozenTraceId = nonEmpty(latest.data?.__traceId as unknown as string | undefined);
+  const frozenTraceId = nonEmpty(latest.data?.__traceId);
   const rootTracePrefix = frozenTraceId ? tracePrefix(frozenTraceId) : undefined;
   const parentSubject =
     readQueueTitle(latest.data) ??
-    (latest.data?.parentSubject as unknown as string | undefined);
+    (latest.data?.parentSubject);
 
   // Fresh per-invocation itemId so `watchChildRuns` waits for THIS re-run and
   // never matches a stale completed child from the initial enrichment (whose
@@ -293,10 +293,10 @@ function emitRelookupRow(
   step: "verify-relookup" | "person-lookup" = "verify-relookup",
 ): void {
   const parentRunId =
-    (latest.data?.parentRunId as unknown as string | undefined) ?? latest.parentRunId;
+    (latest.data?.parentRunId as string | undefined) ?? latest.parentRunId;
   const parentSubject =
     readQueueTitle(latest.data) ??
-    (latest.data?.parentSubject as unknown as string | undefined);
+    (latest.data?.parentSubject as string | undefined);
   emitOcrReviewSnapshot({
     base: { ...(latest.data ?? {}) },
     sessionId: input.sessionId,

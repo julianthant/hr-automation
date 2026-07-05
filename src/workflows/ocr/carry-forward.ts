@@ -26,7 +26,7 @@ export function applyCarryForward<TPreview>(
   const v1WithKeys = v1Records.map((r) => ({ rec: r, key: spec.carryForwardKey(r as never) }));
 
   return v2Records.map((v2): TPreview => {
-    const v2Key = spec.carryForwardKey(v2 as never);
+    const v2Key = spec.carryForwardKey(v2);
     let bestDist = Number.POSITIVE_INFINITY;
     let best: TPreview | undefined;
     for (const { rec, key } of v1WithKeys) {
@@ -37,7 +37,7 @@ export function applyCarryForward<TPreview>(
       }
     }
     if (!best || bestDist > FUZZY_THRESHOLD) return v2;
-    if (spec.isForceResearchFlag(best as never)) return v2;
-    return spec.applyCarryForward({ v2: v2 as never, v1: best as never }) as TPreview;
+    if (spec.isForceResearchFlag(best)) return v2;
+    return spec.applyCarryForward({ v2: v2, v1: best }) as TPreview;
   });
 }

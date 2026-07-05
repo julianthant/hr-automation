@@ -280,7 +280,7 @@ export function buildDisplayNameMap(
   };
   for (const e of sorted) {
     if (!e.parentRunId) continue;
-    const d = e.data as Record<string, string> | undefined;
+    const d = e.data;
     if (d?.mode === "prepare" && d.pdfOriginalName) {
       result.set(e.id, d.pdfOriginalName);
       continue;

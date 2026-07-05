@@ -122,7 +122,7 @@ export async function runPooledBatch<TData, TSteps extends readonly string[]>(
         // EVERY worker died → a real batch-level failure: let withBatchLifecycle's
         // catch own the failed-row fanout. A PARTIAL failure must NOT abandon the
         // surviving workers' completed items — log and carry the result.
-        if (workerCount > 0 && failures.length === workerCount) throw failures[0]!.reason
+        if (workerCount > 0 && failures.length === workerCount) throw failures[0].reason
         for (const f of failures) {
           log.warn(
             `[Pool] a worker died but siblings completed: ${

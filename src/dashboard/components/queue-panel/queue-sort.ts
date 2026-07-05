@@ -125,11 +125,11 @@ export function buildDaemonOperationSortRepresentative(
       data: { __subject: title },
     };
   }
-  const wf = members[0]!.workflow;
+  const wf = members[0].workflow;
   const tsSorted = [...members].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  const earliestTs = tsSorted[0]!.timestamp;
+  const earliestTs = tsSorted[0].timestamp;
   const logs = members.map((m) => m.firstLogTs).filter(Boolean) as string[];
-  const earliestLog = logs.length > 0 ? [...logs].sort()[0]! : "";
+  const earliestLog = logs.length > 0 ? [...logs].sort()[0] : "";
   return {
     workflow: wf,
     id: operationParentRunId,

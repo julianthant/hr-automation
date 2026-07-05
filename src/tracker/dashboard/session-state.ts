@@ -141,7 +141,7 @@ export function filterEventsForRun(
     archetype === "operation" ? [...ownEntries, ...childEntries] : ownEntries;
   const memberRunIds = new Set(
     childEntries
-      .filter((t) => typeof t.runId === "string" && (t.runId as string).length > 0)
+      .filter((t) => typeof t.runId === "string" && (t.runId).length > 0)
       .map((t) => t.runId as string),
   );
 
@@ -374,14 +374,14 @@ export function rebuildSessionState(dir?: string): SessionState {
     if (e.type === "session_create" && e.sessionId) {
       const wf = wfMap.get(inst);
       if (wf && !wf.sessions.find((s) => s.sessionId === e.sessionId)) {
-        wf.sessions.push({ sessionId: e.sessionId!, browsers: [] });
+        wf.sessions.push({ sessionId: e.sessionId, browsers: [] });
       }
     }
     if (e.type === "browser_launch" && e.sessionId && e.browserId && e.system) {
       const wf = wfMap.get(inst);
       const sess = wf?.sessions.find((s) => s.sessionId === e.sessionId);
       if (sess && !sess.browsers.find((b) => b.browserId === e.browserId)) {
-        sess.browsers.push({ browserId: e.browserId!, system: e.system!, authState: "idle" });
+        sess.browsers.push({ browserId: e.browserId, system: e.system, authState: "idle" });
       }
     }
     if (e.type === "browser_close" && e.browserId) {

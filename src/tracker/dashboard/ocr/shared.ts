@@ -51,7 +51,7 @@ function walkOcrJsonl(
 
 export function readFormType(sessionId: string, trackerDir: string | undefined): string | null {
   const e = walkOcrJsonl(sessionId, trackerDir, (row) => typeof row.data?.formType === "string");
-  return e ? (e.data!.formType as string) : null;
+  return e ? (e.data!.formType) : null;
 }
 
 export function readParentRunId(sessionId: string, trackerDir: string | undefined): string | undefined {

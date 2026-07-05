@@ -47,7 +47,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
   // which TypeScript can't statically prove matches the declared TData.
   let handlerInput: TData
   try {
-    handlerInput = wf.config.schema.parse(cleanedData) as TData
+    handlerInput = wf.config.schema.parse(cleanedData)
   } catch (err) {
     throw new Error(`validation error: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
   }

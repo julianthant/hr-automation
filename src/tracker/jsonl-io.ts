@@ -352,7 +352,7 @@ export function writeTrackerEntryRawForDate(
  * compile-time requirement — see the {@link StampedData} comment above.
  */
 export function emitTrackerRow(emission: TrackerRowEmission, dir: string = DEFAULT_DIR): void {
-  writeTrackerEntryRaw(emission as TrackerEntry, dir);
+  writeTrackerEntryRaw(emission, dir);
 }
 
 /**
@@ -367,7 +367,7 @@ export function emitTrackerRowForDate(
   date: string,
   dir: string = DEFAULT_DIR,
 ): void {
-  writeTrackerEntryRawForDate(emission as TrackerEntry, date, dir);
+  writeTrackerEntryRawForDate(emission, date, dir);
 }
 
 // ── Legacy compatibility aliases ───────────────────────────────────────

@@ -240,7 +240,7 @@ export async function resolveSeparationEid(
   // identities for operator approval. person-lookup's result data already
   // carries the proposed person's name/department/payroll title (CRM-sourced),
   // so the approval card can show who the name-search actually resolved to.
-  const data = (result.data ?? {}) as Record<string, string>;
+  const data = (result.data ?? {});
   log.warn(
     `[identity-check] person-lookup resolved a DIFFERENT EID "${resolvedEid}" for ` +
     `"${kualiData.employeeName}" (Kuali EID "${kualiData.eid}") — PAUSING for operator approval ` +
@@ -382,10 +382,10 @@ export const separationsWorkflow = defineWorkflow({
     // distinguish "user prefilled this" from "extraction filled this".
     const lastDayWorkedPrefilled =
       typeof ctx.data.lastDayWorked === "string"
-      && (ctx.data.lastDayWorked as string).length > 0;
+      && (ctx.data.lastDayWorked).length > 0;
     const txnNumberPrefilled =
       typeof ctx.data.transactionNumber === "string"
-      && (ctx.data.transactionNumber as string).length > 0;
+      && (ctx.data.transactionNumber).length > 0;
 
     // ─── Step 1: Extract Kuali data ───
     // Kuali docs are user-editable between runs (e.g. correcting a wrong EID
@@ -416,7 +416,7 @@ export const separationsWorkflow = defineWorkflow({
       ? (["name", "eid", "separationDate", "lastDayWorked"] as const)
       : (["name", "eid", "rawTerminationType", "separationDate", "lastDayWorked"] as const);
     const allPrefilled = requiredKualiFields.every(
-      (k) => typeof ctx.data[k] === "string" && (ctx.data[k] as string).length > 0,
+      (k) => typeof ctx.data[k] === "string" && (ctx.data[k]).length > 0,
     );
 
     let kualiData: KualiSeparationData;
@@ -1004,8 +1004,8 @@ export const separationsWorkflow = defineWorkflow({
         // submit runs in dry-run — but carries the reused T# when transaction-
         // check found an APPROVED duplicate (so the preview shows it); `comments`
         // preserves any edit-and-resume prefill + the duplicate-termination note.
-        transactionNumber: (ctx.data.transactionNumber as string) ?? "",
-        comments: (ctx.data.comments as string) ?? "",
+        transactionNumber: (ctx.data.transactionNumber) ?? "",
+        comments: (ctx.data.comments) ?? "",
       });
       log.success(
         `DRY RUN: reached UCPath Smart HR transaction for doc #${docId} — ` +
@@ -1158,7 +1158,7 @@ export const separationsWorkflow = defineWorkflow({
       // `comments` (the edit-and-resume timekeeper-comments override) is only
       // ever set on the prefill path; stamp it here so a fresh live run doesn't
       // trip the "declared but never populated" warn (mirrors the dry-run snapshot).
-      comments: (ctx.data.comments as string) ?? "",
+      comments: (ctx.data.comments) ?? "",
     });
 
     // A live run that reaches this point with NO transaction number means the

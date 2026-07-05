@@ -94,7 +94,7 @@ function cloneWithScriptedSteps(wf: AnyRegisteredWorkflow, stepData: StepDataFn)
     config: {
       ...wf.config,
       systems: [],
-      handler: handler as unknown as AnyRegisteredWorkflow["config"]["handler"],
+      handler: handler,
     },
   };
 }
@@ -265,7 +265,7 @@ function cloneOathUploadWithStubbedServiceNow(wf: AnyRegisteredWorkflow): AnyReg
       _submitOverride: async () => "HRC0E2E001",
     };
     await oathUploadHandler(
-      ctx as unknown as Parameters<typeof oathUploadHandler>[0],
+      ctx,
       input as OathUploadInput,
       stubOpts,
     );
@@ -275,7 +275,7 @@ function cloneOathUploadWithStubbedServiceNow(wf: AnyRegisteredWorkflow): AnyReg
     config: {
       ...wf.config,
       systems: [],
-      handler: handler as unknown as AnyRegisteredWorkflow["config"]["handler"],
+      handler: handler,
     },
   };
 }

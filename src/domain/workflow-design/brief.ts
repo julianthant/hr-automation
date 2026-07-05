@@ -26,7 +26,7 @@ function nodeLabel(node: DesignNode): string {
   const intentLabel = node.intent?.label?.trim();
   if (intentLabel) return intentLabel;
   if (node.type === "step" && typeof node.config?.step === "string") {
-    return `Step "${node.config.step as string}"`;
+    return `Step "${node.config.step}"`;
   }
   return TYPE_LABEL[node.type] ?? node.type;
 }

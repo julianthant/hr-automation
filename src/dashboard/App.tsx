@@ -582,7 +582,7 @@ export function App() {
         setShortcutsOpen((v) => !v);
       } else if (e.key === "/") {
         e.preventDefault();
-        (document.querySelector('input[aria-label="Search history"]') as HTMLInputElement | null)?.focus();
+        (document.querySelector('input[aria-label="Search history"]'))?.focus();
       } else if (e.key === "[" || e.key === "]") {
         if (workflows.length === 0) return;
         const idx = workflows.indexOf(workflow);
@@ -590,7 +590,7 @@ export function App() {
         e.preventDefault();
         const len = workflows.length;
         const nextIdx = e.key === "]" ? (idx + 1) % len : (idx - 1 + len) % len;
-        handleWorkflowChange(workflows[nextIdx]!);
+        handleWorkflowChange(workflows[nextIdx]);
       } else if (e.key === "g") {
         gPressedAtRef.current = performance.now();
       } else if (e.key === "t") {
