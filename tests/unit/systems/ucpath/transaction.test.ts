@@ -20,9 +20,11 @@ function fakeLocator(behavior: {
 }): Locator {
   const self = {
     first: () => self,
-    waitFor: async (opts: { state?: string; timeout?: number }) => {
+    waitFor: (opts: { state?: string; timeout?: number }): Promise<void> => {
       behavior.onWaitFor?.(opts);
-      if (!behavior.resolve) throw new Error("Timeout 123ms exceeded (fake)");
+      return behavior.resolve
+        ? Promise.resolve()
+        : Promise.reject(new Error("Timeout 123ms exceeded (fake)"));
     },
   };
   return self as unknown as Locator;

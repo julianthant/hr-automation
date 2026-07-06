@@ -180,11 +180,14 @@ export async function enterEffectiveDate(
 /**
  * Click the Create Transaction button and wait for the form to load.
  *
+ * @param _page - Playwright page (kept for call-site arity/API stability; the
+ *   create round-trip is now observed via frame-scoped waits, so the page
+ *   handle itself is unused since the fixed 5s sleep was removed 2026-07-06)
  * @param frame - PeopleSoft content iframe FrameLocator
  * @returns TransactionResult indicating success or failure
  */
 export async function clickCreateTransaction(
-  page: Page,
+  _page: Page,
   frame: FrameLocator,
 ): Promise<TransactionResult> {
   log.step("Clicking Create Transaction...");
