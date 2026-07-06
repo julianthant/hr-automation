@@ -13,6 +13,30 @@ export interface EmergencyContactContext {
   employeeName: string;
 }
 
+/**
+ * Best-effort PeopleSoft processing-spinner wait, adapted from
+ * `ucpath.waitForPeopleSoftProcessing` (which targets a `FrameLocator`) for
+ * use directly on this `Page` — Emergency Contact's `uc_deep_link=1` URL
+ * renders OUTSIDE the HR Tasks iframe (see `buildEmergencyContactPlan`'s
+ * JSDoc), so there is no `FrameLocator` to hand that helper. Same spinner
+ * anchors; always resolves (never throws) since the spinner may not appear
+ * for every postback — a checkbox/select toggle that doesn't round-trip the
+ * server just returns immediately.
+ * NEEDS LIVE VERIFY: confirm these anchors actually render on the deep-link
+ * (non-iframed) Emergency Contact page the same way they do inside HR Tasks.
+ */
+async function waitForContactPagePostback(page: Page, timeoutMs = 3_000): Promise<void> {
+  const processingSelector =
+    "#processing, #WAIT_win0, .ps_box-processing, [id*='PROCESSING']"; // allow-inline-selector
+  try {
+    const probe = page.locator(processingSelector).first(); // allow-inline-selector
+    await probe.waitFor({ state: "visible", timeout: 800 });
+    await probe.waitFor({ state: "hidden", timeout: timeoutMs });
+  } catch {
+    // Spinner did not appear or already disappeared — fine.
+  }
+}
+
 
 export interface ContactMatch {
   /** The existing contact's name as it appears on the UCPath record. */
@@ -105,7 +129,12 @@ export function buildEmergencyContactPlan(
       .getByRole("button", { name: /add a new row/i })
       .first()
       .click({ timeout: 10_000 });
-    await page.waitForTimeout(2_000);
+    // The new row's Contact Name field is what the next plan step fills —
+    // wait for it directly instead of a blind pause.
+    await page
+      .getByRole("textbox", { name: "Contact Name" })
+      .first()
+      .waitFor({ state: "visible", timeout: 6_000 });
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   });
 
@@ -115,6 +144,8 @@ export function buildEmergencyContactPlan(
       .getByRole("textbox", { name: "Contact Name" })
       .first()
       .fill(contact.name, { timeout: 10_000 });
+    // TODO(live-verify): no detectable post-fill condition for a plain text
+    // field with no known dependent postback — keeping the settle pause.
     await page.waitForTimeout(500);
   });
 
@@ -128,7 +159,9 @@ export function buildEmergencyContactPlan(
       const checked = await cb.isChecked({ timeout: 5_000 }).catch(() => false);
       if (checked) await cb.uncheck({ timeout: 5_000 });
     }
-    await page.waitForTimeout(500);
+    // Checkbox toggles can round-trip a PeopleSoft postback; wait for the
+    // processing spinner (if any) to settle rather than a blind pause.
+    await waitForContactPagePostback(page, 2_000);
   });
 
   // 4. Relationship.
@@ -140,7 +173,9 @@ export function buildEmergencyContactPlan(
         .getByRole("combobox", { name: "Relationship to Employee" })
         .first()
         .selectOption({ label: relationshipLabel }, { timeout: 10_000 });
-      await page.waitForTimeout(1_500);
+      // A relationship change can round-trip a postback; wait for the
+      // processing spinner (if any) to settle rather than a blind pause.
+      await waitForContactPagePostback(page, 3_000);
     },
   );
 
@@ -161,7 +196,9 @@ export function buildEmergencyContactPlan(
 
       if (wantsSameAddress) {
         if (!checked) await sameAddrCb.check({ timeout: 5_000 });
-        await page.waitForTimeout(1_500);
+        // Checking "Same Address" can round-trip a postback (it hides/disables
+        // the manual-address section); wait for the spinner to settle.
+        await waitForContactPagePostback(page, 3_000);
         if (!contact.sameAddressAsEmployee && !contact.address) {
           log.step(
             "sameAddressAsEmployee=false + address=null — defensive fallback to same-as-employee",
@@ -171,7 +208,13 @@ export function buildEmergencyContactPlan(
       }
 
       if (checked) await sameAddrCb.uncheck({ timeout: 5_000 });
-      await page.waitForTimeout(1_500);
+      // Unchecking reveals the "Edit Address" button — wait for it directly
+      // (the next step in this branch clicks it) instead of a blind pause.
+      await page
+        .getByRole("button", { name: "Edit Address" })
+        .first()
+        .waitFor({ state: "visible", timeout: 4_000 })
+        .catch(() => {});
 
       // Unreachable in practice (wantsSameAddress is true when address is null),
       // but kept as a final safety net.
@@ -184,7 +227,11 @@ export function buildEmergencyContactPlan(
       await dismissPeopleSoftModalMask(page);
       await page.getByRole("button", { name: "Edit Address" }).first()
         .click({ timeout: 10_000 });
-      await page.waitForTimeout(2_000);
+      // Wait for the Edit Address modal's first field before filling it.
+      await page
+        .getByRole("textbox", { name: "Address 1" })
+        .first()
+        .waitFor({ state: "visible", timeout: 4_000 });
 
       if (addr.street) {
         await page.getByRole("textbox", { name: "Address 1" }).first()
@@ -206,7 +253,13 @@ export function buildEmergencyContactPlan(
       await dismissPeopleSoftModalMask(page);
       await page.getByRole("button", { name: "OK", exact: true }).first()
         .click({ timeout: 10_000 });
-      await page.waitForTimeout(2_000);
+      // Wait for the Edit Address modal to close (its Address 1 field
+      // detaches/hides) before falling through to the existing networkidle wait.
+      await page
+        .getByRole("textbox", { name: "Address 1" })
+        .first()
+        .waitFor({ state: "hidden", timeout: 5_000 })
+        .catch(() => {});
       await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
     },
   );
@@ -219,6 +272,8 @@ export function buildEmergencyContactPlan(
         .getByRole("textbox", { name: "Phone", exact: true })
         .first()
         .fill(primaryPhone, { timeout: 10_000 });
+      // TODO(live-verify): no detectable post-fill condition — Phone is the
+      // last field before caller's "save" step; keeping the settle pause.
       await page.waitForTimeout(500);
     });
   } else {
