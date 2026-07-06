@@ -554,3 +554,154 @@ test('dependency release terminalizes a task_kind=ocr anchor instead of queueing
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('retryTaskFromAttempt with blockedControlStates refuses atomically when the task became claimed mid-retry (TOCTOU)', () => {
+  // The retry double-execution race: the control layer pre-checks
+  // control_state (non-transactionally), then does JSONL I/O, then calls
+  // retryTaskFromAttempt. A daemon can claim the task inside that window —
+  // an unguarded reset would re-queue a task a worker is actively running.
+  // The guarded UPDATE must match 0 rows and throw, leaving the daemon's
+  // claim fully intact (attempt INSERT rolled back too).
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    // Simulate the mid-window daemon claim (state: queued → claimed).
+    const claimed = store.claimNextTask({ workflow: 'wf', workerId: 'daemon-1', now: iso(1) })
+    assert.ok(claimed)
+
+    assert.throws(
+      () =>
+        store.retryTaskFromAttempt({
+          runId: queued.runId,
+          now: iso(2),
+          blockedControlStates: ['claimed', 'running', 'cancel_requested', 'cancelling'],
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error)
+        assert.equal(err.name, 'RetryTaskBecameActiveError')
+        assert.match(err.message, /became 'claimed'/)
+        assert.match(err.message, new RegExp(queued.runId))
+        return true
+      },
+    )
+
+    // The daemon's claim survives untouched — no reset, no orphan attempt.
+    const task = store.getTask(queued.taskId)
+    assert.equal(task?.state, 'claimed')
+    assert.equal(task?.claimedByWorkerId, 'daemon-1')
+    assert.equal(store.listAttemptsForTask(queued.taskId).length, 1, 'the new attempt INSERT must roll back')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('retryTaskFromAttempt with blockedControlStates proceeds for a terminal (failed) task', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    store.markTaskFailed({ taskId: queued.taskId, attemptId: queued.attemptId, error: 'boom', now: iso(1) })
+
+    const retried = store.retryTaskFromAttempt({
+      runId: queued.runId,
+      now: iso(2),
+      blockedControlStates: ['claimed', 'running', 'cancel_requested', 'cancelling'],
+    })
+
+    assert.equal(store.getTask(queued.taskId)?.state, 'queued')
+    assert.notEqual(retried.runId, queued.runId)
+    assert.equal(store.listAttemptsForTask(queued.taskId).length, 2)
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('retryTaskFromAttempt bumps claim_generation so a stale worker cannot overwrite the fresh retry (ISS-005 pattern)', () => {
+  // Race tail: worker w1 claimed the task (lease gen 1), the task got failed,
+  // the operator retried. WITHOUT a generation bump at retry time, stale w1's
+  // late markTaskDone({claimGeneration: 1}) would still match the lease and
+  // flip the freshly-queued retry to done — silently overwriting the new run.
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const c1 = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c1)
+    assert.equal(c1.claimGeneration, 1)
+    // The attempt fails (e.g. daemon marked it failed while w1's async tail
+    // is still unwinding), then the operator retries.
+    store.markTaskFailed({ taskId: queued.taskId, attemptId: c1.attemptId, error: 'boom', now: iso(2) })
+    const retried = store.retryTaskFromAttempt({ runId: queued.runId, now: iso(3) })
+    assert.equal(store.getTask(queued.taskId)?.state, 'queued')
+
+    // Stale w1 completes late with its old lease — must be a no-op.
+    store.markTaskDone({ taskId: queued.taskId, attemptId: c1.attemptId, claimGeneration: c1.claimGeneration, now: iso(4) })
+
+    const task = store.getTask(queued.taskId)
+    assert.equal(task?.state, 'queued', 'a stale worker must not terminalize the fresh retry')
+    assert.equal(task?.currentRunId, retried.runId)
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('markTaskRunning throws on a terminal task instead of resurrecting it', () => {
+  // markTerminal NULLs claimed_by_worker_id, so before the control_state
+  // predicate the (claimed_by IS NULL) branch let a misordered caller flip a
+  // done/failed/cancelled task straight back to running. Fail loud instead.
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const c1 = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c1)
+    store.markTaskDone({ taskId: queued.taskId, attemptId: c1.attemptId, now: iso(2) })
+
+    assert.throws(
+      () => store.markTaskRunning({ taskId: queued.taskId, attemptId: c1.attemptId, workerId: 'w1', now: iso(3) }),
+      /refusing to move task .* from terminal state 'done' back to 'running'/,
+    )
+    assert.equal(store.getTask(queued.taskId)?.state, 'done')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('markTaskRunning still supports the in-process queued path (claimed_by NULL, state queued)', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    // In-process runs enqueue then mark running directly without a claim.
+    store.markTaskRunning({ taskId: queued.taskId, attemptId: queued.attemptId, workerId: 'dashboard:1', now: iso(1) })
+    const task = store.getTask(queued.taskId)
+    assert.equal(task?.state, 'running')
+    assert.equal(task?.claimedByWorkerId, 'dashboard:1')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('markTaskRunning no-ops (without throwing) on a cancel_requested task, preserving the cancel intent', () => {
+  // A cancel that lands between claim and mark-running flips the task to
+  // cancel_requested. The old guard (claimed_by only) stomped that back to
+  // 'running', erasing the cooperative-cancel state. Now the state predicate
+  // excludes it: benign no-op (not terminal, so no throw) and the cancel
+  // survives for the worker-command poll to honor.
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const c1 = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(c1)
+    store.requestCancelTask({ taskId: queued.taskId, reason: 'operator cancel', now: iso(2) })
+    assert.equal(store.getTask(queued.taskId)?.state, 'cancel_requested')
+
+    store.markTaskRunning({ taskId: queued.taskId, attemptId: c1.attemptId, workerId: 'w1', now: iso(3) })
+
+    assert.equal(store.getTask(queued.taskId)?.state, 'cancel_requested')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
