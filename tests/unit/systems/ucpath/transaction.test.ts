@@ -1,11 +1,32 @@
 import { describe, test } from "vitest";
 import assert from "node:assert/strict";
+import type { Locator } from "playwright";
 import {
   extractSmartHrTransactionNumber,
   rowMatchesTerminationEid,
   classifyOutcomeSignals,
   parsePayRate,
+  waitForNamedCondition,
+  interpretPostSubmitTxnReadback,
 } from "../../../../src/systems/ucpath/transaction.js";
+
+/**
+ * Minimal fake Locator for waitForNamedCondition: records the waitFor options
+ * it received and resolves/rejects per the injected behavior.
+ */
+function fakeLocator(behavior: {
+  resolve: boolean;
+  onWaitFor?: (opts: { state?: string; timeout?: number }) => void;
+}): Locator {
+  const self = {
+    first: () => self,
+    waitFor: async (opts: { state?: string; timeout?: number }) => {
+      behavior.onWaitFor?.(opts);
+      if (!behavior.resolve) throw new Error("Timeout 123ms exceeded (fake)");
+    },
+  };
+  return self as unknown as Locator;
+}
 
 describe("parsePayRate", () => {
   test("extracts the numeric rate from a formatted wage", () => {
@@ -124,5 +145,85 @@ describe("classifyOutcomeSignals", () => {
 
   test("neither signal yet → 'pending' (keep polling, do not conclude success)", () => {
     assert.equal(classifyOutcomeSignals(false, false), "pending");
+  });
+});
+
+/**
+ * The bounded named-condition wait that replaced the fixed waitForTimeout
+ * sleeps (2026-07-06). Contract: waits for a SPECIFIC element state, defaults
+ * to "visible", honors an explicit "hidden" (wizard-left-the-page conditions),
+ * and NEVER throws on timeout — it returns false so the caller proceeds to its
+ * own actionability-checked action (worst case strictly no worse than the old
+ * sleep).
+ */
+describe("waitForNamedCondition", () => {
+  test("returns true when the element reaches the state within the cap", async () => {
+    const seen: Array<{ state?: string; timeout?: number }> = [];
+    const ok = await waitForNamedCondition(
+      fakeLocator({ resolve: true, onWaitFor: (o) => seen.push(o) }),
+      { timeoutMs: 5_000, label: "test condition" },
+    );
+    assert.equal(ok, true);
+    // Defaults to "visible" and passes the cap through as the waitFor timeout.
+    assert.deepEqual(seen, [{ state: "visible", timeout: 5_000 }]);
+  });
+
+  test("passes state:'hidden' through for wizard-advanced conditions", async () => {
+    const seen: Array<{ state?: string; timeout?: number }> = [];
+    const ok = await waitForNamedCondition(
+      fakeLocator({ resolve: true, onWaitFor: (o) => seen.push(o) }),
+      { timeoutMs: 16_000, label: "reason-code page gone", state: "hidden" },
+    );
+    assert.equal(ok, true);
+    assert.deepEqual(seen, [{ state: "hidden", timeout: 16_000 }]);
+  });
+
+  test("returns false (does NOT throw) when the condition never resolves", async () => {
+    const ok = await waitForNamedCondition(
+      fakeLocator({ resolve: false }),
+      { timeoutMs: 100, label: "never-appearing element" },
+    );
+    assert.equal(ok, false);
+  });
+});
+
+/**
+ * Post-submit txn-number stamping decision (onboarding readback). The rule it
+ * pins: only a real PeopleSoft transaction id (`T` + ≥6 digits) may be stamped
+ * as `transactionNumber`; anything else — empty readback, the literal "NEW"
+ * the Person ID column renders for unprocessed hires, a stray grid value —
+ * maps to the explicit `submittedWithoutTxnNumber` marker instead of a
+ * plausible-but-wrong number (fail-loud rule).
+ */
+describe("interpretPostSubmitTxnReadback", () => {
+  test("a real T-number is stamped, uppercased and trimmed", () => {
+    assert.deepEqual(interpretPostSubmitTxnReadback("T002114817"), {
+      transactionNumber: "T002114817",
+      submittedWithoutTxnNumber: false,
+    });
+    assert.deepEqual(interpretPostSubmitTxnReadback("  t002144847 "), {
+      transactionNumber: "T002144847",
+      submittedWithoutTxnNumber: false,
+    });
+  });
+
+  test("empty / null / undefined readback → submittedWithoutTxnNumber marker", () => {
+    for (const miss of ["", "   ", null, undefined]) {
+      assert.deepEqual(interpretPostSubmitTxnReadback(miss), {
+        transactionNumber: "",
+        submittedWithoutTxnNumber: true,
+      });
+    }
+  });
+
+  test("non-txn-shaped values are NOT stamped as numbers", () => {
+    // "NEW" is what the Smart HR Person ID column renders for an unprocessed
+    // hire; "T12345" is too short to be a real transaction id.
+    for (const bogus of ["NEW", "T12345", "002114817", "TXN"]) {
+      assert.deepEqual(interpretPostSubmitTxnReadback(bogus), {
+        transactionNumber: "",
+        submittedWithoutTxnNumber: true,
+      });
+    }
   });
 });

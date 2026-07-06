@@ -63,6 +63,39 @@ export async function waitForTransactionOutcome(
   return "timeout";
 }
 
+/**
+ * Bounded best-effort wait for a NAMED page condition — a specific element
+ * becoming visible (default) or hidden (`state: "hidden"`, e.g. "the wizard
+ * left the reason-code page") — as a drop-in replacement for a fixed
+ * `waitForTimeout` sleep. Returns whether the condition was observed within
+ * the cap.
+ *
+ * On timeout it logs and returns `false` so the caller PROCEEDS: the very next
+ * `safeClick`/`safeFill` carries its own actionability wait (the backstop that
+ * existed before too). It never throws, so worst-case behavior is strictly no
+ * worse than the fixed sleep it replaces — and on the happy path it returns as
+ * soon as the real post-condition is met instead of always burning the full
+ * fixed interval. Caps are set ≥ 2× the sleep they replace.
+ */
+export async function waitForNamedCondition(
+  locator: Locator,
+  opts: { timeoutMs: number; label: string; state?: "visible" | "hidden" },
+): Promise<boolean> {
+  const { timeoutMs, label, state = "visible" } = opts;
+  const seen = await locator
+    .first()
+    .waitFor({ state, timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false);
+  if (!seen) {
+    log.step(
+      `[wait] '${label}' not confirmed within ${timeoutMs}ms — proceeding `
+      + `(the next safeClick/safeFill actionability wait is the backstop)`,
+    );
+  }
+  return seen;
+}
+
 // ─── STEP 1: Navigate sidebar → Smart HR Templates → Smart HR Transactions ───
 
 /**
@@ -86,8 +119,16 @@ export async function clickSmartHRTransactions(page: Page): Promise<void> {
     timeout: 10_000,
     label: "ucpath smart hr transactions sidebar link",
   });
-  await page.waitForTimeout(5_000);
+  // Replaces a fixed 5s sleep: wait for the actual post-condition — the Smart HR
+  // Transactions form rendering inside the content iframe (its "Select Template"
+  // textbox is present on this page for every caller, both the create flow and
+  // the list-scan callers). networkidle guards the iframe load; the template
+  // input becoming visible is the named confirmation the form is interactive.
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await waitForNamedCondition(smartHR.templateInput(getContentFrame(page)), {
+    timeoutMs: 15_000,
+    label: "smart hr transactions form (Select Template textbox)",
+  });
 
   // Collapse the sidebar navigation to prevent overlay blocking iframe buttons
   log.step("Collapsing sidebar navigation...");
@@ -153,9 +194,14 @@ export async function clickCreateTransaction(
     label: "ucpath create transaction button",
   });
 
-  // Wait for PeopleSoft server round-trip
+  // Wait for PeopleSoft server round-trip. The prior fixed 5s sleep sat BEFORE
+  // waitForPeopleSoftProcessing, so by the time the spinner wait ran the spinner
+  // had usually already come and gone (it no-op'd on its 2s appear-timeout).
+  // Dropping the sleep lets waitForPeopleSoftProcessing actually observe the
+  // create round-trip's spinner appear→disappear, and the DEFINITIVE named
+  // condition — the reason-code page rendering vs. the error banner — is the
+  // waitForTransactionOutcome poll below (20s cap, the real success marker).
   log.step("Waiting for PeopleSoft to process transaction creation...");
-  await page.waitForTimeout(5_000);
   await waitForPeopleSoftProcessing(frame, 30_000);
 
   // Decide on a DEFINITIVE outcome — error banner vs the reason-code page (the
@@ -165,7 +211,10 @@ export async function clickCreateTransaction(
   // check so behavior never regresses.
   const errorLocator = smartHR.errorBanner(frame);
   const successMarker = smartHR.reasonCodeSelect(frame);
-  const outcome = await waitForTransactionOutcome(errorLocator, successMarker, { timeoutMs: 20_000 });
+  // 30s cap (was 20s): the fixed 5s pre-sleep above was removed, so the poll
+  // starts earlier — the longer cap keeps the definitive-outcome window ≥ the
+  // old sleep+poll total (worst case strictly no worse).
+  const outcome = await waitForTransactionOutcome(errorLocator, successMarker, { timeoutMs: 30_000 });
   if (outcome === "error" || (outcome === "timeout" && (await errorLocator.count().catch(() => 0)) > 0)) {
     const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 }).catch(() => null);
     log.error(`Transaction creation error: ${errorText ?? "Unknown error"}`);
@@ -235,8 +284,23 @@ export async function selectReasonCode(
     });
   }
 
-  await page.waitForTimeout(8_000);
-  await waitForPeopleSoftProcessing(frame, 15_000);
+  // Continue advances the wizard OFF the reason-code page. Replaces a fixed 8s
+  // sleep with two named conditions: (1) the PeopleSoft processing overlay
+  // lifecycle for the Continue round-trip (the old sleep ran BEFORE this wait,
+  // so the spinner had usually come and gone and the wait no-op'd on its 2s
+  // appear-timeout); (2) the Reason Code dropdown itself leaving the page
+  // (hidden/detached) — the one post-condition common to BOTH callers, since
+  // onboarding lands on the Personal Data form while separations lands on the
+  // transaction form (different next pages, so no single next-page element can
+  // be asserted here). The downstream fill (fillPersonalData / fillComments,
+  // each with a 10s actionability wait) remains the positive backstop. Cap 16s
+  // (≥ 2× the old 8s sleep).
+  await waitForPeopleSoftProcessing(frame, 20_000);
+  await waitForNamedCondition(smartHR.reasonCodeSelect(frame), {
+    timeoutMs: 16_000,
+    label: "wizard advanced past reason-code page (Reason Code dropdown gone)",
+    state: "hidden",
+  });
 
   log.success("Reason code selected and continued");
 }
@@ -465,8 +529,15 @@ export async function clickJobDataTab(
     timeout: 10_000,
     label: "ucpath job data tab",
   });
-  await page.waitForTimeout(5_000);
+  // Replaces a fixed 5s sleep: the tab click triggers a PeopleSoft round-trip
+  // (observed by waitForPeopleSoftProcessing), and the named post-condition is
+  // the Job Data tab's first field — the Position Number textbox — rendering
+  // (fillJobData fills it next, so it must be present).
   await waitForPeopleSoftProcessing(frame, 15_000);
+  await waitForNamedCondition(jobDataSelectors.positionNumberInput(frame), {
+    timeoutMs: 15_000,
+    label: "job data tab (Position Number textbox)",
+  });
 
   log.success("Job Data tab loaded");
 }
@@ -501,9 +572,16 @@ export async function fillJobData(
     timeout: 10_000,
     label: "ucpath position number",
   });
-  // Position number fill triggers PeopleSoft refresh — wait for it
-  await page.waitForTimeout(5_000);
+  // Position number fill triggers a PeopleSoft page refresh (grid input IDs
+  // mutate $11 → $0). Replaces a fixed 5s sleep: waitForPeopleSoftProcessing
+  // observes the refresh spinner, and the named post-condition is the next
+  // field on the refreshed grid — the Employee Classification textbox — being
+  // present (fillJobData fills it next). Cap 12s (≥ 2× the old 5s sleep).
   await waitForPeopleSoftProcessing(frame, 15_000);
+  await waitForNamedCondition(jobDataSelectors.employeeClassificationInput(frame), {
+    timeoutMs: 12_000,
+    label: "job data grid settled (Employee Classification textbox)",
+  });
   log.step("Position number filled — page refreshed, grid indices may have changed");
 
   log.step("Filling employee classification...");
@@ -640,7 +718,10 @@ export async function clickSaveAndSubmit(
     timeout: 10_000,
     label: "ucpath save and submit button",
   });
-  await page.waitForTimeout(5_000);
+  // Dropped the fixed 5s pre-sleep so waitForPeopleSoftProcessing observes the
+  // submit round-trip's spinner. The DEFINITIVE named condition — the
+  // confirmation OK dialog vs. the error banner — is the waitForTransactionOutcome
+  // poll below (20s cap, the real success marker for this irreversible submit).
   await waitForPeopleSoftProcessing(frame, 30_000);
 
   // Decide on a DEFINITIVE outcome — error banner vs the post-submit confirmation
@@ -652,7 +733,10 @@ export async function clickSaveAndSubmit(
   // immediately.
   const errorLocator = smartHR.errorBanner(frame);
   const okMarker = smartHR.confirmationOkButton(frame);
-  const outcome = await waitForTransactionOutcome(errorLocator, okMarker, { timeoutMs: 20_000 });
+  // 30s cap (was 20s): the fixed 5s pre-sleep above was removed, so the poll
+  // starts earlier — the longer cap keeps the definitive-outcome window ≥ the
+  // old sleep+poll total (worst case strictly no worse).
+  const outcome = await waitForTransactionOutcome(errorLocator, okMarker, { timeoutMs: 30_000 });
   if (outcome === "error" || (outcome === "timeout" && (await errorLocator.count().catch(() => 0)) > 0)) {
     const errorText = await errorLocator.nth(0).textContent({ timeout: 5_000 }).catch(() => null);
     log.error(`Save and Submit error: ${errorText ?? "Unknown error"}`);
@@ -1074,6 +1158,26 @@ export function rowMatchesTerminationEid(
   eid: string,
 ): boolean {
   return cellTexts.some((c) => c.trim() === eid) && /Terminat/i.test(rowText);
+}
+
+/**
+ * Pure decision for stamping a post-submit Smart HR transaction-number
+ * readback into tracker data. A readback only counts when it looks like a
+ * real PeopleSoft transaction id (`T` + ≥6 digits, e.g. `T002114817`) —
+ * anything else (empty, `"NEW"`, whitespace, a stray grid value) maps to the
+ * explicit `submittedWithoutTxnNumber` marker instead of being stamped as if
+ * it were a number. This mirrors separations' pattern: "submit succeeded but
+ * no txn# read" is a DISTINGUISHABLE state, never silently conflated with a
+ * successful readback (fail-loud rule). Unit-pinned.
+ */
+export function interpretPostSubmitTxnReadback(
+  txnNumber: string | null | undefined,
+): { transactionNumber: string; submittedWithoutTxnNumber: boolean } {
+  const normalized = (txnNumber ?? "").trim().toUpperCase();
+  if (/^T\d{6,}$/.test(normalized)) {
+    return { transactionNumber: normalized, submittedWithoutTxnNumber: false };
+  }
+  return { transactionNumber: "", submittedWithoutTxnNumber: true };
 }
 
 export function extractSmartHrTransactionNumber(text: string): string | null {
