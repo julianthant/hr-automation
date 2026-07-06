@@ -8,6 +8,7 @@ import { launchBrowser } from '../../infra/browser/launch.js'
 import { log } from '../../utils/log.js'
 import { numEnv } from '../../utils/env.js'
 import { classifyPlaywrightError, errorMessage } from '../../utils/errors.js'
+import { withTimeout, TimeoutError } from '../../utils/with-timeout.js'
 import { PATHS } from '../../config.js'
 import { idleRefreshCadence } from '../../domain/idle-refresh.js'
 import { classifyBrowserHealth, isLoginLikeUrl, type BrowserHealthVerdict } from '../../domain/browser-health.js'
@@ -69,6 +70,16 @@ const HEALTH_MONITOR_TICK_MS = numEnv('HRAUTO_HEALTH_MONITOR_TICK_MS', 30_000)
 const HEALTH_MONITOR_MAX_AUTO_REFRESH = numEnv('HRAUTO_HEALTH_MONITOR_MAX_REFRESH', 10)
 /** Max consecutive Reopen attempts (rung 2) before surfacing `failed`. */
 const HEALTH_MONITOR_MAX_REOPEN = numEnv('HRAUTO_HEALTH_MONITOR_MAX_REOPEN', 3)
+/**
+ * Bound on `Session.close()`'s graceful `context.close()`/`browser.close()`
+ * walk. A hung Playwright/CDP RPC (dead socket, wedged renderer) can otherwise
+ * block `close()` forever — which wedges the ENTIRE daemon shutdown chain
+ * (`runDaemonShutdownCleanup` never runs → lockfile never unlinks → the
+ * process keeps heartbeating as a zombie with its claimed item stranded).
+ * On timeout, `close()` falls back to `killChromeHard`, which force-kills the
+ * underlying chromium process tree directly (no Playwright RPC involved).
+ */
+const SESSION_CLOSE_TIMEOUT_MS = numEnv('HRAUTO_SESSION_CLOSE_TIMEOUT_MS', 15_000)
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -647,6 +658,17 @@ export class Session {
    * `browser.close()` with 50ms window" approach which often left
    * chromium subprocesses orphaned (adopted by init, ppid=1) and
    * cascaded into the "8 chrome windows after retry" bug.
+   *
+   * **Process-group kill on SIGKILL escalation.** Only the captured chromium
+   * PARENT pid is SIGTERM'd here — but exactly in the wedged case where
+   * SIGKILL fires (the parent didn't exit gracefully), its renderer/GPU
+   * children may not cascade with it: darwin has no `/proc` cgroup to reap
+   * orphans after the fact, so a wedged parent can leave them running. Right
+   * before escalating, enumerate the parent's FULL descendant tree
+   * (`listDescendantPids` — walked fresh here, not at SIGTERM time, so a
+   * child forked during the grace period is still caught) and SIGKILL the
+   * set immediately after the parent. Enumeration is defensive: a failure
+   * there falls back to parent-only kill (today's behavior).
    */
   killChromeHard(gracePeriodMs = 2_000): Promise<number> {
     this.markClosing()
@@ -661,8 +683,13 @@ export class Session {
         for (const pid of pids) {
           try {
             process.kill(pid, 0) // is it still alive?
-            // Still alive — escalate.
+            // Still alive — escalate. Sweep descendants fresh, right before
+            // the kill, then SIGKILL the parent followed by every descendant.
+            const descendants = listDescendantPids(pid)
             try { process.kill(pid, 'SIGKILL') } catch { /* race — gone now */ }
+            for (const child of descendants) {
+              try { process.kill(child, 'SIGKILL') } catch { /* race — gone now, or already reaped */ }
+            }
           } catch {
             // ESRCH — process already gone
           }
@@ -718,8 +745,35 @@ export class Session {
     this.stopHealthMonitor()
   }
 
+  /**
+   * Graceful teardown: `context.close()` + `browser.close()` per launched
+   * slot. Bounded by `SESSION_CLOSE_TIMEOUT_MS` — a wedged Playwright/CDP RPC
+   * can hang this call forever, and every daemon shutdown path (drain exit,
+   * force-stop `finally`, `Session.forWorker` pool release, in-process
+   * `run-workflow`/`workflow` teardown) awaits `close()` directly, so a hang
+   * here wedges the whole chain. On timeout, force-kill the underlying
+   * chromium processes via `killChromeHard` instead (no Playwright RPC, so it
+   * can't hang the same way) and log which timeout fired. A non-timeout
+   * rejection (e.g. a context already gone) is rethrown unchanged — callers
+   * already treat `close()` as best-effort (see `daemon.ts`'s `catch {}`).
+   */
   async close(): Promise<void> {
     this.markClosing()
+    try {
+      await withTimeout(this.closeAllBrowsers(), SESSION_CLOSE_TIMEOUT_MS, 'Session.close')
+    } catch (err) {
+      if (err instanceof TimeoutError) {
+        log.warn(
+          `[Session] close() hung: ${err.message} — force-killing chromium via killChromeHard`,
+        )
+        await this.killChromeHard(2_000)
+        return
+      }
+      throw err
+    }
+  }
+
+  private async closeAllBrowsers(): Promise<void> {
     for (const slot of this.state.browsers.values()) {
       await slot.context.close()
       if (slot.browser) await slot.browser.close()
@@ -1240,8 +1294,15 @@ export class Session {
       // Both rungs exhausted — surface for the operator.
       if (st.lastStatus !== 'failed') this.emitHealth(systemId, 'failed', `${verdict.reason ?? 'unhealthy'} (recovery exhausted)`)
       st.lastStatus = 'failed'
-    } catch {
-      /* best-effort — a monitor failure must never break the run */
+    } catch (err) {
+      // Still best-effort — a monitor failure must never break the run — but
+      // NEVER silently. Without this, an unexpected throw from
+      // inspectSystemHealth/refreshSystem/reopenSystem stops the recovery
+      // ladder forever with zero trace (the timer keeps firing, but every
+      // tick re-throws into this same silent catch).
+      log.warn(
+        `[Session: ${systemId}] health monitor tick failed unexpectedly (recovery ladder skipped this tick): ${errorMessage(err)}`,
+      )
     } finally {
       st.monitorBusy = false
     }
@@ -1979,6 +2040,52 @@ function listChildPids(parentPid: number): number[] {
     }).toString()
     return out.trim().split('\n').filter(Boolean).map(Number).filter(Number.isFinite)
   } catch {
+    return []
+  }
+}
+
+/**
+ * BFS-walk the full descendant tree of `rootPid` using an injected
+ * child-lookup function, so the traversal itself is unit-testable without
+ * spawning real processes (see `tests/unit/core/session.test.ts`). Returns
+ * descendants only — `rootPid` itself is excluded. A `seen` set both dedupes
+ * a pid reachable via more than one path and guards against a pathological
+ * cycle in a buggy `getChildren` implementation (real process trees can't
+ * cycle, but the traversal shouldn't infinite-loop if one ever did).
+ */
+export function walkDescendantPids(
+  rootPid: number,
+  getChildren: (pid: number) => number[],
+): number[] {
+  const result: number[] = []
+  const seen = new Set<number>([rootPid])
+  const queue: number[] = [rootPid]
+  while (queue.length > 0) {
+    const pid = queue.shift() as number
+    for (const child of getChildren(pid)) {
+      if (seen.has(child)) continue
+      seen.add(child)
+      result.push(child)
+      queue.push(child)
+    }
+  }
+  return result
+}
+
+/**
+ * `killChromeHard`'s descendant enumeration — macOS/darwin has no `/proc`
+ * cgroup to catch orphaned renderer/GPU children after the fact, so a wedged
+ * parent that dies without reaping them can leave them running. Best-effort:
+ * `listChildPids` already swallows its own `pgrep` failures, but this wrapper
+ * defensively catches the traversal itself too, so an enumeration failure
+ * degrades to "kill the parent only" (today's behavior) rather than throwing
+ * out of the kill path.
+ */
+function listDescendantPids(rootPid: number): number[] {
+  try {
+    return walkDescendantPids(rootPid, listChildPids)
+  } catch (err) {
+    log.warn(`[Session] descendant pid enumeration failed for pid ${rootPid}: ${errorMessage(err)}`)
     return []
   }
 }
