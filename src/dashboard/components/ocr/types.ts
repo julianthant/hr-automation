@@ -407,6 +407,15 @@ export interface VerifyPreviewRecord {
   originallyMissing?: string[];
   documentType?: "expected" | "unknown";
   checks: VerifyCheck[];
+  /**
+   * LLM-disambiguation confidence (0–1) the match was resolved at. Only
+   * populated when this record is a read-only projection of a standalone
+   * oath/EC record (`readonly-record.ts`'s `toReadonlyVerifyRecord`) — a
+   * native `verify` run resolves identity via lookup, not LLM
+   * disambiguation, so it has none. Carried through so a post-hoc audit of
+   * an approved record can see what confidence it was approved at.
+   */
+  matchConfidence?: number;
 }
 
 export interface VerifyPrepareRowData {
