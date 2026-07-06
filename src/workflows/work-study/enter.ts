@@ -5,6 +5,7 @@ import { getContentFrame } from "../../systems/ucpath/navigate.js";
 import { payPathActions, hrTasks, smartHR } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_SMART_HR_URL } from "../../config.js";
+import { gotoWithRetry } from "../../infra/browser/launch.js";
 import type { WorkStudyInput } from "./schema.js";
 
 /** Mutable context populated during plan execution. */
@@ -32,10 +33,9 @@ function buildCommentsText(effectiveDate: string): string {
  */
 async function navigateToPayPathActions(page: Page): Promise<void> {
   log.step("Navigating to HR Tasks...");
-  await page.goto(UCPATH_SMART_HR_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  });
+  // gotoWithRetry refreshes through transient "site didn't load" failures
+  // (network hiccups, navigation timeouts) instead of a one-shot goto.
+  await gotoWithRetry(page, UCPATH_SMART_HR_URL, hrTasks.payPathLink(page));
   await waitForPageReady(page);
 
   // Click PayPath/Additional Pay in sidebar to expand sub-items
@@ -60,8 +60,13 @@ async function searchEmployee(
   await payPathActions.emplIdInput(frame).fill(emplId, { timeout: 10_000 });
   log.step("Filled Empl ID, clicking Search...");
   await payPathActions.searchButton(frame).click({ timeout: 10_000 });
-  // PeopleSoft reloads the iframe content after search — needs extra wait
-  await page.waitForTimeout(5_000);
+  // PeopleSoft reloads the iframe content after search — wait for the
+  // resulting employee-name readback to render instead of a blind flat pause
+  // (best-effort: the "payroll in progress" alert branch below can render
+  // instead, in which case this simply times out and falls through to it).
+  await payPathActions.employeeNameDisplay(frame)
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .catch(() => {});
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // Dismiss any PeopleSoft alert dialog (e.g. "payroll in progress" warning).
