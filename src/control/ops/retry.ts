@@ -7,6 +7,7 @@
  * `/api/run-with-data` edit-and-resume route can reuse it directly.
  */
 import { existsSync } from "fs";
+import { RetryTaskBecameActiveError } from "../../core/task-store/index.js";
 import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
 import { byTimestampAsc, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
@@ -379,7 +380,29 @@ async function reEnqueueEntry(
           error: `cannot retry: prior tracker row is missing for workflow=${wf} id=${id} runId=${resolvedRunId}`,
         };
       }
-      const retried = stores.taskStore.retryTaskFromAttempt({ runId: resolvedRunId });
+      // Pass the blocking states so `retryTaskFromAttempt` guards its reset
+      // UPDATE atomically. The `ACTIVE_STATES_BLOCKING_RETRY` pre-check above is
+      // a fast, legible early-out, but it is NOT transactional with this call —
+      // a daemon can claim the row in the JSONL-I/O window between them
+      // (`findInheritedPriorEntry`). If that happens, the guarded UPDATE matches
+      // 0 rows and throws `RetryTaskBecameActiveError`; treat it as "the task
+      // became active — refuse the retry" rather than resetting a row a worker
+      // is actively running (double execution).
+      let retried: ReturnType<typeof stores.taskStore.retryTaskFromAttempt>;
+      try {
+        retried = stores.taskStore.retryTaskFromAttempt({
+          runId: resolvedRunId,
+          blockedControlStates: [...ACTIVE_STATES_BLOCKING_RETRY],
+        });
+      } catch (err) {
+        if (err instanceof RetryTaskBecameActiveError) {
+          return {
+            ok: false,
+            error: `item became ${err.controlState} while retrying (a daemon claimed it) — cancel the active attempt before retrying (runId=${resolvedRunId})`,
+          };
+        }
+        throw err;
+      }
       resetRetriedOcrDependencies(stores.taskStore.db, retried.taskId);
       if (resolvedParent) {
         stores.taskStore.db
