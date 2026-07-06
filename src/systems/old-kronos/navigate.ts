@@ -47,6 +47,24 @@ export async function dismissModal(page: Page, iframe: Frame): Promise<void> {
 }
 
 /**
+ * Poll for the Genies SPA to reappear after a reload/re-auth — any frame
+ * named `widgetFrame*` or whose URL contains "genies". Used instead of a
+ * blind flat sleep after actions that trigger a full page reload; the outer
+ * `getGeniesIframe` retry loop re-checks these same conditions on its next
+ * iteration regardless, so this only shortens the common case.
+ */
+async function waitForAnyUkgFrame(page: Page, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const hasFrame = page
+      .frames()
+      .some((f) => f.name().startsWith("widgetFrame") || f.url().toLowerCase().includes("genies"));
+    if (hasFrame) return;
+    await page.waitForTimeout(300);
+  }
+}
+
+/**
  * Locate the Genies iframe (main employee grid) in UKG.
  * The frame is named `widgetFrame804` but falls back to any `widgetFrame*`.
  */
@@ -57,7 +75,7 @@ async function reloadOnNetworkError(page: Page, frame: Frame, label: string): Pr
   await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
   // Let UKG finish re-initializing its SPA. The outer getGeniesIframe retry loop
   // provides additional tolerance if the frame isn't ready yet after this wait.
-  await page.waitForTimeout(5_000);
+  await waitForAnyUkgFrame(page, 10_000);
   return true;
 }
 
@@ -70,7 +88,7 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
       const reAuthOk = await loginToUKG(page);
       if (!reAuthOk) throw new UKGError("Re-authentication to UKG failed", "getGeniesIframe");
       log.success("UKG re-authenticated after session expiry");
-      await page.waitForTimeout(5_000);
+      await waitForAnyUkgFrame(page, 10_000);
       continue;
     }
 
@@ -105,8 +123,9 @@ export async function getGeniesIframe(page: Page): Promise<Frame> {
   // Last resort: reload and retry
   log.step("Reloading page and retrying (final attempt)...");
   await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
-  // Keep 15s — UKG's SPA fully re-initializes on reload; too short risks missing the frame.
-  await page.waitForTimeout(15_000);
+  // UKG's SPA fully re-initializes on reload; poll for the frame instead of a
+  // blind flat sleep (cap well above the old 15s in case it's genuinely slow).
+  await waitForAnyUkgFrame(page, 30_000);
 
   const iframe = page.frame({ name: "widgetFrame804" });
   if (iframe) return iframe;
@@ -422,7 +441,9 @@ export async function switchToPreviousPayPeriod(
 
     const prevLink = timecard.previousPayPeriodLink(f);
     if (await clickIfPresent(prevLink, { timeout: 5_000, label: "old kronos previous pay period link" })) {
-      await page.waitForTimeout(5_000);
+      // Wait for the period dropdown to close (the clicked link detaches/
+      // hides) as a signal the switch was accepted, instead of a blind pause.
+      await prevLink.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
       log.step("[Old Kronos] Switched to Previous Pay Period");
       return true;
     }

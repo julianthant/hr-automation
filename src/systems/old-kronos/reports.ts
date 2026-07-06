@@ -130,8 +130,17 @@ export async function waitForReportAndDownload(
     await jsClickText(page, "CHECK REPORT STATUS");
   }
 
-  // Wait 12 seconds for the report to generate
-  await page.waitForTimeout(12_000);
+  // Wait for a NEW report-status row to actually appear (bounded poll) rather
+  // than a blind flat sleep for "the report to generate". This is the same
+  // "row not in existingRowIds" signal Phase 1 below re-confirms via the
+  // specific TR id lookup — this just avoids blocking before checking at all.
+  const reportGenDeadline = Date.now() + 24_000;
+  while (Date.now() < reportGenDeadline) {
+    const currentIds = await collectReportRowIds(page);
+    const hasNewRow = [...currentIds].some((id) => !existingRowIds.has(id));
+    if (hasNewRow) break;
+    await page.waitForTimeout(1_000);
+  }
 
   // Poll for a NEW row (not in the pre-run snapshot), then wait until it is Complete.
   let myRowId: string | null = null;
@@ -476,7 +485,12 @@ export async function handleReportsPage(
     return false;
   }
   log.step("Selected 'Time Detail'");
-  await page.waitForTimeout(5_000);
+  // Wait for the report workspace frame to actually attach before querying it
+  // below, instead of a blind flat sleep.
+  const wsFrameDeadline = Date.now() + 10_000;
+  while (Date.now() < wsFrameDeadline && !page.frame({ name: "khtmlReportWorkspace" })) {
+    await page.waitForTimeout(300);
+  }
 
   // Step 3: Set Actual/Adjusted dropdown. The report workspace frame has
   // multiple unlabeled `<select>` elements we enumerate by index and filter
