@@ -1,8 +1,9 @@
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { Session } from '../../../src/core/kernel/session.js'
+import { Session, walkDescendantPids } from '../../../src/core/kernel/session.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
+import { log } from '../../../src/utils/log.js'
 
 const makeSystem = (id: string, loginFn?: () => Promise<void>): SystemConfig => ({
   id,
@@ -1218,4 +1219,104 @@ test('session: idle reload does NOT fire for a non-registry system (crm)', async
   } finally {
     await s.close()
   }
+})
+
+test('session.close: bounded — a hung context.close() falls back to killChromeHard instead of hanging forever', async () => {
+  const warnMessages: string[] = []
+  const warnSpy = vi.spyOn(log, 'warn').mockImplementation((msg: unknown) => {
+    warnMessages.push(typeof msg === 'string' ? msg : JSON.stringify(msg))
+  })
+  const hangingContext = {
+    close: () => new Promise<void>(() => { /* deliberately never resolves — simulates a wedged CDP RPC */ }),
+  } as unknown as import('playwright').BrowserContext
+  const fakeBrowser = { close: async () => {} } as unknown as import('playwright').Browser
+  const fakePage = { close: async () => {}, isClosed: () => false } as unknown as import('playwright').Page
+  const s = Session.forTesting({
+    systems: [],
+    browsers: new Map([
+      ['kuali', { page: fakePage, context: hangingContext, browser: fakeBrowser, chromiumPid: 999_999 }],
+    ]),
+    readyPromises: new Map(),
+  })
+  const killSpy = vi.spyOn(s, 'killChromeHard').mockResolvedValue(0)
+  vi.useFakeTimers()
+  try {
+    const closePromise = s.close()
+    // Advance well past the default SESSION_CLOSE_TIMEOUT_MS (15s) bound so the
+    // hung context.close() never gets a chance to resolve on its own.
+    await vi.advanceTimersByTimeAsync(20_000)
+    await closePromise
+    assert.equal(killSpy.mock.calls.length, 1, 'killChromeHard should fire exactly once the close() timeout trips')
+    assert.ok(
+      warnMessages.some((m) => m.includes('close()') && m.includes('killChromeHard')),
+      `expected a log.warn naming the hang + fallback: ${JSON.stringify(warnMessages)}`,
+    )
+  } finally {
+    vi.useRealTimers()
+    warnSpy.mockRestore()
+    killSpy.mockRestore()
+  }
+})
+
+test('session: health monitor catch never swallows silently — logs a warning naming the system + error', async () => {
+  const warnMessages: string[] = []
+  const warnSpy = vi.spyOn(log, 'warn').mockImplementation((msg: unknown) => {
+    warnMessages.push(typeof msg === 'string' ? msg : JSON.stringify(msg))
+  })
+  const page = makeHealthPage()
+  const s = await Session.launch([{ id: 'a', login: async () => {} }], {
+    launchFn: healthFakeLaunch(page),
+    healthMonitorOverride: { tickMs: 20 },
+  })
+  const boom = new Error('inspect boom')
+  // Monkey-patch the instance's (TS-private, runtime-public) inspectSystemHealth
+  // to force the unexpected-throw path the health monitor's catch guards
+  // against — the production paths (inspectSystemHealth/refreshSystem/
+  // reopenSystem) are all internally defensive today, so this simulates a
+  // future/edge-case throw rather than reaching one through real page fakes.
+  ;(s as unknown as { inspectSystemHealth: (id: string) => Promise<unknown> }).inspectSystemHealth =
+    async () => { throw boom }
+  try {
+    await new Promise((r) => setTimeout(r, 100))
+    assert.ok(
+      warnMessages.some((m) => m.includes('a') && m.includes('inspect boom')),
+      `expected a log.warn naming the system + error: ${JSON.stringify(warnMessages)}`,
+    )
+  } finally {
+    warnSpy.mockRestore()
+    await s.close()
+  }
+})
+
+test('walkDescendantPids: BFS-walks the full descendant tree via an injected child-lookup, root excluded, no duplicates', () => {
+  // Tree:      1
+  //          /   \
+  //         2     3
+  //        /       \
+  //       4         5
+  const tree: Record<number, number[]> = {
+    1: [2, 3],
+    2: [4],
+    3: [5],
+    4: [],
+    5: [],
+  }
+  const getChildren = (pid: number): number[] => tree[pid] ?? []
+  const result = walkDescendantPids(1, getChildren)
+  assert.deepEqual([...result].sort((a, b) => a - b), [2, 3, 4, 5])
+})
+
+test('walkDescendantPids: a cycle in a buggy child-lookup does not infinite-loop', () => {
+  const tree: Record<number, number[]> = {
+    1: [2],
+    2: [1], // cycle back to root
+  }
+  const getChildren = (pid: number): number[] => tree[pid] ?? []
+  const result = walkDescendantPids(1, getChildren)
+  assert.deepEqual(result, [2])
+})
+
+test('walkDescendantPids: no children returns an empty array', () => {
+  const result = walkDescendantPids(42, () => [])
+  assert.deepEqual(result, [])
 })
