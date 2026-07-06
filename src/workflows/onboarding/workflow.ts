@@ -19,6 +19,7 @@ import {
 import { TransactionError } from "../../systems/ucpath/types.js";
 import { searchPerson } from "../../systems/ucpath/navigate.js";
 import { findExistingHireTransaction } from "../../systems/ucpath/index.js";
+import { interpretPostSubmitTxnReadback } from "../../systems/ucpath/transaction.js";
 import { loginToI9, createI9Employee, searchI9Employee } from "../../systems/i9/index.js";
 import { extractRawFields, extractRecordPageFields } from "./extract.js";
 import { validateEmployeeData } from "./schema.js";
@@ -99,6 +100,9 @@ export const onboardingWorkflow = defineWorkflow({
     { key: "wage", label: "Wage" },
     { key: "effectiveDate", label: "Eff Date" },
     { key: "i9ProfileId", label: "I9 Profile" },
+    // Stamped by the post-submit readback (or the duplicate-hire skip path).
+    // conditional: rehire / dry-run / failed runs legitimately never reach it.
+    { key: "transactionNumber", label: "Txn #", conditional: true },
   ],
   getName: (d) => {
     const name = [d.firstName, d.lastName].filter(Boolean).join(" ");
@@ -439,6 +443,9 @@ export const onboardingWorkflow = defineWorkflow({
           ctx.updateData({
             status: "Already Submitted",
             existingHireTxn: existingHire.transactionId,
+            // Same field the fresh-submit readback stamps, so the dashboard
+            // Txn # column is populated on both paths.
+            transactionNumber: existingHire.transactionId,
           });
           await ctx.screenshot({ kind: "form", label: "onboarding-existing-hire-transaction" });
           return;
@@ -451,7 +458,47 @@ export const onboardingWorkflow = defineWorkflow({
           await ctx.screenshot({ kind: 'form', label: 'onboarding-transaction-submitted' });
           log.success("Transaction created successfully in UCPath");
           ctx.updateData({ status: "Done" });
-          // ActionPlan doesn't surface the txn number; leave as "<empty>" sentinel.
+
+          // ── Post-submit transaction-number readback ──
+          // A new hire has no EID (the Smart HR list's Person ID column renders
+          // "NEW" until the transaction processes), so clickSaveAndSubmit's
+          // EID-keyed readback is structurally unavailable here. Instead reuse
+          // the NAME-keyed SS Smart HR probe — the same HIGH-CONFIDENCE
+          // instrument as the pre-submit duplicate guard (HIR/REH + in-flight
+          // status + effdt matching this run EXACTLY), so it can only return
+          // THIS run's just-submitted transaction, never a guessed number.
+          // Poll a few attempts: the list can take a beat to show the new row.
+          let readbackTxnId = "";
+          for (let attempt = 1; attempt <= 3 && !readbackTxnId; attempt++) {
+            if (attempt > 1) await ucpathPage.waitForTimeout(5_000);
+            const readback = await findExistingHireTransaction(ucpathPage, {
+              firstName: data.firstName,
+              lastName: data.lastName,
+              effectiveDate: data.effectiveDate,
+              templateId: TEMPLATE_ID,
+            });
+            if (readback.found) readbackTxnId = readback.transactionId;
+          }
+          const stamp = interpretPostSubmitTxnReadback(readbackTxnId);
+          if (stamp.submittedWithoutTxnNumber) {
+            // Fail LOUD in the tracker data (explicit marker, mirroring
+            // separations' submittedWithoutTxnNumber) — but do NOT fail the
+            // run: the hire IS submitted, and failing here would invite a
+            // retry whose fail-open duplicate probe (the same instrument that
+            // just missed) could re-submit and create a DUPLICATE HIRE.
+            txnExit = "<submitted-without-txn-number>";
+            log.warn(
+              `[Onboarding Txn] Smart HR hire submitted but the transaction number could not be `
+              + `read back from the SS Smart HR list for ${data.firstName} ${data.lastName} `
+              + `(effdt ${data.effectiveDate}) — marking submittedWithoutTxnNumber for manual lookup.`,
+            );
+            await ctx.screenshot({ kind: 'error', label: 'onboarding-transaction-submitted-missing-number' });
+            ctx.updateData({ transactionNumber: "", submittedWithoutTxnNumber: true });
+          } else {
+            txnExit = stamp.transactionNumber;
+            log.success(`[Onboarding Txn] Transaction number read back: ${stamp.transactionNumber}`);
+            ctx.updateData({ transactionNumber: stamp.transactionNumber });
+          }
         } catch (error) {
           // `ctx.retry` rethrows the underlying error verbatim on exhaustion, so the
           // old `RetryStepError` branch no longer fires on kernel-handler callsites.
