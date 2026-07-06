@@ -315,12 +315,13 @@ async function navigateToPersonOrgSummary(page: Page): Promise<FrameLocator> {
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
-  await page.waitForTimeout(5_000);
+  // Wait for the sidebar link we're about to click, instead of a blind pause.
+  const posLink = hrTasks.personOrgSummaryLink(page);
+  await posLink.waitFor({ state: "visible", timeout: 10_000 });
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
   // Click "Person Organizational Summary" in sidebar nav
   // SELECTOR: verified v1.0 — link text in HR Tasks sidebar
-  const posLink = hrTasks.personOrgSummaryLink(page);
   await safeClick(posLink, {
     timeout: 10_000,
     label: "ucpath person org summary sidebar link",
