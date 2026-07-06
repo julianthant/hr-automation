@@ -33,7 +33,7 @@ import {
   releaseParentsIfDependenciesSatisfied,
   type ReleasedParentTask,
 } from './child-state.js'
-import { retryTaskFromAttempt } from './retry.js'
+import { retryTaskFromAttempt, RetryTaskBecameActiveError } from './retry.js'
 import {
   getTask,
   getAttempt,
@@ -61,6 +61,8 @@ export type {
   ActiveTaskRef,
 }
 
+export { RetryTaskBecameActiveError }
+
 export interface ControlTaskStore {
   control: ControlDb
   db: Database
@@ -76,7 +78,15 @@ export interface ControlTaskStore {
   markTaskFailedIfActive(request: { taskId: string; attemptId?: string; error: string; now?: string }): boolean
   markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string }): void
   requestCancelTask(request: { taskId: string; reason?: string; now?: string }): TaskRow | null
-  retryTaskFromAttempt(request: { runId: string; now?: string }): EnqueuedTask
+  /**
+   * Re-enqueue a failed/terminal task as a fresh attempt. `blockedControlStates`
+   * (when supplied) guards the reset UPDATE atomically: if the task became one
+   * of those states between the caller's pre-check and this call, it throws
+   * `RetryTaskBecameActiveError` instead of resetting a row a daemon is actively
+   * running. Always bumps `claim_generation` so a racing stale worker's terminal
+   * write no-ops.
+   */
+  retryTaskFromAttempt(request: { runId: string; now?: string; blockedControlStates?: readonly string[] }): EnqueuedTask
   createDependency(request: {
     parentTaskId: string
     childTaskId: string
