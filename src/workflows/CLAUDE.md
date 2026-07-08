@@ -16,6 +16,17 @@ Every workflow is kernel-based. Declare shape via `defineWorkflow` in `workflow.
 - Compose workflows with `ctx.delegateTo` and `ctx.delegateToAll`. Do not call `runWorkflow(child, ..., { parentRunId })` or `ensureDaemonsAndEnqueue(child, ..., { parentRunId })` directly inside handlers; architecture guards block this.
 - Omitting `renderAs` is a delegated single row (the default). `renderAs: "preview"` is a presentation hint; `renderAs: "operation"` stamps `operation-member` children under the parent run via `rowShape`.
 
+## Error handling convention
+
+The default throw is a **plain `Error`** with a legible message naming the offending value/EID/field (root CLAUDE.md "Fail loud") — this is correct for the large majority of throw sites and needs no subclass.
+
+Subclass `WorkflowError` (`src/domain/workflow-error.ts`, `extends Error` with an optional generic `code`) **only when a caller needs to branch on the failure programmatically**, not just display the message:
+
+- **`instanceof`-only discrimination** — a step's generic catch-and-continue swallows most errors but must let one specific fatal condition escape. See `EmplIdNotRecognizedError` (`src/workflows/separations/steps/ucpath-transaction.ts`): the `ucpath-transaction` step's soft-failure catch normally continues to Kuali finalization, but an unrecognized Empl ID must abort the run instead — the catch does `if (e instanceof EmplIdNotRecognizedError) throw e;`.
+- **A `code` a route/caller switches on** — see `RetryPageError` (`src/workflows/ocr/retry-page.ts`): `src/tracker/dashboard/ocr/retry-page.ts` maps `err.code` (`"row-not-found" | "row-not-mutable" | "image-missing" | "spec-missing"`) to a specific HTTP status (404/409/410/400).
+
+Do not subclass just to carry a message, and do not retrofit the ~90 other plain-`Error` throw sites in the codebase onto `WorkflowError` — only migrate (or add) a subclass when a real caller needs `instanceof`/`code` branching.
+
 ## Dashboard Integration
 
 - Declare `label`, `getName`, `getId`, and labeled `detailFields` in `defineWorkflow`.
