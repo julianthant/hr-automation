@@ -7,6 +7,7 @@ import {
   sessionsDir,
 } from "./paths.js";
 import { getLogRunId } from "../utils/log-context.js";
+import { log } from "../utils/log.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applySessionEventLive } from "./state/runtime.js";
 
@@ -171,12 +172,14 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
     } catch {
       continue;
     }
-    for (const line of raw.split("\n")) {
+    for (const [i, line] of raw.split("\n").entries()) {
       if (!line) continue;
       try {
         events.push(JSON.parse(line) as SessionEvent);
-      } catch {
-        // Skip malformed lines.
+      } catch (err) {
+        log.warn(
+          `[session-events] skipping malformed JSONL line ${i + 1} in ${filePath}: ${(err as Error).message} (raw: ${line.slice(0, 80)})`,
+        );
       }
     }
     // Delete-then-set bumps insertion-order position for the LRU eviction.

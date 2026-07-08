@@ -80,11 +80,38 @@ export async function runPooledBatch<TData, TSteps extends readonly string[]>(
 
       async function worker(index: number): Promise<void> {
         const { session, authTimings } = await strategy.acquire(index)
+        // A worker drains MULTIPLE items off the shared queue on its OWN
+        // session (work-stealing `queue.shift()`), so residual per-item
+        // browser state (e.g. a stuck Person Profile page) can leak from
+        // item N to item N+1 on the SAME worker exactly like sequential
+        // mode's item loop — `betweenItems` was previously wired only into
+        // `workflow.ts`'s sequential path and silently ignored here. Skipped
+        // on each worker's OWN first item (fresh session from `acquire`).
+        let firstItem = true
         try {
           while (queue.length > 0) {
             const next = queue.shift()
             if (next === undefined) break
             const { item, itemId, runId } = next
+            const betweenItems = wf.config.batch?.betweenItems
+            const preHandler = betweenItems && !firstItem
+              ? async () => {
+                  for (const hook of betweenItems) {
+                    if (hook === 'reset') {
+                      const t0 = Date.now()
+                      await Promise.all(wf.config.systems.map((s) => session.reset(s.id)))
+                      log.step(`[Pool W${index}] Reset systems (took ${Date.now() - t0}ms)`)
+                    } else if (hook === 'health-check') {
+                      const results = await Promise.all(
+                        wf.config.systems.map(async (s) => ({ id: s.id, ok: await session.healthCheck(s.id) })),
+                      )
+                      const failed = results.find((r) => !r.ok)
+                      if (failed) throw new Error(`health-check failed for ${failed.id}`)
+                    }
+                  }
+                }
+              : undefined
+            firstItem = false
             const r = await runOneItem({
               wf,
               session,
@@ -96,6 +123,7 @@ export async function runPooledBatch<TData, TSteps extends readonly string[]>(
               callerPreEmits,
               preAssignedInstance: instance,
               authTimings,
+              preHandler,
             })
             markTerminated(runId)
             if (r.ok) result.succeeded++

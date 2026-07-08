@@ -134,9 +134,23 @@ function markTerminal(
       ...(request.claimGeneration !== undefined ? { claimGeneration: request.claimGeneration } : {}),
       now,
     })
-    // A guarded write that matched no row is a STALE completion (the lease moved
-    // on) — leave the attempt untouched so the task + attempt stay consistent.
-    if (request.claimGeneration !== undefined && result.changes === 0) return
+    if (result.changes === 0) {
+      // A guarded write (claimGeneration supplied) that matched no row is a
+      // STALE completion (the lease moved on to a peer) — a documented,
+      // verified valid state (ISS-005; see task-store.test.ts). Leave the
+      // attempt untouched so the task + attempt stay consistent.
+      if (request.claimGeneration !== undefined) return
+      // Unguarded (no claimGeneration) and STILL no row matched means
+      // `request.taskId` does not exist — never a valid state for a caller
+      // that resolved the task first. Silently returning here would mask the
+      // failure: the attempt write below would proceed unconditionally
+      // against a task that was never terminalized, and callers (e.g.
+      // `markTaskTerminal` in daemon/queue.ts) append a success audit event
+      // regardless of this function's (void) return. Fail loud instead.
+      throw new Error(
+        `markTerminal: no task found for taskId ${request.taskId} (taskState=${request.taskState})`,
+      )
+    }
     if (request.attemptId) {
       db.prepare(`
         UPDATE task_attempts

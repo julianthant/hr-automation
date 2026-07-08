@@ -87,6 +87,57 @@ test("uses SQLite task rows when all expected child tasks exist", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("logs a warning when a terminal item's stored data JSON is corrupted", async () => {
+  const dir = setupTrackerDir();
+  const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
+  const [a] = taskStore.enqueueTasks({
+    workflow: "oath-signature",
+    inputs: [{ emplId: "10000003" }],
+    deriveItemId: (input) => input.emplId,
+    runIds: ["sig-run-c"],
+  });
+
+  // Seed a corrupted `items.latest_data_json` value directly, simulating
+  // on-disk data corruption ahead of the projection read.
+  taskStore.db.prepare(`
+    INSERT INTO items (
+      workflow, tracker_date, item_id, latest_run_id, latest_status,
+      latest_ts, latest_data_json, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    "oath-signature", "2026-05-01", "10000003", "sig-run-c", "done",
+    new Date().toISOString(), "{not valid json", new Date().toISOString(),
+  );
+
+  const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+
+  try {
+    const promise = watchChildRuns({
+      workflow: "oath-signature",
+      expectedItemIds: ["10000003"],
+      trackerDir: dir,
+      timeoutMs: 5000,
+    });
+
+    setTimeout(() => {
+      taskStore.markTaskDone({ taskId: a.taskId, attemptId: a.attemptId });
+    }, 100);
+
+    const outcomes = await promise;
+    assert.equal(outcomes.length, 1);
+    assert.deepEqual(outcomes[0]?.data, {});
+
+    assert.equal(warn.mock.calls.length, 1);
+    const [message] = warn.mock.calls[0] ?? [];
+    assert.match(String(message), /failed to parse stored data JSON/);
+    assert.match(String(message), /10000003/);
+  } finally {
+    warn.mockRestore();
+    taskStore.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fresh dir after closeStateDbForTests yields empty store", async () => {
   const dir = setupTrackerDir();
   let reopenedStore: ReturnType<typeof createTaskStore> | null = null;

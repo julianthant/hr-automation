@@ -255,14 +255,30 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
   if (bestEffort) {
     try {
       await markAndSettle()
-    } catch {
-      /* best-effort — queue event append; tracker row below is the user-visible signal */
+    } catch (e) {
+      // Best-effort — this path is ONLY reached from the SIGINT-grace-window
+      // shutdown sweep (the claim-loop caller in daemon.ts never passes
+      // bestEffort, so it lets the same failure throw for real). A swallowed
+      // failure here can leave the task non-terminal in SQLite / a dependent
+      // parent unsettled, so it must never be fully silent even though we
+      // don't want a transient SQLite hiccup to abort process teardown.
+      log.warn(
+        `[Daemon ${wf.config.name}] shutdown mark/settle failed for item '${item.itemId}' (taskId ${item.taskId ?? 'n/a'}): ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      )
     }
     if (shouldEmitRow) {
       try {
         emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
-      } catch {
-        /* best-effort */
+      } catch (e) {
+        // Best-effort: the SQLite mark/settle above (or its own warn) is the
+        // durable signal; this only affects the tracker-row visual signal.
+        log.warn(
+          `[Daemon ${wf.config.name}] shutdown failed-row emit threw for item '${item.itemId}': ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        )
       }
     }
     return

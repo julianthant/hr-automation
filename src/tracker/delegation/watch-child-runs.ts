@@ -326,7 +326,7 @@ function batchGetItemProjections(
   const out = new Map<string, { data: Record<string, string>; error?: string }>();
   for (const row of rows) {
     out.set(row.item_id, {
-      data: parseStringRecord(row.latest_data_json),
+      data: parseStringRecord(row.latest_data_json, `item ${row.item_id} (workflow ${workflow})`),
       ...(row.latest_error ? { error: row.latest_error } : {}),
     });
   }
@@ -350,7 +350,7 @@ function findBlockedParentBatch(
   return row ? row.task_id : null;
 }
 
-function parseStringRecord(raw: string | null): Record<string, string> {
+function parseStringRecord(raw: string | null, context?: string): Record<string, string> {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -361,7 +361,10 @@ function parseStringRecord(raw: string | null): Record<string, string> {
       else if (value !== undefined && value !== null) out[key] = String(value);
     }
     return out;
-  } catch {
+  } catch (err) {
+    log.warn(
+      `watch-child-runs: failed to parse stored data JSON${context ? ` for ${context}` : ""}: ${errorMessage(err)}`,
+    );
     return {};
   }
 }

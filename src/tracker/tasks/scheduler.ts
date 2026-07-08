@@ -1,4 +1,5 @@
 import { transaction } from "../../infra/sqlite/index.js";
+import { log } from "../../utils/log.js";
 
 import { emitTrackerRow, type TrackerEntry, type TrackerRowEmission } from "../jsonl.js";
 import type { TaskStore } from "./store.js";
@@ -270,7 +271,11 @@ function readLatestProjectedRun(
     ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
     status: row.latest_status,
     ...(row.latest_step ? { step: row.latest_step } : {}),
-    data: parseStringRecord(row.latest_data_json),
+    data: parseStringRecord(row.latest_data_json, {
+      workflow: row.workflow,
+      itemId: row.item_id,
+      runId: row.run_id,
+    }),
     ...(row.latest_error ? { error: row.latest_error } : {}),
     timestamp: row.latest_tracker_ts,
   };
@@ -280,7 +285,10 @@ function isTerminal(status: TrackerEntry["status"]): boolean {
   return status === "done" || status === "failed" || status === "skipped";
 }
 
-function parseStringRecord(raw: string | null): Record<string, string> {
+function parseStringRecord(
+  raw: string | null,
+  context?: { workflow: string; itemId: string; runId: string | null },
+): Record<string, string> {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -291,7 +299,12 @@ function parseStringRecord(raw: string | null): Record<string, string> {
       else if (value !== undefined && value !== null) out[key] = String(value);
     }
     return out;
-  } catch {
+  } catch (err) {
+    log.warn(
+      `[scheduler] failed to parse latest_data_json for ` +
+        `workflow=${context?.workflow ?? "?"} item=${context?.itemId ?? "?"} ` +
+        `run=${context?.runId ?? "?"}: ${String(err)}`,
+    );
     return {};
   }
 }

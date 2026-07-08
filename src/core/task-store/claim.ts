@@ -62,7 +62,22 @@ function claimNextTaskReturning(
       WHERE id = (SELECT id FROM next_task)
       RETURNING *
     `).get(request) as TaskDbRow | undefined
-    if (!row?.current_attempt_id) return null
+    if (!row) return null
+    if (!row.current_attempt_id) {
+      // The UPDATE...RETURNING already fired: this row's `control_state` is
+      // now 'claimed', owned by `request.workerId`, with `claim_generation`
+      // incremented — a REAL claim against the DB. Returning `null` here
+      // (as if nothing were available) would read as "no work claimed" to
+      // the caller while the task sits phantom-claimed and unowned in
+      // practice (no attempt to complete it with) until its lease expires.
+      // A daemon `workflow_item` is always enqueued together with its
+      // attempt (`enqueueTasks`), so a missing `current_attempt_id` here is
+      // a genuine data-integrity violation, not a valid empty-queue state —
+      // throwing rolls back this transaction's claim (task-store.ts wraps
+      // `BEGIN IMMEDIATE`/`ROLLBACK`), leaving the task queued rather than
+      // stranded in a claimed-but-unowned limbo.
+      throw new Error(`claimNextTask: claimed task ${row.id} has no current_attempt_id`)
+    }
     markAttemptClaimed(db, row.current_attempt_id, request.workerId, request.now)
     // The post-increment generation is the lease this worker now holds. A
     // re-pend + re-claim by a peer advances it again, so the original worker's

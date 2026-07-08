@@ -486,8 +486,17 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
                 childState: 'failed',
               })
               void wakeDaemonsForReleasedParents(released, trackerDir)
-            } catch {
-              /* best-effort */
+            } catch (e) {
+              // Best-effort (last-daemon shutdown sweep, mirrors the `won`
+              // handling above): a dependent parent may stay stuck in
+              // waiting_dependencies until manually recovered, so this must
+              // never be fully silent even though we don't abort the loop
+              // (a throw here would strand the REMAINING queued items too).
+              log.warn(
+                `[Daemon ${wf.config.name}/${instanceId}] dependency settle failed for queued item '${item.id}' (taskId ${item.taskId}) — a dependent parent may stay stuck waiting: ${
+                  e instanceof Error ? e.message : String(e)
+                }`,
+              )
             }
           }
           try {
@@ -515,8 +524,14 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
               },
               trackerDir,
             )
-          } catch {
-            /* best-effort */
+          } catch (e) {
+            // Best-effort: SQLite is already durably marked failed (the `won`
+            // check above); this only affects the tracker-row VISUAL signal.
+            log.warn(
+              `[Daemon ${wf.config.name}/${instanceId}] failed-row emit threw for queued item '${item.id}': ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            )
           }
         }
       }

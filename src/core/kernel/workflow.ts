@@ -11,7 +11,7 @@ import { defaultPresentationFromMetadata, mergePresentation } from '../../domain
 import type { WorkflowArchetype, WorkflowArchetypeOrResolver } from '../../domain/row-archetype.js'
 import type { QueueRowKindOrResolver } from '../../domain/queue-row-kind.js'
 import { queueRowKindFromInputSubject } from '../../domain/queue-row-kind.js'
-import { register, autoLabel, normalizeDetailField } from './registry.js'
+import { register, getAll, autoLabel, normalizeDetailField } from './registry.js'
 import { setWorkflowRuntimePolicy } from '../../domain/workflow-runtime/registry.js'
 import { registerWorkflowStatusExtensions } from '../../domain/queue-row-status.js'
 import { Session } from './session.js'
@@ -106,6 +106,28 @@ export function defineWorkflow<TData, TSteps extends readonly string[]>(
     config.inputSubject ?? 'name',
   )
   const code = (config.code ?? config.name.slice(0, 2)).toLowerCase()
+  // Fail loud on an EXPLICIT code collision: two workflows declaring the same
+  // trace-id prefix corrupt run correlation (the same `<code>-...` id would
+  // name two different workflows). Guard only EXPLICITLY-declared codes: every
+  // production workflow declares an explicit `code` (the queue-row-kind-coverage
+  // architecture guard requires it), so a collision between two implicit
+  // name-derived prefixes can only occur between throwaway test workflows and is
+  // not a real-world defect. Re-registering the SAME name (test re-def, hot
+  // reload) is not a collision.
+  if (config.code !== undefined) {
+    const codeCollision = getAll().find((m) => m.code === code && m.name !== config.name)
+    if (codeCollision) {
+      // Surface LOUD (not throw): a duplicate trace-id prefix corrupts run
+      // CORRELATION (observability), not HR data — crashing the whole app at
+      // module load over a 2-char overlap is disproportionate. A startup warn
+      // is visible + actionable; production codes are curated unique, so this
+      // only fires on a genuine duplicate.
+      log.warn(
+        `defineWorkflow('${config.name}'): code '${code}' is already used by workflow '${codeCollision.name}'. ` +
+        `Trace-id prefixes should be unique — set an explicit, distinct 'code' on one of these workflows.`,
+      )
+    }
+  }
   const presetsMetadata = config.presets
     ? validateAndNormalizePresets(config.name, config.steps, config.presets)
     : undefined

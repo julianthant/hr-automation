@@ -5,6 +5,7 @@ import { defineWorkflow } from "../../../src/core/index.js";
 import { buildHttpPendingData } from "../../../src/core/daemon/enqueue-dispatch.js";
 import { personLookupWorkflow } from "../../../src/workflows/person-lookup/workflow.js";
 import { separationsWorkflow } from "../../../src/workflows/separations/workflow.js";
+import { emergencyContactWorkflow } from "../../../src/workflows/emergency-contact/workflow.js";
 
 test("buildHttpPendingData: EID lookup HTTP enqueue seeds normalized display data", () => {
   const data = buildHttpPendingData(personLookupWorkflow, { name: "zaw, hein thant" });
@@ -65,6 +66,28 @@ test("buildHttpPendingData honors direct input-run batch row-shape hint", () => 
 
   assert.equal(data.searchName, "Doe, Jane");
   assert.equal(data.archetype, "operation-member");
+});
+
+test("buildHttpPendingData: emergency-contact OCR fan-out seeds employeeName for member preview", () => {
+  const data = buildHttpPendingData(emergencyContactWorkflow, {
+    sourcePage: 2,
+    employee: {
+      name: "Akitsugu Uchida",
+      employeeId: "10794813",
+    },
+    emergencyContact: {
+      name: "Sara Garcia",
+      relationship: "Parent",
+      primary: true,
+      sameAddressAsEmployee: true,
+    },
+    notes: [],
+  });
+
+  assert.equal(data.employeeName, "Akitsugu Uchida");
+  assert.equal(data.emplId, "10794813");
+  assert.equal(data.__name, "Akitsugu Uchida");
+  assert.equal(data.contactName, "Sara Garcia");
 });
 
 test("personLookupWorkflow exposes the stable itemId deriver for HTTP enqueue", () => {

@@ -1,4 +1,4 @@
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,6 +29,9 @@ import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 import { rowFilePath } from '../../../src/tracker/paths.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
+import { log } from '../../../src/utils/log.js'
+
+import * as queueModule from '../../../src/core/daemon/queue.js'
 
 // Fake Session that has no browsers — works fine because our test workflow
 // uses `systems: []` so nothing calls `page()` / `healthCheck()`.
@@ -1979,6 +1982,76 @@ test('runWorkflowDaemon: an idle daemon re-polls and claims enqueued work even w
     })
     await runPromise
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Fail-loud regression: `claimNextItem` resolving `null` is the VALID
+ * "genuinely empty queue" signal, but a THROWN claim error was previously
+ * swallowed to that same `null` via a bare `.catch(() => null)` — making a
+ * real fault (e.g. a SQLite transaction failure) indistinguishable from
+ * healthy idle. Prove the fix: an induced one-time throw is (1) logged loud
+ * via `log.error` (not silently downgraded) and (2) does NOT wedge the
+ * daemon — it retries and still claims + finishes the item once the fault
+ * clears, rather than parking as if there were no work.
+ */
+test('runWorkflowDaemon: a claimNextItem THROW is logged loud and retried, not swallowed as an empty queue', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-claim-error-'))
+  const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {})
+  const claimSpy = vi.spyOn(queueModule, 'claimNextItem')
+  try {
+    const seen: string[] = []
+    const wf = defineWorkflow({
+      name: 'dint-claim-err',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      getId: (d) => (d as { id: string }).id,
+      handler: async (ctx, data) => {
+        await ctx.step('run', async () => {
+          seen.push((data as { id: string }).id)
+        })
+      },
+    })
+
+    await enqueueItems<{ id: string }>('dint-claim-err', [{ id: 'one' }], (d) => d.id, dir)
+
+    claimSpy.mockImplementationOnce(() => Promise.reject(new Error('simulated claim failure')))
+
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 200,
+    })
+
+    const { port } = await waitForDaemon('dint-claim-err', dir)
+
+    // The first claim attempt throws (above); the loop must not treat that
+    // as "nothing queued" forever — it retries (CLAIM_ERROR_RETRY_MS) and
+    // the item is still claimed and completed.
+    await waitFor(async () => {
+      const st = await readQueueStateIncludingTerminals('dint-claim-err', dir)
+      return st.done.length === 1
+    }, 8_000)
+
+    console.error('DEBUG calls', claimSpy.mock.calls.length)
+    assert.deepEqual(seen, ['one'])
+    assert.ok(
+      errorSpy.mock.calls.some((call) => String(call[0]).includes('claim error')),
+      'expected the induced claim failure to be logged via log.error, not swallowed silently',
+    )
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+  } finally {
+    errorSpy.mockRestore()
     rmSync(dir, { recursive: true, force: true })
   }
 })
