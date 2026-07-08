@@ -24,6 +24,38 @@ export function formatTimecardDate(
 }
 
 /**
+ * Positive check that a displayed pay-period label actually changed after a
+ * "switch to previous period" (or "apply a custom range") action.
+ *
+ * Both Old and New Kronos close their period dropdown/option as soon as the
+ * click registers (`.waitFor({ state: "hidden" })`) — that only proves the
+ * dropdown/option DETACHED, not that the underlying timecard grid actually
+ * switched periods. Trusting the dropdown-close signal alone risks reading
+ * the grid while it still shows the ORIGINAL period (silently wrong LDW /
+ * sick / holiday data — see root CLAUDE.md "Fail loud"). Call this
+ * immediately after the dropdown-close wait, comparing the period label read
+ * before the switch to the label read after, and fail loud (throw) when it
+ * returns `false`.
+ *
+ * `after` must be non-blank AND different from `before` (case/whitespace
+ * insensitive). When `currentLabelPattern` is supplied, `after` must also NOT
+ * still match it — used by New Kronos to catch the case where the label
+ * closed the dropdown but is still literally showing "Current Pay Period".
+ */
+export function didPeriodLabelSwitch(
+  before: string,
+  after: string,
+  currentLabelPattern?: RegExp,
+): boolean {
+  const b = before.trim().toLowerCase();
+  const a = after.trim().toLowerCase();
+  if (!a) return false;
+  if (a === b) return false;
+  if (currentLabelPattern && currentLabelPattern.test(after)) return false;
+  return true;
+}
+
+/**
  * Generic timecard-check orchestration: navigate to timecard, check the
  * current pay period, and if empty, switch to the previous period and
  * re-check.
