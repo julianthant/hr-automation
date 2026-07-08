@@ -84,6 +84,8 @@ If you can't satisfy both, **fail loud** — do not add the fallback. When in do
 
 **When you catch, don't swallow:** a `catch` that returns a default/empty/`{}`/`null`/`0`/`true` and lets execution continue must instead re-throw (or at minimum `log.warn` AND propagate a distinguishable "unknown" the caller checks) — never let "the check failed" become indistinguishable from "the check passed / found nothing." `catch { won = true }`, `catch { return [] }`, `JSON.parse(...) catch { return {} }`, `.catch(() => ({ match: true }))`, and `?? "SDCMP"` / `?? "queued"` on corrupted input are all bugs, not resilience.
 
+**Mechanically enforced (ratchet guards, `npm run test:architecture`):** `tests/unit/architecture/fail-loud-catch-default.test.ts` (catch blocks that return/assign a bare default, both `catch { ... }` and `.catch(() => <default>)`), `tests/unit/architecture/wait-for-timeout-allowlist.test.ts` (every `waitForTimeout(` in `src/workflows/`/`src/systems/` must be an allowlisted, reasoned survivor), `tests/unit/architecture/inline-selectors-workflows.test.ts` (extends `tests/unit/systems/inline-selectors.test.ts` to `src/workflows/**`), and `tests/unit/architecture/nullish-literal-data-fallback.test.ts` (`data.x ?? "<literal>"`-shaped fallbacks). Each is a per-file allowlist with a required one-line justification — new occurrences fail the guard immediately; see each file's header comment for how to fix vs. allowlist.
+
 ## Best Practices
 
 - **Selectors:** `npm run selector:search "<intent>"` first. New selector: map via `playwright-cli` → add JSDoc + `// verified <date>` to `selectors.ts` → `npm run selectors:catalog`. Full workflow: `src/systems/CLAUDE.md`.
