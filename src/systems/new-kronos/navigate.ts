@@ -532,7 +532,9 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
 
     const prevOption = timecard.previousPayPeriodOption(page);
     if (await clickIfPresent(prevOption, { timeout: 5_000, label: "new kronos previous pay period option" })) {
-      await page.waitForTimeout(5_000);
+      // Wait for the period dropdown option to close (detach/hide) as a
+      // signal the switch was accepted, instead of a blind pause.
+      await prevOption.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
       log.step("[New Kronos] Switched to Previous Pay Period");
       return true;
     }

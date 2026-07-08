@@ -48,14 +48,19 @@ export async function openActionList(page: Page): Promise<void> {
     KUALI_SPACE_URL,
     actionList.menuItem(page),
   );
-  await page.waitForTimeout(3_000);
+  // gotoWithRetry's `verify` only checks count() > 0; wait for the menu item to
+  // actually be visible/interactable before clicking it.
+  await actionList.menuItem(page).waitFor({ state: "visible", timeout: 8_000 });
 
   log.step("Clicking Action List...");
   await safeClick(actionList.menuItem(page), {
     timeout: 15_000,
     label: "kuali action list menu item",
   });
-  await page.waitForTimeout(3_000);
+  // The Action List's own search box is UI chrome that renders as soon as the
+  // list view mounts (independent of whether any documents are pending), so
+  // it's a reliable "Action List loaded" signal.
+  await actionList.searchInput(page).waitFor({ state: "visible", timeout: 8_000 });
   log.success("Action List loaded");
 }
 
@@ -133,16 +138,22 @@ export async function clickDocument(page: Page, docNumber: string): Promise<stri
   });
   // Let the filtered result render (Kuali refetches the list server-side).
   await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
-  await page.waitForTimeout(1_500);
-
   const docLink = actionList.docLink(page, docNumber);
+  // Wait for the matching row to actually render before checking count() — a
+  // genuine "not found" search still settles quickly, so this only shortens
+  // the common (found) case rather than lengthening the miss case.
+  await docLink.first().waitFor({ state: "visible", timeout: 3_000 }).catch(() => {});
   if ((await docLink.count()) === 0) {
     throw new Error(`Document #${docNumber} not found in Action List`);
   }
 
   log.step(`Found document #${docNumber}, clicking...`);
   await safeClick(docLink.first(), { timeout: 10_000, label: "kuali document link" });
-  await page.waitForTimeout(3_000);
+  // Wait for the separation form to render before reading the resulting URL.
+  // Best-effort (.catch): a non-separation Action List document has no
+  // employeeName field — extraction still enforces field presence via its
+  // own per-field timeouts, so this is a readiness gate, not a hard contract.
+  await separationForm.employeeName(page).waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
 
   const url = page.url();
   log.success(`Document #${docNumber} opened: ${url}`);
