@@ -12,6 +12,16 @@ export {
 } from "./history.js";
 export type { OnboardingOathHistory } from "./history.js";
 export {
+  searchCrmOnboardingResultRows,
+  extractCrmOnboardingRecord,
+  hasIdentifyingCrmData,
+  navigatedToCrmRecordHost,
+} from "./onboarding-records.js";
+export type {
+  CrmOnboardingSearchRow,
+  CrmOnboardingRecord,
+} from "./onboarding-records.js";
+export {
   DEFAULT_CRM_DOC_INDICES,
   buildCrmDocumentDownloadPath,
   buildCrmDocumentFolderName,
