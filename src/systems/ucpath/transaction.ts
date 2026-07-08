@@ -964,27 +964,46 @@ export async function findExistingTerminationTransaction(
     }
     log.step(`[Txn Lookup] Matching row found (link='${linkText}') — reading txn #`);
 
+    // This is the pre-submit duplicate guard — `clickIfPresent` would swallow
+    // a genuine click failure (element present, click throws) into the same
+    // `false` as "row genuinely absent," and the code below would then treat
+    // that as "no existing transaction," clearing the way for a duplicate
+    // termination submit (the exact risk the outer catch below exists to
+    // prevent). So only a true absence (count === 0 — the row vanished
+    // between the scan and the click) is treated as "no match" here; once the
+    // row is confirmed present, the click is a hard `safeClick` that THROWS
+    // on failure and reaches the outer catch's fail-loud error.
     const link = frame.getByRole("link", { name: linkText }); // allow-inline-selector -- dynamic matched-name link
-    if (!(await clickIfPresent(link, {
-      timeout: 5_000,
-      label: "ucpath existing transaction row link",
-    }))) {
+    if ((await link.count().catch(() => 0)) === 0) {
       log.warn(`[Txn Lookup] Row matched but link '${linkText}' disappeared before click — treating as no match`);
       return { txnNumber: null, alreadyAtSmartHR: true };
     }
+    await safeClick(link.first(), {
+      timeout: 5_000,
+      label: "ucpath existing transaction row link",
+    });
     // Wait for PeopleSoft to render the transaction detail page.
     await waitForPeopleSoftProcessing(frame, 15_000);
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
 
+    // Same reasoning as the row-link click above: Continue is a required
+    // navigation step to reach the page that carries the Transaction ID, not
+    // an optional affordance — a click failure here must propagate (not be
+    // read as "no existing transaction").
     const continueBtn = smartHR.continueButton(frame);
-    if (await clickIfPresent(continueBtn, {
+    if ((await continueBtn.count().catch(() => 0)) === 0) {
+      throw new Error(
+        `[Txn Lookup] Continue button not found on the transaction detail page for eid=${employeeId} — ` +
+        "cannot confirm whether an existing termination transaction exists",
+      );
+    }
+    await safeClick(continueBtn.first(), {
       timeout: 5_000,
       label: "ucpath existing transaction continue button",
-    })) {
-      // Wait for PeopleSoft to load the transaction form after Continue.
-      await waitForPeopleSoftProcessing(frame, 15_000);
-      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    }
+    });
+    // Wait for PeopleSoft to load the transaction form after Continue.
+    await waitForPeopleSoftProcessing(frame, 15_000);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
 
     const txnNumber = await readTxnNumberFromDetailPage(frame);
     if (txnNumber) {

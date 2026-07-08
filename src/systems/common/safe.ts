@@ -103,8 +103,10 @@ export async function clickIfPresent(
     count = await locator.count();
   } catch (err) {
     // count() can reject on cancel (signal injected by the Page proxy) — that
-    // must propagate; any other count failure means "treat as absent".
+    // must propagate; any other count failure means "treat as absent". Still
+    // log so a swallowed count() error (e.g. frame detached) isn't invisible.
     if (isCancellation(err)) throw err;
+    log.debug(`${opts.label}: count() failed, treating as absent — ${errorMessage(err)}`);
     return false;
   }
   if (count === 0) return false;

@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import { pickI9SignerSearchResult, searchI9Employee } from "./search.js";
 import { search as searchSelectors, summary as summarySelectors } from "./selectors.js";
 import type { I9SearchCriteria } from "./types.js";
@@ -85,7 +86,16 @@ export async function lookupSection2Signer(
     const restricted = await searchSelectors
       .accessRestrictedAlert(page)
       .count()
-      .catch(() => 0);
+      .catch((err) => {
+        // A count() failure here (e.g. a detached frame) must not silently
+        // resolve to "not restricted" without a trace — that would collapse
+        // back into the exact "existing record misreported as not-found"
+        // problem this check exists to catch (see 2026-06-06 lesson).
+        log.warn(
+          `I9 ${label}: access-restricted alert check failed, treating as not-restricted — ${errorMessage(err)}`,
+        );
+        return 0;
+      });
     if (restricted > 0) {
       log.step(`I9 ${label}: record exists but operator lacks access (restricted)`);
       return { status: "unable-to-access", signerName: null };
@@ -140,18 +150,10 @@ export async function lookupSection2Signer(
     return { status: "historical", signerName: null, profileId, i9Id };
   }
 
-  // Wait for the summary view + the audit-trail TABLE to render. The heading
-  // appears before the audit rows populate, so anchoring only on the heading
-  // raced the `row.count()` below (count 0 → a signed record mis-read as
-  // unsigned). Both routes (`/form-I9/summary` + the historical redirect)
-  // expose the same heading.
+  // Wait for the summary view heading. Both routes (`/form-I9/summary` +
+  // the historical redirect) expose the same heading.
   try {
     await waitForSummaryView(page);
-    await summarySelectors
-      .auditTrailHeaderRow(page)
-      .first()
-      .waitFor({ state: "visible", timeout: 10_000 })
-      .catch(() => {});
   } catch {
     return {
       status: "error",
@@ -162,11 +164,43 @@ export async function lookupSection2Signer(
     };
   }
 
+  // The heading appears before the audit-trail TABLE populates, so anchoring
+  // only on the heading raced the `row.count()` below in the past (count 0 →
+  // a signed record mis-read as unsigned; see 2026-06-06 lesson). Wait for
+  // the audit-trail header row to confirm the table itself rendered — but
+  // track whether that confirmation succeeded, because `row.count()` below
+  // is only trustworthy evidence of "unsigned" once we know the table loaded.
+  // NEEDS LIVE VERIFY: confirm live whether a genuinely-unsigned I-9 ever
+  // takes >10s to render the audit-trail header row under normal load — if
+  // so this fix would need a longer timeout rather than reporting "error".
+  const auditTableConfirmedRendered = await summarySelectors
+    .auditTrailHeaderRow(page)
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+
   // Find the "Signed Section 2" audit row. Missing on modern I-9s where
   // Section 2 hasn't been signed yet (historical was already returned above).
   const row = summarySelectors.signedSection2Row(page);
   const rowCount = await row.count();
   if (rowCount === 0) {
+    if (!auditTableConfirmedRendered) {
+      // A 0 count with an unconfirmed audit table is NOT trustworthy evidence
+      // of "unsigned" — it may just mean the table hasn't loaded yet. Fail
+      // loud instead of reporting a false "unsigned" for a record that could
+      // actually be signed.
+      log.warn(
+        `I9 ${label}: audit-trail table never confirmed rendered before counting — refusing to report "unsigned"`,
+      );
+      return {
+        status: "error",
+        signerName: null,
+        profileId,
+        i9Id,
+        detail: "Audit-trail table did not render in time to confirm Section 2 is genuinely unsigned",
+      };
+    }
     log.step(`I9 ${label}: Section 2 unsigned (no signed-section-2 audit row)`);
     return { status: "unsigned", signerName: null, profileId, i9Id };
   }

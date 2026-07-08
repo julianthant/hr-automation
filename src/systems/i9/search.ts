@@ -168,7 +168,20 @@ async function parseSearchResults(page: Page): Promise<I9SearchResult[]> {
     const cells = row.getByRole("gridcell"); // allow-inline-selector -- row-scoped cell readback, rooted in registry row
     const cellCount = await cells.count();
 
-    if (cellCount < 5) continue; // Skip malformed rows
+    if (cellCount < 5) {
+      // A row with fewer than 5 cells doesn't match the expected grid shape
+      // (Last Name, First Name, Employer, Worksite, Profile ID, ...). Silently
+      // dropping it without a trace risks a false "not found"/"unsigned" for a
+      // record that's actually present but mis-parsed — surface it so a
+      // shrinking result set is diagnosable instead of invisible.
+      // LIVE-VERIFIED 2026-07-08: a real "Smith" search renders results rows
+      // with uniformly 10 cells (the dashboard's separate reverification grid
+      // is uniformly 5), and a zero-result search renders NO tbody rows at
+      // all (no short placeholder row) — so a sub-5-cell row here is always
+      // a genuine parse anomaly, never a legitimate grid state.
+      log.warn(`I9 search: skipping malformed result row ${i} (only ${cellCount} cell(s))`);
+      continue;
+    }
 
     const cellTexts = await cells.allTextContents();
     const lastName = cellTexts[0] ?? "";
