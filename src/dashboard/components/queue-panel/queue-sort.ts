@@ -30,9 +30,18 @@ function deferTerminalNotFoundToEnd(mode: QueueSortMode): boolean {
   return mode === "label-asc" || mode === "label-desc";
 }
 
+/**
+ * Start-time anchor for queue sort — matches {@link EntryItem}'s elapsed/footer
+ * chain (`firstLogTs` → `startTimestamp` → `timestamp`).
+ */
+export function queueSortStartTs(entry: TrackerEntry): string {
+  const start = entry.firstLogTs || entry.startTimestamp || entry.timestamp || "";
+  return start;
+}
+
 function compareStartNewest(a: TrackerEntry, b: TrackerEntry): number {
-  const aStart = a.firstLogTs ?? "";
-  const bStart = b.firstLogTs ?? "";
+  const aStart = queueSortStartTs(a);
+  const bStart = queueSortStartTs(b);
   if (!aStart && bStart) return 1;
   if (aStart && !bStart) return -1;
   if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
@@ -40,8 +49,8 @@ function compareStartNewest(a: TrackerEntry, b: TrackerEntry): number {
 }
 
 function compareStartOldest(a: TrackerEntry, b: TrackerEntry): number {
-  const aStart = a.firstLogTs ?? "";
-  const bStart = b.firstLogTs ?? "";
+  const aStart = queueSortStartTs(a);
+  const bStart = queueSortStartTs(b);
   if (!aStart && bStart) return 1;
   if (aStart && !bStart) return -1;
   if (!aStart && !bStart) return a.timestamp.localeCompare(b.timestamp);
@@ -162,18 +171,9 @@ export function sortDaemonOperationParentIds(
     const members = membersByParent.get(pid) ?? [];
     const rep = buildDaemonOperationSortRepresentative(pid, members, workflowLabel);
     const allNf = operationMembersAreAllTerminalNotFound(members);
-    return { pid, rep, allNf };
+    return { pid, rep, deferNotFoundBucket: allNf };
   });
-  if (!deferTerminalNotFoundToEnd(mode)) {
-    return [...wrapped]
-      .sort((a, b) => compareByMode(a.rep, b.rep, mode, displayNames))
-      .map((w) => w.pid);
-  }
-  const primary = wrapped.filter((w) => !w.allNf);
-  const deferred = wrapped.filter((w) => w.allNf);
-  const sortBucket = (bucket: typeof wrapped) =>
-    [...bucket].sort((a, b) => compareByMode(a.rep, b.rep, mode, displayNames));
-  return [...sortBucket(primary), ...sortBucket(deferred)].map((w) => w.pid);
+  return sortQueueRenderItems(wrapped, mode, displayNames).map((w) => w.pid);
 }
 
 /**
@@ -181,23 +181,56 @@ export function sortDaemonOperationParentIds(
  * render after other rows, then sort within each tier. For **start time**
  * sorts, every row (including not found) orders by the active time rule only.
  */
+export interface QueueSortRenderItem {
+  rep: TrackerEntry;
+  /** Label sorts only: sink all–not-found operation batches after other rows. */
+  deferNotFoundBucket?: boolean;
+}
+
+function sortRenderItemsByMode(
+  items: QueueSortRenderItem[],
+  mode: QueueSortMode,
+  displayNames?: Map<string, string>,
+): QueueSortRenderItem[] {
+  const compare = (a: QueueSortRenderItem, b: QueueSortRenderItem) =>
+    compareByMode(a.rep, b.rep, mode, displayNames);
+
+  if (!deferTerminalNotFoundToEnd(mode)) {
+    return [...items].sort(compare);
+  }
+
+  const deferred: QueueSortRenderItem[] = [];
+  const rest: QueueSortRenderItem[] = [];
+  for (const item of items) {
+    if (item.deferNotFoundBucket || isTerminalNotFoundEntry(item.rep)) {
+      deferred.push(item);
+    } else {
+      rest.push(item);
+    }
+  }
+  const sortBucket = (bucket: QueueSortRenderItem[]) => [...bucket].sort(compare);
+  return [...sortBucket(rest), ...sortBucket(deferred)];
+}
+
+/** Sort heterogeneous queue render rows (preview/operation cards + flat singles) together. */
+export function sortQueueRenderItems<T extends QueueSortRenderItem>(
+  items: T[],
+  mode: QueueSortMode,
+  displayNames?: Map<string, string>,
+): T[] {
+  return sortRenderItemsByMode(items, mode, displayNames) as T[];
+}
+
 export function sortQueueEntriesForDisplay(
   entries: TrackerEntry[],
   mode: QueueSortMode,
   displayNames?: Map<string, string>,
 ): TrackerEntry[] {
-  if (!deferTerminalNotFoundToEnd(mode)) {
-    return [...entries].sort((a, b) => compareByMode(a, b, mode, displayNames));
-  }
-  const terminalNotFound: TrackerEntry[] = [];
-  const rest: TrackerEntry[] = [];
-  for (const e of entries) {
-    if (isTerminalNotFoundEntry(e)) terminalNotFound.push(e);
-    else rest.push(e);
-  }
-  const sortBucket = (bucket: TrackerEntry[]) =>
-    [...bucket].sort((a, b) => compareByMode(a, b, mode, displayNames));
-  return [...sortBucket(rest), ...sortBucket(terminalNotFound)];
+  return sortQueueRenderItems(
+    entries.map((entry) => ({ rep: entry })),
+    mode,
+    displayNames,
+  ).map((item) => item.rep);
 }
 
 export function readStoredQueueSortMode(): QueueSortMode {

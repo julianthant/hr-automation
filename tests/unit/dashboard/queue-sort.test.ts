@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   sortQueueEntriesForDisplay,
   sortDaemonOperationParentIds,
+  sortQueueRenderItems,
   isQueueSortMode,
   DEFAULT_QUEUE_SORT_MODE,
 } from "../../../src/dashboard/components/queue-panel/queue-sort.js";
@@ -189,6 +190,32 @@ test("sortDaemonOperationParentIds time sort orders all–not-found batches by t
     "Person Lookup",
   );
   assert.deepEqual(ids, ["nf", "ok"]);
+});
+
+test("sortQueueRenderItems interleaves preview, operation, and flat rows by start-newest", () => {
+  const items = [
+    {
+      key: "flat-old",
+      rep: entry({ id: "flat-old", firstLogTs: "2026-05-11T10:00:00.000Z" }),
+    },
+    {
+      key: "op-new",
+      rep: entry({ id: "op-parent", firstLogTs: "2026-05-11T14:00:00.000Z" }),
+    },
+    {
+      key: "preview-mid",
+      rep: entry({ id: "preview-parent", firstLogTs: "2026-05-11T12:00:00.000Z" }),
+    },
+    {
+      key: "flat-newest",
+      rep: entry({ id: "flat-newest", firstLogTs: "2026-05-11T16:00:00.000Z" }),
+    },
+  ];
+  const sorted = sortQueueRenderItems(items, "start-newest");
+  assert.deepEqual(
+    sorted.map((item) => item.key),
+    ["flat-newest", "op-new", "preview-mid", "flat-old"],
+  );
 });
 
 test("sortDaemonOperationParentIds label sort still sinks all–not-found batches last", () => {

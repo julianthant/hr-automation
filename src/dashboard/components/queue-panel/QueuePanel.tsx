@@ -28,11 +28,14 @@ import {
   buildQueueProjectionRows,
   type QueueGroupProjectionRow,
   type QueueGroupSurface,
+  type QueueEntryProjectionRow,
 } from "./queue-surface-classifier";
 import { entryMatchesStatusFilter, queueGroupMatchesStatusFilter } from "./queue-status";
 import {
-  sortDaemonOperationParentIds,
+  buildDaemonOperationSortRepresentative,
+  operationMembersAreAllTerminalNotFound,
   sortQueueEntriesForDisplay,
+  sortQueueRenderItems,
   type QueueSortMode,
 } from "./queue-sort";
 import { QueueSortDropdown } from "./QueueSortDropdown";
@@ -126,15 +129,6 @@ function pickProjectionRows<K extends QueueGroupSurface["kind"]>(
     (row): row is QueueGroupProjectionRow & { surface: Extract<QueueGroupSurface, { kind: K }> } =>
       row.surface.kind === kind,
   );
-}
-
-function reorderByIds<T>(
-  items: T[],
-  idFn: (item: T) => string,
-  sortedIds: string[],
-): T[] {
-  const byId = new Map(items.map((item) => [idFn(item), item]));
-  return sortedIds.map((id) => byId.get(id)).filter((item): item is T => item !== undefined);
 }
 
 function QueueSortToolbar({
@@ -303,57 +297,28 @@ export function QueuePanel({
     [queueProjectionRows.groupRows],
   );
 
-  const sortedPreviewSurfaces = useMemo(() => {
-    const sortedParents = sortQueueEntriesForDisplay(
-      previewSurfaces.map((row) => row.surface.parent),
-      queueSortMode,
-      displayNames,
-    );
-    return reorderByIds(
-      previewSurfaces,
-      (row) => row.surface.parentRunId,
-      sortedParents.map((parent) => parent.runId ?? parent.id),
-    );
-  }, [previewSurfaces, queueSortMode, displayNames]);
-
   const operationSurfaces = useMemo(
     () => pickProjectionRows(queueProjectionRows.groupRows, "operation"),
     [queueProjectionRows.groupRows],
   );
 
-  const sortedOperationSurfaces = useMemo(() => {
-    const ids = sortDaemonOperationParentIds(
-      operationSurfaces.map((row) => row.surface.parentRunId),
-      operationMembersByParentRunId,
-      queueSortMode,
-      workflowLabel,
-      displayNames,
-    );
-    return reorderByIds(operationSurfaces, (row) => row.surface.parentRunId, ids);
-  }, [operationSurfaces, operationMembersByParentRunId, queueSortMode, workflowLabel, displayNames]);
-
   /** Preview cards respect StatPills — show when parent or any child matches. */
   const visiblePreviewSurfaces = useMemo(
     () =>
-      sortedPreviewSurfaces.filter((surface) => {
-        return queueGroupMatchesStatusFilter(statusFilter, surface.surface.members, surface.surface.parent);
-      }),
-    [sortedPreviewSurfaces, statusFilter],
+      previewSurfaces.filter((surface) =>
+        queueGroupMatchesStatusFilter(statusFilter, surface.surface.members, surface.surface.parent),
+      ),
+    [previewSurfaces, statusFilter],
   );
 
   /** Operation coordinator cards: visible when the row or any member matches. */
   const visibleOperationSurfaces = useMemo(
     () =>
-      sortedOperationSurfaces.filter((surface) =>
+      operationSurfaces.filter((surface) =>
         queueGroupMatchesStatusFilter(statusFilter, surface.surface.members, surface.surface.parent),
       ),
-    [sortedOperationSurfaces, statusFilter],
+    [operationSurfaces, statusFilter],
   );
-
-  /** Group cards are not included in {@link sortedFiltered}; avoid empty-state under them. */
-  const hasGroupQueueCards =
-    visiblePreviewSurfaces.length > 0 ||
-    visibleOperationSurfaces.length > 0;
 
   const filtered = useMemo(() => {
     let result = queueProjectionRows.flatEntries;
@@ -363,16 +328,64 @@ export function QueuePanel({
     return result;
   }, [queueProjectionRows.flatEntries, statusFilter]);
 
+  type UnifiedQueueRow =
+    | { kind: "group"; row: QueueGroupProjectionRow; sortKey: string }
+    | { kind: "flat"; row: QueueEntryProjectionRow; sortKey: string };
+
+  /** One sort pass across preview cards, operation cards, and flat singles. */
+  const sortedUnifiedQueueRows = useMemo((): UnifiedQueueRow[] => {
+    const sortItems: Array<UnifiedQueueRow & { rep: TrackerEntry; deferNotFoundBucket?: boolean }> = [];
+
+    for (const row of visiblePreviewSurfaces) {
+      sortItems.push({
+        kind: "group",
+        row,
+        sortKey: `preview:${row.surface.parentRunId}`,
+        rep: row.surface.parent,
+      });
+    }
+
+    for (const row of visibleOperationSurfaces) {
+      const members = row.surface.members.length > 0
+        ? row.surface.members
+        : operationMembersByParentRunId.get(row.surface.parentRunId) ?? [];
+      sortItems.push({
+        kind: "group",
+        row,
+        sortKey: `operation:${row.surface.parentRunId}`,
+        rep: buildDaemonOperationSortRepresentative(
+          row.surface.parentRunId,
+          members,
+          workflowLabel,
+        ),
+        deferNotFoundBucket: operationMembersAreAllTerminalNotFound(members),
+      });
+    }
+
+    for (const row of filtered) {
+      sortItems.push({
+        kind: "flat",
+        row,
+        sortKey: `flat:${row.entry.id}`,
+        rep: row.entry,
+      });
+    }
+
+    const sorted = sortQueueRenderItems(sortItems, queueSortMode, displayNames);
+    return sorted.map(({ kind, row, sortKey }) => ({ kind, row, sortKey }));
+  }, [
+    visiblePreviewSurfaces,
+    visibleOperationSurfaces,
+    filtered,
+    operationMembersByParentRunId,
+    workflowLabel,
+    queueSortMode,
+    displayNames,
+  ]);
+
   const sortedFiltered = useMemo(
-    () => {
-      const entries = sortQueueEntriesForDisplay(
-        filtered.map((row) => row.entry),
-        queueSortMode,
-        displayNames,
-      );
-      return reorderByIds(filtered, (row) => row.entry.id, entries.map((entry) => entry.id));
-    },
-    [filtered, queueSortMode, displayNames],
+    () => sortedUnifiedQueueRows.filter((row): row is UnifiedQueueRow & { kind: "flat" } => row.kind === "flat"),
+    [sortedUnifiedQueueRows],
   );
 
   const sortedOperationMembers = useMemo(
@@ -393,7 +406,7 @@ export function QueuePanel({
   const navigableIds = useMemo(() => {
     if (loading) return [];
     if (operationQueueParentRunId) return sortedOperationMembers.map((e) => e.id);
-    return sortedFiltered.map((row) => row.entry.id);
+    return sortedFiltered.map((item) => item.row.entry.id);
   }, [loading, operationQueueParentRunId, sortedOperationMembers, sortedFiltered]);
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -409,7 +422,7 @@ export function QueuePanel({
   // stable while still seeing the latest rows / date / dispatcher.
   const { dispatchWorkflowAction } = useWorkflowActionDispatcher();
   const rowsById = useMemo(
-    () => new Map(sortedFiltered.map((row) => [row.entry.id, row])),
+    () => new Map(sortedFiltered.map((item) => [item.row.entry.id, item.row])),
     [sortedFiltered],
   );
   const rowsByIdRef = useRef(rowsById);
@@ -578,11 +591,6 @@ export function QueuePanel({
     }
   };
 
-  const visibleGroupSurfaces: QueueGroupProjectionRow[] = [
-    ...visiblePreviewSurfaces,
-    ...visibleOperationSurfaces,
-  ];
-
   return (
     <div
       className={cn(
@@ -655,19 +663,9 @@ export function QueuePanel({
           />
         ) : (
           <>
-            {/* Queue virtualization is intentionally deferred: operator-visible
-                lists are dominated by grouped/batch rows and are normally well
-                below the ~50-row threshold where virtualization pays for its
-                added keyboard/focus complexity. LogStream is the hot path. */}
-            {visibleGroupSurfaces.map(renderQueueGroupSurface)}
-            {/* Prep rows render as regular EntryItem (same size + behavior
-                as other workflow rows). The only differentiator is the
-                Preview tab inside LogPanel, gated on data.mode === "prepare".
-                Reupload + Discard live in OcrReviewPane's header. */}
-            {loading ? (
+            {loading && sortedUnifiedQueueRows.length === 0 ? (
               <QueueLoadingSkeleton />
-            ) : sortedFiltered.length === 0 &&
-              !hasGroupQueueCards ? (
+            ) : sortedUnifiedQueueRows.length === 0 ? (
               <EmptyState
                 icon={Inbox}
                 title="No entries yet"
@@ -675,18 +673,22 @@ export function QueuePanel({
                 action={<QueueEmptyCta workflow={workflow} />}
               />
             ) : (
-              sortedFiltered.map(({ entry, projection }) => (
-                <EntryItem
-                  key={entry.id}
-                  entry={entry}
-                  projection={projection}
-                  displayNames={displayNames}
-                  selected={selectedId === entry.id}
-                  onSelect={onSelect}
-                  date={date}
-                  onDelete={onDelete}
-                />
-              ))
+              sortedUnifiedQueueRows.map((item) =>
+                item.kind === "group" ? (
+                  renderQueueGroupSurface(item.row)
+                ) : (
+                  <EntryItem
+                    key={item.row.entry.id}
+                    entry={item.row.entry}
+                    projection={item.row.projection}
+                    displayNames={displayNames}
+                    selected={selectedId === item.row.entry.id}
+                    onSelect={onSelect}
+                    date={date}
+                    onDelete={onDelete}
+                  />
+                ),
+              )
             )}
           </>
         )}
