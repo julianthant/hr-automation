@@ -1,4 +1,3 @@
-import { Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WorkflowListEntry } from "./useWorkflowPresentation.js";
 import { NODE_ROW } from "./graph/graph-types.js";
@@ -11,10 +10,6 @@ interface EditorSidebarProps {
   /** Live override count for the selected workflow (from the draft). */
   selectedCount: number;
   onSelect: (name: string) => void;
-
-  // Data bank trigger (opens the floating palette over the canvas)
-  paletteOpen: boolean;
-  onTogglePalette: () => void;
 
   // Outline of the selected workflow (drops down from its row)
   outline: OutlineModel | null;
@@ -35,17 +30,15 @@ interface EditorSidebarProps {
  * The merged editor sidebar — workflow picker + outline in one panel. Picking a
  * workflow expands its outline inline (the presentation spine: queue row →
  * pipeline steps with op counts → delegation), so the whole workflow is reachable
- * without leaving the list. The "Data bank" button at the right of the header
- * opens the floating op palette over the canvas; clicking an outline entry FOCUSES
- * that lane on the canvas. The footer carries the three canvas view controls.
+ * without leaving the list. The Data Bank lives in the permanent right sidebar;
+ * clicking an outline entry FOCUSES that lane on the canvas. The footer carries
+ * the three canvas view controls.
  */
 export function EditorSidebar({
   list,
   selected,
   selectedCount,
   onSelect,
-  paletteOpen,
-  onTogglePalette,
   outline,
   focusedId,
   onFocus,
@@ -59,25 +52,10 @@ export function EditorSidebar({
 }: EditorSidebarProps): JSX.Element {
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-sidebar" aria-label="Workflows and outline">
-      <div className="flex items-center gap-2 px-3.5 py-3.5">
-        <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="px-3.5 py-3.5">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Workflows
         </span>
-        <button
-          type="button"
-          aria-label="Open data bank"
-          aria-pressed={paletteOpen}
-          title="Data bank — every system's clicks, fills & scrapers"
-          onClick={onTogglePalette}
-          className={cn(
-            "inline-flex h-7 w-7 items-center justify-center rounded-md border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-            paletteOpen
-              ? "border-ring/60 bg-accent text-foreground"
-              : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-        >
-          <Database aria-hidden className="h-4 w-4" />
-        </button>
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">

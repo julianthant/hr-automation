@@ -10,6 +10,13 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type {
   TitleSchemeId,
   SubtitleSchemeId,
@@ -66,6 +73,8 @@ interface NodeInspectorProps {
   onUpdateAddedOp: (step: string, addedId: string, patch: Partial<ActionNodeData>) => void;
   /** Remove a step lane's dropped op. */
   onRemoveAddedOp: (step: string, addedId: string) => void;
+  /** `dialog` = centered modal (leaves the Data Bank sidebar visible). */
+  presentation?: "overlay" | "dialog";
 }
 
 const INSPECTOR_TITLES: Record<string, string> = {
@@ -97,7 +106,9 @@ export function NodeInspector({
   onRemoveIntent,
   onUpdateAddedOp,
   onRemoveAddedOp,
+  presentation = "overlay",
 }: NodeInspectorProps): JSX.Element {
+  const title = INSPECTOR_TITLES[node.type ?? ""] ?? "Node";
   const inspectorContent: Partial<Record<string, JSX.Element>> = {
     [NODE_ROW]: <RowInspector data={data} draft={draft} onChange={onChange} />,
     [NODE_STEP]: (
@@ -120,15 +131,38 @@ export function NodeInspector({
     [NODE_GROUP]: <IntentInspector node={node} onUpdate={onUpdateIntent} onRemove={onRemoveIntent} />,
   };
 
+  const body = (
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3.5">
+      {inspectorContent[node.type ?? ""] ?? (
+        <p className="text-xs text-muted-foreground">No editable config for this node.</p>
+      )}
+    </div>
+  );
+
+  if (presentation === "dialog") {
+    return (
+      <Dialog open onOpenChange={(open) => !open && onClose()}>
+        <DialogContent size="lg" aria-label={`${title} inspector`}>
+          <DialogHeader>
+            <DialogTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {title}
+            </DialogTitle>
+          </DialogHeader>
+          <DialogBody className="px-0" viewportClassName="px-3.5 pb-3.5">
+            {body}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <aside
-      aria-label={`${INSPECTOR_TITLES[node.type ?? ""] ?? "Node"} inspector`}
+      aria-label={`${title} inspector`}
       className="absolute right-3 top-3 bottom-3 z-10 flex w-[22rem] flex-col rounded-xl border border-border bg-card/95 shadow-lg backdrop-blur"
     >
       <header className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {INSPECTOR_TITLES[node.type ?? ""] ?? "Node"}
-        </span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</span>
         <button
           type="button"
           aria-label="Close inspector"
@@ -138,12 +172,7 @@ export function NodeInspector({
           <X aria-hidden className="h-4 w-4 shrink-0" />
         </button>
       </header>
-
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3.5">
-        {inspectorContent[node.type ?? ""] ?? (
-          <p className="text-xs text-muted-foreground">No editable config for this node.</p>
-        )}
-      </div>
+      {body}
     </aside>
   );
 }

@@ -25,7 +25,7 @@ import { NodeInspector } from "./NodeInspector.js";
 import { LaneInteractionContext } from "./lane-interaction.js";
 import { DATA_BANK_DRAG_MIME, parseOpDragPayload, opToActionData } from "./data-bank-dnd.js";
 import type { IntentNodeKind } from "./graph-types.js";
-import { DataBankPalette } from "./DataBankPalette.js";
+import type { AnnotateKind } from "./DataBankPalette.js";
 import type { DataBank, DataBankOperation } from "../../../../domain/workflow-design/data-bank.js";
 import type { DesignOverlay } from "./design-spec.js";
 import {
@@ -56,12 +56,16 @@ function stepNodeIdAtTarget(target: EventTarget | null): string | null {
   return id ? parseStepNodeId(id) : null;
 }
 
-/** The lifted, page-owned view controller — focus / collapse / data-flow / fit /
- *  palette state shared between the merged sidebar and the canvas. */
+/** Canvas actions the page registers for the permanent Data Bank sidebar. */
+export interface GraphCanvasActions {
+  addActionNode: (op: DataBankOperation) => void;
+  addAnnotation: (kind: AnnotateKind) => void;
+}
+
+/** The lifted, page-owned view controller — focus / collapse / data-flow / fit
+ *  state shared between the merged sidebar and the canvas. */
 export interface CanvasViewState {
   bank: DataBank | null;
-  paletteOpen: boolean;
-  onClosePalette: () => void;
   dataFlowOn: boolean;
   /** Dry-run overlay: annotate where a dry run diverges from a live run. */
   dryRunOn: boolean;
@@ -91,6 +95,8 @@ interface GraphCanvasProps extends CanvasViewState {
   onRemoveAddedOp: (step: string, addedId: string) => void;
   /** Edit a dropped op's data-flow vars / note. */
   onUpdateAddedOp: (step: string, addedId: string, patch: Partial<ActionNodeData>) => void;
+  /** Expose add-node helpers to the page's Data Bank sidebar. */
+  onRegisterActions?: (actions: GraphCanvasActions) => void;
 }
 
 /** Lanes + the presentation spine round-trip to the override; ops lanes are display. */
@@ -184,8 +190,6 @@ function GraphCanvasInner({
   onGraphChange,
   wrapperRef,
   bank,
-  paletteOpen,
-  onClosePalette,
   dataFlowOn,
   dryRunOn,
   collapsedIds,
@@ -197,6 +201,7 @@ function GraphCanvasInner({
   onAddOpToStep,
   onRemoveAddedOp,
   onUpdateAddedOp,
+  onRegisterActions,
 }: GraphCanvasInnerProps): JSX.Element {
   const reducedMotion = usePrefersReducedMotion();
   const { screenToFlowPosition, fitView, getNode, setCenter } = useReactFlow();
@@ -294,13 +299,6 @@ function GraphCanvasInner({
   const focusedId = focusTarget?.id ?? null;
 
   // ── Focus (sidebar → frame a lane, dim the rest) ───────────────────────────────
-  // Focusing also SELECTS the node, which opens the right inspector (an overlay on
-  // the canvas's right edge). So we center the node in the area LEFT of the
-  // inspector — `setCenter` puts a flow point at the true viewport centre, and we
-  // push the target right by half the inspector's footprint so the node lands in
-  // the visible middle, not under the panel. (Keep INSPECTOR_FOOTPRINT in sync with
-  // NodeInspector's `w-[22rem]` + right gap.)
-  const INSPECTOR_FOOTPRINT = 372;
   const focusNode = useCallback(
     (id: string) => {
       setNodes((curr) => curr.map((n) => ({ ...n, selected: n.id === id })));
@@ -314,7 +312,7 @@ function GraphCanvasInner({
       const h = node.measured?.height ?? 240;
       const vh = wrapperRef.current?.clientHeight ?? 800;
       const zoom = Math.min(1.1, Math.max(0.55, (vh * 0.82) / h));
-      const cx = node.position.x + w / 2 + INSPECTOR_FOOTPRINT / 2 / zoom;
+      const cx = node.position.x + w / 2;
       const cy = node.position.y + h / 2;
       void setCenter(cx, cy, { zoom, duration });
     },
@@ -412,6 +410,13 @@ function GraphCanvasInner({
     },
     [setNodes, nextDropPosition],
   );
+
+  useEffect(() => {
+    onRegisterActions?.({
+      addActionNode: (op) => addActionNode(op),
+      addAnnotation: addIntentNode,
+    });
+  }, [onRegisterActions, addActionNode, addIntentNode]);
 
   // ── Drag-and-drop from the Data Bank palette ───────────────────────────────────
   // Drop ON a step lane → the op joins that step (an "added" row); drop on empty
@@ -512,16 +517,6 @@ function GraphCanvasInner({
             maskColor="color-mix(in srgb, var(--background) 70%, transparent)"
             style={{ backgroundColor: "var(--popover)" }}
           />
-          {paletteOpen ? (
-            <Panel position="top-left">
-              <DataBankPalette
-                bank={bank}
-                onAddOp={addActionNode}
-                onAddAnnotation={addIntentNode}
-                onClose={onClosePalette}
-              />
-            </Panel>
-          ) : null}
 
           {dryRunOn ? (
             <Panel position="top-center">
@@ -563,6 +558,7 @@ function GraphCanvasInner({
 
         {selectedNode ? (
           <NodeInspector
+            presentation="dialog"
             node={selectedNode}
             data={data}
             workflowName={workflowName}

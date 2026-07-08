@@ -34,10 +34,16 @@ interface DataBankPaletteProps {
   bank: DataBank | null;
   /** Add a real automation primitive (places an action node). */
   onAddOp: (op: DataBankOperation) => void;
+  /** Open detail dialog instead of immediately adding (sidebar mode). */
+  onOpClick?: (op: DataBankOperation) => void;
+  /** Called when a drag starts — suppresses the subsequent click. */
+  onOpDragStart?: () => void;
   /** Add an annotation node (note / group). */
   onAddAnnotation: (kind: AnnotateKind) => void;
   /** Dismiss the palette (renders an × in the header when provided). */
   onClose?: () => void;
+  /** `sidebar` = permanent right rail; `floating` = overlay card (legacy). */
+  variant?: "floating" | "sidebar";
 }
 
 const ANNOTATIONS: { kind: AnnotateKind; label: string; icon: LucideIcon }[] = [
@@ -53,7 +59,15 @@ const ANNOTATIONS: { kind: AnnotateKind; label: string; icon: LucideIcon }[] = [
  * human summary, the variables it reads/writes, and its source selector; click one
  * to drop it on the canvas. Note / Group annotations live in the footer.
  */
-export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: DataBankPaletteProps): JSX.Element {
+export function DataBankPalette({
+  bank,
+  onAddOp,
+  onOpClick,
+  onOpDragStart,
+  onAddAnnotation,
+  onClose,
+  variant = "floating",
+}: DataBankPaletteProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<PaletteView>("system");
   const [kinds, setKinds] = useState<DataBankOpKind[]>([]);
@@ -75,10 +89,16 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
     pushRecent(op.id);
     onAddOp(op);
   };
+  const handleOpActivate = (op: DataBankOperation): void => {
+    pushRecent(op.id);
+    if (onOpClick) onOpClick(op);
+    else addOp(op);
+  };
   const startOpDrag = (e: React.DragEvent, op: DataBankOperation): void => {
     e.dataTransfer.setData(DATA_BANK_DRAG_MIME, serializeOpDrag(op));
     e.dataTransfer.effectAllowed = "copy";
     pushRecent(op.id);
+    onOpDragStart?.();
   };
   const toggleKind = (kind: DataBankOpKind): void =>
     setKinds((prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]));
@@ -90,8 +110,17 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
       return next;
     });
 
+  const isSidebar = variant === "sidebar";
+
   return (
-    <div className="flex max-h-[78vh] w-[27rem] flex-col rounded-xl border border-border bg-card/95 shadow-xl backdrop-blur">
+    <div
+      className={cn(
+        "flex w-[27rem] shrink-0 flex-col bg-card",
+        isSidebar
+          ? "h-full border-l border-border"
+          : "max-h-[78vh] rounded-xl border border-border bg-card/95 shadow-xl backdrop-blur",
+      )}
+    >
       {/* Header */}
       <div className="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary">
@@ -162,7 +191,9 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
         ) : null}
 
         <p className="text-[10.5px] leading-snug text-muted-foreground">
-          Drag an op onto a step lane to add it there, or onto the canvas for a standalone node.
+          {onOpClick
+            ? "Click an op for details, or drag onto a step lane / the canvas."
+            : "Drag an op onto a step lane to add it there, or onto the canvas for a standalone node."}
         </p>
       </div>
 
@@ -182,7 +213,7 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
                 <ul className="space-y-0.5">
                   {recentOps.map((op) => (
                     <li key={`recent-${op.id}`}>
-                      <OpRow op={op} onAdd={() => addOp(op)} onDragStart={(e) => startOpDrag(e, op)} />
+                      <OpRow op={op} onActivate={() => handleOpActivate(op)} onDragStart={(e) => startOpDrag(e, op)} />
                     </li>
                   ))}
                 </ul>
@@ -211,7 +242,7 @@ export function DataBankPalette({ bank, onAddOp, onAddAnnotation, onClose }: Dat
                     <ul className="space-y-0.5">
                       {g.ops.map((op) => (
                         <li key={op.id}>
-                          <OpRow op={op} onAdd={() => addOp(op)} onDragStart={(e) => startOpDrag(e, op)} />
+                          <OpRow op={op} onActivate={() => handleOpActivate(op)} onDragStart={(e) => startOpDrag(e, op)} />
                         </li>
                       ))}
                     </ul>
@@ -280,11 +311,11 @@ function SectionEyebrow({ icon: Icon, label }: { icon: LucideIcon; label: string
 
 function OpRow({
   op,
-  onAdd,
+  onActivate,
   onDragStart,
 }: {
   op: DataBankOperation;
-  onAdd: () => void;
+  onActivate: () => void;
   onDragStart: (e: React.DragEvent) => void;
 }): JSX.Element {
   const v = opKindVisual(op.kind);
@@ -296,9 +327,9 @@ function OpRow({
       type="button"
       draggable
       onDragStart={onDragStart}
-      onClick={onAdd}
+      onClick={onActivate}
       title={op.selectorFqn ?? op.summary ?? op.label}
-      aria-label={`Add ${v.verb} — ${op.label} (drag onto a step or the canvas)`}
+      aria-label={`${v.verb} — ${op.label} (click for details, drag onto a step or the canvas)`}
       className="group flex w-full cursor-grab gap-2.5 rounded-lg border border-transparent px-2 py-2 text-left outline-none transition-colors hover:border-border hover:bg-card focus-visible:border-border focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
     >
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary">

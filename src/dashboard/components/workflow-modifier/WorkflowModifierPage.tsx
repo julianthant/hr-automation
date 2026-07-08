@@ -6,7 +6,8 @@ import type { WorkflowOverride } from "./useWorkflowPresentation.js";
 import { useWorkflowDesign } from "./useWorkflowDesign.js";
 import { useDataBank } from "./useDataBank.js";
 import { EditorSidebar } from "./EditorSidebar.js";
-import { GraphCanvas } from "./graph/GraphCanvas.js";
+import { DataBankSidebar } from "./DataBankSidebar.js";
+import { GraphCanvas, type GraphCanvasActions } from "./graph/GraphCanvas.js";
 import { groupLaneOps } from "./graph/lane-build.js";
 import { buildOutlineModel } from "./graph/outline-build.js";
 import { designSpecToGraph, graphToDesignSpec, mergeAddedOpsIntoModel } from "./graph/design-spec.js";
@@ -35,7 +36,6 @@ export function WorkflowModifierPage({
   const [reverting, setReverting] = useState(false);
 
   // ── Lifted canvas view controller (shared with the sidebar) ───────────────────
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [dataFlowOn, setDataFlowOn] = useState(false);
   const [dryRunOn, setDryRunOn] = useState(false);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
@@ -44,6 +44,10 @@ export function WorkflowModifierPage({
   // Ops the operator dropped into step lanes from the Data Bank, keyed by bare
   // step. Design intent (no runtime override) — serialized to the scaffold.
   const [addedOps, setAddedOps] = useState<Record<string, AddedLaneOp[]>>({});
+  const canvasActionsRef = useRef<GraphCanvasActions | null>(null);
+  const registerCanvasActions = useCallback((actions: GraphCanvasActions) => {
+    canvasActionsRef.current = actions;
+  }, []);
 
   // Latest live graph model, lifted from the canvas for "Generate scaffold".
   const modelRef = useRef<GraphModel | null>(null);
@@ -197,8 +201,6 @@ export function WorkflowModifierPage({
         selected={wp.selected}
         selectedCount={total}
         onSelect={handleSelect}
-        paletteOpen={paletteOpen}
-        onTogglePalette={() => setPaletteOpen((o) => !o)}
         outline={outline}
         focusedId={focusTarget?.id ?? null}
         onFocus={focusLane}
@@ -225,8 +227,6 @@ export function WorkflowModifierPage({
                   designOverlay={designOverlay}
                   onGraphChange={handleGraphChange}
                   bank={bank}
-                  paletteOpen={paletteOpen}
-                  onClosePalette={() => setPaletteOpen(false)}
                   dataFlowOn={dataFlowOn}
                   dryRunOn={dryRunOn}
                   collapsedIds={collapsedIds}
@@ -238,6 +238,7 @@ export function WorkflowModifierPage({
                   onAddOpToStep={addOpToStep}
                   onRemoveAddedOp={removeAddedOp}
                   onUpdateAddedOp={updateAddedOp}
+                  onRegisterActions={registerCanvasActions}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center" aria-live="polite">
@@ -315,6 +316,14 @@ export function WorkflowModifierPage({
           </div>
         )}
       </main>
+
+      {wp.data && wd.loaded ? (
+        <DataBankSidebar
+          bank={bank}
+          onAddOp={(op) => canvasActionsRef.current?.addActionNode(op)}
+          onAddAnnotation={(kind) => canvasActionsRef.current?.addAnnotation(kind)}
+        />
+      ) : null}
     </div>
   );
 }
