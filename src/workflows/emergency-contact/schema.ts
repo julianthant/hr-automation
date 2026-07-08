@@ -13,6 +13,8 @@ export const AddressSchema = z.object({
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
   zip: z.string().nullable().optional(),
+  /** ISO 3166-1 alpha-2 when known (e.g. `CN`, `GB`); full country name also accepted from OCR. */
+  country: z.string().nullable().optional(),
 });
 export type Address = z.infer<typeof AddressSchema>;
 

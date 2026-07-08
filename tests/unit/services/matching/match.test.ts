@@ -6,6 +6,7 @@ import {
   correctNameSpelling,
   normalizeUsAddress,
   compareUsAddresses,
+  inferEmergencyContactSameAddress,
   matchAgainstRoster,
   evaluateRosterIdentityTrust,
   shouldSkipPersonLookupForRosterTrust,
@@ -223,5 +224,42 @@ describe("correctNameSpelling", () => {
 
   it("returns the original name unchanged when the authoritative name is empty", () => {
     assert.equal(correctNameSpelling("Balmaceda, Jaden", ""), "Balmaceda, Jaden");
+  });
+});
+
+describe("inferEmergencyContactSameAddress", () => {
+  it("defaults to same-as-employee when the contact has no address", () => {
+    const out = inferEmergencyContactSameAddress(
+      { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
+      { address: null },
+    );
+    assert.equal(out.sameAddressAsEmployee, true);
+    assert.equal(out.address, null);
+  });
+
+  it("sets same-as-employee false when contact has explicit non-US country", () => {
+    const out = inferEmergencyContactSameAddress(
+      { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
+      { address: { street: "10 Downing St", city: "London", zip: "SW1A 2AA", country: "GB" } },
+    );
+    assert.equal(out.sameAddressAsEmployee, false);
+  });
+
+  it("sets same-as-employee false when contact address differs (international)", () => {
+    const out = inferEmergencyContactSameAddress(
+      { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
+      { address: { street: "Hefei, Anhui, China" } },
+    );
+    assert.equal(out.sameAddressAsEmployee, false);
+    assert.equal(out.address?.street, "Hefei, Anhui, China");
+  });
+
+  it("sets same-as-employee true when US addresses match by ZIP + street", () => {
+    const out = inferEmergencyContactSameAddress(
+      { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
+      { address: { street: "3869 Miramar Street", city: "La Jolla", state: "CA", zip: "92092" } },
+    );
+    assert.equal(out.sameAddressAsEmployee, true);
+    assert.equal(out.address, null);
   });
 });

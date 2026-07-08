@@ -5,8 +5,11 @@ import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
 import { TransactionError } from "../../systems/ucpath/types.js";
-import { navigateToEmergencyContact, demoteExistingContact } from "../../systems/ucpath/personal-data.js";
-import { dismissPeopleSoftModalMask } from "../../systems/common/modal.js";
+import {
+  navigateToEmergencyContact,
+  demoteExistingContact,
+  saveEmergencyContactWithPrimaryRecovery,
+} from "../../systems/ucpath/personal-data.js";
 import {
   buildEmergencyContactPlan,
   extractEmployeeName,
@@ -51,12 +54,13 @@ export function shouldDemoteExistingContactForRun(
   return Boolean(match && !match.isExact && !dryRun);
 }
 
-export function buildEmergencyContactPendingData(
+/** Flat tracker seed for emergency-contact rows (HTTP enqueue + batch pre-emit). */
+export function buildEmergencyContactTrackerSeed(
   record: EmergencyContactRecord,
-  batchName: string,
+  batchName?: string,
 ): Record<string, string> {
   return {
-    batchName,
+    ...(batchName ? { batchName } : {}),
     sourcePage: String(record.sourcePage),
     emplId: record.employee.employeeId,
     employeeName: record.employee.name,
@@ -64,6 +68,13 @@ export function buildEmergencyContactPendingData(
     relationship: record.emergencyContact.relationship,
     ...(record.dryRun ? { dryRun: "true" } : {}),
   };
+}
+
+export function buildEmergencyContactPendingData(
+  record: EmergencyContactRecord,
+  batchName: string,
+): Record<string, string> {
+  return buildEmergencyContactTrackerSeed(record, batchName);
 }
 
 /**
@@ -108,6 +119,7 @@ export const emergencyContactWorkflow = defineWorkflow({
     betweenItems: ["reset"],
   },
   matchKey: "emplId",
+  initialData: (input) => buildEmergencyContactTrackerSeed(input),
   detailFields: [
     { key: "employeeName", label: "Name", editable: true, group: "Employee" },
     { key: "emplId", label: "Empl ID", editable: true, group: "Employee", inputKind: "id" },
@@ -246,23 +258,13 @@ export const emergencyContactWorkflow = defineWorkflow({
         log.success(`Dry run complete for ${effectiveRecord.employee.name} — UCPath Save was skipped.`);
         return;
       }
-      await dismissPeopleSoftModalMask(page);
-      await page
-        .getByRole("button", { name: "Save", exact: true })
-        .first()
-        .click({ timeout: 10_000 });
-      // networkidle guards the PeopleSoft save roundtrip; sleep was redundant.
-      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-      // Fail loud: a rejected save (session timeout, validation error) renders a
-      // PeopleSoft error banner — never report a successful save while one is
-      // visible. needs-live: confirm the banner is reachable at the personal-data
-      // page top-level (vs the #main_target_win0 frame) and whether a POSITIVE
-      // save-confirmation marker exists to assert instead of error-absence.
-      const saveError = page.locator(".PSERROR, #ALERTMSG, .ps_alert-error").first();
-      if (await saveError.isVisible().catch(() => false)) {
-        const detail = (await saveError.textContent().catch(() => null))?.trim();
+      try {
+        await saveEmergencyContactWithPrimaryRecovery(page, effectiveRecord.emergencyContact.name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         throw new Error(
-          `Emergency contact save for ${effectiveRecord.employee.name} (EID ${effectiveRecord.employee.employeeId}) reported a PeopleSoft error${detail ? `: ${detail}` : ""} — refusing to report success`,
+          `Emergency contact save for ${effectiveRecord.employee.name} (EID ${effectiveRecord.employee.employeeId}) failed — ${detail}`,
+          { cause: err instanceof Error ? err : undefined },
         );
       }
       await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });

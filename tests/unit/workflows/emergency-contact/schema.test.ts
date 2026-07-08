@@ -35,6 +35,18 @@ describe("AddressSchema — null street tolerance (ISS-004)", () => {
   it("still rejects a present-but-empty street (min(1) holds when non-null)", () => {
     assert.equal(AddressSchema.safeParse({ street: "", city: "X" }).success, false);
   });
+
+  it("accepts an optional country on international addresses", () => {
+    const parsed = AddressSchema.safeParse({
+      street: "Hefei, Anhui",
+      city: "Hefei",
+      state: "Anhui",
+      zip: null,
+      country: "CN",
+    });
+    assert.equal(parsed.success, true);
+    if (parsed.success) assert.equal(parsed.data.country, "CN");
+  });
 });
 
 describe("EmergencyContactSchema — same-address-when-null transform", () => {

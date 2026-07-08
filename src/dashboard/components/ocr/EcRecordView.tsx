@@ -24,6 +24,7 @@ const FIELD_LABELS = {
   city: "City",
   state: "State",
   zip: "ZIP",
+  country: "Country",
   cellPhone: "Cell Phone",
   homePhone: "Home Phone",
   workPhone: "Work Phone",
@@ -193,6 +194,15 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
               value={address?.zip ?? ""}
               onChange={(e) => setAddress({ zip: e.target.value })}
               className="form-input font-mono"
+            />
+          </RecordField>
+          <RecordField label={FIELD_LABELS.country}>
+            <input
+              type="text"
+              value={address?.country ?? ""}
+              onChange={(e) => setAddress({ country: e.target.value })}
+              className="form-input font-mono uppercase"
+              placeholder="US, CN, GB…"
             />
           </RecordField>
         </div>

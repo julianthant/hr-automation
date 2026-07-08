@@ -17,29 +17,61 @@
 import { z } from "zod/v4";
 import { log } from "../../utils/log.js";
 import { completeJson } from "./complete.js";
+import {
+  inferEmergencyContactSameAddress,
+  hasMeaningfulAddress,
+} from "../matching/match.js";
+import { resolveAddress } from "../address/index.js";
+import { isLikelyUsAddress, normalizeCountryHint } from "../address/format.js";
 
 export interface NormalizationChange {
   /** Dotted field path, e.g. `emergencyContact.cellPhone`. */
   field: string;
   from: string;
   to: string;
-  /** `rule` = deterministic; `llm` = free-tier model canonicalization. */
-  method: "rule" | "llm";
+  /** `rule` = deterministic; `llm` = free-tier model; `geocode` = address API enrichment. */
+  method: "rule" | "llm" | "geocode";
 }
 
 // ─── Deterministic rules ──────────────────────────────────────
 
 /**
- * Normalize a US phone to `(XXX) XXX-XXXX`. Strips formatting, tolerates a
- * leading country `1`, and returns null when there aren't exactly 10 usable
- * digits (so a partial/garbled number is left untouched, not fabricated).
+ * Normalize a phone number for UCPath review. US numbers → `(XXX) XXX-XXXX`.
+ * International numbers (country code present, 11–15 digits) → `+CC …` grouped
+ * format. Returns null when there aren't enough digits to canonicalize safely
+ * (partial/garbled OCR is left untouched, not fabricated).
  */
 export function normalizePhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  let digits = raw.replace(/\D/g, "");
+  const trimmed = raw.trim();
+  let digits = trimmed.replace(/\D/g, "");
   if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
-  if (digits.length !== 10) return null;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  const intl = formatInternationalPhone(digits);
+  if (intl) return intl;
+  return null;
+}
+
+/** Group international digits as +CC blocks (China +86 gets a dedicated layout). */
+function formatInternationalPhone(digits: string): string | null {
+  if (digits.length < 11 || digits.length > 15) return null;
+  if (digits.startsWith("86") && digits.length >= 13) {
+    const national = digits.slice(2);
+    if (national.length >= 11) {
+      return `+86 ${national.slice(0, 3)} ${national.slice(3, 7)} ${national.slice(7)}`;
+    }
+  }
+  const ccLen = digits.startsWith("1") ? 1 : digits.length >= 12 ? 2 : 3;
+  const cc = digits.slice(0, ccLen);
+  const rest = digits.slice(ccLen);
+  if (rest.length < 7) return null;
+  const chunks: string[] = [];
+  for (let i = 0; i < rest.length; i += 3) {
+    chunks.push(rest.slice(i, i + 3));
+  }
+  return `+${cc} ${chunks.join(" ")}`.trim();
 }
 
 const US_STATES: Record<string, string> = {
@@ -168,24 +200,25 @@ const AddressLlmSchema = z.object({
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
   zip: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
 });
 
 /**
- * Split a one-line US address string into components via the LLM (the VL-003
+ * Split a one-line address string into components via the LLM (the VL-003
  * case: the vision model returned the address as a bare string, coerced to
  * `{ street: <whole line> }`). Returns null on exhaustion / unparseable. Applies
- * the deterministic state/zip rules on top of the model's split.
+ * the deterministic state/zip rules on top of the model's split for US lines.
  */
 export async function splitAddressString(
   line: string,
   opts: { cacheDir?: string; pool?: Parameters<typeof completeJson>[0]["pool"] } = {},
-): Promise<{ street: string | null; city: string | null; state: string | null; zip: string | null } | null> {
+): Promise<{ street: string | null; city: string | null; state: string | null; zip: string | null; country: string | null } | null> {
   const trimmed = line.trim();
   if (!trimmed) return null;
   const result = await completeJson({
-    prompt: `Split this US mailing address into components. Do not invent missing parts.
+    prompt: `Split this mailing address into components. Do not invent missing parts.
 Address: "${trimmed}"
-Respond with ONLY JSON: {"street":"...","city":"...","state":"2-letter","zip":"..."}. Use null for any part not present.`,
+Respond with ONLY JSON: {"street":"...","city":"...","state":"province or 2-letter US state","zip":"postal code","country":"2-letter ISO or country name"}. Use null for any part not present.`,
     schema: AddressLlmSchema,
     cacheDir: opts.cacheDir,
     pool: opts.pool,
@@ -193,11 +226,14 @@ Respond with ONLY JSON: {"street":"...","city":"...","state":"2-letter","zip":".
     estTokens: 400,
   });
   if (!result) return null;
+  const country = normalizeCountryHint(result.country);
+  const us = country ? isLikelyUsAddress({ street: trimmed, country }) : /\b[A-Z]{2}\b/.test(trimmed) || /\d{5}(-\d{4})?\b/.test(trimmed);
   return {
     street: result.street?.trim() || null,
     city: result.city?.trim() || null,
-    state: normalizeUsState(result.state) ?? (result.state?.trim() || null),
-    zip: normalizeZip(result.zip) ?? (result.zip?.trim() || null),
+    state: us ? (normalizeUsState(result.state) ?? (result.state?.trim() || null)) : (result.state?.trim() || null),
+    zip: us ? (normalizeZip(result.zip) ?? (result.zip?.trim() || null)) : (result.zip?.trim() || null),
+    country,
   };
 }
 
@@ -213,6 +249,7 @@ interface NormalizableAddress {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  country?: string | null;
 }
 interface NormalizableParty {
   relationship?: string | null;
@@ -221,10 +258,13 @@ interface NormalizableParty {
   workPhone?: string | null;
   address?: NormalizableAddress | null;
   homeAddress?: NormalizableAddress | null;
+  sameAddressAsEmployee?: boolean;
 }
 export interface NormalizableEcRecord {
   employee?: NormalizableParty | null;
   emergencyContact?: NormalizableParty | null;
+  originallyMissing?: string[];
+  warnings?: string[];
 }
 
 const PHONE_FIELDS = ["cellPhone", "homePhone", "workPhone"] as const;
@@ -246,11 +286,72 @@ function normalizeAddressInPlace(
   }
 }
 
+async function enrichAddressInPlace(
+  addr: NormalizableAddress,
+  path: string,
+  changes: NormalizationChange[],
+  opts: { fetch?: typeof fetch; enableGeocoding?: boolean },
+): Promise<void> {
+  if (opts.enableGeocoding === false) return;
+  if (!hasMeaningfulAddress(addr)) return;
+  const resolution = await resolveAddress(
+    {
+      street: addr.street,
+      city: addr.city,
+      state: addr.state,
+      zip: addr.zip,
+      country: normalizeCountryHint(addr.country),
+    },
+    { fetch: opts.fetch },
+  );
+  if (!resolution || resolution.confidence === "unverified") return;
+
+  const before = formatAddressSummary(addr);
+  const us = isLikelyUsAddress({
+    street: addr.street,
+    city: addr.city,
+    state: addr.state,
+    zip: addr.zip,
+    country: resolution.address.country,
+  });
+
+  addr.street = resolution.address.street || addr.street;
+  addr.city = resolution.address.city || addr.city;
+  addr.state = us
+    ? (normalizeUsState(resolution.address.state) ?? (resolution.address.state || addr.state))
+    : (resolution.address.state || addr.state);
+  addr.zip = us
+    ? (normalizeZip(resolution.address.zip) ?? (resolution.address.zip || addr.zip))
+    : (resolution.address.zip || addr.zip);
+  if (resolution.address.country) {
+    addr.country = normalizeCountryHint(resolution.address.country) ?? resolution.address.country;
+  } else if (addr.country) {
+    addr.country = normalizeCountryHint(addr.country) ?? addr.country;
+  }
+
+  const after = formatAddressSummary(addr);
+  if (before !== after) {
+    changes.push({
+      field: `${path}`,
+      from: before,
+      to: after,
+      method: "geocode",
+    });
+  }
+}
+
+function formatAddressSummary(addr: NormalizableAddress): string {
+  return [addr.street, addr.city, addr.state, addr.zip, addr.country]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 async function normalizePartyInPlace(
   party: NormalizableParty,
   path: string,
   changes: NormalizationChange[],
-  opts: { cacheDir?: string; pool?: Parameters<typeof completeJson>[0]["pool"] },
+  opts: { cacheDir?: string; pool?: Parameters<typeof completeJson>[0]["pool"]; fetch?: typeof fetch; enableGeocoding?: boolean },
 ): Promise<void> {
   for (const f of PHONE_FIELDS) {
     const cur = party[f];
@@ -262,7 +363,34 @@ async function normalizePartyInPlace(
   }
   for (const addrKey of ["address", "homeAddress"] as const) {
     const addr = party[addrKey];
-    if (addr && typeof addr === "object") normalizeAddressInPlace(addr, `${path}.${addrKey}`, changes);
+    if (!addr || typeof addr !== "object") continue;
+    const street = addr.street?.trim() ?? "";
+    const needsSplit =
+      street.length > 0
+      && !addr.city?.trim()
+      && !addr.state?.trim()
+      && street.includes(",");
+    if (needsSplit) {
+      const split = await splitAddressString(street, opts);
+      if (split?.street) {
+        const merged = {
+          street: split.street,
+          city: split.city ?? addr.city,
+          state: split.state ?? addr.state,
+          zip: split.zip ?? addr.zip,
+          country: split.country ?? addr.country,
+        };
+        changes.push({
+          field: `${path}.${addrKey}`,
+          from: street,
+          to: [merged.street, merged.city, merged.state, merged.zip].filter(Boolean).join(", "),
+          method: "llm",
+        });
+        party[addrKey] = merged;
+      }
+    }
+    normalizeAddressInPlace(party[addrKey]!, `${path}.${addrKey}`, changes);
+    await enrichAddressInPlace(party[addrKey]!, `${path}.${addrKey}`, changes, opts);
   }
   if (path.endsWith("emergencyContact") && party.relationship) {
     const canon = await canonicalizeRelationship(party.relationship, opts);
@@ -270,6 +398,47 @@ async function normalizePartyInPlace(
       changes.push({ field: `${path}.relationship`, from: party.relationship, to: canon.value, method: canon.method });
       party.relationship = canon.value;
     }
+  }
+}
+
+function applySameAddressInference(
+  record: NormalizableEcRecord,
+  changes: NormalizationChange[],
+): void {
+  const contact = record.emergencyContact;
+  if (!contact || typeof contact !== "object") return;
+  const inferred = inferEmergencyContactSameAddress(
+    record.employee?.homeAddress ?? null,
+    contact,
+  );
+  const prevSame = contact.sameAddressAsEmployee;
+  const prevAddr = contact.address;
+  if (
+    typeof prevSame === "boolean"
+    && inferred.sameAddressAsEmployee !== prevSame
+  ) {
+    changes.push({
+      field: "emergencyContact.sameAddressAsEmployee",
+      from: String(prevSame ?? ""),
+      to: String(inferred.sameAddressAsEmployee),
+      method: "rule",
+    });
+    contact.sameAddressAsEmployee = inferred.sameAddressAsEmployee;
+  }
+  if (inferred.address !== prevAddr) {
+    contact.address = inferred.address ?? null;
+  }
+  if (
+    inferred.sameAddressAsEmployee
+    && hasMeaningfulAddress(record.employee?.homeAddress)
+    && !hasMeaningfulAddress(contact.address)
+    && (record as { originallyMissing?: string[] }).originallyMissing?.includes("emergencyContact.address")
+  ) {
+    // Signal only — caller surfaces as a review warning.
+    (record as { warnings?: string[] }).warnings = [
+      ...((record as { warnings?: string[] }).warnings ?? []),
+      "Contact address was illegible on the paper — verify same-address checkbox",
+    ];
   }
 }
 
@@ -281,7 +450,7 @@ async function normalizePartyInPlace(
  */
 export async function normalizeEmergencyContactRecord(
   record: NormalizableEcRecord,
-  opts: { cacheDir?: string; pool?: Parameters<typeof completeJson>[0]["pool"] } = {},
+  opts: { cacheDir?: string; pool?: Parameters<typeof completeJson>[0]["pool"]; fetch?: typeof fetch; enableGeocoding?: boolean } = {},
 ): Promise<NormalizationChange[]> {
   const changes: NormalizationChange[] = [];
   try {
@@ -291,6 +460,7 @@ export async function normalizeEmergencyContactRecord(
     if (record.employee && typeof record.employee === "object") {
       await normalizePartyInPlace(record.employee, "employee", changes, opts);
     }
+    applySameAddressInference(record, changes);
   } catch (err) {
     log.warn(`[normalize-contact] normalization error (kept original values): ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -39,7 +39,7 @@ test("matchRecord: form-EID + similar roster name → matched, skip lookup", asy
   assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), null);
 });
 
-test("matchRecord: form-EID + different roster name → lookup-pending verify", async () => {
+test("matchRecord: form-EID + different roster name → matched from roster, skip lookup", async () => {
   const ocr = {
     formKind: "emergency-contact" as const,
     sourcePage: 1,
@@ -48,8 +48,30 @@ test("matchRecord: form-EID + different roster name → lookup-pending verify", 
     notes: [], documentType: "expected" as const, originallyMissing: [],
   };
   const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
-  assert.equal(preview.matchState, "lookup-pending");
-  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), "verify");
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.matchSource, "form");
+  assert.equal(preview.employee.name, "Wrong Person");
+  assert.equal(preview.employee.employeeId, "10001234");
+  assert.equal(preview.rosterNameTrust, "similar");
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), null);
+});
+
+test("matchRecord: form-EID present + blank OCR name → matched, name from roster, skip lookup", async () => {
+  const ocr = {
+    formKind: "emergency-contact" as const,
+    sourcePage: 1,
+    employee: { name: "", employeeId: "10001234" },
+    emergencyContact: { name: "Sara Garcia", relationship: "Sister", primary: true, sameAddressAsEmployee: true, address: null, cellPhone: "(555) 123-4567" },
+    notes: [], documentType: "expected" as const, originallyMissing: [],
+  };
+  const preview = await emergencyContactOcrFormSpec.matchRecord({ record: ocr, roster });
+  assert.equal(preview.matchState, "matched");
+  assert.equal(preview.matchSource, "form");
+  assert.equal(preview.employee.name, "Maria Garcia");
+  assert.equal(preview.employee.employeeId, "10001234");
+  assert.equal(preview.rosterNameTrust, "same");
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(preview), null);
+  assert.ok(preview.warnings.some((w) => w.includes("taken from roster")));
 });
 
 test("matchRecord: no form-EID, high roster name match → matched (roster), skip lookup", async () => {
@@ -135,8 +157,23 @@ test("needsLookup: matched-via-roster with roster trust → null", async () => {
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), null);
 });
 
-test("needsLookup: matched-via-roster without trust → 'verify'", async () => {
+test("needsLookup: matched-via-roster without trust → null (roster-backed identity)", async () => {
   const r = { matchState: "matched", matchSource: "roster", employee: { employeeId: "10001234" } } as any;
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: matched-via-llm roster candidate → null", async () => {
+  const r = {
+    matchState: "matched",
+    matchSource: "llm",
+    employee: { employeeId: "10001234" },
+    rosterCandidates: [{ eid: "10001234", name: "Maria Garcia", score: 0.9 }],
+  } as any;
+  assert.equal(emergencyContactOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: matched without roster source → 'verify'", async () => {
+  const r = { matchState: "matched", matchSource: "llm", employee: { employeeId: "10001234" } } as any;
   assert.equal(emergencyContactOcrFormSpec.needsLookup(r), "verify");
 });
 

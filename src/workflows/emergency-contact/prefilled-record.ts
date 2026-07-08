@@ -14,7 +14,7 @@ type EmergencyContactDetails = EmergencyContactRecord["emergencyContact"];
 export function buildContactAddressSummary(contact: EmergencyContactDetails): string {
   if (contact.sameAddressAsEmployee) return SAME_AS_EMPLOYEE_LABEL;
   if (!contact.address) return NO_ADDRESS_LABEL;
-  return [contact.address.street, contact.address.city, contact.address.state, contact.address.zip]
+  return [contact.address.street, contact.address.city, contact.address.state, contact.address.zip, contact.address.country]
     .filter((s): s is string => Boolean(s))
     .join(", ");
 }

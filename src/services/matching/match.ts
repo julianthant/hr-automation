@@ -1,4 +1,5 @@
 import { normalizeEid } from "../../domain/identity/eid.js";
+import { isUsCountry } from "../address/format.js";
 import { levenshteinDistance } from "./levenshtein.js";
 
 // ─── Name match ────────────────────────────────────────────
@@ -266,10 +267,11 @@ const STATE_NAMES: Record<string, string> = {
 };
 
 export interface AddressLike {
-  street: string;
+  street?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  country?: string | null;
 }
 
 export interface NormalizedAddress {
@@ -328,7 +330,81 @@ export function compareUsAddresses(
   return d <= 3 ? "match" : "differ";
 }
 
-// ─── Roster lookup ─────────────────────────────────────────
+/** One-line address for fuzzy / international comparison. */
+export function formatAddressOneLine(addr: AddressLike | null | undefined): string {
+  if (!addr) return "";
+  return [addr.street, addr.city, addr.state, addr.zip, addr.country]
+    .map((p) => (p ?? "").trim())
+    .filter((p) => p.length > 0)
+    .join(", ");
+}
+
+export function hasMeaningfulAddress(addr: AddressLike | null | undefined): boolean {
+  return formatAddressOneLine(addr).trim().length > 0;
+}
+
+/** Contact address inference requires a street line — state/zip alone is not an extracted address. */
+function contactHasExtractedAddress(addr: AddressLike | null | undefined): boolean {
+  return (addr?.street ?? "").trim().length > 0;
+}
+
+function normalizeAddressLine(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[.,;:]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Infer whether an emergency contact shares the employee's home address.
+ * Compares extracted employee + contact addresses (US ZIP match when possible,
+ * otherwise a normalized one-line string compare for international addresses).
+ */
+export function inferEmergencyContactSameAddress(
+  employeeHome: AddressLike | null | undefined,
+  contact: {
+    sameAddressAsEmployee?: boolean;
+    address?: AddressLike | null;
+  },
+): { sameAddressAsEmployee: boolean; address: AddressLike | null | undefined } {
+  const contactHas = contactHasExtractedAddress(contact.address);
+  if (!contactHas) {
+    return {
+      sameAddressAsEmployee: contact.sameAddressAsEmployee ?? true,
+      address: contact.address ?? null,
+    };
+  }
+  const employeeHas = hasMeaningfulAddress(employeeHome);
+  if (!employeeHas) {
+    return { sameAddressAsEmployee: false, address: contact.address };
+  }
+
+  const contactCountry = (contact.address?.country ?? "").trim();
+  if (contactCountry && !isUsCountry(contactCountry)) {
+    return { sameAddressAsEmployee: false, address: contact.address };
+  }
+
+  const usCompare = compareUsAddresses(employeeHome, contact.address);
+  if (usCompare === "match") {
+    return { sameAddressAsEmployee: true, address: null };
+  }
+  if (usCompare === "differ") {
+    return { sameAddressAsEmployee: false, address: contact.address };
+  }
+
+  const empLine = normalizeAddressLine(formatAddressOneLine(employeeHome));
+  const conLine = normalizeAddressLine(formatAddressOneLine(contact.address));
+  if (empLine && conLine) {
+    const same =
+      empLine === conLine || levenshteinDistance(empLine, conLine) <= 3;
+    return same
+      ? { sameAddressAsEmployee: true, address: null }
+      : { sameAddressAsEmployee: false, address: contact.address };
+  }
+
+  return { sameAddressAsEmployee: false, address: contact.address };
+}
 
 export interface RosterRow {
   eid: string;
