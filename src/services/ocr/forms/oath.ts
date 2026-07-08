@@ -361,6 +361,8 @@ export const oathOcrFormSpec: OcrFormSpec<
     }
     if (record.matchState === "matched" && normalizeUcpathEmployeeId(record.employeeId)) {
       if (record.verification) return null;
+      // Roster-backed match — EID + name came from the onboarding roster.
+      if (record.matchSource === "form-eid" || record.matchSource === "roster") return null;
       return "verify";
     }
     if (record.matchState === "resolved") return null;

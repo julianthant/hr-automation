@@ -518,6 +518,7 @@ test("orchestrator drives the session timeline via onPhase for each running phas
         data: [{
           sourcePage: 1, rowIndex: 0,
           printedName: "Liam Kustenbauder",
+          employeeId: "10009999",
           employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
           notes: [], documentType: "expected", originallyMissing: [],
         }],
@@ -616,6 +617,56 @@ test("orchestrator with previousRunId carries forward v1 EIDs", async () => {
   );
 
   assert.equal(watchCalled, false, "watchChildRuns should not be called when carry-forward fully resolves");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("orchestrator with previousRunId FAILS LOUD when the prior run's data.records is unparseable (does not silently drop prior human corrections)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  // Pre-populate v1 history in JSONL with a corrupted (non-JSON) records payload —
+  // this must NOT be treated the same as "no prior run" (which legitimately
+  // returns []). Previously this collapsed to [] via a swallowed catch, silently
+  // discarding every prior human OCR correction.
+  mkdirSync(rowsDir(dir), { recursive: true });
+  const ocrFile = rowFilePath("ocr", "2026-05-01", dir);
+  writeFileSync(ocrFile, JSON.stringify({
+    workflow: "ocr", id: "session-corrupt", runId: "run-prev",
+    status: "done", step: "approved",
+    data: { records: "{not valid json" },
+    timestamp: "2026-05-01T00:00:00Z",
+  }) + "\n");
+
+  await assert.rejects(
+    runOcrOrchestrator(
+      {
+        pdfPath,
+        pdfOriginalName: "fake-v2.pdf",
+        pdfFileId,
+        formType: "oath",
+        sessionId: "session-corrupt",
+        rosterPath,
+        rosterMode: "existing",
+        previousRunId: "run-prev",
+      },
+      {
+        runId: "run-2",
+        trackerDir: dir,
+        date: "2026-05-01",
+        _ocrPipelineOverride: async () => ({
+          data: [{
+            sourcePage: 1, rowIndex: 0,
+            printedName: "Liam Kustenbauder",
+            employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+            notes: [], documentType: "expected", originallyMissing: [],
+          }],
+          provider: "stub", attempts: 1, cached: false,
+        }),
+        _loadRosterOverride: async () => [{ eid: "10000001", name: "Liam Kustenbauder" }],
+        _watchChildRunsOverride: async () => [],
+      },
+    ),
+    /carry-forward.*unparseable/,
+  );
+
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -873,7 +924,7 @@ test("orchestrator pre-emits delegated eid-lookup pending rows before daemon aut
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath employee id", async () => {
+test("orchestrator dispatches eid-lookup by EID when form EID is not on roster", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const writtenEntries: object[] = [];
   let eidLookupItems: Array<{ name?: string; emplId?: string; itemId: string }> = [];
@@ -898,6 +949,7 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
           sourcePage: 1,
           rowIndex: 0,
           printedName: "Liam Kustenbauder",
+          employeeId: "10009999",
           employeeSigned: true,
           officerSigned: true,
           dateSigned: "05/01/2026",
@@ -922,7 +974,7 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
           runId: "eid-run-active-mock",
           status: "done" as const,
           data: {
-            emplId: "10000001",
+            emplId: "10009999",
             hrStatus: "Active",
             department: "Housing Dining Hospitality",
             activeStatus: "active",
@@ -935,7 +987,7 @@ test("orchestrator dispatches eid-lookup by EID when roster supplies a UCPath em
   );
 
   assert.equal(eidLookupItems.length, 1);
-  assert.equal(eidLookupItems[0].emplId, "10000001");
+  assert.equal(eidLookupItems[0].emplId, "10009999");
   assert.match(eidLookupItems[0].itemId, /^ocr-oath-run-active-r0$/);
   // Regression guard for the 2026-05-28 eid-lookup→person-lookup rename that
   // stranded watchChildRuns on a dead `eid-lookup` key (1h timeout). The
@@ -997,7 +1049,7 @@ test("orchestrator treats non-UCPath employee ids as missing and falls back to n
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by-EID)", async () => {
+test("orchestrator records SQLite dependencies for eid-lookup fan-out (form EID off-roster)", async () => {
   const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
   const runId = "00000000-0000-4000-8000-0000000000ab";
   let watcherCalled = false;
@@ -1021,6 +1073,7 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
           sourcePage: 1,
           rowIndex: 0,
           printedName: "Liam Kustenbauder",
+          employeeId: "10009999",
           employeeSigned: true,
           officerSigned: true,
           dateSigned: "05/01/2026",
@@ -1043,7 +1096,7 @@ test("orchestrator records SQLite dependencies for eid-lookup fan-out (verify-by
         assert.equal(children[0].workflow, "person-lookup");
         assert.equal(children[0].itemId, `ocr-oath-${runId}-r0`);
         assert.equal(children[0].recordIndex, 0);
-        assert.equal(children[0].lookupKind, "verify");
+        assert.equal(children[0].lookupKind, "verify-only");
       },
       _scheduleDependencyTickOverride: async () => ({ ok: true }),
       _watchChildRunsOverride: async () => {
@@ -1641,6 +1694,83 @@ test("second opinion: a re-read that ranks no better KEEPS the original reading 
   const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{ printedName?: string }>;
   const name = String(parsed[0]?.printedName ?? "");
   assert.ok(name.includes("Merrell"), `original reading must be kept, got "${name}"`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("second opinion: EC form EID not on roster is re-read and adopted when corrected EID roster-matches", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ data?: Record<string, unknown> }> = [];
+  const calls: Array<{ pageNum: number; excludeModels: string[] }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "emergency-contact",
+      sessionId: "session-ec-so-eid",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-ec-so-eid",
+      trackerDir: dir,
+      _emitOverride: (entry: unknown) => writtenEntries.push(entry as never),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          formKind: "emergency-contact",
+          sourcePage: 1,
+          employee: { name: "Shaaf Hababi", employeeId: "10843962" },
+          emergencyContact: { name: "Jude Hakim", relationship: "Friend", primary: true },
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+        pages: [{ page: 1, success: true, attemptedKeys: ["gemini-0:gemini-2.5-flash-lite"], poolKeyId: "gemini-0:gemini-2.5-flash-lite", attempts: 1 }],
+      }),
+      _secondOpinionOverride: async (args: { pageNum: number; excludeModels: string[] }) => {
+        calls.push(args);
+        return {
+          records: [{
+            formKind: "emergency-contact",
+            sourcePage: 1,
+            employee: {
+              name: "Sharaf Ammar A Hababi",
+              employeeId: "10883962",
+              homeAddress: { street: "5370 Toscana Way H309", city: "San Diego", state: "CA", zip: "92122" },
+            },
+            emergencyContact: {
+              name: "Jude Hakim",
+              relationship: "Friend",
+              primary: true,
+              address: { street: "8800 Lombard Pl", city: "San Diego", state: "CA", zip: "92122" },
+              cellPhone: "(202) 500-8356",
+            },
+            notes: [], documentType: "expected", originallyMissing: [],
+          }],
+          poolKeyId: "gemini-0:gemini-3.5-flash",
+        };
+      },
+      _loadRosterOverride: async () => [{ eid: "10883962", name: "Hababi, Sharaf" }],
+      _lookupSuggestionOverride: async () => [],
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [],
+    } as never,
+  );
+
+  assert.equal(calls.length, 1, "EC EID-not-on-roster record triggers second opinion");
+  assert.equal(calls[0].pageNum, 1);
+  const last = [...writtenEntries].reverse().find((e) => typeof (e.data as { records?: unknown })?.records === "string");
+  assert.ok(last, "a snapshot with records was emitted");
+  const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{
+    employee?: { employeeId?: string; name?: string };
+    matchState?: string;
+    emergencyContact?: { cellPhone?: string; address?: { street?: string } };
+  }>;
+  assert.equal(parsed[0]?.employee?.employeeId, "10883962", "adopted corrected EID from tier-1 re-read");
+  assert.equal(parsed[0]?.matchState, "matched");
+  assert.equal(parsed[0]?.emergencyContact?.cellPhone, "(202) 500-8356");
+  assert.ok(String(parsed[0]?.emergencyContact?.address?.street ?? "").includes("Lombard"));
   rmSync(dir, { recursive: true, force: true });
 });
 

@@ -9,6 +9,8 @@ export { completeJson, completeText } from "./complete.js";
 export type { CompleteOptions, CompleteResult } from "./complete.js";
 export { buildTextPool, summarizeTextPool } from "./text-pool.js";
 export type { TextPoolKey, LlmProviderId } from "./text-pool.js";
+export { resolveAddress } from "../address/index.js";
+export type { AddressInput, AddressResolution, ResolvedAddress } from "../address/index.js";
 export {
   normalizePhone,
   normalizeUsState,

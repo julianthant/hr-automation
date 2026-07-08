@@ -130,9 +130,19 @@ test("needsLookup: lookup-pending → 'name'", async () => {
   assert.equal(oathOcrFormSpec.needsLookup(r), "name");
 });
 
-test("needsLookup: matched with eid → 'verify'", async () => {
-  const r = { matchState: "matched", employeeId: "10000001" } as any;
+test("needsLookup: matched with eid but no roster source → 'verify'", async () => {
+  const r = { matchState: "matched", employeeId: "10000001", matchSource: "llm" } as any;
   assert.equal(oathOcrFormSpec.needsLookup(r), "verify");
+});
+
+test("needsLookup: matched via roster → null", async () => {
+  const r = { matchState: "matched", employeeId: "10000001", matchSource: "roster" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), null);
+});
+
+test("needsLookup: matched via form-eid → null", async () => {
+  const r = { matchState: "matched", employeeId: "10000001", matchSource: "form-eid" } as any;
+  assert.equal(oathOcrFormSpec.needsLookup(r), null);
 });
 
 test("needsLookup: extracted (unsigned) → null", async () => {

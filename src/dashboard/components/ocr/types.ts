@@ -46,6 +46,7 @@ export interface Address {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  country?: string | null;
 }
 
 export interface PreviewEmployee {

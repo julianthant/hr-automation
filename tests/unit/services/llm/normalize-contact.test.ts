@@ -47,6 +47,12 @@ test("normalizePhone canonicalizes common formats to (XXX) XXX-XXXX", () => {
   assert.equal(normalizePhone(null), null);
 });
 
+test("normalizePhone formats full international China numbers", () => {
+  assert.equal(normalizePhone("+86 13349115055"), "+86 133 4911 5055");
+  assert.equal(normalizePhone("8613349115055"), "+86 133 4911 5055");
+  assert.equal(normalizePhone("+86 133491"), null, "truncated OCR → left untouched");
+});
+
 test("normalizeUsState maps names and abbreviations to USPS codes", () => {
   assert.equal(normalizeUsState("California"), "CA");
   assert.equal(normalizeUsState("ca"), "CA");
@@ -142,7 +148,7 @@ test("normalizeEmergencyContactRecord applies rule changes and reports them", as
     },
   };
   // No pool → LLM path unavailable, but relationship "husband" is rule-mapped.
-  const changes = await normalizeEmergencyContactRecord(record, { pool: [] });
+  const changes = await normalizeEmergencyContactRecord(record, { pool: [], enableGeocoding: false });
 
   assert.equal(record.emergencyContact.relationship, "Spouse");
   assert.equal(record.emergencyContact.cellPhone, "(619) 555-2222");
@@ -159,12 +165,32 @@ test("normalizeEmergencyContactRecord applies rule changes and reports them", as
   assert.ok(!fields.includes("emergencyContact.homePhone"), "no change recorded for untouched field");
 });
 
+test("normalizeEmergencyContactRecord infers different-address when employee and contact differ", async () => {
+  __resetUsageTrackerForTests();
+  const record = {
+    employee: {
+      homeAddress: { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
+    },
+    emergencyContact: {
+      name: "LiLun Dong",
+      relationship: "Parent",
+      sameAddressAsEmployee: true,
+      address: { street: "Hefei, Anhui, China" },
+      cellPhone: "+86 13349115055",
+    },
+  };
+  const changes = await normalizeEmergencyContactRecord(record, { pool: [], enableGeocoding: false });
+  assert.equal(record.emergencyContact.sameAddressAsEmployee, false);
+  assert.equal(record.emergencyContact.cellPhone, "+86 133 4911 5055");
+  assert.ok(changes.some((c) => c.field === "emergencyContact.sameAddressAsEmployee"));
+});
+
 test("normalizeEmergencyContactRecord makes no changes on already-clean data", async () => {
   __resetUsageTrackerForTests();
   const record = {
     emergencyContact: { relationship: "Spouse", cellPhone: "(858) 534-1234", address: { state: "CA", zip: "92093" } },
   };
-  const changes = await normalizeEmergencyContactRecord(record, { pool: [] });
+  const changes = await normalizeEmergencyContactRecord(record, { pool: [], enableGeocoding: false });
   assert.equal(changes.length, 0);
 });
 

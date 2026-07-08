@@ -186,6 +186,29 @@ describe("PermissiveRecordSchema — OCR-pass permissive EC schema", () => {
     assert.equal(parsed.data.employee.homeAddress?.street, "456 Elm Ave, La Jolla, CA 92037");
   });
 
+  it("infers sameAddressAsEmployee=false when contact address differs from employee (international)", () => {
+    const parsed = PermissiveRecordSchema.safeParse({
+      sourcePage: 8,
+      employee: {
+        name: "Yining Dong",
+        employeeId: "10885410",
+        homeAddress: { street: "3869 Miramar St", city: "La Jolla", state: "CA", zip: "92092" },
+      },
+      emergencyContact: {
+        name: "LiLun Dong",
+        relationship: "Parent",
+        address: { street: "Hefei, Anhui, China", country: "CN" },
+        cellPhone: "+86 13349115055",
+      },
+      documentType: "expected",
+      originallyMissing: [],
+    });
+    assert.ok(parsed.success, `parse should succeed: ${JSON.stringify(!parsed.success && parsed.error.issues)}`);
+    assert.equal(parsed.data.emergencyContact.sameAddressAsEmployee, false);
+    assert.equal(parsed.data.emergencyContact.address?.street, "Hefei, Anhui, China");
+    assert.equal(parsed.data.emergencyContact.address?.country, "CN");
+  });
+
   it("approveTo.deriveInput: produces an EmergencyContactRecord-compatible shape from a permissive record", () => {
     // Verify matchRecord + deriveInput compile and produce the downstream shape.
     // The cast `as EmergencyContactRecord` is intentional — strict re-parse happens
@@ -446,5 +469,17 @@ describe("emergencyContactOcrFormSpec.matchRecord auto-accept floor", () => {
     });
     assert.equal(result.matchState, "lookup-pending");
     assert.equal(result.employee.employeeId, "");
+  });
+});
+
+describe("EC OCR prompt — vision extraction guidance", () => {
+  it("requires digit-accurate UCPath EIDs and full EC section extraction", () => {
+    const prompt = emergencyContactOcrFormSpec.prompt;
+    assert.match(prompt, /digit-by-digit/i);
+    assert.match(prompt, /10843962.*10883962|10883962.*10843962/);
+    assert.match(prompt, /10983978.*10883978|10883978.*10983978/);
+    assert.match(prompt, /Emergency section/i);
+    assert.match(prompt, /Contact address field contains email/i);
+    assert.match(prompt, /0918|mailstop|Apt/i);
   });
 });

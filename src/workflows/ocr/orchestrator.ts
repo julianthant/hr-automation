@@ -106,14 +106,22 @@ function secondOpinionCap(): number {
 
 /** Extracted name across form shapes (oath/verify flat, EC nested). */
 function readOcrRecordName(rec: unknown): string {
-  const r = rec as { printedName?: unknown; employee?: { name?: unknown } };
+  const r = rec as {
+    printedName?: unknown;
+    employee?: { name?: unknown };
+    emergencyContact?: { name?: unknown };
+  };
   const flat = typeof r.printedName === "string" ? r.printedName.trim() : "";
   if (flat) return flat;
-  return typeof r.employee?.name === "string" ? r.employee.name.trim() : "";
+  const employeeName = typeof r.employee?.name === "string" ? r.employee.name.trim() : "";
+  if (employeeName) return employeeName;
+  return typeof r.emergencyContact?.name === "string" ? r.emergencyContact.name.trim() : "";
 }
 
 /** EID across form shapes; usable = ≥5 digits after stripping separators. */
 function readUsableEid(rec: unknown): string | null {
+  const normalized = extractOcrRecordEid(rec);
+  if (normalized) return normalized;
   const r = rec as { employeeId?: unknown; employee?: { employeeId?: unknown } };
   const raw =
     typeof r.employeeId === "string"
@@ -123,6 +131,20 @@ function readUsableEid(rec: unknown): string | null {
         : "";
   const digits = raw.replace(/\D/g, "");
   return /^\d{5,}$/.test(digits) ? digits : null;
+}
+
+/** EID for operator-facing logs — normalized UCPath when valid, else raw extracted text. */
+function readOcrRecordEidForLog(rec: unknown): string {
+  const normalized = extractOcrRecordEid(rec);
+  if (normalized) return normalized;
+  const r = rec as { employeeId?: unknown; employee?: { employeeId?: unknown } };
+  const raw =
+    typeof r.employeeId === "string"
+      ? r.employeeId.trim()
+      : typeof r.employee?.employeeId === "string"
+        ? r.employee.employeeId.trim()
+        : "";
+  return raw;
 }
 
 /**
@@ -135,6 +157,65 @@ function matchOutcomeRank(rec: unknown): number {
   if ((r.rosterCandidates?.length ?? 0) > 0) return 2;
   if (readUsableEid(rec)) return 2;
   return 1;
+}
+
+/** EC-only second-opinion triggers beyond the generic no-roster/no-EID suspect. */
+function isEcSecondOpinionSuspect(rec: unknown): boolean {
+  const r = rec as {
+    formKind?: string;
+    matchState?: string;
+    matchSource?: string;
+    warnings?: string[];
+    employee?: { name?: unknown };
+    emergencyContact?: {
+      sameAddressAsEmployee?: boolean;
+      address?: { street?: unknown } | null;
+      cellPhone?: unknown;
+      homePhone?: unknown;
+      workPhone?: unknown;
+    };
+  };
+  if (r.formKind !== "emergency-contact") return false;
+
+  // Form EID present but absent from roster — often a transposed digit (10843962 vs 10883962).
+  if (
+    r.matchState === "lookup-pending" &&
+    r.matchSource === "form" &&
+    readUsableEid(rec) &&
+    r.warnings?.some((w) => w.includes("not in roster"))
+  ) {
+    return true;
+  }
+
+  // Employee block present but emergency contact has no phone AND no street — incomplete extraction.
+  const employeeName = typeof r.employee?.name === "string" ? r.employee.name.trim() : "";
+  if (!employeeName || !r.emergencyContact) return false;
+  const hasPhone = [r.emergencyContact.cellPhone, r.emergencyContact.homePhone, r.emergencyContact.workPhone]
+    .some((p) => typeof p === "string" && p.replace(/\D/g, "").length >= 7);
+  const hasStreet =
+    typeof r.emergencyContact.address?.street === "string" &&
+    r.emergencyContact.address.street.trim().length > 0;
+  return !hasPhone && !hasStreet;
+}
+
+function isSecondOpinionSuspect(rec: unknown): boolean {
+  if (readOcrRecordName(rec) === "") return false;
+  if (matchOutcomeRank(rec) === 1) return true;
+  return isEcSecondOpinionSuspect(rec);
+}
+
+function secondOpinionSuspectReason(rec: unknown): string {
+  if (matchOutcomeRank(rec) === 1) {
+    return "matched 0 roster rows and has no EID";
+  }
+  if (isEcSecondOpinionSuspect(rec)) {
+    const r = rec as { matchState?: string; warnings?: string[] };
+    if (r.warnings?.some((w) => w.includes("not in roster"))) {
+      return "form EID not on roster (possible digit misread)";
+    }
+    return "emergency contact block missing phone and address";
+  }
+  return "low-confidence extraction";
 }
 
 export interface OcrOrchestratorOpts {
@@ -639,8 +720,8 @@ export async function runOcrOrchestrator(
     // Per-record extraction summary so operator can see exactly what came
     // out of the LLM before any matching/disambiguation runs on top.
     (ocrResult.data as Array<Record<string, unknown>>).forEach((rec, i) => {
-      const name = String(rec.printedName ?? "").trim() || "(empty)";
-      const eid = String(rec.employeeId ?? "").trim() || "(none)";
+      const name = readOcrRecordName(rec) || "(empty)";
+      const eid = readOcrRecordEidForLog(rec) || "(none)";
       const date = String(rec.dateSigned ?? "").trim() || "(none)";
       const signed = rec.employeeSigned === true ? "✓" : rec.employeeSigned === false ? "✗" : "?";
       const docType = String(rec.documentType ?? "expected");
@@ -705,10 +786,10 @@ export async function runOcrOrchestrator(
     );
     // Per-record match outcome summary.
     records.forEach((r, i) => {
-      const rec = r as { matchState?: string; matchSource?: string; employeeId?: string; printedName?: string; matchConfidence?: number; rosterCandidates?: Array<{ score: number }> };
+      const rec = r as { matchState?: string; matchSource?: string; matchConfidence?: number; rosterCandidates?: Array<{ score: number }> };
       const conf = typeof rec.matchConfidence === "number" ? ` conf=${rec.matchConfidence.toFixed(2)}` : "";
       const candCount = rec.rosterCandidates?.length ?? 0;
-      log.step(`[ocr] match ${i + 1}/${records.length}: state=${rec.matchState} source=${rec.matchSource ?? "(none)"} eid=${rec.employeeId || "(none)"}${conf} candidates=${candCount}`);
+      log.step(`[ocr] match ${i + 1}/${records.length}: state=${rec.matchState} source=${rec.matchSource ?? "(none)"} eid=${readOcrRecordEidForLog(r) || "(none)"}${conf} candidates=${candCount}`);
     });
 
     // 3a. Second opinion: re-read suspect pages on accuracy-tier models.
@@ -727,7 +808,7 @@ export async function runOcrOrchestrator(
     if (roster.length > 0) {
       const suspects = records
         .map((rec, index) => ({ rec, index }))
-        .filter(({ rec }) => matchOutcomeRank(rec) === 1 && readOcrRecordName(rec) !== "");
+        .filter(({ rec }) => isSecondOpinionSuspect(rec));
       const cap = secondOpinionCap();
       if (suspects.length > cap) {
         log.warn(`[ocr/second-opinion] ${suspects.length} suspect record(s); re-reading only the first ${cap} (OCR_SECOND_OPINION_MAX)`);
@@ -740,7 +821,9 @@ export async function runOcrOrchestrator(
         // poolKeyId is `<provider>-<keyIndex>:<model>`; model ids may contain ":".
         const firstModel = pageInfo?.poolKeyId?.split(":").slice(1).join(":") ?? "";
         const oldName = readOcrRecordName(rec);
-        log.step(`[ocr/second-opinion] page ${pageNum}: "${oldName}" matched 0 roster rows and has no EID — re-reading on a tier-1 model${firstModel ? ` (first read: ${firstModel})` : ""}`);
+        log.step(
+          `[ocr/second-opinion] page ${pageNum}: "${oldName}" ${secondOpinionSuspectReason(rec)} — re-reading on a tier-1 model${firstModel ? ` (first read: ${firstModel})` : ""}`,
+        );
         const second = await raceOcrPrepWithDiscard(
           id,
           runId,
@@ -1551,11 +1634,24 @@ function readPreviousRecords(
     predicate: (e) => e.id === sessionId && e.runId === previousRunId,
   });
   if (!latest?.data?.records) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(latest.data.records);
-    if (Array.isArray(parsed)) return parsed;
-  } catch { /* tolerate */ }
-  return [];
+    parsed = JSON.parse(latest.data.records);
+  } catch (err) {
+    // A present-but-unparseable carry-forward payload is NOT the same as "no
+    // prior run" — silently falling back to [] here would discard every prior
+    // human OCR correction with no trace. Fail loud so it gets fixed at the
+    // source instead of the operator losing their edits unknowingly.
+    throw new Error(
+      `[ocr] carry-forward: previous run (sessionId=${sessionId} previousRunId=${previousRunId}) has unparseable data.records — refusing to silently drop prior human corrections: ${errorMessage(err)}`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `[ocr] carry-forward: previous run (sessionId=${sessionId} previousRunId=${previousRunId}) data.records is not an array (got ${typeof parsed}) — refusing to silently drop prior human corrections`,
+    );
+  }
+  return parsed;
 }
 
 function lookupEnqueueEmplId(target: { record: unknown; eid?: string }): string {

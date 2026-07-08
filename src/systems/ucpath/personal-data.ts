@@ -177,3 +177,162 @@ export async function demoteExistingContact(
 
   log.success(`Demoted "${existingName}" — Primary Contact unchecked + saved`);
 }
+
+/** PeopleSoft error when more than one emergency contact row is marked primary. */
+export function isEmergencyContactPrimaryConflictMessage(text: string): boolean {
+  return (
+    /only one emergency contact can be indicated as the primary contact/i.test(text) ||
+    /\(1000,110\)/.test(text)
+  );
+}
+
+async function readVisibleEmergencyContactSaveError(page: Page): Promise<string | null> {
+  const dialog = emergencyContact.messageDialog(page);
+  if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    const text = await dialog.innerText({ timeout: 2_000 }).catch(() => "");
+    return text.trim() || null;
+  }
+  const banner = emergencyContact.saveErrorBanner(page);
+  if (await banner.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    return (await banner.textContent({ timeout: 1_000 }).catch(() => null))?.trim() ?? null;
+  }
+  return null;
+}
+
+async function dismissPeopleSoftMessageDialog(page: Page): Promise<boolean> {
+  await dismissPeopleSoftModalMask(page);
+  const okButton = emergencyContact.messageDialogOkButton(page);
+  if (await okButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await okButton.click({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Click Save on the emergency contact editor and wait for the roundtrip.
+ * Does not inspect success/failure — callers read errors separately.
+ */
+export async function saveEmergencyContactEditor(page: Page): Promise<void> {
+  await dismissPeopleSoftModalMask(page);
+  await safeClick(emergencyContact.saveButton(page), {
+    timeout: 10_000,
+    label: "ucpath emergency contact save button",
+  });
+  await page.waitForTimeout(2_000);
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+}
+
+async function uncheckPrimaryContactAtRow(page: Page, rowIndex: number): Promise<boolean> {
+  const cb = emergencyContact.primaryContactCheckboxes(page).nth(rowIndex);
+  let checked: boolean;
+  try {
+    checked = await cb.isChecked({ timeout: 5_000 });
+  } catch (err) {
+    throw new Error(
+      `uncheckPrimaryContactAtRow: could not read Primary Contact checkbox state for row ${rowIndex + 1} — ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  if (!checked) return false;
+  await cb.uncheck({ timeout: 5_000 });
+  await page.waitForTimeout(500);
+  log.step(`Unchecked Primary Contact on row ${rowIndex + 1}`);
+  return true;
+}
+
+/**
+ * Uncheck Primary Contact on every row except the kept row/contact.
+ * After "Add a new row at row 1" the new contact is row index 0.
+ */
+export async function demoteOtherPrimaryContacts(
+  page: Page,
+  options: { keepRowIndex?: number; keepContactName?: string } = {},
+): Promise<number> {
+  const keepRowIndex = options.keepRowIndex ?? 0;
+  const keepName = options.keepContactName?.trim();
+  const nameInputs = await emergencyContact.contactNameInputs(page).all();
+  const primaryCheckboxes = emergencyContact.primaryContactCheckboxes(page);
+  let demoted = 0;
+
+  for (let i = 0; i < nameInputs.length; i++) {
+    if (i === keepRowIndex) continue;
+    if (keepName) {
+      const rowName = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+      if (rowName.trim() === keepName) continue;
+    }
+    const cb = primaryCheckboxes.nth(i);
+    let checked: boolean;
+    try {
+      checked = await cb.isChecked({ timeout: 5_000 });
+    } catch (err) {
+      throw new Error(
+        `demoteOtherPrimaryContacts: could not read Primary Contact checkbox state for row ${i + 1} — ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+    if (!checked) continue;
+    await cb.uncheck({ timeout: 5_000 });
+    await page.waitForTimeout(500);
+    demoted++;
+    log.step(`Unchecked Primary Contact on row ${i + 1}`);
+  }
+  return demoted;
+}
+
+async function uncheckPrimaryContactForName(page: Page, contactName: string): Promise<boolean> {
+  const nameInputs = await emergencyContact.contactNameInputs(page).all();
+  for (let i = 0; i < nameInputs.length; i++) {
+    const rowName = await nameInputs[i].inputValue({ timeout: 2_000 }).catch(() => "");
+    if (rowName.trim() !== contactName.trim()) continue;
+    return uncheckPrimaryContactAtRow(page, i);
+  }
+  return false;
+}
+
+/**
+ * Save the editor; on the "only one primary contact" PeopleSoft error,
+ * dismiss the dialog, uncheck conflicting primary rows, and retry once.
+ *
+ * Recovery order:
+ *   1. Demote every other row's Primary Contact (keep the new contact primary).
+ *   2. If none were demoted, uncheck Primary Contact on the new contact row.
+ */
+export async function saveEmergencyContactWithPrimaryRecovery(
+  page: Page,
+  contactName: string,
+): Promise<void> {
+  await saveEmergencyContactEditor(page);
+
+  let errorText = await readVisibleEmergencyContactSaveError(page);
+  if (!errorText) return;
+  if (!isEmergencyContactPrimaryConflictMessage(errorText)) {
+    throw new Error(`Emergency contact save reported a PeopleSoft error: ${errorText}`);
+  }
+
+  log.step("Primary contact conflict on save — recovering...");
+  await dismissPeopleSoftMessageDialog(page);
+
+  const demoted = await demoteOtherPrimaryContacts(page, {
+    keepRowIndex: 0,
+    keepContactName: contactName,
+  });
+  if (demoted === 0) {
+    log.step(
+      `No other primary contacts demoted — unchecking Primary Contact on "${contactName}"`,
+    );
+    const unchecked = await uncheckPrimaryContactForName(page, contactName);
+    if (!unchecked) {
+      await uncheckPrimaryContactAtRow(page, 0);
+    }
+  }
+
+  await saveEmergencyContactEditor(page);
+  errorText = await readVisibleEmergencyContactSaveError(page);
+  if (errorText) {
+    throw new Error(
+      `Emergency contact save failed after primary-contact recovery: ${errorText}`,
+    );
+  }
+}
