@@ -57,6 +57,10 @@ export const TIMEOUTS = {
   duoApproval: SETTINGS.timeouts.duoApprovalSeconds,       // seconds (used by duo-poll.ts)
   duoApprovalCrm: SETTINGS.timeouts.duoApprovalCrmSeconds, // seconds
   retryDelay: SETTINGS.timeouts.retryDelayMs,
+  // Short, fixed (not settings-backed) pause after a UI action — a click or
+  // dismissal — before the next read, e.g. letting a PeopleSoft sidebar
+  // collapse/expand settle. Not navigation-scale; keep separate from `fast`.
+  uiSettle: 2_000,
 } as const;
 
 // ─── Screen layout ──────────────────────────────────────────
