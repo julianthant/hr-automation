@@ -13,6 +13,14 @@ interface UseRunsForMergedEntryResult {
   setRuns: Dispatch<SetStateAction<RunInfo[]>>;
   activeRunId: string | null;
   setActiveRunId: Dispatch<SetStateAction<string | null>>;
+  /**
+   * True when the MOST RECENT `/api/runs` fetch failed for at least one
+   * member. `runs` is never silently truncated by a failure — a failed
+   * member's PRIOR entries are preserved rather than dropped — but this flag
+   * lets a consumer (e.g. `RunSelector`) show that the run history may be
+   * stale instead of reading identically to "confirmed, no other runs."
+   */
+  runsError: boolean;
 }
 
 /**
@@ -31,8 +39,18 @@ export function useRunsForMergedEntry({
   date,
 }: UseRunsForMergedEntryInput): UseRunsForMergedEntryResult {
   const [runs, setRuns] = useState<RunInfo[]>([]);
+  const [runsError, setRunsError] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(entry?.runId || null);
   const fetchGeneration = useRef(0);
+  // Latest `runs`, mirrored outside React state so a partial-failure refetch
+  // (an async .then, not a functional setState updater) can read the PRIOR
+  // value to fall back a failed member's entries instead of dropping them.
+  // Kept in sync via the effect below regardless of what set `runs` (this
+  // hook's own fetch, or an external `setRuns` call like LogPanel's delete).
+  const runsRef = useRef<RunInfo[]>([]);
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
 
   // Stable request key: encodes the (id, runId) pair for each member, sorted
   // oldest-first by firstSeen. Excludes status and step — those change every
@@ -69,6 +87,8 @@ export function useRunsForMergedEntry({
   useEffect(() => {
     if (!entry) {
       setRuns([]);
+      runsRef.current = [];
+      setRunsError(false);
       setActiveRunId(null);
       return;
     }
@@ -82,54 +102,79 @@ export function useRunsForMergedEntry({
 
     const myGen = ++fetchGeneration.current;
 
-    void Promise.all(
+    void Promise.allSettled(
       fetchItems.map((m) =>
         fetch(
           `/api/runs?workflow=${encodeURIComponent(runsWorkflow)}&id=${encodeURIComponent(m.id)}&date=${encodeURIComponent(date)}`,
         )
-          .then((r) => r.json())
-          .then((data: RunInfo[]) => data.map((run) => ({ ...run, itemId: m.id })))
-          .catch(() => [] as RunInfo[]),
+          .then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
+          .then((data: RunInfo[]) => data.map((run) => ({ ...run, itemId: m.id }))),
       ),
-    ).then((perMember) => {
+    ).then((results) => {
       if (myGen !== fetchGeneration.current) return;
 
+      // A failed member's refetch must not silently erase its previously
+      // known runs — that would read as "this run has no other attempts"
+      // instead of "we couldn't refresh it" (fail-loud: see root CLAUDE.md).
+      // Fall back to the last-known-good list for that one member and flag
+      // `runsError` so a stale RunSelector is distinguishable from a
+      // confirmed one.
+      const priorByItemId = new Map<string, RunInfo[]>();
+      for (const r of runsRef.current) {
+        const key = r.itemId ?? "";
+        const list = priorByItemId.get(key);
+        if (list) list.push(r);
+        else priorByItemId.set(key, [r]);
+      }
+
+      let anyFailed = false;
+      const perMember = results.map((result, i) => {
+        if (result.status === "fulfilled") return result.value;
+        anyFailed = true;
+        return priorByItemId.get(fetchItems[i].id) ?? [];
+      });
+
       const pooled = perMember.flat();
-      const renumbered = pooled.map((run, i) => ({ ...run, runOrdinal: i + 1 }));
+      runsRef.current = pooled;
+      setRunsError(anyFailed);
 
       setRuns((prev) => {
         if (
-          prev.length === renumbered.length &&
+          prev.length === pooled.length &&
           prev.every(
             (r, i) =>
-              r.runId === renumbered[i].runId &&
-              r.status === renumbered[i].status &&
-              r.step === renumbered[i].step &&
-              r.lastLogTs === renumbered[i].lastLogTs &&
-              r.itemId === renumbered[i].itemId,
+              r.runId === pooled[i].runId &&
+              r.status === pooled[i].status &&
+              r.step === pooled[i].step &&
+              r.lastLogTs === pooled[i].lastLogTs &&
+              r.itemId === pooled[i].itemId &&
+              r.runOrdinal === pooled[i].runOrdinal,
           )
         )
           return prev;
-        return renumbered;
+        return pooled;
       });
 
       setActiveRunId((prev) => {
         if (!prev)
-          return renumbered.length > 0
-            ? renumbered[renumbered.length - 1].runId
+          return pooled.length > 0
+            ? pooled[pooled.length - 1].runId
             : entry.runId || null;
         const latestRunId =
-          renumbered.length > 0 ? renumbered[renumbered.length - 1].runId : null;
+          pooled.length > 0 ? pooled[pooled.length - 1].runId : null;
         if (
           latestRunId &&
           latestRunId !== prev &&
-          !renumbered.slice(0, -1).some((r) => r.runId === latestRunId)
+          !pooled.slice(0, -1).some((r) => r.runId === latestRunId)
         ) {
           return latestRunId;
         }
-        if (renumbered.some((r) => r.runId === prev)) return prev;
-        return renumbered.length > 0
-          ? renumbered[renumbered.length - 1].runId
+        if (pooled.some((r) => r.runId === prev)) return prev;
+        return pooled.length > 0
+          ? pooled[pooled.length - 1].runId
           : entry.runId || null;
       });
     });
@@ -143,5 +188,5 @@ export function useRunsForMergedEntry({
   // the per-member id/runId tuples; if workflow identity itself changed we'd
   // see a different requestKey anyway.
 
-  return { runs, setRuns, activeRunId, setActiveRunId };
+  return { runs, setRuns, activeRunId, setActiveRunId, runsError };
 }

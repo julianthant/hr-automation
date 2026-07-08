@@ -298,7 +298,13 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
             const j = (await r.json()) as
               | { ok: true; priorRuns: PriorRunSummary[] }
               | { ok: false; error: string };
-            return { fileName: candidate.name, priorRuns: j.ok ? j.priorRuns ?? [] : [] };
+            // A `{ok:false}` response is a genuine backend failure for THIS
+            // file's duplicate check, not "no duplicates found" — silently
+            // returning [] would let the operator upload a real duplicate
+            // unwarned. Throw so the outer catch surfaces it as an error
+            // banner instead of masking it as a clean check.
+            if (!j.ok) throw new Error(j.error || `Duplicate check failed for ${candidate.name}`);
+            return { fileName: candidate.name, priorRuns: j.priorRuns ?? [] };
           }),
         );
         if (cancelled) return;

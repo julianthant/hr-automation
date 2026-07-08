@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, AlertCircle, RefreshCw, EyeOff } from "lucide-react";
+import { Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { FailedPage } from "./types";
@@ -26,7 +26,6 @@ function providerFamily(keyId: string): string {
 
 export function FailedPageCard({ failedPage, totalPages, sessionId, runId, onRetryComplete }: FailedPageCardProps) {
   const [retrying, setRetrying] = useState(false);
-  const [skipped, setSkipped] = useState(false);
 
   async function handleRetry() {
     if (retrying) return;
@@ -60,10 +59,7 @@ export function FailedPageCard({ failedPage, totalPages, sessionId, runId, onRet
   const triedFamilies = Array.from(new Set(failedPage.attemptedKeys.map(providerFamily)));
 
   return (
-    <div className={cn(
-      "rounded-md border bg-card p-4",
-      skipped ? "border-border/40 opacity-50" : "border-destructive/40",
-    )}>
+    <div className="rounded-md border border-destructive/40 bg-card p-4">
       <div className="flex items-start gap-3">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden />
         <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -92,7 +88,7 @@ export function FailedPageCard({ failedPage, totalPages, sessionId, runId, onRet
             <button
               type="button"
               onClick={handleRetry}
-              disabled={retrying || skipped}
+              disabled={retrying}
               className={cn(
                 "inline-flex h-7 items-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-semibold text-primary-foreground",
                 "disabled:cursor-not-allowed disabled:opacity-50",
@@ -100,15 +96,6 @@ export function FailedPageCard({ failedPage, totalPages, sessionId, runId, onRet
             >
               {retrying ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" /> : <RefreshCw className="h-3 w-3" />}
               {retrying ? "Retrying…" : "Retry page"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSkipped((s) => !s)}
-              disabled={retrying}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
-            >
-              <EyeOff className="h-3 w-3" />
-              {skipped ? "Unskip" : "Skip page"}
             </button>
           </div>
         </div>

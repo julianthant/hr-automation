@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play, SearchX } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Play, SearchX, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DeleteButton } from "@/components/shared/DeleteButton";
 import { RetryButton } from "@/components/shared/RetryButton";
@@ -31,6 +31,14 @@ interface RunSelectorProps {
     runId?: string | null;
     onDeleted: (id: string) => void;
   };
+  /**
+   * True when the most recent `/api/runs` refetch failed for at least one
+   * merged member — `runs` keeps its last-known-good list rather than being
+   * silently truncated, but this run history may be stale. Shows a
+   * distinguishable warning glyph instead of reading identically to "this
+   * confirmed run list has no other attempts."
+   */
+  stale?: boolean;
 }
 
 /**
@@ -77,7 +85,7 @@ function statusColor(run: RunInfo, workflow: string): string {
  * which alphabetic sort would produce). Opens an ordered list of every run
  * with its status glyph; the trigger always shows the active run + a chevron.
  */
-export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTarget, workflow }: RunSelectorProps) {
+export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTarget, workflow, stale }: RunSelectorProps) {
   // Numeric desc — newest run on top regardless of how it was inserted upstream.
   const sortedRuns = useMemo(
     () => [...runs].sort((a, b) => runNumber(b) - runNumber(a)),
@@ -137,7 +145,12 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            aria-label={`Run #${activeNum} of ${totalRuns} — ${activeDisplay}`}
+            aria-label={
+              stale
+                ? `Run #${activeNum} of ${totalRuns} — ${activeDisplay} — run history may be stale, refresh failed`
+                : `Run #${activeNum} of ${totalRuns} — ${activeDisplay}`
+            }
+            title={stale ? "Couldn't refresh run history — showing the last-known list" : undefined}
             className={cn(
               "h-8 min-w-[126px] px-3 rounded-md border border-border bg-secondary cursor-pointer",
               "inline-flex items-center justify-center gap-2 transition-colors",
@@ -151,6 +164,12 @@ export function RunSelector({ runs, activeRunId, onSelect, retryTarget, deleteTa
             <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
               of {totalRuns}
             </span>
+            {stale && (
+              <AlertTriangle
+                aria-hidden
+                className="w-3 h-3 shrink-0 text-warning"
+              />
+            )}
             <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
           </button>
         </DropdownMenuTrigger>
