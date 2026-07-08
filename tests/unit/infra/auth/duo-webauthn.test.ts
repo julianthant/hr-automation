@@ -627,6 +627,76 @@ describe("selectDuoFactor — ISS-005 pre-prompt guard", () => {
       "waited to the absolute promptRenderCap (factor window + render grace) before giving up",
     );
   });
+
+  // ── Strengthening edge cases (the (a)/(b)/(c) trio above already pins the
+  // core regression: the deadline must not elapse — i.e. must not be read as
+  // "no factor" — while the page is still pre-prompt. These two cases probe
+  // the boundary of that guard rather than duplicate it. ──
+
+  it("(d) propagates an abort fired DURING the pre-prompt extension instead of silently resolving to undefined (fail loud)", async () => {
+    // A cancellation (e.g. daemon stop, run cancel) that lands while the ISS-005
+    // guard is extending past the initial factor deadline — but still well before
+    // the render cap — must interrupt the wait immediately, not be swallowed by
+    // the extension loop and reported as an ordinary "factor not found" give-up.
+    const clock = { t: CLOCK_BASE };
+    const clicks: string[] = [];
+    const controller = new AbortController();
+    const abortAt = CLOCK_BASE + 1_800; // a few polls into the extended (post-deadline) window
+    const abortError = new Error("cancelled: daemon stop");
+    const page = makeFakePage({
+      clock,
+      clicks,
+      presentTexts: () => [],
+      presentLinks: () => [], // prompt never renders — same shape as scenario (c)
+    });
+    // Piggyback on waitForTimeout (the only place virtual time advances) to
+    // fire the abort once the clock crosses the threshold.
+    const originalWaitForTimeout = page.waitForTimeout.bind(page);
+    (page as unknown as { waitForTimeout: (ms?: number) => Promise<void> }).waitForTimeout = async (ms?: number) => {
+      await originalWaitForTimeout(ms ?? 0);
+      if (!controller.signal.aborted && clock.t >= abortAt) controller.abort(abortError);
+    };
+
+    await assert.rejects(
+      () => selectDuoFactor(page, factorOrder, FACTOR_WINDOW_MS, controller.signal, undefined, () => clock.t),
+      (err: unknown) => err === abortError,
+      "must reject with the abort reason, not resolve to undefined",
+    );
+    assert.deepEqual(clicks, [], "never reaches a factor click");
+    assert.ok(
+      clock.t < CLOCK_BASE + EXPECTED_CAP_FROM_START,
+      "aborted well before the render cap — the extension does not swallow cancellation",
+    );
+  });
+
+  it("(e) a factor window larger than the 20s floor scales the render cap accordingly (promptRenderCap = timeoutMs + grace)", async () => {
+    // promptRenderCap = max(timeoutMs, 20_000) + DUO_FACTOR_PROMPT_RENDER_GRACE_MS.
+    // (a)/(b)/(c) all use a sub-20s window, exercising only the 20s floor. This
+    // pins the OTHER branch of the max() — a caller-supplied window bigger than
+    // the floor must extend the cap past 45s, not clamp back down to it.
+    const LARGE_FACTOR_WINDOW_MS = 30_000;
+    const EXPECTED_LARGE_CAP = LARGE_FACTOR_WINDOW_MS + PROMPT_RENDER_GRACE_MS; // 55_000
+    const clock = { t: CLOCK_BASE };
+    const clicks: string[] = [];
+    const page = makeFakePage({
+      clock,
+      clicks,
+      presentTexts: () => [],
+      presentLinks: () => [],
+    });
+
+    const label = await selectDuoFactor(page, factorOrder, LARGE_FACTOR_WINDOW_MS, undefined, undefined, () => clock.t);
+
+    assert.equal(label, undefined, "never-rendered prompt still ends in a give-up");
+    assert.ok(
+      clock.t >= CLOCK_BASE + EXPECTED_LARGE_CAP,
+      `expected to wait to the scaled cap (${EXPECTED_LARGE_CAP}ms), only waited ${clock.t - CLOCK_BASE}ms`,
+    );
+    assert.ok(
+      clock.t < CLOCK_BASE + EXPECTED_LARGE_CAP + 5_000,
+      "must not wait dramatically past the scaled cap either (still bounded)",
+    );
+  });
 });
 
 describe("selectDuoFactor — Phase 1 security-key auto-fire (no early bail)", () => {
