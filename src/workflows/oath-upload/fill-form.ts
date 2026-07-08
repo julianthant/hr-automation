@@ -59,7 +59,12 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
   await safeFill(hrInquiry.select2DropSearch(page, "Specifically"), v.specifically, {
     label: "servicenow hr inquiry specifically",
   });
-  await page.waitForTimeout(800);
+  // Wait for the typeahead to filter results (debounced) before attempting
+  // the click, instead of a blind pause; non-throwing — the try/catch below
+  // already handles a genuine miss via the Enter-to-accept fallback.
+  await hrInquiry.select2ResultOption(page, "Specifically", v.specifically)
+    .waitFor({ state: "visible", timeout: 2_000 })
+    .catch(() => {});
   try {
     await safeClick(hrInquiry.select2ResultOption(page, "Specifically", v.specifically), {
       timeout: 3_000,
@@ -86,7 +91,12 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
     await safeFill(hrInquiry.select2DropSearch(page, "Category"), v.category, {
       label: "servicenow hr inquiry category",
     });
-    await page.waitForTimeout(500);
+    // Wait for the typeahead to filter results (debounced) before attempting
+    // the click, instead of a blind pause; non-throwing — the try/catch below
+    // already handles a genuine miss via the Enter-to-accept fallback.
+    await hrInquiry.select2ResultOption(page, "Category", v.category)
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .catch(() => {});
     try {
       await safeClick(hrInquiry.select2ResultOption(page, "Category", v.category), {
         timeout: 3_000,
