@@ -7,8 +7,8 @@ import {
   buildDaemonsSpawnHandler,
   buildDaemonsStopHandler,
   buildDeleteEntryHandler,
-  buildApproveSeparationEidHandler,
-  buildDismissSeparationEidHandler,
+  buildApproveEidHandler,
+  buildDismissEidHandler,
   buildDrainWorkerHandler,
   buildEntryReEnqueueHandler,
   buildFindPriorByKeyHandler,
@@ -309,23 +309,28 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
     }, buildEntryReEnqueueHandler(deps.dir, { withData: true }), 202);
   });
 
-  // Separations EID-approval review — approve a chosen EID (re-queue the doc as a
-  // fresh, gate-skipping run) or dismiss the review (stamp the row, no re-queue).
-  app.post("/api/separations/approve-eid", async (c) => {
+  // Identity-approval review (workflow-agnostic) — approve a chosen EID (re-queue
+  // the item as a fresh, gate-skipping run) or dismiss the review (stamp the row,
+  // no re-queue). The `workflow` rides the body (the banner already sends it); the
+  // handler rejects any workflow not in EID_APPROVAL_WORKFLOWS. Adopted by
+  // separations + onboarding.
+  app.post("/api/eid-approval/approve", async (c) => {
     return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
       eid: String(body.eid ?? ""),
       date: body.date ? String(body.date) : undefined,
-    }), buildApproveSeparationEidHandler(deps.dir), 202);
+    }), buildApproveEidHandler(deps.dir), 202);
   });
 
-  app.post("/api/separations/dismiss-eid", async (c) => {
+  app.post("/api/eid-approval/dismiss", async (c) => {
     return postJson(c, (body) => ({
+      workflow: String(body.workflow ?? ""),
       id: String(body.id ?? ""),
       runId: body.runId ? String(body.runId) : undefined,
       date: body.date ? String(body.date) : undefined,
-    }), buildDismissSeparationEidHandler(deps.dir));
+    }), buildDismissEidHandler(deps.dir));
   });
 
   app.post("/api/save-data", async (c) => {
