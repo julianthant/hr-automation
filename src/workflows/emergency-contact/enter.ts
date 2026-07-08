@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
 import { log } from "../../utils/log.js";
 import { readExistingContactNames } from "../../systems/ucpath/personal-data.js";
+import { emergencyContact as emergencyContactSelectors } from "../../systems/ucpath/selectors.js";
 import { dismissPeopleSoftModalMask } from "../../systems/common/modal.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import { mapRelationship } from "./config.js";
@@ -125,14 +126,13 @@ export function buildEmergencyContactPlan(
   // 1. Add a new row.
   plan.add('Click "Add a new row at row 1"', async () => {
     await dismissPeopleSoftModalMask(page);
-    await page
-      .getByRole("button", { name: /add a new row/i })
-      .first()
+    await emergencyContactSelectors
+      .addNewRowButton(page)
       .click({ timeout: 10_000 });
     // The new row's Contact Name field is what the next plan step fills —
     // wait for it directly instead of a blind pause.
-    await page
-      .getByRole("textbox", { name: "Contact Name" })
+    await emergencyContactSelectors
+      .contactNameInputs(page)
       .first()
       .waitFor({ state: "visible", timeout: 6_000 });
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
@@ -140,8 +140,8 @@ export function buildEmergencyContactPlan(
 
   // 2. Contact Name.
   plan.add(`Fill Contact Name: ${contact.name}`, async () => {
-    await page
-      .getByRole("textbox", { name: "Contact Name" })
+    await emergencyContactSelectors
+      .contactNameInputs(page)
       .first()
       .fill(contact.name, { timeout: 10_000 });
     // TODO(live-verify): no detectable post-fill condition for a plain text
@@ -151,7 +151,7 @@ export function buildEmergencyContactPlan(
 
   // 3. Primary Contact checkbox.
   plan.add("Set Primary Contact", async () => {
-    const cb = page.getByRole("checkbox", { name: "Primary Contact" }).first();
+    const cb = emergencyContactSelectors.primaryContactCheckboxes(page).first();
     if (contact.primary) {
       const checked = await cb.isChecked({ timeout: 5_000 }).catch(() => false);
       if (!checked) await cb.check({ timeout: 5_000 });
@@ -169,9 +169,8 @@ export function buildEmergencyContactPlan(
   plan.add(
     `Select Relationship: "${contact.relationship}" -> "${relationshipLabel}"`,
     async () => {
-      await page
-        .getByRole("combobox", { name: "Relationship to Employee" })
-        .first()
+      await emergencyContactSelectors
+        .relationshipComboBox(page)
         .selectOption({ label: relationshipLabel }, { timeout: 10_000 });
       // A relationship change can round-trip a postback; wait for the
       // processing spinner (if any) to settle rather than a blind pause.
@@ -189,9 +188,7 @@ export function buildEmergencyContactPlan(
       ? 'Check "Same Address as Employee"'
       : 'Uncheck "Same Address as Employee" and enter manual address',
     async () => {
-      const sameAddrCb = page
-        .getByRole("checkbox", { name: "Same Address as Employee" })
-        .first();
+      const sameAddrCb = emergencyContactSelectors.sameAddressAsEmployeeCheckbox(page);
       const checked = await sameAddrCb.isChecked({ timeout: 5_000 }).catch(() => false);
 
       if (wantsSameAddress) {
@@ -210,9 +207,8 @@ export function buildEmergencyContactPlan(
       if (checked) await sameAddrCb.uncheck({ timeout: 5_000 });
       // Unchecking reveals the "Edit Address" button — wait for it directly
       // (the next step in this branch clicks it) instead of a blind pause.
-      await page
-        .getByRole("button", { name: "Edit Address" })
-        .first()
+      await emergencyContactSelectors
+        .editAddressButton(page)
         .waitFor({ state: "visible", timeout: 4_000 })
         .catch(() => {});
 
@@ -225,39 +221,37 @@ export function buildEmergencyContactPlan(
 
       const addr = contact.address;
       await dismissPeopleSoftModalMask(page);
-      await page.getByRole("button", { name: "Edit Address" }).first()
+      await emergencyContactSelectors.editAddressButton(page)
         .click({ timeout: 10_000 });
       // Wait for the Edit Address modal's first field before filling it.
-      await page
-        .getByRole("textbox", { name: "Address 1" })
-        .first()
+      await emergencyContactSelectors
+        .address1Input(page)
         .waitFor({ state: "visible", timeout: 4_000 });
 
       if (addr.street) {
-        await page.getByRole("textbox", { name: "Address 1" }).first()
+        await emergencyContactSelectors.address1Input(page)
           .fill(addr.street, { timeout: 10_000 });
       }
       if (addr.city) {
-        await page.getByRole("textbox", { name: "City" }).first()
+        await emergencyContactSelectors.cityInput(page)
           .fill(addr.city, { timeout: 10_000 });
       }
       if (addr.state) {
-        await page.getByRole("textbox", { name: "State" }).first()
+        await emergencyContactSelectors.stateInput(page)
           .fill(addr.state, { timeout: 10_000 });
       }
       if (addr.zip) {
-        await page.getByRole("textbox", { name: "Postal" }).first()
+        await emergencyContactSelectors.postalInput(page)
           .fill(addr.zip, { timeout: 10_000 });
       }
 
       await dismissPeopleSoftModalMask(page);
-      await page.getByRole("button", { name: "OK", exact: true }).first()
+      await emergencyContactSelectors.editAddressOkButton(page)
         .click({ timeout: 10_000 });
       // Wait for the Edit Address modal to close (its Address 1 field
       // detaches/hides) before falling through to the existing networkidle wait.
-      await page
-        .getByRole("textbox", { name: "Address 1" })
-        .first()
+      await emergencyContactSelectors
+        .address1Input(page)
         .waitFor({ state: "hidden", timeout: 5_000 })
         .catch(() => {});
       await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
@@ -268,9 +262,8 @@ export function buildEmergencyContactPlan(
   const primaryPhone = contact.cellPhone || contact.homePhone || contact.workPhone;
   if (primaryPhone) {
     plan.add(`Fill Phone: ${primaryPhone}`, async () => {
-      await page
-        .getByRole("textbox", { name: "Phone", exact: true })
-        .first()
+      await emergencyContactSelectors
+        .phoneInput(page)
         .fill(primaryPhone, { timeout: 10_000 });
       // TODO(live-verify): no detectable post-fill condition — Phone is the
       // last field before caller's "save" step; keeping the settle pause.
@@ -293,9 +286,9 @@ export function buildEmergencyContactPlan(
  * clear "could not read the displayed identity" rather than a false miss.
  */
 export async function readEmergencyContactPersonIdRow(page: Page): Promise<string> {
-  const personIdEl = page.getByText("Person ID").first();
+  const personIdEl = emergencyContactSelectors.personIdText(page);
   if ((await personIdEl.count().catch(() => 0)) === 0) return "";
-  return (await personIdEl.locator("..").innerText({ timeout: 3_000 })).trim();
+  return (await personIdEl.locator("..").innerText({ timeout: 3_000 })).trim(); // allow-inline-selector
 }
 
 /**
