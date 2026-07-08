@@ -16,7 +16,7 @@ import {
   type SearchRoot,
   type PeopleRoot,
 } from "./selectors.js";
-import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
+import { clickIfPresent, safeClick, safeFill, checkDisplayedIdentity } from "../common/index.js";
 import { gotoWithRetry } from "../../infra/browser/launch.js";
 import {
   formatTimecardDate,
@@ -305,10 +305,11 @@ export function probeEidInTimecardText(
   text: string,
   searchedEid: string,
 ): { match: boolean; otherEid: string | null } {
-  if (text.includes(searchedEid)) return { match: true, otherEid: null };
-  // A different 8-digit id on the timecard is a positive wrong-person signal.
-  const m = text.match(/\b\d{8}\b/);
-  return { match: false, otherEid: m ? m[0] : null };
+  // Delegates to the shared identity primitive (`checkDisplayedIdentity`):
+  // word-boundary match on the searched EID, and any competing 8-digit id on the
+  // timecard reported as a positive wrong-person signal.
+  const r = checkDisplayedIdentity(searchedEid, text);
+  return { match: r.ok, otherEid: r.shown };
 }
 
 /**
@@ -323,18 +324,15 @@ async function waitForTimecardEmployee(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const probe = await page
-      .evaluate(
-        (searchedEid) => {
-          const text = document.body?.innerText ?? "";
-          if (text.includes(searchedEid)) return { match: true, otherEid: null as string | null };
-          const m = text.match(/\b\d{8}\b/);
-          return { match: false, otherEid: m ? m[0] : null };
-        },
-        eid,
-      )
-      .catch(() => ({ match: false as boolean, otherEid: null as string | null }));
-    if (probe.match) return true;
+    // TODO(live-verify): scope this to a pinpoint WFD timecard employee-header
+    // selector once one can be live-mapped (needs a found employee's open
+    // timecard). document.body.innerText EXCLUDES <input> values, so the searched
+    // EID cannot leak from the search box. Compare/throw is routed through the
+    // shared identity primitive via `probeEidInTimecardText`.
+    const bodyText = await page
+      .evaluate(() => document.body?.innerText ?? "")
+      .catch(() => null);
+    if (bodyText !== null && probeEidInTimecardText(bodyText, eid).match) return true;
     await page.waitForTimeout(500);
   }
   return false;
@@ -499,20 +497,26 @@ export async function verifyTimecardEmployee(
   const deadline = Date.now() + 8_000;
   let shownEid: string | null = null;
   while (Date.now() < deadline) {
-    const probe = await page
-      .evaluate((searchedEid) => {
-        const text = document.body?.innerText ?? "";
-        if (text.includes(searchedEid)) return { match: true, otherEid: null as string | null };
-        const m = text.match(/\b\d{8}\b/);
-        return { match: false, otherEid: m ? m[0] : null };
-      }, eid)
-      // Fail SAFE, not open: a probe exception must NOT confirm the employee.
-      // This gate exists to stop a stale/wrong employee's timecard from being
-      // read into a separation — a thrown probe means "could not verify", which
-      // is `match: false` (the loop keeps polling, then the caller throws).
-      .catch(() => ({ match: false as boolean, otherEid: null as string | null }));
-    if (probe.match) return { ok: true, shownEid: eid };
-    shownEid = probe.otherEid;
+    // TODO(live-verify): scope this to a pinpoint WFD timecard employee-header
+    // selector once one can be live-mapped (needs a found employee's open
+    // timecard). document.body.innerText EXCLUDES <input> values and the search
+    // slide-out is closed above, so the searched EID cannot linger from the
+    // global Employee Search box. The compare/throw is routed through the shared
+    // identity primitive via `probeEidInTimecardText` (word-boundary + competing
+    // 8-digit id capture).
+    //
+    // Fail SAFE, not open: a probe EXCEPTION must NOT confirm the employee. This
+    // gate stops a stale/wrong employee's timecard from being read into a
+    // separation — a thrown probe means "could not verify" (keep polling, then
+    // the caller throws).
+    const bodyText = await page
+      .evaluate(() => document.body?.innerText ?? "")
+      .catch(() => null);
+    if (bodyText !== null) {
+      const probe = probeEidInTimecardText(bodyText, eid);
+      if (probe.match) return { ok: true, shownEid: eid };
+      shownEid = probe.otherEid;
+    }
     await page.waitForTimeout(500);
   }
   return { ok: false, shownEid };
@@ -1053,7 +1057,9 @@ export async function closeEmployeeSearch(page: Page): Promise<void> {
  * 8-digit EID can't partially match a longer number. Exported for unit tests.
  */
 export function peopleHeaderShowsEid(headerText: string, eid: string): boolean {
-  return new RegExp(`\\b${eid}\\b`).test(headerText);
+  // Word-boundary match via the shared identity primitive so an 8-digit EID
+  // can't partially match a longer number.
+  return checkDisplayedIdentity(eid, headerText).ok;
 }
 
 /**

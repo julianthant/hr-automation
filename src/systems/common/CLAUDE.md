@@ -65,7 +65,52 @@ registries:
 Before mapping anything new, always run `npm run selector:search "<intent>"`
 to scan the existing catalogs. The CLI ranks both selectors and lessons.
 
+## Pre-submit identity gate (`assertDisplayedIdentity`)
+
+`identity.ts` is the shared primitive for confirming the page displays the RIGHT
+person/subject before an irreversible Save / Submit / Import. Use it instead of
+hand-rolling a per-workflow EID/id check.
+
+- **Pure core** `checkDisplayedIdentity(expected, displayed, opts)` → `{ ok, shown }`.
+  `mode: "word-boundary"` (default) matches `\bexpected\b` inside a header/blob and,
+  on a miss, reports a competing 8-digit id (override via `competingIdPattern`);
+  `mode: "exact"` requires the trimmed field value to equal `expected` and reports
+  the whole displayed value. Throws on an empty `expected` (a gate with no expected
+  value can never be real).
+- **Async gate** `assertDisplayedIdentity({ expected, extract, context, mode?, pollMs? })`
+  calls the `extract` closure (Playwright-agnostic), compares, and **throws a legible
+  EXPECTED-vs-DISPLAYED error** on a mismatch. Fail-loud contract: an `extract` throw
+  is INCONCLUSIVE → throws (never passes); an empty displayed value → throws; optional
+  `pollMs` re-reads while the page is still switching subjects (batch reuse).
+
+**Adoption recipe:** pick the page's OWN identity element (never whole-page text that
+a lingering search box can pollute), write a small `extract` reading it, call the gate
+right before the irreversible step. Wired today:
+- **New Kronos** — `peopleHeaderShowsEid` / `probeEidInTimecardText` delegate to the pure
+  core (`.empName` header / timecard text). *TODO(live-verify): scope the timecard read
+  to a pinpoint WFD employee-header selector once a found-employee timecard is mappable.*
+- **OnBase** — after the Employee Lookup keyset autofills, `exact`-match the "UCPath ID"
+  keyword before Import (`workflows/onbase/handler.ts`).
+- **Emergency Contact** — `word-boundary`-match the "Person ID <emplId>" header
+  (`readEmergencyContactPersonIdRow`) before demote/add (`workflows/emergency-contact/`).
+- **Oath Signature** — deferred (`TODO(live-verify)` in `enter.ts`): the profile is reached
+  by an exact unique-EID search and `crm-verify` already confirms the EID, so a gate needs
+  a live-mapped Person-Profile EID display selector before it can be wired safely.
+
 ## Lessons Learned
+
+### 2026-07-08 — `assertDisplayedIdentity` extracted as the shared identity gate
+
+The wrong-person guard (`verifyPeopleEmployee` / `verifyTimecardEmployee`) was
+per-workflow copy-paste — one `\b<eid>\b` regex here, one `document.body.innerText`
+probe there — so each new file-a-document flow risked shipping without any gate.
+Extracted into `identity.ts` (pure `checkDisplayedIdentity` + async
+`assertDisplayedIdentity`); New Kronos now delegates to it, and OnBase +
+Emergency Contact adopted it before Import/demote. **Rule:** every workflow that
+Saves/Submits/Imports against a subject reached via search/keyset/nav must gate
+on the page's OWN identity element through this primitive before the irreversible
+step — fail loud on a mismatch or an inconclusive read, never proceed. See the
+"Pre-submit identity gate" section above for the recipe.
 
 ### 2026-04-21 — `safeClick`/`safeFill` log contract changed (Task 2.1)
 
