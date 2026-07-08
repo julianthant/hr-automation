@@ -43,6 +43,10 @@ export const employeeGrid = {
 
   /**
    * First row of the Genies grid. verified 2026-03-16
+   * Also used directly by `old-kronos-reports/workflow.ts`'s post-search
+   * "did we get a matching row" confirmation (promoted from an inline
+   * `iframe.locator("#row0genieGrid")` there — identical locator, moved).
+   * // verified 2026-07-08 (inherited from working production code — same locator, moved)
    * @tags first, row, genies, grid, employee, ukg, old-kronos
    */
   firstRow: (iframe: Frame): Locator => iframe.locator("#row0genieGrid"),
@@ -182,6 +186,23 @@ export const timecard = {
    */
   previousPayPeriodLink: (f: Frame): Locator =>
     f.getByRole("link", { name: "Previous Pay Period" }),
+
+  /**
+   * The readonly timeframe-selector input (`#timeframe-selector-input`) that
+   * opens the period dropdown when clicked (see `switchToPreviousPayPeriod` —
+   * clicked via `element.click()` in `f.evaluate` because Playwright's
+   * actionability checks block a normal click on a readonly input). Reading
+   * its displayed value via `.inputValue()` does NOT require actionability
+   * checks, so it's used as the positive "did the displayed period actually
+   * change" signal after a period switch.
+   * // TODO(live-verify): the exact displayed value/format of this input
+   * before vs. after switching to Previous Pay Period has not been confirmed
+   * against a live UKG page — this selector is inherited from the existing
+   * click-target id (mapped 2026-04-01), not a fresh snapshot of its value
+   * semantics.
+   * @tags timeframe, selector, input, period, readback, timecard, ukg, old-kronos
+   */
+  periodSelectorInput: (f: Frame): Locator => f.locator("#timeframe-selector-input"),
 };
 
 // ─── Workspace tabs ───────────────────────────────────────────────────────
