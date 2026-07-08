@@ -1,46 +1,57 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 
-import { deriveDelegationLabel } from "../../../src/dashboard/components/log-panel/LogPanel.js";
+import { deriveLogPanelFooterRunLabel } from "../../../src/dashboard/components/log-panel/LogPanel.js";
 import type { TrackerEntry } from "../../../src/dashboard/components/shared/types.js";
-
-const LABELS: Record<string, string> = {
-  ocr: "OCR",
-  "oath-signature": "Oath Signature",
-  "person-lookup": "Person Lookup",
-};
-const label = (name: string): string => LABELS[name] ?? name;
 
 function entry(overrides: Partial<TrackerEntry> = {}): TrackerEntry {
   return {
-    workflow: "person-lookup",
+    workflow: "emergency-contact",
     timestamp: "2026-06-06T18:00:00.000Z",
     id: "item-1",
     runId: "run-1",
     status: "done",
-    data: { archetype: "single" },
+    data: { archetype: "single", queueRowKind: "person" },
     ...overrides,
   } as TrackerEntry;
 }
 
-test("a root run (no parentRunId) reads Standalone", () => {
-  const e = entry();
-  assert.equal(deriveDelegationLabel(e, [e], label), "Standalone");
+test("shows trace id even when EID is present", () => {
+  const e = entry({
+    runOrdinal: 1,
+    data: {
+      archetype: "single",
+      queueRowKind: "person",
+      eid: "10884790",
+      __traceId: "ec-150044-0d3f",
+    },
+  });
+  assert.equal(deriveLogPanelFooterRunLabel(e), "ec-150044-0d3f-1");
 });
 
-test("a delegated run reads 'from <Parent Workflow label>'", () => {
-  const parent = entry({ workflow: "oath-signature", id: "oath-1", runId: "oath-run-1" });
-  const child = entry({ runId: "pl-run-1", parentRunId: "oath-run-1" });
-  assert.equal(deriveDelegationLabel(child, [parent, child], label), "from Oath Signature");
+test("shows trace id for a person row without EID", () => {
+  const e = entry({
+    runOrdinal: 2,
+    data: { archetype: "single", queueRowKind: "person", __traceId: "ec-143012-a3f1" },
+  });
+  assert.equal(deriveLogPanelFooterRunLabel(e), "ec-143012-a3f1-2");
 });
 
-test("an OCR-delegated person-lookup reads 'from OCR'", () => {
-  const ocr = entry({ workflow: "ocr", id: "ocr-1", runId: "ocr-run-1", data: { archetype: "preview" } });
-  const pl = entry({ runId: "pl-run-2", parentRunId: "ocr-run-1" });
-  assert.equal(deriveDelegationLabel(pl, [ocr, pl], label), "from OCR");
+test("shows trace id for a file row", () => {
+  const e = entry({
+    runOrdinal: 1,
+    workflow: "ocr",
+    data: {
+      archetype: "preview",
+      queueRowKind: "file",
+      pdfOriginalName: "packet.pdf",
+      __traceId: "oc-091530-b2c4",
+    },
+  });
+  assert.equal(deriveLogPanelFooterRunLabel(e), "oc-091530-b2c4-1");
 });
 
-test("a delegated run whose parent row is absent falls back to 'Delegated'", () => {
-  const child = entry({ runId: "pl-run-1", parentRunId: "missing-run" });
-  assert.equal(deriveDelegationLabel(child, [child], label), "Delegated");
+test("returns empty when no trace id is stamped", () => {
+  const e = entry({ data: { archetype: "single", eid: "10884790" } });
+  assert.equal(deriveLogPanelFooterRunLabel(e), "");
 });

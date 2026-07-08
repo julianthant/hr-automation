@@ -52,8 +52,8 @@ interface LogStreamProps {
   onPreviewVisibleChange?: (visible: boolean) => void;
   /** Compact controls for run history and row actions, rendered in the footer. */
   runControlsSlot?: ReactNode;
-  /** Delegation chip in the footer: "from <Parent Workflow>" when delegated. "Standalone" is suppressed (noise). */
-  delegationLabel?: string;
+  /** Trace id chip in the footer (`data.__traceId`, e.g. `ec-150044-a3f1`). */
+  footerRunLabel?: string;
   /** Run-level failure banner (reason + Retry), rendered under the surface bar when the run failed. */
   failureBanner?: ReactNode;
   /**
@@ -231,7 +231,7 @@ export function LogStream({
   previewAvailable,
   onPreviewVisibleChange,
   runControlsSlot,
-  delegationLabel,
+  footerRunLabel,
   failureBanner,
   sourceLabelOf,
   initialTab,
@@ -595,10 +595,12 @@ export function LogStream({
             <span className="sr-only" aria-live="polite">{visible.length} log entries streaming</span>
           </div>
         )}
-        {/* Delegation provenance only when it adds info — "from <Parent>". "Standalone" is suppressed as noise. */}
-        {delegationLabel && delegationLabel !== "Standalone" && (
-          <span className="px-2 py-0.5 rounded-md bg-secondary text-[11px] font-mono text-muted-foreground border border-border/60 whitespace-nowrap shrink-0">
-            {delegationLabel}
+        {footerRunLabel && (
+          <span
+            className="px-2 py-0.5 rounded-md bg-secondary text-[11px] font-mono text-muted-foreground border border-border/60 whitespace-nowrap shrink-0"
+            title={footerRunLabel}
+          >
+            {footerRunLabel}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">

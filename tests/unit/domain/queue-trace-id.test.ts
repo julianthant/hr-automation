@@ -4,6 +4,7 @@ import {
   buildTraceId,
   tracePrefix,
   runIdFragment,
+  formatTraceIdRunLabel,
 } from "../../../src/domain/queue-trace-id.js";
 
 describe("queue trace id — prefix helpers (trace/span model)", () => {
@@ -41,5 +42,32 @@ describe("queue trace id — prefix helpers (trace/span model)", () => {
     assert.equal(tracePrefix(a), "ou-090553");
     assert.equal(tracePrefix(b), "ou-090553");
     assert.notEqual(a, b);
+  });
+});
+
+describe("formatTraceIdRunLabel — display-only run suffix", () => {
+  it("returns empty string when traceId is blank", () => {
+    assert.equal(formatTraceIdRunLabel("", 1), "");
+    assert.equal(formatTraceIdRunLabel("   ", 2), "");
+  });
+
+  it("appends -N when runOrdinal is a positive integer", () => {
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac", 1), "ec-085131-feac-1");
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac", 3), "ec-085131-feac-3");
+  });
+
+  it("returns traceId unchanged when runOrdinal is missing or invalid", () => {
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac", undefined), "ec-085131-feac");
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac", 0), "ec-085131-feac");
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac", -1), "ec-085131-feac");
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac", 1.5), "ec-085131-feac");
+  });
+
+  it("does not double-suffix when traceId already has a run suffix", () => {
+    assert.equal(formatTraceIdRunLabel("ec-085131-feac-2", 2), "ec-085131-feac-2");
+  });
+
+  it("trims whitespace from traceId before suffixing", () => {
+    assert.equal(formatTraceIdRunLabel("  ec-085131-feac  ", 1), "ec-085131-feac-1");
   });
 });

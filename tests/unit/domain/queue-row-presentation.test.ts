@@ -10,7 +10,7 @@
  */
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import { resolveQueueRowPresentation } from "../../../src/domain/queue-row-presentation.js";
+import { resolveQueueRowPresentation, resolvePersonNameFromData } from "../../../src/domain/queue-row-presentation.js";
 
 describe("resolveQueueRowPresentation — returns undefined for unmigrated rows", () => {
   it("returns undefined when queueRowKind is absent from data", () => {
@@ -374,5 +374,69 @@ describe("resolveQueueRowPresentation — catalog kind", () => {
     });
     assert.ok(result);
     assert.equal(result.subtitle, "sp-250000-ab56");
+  });
+});
+
+describe("resolveQueueRowPresentation — trace subtitle run suffix", () => {
+  it("suffixes trace id subtitles when runOrdinal is present", () => {
+    const result = resolveQueueRowPresentation({
+      id: "item-1",
+      runOrdinal: 2,
+      data: {
+        queueRowKind: "file",
+        pdfOriginalName: "doc.pdf",
+        __traceId: "oc-210000-st89",
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.subtitle, "oc-210000-st89-2");
+  });
+
+  it("leaves EID subtitles unsuffixed for person rows", () => {
+    const result = resolveQueueRowPresentation({
+      id: "item-1",
+      runOrdinal: 3,
+      data: {
+        queueRowKind: "person",
+        name: "Jane Doe",
+        emplId: "12345",
+        __traceId: "ws-120000-ab12",
+      },
+    });
+    assert.ok(result);
+    assert.equal(result.subtitle, "12345");
+  });
+
+  it("suffixes trace fallback when EID is absent", () => {
+    const result = resolveQueueRowPresentation(
+      {
+        id: "item-1",
+        runOrdinal: 1,
+        data: {
+          queueRowKind: "person",
+          name: "Jane Doe",
+          __traceId: "ws-130000-cd34",
+        },
+      },
+      { preferTraceIdSubtitle: true },
+    );
+    assert.ok(result);
+    assert.equal(result.subtitle, "ws-130000-cd34-1");
+  });
+});
+
+describe("resolvePersonNameFromData", () => {
+  it("reads employeeName and nested employee JSON name", () => {
+    assert.equal(
+      resolvePersonNameFromData({ employeeName: "Maria Garcia", emplId: "10885410" }),
+      "Maria Garcia",
+    );
+    assert.equal(
+      resolvePersonNameFromData({
+        employee: JSON.stringify({ name: "Akitsugu Uchida", employeeId: "10794813" }),
+        emplId: "10794813",
+      }),
+      "Akitsugu Uchida",
+    );
   });
 });

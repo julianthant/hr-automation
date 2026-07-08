@@ -1,5 +1,6 @@
 import { resolveQueueRowKind } from "./queue-row-kind.js";
 import { readQueueTitle } from "./queue-title.js";
+import { formatTraceIdRunLabel } from "./queue-trace-id.js";
 import { resolveNaming } from "./workflow-presentation/resolve.js";
 import type { NamingConfig } from "./workflow-presentation/types.js";
 
@@ -27,6 +28,7 @@ export interface QueueRowPresentation {
 interface PresentationEntry {
   id: string;
   data?: Record<string, string> | null;
+  runOrdinal?: number;
 }
 
 export interface QueueRowPresentationOptions {
@@ -75,19 +77,42 @@ function resolveEid(data: Record<string, string>): string {
   return /^\d+$/.test(candidate) ? candidate : "";
 }
 
+function parseEmployeeBlobName(raw: string | undefined): string {
+  if (!raw?.trim()) return "";
+  try {
+    const parsed = JSON.parse(raw) as { name?: unknown };
+    if (typeof parsed?.name === "string" && parsed.name.trim()) return parsed.name.trim();
+  } catch {
+    // Not JSON — rows stamped via initialData carry flat employeeName instead.
+  }
+  return "";
+}
+
 /**
  * The person's display name — resolved name fields first, falling back to the
  * operator subject when it names a person/EID/email. Returns "" before any
  * name resolves (caller supplies the pending typed-input fallback).
  */
-function resolvePersonName(data: Record<string, string>): string {
+export function resolvePersonNameFromData(data: Record<string, string>): string {
   const direct = firstNonBlank(data.name, data.employeeName, data.resolvedName, data.searchName);
   if (direct) return direct;
+  const nested = parseEmployeeBlobName(data.employee);
+  if (nested) return nested;
   const subjectKind = data.__subjectKind;
   if (subjectKind === "person" || subjectKind === "eid" || subjectKind === "email") {
     return firstNonBlank(data.__name, data.__subject);
   }
   return "";
+}
+
+function resolvePersonName(data: Record<string, string>): string {
+  return resolvePersonNameFromData(data);
+}
+
+function displayTraceId(data: Record<string, string>, runOrdinal?: number): string | undefined {
+  const raw = firstNonBlank(data.__traceId);
+  if (!raw) return undefined;
+  return formatTraceIdRunLabel(raw, runOrdinal) || undefined;
 }
 
 export function resolveQueueRowPresentation(
@@ -99,14 +124,18 @@ export function resolveQueueRowPresentation(
   const data = entry.data ?? {};
 
   if (options.naming) {
-    const vars: Record<string, string> = { ...data, traceId: data.__traceId ?? "" };
+    const vars: Record<string, string> = {
+      ...data,
+      traceId: data.__traceId ?? "",
+      ...(entry.runOrdinal !== undefined ? { runOrdinal: String(entry.runOrdinal) } : {}),
+    };
     const { title, subtitle } = resolveNaming(vars, options.naming, {
       preferTraceIdSubtitle: options.preferTraceIdSubtitle,
     });
     return { title: title || firstNonBlank(data.searchName, data.__subject, data.__name) || entry.id, subtitle };
   }
 
-  const traceId = firstNonBlank(data.__traceId) || undefined;
+  const traceId = displayTraceId(data, entry.runOrdinal);
 
   if (kind === "person") {
     const name = resolvePersonName(data);

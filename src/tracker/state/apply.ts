@@ -21,7 +21,7 @@ interface CachedStatements {
   selectRunForScreenshot: Statement;
   countRunsForScreenshot: Statement;
   updateRunScreenshotCount: Statement;
-  recomputeRunOrdinalsForItem: Statement;
+  assignNextRunOrdinalForRun: Statement;
 }
 
 const stmtCache = new WeakMap<Database, CachedStatements>();
@@ -165,26 +165,22 @@ function stmts(db: Database): CachedStatements {
       SET screenshot_count = screenshot_count + @delta, updated_at = @updatedAt
       WHERE run_id = @runId
     `),
-    // Mirror of the rebuild path's recomputeRunOrdinals, scoped to one
-    // (workflow, tracker_date, item_id) bucket so it's cheap enough to call
-    // on every live tracker apply. Without this, new run rows hit the schema
-    // default of 1 and the dashboard shows two "Run #1" entries side-by-side.
-    recomputeRunOrdinalsForItem: db.prepare(`
-      WITH ordered AS (
-        SELECT
-          run_id,
-          ROW_NUMBER() OVER (
-            ORDER BY COALESCE(first_work_ts, first_any_ts), run_id
-          ) AS ordinal
-        FROM runs
-        WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
-      )
+    // Stable run ordinals: assign the next integer for a NEW run only. Gaps are
+    // preserved when a middle run is deleted (no ROW_NUMBER recompute).
+    assignNextRunOrdinalForRun: db.prepare(`
       UPDATE runs
       SET run_ordinal = (
-        SELECT ordinal FROM ordered WHERE ordered.run_id = runs.run_id
+        SELECT COALESCE(MAX(r2.run_ordinal), 0) + 1
+        FROM runs r2
+        WHERE r2.workflow = @workflow
+          AND r2.tracker_date = @date
+          AND r2.item_id = @itemId
+          AND r2.run_id != @runId
       )
-      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
-        AND EXISTS (SELECT 1 FROM ordered WHERE ordered.run_id = runs.run_id)
+      WHERE workflow = @workflow
+        AND tracker_date = @date
+        AND item_id = @itemId
+        AND run_id = @runId
     `),
   };
   stmtCache.set(db, cached);
@@ -315,10 +311,11 @@ export function applyTrackerEntry(
     });
 
     if (!existingRun) {
-      s.recomputeRunOrdinalsForItem.run({
+      s.assignNextRunOrdinalForRun.run({
         workflow: entry.workflow,
         date: trackerDate,
         itemId: entry.id,
+        runId,
       });
     }
   });
