@@ -8,6 +8,12 @@ import { buildCliAdapter } from "../../core/cli-adapter.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
+import { isUcpathEmployeeId } from "../../domain/identity/eid.js";
+import { classifyNameSimilarity } from "../../services/matching/match.js";
+import {
+  buildIdentityApprovalPauseData,
+  identityApprovalStatusExtensions,
+} from "../../domain/identity-approval.js";
 import { loginToUCPath, loginToACTCrm } from "../../infra/auth/login.js";
 import { requireLogin } from "../../infra/auth/require-login.js";
 import {
@@ -84,6 +90,12 @@ export const onboardingWorkflow = defineWorkflow({
   steps: onboardingSteps,
   schema: OnboardingInputSchema,
   runtimePolicy: ONBOARDING_WORKFLOW_RUNTIME_POLICY,
+  // Identity-approval review: person-search pauses (rather than blindly
+  // recording a rehire) when the UCPath match resolves a DIFFERENT-named
+  // person than the CRM record. The row then displays "Awaiting Approval" /
+  // "Dismissed" via this shared rule (gated on data.eidApproval). See
+  // src/domain/identity-approval.ts + the person-search gate below.
+  statusExtensions: identityApprovalStatusExtensions,
   // Pool mode: each worker gets its own Session with 3 browsers (CRM + UCPath +
   // I9), 2 Duos per worker (I9 SSO has no 2FA). Pool size 4 matches the legacy
   // default; overridable at runtime via `RunOpts.poolSize`. `preEmitPending: true` lets in-process pool callers emit the full
@@ -119,6 +131,16 @@ export const onboardingWorkflow = defineWorkflow({
   handler: async (ctx, input) => {
     const email = input.email;
     let data: EmployeeData | null = null;
+
+    // Identity-approval re-run marker. When the operator approves a chosen EID
+    // from the identity-approval review, the approve action re-enqueues this
+    // email carrying `prefilledData.eidApproved` (merged into ctx.data before the
+    // handler runs). Its presence means the operator already resolved the
+    // identity mismatch surfaced by the person-search gate below, so that gate
+    // must NOT re-pause. Read at handler entry (before any step overwrites data).
+    const approvedEid =
+      typeof ctx.data.eidApproved === "string" ? ctx.data.eidApproved.trim() : "";
+    const eidPreApproved = isUcpathEmployeeId(approvedEid);
 
     // Stamp dryRun onto every running row's data (initialData stamps the
     // pending pre-emit; this carries it to subsequent live rows so the
@@ -290,6 +312,55 @@ export const onboardingWorkflow = defineWorkflow({
     });
 
     if (searchResult.found) {
+      // ── Identity-approval gate (wrong-person guard) ──
+      // person-search matched an existing UCPath person by SSN/DOB/name. If that
+      // matched person's name is confidently the SAME (or a close spelling
+      // variant) as the CRM-extracted person, it's a genuine rehire (recorded
+      // below). But a `different` name means the SSN/name search resolved a
+      // DIFFERENT person (an SSN typo / collision) — recording their EID as this
+      // person's rehire (or acting on it downstream) is the wrong-person risk
+      // that once terminated the wrong employee in separations. So PAUSE for
+      // operator approval instead of assuming the match — UNLESS the operator
+      // already approved a chosen EID (the eidPreApproved re-run). Uses the SAME
+      // order-insensitive `classifyNameSimilarity` confidence tiers separations
+      // trusts. This is orthogonal to the 2026-07-01 duplicate-HIRE probe (that
+      // guards the new-hire submit path; this guards the rehire-match path).
+      const match = searchResult.matches?.[0];
+      const matchedName = match ? `${match.firstName} ${match.lastName}`.trim() : "";
+      // The CRM-extracted name was stamped into ctx.data by the extraction step
+      // (buildDetailFieldsPayload) — read it there (the outer `data` local is
+      // narrowed to null in linear flow since it's only assigned inside step
+      // closures).
+      const crmFirst = typeof ctx.data.firstName === "string" ? ctx.data.firstName : "";
+      const crmLast = typeof ctx.data.lastName === "string" ? ctx.data.lastName : "";
+      const crmName = `${crmFirst} ${crmLast}`.trim();
+      const nameTier = match ? classifyNameSimilarity(crmName, matchedName) : "different";
+
+      if (!eidPreApproved && match && nameTier === "different") {
+        log.warn(
+          `[person-search] UCPath match "${matchedName}" (EID ${match.emplId}) does not match the CRM `
+          + `record "${crmName}" — PAUSING for operator identity approval (no silent rehire/hire).`,
+        );
+        ctx.updateData(buildIdentityApprovalPauseData({
+          // Original = the CRM-extracted person. A new hire has no UCPath EID, so
+          // the original card shows the name only (found:false → its "Use this
+          // EID" button is disabled; the operator picks the proposed EID, types a
+          // different one, or dismisses to fix the CRM record).
+          original: { eid: "", name: crmName, found: false },
+          // Proposed = the UCPath person the SSN/name search matched.
+          proposed: { eid: match.emplId, name: matchedName },
+        }));
+        // Early return (no steps skipped — onboarding's rehire branch already
+        // returns before i9-creation/transaction; the run ends `done`).
+        return;
+      }
+      if (eidPreApproved) {
+        log.success(
+          `[person-search] EID ${approvedEid} was operator-approved via the identity-approval `
+          + `review — proceeding with the confirmed rehire (no re-pause).`,
+        );
+      }
+
       log.error("Person already exists in UCPath — marking as rehire");
       if (searchResult.matches) {
         for (const m of searchResult.matches) {
