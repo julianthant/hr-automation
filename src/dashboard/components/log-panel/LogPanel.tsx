@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
 import { TerminalSquare, TriangleAlert } from "lucide-react";
 import { StepPipeline, computeOcrPipelineView } from "./StepPipeline";
@@ -13,6 +13,7 @@ import { EditDataTab } from "./EditDataTab";
 import { EidApprovalBanner } from "./EidApprovalBanner";
 import { ViewDataPanel } from "./ViewDataPanel";
 import { isDataPointLog } from "../../../domain/data-point.js";
+import { formatTraceIdRunLabel } from "../../../domain/queue-trace-id.js";
 import { useLogs, type CollapsedLogEntry } from "@/components/hooks/useLogs";
 import { useCoordinatorAggregatedLogs } from "@/components/hooks/useCoordinatorAggregatedLogs";
 import {
@@ -29,7 +30,7 @@ import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 import { formatTrackerValue, isMonospaceKey } from "@/components/shared/types";
 import { deriveTrackerFallbackLog } from "./log-fallback";
-import { useWorkflow, useWorkflows } from "@/lib/workflows-context";
+import { useWorkflow } from "@/lib/workflows-context";
 import { hasDelegationRole } from "../../../domain/row-archetype.js";
 
 type LazySlot = ReactNode | (() => ReactNode);
@@ -90,23 +91,13 @@ export function resolveDetailEntry(
 }
 
 /**
- * The log-panel footer chip describes the run's DELEGATION rather than its row
- * shape: a delegated run (`parentRunId`) reads "from <Parent Workflow>" (resolved
- * by finding the parent run in `allEntries` and labeling its workflow), and a
- * root run (no `parentRunId`) reads "Standalone" — it was run directly by the
- * workflow, not as a sub-step of another. Pure + exported for unit testing
- * (`workflowLabel` is injected so the resolver stays out of the function).
+ * The log-panel footer chip shows the run's trace id (`data.__traceId`) — the
+ * greppable run identifier (e.g. `ec-150044-a3f1`), NOT the person EID. Pure +
+ * exported for unit testing.
  */
-export function deriveDelegationLabel(
-  entry: TrackerEntry,
-  allEntries: TrackerEntry[],
-  workflowLabel: (workflow: string) => string,
-): string {
-  if (entry.parentRunId) {
-    const parent = allEntries.find((e) => e.runId === entry.parentRunId);
-    return parent?.workflow ? `from ${workflowLabel(parent.workflow)}` : "Delegated";
-  }
-  return "Standalone";
+export function deriveLogPanelFooterRunLabel(entry: TrackerEntry): string {
+  const traceId = typeof entry.data?.__traceId === "string" ? entry.data.__traceId.trim() : "";
+  return formatTraceIdRunLabel(traceId, entry.runOrdinal);
 }
 
 export function LogPanel({ entry, workflow, date, allEntries, displayNames, siblings, defaultTab, previewSlot, previewHeaderSlot, previewAvailable, onPreviewVisibleChange, onDeleteEntry }: LogPanelProps) {
@@ -134,11 +125,11 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   const registeredSteps = registered?.steps ?? [];
   const detailFields = registered?.detailFields ?? [];
 
-  // Runs for this entry + siblings, pooled and globally renumbered.
+  // Runs for this entry + siblings, pooled with backend-stable run ordinals.
   // Keyed on (id, runId) tuples — NOT on status/step — so status updates
   // at 1 Hz do not trigger /api/runs refetches (new runs start by runId
   // changing, not status changing).
-  const { runs, setRuns, activeRunId, setActiveRunId } = useRunsForMergedEntry({
+  const { runs, setRuns, activeRunId, setActiveRunId, runsError } = useRunsForMergedEntry({
     entry,
     siblings,
     workflow,
@@ -271,17 +262,21 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
     [detailFields],
   );
 
-  // Footer chip = delegation provenance ("from <Parent>" / "Standalone"), not the
-  // row shape. Resolve a parent run's workflow → its human label via the registry.
-  const allWorkflows = useWorkflows();
-  const workflowLabel = useCallback(
-    (name: string) => allWorkflows.find((w) => w.name === name)?.label ?? name,
-    [allWorkflows],
-  );
-  const delegationLabel = useMemo(
-    () => (entry ? deriveDelegationLabel(entry, allEntries ?? [], workflowLabel) : ""),
-    [entry, allEntries, workflowLabel],
-  );
+  // Footer chip = the active run's trace id. When viewing a historical run,
+  // prefer that run's stamped data over the deduped live entry.
+  const footerRunLabel = useMemo(() => {
+    if (!entry) return "";
+    const historicalData = !isViewingLiveRun ? activeRun?.data : undefined;
+    const runOrdinal = !isViewingLiveRun ? activeRun?.runOrdinal : entry.runOrdinal;
+    const labelEntry: TrackerEntry = historicalData
+      ? {
+          ...entry,
+          runOrdinal,
+          data: { ...entry.data, ...historicalData } as TrackerEntry["data"],
+        }
+      : { ...entry, runOrdinal };
+    return deriveLogPanelFooterRunLabel(labelEntry);
+  }, [entry, isViewingLiveRun, activeRun?.data, activeRun?.runOrdinal]);
 
   if (!entry) {
     return (
@@ -437,7 +432,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
         logs={displayedLogs}
         events={events}
         loading={logsLoading}
-        delegationLabel={delegationLabel}
+        footerRunLabel={footerRunLabel}
         failureBanner={failureBanner ?? eidApprovalBanner}
         sourceLabelOf={sourceLabelOf}
         screenshotsSlot={
@@ -486,6 +481,7 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
             activeRunId={activeRunId}
             onSelect={setActiveRunId}
             workflow={logSourceWorkflow}
+            stale={runsError}
             retryTarget={{
               workflow: logSourceWorkflow,
               id: activeItemId ?? entry.id,

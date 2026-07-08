@@ -80,3 +80,20 @@ export function buildTraceId(opts: { code: string; runId: string; at: Date; root
   const code = opts.code.trim().toLowerCase() || "wf";
   return `${code}-${formatTraceTimestamp(opts.at)}-${runIdFragment(opts.runId)}`;
 }
+
+/**
+ * Display-only run-attempt suffix for a frozen `data.__traceId`.
+ * The stored trace id never changes — this adds `-1`, `-2`, … for UI labels.
+ */
+export function formatTraceIdRunLabel(traceId: string, runOrdinal: number | undefined): string {
+  const trimmed = traceId.trim();
+  if (!trimmed) return "";
+  if (typeof runOrdinal !== "number" || !Number.isInteger(runOrdinal) || runOrdinal <= 0) {
+    return trimmed;
+  }
+  const parts = trimmed.split("-");
+  if (parts.length >= 4 && /^\d+$/.test(parts[parts.length - 1] ?? "")) {
+    return trimmed;
+  }
+  return `${trimmed}-${runOrdinal}`;
+}

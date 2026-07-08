@@ -161,6 +161,24 @@ describe("pickPreviewChildren", () => {
     assert.equal(pickPreviewChildren(kids, 10).length, 2);
   });
 
+  it("prefers employeeName for emergency-contact member preview labels", () => {
+    const out = pickPreviewChildren(
+      [
+        child({
+          id: "10002241",
+          data: {
+            emplId: "10002241",
+            employeeName: "Maria Garcia",
+            __subject: "10002241",
+          },
+        }),
+      ],
+      1,
+    );
+    assert.equal(out[0]?.name, "Maria Garcia");
+    assert.equal(out[0]?.emplId, "10002241");
+  });
+
   it("prefers person names and EIDs over technical subject labels for preview labels", () => {
     const out = pickPreviewChildren(
       [

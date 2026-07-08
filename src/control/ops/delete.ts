@@ -393,24 +393,6 @@ function deleteProjectedEntry(db: ReturnType<typeof openStateDb>, req: DeleteTar
     return;
   }
 
-  db.prepare(`
-    WITH ordered AS (
-      SELECT
-        run_id,
-        ROW_NUMBER() OVER (
-          ORDER BY COALESCE(first_work_ts, first_any_ts), run_id
-        ) AS ordinal
-      FROM runs
-      WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id
-    )
-    UPDATE runs
-    SET run_ordinal = (
-      SELECT ordinal FROM ordered WHERE ordered.run_id = runs.run_id
-    )
-    WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id
-      AND EXISTS (SELECT 1 FROM ordered WHERE ordered.run_id = runs.run_id)
-  `).run(params);
-
   const latestRun = db.prepare(`
     SELECT run_id, latest_status, latest_step, latest_tracker_ts, latest_data_json, latest_error
     FROM runs

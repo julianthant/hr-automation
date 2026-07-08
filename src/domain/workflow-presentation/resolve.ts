@@ -5,6 +5,7 @@ import type {
   NamingPartTitle,
   WorkflowPresentationConfig,
 } from "./types.js";
+import { formatTraceIdRunLabel } from "../queue-trace-id.js";
 import { resolveSubtitle, resolveTitle } from "./schemes.js";
 
 /**
@@ -63,12 +64,21 @@ export function resolveNaming(
   const title = resolveTitle(vars, titlePart);
   let subtitle: string;
   if (opts.preferTraceIdSubtitle && subtitlePart.scheme === "eid-else-trace") {
-    const trace = (vars.traceId ?? vars.__traceId ?? "").trim();
+    const trace = formatTraceIdRunLabel(
+      (vars.traceId ?? vars.__traceId ?? "").trim(),
+      parseRunOrdinalVar(vars.runOrdinal),
+    );
     subtitle = trace || resolveSubtitle(vars, subtitlePart);
   } else {
     subtitle = resolveSubtitle(vars, subtitlePart);
   }
   return { title, subtitle: subtitle || undefined };
+}
+
+function parseRunOrdinalVar(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 /**

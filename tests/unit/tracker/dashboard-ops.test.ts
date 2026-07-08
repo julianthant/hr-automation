@@ -824,7 +824,7 @@ describe("buildDeleteEntryHandler", () => {
     assert.deepEqual({ ...item }, { latest_run_id: "run-1", latest_status: "failed" });
   });
 
-  it("compacts SQLite run ordinals after deleting a middle run", () => {
+  it("preserves stable run ordinals after deleting a middle run (gap retained)", () => {
     writeFileSync(
       rowFilePath("separations", "2026-05-09", tmp),
       [
@@ -877,7 +877,7 @@ describe("buildDeleteEntryHandler", () => {
       remainingRuns.map((row) => ({ ...row })),
       [
         { run_id: "run-1", run_ordinal: 1 },
-        { run_id: "run-3", run_ordinal: 2 },
+        { run_id: "run-3", run_ordinal: 3 },
       ],
     );
   });

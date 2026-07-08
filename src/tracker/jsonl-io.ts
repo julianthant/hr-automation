@@ -198,6 +198,8 @@ export interface TrackerEntry {
   status: "pending" | "running" | "done" | "failed" | "skipped";
   step?: string;
   data?: Record<string, string>;
+  /** 1-indexed stable run ordinal for this item (SQLite projection / SSE enrichment). */
+  runOrdinal?: number;
   /**
    * Rich-typed mirror of `data`. Absent on older JSONL records — the frontend
    * falls back to `data` when a key is missing from `typedData`.

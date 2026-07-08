@@ -16,6 +16,8 @@ describe("resolveSubtitle", () => {
   it("eid-else-trace → eid when present", () => expect(resolveSubtitle(vars, { scheme: "eid-else-trace" })).toBe("10012345"));
   it("eid-else-trace → trace when no eid", () => expect(resolveSubtitle({ ...vars, emplId: "" }, { scheme: "eid-else-trace" })).toBe("ou-143012-a3f1"));
   it("trace-only → trace", () => expect(resolveSubtitle(vars, { scheme: "trace-only" })).toBe("ou-143012-a3f1"));
+  it("trace-only → suffixed trace when runOrdinal is set", () =>
+    expect(resolveSubtitle({ ...vars, runOrdinal: "2" }, { scheme: "trace-only" })).toBe("ou-143012-a3f1-2"));
 });
 
 describe("SCHEME_LIBRARY", () => {

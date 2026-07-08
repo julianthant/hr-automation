@@ -1,6 +1,7 @@
 import type { TrackerEntry } from "@/components/shared/types.js";
 import { useElapsed, formatDuration } from "@/components/hooks/useElapsed";
 import { statusKeyForEntry } from "@/components/shared/status-styles.js";
+import { resolvePersonNameFromData } from "../../../domain/queue-row-presentation.js";
 
 export interface OperationCounts {
   done: number;
@@ -120,10 +121,7 @@ function validEmployeeId(value: string | undefined): string {
 
 export function resolveChildLabel(child: TrackerEntry): string {
   const data = child.data ?? {};
-  const named =
-    (typeof data.name === "string" && data.name.trim()) ||
-    (typeof data.searchName === "string" && data.searchName.trim()) ||
-    "";
+  const named = resolvePersonNameFromData(data);
   if (named.length > 0) return named;
   const eid = validEmployeeId(data.emplId) || validEmployeeId(data.eid);
   if (eid) return eid;

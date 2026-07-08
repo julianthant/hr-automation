@@ -1,5 +1,6 @@
 // src/domain/workflow-presentation/schemes.ts
 import { renderTemplate } from "./template.js";
+import { formatTraceIdRunLabel } from "../queue-trace-id.js";
 import type { NamingPartSubtitle, NamingPartTitle, NamingPartTrace } from "./types.js";
 import { readQueueTitle } from "../queue-title.js";
 
@@ -26,6 +27,17 @@ const eid = (vars: Record<string, string>): string => {
 const personName = (vars: Record<string, string>): string =>
   firstNonBlank(vars.name, vars.employeeName, vars.searchName, vars.__name, vars.__subject);
 
+function parseRunOrdinal(vars: Record<string, string>): number | undefined {
+  const raw = vars.runOrdinal;
+  if (raw === undefined || raw === "") return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function displayTrace(vars: Record<string, string>): string {
+  return formatTraceIdRunLabel(firstNonBlank(vars.traceId, vars.__traceId), parseRunOrdinal(vars));
+}
+
 export function resolveTitle(vars: Record<string, string>, part: NamingPartTitle): string {
   switch (part.scheme) {
     case "person-name":
@@ -42,7 +54,7 @@ export function resolveTitle(vars: Record<string, string>, part: NamingPartTitle
 }
 
 export function resolveSubtitle(vars: Record<string, string>, part: NamingPartSubtitle): string {
-  const trace = firstNonBlank(vars.traceId, vars.__traceId);
+  const trace = displayTrace(vars);
   switch (part.scheme) {
     case "eid-else-trace":
       return eid(vars) || trace;
