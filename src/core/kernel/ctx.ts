@@ -223,14 +223,23 @@ export function makeCtx<TSteps extends readonly string[], TData>(
           ...(opts?.systems ? { systems: opts.systems } : {}),
         })
         // When a system filter was requested, stamp the file for that system
-        // (the first requested one) rather than a blind files[0] — otherwise a
-        // multi-system run could stamp the wrong page's screenshot.
+        // (the first requested one) ONLY — never fall back to another
+        // captured system's file. This is audit evidence; silently stamping a
+        // DIFFERENT system's screenshot under the requested system's data key
+        // would mislabel the evidence (fail loud, per root CLAUDE.md "Fail
+        // loud — no unverified silent fallbacks"). With no filter requested,
+        // "the active page" is unambiguous, so `files[0]` there is a
+        // documented-valid default, not a guess.
         const wanted = opts?.systems?.[0]
-        const file =
-          (wanted ? cap.files?.find((f) => f.system === wanted) : undefined) ??
-          cap.files?.[0]
-        const filename = file?.path.split('/').pop()
-        if (filename) stepper.updateData({ [dataKey]: filename })
+        const file = wanted ? cap.files?.find((f) => f.system === wanted) : cap.files?.[0]
+        if (wanted && !file) {
+          log.warn(
+            `Screenshot capture for "${label}": requested system "${wanted}" produced no file — not stamping ${dataKey} with a different system's screenshot`,
+          )
+        } else {
+          const filename = file?.path.split('/').pop()
+          if (filename) stepper.updateData({ [dataKey]: filename })
+        }
       } catch (err) {
         log.warn(`Screenshot capture failed for ${label}: ${errorMessage(err)}`)
       }

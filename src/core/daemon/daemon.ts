@@ -29,7 +29,7 @@ import {
   SHUTDOWN_NO_RESPONSIVE_PEER_FAIL_REASON,
 } from './in-flight-shutdown.js'
 import { resolveTeardownTransition } from './teardown-transition.js'
-import type { DaemonLockfile } from './types.js'
+import type { DaemonLockfile, QueueItem } from './types.js'
 import {
   emitItemStart,
   emitItemComplete,
@@ -97,6 +97,20 @@ const DEFAULT_LOCK_HEAL_MS = 10_000
  * idle daemon only does a cheap indexed `claimNextTask` seek per tick.
  */
 const DEFAULT_IDLE_REPOLL_MS = numEnv('HRAUTO_DAEMON_IDLE_REPOLL_MS', 30_000)
+/**
+ * Retry delay after a `claimNextItem` THROW (fail-loud: distinct from the
+ * normal idle cadence — see the `CLAIM_ERROR` sentinel below).
+ */
+const CLAIM_ERROR_RETRY_MS = 2_000
+/**
+ * Sentinel distinguishing a `claimNextItem` ERROR from a genuinely empty
+ * queue. `claimNextItem` (queue.ts) already resolves `null` for "nothing
+ * queued" — a thrown error is a real fault (e.g. a SQLite transaction
+ * failure), and swallowing it to that same `null` would make a broken claim
+ * indistinguishable from healthy idle, so the loop would silently retry on
+ * the same up-to-`idleRepollMs` idle cadence forever with no visible signal.
+ */
+const CLAIM_ERROR = Symbol('claim-error')
 
 /**
  * Long-running daemon loop. Must be invoked from a DETACHED process via
@@ -501,18 +515,31 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             await pollWorkerCommands()
             state.queueDepthCache = taskStore.countQueued(wf.config.name)
 
-            const item = state.shuttingDown
+            const claimed: QueueItem | null | typeof CLAIM_ERROR = state.shuttingDown
               ? null
               : await claimNextItem(
                   wf.config.name,
                   instanceId,
                   trackerDir,
                 ).catch((e) => {
-                  log.warn(
-                    `[Daemon ${instanceId}] claim error: ${e instanceof Error ? e.message : String(e)}`,
+                  log.error(
+                    `[Daemon ${instanceId}] claim error (queue may have work stuck unclaimed — NOT a genuinely empty queue): ${e instanceof Error ? e.message : String(e)}`,
                   )
-                  return null
+                  return CLAIM_ERROR
                 })
+
+            if (claimed === CLAIM_ERROR) {
+              // Distinguishable signal the caller checks (fail-loud): retry
+              // soon on a short fixed delay instead of falling into the same
+              // idle park a genuinely empty queue uses below, so a transient
+              // fault recovers fast and a persistent one keeps logging loudly
+              // every retry rather than going quiet for up to `idleRepollMs`.
+              await new Promise<void>((resolve) => {
+                setTimeout(resolve, CLAIM_ERROR_RETRY_MS).unref()
+              })
+              continue
+            }
+            const item = claimed
 
             if (item) {
               setPhase('processing')

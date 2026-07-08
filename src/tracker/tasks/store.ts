@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
+import { log } from "../../utils/log.js";
 
 import { openStateDb, runMigrations } from "../state/db.js";
 import type {
@@ -25,6 +26,21 @@ function taskSqlControlState(status: TaskStatus): string {
   return "queued";
 }
 
+// verified 2026-07-08: the trailing `return "queued"` below is NOT a silent
+// corrupted-value fallback. `tasks.control_state` is DB-CHECK-constrained
+// (src/tracker/state/schema.ts) to exactly 10 values — 'queued',
+// 'waiting_dependencies', 'claimed', 'running', 'cancel_requested',
+// 'cancelling', 'cancelled', 'done', 'failed', 'blocked' — and every one of
+// those 10 is handled explicitly above; SQLite itself refuses to persist any
+// other string, so that branch can never mask a genuinely corrupted stored
+// value. The remaining reachable branch (`!controlState` → null) guards a
+// real legacy state, not a masked failure: both current insert paths
+// (core/task-store/enqueue.ts, this file's `upsertTask`) always set
+// `control_state` explicitly, so null only occurs on a task row written
+// before this column existed (pre-migration). Defaulting an unclaimed
+// legacy row to "queued" is the same "not yet started" reading `pending`
+// gets one line up. If this enum ever changes, update both this comment and
+// the CHECK constraint together.
 function taskStatusFromSqlControlState(controlState: string | null): TaskStatus {
   if (!controlState) return "queued";
   if (controlState === "waiting_dependencies") return "waiting_on_children";
@@ -347,8 +363,8 @@ export function listPendingDependencies(
     kind: row.dependency_kind as TaskDependencyKind,
     status: row.dependency_status as TaskDependencyStatus,
     failurePolicy: row.failure_policy as TaskDependencyFailurePolicy,
-    metadata: parseJsonObject(row.metadata_json),
-    result: parseJsonObject(row.result_json),
+    metadata: parseJsonObject(row.metadata_json, `dependency ${row.dependency_id} metadata_json`),
+    result: parseJsonObject(row.result_json, `dependency ${row.dependency_id} result_json`),
     parent: mapTaskRow(prefixedTaskRow(row, "parent")),
     child: mapTaskRow(prefixedTaskRow(row, "child")),
     createdAt: String(row.dependency_created_at),
@@ -545,7 +561,7 @@ export function getDependencySummaryByParentRunId(
       itemId: child.item_id,
       ...(child.run_id ? { runId: child.run_id } : {}),
       status: taskStatusFromSqlControlState(child.control_state),
-      metadata: parseJsonObject(child.metadata_json),
+      metadata: parseJsonObject(child.metadata_json, `child ${child.workflow}/${child.item_id} metadata_json`),
       ...readTraceId(child.latest_data_json),
     })),
   };
@@ -761,7 +777,7 @@ function mapTaskRow(row: TaskDbRow): TaskRow {
     taskKind: row.task_kind,
     status: taskStatusFromSqlControlState(row.control_state),
     ...(row.parent_task_id ? { parentTaskId: row.parent_task_id } : {}),
-    data: parseJsonObject(row.data_json),
+    data: parseJsonObject(row.data_json, `task ${row.id} (${row.workflow}/${row.item_id}) data_json`),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.terminal_at ? { terminalAt: row.terminal_at } : {}),
@@ -785,14 +801,20 @@ function prefixedTaskRow(row: Record<string, unknown>, prefix: "parent" | "child
   };
 }
 
-function parseJsonObject(raw: unknown): Record<string, unknown> {
+function parseJsonObject(raw: unknown, context?: string): Record<string, unknown> {
   if (typeof raw !== "string" || !raw) return {};
   try {
     const parsed = JSON.parse(raw) as unknown;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as Record<string, unknown>
       : {};
-  } catch {
+  } catch (err) {
+    // Do NOT swallow silently: a corrupted stored JSON blob masked as `{}`
+    // hides the corruption (matches find-latest-entry.ts's parseDataJson).
+    log.warn(
+      `[task-store] parseJsonObject: unparseable JSON${context ? ` (${context})` : ""} — ` +
+        `${err instanceof Error ? err.message : String(err)}; raw=${raw.slice(0, 200)}`,
+    );
     return {};
   }
 }

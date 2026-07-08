@@ -84,3 +84,51 @@ test('captureAndStampScreenshot captures a form screenshot and stamps first file
 
   assert.equal(ctx.data.personOrgScreenshot, 'person-org.png')
 })
+
+test('captureAndStampScreenshot does not stamp a DIFFERENT system\'s file when the requested system produced none (fail loud, no wrong-system fallback)', async () => {
+  const session = Session.forTesting({
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+  const stepper = new Stepper({
+    workflow: 'test',
+    itemId: 't1',
+    runId: 'r1',
+    emitStep: () => {},
+    emitData: () => {},
+    emitFailed: () => {},
+  })
+  const ctx = makeCtx({
+    session,
+    stepper,
+    isBatch: false,
+    runId: 'r1',
+    workflow: 'test',
+    itemId: 't1',
+    emitScreenshotEvent: () => {},
+    signal: new AbortController().signal,
+  })
+  ctx.screenshot = async (opts) => {
+    assert.deepEqual(opts, { kind: 'form', label: 'CRM search failed', systems: ['ucpath'] })
+    // Requested system ("ucpath") produced no file; a DIFFERENT system's
+    // ("crm") capture succeeded instead — this must never be stamped under
+    // the ucpath-labeled data key.
+    return {
+      type: 'screenshot',
+      runId: 'r1',
+      ts: 1,
+      timestamp: '2026-05-15T00:00:00.000Z',
+      kind: 'form',
+      label: 'CRM search failed',
+      step: null,
+      files: [{ system: 'crm', path: '/tmp/crm-record.png' }],
+    }
+  }
+
+  await ctx.captureAndStampScreenshot('CRM search failed', 'personOrgSearchScreenshot', {
+    systems: ['ucpath'],
+  })
+
+  assert.equal(ctx.data.personOrgSearchScreenshot, undefined)
+})

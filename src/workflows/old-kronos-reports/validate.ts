@@ -13,22 +13,18 @@ const { PDFParse } = require("pdf-parse");
  * @returns true if PDF contains actual report data
  */
 export async function validatePdf(filepath: string): Promise<boolean> {
-  try {
-    const fileStat = await stat(filepath);
-    if (fileStat.size === 0) return false;
+  const fileStat = await stat(filepath);
+  if (fileStat.size === 0) return false;
 
-    const buffer = await readFile(filepath);
-    const text = buffer.toString("utf-8");
+  const buffer = await readFile(filepath);
+  const text = buffer.toString("utf-8");
 
-    // PyPDF2 equivalent: check for the "No Data Returned" placeholder
-    if (text.includes("No Data Returned")) {
-      return false;
-    }
-
-    return true;
-  } catch {
+  // PyPDF2 equivalent: check for the "No Data Returned" placeholder
+  if (text.includes("No Data Returned")) {
     return false;
   }
+
+  return true;
 }
 
 /**
@@ -68,7 +64,10 @@ export async function verifyPdfMatch(
 
   if (!pdfName && !pdfId) return "Could not read PDF";
 
-  const nameMatch = pdfName === expectedName;
+  // An empty-vs-empty comparison is not a real match — it would silently
+  // defeat the cross-worker name guard whenever extraction fails on both
+  // sides. Require both sides non-empty for a positive match.
+  const nameMatch = pdfName !== "" && expectedName !== "" && pdfName === expectedName;
   const idMatch = pdfId === expectedId;
 
   if (nameMatch && idMatch) return "x";
@@ -87,7 +86,17 @@ export async function validateAndClean(
   filepath: string,
   employeeId: string,
 ): Promise<{ valid: boolean }> {
-  const valid = await validatePdf(filepath);
+  let valid: boolean;
+  try {
+    valid = await validatePdf(filepath);
+  } catch (err) {
+    // A read/stat I/O error is NOT the same as a confirmed-empty/invalid
+    // report — it may be transient (partial write, FS hiccup). Do not
+    // delete a report we couldn't actually inspect; fail loud instead.
+    const reason = err instanceof Error ? err.message : String(err);
+    log.warn(`[${employeeId}] Failed to read PDF for validation (${filepath}): ${reason} — not deleting`);
+    throw err;
+  }
 
   if (!valid) {
     log.step(`[${employeeId}] PDF contains no data — deleting`);

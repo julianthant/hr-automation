@@ -1,5 +1,6 @@
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
+import { log } from '../../../src/utils/log.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,6 +28,39 @@ test('defineWorkflow: registers metadata on construction', () => {
   // Legacy string-array detailFields are normalized to labeled shape.
   assert.deepEqual(meta.detailFields, [{ key: 'x', label: 'X' }])
   assert.equal(wf.metadata.name, 'test-wf')
+})
+
+test('defineWorkflow: warns loudly (does NOT crash) on a second workflow with an already-used explicit code', () => {
+  clear()
+  const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {})
+  try {
+    defineWorkflow({
+      name: 'code-owner',
+      code: 'zz',
+      systems: [],
+      steps: ['a'] as const,
+      schema: z.object({}),
+      handler: async () => {},
+    })
+    // A duplicate EXPLICIT code must not crash registration (a trace-id-prefix
+    // collision is an observability issue, not an HR-data one) — it surfaces a
+    // loud warn instead so a genuine mistake is visible at startup.
+    defineWorkflow({
+      name: 'code-squatter',
+      code: 'zz',
+      systems: [],
+      steps: ['a'] as const,
+      schema: z.object({}),
+      handler: async () => {},
+    })
+    assert.ok(getByName('code-squatter'), 'the second workflow still registers')
+    assert.ok(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("code 'zz' is already used")),
+      'a collision warning was logged',
+    )
+  } finally {
+    warnSpy.mockRestore()
+  }
 })
 
 test('defineWorkflow: presets surface on metadata with normalized shape', () => {
@@ -237,6 +271,7 @@ test('runWorkflow: does NOT install SIGINT when trackerStub is false (tracker ow
   let observed: number | null = null
   const wf = defineWorkflow({
     name,
+    code: 'sd', // distinct from the earlier 'sigint-observe' test's implicit 'si' code
     systems: [{ id: 'x', login: async () => {} }],
     steps: ['s1'] as const,
     schema: z.object({}),
