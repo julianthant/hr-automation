@@ -11,6 +11,7 @@ import {
   deriveLookupProgressLabel,
   type OcrRecordLookupTracker,
 } from "./lookup-status";
+import { MatchWarnings } from "./shared/MatchWarnings";
 
 export interface VerifyRecordViewProps {
   record: VerifyPreviewRecord;
@@ -229,27 +230,23 @@ function CheckRow({
  */
 export function VerifyRecordView({ record, onRelookup, relookupPending, lookupTracker }: VerifyRecordViewProps) {
   const checks = record.checks ?? [];
-  const hasWarnings =
-    record.matchState === "unresolved" || (record.warnings?.length ?? 0) > 0;
 
   // The record's document-type chip + name + EID are rendered by the card's
   // shared nav header (`PrepReviewRecordNav`) — the name in the title, the
   // document-type chip in place of the old ordinal, the EID in the "Employee
-  // ID" completeness check below. So this body renders only the warning line +
-  // the completeness report (no duplicated header).
+  // ID" completeness check below. So this body renders only the confidence
+  // badge + warning line + the completeness report (no duplicated header).
+  // `matchConfidence` is only populated for a standalone oath/EC record
+  // projected read-only via `readonly-record.ts` (a native `verify` run has
+  // no LLM-disambiguation confidence of its own) — so a post-hoc audit of an
+  // approved record can still see the confidence it was matched at.
   return (
     <div className="flex flex-col gap-3">
-      {/* Warning line */}
-      {hasWarnings && (
-        <div className="text-xs text-muted-foreground/80">
-          {record.matchState === "unresolved" && (
-            <span className="mr-2">Could not resolve employee.</span>
-          )}
-          {record.warnings?.map((w, i) => (
-            <span key={i}>{w}</span>
-          ))}
-        </div>
-      )}
+      <MatchWarnings
+        matchState={record.matchState}
+        warnings={record.warnings}
+        matchConfidence={record.matchConfidence}
+      />
 
       {/* Completeness checklist — recessed body, raised found rows. */}
       {checks.length === 0 ? (
