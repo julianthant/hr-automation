@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 
 import {
   resolveSearchResult,
+  resolveSearchPresence,
   parseMmddyyyy,
   toIsoDate,
   calendarDayLabelPattern,
@@ -107,6 +108,21 @@ describe("peopleHeaderShowsEid", () => {
   it("word-boundary: an 8-digit EID does not partially match a longer number", () => {
     assert.equal(peopleHeaderShowsEid("Someone 1041635200", "10416352"), false);
     assert.equal(peopleHeaderShowsEid("", "10416352"), false);
+  });
+});
+
+describe("resolveSearchPresence", () => {
+  it("returns found when a result is present, even if no-results text is also visible", () => {
+    assert.equal(resolveSearchPresence(true, true), "found");
+    assert.equal(resolveSearchPresence(true, false), "found");
+  });
+
+  it("returns not-found only when no-results is visible and no result is present", () => {
+    assert.equal(resolveSearchPresence(false, true), "not-found");
+  });
+
+  it("returns pending while the grid is still loading", () => {
+    assert.equal(resolveSearchPresence(false, false), "pending");
   });
 });
 

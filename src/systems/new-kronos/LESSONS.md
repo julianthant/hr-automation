@@ -84,6 +84,14 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `goToMenu.goToButtonOnPage`, `goToMenu.goToButtonInFrame` in `selectors.ts`
 **Tags:** go-to, button, toolbar, quick-find, slideout, slideout__mask, intercept, modal-overlay, goToDropdownButton, ng-disabled, first, resolution, navigation, timecard
 
+## 2026-07-06 — Found beats no-results during the search grid load overlap
+
+**Tried:** Racing `Promise.any([checkbox attached, slat visible])` (→ found) against `noResultsText.waitFor({ visible })` (→ not found) in `resolveSearchResult`.
+**Failed because:** While WFD loads search results it can briefly show BOTH `"There are no items to display."` AND the result checkbox/slat at the same time (live probe 2026-07-06, EID 10714794: at t+100ms `noResults=true` while `checkbox count=1`). Whichever waiter settled first won the race — when no-results won, a clearly-found employee was mis-resolved NOT FOUND in ~1s (`Employee 10714794 NOT found in Kronos` in kronos-pay-rule).
+**Fix:** Replace the race with `waitForEmployeeSearchOutcome`: poll BOTH contexts (iframe + top-level) every 200ms; on each tick `resolveSearchPresence(hasResult, noResults)` — **found always beats no-results** when both are true; not-found only when the sentinel is visible AND no result signal exists in either context. Added `search.resultEmployeeId` as a third found signal. Pure `resolveSearchPresence` pinned in `navigate.test.ts`.
+**Selector:** `search.resultEmployeeId`, `searchResultPresentInRoot`, `waitForEmployeeSearchOutcome`, `resolveSearchPresence` in `navigate.ts`
+**Tags:** found, not-found, race, overlap, no-results, checkbox, search, kronos-pay-rule, ISS-B04
+
 ## 2026-06-22 — Found-detection must wait for the "Select Item" checkbox ATTACHED, not VISIBLE (it's a hidden native input)
 
 **Tried:** `searchEmployee` resolved found vs not-found by racing `firstResultCheckbox.waitFor({ state: "visible" })` (→ found) against `noResultsText.waitFor({ state: "visible" })` (→ not found), with a both-rejected timeout → NOT FOUND (ISS-B04).
