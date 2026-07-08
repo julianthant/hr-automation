@@ -3,12 +3,35 @@ import { randomUUID } from 'node:crypto'
 import { type Database } from '../../infra/sqlite/index.js'
 
 import type { ControlDb } from '../control-db.js'
-import { type EnqueuedTask, type AttemptDbRow } from './types.js'
+import { type EnqueuedTask, type AttemptDbRow, getTaskRaw } from './types.js'
+
+/**
+ * Thrown when {@link retryTaskFromAttempt} is called with `blockedControlStates`
+ * and the target task has become one of those states (claimed/running/…) BETWEEN
+ * the control layer's non-transactional state pre-check and the retry UPDATE.
+ * The retry is refused loud so a daemon that claimed the row mid-retry keeps
+ * running the prior attempt instead of the retry silently resetting it to
+ * `queued` (double execution). Carries the observed `controlState` for a legible
+ * operator-facing error.
+ */
+export class RetryTaskBecameActiveError extends Error {
+  readonly controlState: string
+  readonly runId: string
+  constructor(runId: string, controlState: string) {
+    super(
+      `retryTaskFromAttempt: task for runId=${runId} became '${controlState}' after the retry state check — ` +
+        `a daemon claimed it mid-retry. Cancel the active attempt before retrying.`,
+    )
+    this.name = 'RetryTaskBecameActiveError'
+    this.controlState = controlState
+    this.runId = runId
+  }
+}
 
 export function retryTaskFromAttempt(
   db: Database,
   control: ControlDb,
-  request: { runId: string; now?: string },
+  request: { runId: string; now?: string; blockedControlStates?: readonly string[] },
 ): EnqueuedTask {
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
@@ -50,6 +73,23 @@ export function retryTaskFromAttempt(
     `).get(prior.task_id) as { n: number }).n) + 1
     const attemptId = randomUUID()
     const runId = randomUUID()
+    // Guard the retry UPDATE itself with the caller's blocked-state set so the
+    // check + reset are ATOMIC. The control layer does a non-transactional
+    // pre-read of control_state, but a daemon can claim the row between that
+    // read and here (queued → claimed); an unguarded reset would then re-queue
+    // a task a worker is actively running (double execution). With the
+    // predicate, a mid-retry claim makes the UPDATE match 0 rows and we throw
+    // so the retry is refused. Also bump `claim_generation` (mirrors
+    // returnTaskToQueued, ISS-005): a stale worker that raced in and claimed the
+    // OLD attempt holds a now-behind lease, so its terminal write no-ops rather
+    // than overwriting this fresh retry.
+    const blocked = request.blockedControlStates ?? []
+    const blockedParams: Record<string, string> = {}
+    const blockedPlaceholders = blocked.map((state, i) => {
+      const key = `blk${i}`
+      blockedParams[key] = state
+      return `@${key}`
+    })
     db.prepare(`
       INSERT INTO task_attempts (
         id, task_id, attempt_no, run_id, control_state,
@@ -67,12 +107,13 @@ export function retryTaskFromAttempt(
       itemId: prior.item_id,
       now,
     })
-    db.prepare(`
+    const result = db.prepare(`
       UPDATE tasks
       SET control_state = 'queued',
           run_id = @runId,
           input_json = @resetInputJson,
           current_attempt_id = @attemptId,
+          claim_generation = claim_generation + 1,
           claimed_by_worker_id = NULL,
           claimed_at = NULL,
           claim_expires_at = NULL,
@@ -83,7 +124,17 @@ export function retryTaskFromAttempt(
           parent_run_id = parent_run_id,
           updated_at = @now
       WHERE id = @taskId
-    `).run({ taskId: prior.task_id, runId, resetInputJson, attemptId, now })
+      ${blockedPlaceholders.length > 0 ? `AND control_state NOT IN (${blockedPlaceholders.join(', ')})` : ''}
+    `).run({ taskId: prior.task_id, runId, resetInputJson, attemptId, now, ...blockedParams })
+    if (blocked.length > 0 && result.changes === 0) {
+      // The row exists (we SELECTed it above) and is in the same transaction, so
+      // a 0-row UPDATE can only mean the blocked-state predicate excluded it —
+      // i.e. the task became active between the pre-check and now. Re-read its
+      // current state for a legible error, then throw (rolls back the attempt
+      // INSERT above).
+      const current = getTaskRaw(db, prior.task_id)
+      throw new RetryTaskBecameActiveError(request.runId, current?.control_state ?? 'unknown')
+    }
     const position = (db.prepare(`
       SELECT COUNT(*) AS n
       FROM tasks

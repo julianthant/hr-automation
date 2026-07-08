@@ -8,6 +8,8 @@ import {
   getTaskRaw,
   mapTaskRow,
   parseJson,
+  normalizeTaskState,
+  isTerminalTaskState,
 } from './types.js'
 
 export function claimNextTask(
@@ -148,6 +150,14 @@ export function markTaskRunning(
     // so it can't overwrite claimed_by_worker_id / current_attempt_id and
     // mislead recoverClaimsForDeadWorkers. The terminal write is lease-guarded
     // (ISS-005); this guards the running transition.
+    //
+    // Terminal guard: `markTerminal` NULLs `claimed_by_worker_id` on a
+    // done/failed/cancelled task, so the `claimed_by IS NULL` branch above
+    // would otherwise let a misordered caller RESURRECT a terminal task into
+    // `running`. Restrict the valid pre-running states to the only two a
+    // legitimate transition comes from: `claimed` (daemon claim path) and
+    // `queued` (the in-process path, which enqueues then marks running without
+    // claiming); `running` is included so an idempotent re-mark still matches.
     const result = db.prepare(`
       UPDATE tasks
       SET control_state = 'running',
@@ -156,10 +166,25 @@ export function markTaskRunning(
           updated_at = @now
       WHERE id = @taskId
         AND (claimed_by_worker_id IS NULL OR claimed_by_worker_id = @workerId)
+        AND control_state IN ('claimed', 'queued', 'running')
     `).run({ ...request, now })
-    // No-op task UPDATE = a peer superseded this claim; leave the attempt row
-    // untouched too so task + attempt stay in lockstep.
-    if (result.changes === 0) return
+    // A 0-row UPDATE has two causes; distinguish them (fail loud on the unsafe
+    // one). Re-read the row: if it is TERMINAL, a caller tried to resurrect a
+    // done/failed/cancelled task — throw so the misordering surfaces instead of
+    // silently reviving it. Otherwise it is the benign, expected case (a peer
+    // superseded this claim, or the task was cancelled) — leave the attempt row
+    // untouched too so task + attempt stay in lockstep, and no-op.
+    if (result.changes === 0) {
+      const current = getTaskRaw(db, request.taskId)
+      if (current && isTerminalTaskState(normalizeTaskState(current))) {
+        throw new Error(
+          `markTaskRunning: refusing to move task ${request.taskId} from terminal state ` +
+            `'${current.control_state}' back to 'running' (attempt=${request.attemptId}, worker=${request.workerId}) — ` +
+            `a terminal task must never be resurrected.`,
+        )
+      }
+      return
+    }
     db.prepare(`
       UPDATE task_attempts
       SET control_state = 'running',

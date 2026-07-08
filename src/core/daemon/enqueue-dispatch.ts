@@ -24,7 +24,30 @@ import { resolveQueueRowKindFromValue } from "../../domain/queue-row-kind.js";
 import { buildTraceId } from "../../domain/queue-trace-id.js";
 import { allocateLowestBatchDisplayOrdinal } from "../../tracker/batch-display-ordinal.js";
 import { DEFAULT_DIR, emitTrackerRow, type StampedData } from "../../tracker/jsonl.js";
+import { KeyedMutex } from "../../utils/keyed-mutex.js";
 import { log } from "../../utils/log.js";
+
+/**
+ * Serializes the supersede→enqueue critical section per workflow so two
+ * concurrent input runs for the SAME item can't both go live.
+ *
+ * The race: `supersedePriorRuns` lists prior active runs then cancels them
+ * (read-then-cancel, no lock), and `enqueueTasks` only adopts a row on an exact
+ * `(workflow, itemId, runId)` match — so a fresh runId always writes a NEW row.
+ * Two enqueues interleaving at their await points can therefore each observe
+ * "no prior run" and both write a live root task for one person. Holding a
+ * per-workflow lock across `ensureDaemonsAndEnqueue` (which fires supersede in
+ * `onPreparedItems` and then writes the task) makes the second enqueue observe
+ * the first's committed run and cancel it — only the latest run survives.
+ *
+ * Keyed per WORKFLOW (not per item): this is a single-operator dashboard, input
+ * runs are low-volume and complete in ms, so serializing a workflow's input-run
+ * enqueues is cheap and sidesteps having to derive item ids up front (a
+ * per-item lock set risks partial-overlap deadlocks). Only the supersede-guarded
+ * `/api/enqueue` path takes the lock; delegated / fan-out enqueues that call
+ * `ensureDaemonsAndEnqueue` directly (no `supersedePriorRuns`) are unaffected.
+ */
+const enqueueSupersedeMutex = new KeyedMutex();
 
 export interface EnqueueHttpResult {
   ok: boolean;
@@ -287,7 +310,12 @@ export async function enqueueFromHttp(
       }
     : undefined;
 
-  try {
+  // The supersede → pre-emit → enqueue sequence must be atomic per workflow so
+  // two concurrent input runs for the same item can't both survive (see
+  // `enqueueSupersedeMutex`). Wrap it in a closure and run it under the lock
+  // only when the supersede guard is active; unguarded delegated/fan-out
+  // enqueues run it inline.
+  const runEnqueue = async (): Promise<void> => {
     if (operationCoordinatorRunId) {
       const coordinatorItemId = `input-run-${operationCoordinatorRunId.slice(0, 8)}`;
       const coordinatorTraceId = buildTraceId({
@@ -429,6 +457,14 @@ export async function enqueueFromHttp(
         },
       },
     );
+  };
+
+  try {
+    if (supersedePriorRuns) {
+      await enqueueSupersedeMutex.runExclusive(workflowName, runEnqueue);
+    } else {
+      await runEnqueue();
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error(`enqueueFromHttp(${workflowName}): ${message}`);
