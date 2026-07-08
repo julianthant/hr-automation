@@ -16,6 +16,7 @@ import {
   Play,
   PauseCircle,
   Camera,
+  CircleHelp,
 } from "lucide-react";
 import {
   ContextMenu,
@@ -513,6 +514,14 @@ function BrowserTile({
   // Health overrides the tile look when non-healthy; otherwise the auth state
   // drives it. Both are bound to THIS browser by id.
   const badHealth = b.health && b.health !== "healthy" ? b.health : undefined;
+  // `b.health` is undefined until the first `browser_health` probe lands (the
+  // monitor ticks every ~30s and skips while auth/a step owns the page) — that
+  // is a genuinely valid "not yet checked" window, not a confirmed-healthy one.
+  // Don't let it read identically to a probed-and-healthy browser: the idle
+  // countdown ring specifically claims "confirmed healthy AND being cycled",
+  // so it's gated on an ACTUAL healthy probe, not merely the absence of a bad
+  // one — otherwise a stalled/dead health monitor would look forever fine.
+  const healthUnknown = b.authState === "authed" && !badHealth && b.health !== "healthy";
   const tone = badHealth ? healthTone[badHealth] : authBg[b.authState];
   const labelColor = badHealth ? healthColor[badHealth] : authColor[b.authState];
   const stateLabel = badHealth ? healthLabel[badHealth] : authLabel[b.authState];
@@ -522,7 +531,9 @@ function BrowserTile({
         b.authState === "authed" &&
         idleBySystem?.[systemId]?.lastTouchAt
       ? `${systemId} · ${authLabel[b.authState]} · idle page reload timer`
-      : `${systemId} · ${authLabel[b.authState]}`;
+      : healthUnknown
+        ? `${systemId} · ${authLabel[b.authState]} · health not yet checked`
+        : `${systemId} · ${authLabel[b.authState]}`;
   // Append the browser's current url + a recovery trail so hovering a tile
   // (esp. a failed/flapping one) shows where it actually is and how it got there.
   const trail =
@@ -552,9 +563,10 @@ function BrowserTile({
             {systemId}
           </span>
         </div>
-        {/* Idle ring shows only when healthy + idle-refresh; a non-healthy tile
-            shows its health icon instead. */}
-        {!badHealth &&
+        {/* Idle ring shows only when CONFIRMED healthy + idle-refresh; a
+            non-healthy tile shows its health icon, and an unprobed tile shows
+            a neutral "not yet checked" glyph instead of implying it's fine. */}
+        {b.health === "healthy" &&
           isIdleRefreshSystem(systemId) &&
           b.authState === "authed" &&
           !itemInFlight &&
@@ -569,6 +581,12 @@ function BrowserTile({
           )}
         {badHealth && (
           <HealthIcon health={badHealth} className={cn("w-3 h-3 shrink-0", healthColor[badHealth])} />
+        )}
+        {healthUnknown && (
+          <CircleHelp
+            aria-label={`${systemId} health not yet checked`}
+            className="w-3 h-3 shrink-0 text-muted-foreground"
+          />
         )}
         {/* Always-visible cue that auto-recovery is paused for this browser. */}
         {paused && (

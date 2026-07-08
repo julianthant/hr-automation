@@ -158,6 +158,11 @@ export function NotificationBell({ failureCounts, date, onOpen }: NotificationBe
   const [open, setOpen] = useState(false);
   const [backfill, setBackfill] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
+  // Distinguishes "confirmed no historical failures" from "the /api/failures
+  // backfill fetch failed" — both would otherwise settle `backfill` to an
+  // empty array and read identically as "You're all caught up" (fail-loud:
+  // see root CLAUDE.md).
+  const [backfillError, setBackfillError] = useState(false);
   const [lastSeenAt, setLastSeenAt] = useState<number>(() => readNumber(LAST_SEEN_KEY));
   const [failureAck, setFailureAck] = useState<number>(() => readNumber(FAILURES_ACK_KEY));
   const [filter, setFilter] = useState<string>(ALL_FILTER);
@@ -209,10 +214,15 @@ export function NotificationBell({ failureCounts, date, onOpen }: NotificationBe
     fetch(`/api/failures?date=${encodeURIComponent(date)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((body: FailureRow[]) => {
-        if (!cancelled) setBackfill(body.map(failureRowToNotification));
+        if (cancelled) return;
+        setBackfill(body.map(failureRowToNotification));
+        setBackfillError(false);
       })
       .catch(() => {
-        if (!cancelled) setBackfill([]);
+        if (!cancelled) {
+          setBackfill([]);
+          setBackfillError(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -266,9 +276,17 @@ export function NotificationBell({ failureCounts, date, onOpen }: NotificationBe
         <div className="px-4 py-3 border-b border-border/70">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[13px] font-semibold text-foreground tracking-tight">Notifications</span>
-            {total > 0 && (
-              <span className="text-[11px] text-muted-foreground">{total} recent</span>
-            )}
+            <span className="flex items-center gap-1.5">
+              {backfillError && (
+                <AlertTriangle
+                  aria-label="Couldn't load notification history — showing the live feed only"
+                  className="h-3 w-3 text-warning"
+                />
+              )}
+              {total > 0 && (
+                <span className="text-[11px] text-muted-foreground">{total} recent</span>
+              )}
+            </span>
           </div>
           {filterChips.length > 1 && (
             <div
@@ -314,11 +332,20 @@ export function NotificationBell({ failureCounts, date, onOpen }: NotificationBe
 
         {total === 0 ? (
           <div className="px-4 py-6 text-center">
-            <div className="text-[13px] text-foreground font-medium">
-              {loading ? "Loading…" : "No notifications"}
+            <div
+              className={cn(
+                "text-[13px] font-medium",
+                backfillError ? "text-warning" : "text-foreground",
+              )}
+            >
+              {loading ? "Loading…" : backfillError ? "Couldn't load notification history" : "No notifications"}
             </div>
             <div className="text-[12px] text-muted-foreground mt-1">
-              {loading ? "Fetching recent activity." : "You're all caught up."}
+              {loading
+                ? "Fetching recent activity."
+                : backfillError
+                  ? "The live feed is current, but past failures may be missing — try reopening."
+                  : "You're all caught up."}
             </div>
           </div>
         ) : (
