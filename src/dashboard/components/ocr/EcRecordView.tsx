@@ -1,6 +1,7 @@
 import type { PreviewRecord } from "./types";
 import { RELATIONSHIP_OPTIONS } from "./types";
 import { RecordField, recordFieldMissing } from "./shared/RecordField";
+import { MatchWarnings } from "./shared/MatchWarnings";
 import {
   mergeOcrPersonNameParts,
   readOcrPersonNameParts,
@@ -79,6 +80,11 @@ export function EcRecordView({ record, onChange }: EcRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
+      <MatchWarnings
+        matchState={record.matchState}
+        warnings={record.warnings}
+        matchConfidence={record.matchConfidence}
+      />
       <div className="grid grid-cols-2 gap-3">
         <RecordField
           label={FIELD_LABELS.employeeFirstName}

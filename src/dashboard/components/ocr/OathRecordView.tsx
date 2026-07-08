@@ -1,5 +1,6 @@
 import type { OathPreviewRecord } from "./types";
 import { RecordField, recordFieldMissing } from "./shared/RecordField";
+import { MatchWarnings } from "./shared/MatchWarnings";
 import {
   mergeOcrPersonNameParts,
   readOcrPersonNameParts,
@@ -47,6 +48,11 @@ export function OathRecordView({ record, onChange }: OathRecordViewProps) {
 
   return (
     <div className="flex flex-col gap-3">
+      <MatchWarnings
+        matchState={record.matchState}
+        warnings={record.warnings}
+        matchConfidence={record.matchConfidence}
+      />
       <RecordField label="Empl ID" missing={recordFieldMissing(record, "employeeId")}>
         <input
           type="text"

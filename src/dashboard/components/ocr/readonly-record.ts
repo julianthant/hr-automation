@@ -202,6 +202,7 @@ export function toReadonlyVerifyRecord(
       selected: record.selected,
       warnings,
       checks,
+      matchConfidence: record.matchConfidence,
     };
   }
 
@@ -218,5 +219,6 @@ export function toReadonlyVerifyRecord(
     selected: record.selected,
     warnings,
     checks,
+    matchConfidence: record.matchConfidence,
   };
 }
