@@ -55,21 +55,9 @@ const INLINE_PATTERNS: Array<{ name: string; re: RegExp }> = [
 
 /** file (relative to repo root) -> { count, reason } */
 const ALLOWLIST: Record<string, { count: number; reason: string }> = {
-  "src/workflows/emergency-contact/enter.ts": {
-    count: 18,
-    reason: "Pre-existing workflow-local selectors for the UCPath Emergency Contact popup form (single consumer) — not yet promoted to src/systems/ucpath/selectors.ts. Same class as the just-fixed person-lookup violations; flagged for a follow-up migration pass, not a correctness bug (a missing/renamed role throws, it doesn't silently mis-fill).",
-  },
-  "src/workflows/oath-upload/fill-form.ts": {
-    count: 1,
-    reason: "getByText on the just-uploaded attachment's own filename (a value this run generated, not a system chrome selector) while confirming the ServiceNow attachment list — not a promotable registry selector.",
-  },
   "src/workflows/old-kronos-reports/workflow.ts": {
     count: 1,
     reason: "Pre-existing single-use old-kronos reports grid locator — not yet promoted to src/systems/old-kronos/selectors.ts.",
-  },
-  "src/workflows/onboarding/enter.ts": {
-    count: 1,
-    reason: "Pre-existing single-use i9 'Personal Data' tab locator — not yet promoted to src/systems/i9/selectors.ts.",
   },
 };
 

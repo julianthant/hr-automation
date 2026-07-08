@@ -27,7 +27,7 @@ import {
   dismissPeopleSoftModalMask,
 } from "../../systems/ucpath/index.js";
 import type { PersonalDataInput, JobDataInput } from "../../systems/ucpath/index.js";
-import { comments } from "../../systems/ucpath/selectors.js";
+import { comments, smartHR } from "../../systems/ucpath/selectors.js";
 import type { EmployeeData } from "./schema.js";
 
 /**
@@ -199,7 +199,7 @@ export function buildTransactionPlan(
     async () => {
       const frame = getContentFrame(page);
       await dismissPeopleSoftModalMask(page);
-      await frame.getByRole("tab", { name: "Personal Data" }).click({ timeout: 10_000 });
+      await smartHR.tab.personalData(frame).click({ timeout: 10_000 });
       await page.waitForTimeout(3_000);
       await waitForPeopleSoftProcessing(frame, 10_000);
       log.success("Personal Data tab loaded (all tabs visited)");
