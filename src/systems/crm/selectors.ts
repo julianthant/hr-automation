@@ -24,6 +24,26 @@ export const search = {
    */
   nthResultRow: (page: Page, i: number): Locator =>
     page.locator("table tbody tr").nth(i),
+
+  /**
+   * All `<td>` cells of result row `i`, in column order. Used to scrape a
+   * whole row (name / offer-sent-on / process-stage) by index without an
+   * inline `page.locator` at the call site — column indices are documented on
+   * the reader (`src/systems/crm/onboarding-records.ts`). Compound path
+   * rooted in `nthResultRow`. verified 2026-04-14
+   * @tags search, result, row, cells, table, crm
+   */
+  resultRowCells: (page: Page, i: number): Locator =>
+    page.locator("table tbody tr").nth(i).locator("td"),
+
+  /**
+   * The `<a>` link inside result row `i`'s first (name) cell — the record
+   * link to follow into `ONB_ViewOnboarding`. Compound path rooted in
+   * `nthResultRow`. verified 2026-04-14
+   * @tags search, result, row, link, name, crm
+   */
+  resultRowNameLink: (page: Page, i: number): Locator =>
+    page.locator("table tbody tr").nth(i).locator("td").first().locator("a"),
 };
 
 // ─── Record page (/hr/ONB_ViewOnboarding?id=...) ──────────────────────────

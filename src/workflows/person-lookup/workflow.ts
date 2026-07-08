@@ -235,6 +235,21 @@ export function resolveCrmSearchNameParts(
  * If MULTIPLE CRM records directly match DIFFERENT SDCMP candidate EIDs,
  * picking the first would be an arbitrary, potentially wrong-person match —
  * this returns "none" instead of trusting either (root CLAUDE.md "Fail loud").
+ *
+ * Why ±7 days is a justified tolerance, not a loose match (2026-07-08 audit):
+ * CRM's "First Day of Service" and UCPath's Last Hire / effective date are
+ * entered by different systems/people days apart for the same real start date
+ * (onboarding paperwork vs. payroll processing lag), so an exact-date compare
+ * would reject genuine matches. The tolerance is bounded, pinned by a test
+ * (`matchCrmEid` "falls back to a ±7 day date match…" in
+ * `tests/unit/workflows/person-lookup/crm-start-date.test.ts`), documented in
+ * `src/workflows/person-lookup/CLAUDE.md`, and only ever a FALLBACK tie-
+ * breaker below the exact-EID check above — it never runs when a direct EID
+ * match exists, and an ambiguous CRM-only case above already fails loud
+ * instead of guessing. It also does not gate an HR write directly: it only
+ * feeds `crmMatch`/`crmMatchedEmplId`, which choose which CRM record's dates
+ * to surface — a wrong match here would misattribute Start Date display data,
+ * not submit a wrong transaction.
  */
 export function matchCrmEid(
   sdcmp: EidResult[],

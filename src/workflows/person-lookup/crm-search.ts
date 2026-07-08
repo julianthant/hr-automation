@@ -1,77 +1,23 @@
 /**
- * CRM search for EID Lookup cross-verification.
+ * CRM search orchestration for EID Lookup cross-verification.
  *
- * Searches ACT CRM by name (last name, then first name) and extracts
- * key fields from the record page for cross-referencing with UCPath.
- *
- * Reuses existing CRM modules: loginToACTCrm, extractField.
+ * Owns which query strategies to try and which resulting CRM record to
+ * prefer — the raw Playwright search/scrape and record-page navigation +
+ * extraction (incl. the post-navigation identity sanity check) live in
+ * `src/systems/crm/onboarding-records.ts` (promoted there 2026-07-08 so this
+ * workflow file stops owning selectors, per `src/systems/CLAUDE.md`).
  */
 
 import type { Page } from "playwright";
-import { CRM_SEARCH_URL } from "../../config.js";
-import { extractField } from "../../systems/crm/extract.js";
+import {
+  searchCrmOnboardingResultRows,
+  extractCrmOnboardingRecord,
+  type CrmOnboardingRecord,
+  type CrmOnboardingSearchRow,
+} from "../../systems/crm/index.js";
 import { log } from "../../utils/log.js";
 
-export interface CrmRecord {
-  name: string;
-  ppsId: string;
-  ucpathEmployeeId: string;
-  firstDayOfService: string;
-  appointmentEndDate: string;
-  dateSigned: string;
-  department: string;
-  titleCode: string;
-  ucsdEmail: string;
-  personalEmail: string;
-  hireType: string;
-  recordUrl: string;
-}
-
-/**
- * Search CRM by query string and return matching result rows.
- * Each row has: name, offerSentOn, processStage, recordUrl.
- */
-async function searchCrm(
-  page: Page,
-  query: string,
-): Promise<Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>> {
-  log.step(`CRM: Searching for "${query}"...`);
-  const searchUrl = `${CRM_SEARCH_URL}?q=${encodeURIComponent(query)}`;
-  await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-
-  const rows = page.locator("table tbody tr");
-  const count = await rows.count();
-
-  if (count === 0) {
-    log.step(`CRM: No results for "${query}"`);
-    return [];
-  }
-
-  log.step(`CRM: Found ${count} result(s) for "${query}"`);
-
-  const results: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }> = [];
-  for (let i = 0; i < count; i++) {
-    const cells = rows.nth(i).locator("td");
-    // Read total cell count once so we can safely skip columns that don't
-    // exist on this row. The CRM search view occasionally renders rows with
-    // fewer than the expected 5 columns (e.g. condensed layout when the user
-    // has filters applied server-side); `cells.nth(4).textContent()` would
-    // otherwise block for the full 30s auto-wait before throwing.
-    const cellCount = await cells.count();
-    const nameCell = cells.nth(0);
-    const name = cellCount > 0 ? ((await nameCell.textContent())?.trim() ?? "") : "";
-    const offerSentOn = cellCount > 1 ? ((await cells.nth(1).textContent())?.trim() ?? "") : "";
-    const processStage = cellCount > 4 ? ((await cells.nth(4).textContent())?.trim() ?? "") : "";
-    const link = nameCell.locator("a");
-    const href = (await link.count()) > 0 ? (await link.getAttribute("href")) ?? "" : "";
-    const recordUrl = href.startsWith("http") ? href : href ? `https://act-crm.my.site.com${href}` : "";
-
-    results.push({ name, offerSentOn, processStage, recordUrl });
-  }
-
-  return results;
-}
+export type CrmRecord = CrmOnboardingRecord;
 
 export function buildCrmNameSearchQueries(lastName: string, firstName: string): string[] {
   const queries: string[] = [];
@@ -95,54 +41,6 @@ export function buildCrmNameSearchQueries(lastName: string, firstName: string): 
 }
 
 /**
- * Extract key fields from a CRM record page.
- *
- * SELECTORS: verified via playwright-cli v1.1 — record page uses
- * rowheader/cell table layout. extractField() handles both th and td labels.
- */
-async function extractCrmRecord(page: Page, recordUrl: string): Promise<CrmRecord | null> {
-  await page.goto(recordUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-
-  const firstName = await extractField(page, "Employee First Name") ?? "";
-  const lastName = await extractField(page, "Employee Last Name") ?? "";
-  const name = `${lastName}, ${firstName}`.trim();
-
-  const ppsId = await extractField(page, "PPS ID") ?? "";
-  const ucpathEmployeeId = await extractField(page, "UCPath Employee ID") ?? "";
-  const firstDayOfService = await extractField(page, "First Day of Service (Effective Date)")
-    ?? await extractField(page, "First Day of Service") ?? "";
-  const appointmentEndDate = await extractField(page, "Appointment (Expected Job) End Date")
-    ?? await extractField(page, "Appointment End Date") ?? "";
-  const dateSigned = await extractField(page, "Date Signed") ?? "";
-  const department = await extractField(page, "Department") ?? "";
-  const titleCode = await extractField(page, "Title Code/Payroll Title") ?? "";
-  const ucsdEmail = await extractField(page, "UCSD Email Address") ?? "";
-  const personalEmail = await extractField(page, "Personal Email Address") ?? "";
-  const hireType = await extractField(page, "Hire Type") ?? "";
-
-  log.step(`CRM: Extracted record for ${name}`);
-  log.step(`  PPS ID: ${ppsId} | UCPath EID: ${ucpathEmployeeId || "(empty)"}`);
-  log.step(`  First Day: ${firstDayOfService} | Appt End: ${appointmentEndDate} | Signed: ${dateSigned}`);
-  log.step(`  Dept: ${department}`);
-
-  return {
-    name,
-    ppsId,
-    ucpathEmployeeId,
-    firstDayOfService,
-    appointmentEndDate,
-    dateSigned,
-    department,
-    titleCode,
-    ucsdEmail,
-    personalEmail,
-    hireType,
-    recordUrl,
-  };
-}
-
-/**
  * Search CRM by name parts: first search by last name, then find rows
  * matching the first name. Returns all matching CRM records with extracted fields.
  *
@@ -156,7 +54,7 @@ export async function searchCrmByName(
   lastName: string,
   firstName: string,
   options: {
-    onAfterSearch?: (query: string, rows: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>) => Promise<void>;
+    onAfterSearch?: (query: string, rows: CrmOnboardingSearchRow[]) => Promise<void>;
   } = {},
 ): Promise<CrmRecord[]> {
   const records: CrmRecord[] = [];
@@ -164,10 +62,10 @@ export async function searchCrmByName(
     .split(/\s+/)
     .map((token) => token.replace(/[^A-Za-z]/g, "").toLowerCase())
     .filter((token) => token.length >= 2);
-  const selected = new Map<string, { name: string; offerSentOn: string; processStage: string; recordUrl: string }>();
+  const selected = new Map<string, CrmOnboardingSearchRow>();
 
   for (const query of buildCrmNameSearchQueries(lastName, firstName)) {
-    const rows = await searchCrm(page, query);
+    const rows = await searchCrmOnboardingResultRows(page, query);
     await options.onAfterSearch?.(query, rows);
     const matchingRows = rows.filter((r) => {
       const nameLower = r.name.toLowerCase();
@@ -185,8 +83,7 @@ export async function searchCrmByName(
 
   for (const row of selected.values()) {
     if (!row.recordUrl) continue;
-    const record = await extractCrmRecord(page, row.recordUrl);
-    if (record) records.push(record);
+    records.push(await extractCrmOnboardingRecord(page, row.recordUrl));
   }
   if (records.length > 0) return records;
 
@@ -207,17 +104,17 @@ async function searchCrmByEid(
   page: Page,
   emplId: string,
   options: {
-    onAfterSearch?: (query: string, rows: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>) => Promise<void>;
+    onAfterSearch?: (query: string, rows: CrmOnboardingSearchRow[]) => Promise<void>;
   } = {},
 ): Promise<CrmRecord[]> {
-  const rows = await searchCrm(page, emplId);
+  const rows = await searchCrmOnboardingResultRows(page, emplId);
   await options.onAfterSearch?.(emplId, rows);
 
   const records: CrmRecord[] = [];
   for (const row of rows) {
     if (!row.recordUrl) continue;
-    const record = await extractCrmRecord(page, row.recordUrl);
-    if (record && record.ucpathEmployeeId.trim() === emplId) records.push(record);
+    const record = await extractCrmOnboardingRecord(page, row.recordUrl);
+    if (record.ucpathEmployeeId.trim() === emplId) records.push(record);
   }
   if (records.length > 0) {
     log.step(`CRM: ${records.length} record(s) matched EID ${emplId}`);
@@ -240,7 +137,7 @@ export async function searchCrmByEidOrName(
   page: Page,
   params: { emplId?: string; lastName: string; firstName: string },
   options: {
-    onAfterSearch?: (query: string, rows: Array<{ name: string; offerSentOn: string; processStage: string; recordUrl: string }>) => Promise<void>;
+    onAfterSearch?: (query: string, rows: CrmOnboardingSearchRow[]) => Promise<void>;
   } = {},
 ): Promise<CrmRecord[]> {
   const emplId = params.emplId?.trim();

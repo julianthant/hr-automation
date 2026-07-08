@@ -4,7 +4,7 @@ import { clickSaveAndSubmit } from "../../systems/ucpath/index.js";
 import { getContentFrame } from "../../systems/ucpath/navigate.js";
 import { payPathActions, hrTasks, smartHR } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
-import { UCPATH_SMART_HR_URL } from "../../config.js";
+import { UCPATH_SMART_HR_URL, TIMEOUTS } from "../../config.js";
 import { gotoWithRetry } from "../../infra/browser/launch.js";
 import type { WorkStudyInput } from "./schema.js";
 
@@ -17,7 +17,7 @@ export interface WorkStudyContext {
 
 async function waitForPageReady(page: Page): Promise<void> {
   await page.waitForTimeout(3_000);
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: TIMEOUTS.navigation }).catch(() => {});
 }
 
 function buildCommentsText(effectiveDate: string): string {
@@ -40,12 +40,12 @@ async function navigateToPayPathActions(page: Page): Promise<void> {
 
   // Click PayPath/Additional Pay in sidebar to expand sub-items
   log.step("Expanding PayPath/Additional Pay...");
-  await hrTasks.payPathLink(page).click({ timeout: 10_000 });
-  await page.waitForTimeout(2_000);
+  await hrTasks.payPathLink(page).click({ timeout: TIMEOUTS.normal });
+  await page.waitForTimeout(TIMEOUTS.uiSettle);
 
   // Click PayPath Actions sub-item
   log.step("Clicking PayPath Actions...");
-  await hrTasks.payPathActionsLink(page).click({ timeout: 10_000 });
+  await hrTasks.payPathActionsLink(page).click({ timeout: TIMEOUTS.normal });
   await waitForPageReady(page);
   log.success("PayPath Actions search page loaded");
 }
@@ -57,17 +57,17 @@ async function searchEmployee(
   ctx: WorkStudyContext,
 ): Promise<void> {
   log.step(`Searching for Empl ID: ${emplId}...`);
-  await payPathActions.emplIdInput(frame).fill(emplId, { timeout: 10_000 });
+  await payPathActions.emplIdInput(frame).fill(emplId, { timeout: TIMEOUTS.normal });
   log.step("Filled Empl ID, clicking Search...");
-  await payPathActions.searchButton(frame).click({ timeout: 10_000 });
+  await payPathActions.searchButton(frame).click({ timeout: TIMEOUTS.normal });
   // PeopleSoft reloads the iframe content after search — wait for the
   // resulting employee-name readback to render instead of a blind flat pause
   // (best-effort: the "payroll in progress" alert branch below can render
   // instead, in which case this simply times out and falls through to it).
   await payPathActions.employeeNameDisplay(frame)
-    .waitFor({ state: "visible", timeout: 10_000 })
+    .waitFor({ state: "visible", timeout: TIMEOUTS.normal })
     .catch(() => {});
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: TIMEOUTS.navigation }).catch(() => {});
 
   // Dismiss any PeopleSoft alert dialog (e.g. "payroll in progress" warning).
   // Fail-loud rule: never OK an alert unread. No message-text selector is
@@ -76,19 +76,19 @@ async function searchEmployee(
   // playwright-cli, add it to `payPathActions` in selectors.ts, then log the
   // actual text instead of this generic warning.
   const okBtn = payPathActions.alertOkButton(page);
-  if (await okBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (await okBtn.isVisible({ timeout: TIMEOUTS.uiSettle }).catch(() => false)) {
     log.warn(
       `PeopleSoft alert dialog present for Empl ID ${emplId} — dismissing unread (no message-text selector available; see NEEDS-LIVE note above)`,
     );
-    await okBtn.click({ timeout: 5_000 });
-    await page.waitForTimeout(2_000);
+    await okBtn.click({ timeout: TIMEOUTS.fast });
+    await page.waitForTimeout(TIMEOUTS.uiSettle);
   }
 
   // Extract employee name from Position Data header. Fail-loud rule: an
   // unreadable/empty identity readback must NOT be swallowed to '' and
   // allowed to proceed toward a real PayPath submit — throw instead.
   const nameEl = payPathActions.employeeNameDisplay(frame);
-  const name = await nameEl.textContent({ timeout: 5_000 }).catch(() => null);
+  const name = await nameEl.textContent({ timeout: TIMEOUTS.fast }).catch(() => null);
   const trimmedName = name?.trim() ?? "";
   if (!trimmedName) {
     throw new Error(
@@ -112,7 +112,7 @@ async function collapseSidebar(page: Page): Promise<void> {
   const isExpanded = await sidebarBtn.getAttribute("aria-expanded").catch(() => null);
   if (isExpanded === "true") {
     log.step("Collapsing sidebar...");
-    await sidebarBtn.click({ timeout: 5_000 });
+    await sidebarBtn.click({ timeout: TIMEOUTS.fast });
     await page.waitForTimeout(1_000);
   }
 }
@@ -132,11 +132,11 @@ async function fillPositionData(
 
   log.step("  Position Change Reason: JRL");
   await payPathActions.positionChangeReasonInput(frame)
-    .fill("JRL", { timeout: 10_000 });
+    .fill("JRL", { timeout: TIMEOUTS.normal });
 
   log.step("  Position Pool: F");
   await payPathActions.positionPoolInput(frame)
-    .fill("F", { timeout: 10_000 });
+    .fill("F", { timeout: TIMEOUTS.normal });
 
   log.success("Position Data filled");
 }
@@ -145,7 +145,7 @@ async function fillPositionData(
 
 async function clickJobDataTab(page: Page, frame: FrameLocator): Promise<void> {
   log.step("Clicking Job Data tab...");
-  await payPathActions.jobDataTab(frame).click({ timeout: 10_000 });
+  await payPathActions.jobDataTab(frame).click({ timeout: TIMEOUTS.normal });
   await waitForPageReady(page);
   log.success("Job Data tab loaded");
 }
@@ -156,7 +156,7 @@ async function fillJobDataComments(
 ): Promise<void> {
   log.step(`  Job Data Comments: ${comments}`);
   await payPathActions.jobDataCommentsInput(frame)
-    .fill(comments, { timeout: 10_000 });
+    .fill(comments, { timeout: TIMEOUTS.normal });
   log.success("Job Data Comments filled");
 }
 
@@ -164,7 +164,7 @@ async function fillJobDataComments(
 
 async function clickAdditionalPayTab(page: Page, frame: FrameLocator): Promise<void> {
   log.step("Clicking Additional Pay Data tab...");
-  await payPathActions.additionalPayDataTab(frame).click({ timeout: 10_000 });
+  await payPathActions.additionalPayDataTab(frame).click({ timeout: TIMEOUTS.normal });
   await waitForPageReady(page);
   log.success("Additional Pay Data tab loaded");
 }
@@ -175,7 +175,7 @@ async function fillInitiatorComments(
 ): Promise<void> {
   log.step(`  Initiator's Comments: ${comments}`);
   await payPathActions.initiatorsCommentsInput(frame)
-    .fill(comments, { timeout: 10_000 });
+    .fill(comments, { timeout: TIMEOUTS.normal });
   log.success("Initiator's Comments filled");
 }
 
