@@ -353,11 +353,13 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
       </div>
     ) : undefined;
 
-  // EID-approval review banner — a separations run that PAUSED for operator
-  // approval (data.eidApproval === "pending"). The run is `done` (not failed),
-  // so it never collides with the failure banner; reuse the same top slot.
+  // Identity-approval review banner — any identity-resolving run that PAUSED for
+  // operator approval (data.eidApproval === "pending"). Workflow-agnostic
+  // (separations, onboarding, …) — gated only on the pause marker, not the
+  // workflow name. The run is `done` (not failed), so it never collides with the
+  // failure banner; reuse the same top slot.
   const eidApprovalBanner =
-    entry.workflow === "separations" && entry.data?.eidApproval === "pending" ? (
+    entry.data?.eidApproval === "pending" ? (
       <EidApprovalBanner entry={entry} workflow={logSourceWorkflow} date={date} />
     ) : undefined;
 
