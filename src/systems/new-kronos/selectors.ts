@@ -115,9 +115,18 @@ export const search = {
    * native input is visually hidden — see `searchEmployee`.
    * @tags first, result, slat, menuitemradio, found, probe, search, new-kronos
    */
-  // NEEDS LIVE RE-VERIFY 2026-06-22
+  // verified 2026-07-06
   firstResultSlat: (root: SearchRoot): Locator =>
     root.getByRole("menuitemradio").first(),
+
+  /**
+   * The searched employee's ID in the result slat (e.g. "10714794" under the
+   * name). A "somebody showed up" signal independent of checkbox/slat roles.
+   * verified 2026-07-06
+   * @tags result, employee-id, eid, found, probe, search, new-kronos
+   */
+  resultEmployeeId: (root: SearchRoot, employeeId: string): Locator =>
+    root.getByText(employeeId, { exact: true }),
 
   /**
    * Close the sidebar. verified 2026-06-18

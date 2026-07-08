@@ -54,9 +54,11 @@ export const record = {
    * ANY cell (`<th>` OR `<td>`), value in the next sibling `<td>`. Catches
    * record-page rows whose label cell tag varies between the rowheader (`<th>`)
    * and a plain data cell (`<td>`) — a single `.or()` chain so one extract pass
-   * tries both without the caller ordering them. UNVERIFIED against the live
-   * CRM record page — added 2026-06-07 as a strictly-additive permissiveness
-   * widening; needs a live-CRM re-verify.
+   * tries both without the caller ordering them. Live-probed 2026-07-08 on a
+   * real record page ("UCPath Employee ID"): the th arm resolves the value
+   * (same element strategy 1 hits); the td arm's first match had an EMPTY
+   * following td, which extractField's empty-guard skips — the arm cannot
+   * return a wrong value there, it just misses. verified 2026-07-08
    * @tags visualforce, label, value, th, td, extract, record, fallback, crm
    */
   cellLabelFollowingTd: (page: Page, label: string): Locator =>
@@ -76,8 +78,13 @@ export const record = {
    * immediate following sibling (extra spacer/format cells between label and
    * value), and when the label text is split across child nodes inside the
    * label cell (the `:has-text` row match still accumulates the descendant
-   * text). UNVERIFIED against the live CRM record page — added 2026-06-07 as a
-   * strictly-additive fallback; needs a live-CRM re-verify.
+   * text). Live-probed 2026-07-08 on a real record page: `tr:has-text` ALSO
+   * matches enclosing outer-table rows, so `.first()` landed on an outer row
+   * whose last td was EMPTY (extractField's empty-guard skipped it — inert,
+   * not wrong) while the 2nd match held the right value. CAUTION: on a row
+   * with multiple label/value pairs the last cell can be a DIFFERENT field's
+   * value — keep this arm LAST among the table strategies and never promote
+   * it. verified 2026-07-08
    * @tags visualforce, label, value, row, last-cell, extract, record, fallback, crm
    */
   rowLabelLastCell: (page: Page, label: string): Locator =>
@@ -90,9 +97,11 @@ export const record = {
    * label text matches, read its value control. Lightning renders fields as
    * label/value div pairs (`.slds-form-element__label` + `.slds-form-element__control`)
    * rather than the Visualforce `<th>/<td>` table — this catches a record page
-   * served by the Lightning UI instead of classic Visualforce. UNVERIFIED
-   * against the live CRM record page — added 2026-06-07 as a strictly-additive
-   * fallback; needs a live-CRM re-verify.
+   * served by the Lightning UI instead of classic Visualforce. Live-probed
+   * 2026-07-08 on a real record page: ZERO `.slds-form-element` nodes exist —
+   * the hr portal serves classic Visualforce, so this arm is currently a dead
+   * (harmless) fallback kept only for a future Lightning migration.
+   * verified 2026-07-08
    * @tags lightning, label, value, form-element, extract, record, fallback, crm
    */
   lightningFieldValue: (page: Page, label: string): Locator =>
@@ -108,7 +117,12 @@ export const sectionNav = {
   /**
    * Fallback chain for "click a section by name" when direct URL mapping
    * isn't available in CRM_SECTION_URLS. Tries link, then text, then tab.
-   * verified 2026-04-14
+   * Live-checked on a real onboarding record page: "Onboarding History"
+   * resolves via the getByText arm (case-insensitive substring match on the
+   * "Show Onboarding History" button — the documented click fallback);
+   * "UCPath Entry Sheet" has NO in-page anchor on that page shape, so only
+   * the CRM_SECTION_URLS direct-URL path reaches it — do not rely on this
+   * chain for it. verified 2026-07-08
    * @tags section, navigation, name, fallback, link, tab, crm
    */
   byName: (page: Page, sectionName: string): Locator =>

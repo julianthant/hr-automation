@@ -88,9 +88,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 
 **Tried:** Picking the employee name from generic two-word leaf text and excluding a growing list of UI labels.
 **Failed because:** The heuristic could only be made to pass by adding a personal-name exclusion, which is brittle and risks rejecting a real employee if the name later appears as data.
-**Fix:** Read `personOrgSummary.personNameValue` first, then use the old leaf-text heuristic only as a fallback for legacy renderings. The fallback label list now contains UI copy only.
+**Fix:** Read `personOrgSummary.personNameValue` first, then use the old leaf-text heuristic only as a fallback for legacy renderings. The fallback label list now contains UI copy only. (SUPERSEDED IN PART 2026-07-08: the NPC-id chain this prescribed turned out entirely DEAD on the live page — see the 2026-07-08 lesson below; `#PERSON_NAME_NAME` is now the primary arm.)
 **Selector:** `personOrgSummary.personNameValue` in `selectors.ts`
 **Tags:** person-org-summary, name, detail, header, heuristic, selector
+**References:** `src/systems/ucpath/LESSONS.md#2026-07-08` (dead chain masked by the heuristic)
 
 ## 2026-05-27 — Smart HR Transactions text selector also matches SS Smart HR Transactions
 
@@ -222,3 +223,15 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `personSearch.searchSubmitButton` / `personSearch.ssnLookupButton` in `selectors.ts`; `waitForPersonSearchButtonEnabled` in `navigate.ts`
 **Tags:** person-search, national-id, magnifier, prompt-table, modal, mask, pt_modalmask, main-page, iframe, search-button, disabled, enabled, timeout, onboarding
 **References:** `tests/unit/systems/ucpath/navigate.test.ts`. LIVE-VERIFIED END-TO-END 2026-07-01 — real daemon onboarding dry-run (charlottee, complete record): person-search → outcome `duplicate-dialog` → `new-hire` → I-9 search-first (existing profile 2189301) → dry-run terminal `completed`. (The earlier dummy-NID interactive check mis-concluded the magnifier was unnecessary — see the corrected Fix above.)
+
+## 2026-07-08 — Person Org Summary name chain was entirely DEAD live; the body-scan heuristic was silently carrying production (`#PERSON_NAME_NAME` is the real anchor)
+
+**Tried:** Trusting the `personOrgSummary.personNameValue` 4-arm `.or()` chain (`#PERSON_NPC_VW_NAME_DISPLAY` → `#PERSON_NPC_VW_NAME_DISPL` → `#PERSON_NPC_VW_NAME` → `[id*='PERSON_NPC_VW'][id*='NAME']`), carrying a `verified 2026-05-15` date, as the primary name source on the detail page — with the generic leaf-text body-scan heuristic in `person-org-summary.ts` as a legacy fallback.
+
+**Failed because:** A live DOM probe (2026-07-08, EID 10618178, `getElementById` per arm inside `#main_target_win0`) found NO element for ANY of the four arms — the wildcard included — while the name renders in `<span id="PERSON_NAME_NAME" class="PABOLD11TEXT">`. So the "verified" chain had been dead for an unknown period and every production name extraction was actually served by the unverified body-scan heuristic, invisible until the 2026-07 fail-loud audit put a `log.warn` on that fallback path. Broader gotcha: a verified-dated `.or()` chain can be entirely dead while a downstream heuristic masks it, and an a11y snapshot cannot verify id-based selectors — only a per-arm DOM id probe shows which arm actually fires.
+
+**Fix:** `#PERSON_NAME_NAME` added as the chain's primary arm (`verified 2026-07-08`); the NPC arms demoted to legacy fallbacks. The heuristic keeps its loud `selector fallback triggered` warn so any future chain death surfaces on the Selector Health Panel instead of hiding again. When live-verifying a chain, probe EVERY arm (`getElementById` each), not just "did the locator resolve".
+
+**Selector:** `personOrgSummary.personNameValue` in `selectors.ts`
+**Tags:** person-org-summary, name, detail, header, selector, dead-chain, fallback, heuristic, live-probe, selector-health
+**References:** `src/systems/ucpath/LESSONS.md#2026-05-15` (the guidance this supersedes in part); `src/systems/ucpath/CLAUDE.md` 2026-05-15 lesson.

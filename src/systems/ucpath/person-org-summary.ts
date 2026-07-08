@@ -85,6 +85,30 @@ async function readPersonNameFromDetail(frame: FrameLocator): Promise<string | n
     .catch(() => null);
   if (selected) return selected;
 
+  // Registry selector missed. This body-scan heuristic ("any short leaf
+  // span shaped like 'Word Word' that isn't a known UI label") is NOT
+  // independently verified — the 2026-05-15 lesson (src/systems/ucpath/CLAUDE.md)
+  // moved name readback onto the registry selector specifically because this
+  // heuristic is fragile (the ever-growing PERSON_ORG_NAME_LABELS skip list
+  // is the scar tissue from past false-positive matches on PeopleSoft UI
+  // chrome). A silently-wrong name here would still reach the operator: it
+  // flows into EidResult.name → person-lookup's resolvedName, which the
+  // separations EID-approval review displays as the proposed identity — a
+  // wrong name there can mislead that human decision. This doesn't fail
+  // loud (dropping it entirely would break the genuinely-legacy older-page
+  // render the JSDoc above describes, and there's no live signal here to
+  // confirm the registry selector is truly extendable rather than legitimately
+  // absent on that variant), but it MUST be loud: log at the same
+  // "selector fallback triggered" anchor the dashboard Selector Health Panel
+  // aggregates on, so a registry-selector miss is visible and drives a real
+  // selector fix instead of quietly living behind this fallback forever.
+  // LIVE-VERIFIED 2026-07-08 (EID 10618178): the old NPC-id chain missed on
+  // the real detail page — the name lives at `#PERSON_NAME_NAME`, now the
+  // registry selector's primary arm. With that fix the registry hits and
+  // this heuristic is a genuine last-resort for unseen legacy renderings.
+  log.warn(
+    "selector fallback triggered: ucpath person org summary person name value (registry selector missed — falling back to unverified body-scan name heuristic)",
+  );
   const candidates = await personOrgSummary.body(frame).evaluate((body) => {
     const out: string[] = [];
     const els = body.querySelectorAll("span, div");
@@ -96,7 +120,13 @@ async function readPersonNameFromDetail(frame: FrameLocator): Promise<string | n
     }
     return out;
   }).catch(() => [] as string[]);
-  return selectPersonName(candidates, PERSON_ORG_NAME_LABELS);
+  const heuristicName = selectPersonName(candidates, PERSON_ORG_NAME_LABELS);
+  if (heuristicName) {
+    log.warn(
+      `[Person Org Summary] Name "${heuristicName}" resolved via the UNVERIFIED body-scan heuristic (registry selector missed) — verify this name manually before trusting it in an EID-approval decision`,
+    );
+  }
+  return heuristicName;
 }
 
 export interface EidResult {

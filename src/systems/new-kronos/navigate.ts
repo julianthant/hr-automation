@@ -71,6 +71,80 @@ async function resolveSearchRoot(page: Page): Promise<SearchRoot> {
  * Exported for unit testing: it takes the two waiter promises directly, so the
  * race + timeout-as-not-found contract is pinnable without a live page.
  */
+/**
+ * Pure outcome for one poll tick of the employee-search sidebar. When WFD is
+ * loading results it can briefly show BOTH the "no items to display" sentinel
+ * AND the result checkbox/slat — found must win (live 2026-07-06, EID
+ * 10714794: at t+100ms noResults=true while checkbox count=1, so a naive
+ * Promise.race mis-resolved NOT FOUND in ~1s).
+ */
+export function resolveSearchPresence(
+  hasResult: boolean,
+  noResults: boolean,
+): "found" | "not-found" | "pending" {
+  if (hasResult) return "found";
+  if (noResults) return "not-found";
+  return "pending";
+}
+
+/** True when the given search root shows at least one employee result. */
+export async function searchResultPresentInRoot(
+  root: SearchRoot,
+  employeeId: string,
+): Promise<boolean> {
+  if ((await searchSelectors.firstResultCheckbox(root).count()) > 0) return true;
+  if (await searchSelectors.firstResultSlat(root).isVisible().catch(() => false)) return true;
+  if (await searchSelectors.resultEmployeeId(root, employeeId).isVisible().catch(() => false)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Poll BOTH search contexts (portal-frame iframe + top-level page) until an
+ * employee result appears, a genuine no-results state settles, or timeout.
+ * Found signals always beat the no-results sentinel so a transient overlap
+ * during grid load cannot false-negative a present employee.
+ */
+async function waitForEmployeeSearchOutcome(
+  page: Page,
+  employeeId: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const contexts: SearchRoot[] = [searchFrame(page), page];
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    let hasResult = false;
+    for (const root of contexts) {
+      if (await searchResultPresentInRoot(root, employeeId)) {
+        hasResult = true;
+        break;
+      }
+    }
+
+    let noResults = false;
+    for (const root of contexts) {
+      if (await searchSelectors.noResultsText(root).isVisible().catch(() => false)) {
+        noResults = true;
+        break;
+      }
+    }
+
+    const outcome = resolveSearchPresence(hasResult, noResults);
+    if (outcome === "found") return true;
+    if (outcome === "not-found") return false;
+
+    await page.waitForTimeout(200);
+  }
+
+  log.warn(
+    `[New Kronos] No search results surfaced for ${employeeId} within the timeout — ` +
+    `treating as NOT FOUND (best-effort; Kuali Last Day Worked will be used).`,
+  );
+  return false;
+}
+
 export async function resolveSearchResult(
   resultPresent: Promise<unknown>,
   noResultsVisible: Promise<unknown>,
@@ -166,24 +240,12 @@ export async function searchEmployee(
   // was skipped entirely AND the best-effort "no results surfaced" warning fired
   // (the two symptoms are the same root cause). (2026-06-22)
   //
-  // Fix: the result is FOUND when EITHER the checkbox is ATTACHED (present in the
-  // DOM = a result exists, regardless of its visibility) OR the result slat is
-  // visible — `selectEmployeeResult` already keys presence off `count()`, not
-  // visibility, for the same reason. Genuine no-results still settles on the
-  // "no items to display" sentinel (or the ISS-B04 timeout → NOT FOUND).
-  const checkbox = searchSelectors.firstResultCheckbox(root);
-  const slat = searchSelectors.firstResultSlat(root);
-  const noResults = searchSelectors.noResultsText(root);
+  // Poll BOTH contexts (iframe + top-level) and let found signals beat the
+  // no-results sentinel. WFD can show BOTH briefly while the grid loads (live
+  // 2026-07-06: t+100ms noResults=true AND checkbox count=1) — a Promise.race
+  // between those waiters mis-resolved a found employee as NOT FOUND in ~1s.
   const searchResultTimeout = 15_000;
-
-  const found = await resolveSearchResult(
-    Promise.any([
-      checkbox.waitFor({ state: "attached", timeout: searchResultTimeout }),
-      slat.waitFor({ state: "visible", timeout: searchResultTimeout }),
-    ]),
-    noResults.waitFor({ state: "visible", timeout: searchResultTimeout }),
-    employeeId,
-  );
+  const found = await waitForEmployeeSearchOutcome(page, employeeId, searchResultTimeout);
 
   if (found) {
     log.success(`[New Kronos] Employee ${employeeId} found`);

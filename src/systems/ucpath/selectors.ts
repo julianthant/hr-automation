@@ -139,8 +139,10 @@ export const smartHR = {
    * "Delete Selected Transactions" button under the Smart HR Transactions page's
    * "Transactions in Progress" grid — deletes the rows whose Select checkbox is
    * ticked (used to remove a pending termination before recreating it).
-   * NEEDS LIVE VERIFY — mapped from the live screenshot, not playwright-cli.
-   * verified 2026-06-22
+   * Live-verified via playwright-cli against the real in-progress grid (a real
+   * stale duplicate row deleted, keeper preserved) — see the 2026-06-24
+   * `deletePendingTransaction` lesson in src/systems/ucpath/CLAUDE.md.
+   * verified 2026-06-24
    * @tags delete, selected, transactions, in-progress, button, smart-hr
    */
   deleteSelectedTransactionsButton: (f: FrameLocator): Locator =>
@@ -911,7 +913,8 @@ export const personOrgSummary = {
    * Person ID value on the single-result detail page. PeopleSoft renders
    * the header EID as `PERSON_NPC_VW_EMPLID` (no grid suffix); older
    * deployments / variant code paths also expose `PER_INST_EMP_VW_OPRID$0`
-   * and `PER_INST_EMP_VW_EMPLID$0`. verified 2026-05-07
+   * and `PER_INST_EMP_VW_EMPLID$0`. verified 2026-07-08 (live probe,
+   * EID 10618178 — primary arm matched)
    * @tags person-id, emplid, detail, person-org-summary
    */
   personIdValue: (f: FrameLocator): Locator =>
@@ -922,13 +925,19 @@ export const personOrgSummary = {
     ),
 
   /**
-   * Employee display name on the detail page header. The primary PeopleSoft
-   * ID is the stable NPC header field; fallback variants cover older grid
-   * renderings seen on single-result redirects. verified 2026-05-15
+   * Employee display name on the detail page header. Primary anchor is
+   * `#PERSON_NAME_NAME` (the bold PABOLD11TEXT header span) — a live DOM
+   * probe of a real detail page (EID 10618178) found NO element for any
+   * `PERSON_NPC_VW_*NAME*` variant while `#PERSON_NAME_NAME` held the name,
+   * i.e. the old chain missed entirely and the body-scan heuristic in
+   * person-org-summary.ts was silently carrying production. The NPC arms
+   * are kept only as legacy fallbacks for older renderings.
+   * verified 2026-07-08
    * @tags name, display, header, detail, person-org-summary
    */
   personNameValue: (f: FrameLocator): Locator =>
-    f.locator("#PERSON_NPC_VW_NAME_DISPLAY")
+    f.locator("#PERSON_NAME_NAME")
+      .or(f.locator("#PERSON_NPC_VW_NAME_DISPLAY"))
       .or(f.locator("#PERSON_NPC_VW_NAME_DISPL"))
       .or(f.locator("#PERSON_NPC_VW_NAME"))
       .or(f.locator("[id*='PERSON_NPC_VW'][id*='NAME']").first()),
@@ -1538,6 +1547,40 @@ export const emergencyContact = {
    */
   saveButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Save", exact: true }).first(),
+
+  /**
+   * PeopleSoft "Message" alert dialog raised after a failed editor save
+   * (e.g. the (1000,110) only-one-primary-contact conflict).
+   * NEEDS LIVE VERIFY — factored out of the emergency-contact
+   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
+   * verified 2026-07-08
+   * @tags message, dialog, alert, error, save, emergency-contact
+   */
+  messageDialog: (page: Page): Locator =>
+    page.getByRole("alertdialog", { name: "Message" }),
+
+  /**
+   * OK button inside the "Message" alert dialog — dismisses the save error.
+   * NEEDS LIVE VERIFY — factored out of the emergency-contact
+   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
+   * verified 2026-07-08
+   * @tags ok, button, message, dialog, emergency-contact
+   */
+  messageDialogOkButton: (page: Page): Locator =>
+    page
+      .getByRole("alertdialog", { name: "Message" })
+      .getByRole("button", { name: "OK" }),
+
+  /**
+   * Page-level PeopleSoft error banner on the emergency contact editor
+   * (same class/id family as the frame-scoped `smartHR.errorBanner`).
+   * NEEDS LIVE VERIFY — factored out of the emergency-contact
+   * primary-conflict recovery WIP, not yet confirmed via playwright-cli.
+   * verified 2026-07-08
+   * @tags error, banner, alert, save, emergency-contact
+   */
+  saveErrorBanner: (page: Page): Locator =>
+    page.locator(".PSERROR, #ALERTMSG, .ps_alert-error").first(),
 };
 
 // ─── Person Profiles → Oath Signature (standalone deep-link URL) ──────────

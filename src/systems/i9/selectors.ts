@@ -41,14 +41,14 @@ export const login = {
     page.getByRole("button", { name: "Select" }),
 
   /**
-   * Training-notification dismiss button (post-login popup). verified 2026-07-01
+   * Training-notification dismiss button (post-login popup). verified 2026-07-08 (live: dismiss → Yes confirm → home)
    * @tags training, notification, dismiss, button, i9
    */
   dismissNotificationButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Dismiss the Notification" }),
 
   /**
-   * Training-notification confirm "Yes". verified 2026-07-01
+   * Training-notification confirm "Yes". verified 2026-07-08 (live)
    * @tags training, notification, confirm, yes, button, i9
    */
   confirmYesButton: (page: Page): Locator =>
