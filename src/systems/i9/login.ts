@@ -1,8 +1,9 @@
 import type { Page } from "playwright";
 import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import { I9_URL } from "../../config.js";
 import { login as loginSelectors } from "./selectors.js";
-import { safeClick } from "../common/index.js";
+import { clickIfPresent, safeClick } from "../common/index.js";
 import {
   fillSsoCredentials,
   clickSsoSubmit,
@@ -113,15 +114,28 @@ export async function loginToI9(
 
 /**
  * Dismiss the "Required Training Notification" popup that appears after login.
- * Clicks "Dismiss the Notification" then confirms "Yes". Gracefully no-ops when
- * the notification is absent (already on the dashboard).
+ * Clicks "Dismiss the Notification" then confirms "Yes". No-ops when the
+ * notification is genuinely absent (already on the dashboard) — that's the
+ * only case treated as "continuing normally"; a failure AFTER the dismiss
+ * button was found (confirm click or the post-dismiss dashboard wait) is a
+ * distinct, real failure and is surfaced via `log.warn` rather than folded
+ * into the same "no notification" message, since a stuck modal blocking
+ * later clicks would otherwise be misdiagnosed downstream with no trail
+ * pointing back here.
  */
 async function dismissTrainingNotification(page: Page): Promise<void> {
-  try {
-    const dismissBtn = loginSelectors.dismissNotificationButton(page);
-    await safeClick(dismissBtn, { timeout: 5_000, label: "i9 training dismiss button" });
-    log.step("Dismissing training notification...");
+  const dismissBtn = loginSelectors.dismissNotificationButton(page);
+  const present = await clickIfPresent(dismissBtn, {
+    timeout: 5_000,
+    label: "i9 training dismiss button",
+  });
+  if (!present) {
+    log.step("No training notification — continuing");
+    return;
+  }
 
+  log.step("Dismissing training notification...");
+  try {
     // Confirm the dismiss dialog
     await safeClick(loginSelectors.confirmYesButton(page), {
       timeout: 5_000,
@@ -131,8 +145,9 @@ async function dismissTrainingNotification(page: Page): Promise<void> {
 
     // Wait for dashboard to load
     await page.waitForURL((url) => url.pathname === "/" || url.search.includes("mobile=false"), { timeout: 10_000 });
-  } catch {
-    // No notification — already on dashboard
-    log.step("No training notification — continuing");
+  } catch (err) {
+    log.warn(
+      `I9 training notification was present but dismissal did not complete (confirm click or dashboard navigation failed) — page may still show the modal: ${errorMessage(err)}`,
+    );
   }
 }
