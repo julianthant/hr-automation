@@ -284,6 +284,21 @@ export function buildEmergencyContactPlan(
 }
 
 /**
+ * Read the loaded Emergency Contact editor's header row text — UCPath renders it
+ * as "Person ID <emplId> <Employee Name> Emergency Contact". This is the page's
+ * OWN identity (distinct from anything the operator typed), used both to extract
+ * the display name and as the pre-fill identity gate's `extract` source.
+ * Returns "" when the header is absent (the gate then fails loud). An innerText
+ * exception (frame detached, etc.) is left to propagate so the gate reports a
+ * clear "could not read the displayed identity" rather than a false miss.
+ */
+export async function readEmergencyContactPersonIdRow(page: Page): Promise<string> {
+  const personIdEl = page.getByText("Person ID").first();
+  if ((await personIdEl.count().catch(() => 0)) === 0) return "";
+  return (await personIdEl.locator("..").innerText({ timeout: 3_000 })).trim();
+}
+
+/**
  * Pull the employee's display name from the Emergency Contact page header.
  * UCPath shows it as a generic div alongside "Person ID <emplId>".
  */
@@ -292,9 +307,8 @@ export async function extractEmployeeName(
   ctx: EmergencyContactContext,
 ): Promise<void> {
   try {
-    const personIdEl = page.getByText("Person ID").first();
-    if ((await personIdEl.count().catch(() => 0)) === 0) return;
-    const rowText = await personIdEl.locator("..").innerText({ timeout: 3_000 }).catch(() => "");
+    const rowText = await readEmergencyContactPersonIdRow(page);
+    if (!rowText) return;
     const match = rowText.match(/Person ID\s+\d+\s+([A-Za-z][A-Za-z .'-]+?)\s+Emergency Contact/);
     if (match && match[1]) {
       ctx.employeeName = match[1].trim();

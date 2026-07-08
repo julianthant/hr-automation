@@ -10,10 +10,12 @@ import {
   demoteExistingContact,
   saveEmergencyContactWithPrimaryRecovery,
 } from "../../systems/ucpath/personal-data.js";
+import { assertDisplayedIdentity } from "../../systems/common/index.js";
 import {
   buildEmergencyContactPlan,
   extractEmployeeName,
   findExistingContactDuplicate,
+  readEmergencyContactPersonIdRow,
   type ContactMatch,
 } from "./enter.js";
 import type { EmergencyContactContext } from "./enter.js";
@@ -183,6 +185,17 @@ export const emergencyContactWorkflow = defineWorkflow({
       if (!authOk) throw new Error("UCPath authentication failed");
 
       await navigateToEmergencyContact(page, effectiveRecord.employee.employeeId);
+
+      // Pre-fill identity gate: confirm the loaded UCPath editor is showing the
+      // INTENDED employee (its "Person ID <emplId>" header) BEFORE we demote an
+      // existing primary contact or add a new one. A stale/wrong page here would
+      // otherwise write this contact onto the wrong person's record. Fail loud on
+      // a mismatch, naming the id actually displayed.
+      await assertDisplayedIdentity({
+        expected: effectiveRecord.employee.employeeId,
+        context: `Emergency Contact (${effectiveRecord.employee.name || "employee"})`,
+        extract: () => readEmergencyContactPersonIdRow(page),
+      });
 
       const discoveredCtx: EmergencyContactContext = { employeeName: effectiveRecord.employee.name };
       await extractEmployeeName(page, discoveredCtx);
