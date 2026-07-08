@@ -322,7 +322,7 @@ async function probeDaemonStatus(
 }
 
 /** Count `done` + `failed` queue events whose `claimedBy === instanceId`. */
-function countItemsProcessed(instanceId: string, queueLines: string[]): number {
+export function countItemsProcessed(instanceId: string, queueLines: string[]): number {
   let count = 0;
   // We track which runIds were claimed by this instance, then count
   // terminal events for those runIds — `done` / `failed` events carry
@@ -345,7 +345,7 @@ function countItemsProcessed(instanceId: string, queueLines: string[]): number {
   return count;
 }
 
-function discoverLockfileWorkflows(dir: string): string[] {
+export function discoverLockfileWorkflows(dir: string): string[] {
   const d = daemonsDir(dir);
   if (!existsSync(d)) return [];
   const names = new Set<string>();
@@ -359,7 +359,7 @@ function discoverLockfileWorkflows(dir: string): string[] {
   return [...names];
 }
 
-function workerToDaemonInfo(args: {
+export function workerToDaemonInfo(args: {
   worker: WorkerRow;
   matchingLock?: Daemon;
   currentItem: string | null;
