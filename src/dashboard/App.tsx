@@ -76,6 +76,7 @@ import {
   QUEUE_SORT_STORAGE_KEY,
   readStoredQueueSortMode,
   sortQueueEntriesForDisplay,
+  queueSortStartTs,
   type QueueSortMode,
 } from "./components/queue-panel/queue-sort";
 import { AppErrorBoundary } from "./components/shared/AppErrorBoundary";
@@ -212,9 +213,8 @@ export function App() {
       const primaries = mergeGroups.map((g) => g.primary);
       // Match useEntries' newest-first sort so position is stable.
       return [...primaries].sort((a, b) => {
-        type WithFirstLog = TrackerEntry & { firstLogTs?: string };
-        const aStart = (a as WithFirstLog).firstLogTs || "";
-        const bStart = (b as WithFirstLog).firstLogTs || "";
+        const aStart = queueSortStartTs(a);
+        const bStart = queueSortStartTs(b);
         if (!aStart && bStart) return 1;
         if (aStart && !bStart) return -1;
         if (!aStart && !bStart) return b.timestamp.localeCompare(a.timestamp);
