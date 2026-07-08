@@ -14,6 +14,7 @@ import {
 } from "../../services/matching/match.js";
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import { separationsStatusExtensions } from "../../domain/separations-status.js";
+import { buildIdentityApprovalPauseData } from "../../domain/identity-approval.js";
 import { personLookupWorkflow } from "../person-lookup/index.js";
 
 // Auth wrappers — split into prepare (nav + fill) + submit (click + Duo)
@@ -644,21 +645,23 @@ export const separationsWorkflow = defineWorkflow({
         ctx.skipStep("kronos-search");
         ctx.skipStep("ucpath-transaction");
         ctx.skipStep("kuali-finalization");
-        ctx.updateData({
-          eidApproval: "pending",
-          status: "Awaiting EID Approval",
+        ctx.updateData(buildIdentityApprovalPauseData({
           // Original (the EID the Kuali form carried).
-          originalEid: kualiData.eid,
-          originalEidName: jobSummaryFound ? jobSummaryName : "",
-          originalEidDepartment: jobSummaryData?.departmentDescription ?? "",
-          originalEidPayrollTitle: jobSummaryData?.jobDescription ?? "",
-          originalEidFound: String(jobSummaryFound),
+          original: {
+            eid: kualiData.eid,
+            name: jobSummaryName,
+            found: jobSummaryFound,
+            department: jobSummaryData?.departmentDescription ?? "",
+            payrollTitle: jobSummaryData?.jobDescription ?? "",
+          },
           // Proposed (the EID the name search resolved to).
-          proposedEid: resolution.proposedEid,
-          proposedEidName: resolution.proposedName,
-          proposedEidDepartment: resolution.proposedDepartment,
-          proposedEidPayrollTitle: resolution.proposedPayrollTitle,
-        });
+          proposed: {
+            eid: resolution.proposedEid,
+            name: resolution.proposedName,
+            department: resolution.proposedDepartment,
+            payrollTitle: resolution.proposedPayrollTitle,
+          },
+        }));
         log.warn(
           `[identity-check] EID mismatch for "${kualiData.employeeName}": Kuali EID ${kualiData.eid}` +
           `${jobSummaryFound ? ` (UCPath "${jobSummaryName}")` : " (not found in UCPath)"} vs ` +

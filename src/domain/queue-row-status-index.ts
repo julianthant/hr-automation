@@ -18,10 +18,14 @@
 import { registerWorkflowStatusExtensions } from "./queue-row-status.js";
 import { personLookupStatusExtensions } from "./person-lookup-status.js";
 import { separationsStatusExtensions } from "./separations-status.js";
+import { identityApprovalStatusExtensions } from "./identity-approval.js";
 import { oathSignatureStatusExtensions } from "./oath-signature-status.js";
 import { ocrStatusExtensions } from "../tracker/dashboard/ocr-status.js";
 
 registerWorkflowStatusExtensions("person-lookup", personLookupStatusExtensions);
 registerWorkflowStatusExtensions("separations", separationsStatusExtensions);
+// Onboarding shares the identity-approval gate (CRM record vs UCPath
+// person-search match) — same derived awaitingApproval/dismissed badge.
+registerWorkflowStatusExtensions("onboarding", identityApprovalStatusExtensions);
 registerWorkflowStatusExtensions("oath-signature", oathSignatureStatusExtensions);
 registerWorkflowStatusExtensions("ocr", ocrStatusExtensions);

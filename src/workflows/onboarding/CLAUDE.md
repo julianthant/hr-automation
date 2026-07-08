@@ -53,6 +53,17 @@ Everything upstream still runs in dry-run: CRM auth/search/extraction, iDocs PDF
 
 Dashboard exposure: onboarding is a dashboard **input-run** start surface (`DASHBOARD_INPUT_RUN_WORKFLOWS` + `INPUT_RUN_REGISTRY`) — typed email(s), comma-separated → a `pool` batch — with a per-page-load dry-run toggle in the input panel's run-settings gear (folds `dryRun: true` onto each enqueued input).
 
+## Identity-approval gate (2026-07-08 — READ THIS)
+
+Onboarding adopts the shared **identity-approval** pause-on-mismatch gate (extracted from separations — `src/domain/identity-approval.ts`). It lives in the `person-search` handling of the `searchResult.found` (rehire) branch:
+
+- **When it pauses:** person-search matched an existing UCPath person by SSN/DOB/name, but that matched person's name is a **`different`** tier vs the CRM-extracted name (`classifyNameSimilarity`, the SAME order-insensitive confidence separations trusts). A `different` name means the SSN/name search resolved a **different person** (an SSN typo / collision); blindly recording their EID as this person's rehire (or acting on it downstream) is the wrong-person risk. `same`/`similar` tiers proceed as a genuine rehire, unchanged.
+- **Pause mechanics:** stamps `buildIdentityApprovalPauseData({ original, proposed })` — `original` = the CRM person (no UCPath EID → `found:false`, so the review card's "Use this EID" is disabled for it), `proposed` = the UCPath match (`emplId` + name) — then `return`s. The run ends `done`; the shared `EidApprovalBanner` renders (LogPanel gates on `data.eidApproval==="pending"`) and the row shows the amber "Awaiting Approval" badge (`statusExtensions: identityApprovalStatusExtensions`, registered in `queue-row-status-index.ts`).
+- **Approve/dismiss:** the generic `/api/eid-approval/{approve,dismiss}` routes (onboarding is in `EID_APPROVAL_WORKFLOWS`). Approve re-enqueues the email carrying `prefilledData.eidApproved`; the handler reads `ctx.data.eidApproved` at entry (`eidPreApproved`) and **skips the gate** so an approved re-run never re-pauses.
+- **Orthogonal to the duplicate-HIRE probe (2026-07-01):** that guards the new-hire *submit* path (double-submit idempotency, `findExistingHireTransaction`); this guards the *rehire-match* path (wrong-person identity). No overlap — different branch, different failure mode.
+- **dry-run unaffected:** the gate is a read/comparison and fires regardless of `dryRun` (surfacing a real mismatch is the point of a dry run); the transaction step's submit-skip is untouched.
+- Verified headless (seeded onboarding `eidApproval:"pending"` fixture → real `dashboard:prod`): the row shows "Awaiting Approval", the banner renders both candidates (original "not found in UCPath" / disabled, proposed enabled), and "Use this EID" POSTs `/api/eid-approval/approve` — `.screenshots/eid-approval-onboarding/01-banner.png`.
+
 ## Lessons Learned
 
 - **Lesson maintenance rule:** Search this section plus CRM/UCPath/I9 system docs before adding onboarding lessons. Merge old retry/kernel/selector notes into the current daemon + kernel model instead of preserving obsolete `retryStep` history.

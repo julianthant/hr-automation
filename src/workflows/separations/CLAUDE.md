@@ -41,6 +41,8 @@ So a resolved-different EID now **PAUSES into an operator review** instead:
 
 This supersedes the prior "name is authoritative — take the name-derived EID" rule. Pinned by `resolve-eid.test.ts`, `dry-run.test.ts` (pause + eidPreApproved re-run), `separations-status.test.ts`, `separations-eid-approval.test.ts`.
 
+**2026-07-08 — the mechanism is now SHARED (workflow-agnostic).** The pause/approve/dismiss machinery was extracted to `src/domain/identity-approval.ts` (`buildIdentityApprovalPauseData` + `identityApprovalStatusExtensions`) + `src/control/ops/eid-approval.ts` (generic `buildApprove/DismissEidHandler`, gated by `EID_APPROVAL_WORKFLOWS`) so onboarding (and later emergency-contact / onbase) can adopt it. **Separations behaves identically** — it now calls `buildIdentityApprovalPauseData` for the pause stamp, `separations-status.ts` / `separations-eid-approval.ts` are thin facades over the shared core, and the routes moved to the workflow-agnostic `/api/eid-approval/{approve,dismiss}` (the `workflow` rides the request body). All the separations tests above stay green unchanged. Adoption recipe: the `identity-approval.ts` JSDoc.
+
 In batch mode (`runWorkflowBatch`) or daemon mode, all three systems authenticate once per session startup; the browsers are reused for every doc, with `session.reset(id)` run between docs to restore a clean starting state.
 
 ## Transaction check (2026-06-22 — READ THIS)

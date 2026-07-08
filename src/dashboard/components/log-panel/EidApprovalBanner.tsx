@@ -5,13 +5,16 @@ import { cn } from "@/lib/utils";
 import type { TrackerEntry } from "@/components/shared/types";
 
 /**
- * EID-approval review banner — shown at the top of the LogPanel when a
- * separations run PAUSED because identity-check resolved a DIFFERENT EID by name
- * (`data.eidApproval === "pending"`). The operator picks which person to
- * separate: the EID on the Kuali form (original), the name-matched EID
- * (proposed), or a manually-entered one — each re-queues the doc as a fresh,
- * gate-skipping run via POST /api/separations/approve-eid. "Dismiss" stamps the
- * row dismissed (no re-queue) via POST /api/separations/dismiss-eid.
+ * Identity-approval review banner — shown at the top of the LogPanel when ANY
+ * identity-resolving run PAUSED because it resolved a DIFFERENT valid person
+ * than the one on the input record (`data.eidApproval === "pending"`). The
+ * operator picks which identity to proceed with: the EID on the input record
+ * (original), the resolved/matched EID (proposed), or a manually-entered one —
+ * each re-queues the item as a fresh, gate-skipping run via
+ * POST /api/eid-approval/approve. "Dismiss" stamps the row dismissed (no
+ * re-queue) via POST /api/eid-approval/dismiss. Workflow-agnostic — separations
+ * (Kuali-form EID vs name search) and onboarding (CRM record vs UCPath
+ * person-search match) both use it; the `workflow` prop rides both requests.
  *
  * The banner disappears on the next SSE update: an approve re-run supersedes the
  * paused row, and a dismiss flips `eidApproval` to `"dismissed"`.
@@ -55,7 +58,7 @@ export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerPr
   const candidates: Candidate[] = [
     {
       kind: "original",
-      label: "On the Kuali form",
+      label: "On the input record",
       eid: originalEid,
       name: originalFound ? (d.originalEidName ?? "") : "",
       found: originalFound,
@@ -108,12 +111,12 @@ export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerPr
   }
 
   const approve = (eid: string, busyKey: string) =>
-    post("/api/separations/approve-eid", { workflow, id, runId, eid, date }, busyKey,
+    post("/api/eid-approval/approve", { workflow, id, runId, eid, date }, busyKey,
       `Re-queued with EID ${eid}`);
 
   const dismiss = () =>
-    post("/api/separations/dismiss-eid", { workflow, id, runId, date }, "dismiss",
-      "Dismissed — fix the Kuali form, then re-run");
+    post("/api/eid-approval/dismiss", { workflow, id, runId, date }, "dismiss",
+      "Dismissed — fix the input record, then re-run");
 
   const manualValid = /^\d{8}$/.test(manualEid.trim());
 
@@ -128,9 +131,9 @@ export function EidApprovalBanner({ entry, workflow, date }: EidApprovalBannerPr
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-semibold text-warning">Identity needs approval</p>
           <p className="mt-0.5 text-[12.5px] leading-snug text-foreground/80">
-            Identity-check resolved a <span className="font-medium text-foreground">different EID</span> for
-            the name on the Kuali form, so it paused instead of submitting a termination. Pick which person
-            to separate — the queue kept processing other docs.
+            The identity check resolved a <span className="font-medium text-foreground">different EID</span> than
+            the person on the input record, so it paused instead of submitting a real transaction. Pick which
+            person to proceed with — the queue kept processing other items.
           </p>
         </div>
       </div>
