@@ -4,6 +4,7 @@ import { log } from "../../utils/log.js";
 import { openControlDb } from "../../core/control-db.js";
 import { getRegisteredFile } from "../../tracker/files/files.js";
 import { loginToOnBase } from "../../infra/auth/login.js";
+import { assertDisplayedIdentity } from "../../systems/common/index.js";
 import { extractPdfPage } from "../../services/ocr/pdf-pages.js";
 import {
   openImportDocument,
@@ -141,11 +142,29 @@ export async function onbaseHandler(
       }
     }
 
+    const values = await readRequiredKeywordValues(page);
+
+    // Pre-import identity gate: when the Employee Lookup keyset SELECTED an
+    // employee it autofills every keyword — including the UCPath ID — from the
+    // SELECTED record, so a wrong/stale selection (batch reuse, a fuzzy modal
+    // pick) surfaces here as a UCPath ID that differs from the one we intend to
+    // file against. Confirm they match BEFORE the irreversible Import; fail loud
+    // on a mismatch. Only meaningful on the autofilled path (a no-match fallback
+    // fills the UCPath ID from OCR itself and the blank-required check below
+    // catches an unrecovered miss).
+    if (autofilled) {
+      await assertDisplayedIdentity({
+        expected: input.ucpathId,
+        context: `OnBase import (page ${input.sourcePage})`,
+        mode: "exact",
+        extract: async () => values["UCPath ID"] ?? null,
+      });
+    }
+
     // Fail loud if any required ("red") keyword is still blank — never import an
     // incompletely-keyed document. Department Name/Code + Vice Chancellor +/code
     // come ONLY from the keyset, so a keyset miss (unknown/mis-OCR'd UCPath ID)
     // cannot be recovered from OCR fallback — say so explicitly.
-    const values = await readRequiredKeywordValues(page);
     const missing = Object.entries(values)
       .filter(([, v]) => !v.trim())
       .map(([label]) => label);
