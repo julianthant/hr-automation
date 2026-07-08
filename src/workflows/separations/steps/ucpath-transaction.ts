@@ -1,5 +1,6 @@
 import { log } from "../../../utils/log.js";
 import { errorMessage } from "../../../utils/errors.js";
+import { WorkflowError } from "../../../domain/workflow-error.js";
 import {
   navigateToSmartHR,
   getContentFrame,
@@ -31,7 +32,7 @@ export interface UcpathTransactionResult {
  * catch (which otherwise swallows the error and lets Kuali finalization run
  * with a blank txn #).
  */
-export class EmplIdNotRecognizedError extends Error {
+export class EmplIdNotRecognizedError extends WorkflowError {
   constructor(emplId: string, employeeName: string) {
     super(
       `UCPath did not recognize Empl ID "${emplId}" for "${employeeName}" — the Smart HR ` +

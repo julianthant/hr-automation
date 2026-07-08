@@ -12,6 +12,7 @@
  */
 import { existsSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
+import { WorkflowError } from "../../domain/workflow-error.js";
 import { openStateDb, stateDbPath } from "../../tracker/state/db.js";
 import { runOcrPerPage } from "../../services/ocr/per-page.js";
 import { buildVisionPool } from "../../services/ocr/per-page-pool.js";
@@ -62,9 +63,11 @@ export interface RetryPageResult {
   stillFailed: boolean;
 }
 
-export class RetryPageError extends Error {
-  constructor(public readonly code: "row-not-found" | "row-not-mutable" | "image-missing" | "spec-missing", message: string) {
-    super(message);
+export type RetryPageErrorCode = "row-not-found" | "row-not-mutable" | "image-missing" | "spec-missing";
+
+export class RetryPageError extends WorkflowError<RetryPageErrorCode> {
+  constructor(code: RetryPageErrorCode, message: string) {
+    super(message, code);
     this.name = "RetryPageError";
   }
 }
