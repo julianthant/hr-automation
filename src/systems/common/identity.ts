@@ -156,7 +156,6 @@ export async function assertDisplayedIdentity(
   } = opts;
 
   const deadline = _now() + pollMs;
-  let last: IdentityCheckResult = { ok: false, shown: null };
   for (;;) {
     let displayed: string | null;
     try {
@@ -168,17 +167,18 @@ export async function assertDisplayedIdentity(
         { cause: err instanceof Error ? err : undefined },
       );
     }
-    last = checkDisplayedIdentity(expected, displayed, matchOpts);
-    if (last.ok) return;
-    if (_now() >= deadline) break;
+    const check = checkDisplayedIdentity(expected, displayed, matchOpts);
+    if (check.ok) return;
+
+    if (_now() >= deadline) {
+      throw new Error(
+        `${context}: displayed identity does not match the expected "${expected}"` +
+          (check.shown
+            ? ` — the page shows "${check.shown}" instead`
+            : " — the expected identity was not found on the page") +
+          ". Refusing to proceed so no action is taken on the wrong person.",
+      );
+    }
     await _sleep(pollIntervalMs);
   }
-
-  throw new Error(
-    `${context}: displayed identity does not match the expected "${expected}"` +
-      (last.shown
-        ? ` — the page shows "${last.shown}" instead`
-        : " — the expected identity was not found on the page") +
-      ". Refusing to proceed so no action is taken on the wrong person.",
-  );
 }
