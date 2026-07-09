@@ -33,6 +33,7 @@ import { emitTrackerRow, dateLocal, type TrackerEntry, type TrackerRowEmission }
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
+import { withTimeout } from "../../utils/with-timeout.js";
 import { createOcrEidLookupDependencyBatch } from "../../tracker/tasks/store.js";
 import { runDependencySchedulerTickForTrackerDir } from "../../tracker/tasks/scheduler.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
@@ -601,7 +602,7 @@ export async function runOcrOrchestrator(
       throw new Error("OCR: no roster path resolved");
     }
     const roster = resolvedRosterPath
-      ? (precomputeRoster((await loadRosterFn(resolvedRosterPath))) as OcrRosterRow[])
+      ? (precomputeRoster(await loadRosterWithRetry(loadRosterFn, resolvedRosterPath)) as OcrRosterRow[])
       : [];
 
     // 1b. Pre-render PDF pages so we know page count + can show the page
@@ -838,9 +839,39 @@ export async function runOcrOrchestrator(
         if (!candidate) continue;
         const rematched = await spec.matchRecord({ record: { ...candidate, sourcePage: pageNum }, roster });
         const newName = readOcrRecordName(rematched);
-        if (matchOutcomeRank(rematched) > matchOutcomeRank(records[index])) {
+        const oldRank = matchOutcomeRank(records[index]);
+        if (matchOutcomeRank(rematched) > oldRank) {
+          // Positive-identity gate: a rank improvement alone does not prove the
+          // re-read is the SAME PERSON. When the ORIGINAL reading still had a
+          // usable identity anchor (rank ≥ 2 — roster candidates or a usable
+          // EID, e.g. the EC form-EID-off-roster suspect), adopting a re-read
+          // whose name shares NO tokens with the original could swap in a
+          // DIFFERENT person from the same page (roster-matched ≠ same person).
+          // Require name-token overlap in that case; without it, KEEP the
+          // original and surface the conflict as a review warning. A rank-1
+          // original (matched nothing, no usable EID) has no trustworthy
+          // identity to preserve — the roster-anchored re-read IS the identity
+          // oracle there — so it adopts on rank alone, still flagged below for
+          // operator confirmation.
+          if (oldRank >= 2 && !namesShareIdentityToken(oldName, newName)) {
+            log.warn(
+              `[ocr/second-opinion] page ${pageNum}: re-read "${newName}" ranks better but shares no name tokens with "${oldName}" — NOT adopting (possible different person); flagged for review`,
+            );
+            pushRecordWarning(
+              records[index],
+              `Second-opinion re-read of this page produced a different person ("${newName}" vs extracted "${oldName}") — kept the original reading; verify the identity manually.`,
+            );
+            continue;
+          }
           log.success(`[ocr/second-opinion] page ${pageNum}: "${oldName}" → "${newName}" (${second.poolKeyId ?? "tier-1"}) — adopted (roster-anchored)`);
           records[index] = rematched;
+          // Make the adoption visible at the review gate — the operator
+          // confirms the corrected reading against the page image instead of
+          // the substitution happening silently.
+          pushRecordWarning(
+            records[index],
+            `Second-opinion re-read adopted for this page: "${oldName}" → "${newName}" — confirm against the page image.`,
+          );
         } else {
           log.step(`[ocr/second-opinion] page ${pageNum}: re-read "${newName}" ranks no better than "${oldName}" — keeping the original`);
         }
@@ -929,7 +960,18 @@ export async function runOcrOrchestrator(
               candidates: t.rec.rosterCandidates!.slice(0, 5),
             });
           } catch (err) {
+            // A disambiguation FAILURE (LLM/transport error) is NOT the same as
+            // "the disambiguator found no confident match" — surface it on the
+            // record so the review card shows the identity was NOT auto-resolved
+            // due to an error, instead of looking cleanly unresolved. The record
+            // still falls through to the name person-lookup below (eid:null keeps
+            // it lookup-pending); it just carries a visible warning now (fail
+            // loud: the swallowed error is now distinguishable to the operator).
             log.warn(`[ocr] disambiguate failed for record ${t.index}: ${errorMessage(err)}`);
+            pushRecordWarning(
+              records[t.index],
+              `Auto-disambiguation failed (${errorMessage(err)}) — identity not auto-resolved; verify manually.`,
+            );
             results[i] = { eid: null, confidence: 0 };
           }
         }
@@ -992,7 +1034,17 @@ export async function runOcrOrchestrator(
                 log.step(`[ocr] lookup suggestions for rec ${target.index + 1}: none; falling back to extracted name`);
               }
             } catch (err) {
+              // A suggestion-LLM failure previously left the record with NO
+              // lookup hint and NO trace on the record itself. Suggestions are
+              // advisory (the extracted name is still used for the name lookup),
+              // but a FAILED call must be distinguishable from "no suggestions"
+              // — flag it on the record so the reviewer knows the enrichment
+              // degraded rather than seeing a cleanly-empty result.
               log.warn(`[ocr] lookup suggestions failed for record ${target.index + 1}: ${errorMessage(err)}`);
+              pushRecordWarning(
+                records[target.index],
+                `Lookup-suggestion enrichment failed (${errorMessage(err)}) — using the extracted name only.`,
+              );
             }
           }
         },
@@ -1268,6 +1320,20 @@ export async function runOcrOrchestrator(
     // terminal `done` row. A failed lookup's per-record ↻ re-opens this done
     // row (see verify-relookup.ts). The handler seeds this payload onto the
     // kernel's terminal `done` so it stays a preview row.
+    // Fail loud on a zero-record extraction rather than emitting a terminal
+    // SUCCESS the operator can't act on. A STANDALONE run completes `done` with
+    // a READ-ONLY card (no manual-fill / per-page retry / discard affordances —
+    // those are delegated-run only), so a `done` card with zero records is a
+    // misleading "success" that hides an extraction which produced nothing
+    // (wrong file, total OCR failure, blank scan). A DELEGATED run is NOT failed
+    // here: it parks at awaiting-approval where per-page retry / manual-fill /
+    // discard let the operator recover.
+    if (completesAfterLookup && records.length === 0) {
+      throw new Error(
+        `[ocr] extraction produced zero records for "${input.pdfOriginalName}" (formType=${input.formType}, sessionId=${id}) — refusing to complete a standalone prep with nothing to review`,
+      );
+    }
+
     if (completesAfterLookup) {
       log.success({
         message: `[ocr] review complete — ${records.length} record(s), ${verifiedCount} verified`,
@@ -1347,6 +1413,54 @@ export async function runOcrOrchestrator(
 }
 
 // ─── Helpers (private) ──────────────────────────────────────
+
+const ROSTER_LOAD_MAX_ATTEMPTS = 3;
+const ROSTER_LOAD_TIMEOUT_MS = 60_000;
+const ROSTER_LOAD_RETRY_BACKOFF_MS = 500;
+
+/**
+ * Load the roster with a bounded retry + per-attempt timeout. The roster xlsx
+ * can be TRANSIENTLY unreadable (a SharePoint download still flushing to disk,
+ * a filesystem hiccup) — RETRYING the SAME read is not a silent fallback (no
+ * value is substituted), so it is allowed under the fail-loud rule. `withTimeout`
+ * bounds a hung read so it can never block the prep forever, and after every
+ * attempt fails we THROW loud naming the roster path — matching against an
+ * empty/partial roster (silently returning `[]`) would mis-classify every
+ * record as unmatched, so we never continue on failure.
+ */
+async function loadRosterWithRetry(
+  loadRosterFn: (path: string) => Promise<MatchRosterRow[]>,
+  rosterPath: string,
+): Promise<MatchRosterRow[]> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= ROSTER_LOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await withTimeout(
+        loadRosterFn(rosterPath),
+        ROSTER_LOAD_TIMEOUT_MS,
+        `ocr roster load (${rosterPath})`,
+      );
+    } catch (err) {
+      lastErr = err;
+      log.warn(
+        `[ocr] roster load attempt ${attempt}/${ROSTER_LOAD_MAX_ATTEMPTS} failed for ${rosterPath}: ${errorMessage(err)}`,
+      );
+      if (attempt < ROSTER_LOAD_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, ROSTER_LOAD_RETRY_BACKOFF_MS * attempt));
+      }
+    }
+  }
+  throw new Error(
+    `[ocr] failed to load roster from ${rosterPath} after ${ROSTER_LOAD_MAX_ATTEMPTS} attempts — refusing to run matching against a missing/partial roster: ${errorMessage(lastErr)}`,
+  );
+}
+
+/** Append an operator-facing warning to a record's `warnings[]` (creates it if absent). */
+function pushRecordWarning(rec: unknown, warning: string): void {
+  const r = rec as { warnings?: string[] };
+  r.warnings = [...(r.warnings ?? []), warning];
+}
+
 
 /**
  * The trace-id code for an OCR run, derived from the target-workflow operation
@@ -1527,7 +1641,23 @@ async function runFanOutPhase(fanOpts: FanOutOpts): Promise<void> {
         if (progressDebounceTimer !== null) clearTimeout(progressDebounceTimer);
         progressDebounceTimer = setTimeout(() => {
           progressDebounceTimer = null;
-          emitSnapshot(records, kind, "running", { failedPages, emptyPages, pageStatusSummary });
+          // This runs OFF the awaited stack (a timer callback). `emitSnapshot`
+          // → `writeTracker` THROWS `createOperatorDiscardError()` when a
+          // discard was requested — an off-stack throw here becomes an unhandled
+          // rejection that vanishes (or crashes the process) instead of
+          // unwinding the prep. The main awaited path already polls the abort
+          // flag on every `raceOcrPrepWithDiscard` / on-stack `writeTracker` and
+          // owns the discard unwind, so here we just SKIP the best-effort
+          // progress emit when an abort is pending, and never let any other emit
+          // error escape the timer (the authoritative emit follows on-stack).
+          if (isOcrPrepareAbortRequested(id, runId)) return;
+          try {
+            emitSnapshot(records, kind, "running", { failedPages, emptyPages, pageStatusSummary });
+          } catch (err) {
+            log.warn(
+              `[ocr] debounced progress snapshot failed (non-fatal; authoritative emit follows on the awaited path): ${errorMessage(err)}`,
+            );
+          }
         }, 250);
       },
     });
@@ -1711,6 +1841,21 @@ function nameTokens(name: string): string[] {
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
+}
+
+/**
+ * Positive-identity check for second-opinion adoption: true when the two name
+ * readings share at least one substantive token (length ≥ 2 — single-letter
+ * initials are too weak to anchor identity). Both readings come off the SAME
+ * page/row, so a genuine re-read of the same person virtually always keeps
+ * some name part ("Merrell, Carlos D" ↔ "Barahona Martell, Carlos D" share
+ * "carlos"); zero overlap is the signature of the model reading a DIFFERENT
+ * person/row. Exported for the orchestrator unit tests.
+ */
+export function namesShareIdentityToken(a: string, b: string): boolean {
+  const tokensA = new Set(nameTokens(a).filter((t) => t.length >= 2));
+  if (tokensA.size === 0) return false;
+  return nameTokens(b).some((t) => t.length >= 2 && tokensA.has(t));
 }
 
 function countTargetsByRecord(targets: Array<{ index: number }>): Map<number, number> {
