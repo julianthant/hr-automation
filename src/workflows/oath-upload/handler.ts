@@ -198,11 +198,27 @@ export async function oathUploadHandler(
         } to finish before filing the ticket`,
       );
       const watch = opts._watchChildRunsOverride ?? watchChildRuns;
-      const outcomes = await watch({
-        workflow: "oath-signature",
-        expectedItemIds: signerItemIds,
-        ...(trackerDir !== undefined ? { trackerDir } : {}),
-      });
+      let outcomes: ChildOutcome[];
+      try {
+        outcomes = await watch({
+          workflow: "oath-signature",
+          expectedItemIds: signerItemIds,
+          ...(trackerDir !== undefined ? { trackerDir } : {}),
+        });
+      } catch (err) {
+        // A wait-signatures REJECTION (poll/read error, timeout, blocked/failed
+        // parent) is NOT "a signer is still pending" — the watch only settles by
+        // returning every signer terminal, or by throwing. Re-throw LOUD and
+        // DISTINCT so the terminal row unambiguously reports that the signer set
+        // could NOT be verified and NO ticket was filed on an unconfirmed set
+        // (rather than a raw watcher error indistinguishable from a signer
+        // failure). A genuine operator cancel is preserved as-is.
+        if (err instanceof CancelledError) throw err;
+        throw new Error(
+          `oath-upload: could not verify the ${signerItemIds.length} oath-signature signer row(s) (wait-signatures failed: ${errorMessage(err)}) — NOT filing the HR ticket`,
+          { cause: err },
+        );
+      }
       // Verify EVERYTHING is good before filing: every expected signer must
       // have terminated `done`. Missing / failed / cancelled → throw, no ticket.
       const byItem = new Map(outcomes.map((o) => [o.itemId, o]));
@@ -243,6 +259,24 @@ export async function oathUploadHandler(
     return;
   }
 
+  // Idempotency-window guard. A PRIOR attempt for this session may have reached
+  // the ServiceNow submit step (durably stamping `data.submitAttempted` on its
+  // `running step=submit` row) and then crashed AFTER ServiceNow filed the
+  // ticket but BEFORE the ticket number persisted (ctx.updateData only merges;
+  // the number lands on the terminal `done` row). We only reach here when NO
+  // filed ticket was found (the probe above returns early on a hit), so a prior
+  // submit-attempt with no recorded ticket is AMBIGUOUS — auto-submitting again
+  // would risk a DUPLICATE HR ticket. Fail loud: the operator verifies
+  // support.ucsd.edu and either records the ticket (work already done) or
+  // re-uploads (new session) to retry cleanly. Dry runs never file, so they
+  // don't stamp the marker and never trip this.
+  if (!input.dryRun && hasUnverifiedPriorSubmit(input.sessionId, pdfHash, trackerDir)) {
+    ctx.updateData({ status: "submit-unverified" });
+    throw new Error(
+      `oath-upload: a previous attempt for sessionId=${input.sessionId} reached the ServiceNow submit step but recorded no ticket number — a ServiceNow ticket MAY already have been filed. Refusing to auto-submit again to avoid a duplicate HR ticket; manually verify support.ucsd.edu (record the ticket if it exists, otherwise re-upload to retry).`,
+    );
+  }
+
   const page = await (opts._pageOverride ? opts._pageOverride() : ctx.page("servicenow"));
   await ctx.step("servicenow-auth", async () => {
     // ServiceNow auth is deferred from session launch to right before we use
@@ -265,6 +299,14 @@ export async function oathUploadHandler(
     await ctx.screenshot({ kind: "form", label: "hr-inquiry-pre-submit" });
   });
 
+  // Durable pre-submit marker (fail-loud idempotency). `ctx.updateData` only
+  // merges into accumulated data; the very next emit — the `running step=submit`
+  // row that `ctx.step` writes at step START, BEFORE the ServiceNow POST —
+  // carries this flag to disk. So a crash AFTER the POST files the ticket but
+  // BEFORE the ticket number persists leaves a durable `submitAttempted`, and a
+  // retry refuses to blindly re-file (see `hasUnverifiedPriorSubmit`). Stamped
+  // only for a REAL submit — a dry run never files, so it must not trip the guard.
+  if (!input.dryRun) ctx.updateData({ submitAttempted: "true" });
   await ctx.step("submit", async () => {
     if (input.dryRun) {
       await ctx.screenshot({ kind: "form", label: "hr-inquiry-dry-run-pre-submit" });
@@ -369,6 +411,44 @@ export function findPriorTicketForSession(
     if (!match) return null;
     const t = match.data?.ticketNumber;
     return typeof t === "string" ? t : null;
+  } finally {
+    controlDb?.close();
+  }
+}
+
+/**
+ * Idempotency-window probe: returns true when a PRIOR run for this session
+ * reached the ServiceNow `submit` step (durably marked `data.submitAttempted`)
+ * — i.e. a ticket MAY have been filed even though no ticket number was recorded
+ * (a crash between the ServiceNow POST and the ticket-number persist). Callers
+ * MUST first rule out a recorded filed ticket via `findPriorTicketForSession`;
+ * a hit here then means the submit outcome is UNKNOWN and auto-retrying would
+ * risk a duplicate HR ticket. Keyed on stable business identity (sessionId,
+ * defensive pdfHash) like the ticket probe; dry-run rows never set the marker.
+ * The `findLatestEntryForPredicate` SQLite fast path short-circuits only on the
+ * latest projection row, then falls through to the JSONL history scan — so a
+ * retry's own newer (marker-less) rows don't mask a prior crashed attempt.
+ */
+export function hasUnverifiedPriorSubmit(
+  sessionId: string,
+  pdfHash: string | undefined,
+  trackerDir?: string,
+): boolean {
+  let controlDb: ReturnType<typeof openControlDb> | undefined;
+  try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
+  try {
+    const match = findLatestEntryForPredicate({
+      workflow: "oath-upload",
+      trackerDir,
+      lookbackDays: LOOKBACK_DAYS,
+      ...(controlDb ? { db: controlDb.db, itemId: sessionId } : {}),
+      predicate: (e) => {
+        if (e.id !== sessionId) return false;
+        if (pdfHash && typeof e.data?.pdfHash === "string" && e.data.pdfHash !== pdfHash) return false;
+        return e.data?.submitAttempted === "true";
+      },
+    });
+    return match !== null;
   } finally {
     controlDb?.close();
   }

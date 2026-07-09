@@ -426,3 +426,273 @@ test("oathUploadHandler born-at-upload: a hard OCR failure THROWS and never file
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ─── 2026-07-09 walk hardening: ticket idempotency window + wait-signatures
+//     poll-failure distinguishability ───────────────────────────────────────
+
+import { mkdirSync, writeFileSync } from "node:fs";
+import { rowFilePath, rowsDir, dateLocal } from "../../../../src/tracker/jsonl.js";
+import { CancelledError } from "../../../../src/core/kernel/types.js";
+
+function seedOathUploadRow(dir: string, row: object): void {
+  mkdirSync(rowsDir(dir), { recursive: true });
+  writeFileSync(rowFilePath("oath-upload", dateLocal(), dir), JSON.stringify(row) + "\n");
+}
+
+test("oathUploadHandler: wait-signatures REJECTION (poll error/timeout) throws a DISTINCT 'could not verify' error and never files (not conflated with a failed signer)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-watchfail-"));
+  try {
+    const { ctx } = makeFakeCtx();
+    let submitCalled = false;
+
+    await assert.rejects(
+      oathUploadHandler(ctx as never, {
+        pdfFileId: "file-1",
+        pdfOriginalName: "test.pdf",
+        sessionId: "session-watchfail",
+        mode: "full",
+        signerItemIds: ["r0", "r1"],
+      }, {
+        trackerDir: dir,
+        _resolvePdfOverride: RESOLVE_PDF,
+        _watchChildRunsOverride: async () => {
+          throw new Error("watchChildRuns timeout (60000ms) — still waiting for: r1");
+        },
+        _loginOverride: async () => true,
+        _submitOverride: async () => { submitCalled = true; return "HRC-SHOULD-NOT-HAPPEN"; },
+      }),
+      /could not verify the 2 oath-signature signer row\(s\).*wait-signatures failed.*NOT filing/,
+    );
+
+    assert.equal(submitCalled, false, "a poll failure must never be treated as 'signers verified'");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: a CancelledError from the signature wait propagates AS a cancel, not a wrapped failure", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-watchcancel-"));
+  try {
+    const { ctx } = makeFakeCtx();
+    let submitCalled = false;
+
+    await assert.rejects(
+      oathUploadHandler(ctx as never, {
+        pdfFileId: "file-1",
+        pdfOriginalName: "test.pdf",
+        sessionId: "session-watchcancel",
+        mode: "full",
+        signerItemIds: ["r0"],
+      }, {
+        trackerDir: dir,
+        _resolvePdfOverride: RESOLVE_PDF,
+        _watchChildRunsOverride: async () => { throw new CancelledError("cancelled"); },
+        _loginOverride: async () => true,
+        _submitOverride: async () => { submitCalled = true; return "x"; },
+      }),
+      (err: unknown) => err instanceof CancelledError,
+    );
+    assert.equal(submitCalled, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: a prior attempt that reached submit WITHOUT a recorded ticket THROWS on retry — a ticket MAY exist; never auto-refile (idempotency window)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-unverified-"));
+  try {
+    // The prior attempt's `running step=submit` row durably carried the
+    // pre-submit marker, then the run crashed before any ticketNumber landed.
+    seedOathUploadRow(dir, {
+      workflow: "oath-upload",
+      id: "session-crashed",
+      runId: "old-run",
+      timestamp: new Date().toISOString(),
+      status: "running",
+      step: "submit",
+      data: { submitAttempted: "true", pdfHash: "a".repeat(64) },
+    });
+
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let submitCalled = false;
+
+    await assert.rejects(
+      oathUploadHandler(ctx as never, {
+        pdfFileId: "file-1",
+        pdfOriginalName: "test.pdf",
+        sessionId: "session-crashed",
+        mode: "full",
+        signerItemIds: ["r0"],
+      }, {
+        trackerDir: dir,
+        _resolvePdfOverride: RESOLVE_PDF,
+        _watchChildRunsOverride: async (opts) => opts.expectedItemIds.map(doneOutcome),
+        _loginOverride: async () => true,
+        _submitOverride: async () => { submitCalled = true; return "HRC-DUPLICATE"; },
+      }),
+      /MAY already have been filed.*Refusing to auto-submit again/,
+    );
+
+    assert.equal(submitCalled, false, "retry must not blindly re-file — the prior submit outcome is unknown");
+    assert.ok(!stepCalls.includes("submit"), "the submit step is never reached");
+    assert.ok(updates.some((u) => u.status === "submit-unverified"), "the row surfaces the unverified-submit state");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: a prior RECORDED ticket takes precedence over the unverified-submit guard — retry skips and reuses the ticket", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-recorded-"));
+  try {
+    // Prior run reached submit AND recorded the ticket: marker + ticketNumber
+    // both on disk. The probe must return the ticket (skip path), never the
+    // unverified-submit throw.
+    seedOathUploadRow(dir, {
+      workflow: "oath-upload",
+      id: "session-filed",
+      runId: "old-run",
+      timestamp: new Date().toISOString(),
+      status: "done",
+      step: "submit",
+      data: { submitAttempted: "true", ticketNumber: "HRC0555555", pdfHash: "a".repeat(64) },
+    });
+
+    const { ctx, stepCalls, updates } = makeFakeCtx();
+    let submitCalled = false;
+
+    await oathUploadHandler(ctx as never, {
+      pdfFileId: "file-1",
+      pdfOriginalName: "test.pdf",
+      sessionId: "session-filed",
+      mode: "full",
+      signerItemIds: ["r0"],
+    }, {
+      trackerDir: dir,
+      _resolvePdfOverride: RESOLVE_PDF,
+      _watchChildRunsOverride: async (opts) => opts.expectedItemIds.map(doneOutcome),
+      _loginOverride: async () => true,
+      _submitOverride: async () => { submitCalled = true; return "x"; },
+    });
+
+    assert.equal(submitCalled, false, "no second ServiceNow submit");
+    assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "HRC0555555");
+    assert.ok(stepCalls.includes("skip:submit"), "submit is skipped, not run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: the pre-submit marker is stamped BEFORE the submit step on a real run, and never for a dry run", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-marker-"));
+  try {
+    // Unified event sequence so marker-vs-step ORDER is assertable.
+    const events: string[] = [];
+    const data: Record<string, unknown> = {};
+    const ctx = {
+      runId: "run-marker",
+      trackerDir: undefined as string | undefined,
+      signal: new AbortController().signal,
+      data,
+      page: async () => ({}),
+      step: async (name: string, fn: () => Promise<void>) => { events.push(`step:${name}`); await fn(); },
+      markStep: (name: string) => events.push(`mark:${name}`),
+      skipStep: (name: string) => events.push(`skip:${name}`),
+      updateData: (d: Record<string, unknown>) => {
+        if (d.submitAttempted === "true") events.push("data:submitAttempted");
+        Object.assign(data, d);
+      },
+      screenshot: async () => undefined,
+    };
+
+    await oathUploadHandler(ctx as never, {
+      pdfFileId: "file-1",
+      pdfOriginalName: "test.pdf",
+      sessionId: "session-marker",
+      mode: "full",
+      signerItemIds: ["r0"],
+    }, {
+      trackerDir: dir,
+      _resolvePdfOverride: RESOLVE_PDF,
+      _watchChildRunsOverride: async (opts) => opts.expectedItemIds.map(doneOutcome),
+      _loginOverride: async () => true,
+      _gotoOverride: async () => {},
+      _verifyOverride: async () => {},
+      _fillFormOverride: async () => {},
+      _submitOverride: async () => "HRC0123456",
+    });
+
+    const markerIdx = events.indexOf("data:submitAttempted");
+    const submitIdx = events.indexOf("step:submit");
+    assert.ok(markerIdx !== -1, "real run stamps the pre-submit marker");
+    assert.ok(submitIdx !== -1);
+    assert.ok(
+      markerIdx < submitIdx,
+      `marker must precede the submit step so the step-start row persists it before the ServiceNow POST (events: ${events.join(" → ")})`,
+    );
+
+    // Dry run: never stamps the marker (a dry run files nothing, so it must
+    // not arm the unverified-submit guard for later real runs).
+    const { ctx: dryCtx, updates: dryUpdates } = makeFakeCtx();
+    await oathUploadHandler(dryCtx as never, {
+      pdfFileId: "file-1",
+      pdfOriginalName: "test.pdf",
+      sessionId: "session-marker-dry",
+      mode: "full",
+      signerItemIds: ["r0"],
+      dryRun: true,
+    }, {
+      trackerDir: dir,
+      _resolvePdfOverride: RESOLVE_PDF,
+      _watchChildRunsOverride: async (opts) => opts.expectedItemIds.map(doneOutcome),
+      _loginOverride: async () => true,
+      _gotoOverride: async () => {},
+      _verifyOverride: async () => {},
+      _fillFormOverride: async () => {},
+      _submitOverride: async () => "HRC-SHOULD-NOT-HAPPEN",
+    });
+    assert.ok(
+      !dryUpdates.some((u) => u.submitAttempted === "true"),
+      "dry run never stamps submitAttempted",
+    );
+    assert.equal(dryUpdates.find((u) => u.ticketNumber)?.ticketNumber, "DRY RUN - not submitted");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("oathUploadHandler: a DRY run proceeds even when a prior unverified-submit marker exists (dry runs file nothing)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oath-upload-dry-after-crash-"));
+  try {
+    seedOathUploadRow(dir, {
+      workflow: "oath-upload",
+      id: "session-dry-after-crash",
+      runId: "old-run",
+      timestamp: new Date().toISOString(),
+      status: "running",
+      step: "submit",
+      data: { submitAttempted: "true", pdfHash: "a".repeat(64) },
+    });
+
+    const { ctx, updates } = makeFakeCtx();
+    await oathUploadHandler(ctx as never, {
+      pdfFileId: "file-1",
+      pdfOriginalName: "test.pdf",
+      sessionId: "session-dry-after-crash",
+      mode: "full",
+      signerItemIds: ["r0"],
+      dryRun: true,
+    }, {
+      trackerDir: dir,
+      _resolvePdfOverride: RESOLVE_PDF,
+      _watchChildRunsOverride: async (opts) => opts.expectedItemIds.map(doneOutcome),
+      _loginOverride: async () => true,
+      _gotoOverride: async () => {},
+      _verifyOverride: async () => {},
+      _fillFormOverride: async () => {},
+      _submitOverride: async () => "HRC-SHOULD-NOT-HAPPEN",
+    });
+    assert.equal(updates.find((u) => u.ticketNumber)?.ticketNumber, "DRY RUN - not submitted");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
