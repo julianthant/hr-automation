@@ -1348,6 +1348,12 @@ test("rosterMode=download queues a fresh SharePoint child with OCR trace lineage
       sessionId: "session-sp",
       rosterMode: "download",
       operationWorkflow: "oath-signature",
+      // Delegated (parentRunId set): the pipeline stub extracts ZERO records,
+      // and a STANDALONE run now fails loud on zero records instead of
+      // completing `done` with nothing to review. A delegated run parks at
+      // awaiting-approval where the operator can retry/manual-fill/discard —
+      // this test only cares about the SharePoint request parameters.
+      parentRunId: "op-run-sp",
       // no rosterPath — should be resolved from SharePoint
     },
     {
@@ -1389,6 +1395,9 @@ test("rosterMode=wait waits for the current SharePoint queue result without requ
       formType: "oath",
       sessionId: "session-sp-wait",
       rosterMode: "wait",
+      // Delegated for the same reason as the fresh-download test above: the
+      // zero-record stub would trip the standalone fail-loud guard.
+      parentRunId: "op-run-sp-wait",
     },
     {
       runId: "run-sp-wait",
@@ -1627,9 +1636,16 @@ test("second opinion: a 0-candidate, no-EID name is re-read on tier-1 and ADOPTE
   assert.deepEqual(calls[0].excludeModels, ["ministral-8b-latest"], "the first-read model is excluded from the re-read");
   const last = [...writtenEntries].reverse().find((e) => typeof (e.data as { records?: unknown })?.records === "string");
   assert.ok(last, "a snapshot with records was emitted");
-  const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{ printedName?: string }>;
+  const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{ printedName?: string; warnings?: string[] }>;
   const name = String(parsed[0]?.printedName ?? "");
   assert.ok(name.includes("Barahona"), `adopted name should be the tier-1 reading, got "${name}"`);
+  // Finding b (2026-07-09): an adoption is never silent — the record carries a
+  // review warning naming both readings so the operator confirms the swap
+  // against the page image.
+  assert.ok(
+    parsed[0]?.warnings?.some((w) => w.includes("Second-opinion re-read adopted") && w.includes("Merrell")),
+    `adopted record carries the adoption warning (warnings: ${JSON.stringify(parsed[0]?.warnings)})`,
+  );
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1993,4 +2009,376 @@ test("buildEidLookupItemIdResolver: pinned through the REAL withRootRuntimeOptio
   assert.equal(resolve(cleaned[0]), "ocr-oath-run-1-r0");
   assert.equal(resolve(cleaned[1]), "ocr-oath-run-1-r1");
   assert.equal(resolve(cleaned[2]), "ocr-oath-run-1-r2");
+});
+
+// ─── 2026-07-09 fail-loud re-audit fixes (campaign findings a–e) ────────────
+
+const OATH_STUB_RECORD = {
+  sourcePage: 1,
+  rowIndex: 0,
+  printedName: "Liam Kustenbauder",
+  employeeSigned: true,
+  officerSigned: true,
+  dateSigned: "05/01/2026",
+  notes: [],
+  documentType: "expected",
+  originallyMissing: [],
+};
+
+test("roster load: a TRANSIENT failure is retried (same operation, no substitute) and the run completes (finding e)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string }> = [];
+  let attempts = 0;
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-roster-retry",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-roster-retry",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{ ...OATH_STUB_RECORD }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("EBUSY: roster still flushing (stub)");
+        return [{ eid: "10000001", name: "Liam Kustenbauder" }];
+      },
+      _enqueueEidLookupOverride: async () => {},
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-roster-retry-r0",
+        runId: "verify-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", emplId: "10000001" },
+      }],
+    },
+  );
+
+  assert.equal(attempts, 2, "the roster read is retried after one transient failure");
+  assert.ok(
+    writtenEntries.some((e) => e.status === "done" && e.step === "person-lookup"),
+    "the run completes normally after the retry",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("roster load: exhausting every retry FAILS LOUD naming the roster path — never proceeds with an empty roster (finding e)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; error?: string }> = [];
+  let attempts = 0;
+  let pipelineRan = false;
+
+  await assert.rejects(
+    runOcrOrchestrator(
+      {
+        pdfPath,
+        pdfOriginalName: "fake.pdf",
+        pdfFileId,
+        formType: "oath",
+        sessionId: "session-roster-dead",
+        rosterPath,
+        rosterMode: "existing",
+      },
+      {
+        runId: "run-roster-dead",
+        trackerDir: dir,
+        _emitOverride: (entry: any) => writtenEntries.push(entry),
+        _ocrPipelineOverride: async () => {
+          pipelineRan = true;
+          return { data: [{ ...OATH_STUB_RECORD }], provider: "stub", attempts: 1, cached: false };
+        },
+        _loadRosterOverride: async () => {
+          attempts += 1;
+          throw new Error("ENOENT: roster gone (stub)");
+        },
+        _enqueueEidLookupOverride: async () => {},
+        _watchChildRunsOverride: async () => [],
+      },
+    ),
+    /failed to load roster .*after 3 attempts.*missing\/partial roster/,
+  );
+
+  assert.equal(attempts, 3, "the same read is attempted exactly 3 times");
+  assert.equal(pipelineRan, false, "OCR never runs against a missing roster — matching would silently mis-classify every record");
+  const failedRow = writtenEntries.find((e) => e.status === "failed");
+  assert.ok(failedRow, "a terminal failed row is emitted");
+  assert.match(failedRow!.error ?? "", /failed to load roster/, "the failed row names the roster failure");
+  rmSync(dir, { recursive: true, force: true });
+}, 15_000);
+
+test("STANDALONE run with ZERO extracted records FAILS LOUD instead of completing a done row with nothing to review (finding a)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string; error?: string }> = [];
+
+  await assert.rejects(
+    runOcrOrchestrator(
+      {
+        pdfPath,
+        pdfOriginalName: "blank-scan.pdf",
+        pdfFileId,
+        formType: "oath",
+        sessionId: "session-zero-standalone",
+        rosterPath,
+        rosterMode: "existing",
+      },
+      {
+        runId: "run-zero-standalone",
+        trackerDir: dir,
+        _emitOverride: (entry: any) => writtenEntries.push(entry),
+        _ocrPipelineOverride: async () => ({ data: [], provider: "stub", attempts: 1, cached: false }),
+        _loadRosterOverride: async () => [{ eid: "10000001", name: "Someone" }],
+        _enqueueEidLookupOverride: async () => {},
+        _watchChildRunsOverride: async () => [],
+      },
+    ),
+    /zero records for "blank-scan\.pdf".*refusing to complete a standalone prep/,
+  );
+
+  assert.ok(
+    !writtenEntries.some((e) => e.status === "done"),
+    "no terminal done row is emitted for a zero-record standalone run",
+  );
+  const failedRow = writtenEntries.find((e) => e.status === "failed");
+  assert.ok(failedRow, "the terminal row is failed");
+  assert.match(failedRow!.error ?? "", /zero records/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("DELEGATED run with ZERO extracted records still parks at awaiting-approval (operator can retry/manual-fill/discard) (finding a)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string }> = [];
+
+  const result = await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "blank-scan.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-zero-delegated",
+      rosterPath,
+      rosterMode: "existing",
+      parentRunId: "op-run-zero",
+    },
+    {
+      runId: "run-zero-delegated",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({ data: [], provider: "stub", attempts: 1, cached: false }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Someone" }],
+      _enqueueEidLookupOverride: async () => {},
+      _watchChildRunsOverride: async () => [],
+    },
+  );
+
+  assert.deepEqual(result, { status: "awaiting-approval" });
+  assert.ok(
+    writtenEntries.some((e) => e.status === "running" && e.step === "awaiting-approval"),
+    "the delegated zero-record run parks at awaiting-approval",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("second opinion: a rank-2 original is NOT swapped for a re-read that shares no name tokens (possible different person) — kept + flagged (finding b)", async () => {
+  // The EC form-EID-off-roster suspect still HAS a usable identity anchor
+  // (rank 2). A tier-1 re-read that roster-matches but names a COMPLETELY
+  // different person must not be adopted on rank alone — that could swap a
+  // different employee into a UCPath-bound record.
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ data?: Record<string, unknown> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "emergency-contact",
+      sessionId: "session-so-identity",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-so-identity",
+      trackerDir: dir,
+      _emitOverride: (entry: unknown) => writtenEntries.push(entry as never),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          formKind: "emergency-contact",
+          sourcePage: 1,
+          employee: { name: "Shaaf Hababi", employeeId: "10843962" },
+          emergencyContact: { name: "Jude Hakim", relationship: "Friend", primary: true },
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub", attempts: 1, cached: false,
+        pages: [{ page: 1, success: true, attemptedKeys: ["gemini-0:gemini-2.5-flash-lite"], poolKeyId: "gemini-0:gemini-2.5-flash-lite", attempts: 1 }],
+      }),
+      _secondOpinionOverride: async () => ({
+        // A DIFFERENT person entirely — roster-matches (rank 3) but shares
+        // zero name tokens with the original reading.
+        records: [{
+          formKind: "emergency-contact",
+          sourcePage: 1,
+          employee: { name: "Quentin Zorro", employeeId: "10883962" },
+          emergencyContact: { name: "Jude Hakim", relationship: "Friend", primary: true },
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        poolKeyId: "gemini-0:gemini-3.5-flash",
+      }),
+      _loadRosterOverride: async () => [{ eid: "10883962", name: "Zorro, Quentin" }],
+      _lookupSuggestionOverride: async () => [],
+      _enqueueEidLookupOverride: async () => {},
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [],
+    } as never,
+  );
+
+  const last = [...writtenEntries].reverse().find((e) => typeof (e.data as { records?: unknown })?.records === "string");
+  assert.ok(last, "a snapshot with records was emitted");
+  const parsed = JSON.parse((last!.data as { records: string }).records) as Array<{
+    employee?: { employeeId?: string; name?: string };
+    warnings?: string[];
+  }>;
+  assert.equal(parsed[0]?.employee?.employeeId, "10843962", "the ORIGINAL reading is kept — the different-person re-read is not adopted");
+  assert.equal(parsed[0]?.employee?.name, "Shaaf Hababi");
+  assert.ok(
+    parsed[0]?.warnings?.some((w) => w.includes("different person") && w.includes("Quentin Zorro")),
+    `the conflict is flagged for manual review (warnings: ${JSON.stringify(parsed[0]?.warnings)})`,
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("namesShareIdentityToken: shares a substantive token → true; disjoint or initial-only overlap → false (finding b)", async () => {
+  const { namesShareIdentityToken } = await import("../../../../src/workflows/ocr/orchestrator.js");
+  // The live-repro pair: misread "Merrell, Carlos D" vs "Barahona Martell, Carlos D" share "carlos".
+  assert.equal(namesShareIdentityToken("Merrell, Carlos D", "Barahona Martell, Carlos D"), true);
+  // The EC digit-misread pair: "Shaaf Hababi" vs "Sharaf Ammar A Hababi" share "hababi".
+  assert.equal(namesShareIdentityToken("Shaaf Hababi", "Sharaf Ammar A Hababi"), true);
+  // Different people share nothing.
+  assert.equal(namesShareIdentityToken("Shaaf Hababi", "Quentin Zorro"), false);
+  // A single-letter initial is too weak to anchor identity.
+  assert.equal(namesShareIdentityToken("D Xu", "D Yang"), false);
+  assert.equal(namesShareIdentityToken("", "Anyone"), false);
+});
+
+test("suggestion-LLM failure is surfaced ON THE RECORD as a warning — a failed enrichment is distinguishable from 'no suggestions' (finding c)", async () => {
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-suggest-fail",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-suggest-fail",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        // A name with NO fuzzy roster candidates → suggestion target.
+        data: [{ ...OATH_STUB_RECORD, printedName: "Zzyzx Qwerty" }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Unrelated Person" }],
+      _secondOpinionOverride: async () => null,
+      _lookupSuggestionOverride: async () => {
+        throw new Error("LLM pool exhausted (stub)");
+      },
+      _enqueueEidLookupOverride: async () => {},
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async () => [{
+        workflow: "person-lookup",
+        itemId: "ocr-oath-run-suggest-fail-r0",
+        runId: "verify-1",
+        status: "done" as const,
+        data: { hrStatus: "Active", emplId: "10000009" },
+      }],
+    },
+  );
+
+  const terminalRow = writtenEntries.find((e) => e.status === "done" && e.step === "person-lookup");
+  assert.ok(terminalRow, "the run still completes — suggestions are advisory");
+  const records = JSON.parse(terminalRow!.data?.records ?? "[]") as Array<{ warnings?: string[] }>;
+  assert.ok(
+    records[0]?.warnings?.some((w) => w.includes("Lookup-suggestion enrichment failed")),
+    `the record carries the enrichment-failure warning (warnings: ${JSON.stringify(records[0]?.warnings)})`,
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("debounced progress snapshot does NOT throw off-stack when a discard lands inside the debounce window (finding d)", async () => {
+  // The 250ms-debounced emitSnapshot runs in a timer callback — OFF the
+  // awaited stack. writeTracker THROWS the operator-discard error when the
+  // prepare-abort flag is set, so before the fix a discard landing inside the
+  // debounce window crashed as an uncaught exception (vitest would fail this
+  // test on it). The timer must SKIP its best-effort emit and let the awaited
+  // path own the discard unwind.
+  const { requestOcrPrepareAbort } = await import("../../../../src/workflows/ocr/prepare-abort.js");
+  const { dir, rosterPath, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: Array<{ status: string }> = [];
+  let entriesWhenAborted = -1;
+
+  const result = await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-debounce-discard",
+      rosterPath,
+      rosterMode: "existing",
+    },
+    {
+      runId: "run-debounce-discard",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{ ...OATH_STUB_RECORD, printedName: "Carlos D. Barahona Martell" }],
+        provider: "stub", attempts: 1, cached: false,
+      }),
+      _loadRosterOverride: async () => [{ eid: "10000001", name: "Different Person" }],
+      _secondOpinionOverride: async () => null,
+      _lookupSuggestionOverride: async () => [],
+      _enqueueEidLookupOverride: async () => {},
+      _disableSqliteDependencies: true,
+      _watchChildRunsOverride: async (opts: any) => {
+        const outcome = {
+          workflow: "person-lookup",
+          itemId: "ocr-oath-run-debounce-discard-r0",
+          runId: "eid-run-1",
+          status: "done" as const,
+          data: { emplId: "10000002", hrStatus: "Active" },
+        };
+        // Arm the 250ms debounce timer, then discard, then wait past the
+        // timer's deadline so it fires while the abort flag is set.
+        opts.onProgress?.(outcome, 0);
+        requestOcrPrepareAbort("session-debounce-discard", "run-debounce-discard");
+        entriesWhenAborted = writtenEntries.length;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return [outcome];
+      },
+    },
+  );
+
+  assert.deepEqual(result, { status: "discarded" }, "the awaited path owns the discard unwind");
+  assert.equal(
+    writtenEntries.length,
+    entriesWhenAborted,
+    "no row is emitted after the discard — the debounced timer emit was suppressed, not thrown off-stack",
+  );
+  rmSync(dir, { recursive: true, force: true });
 });
