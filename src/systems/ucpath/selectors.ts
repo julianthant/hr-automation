@@ -1581,6 +1581,102 @@ export const emergencyContact = {
    */
   saveErrorBanner: (page: Page): Locator =>
     page.locator(".PSERROR, #ALERTMSG, .ps_alert-error").first(),
+
+  /**
+   * "Add a new row at row 1" button on the editor grid — inserts a blank
+   * contact row as row 1. verified 2026-07-08 (inherited from working
+   * production code — same locator, moved)
+   * @tags add, new, row, button, emergency-contact
+   */
+  addNewRowButton: (page: Page): Locator =>
+    page.getByRole("button", { name: /add a new row/i }).first(),
+
+  /**
+   * "Relationship to Employee" dropdown on the editor's newly-added row.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags relationship, combobox, emergency-contact
+   */
+  relationshipComboBox: (page: Page): Locator =>
+    page.getByRole("combobox", { name: "Relationship to Employee" }).first(),
+
+  /**
+   * "Same Address as Employee" checkbox on the editor's newly-added row.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags same, address, employee, checkbox, emergency-contact
+   */
+  sameAddressAsEmployeeCheckbox: (page: Page): Locator =>
+    page.getByRole("checkbox", { name: "Same Address as Employee" }).first(),
+
+  /**
+   * "Edit Address" button, shown after unchecking Same Address as Employee.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags edit, address, button, emergency-contact
+   */
+  editAddressButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "Edit Address" }).first(),
+
+  /**
+   * Address 1 textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, street, textbox, modal, emergency-contact
+   */
+  address1Input: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Address 1" }).first(),
+
+  /**
+   * City textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, city, textbox, modal, emergency-contact
+   */
+  cityInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "City" }).first(),
+
+  /**
+   * State textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, state, textbox, modal, emergency-contact
+   */
+  stateInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "State" }).first(),
+
+  /**
+   * Postal textbox inside the Edit Address modal. verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags address, postal, zip, textbox, modal, emergency-contact
+   */
+  postalInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Postal" }).first(),
+
+  /**
+   * OK button inside the Edit Address modal (exact match — disambiguates
+   * from other OK-labeled buttons on the page). verified 2026-07-08
+   * (inherited from working production code — same locator, moved)
+   * @tags ok, button, modal, emergency-contact
+   */
+  editAddressOkButton: (page: Page): Locator =>
+    page.getByRole("button", { name: "OK", exact: true }).first(),
+
+  /**
+   * Phone textbox (exact match) on the Contact Address/Phone tab. verified
+   * 2026-07-08 (inherited from working production code — same locator,
+   * moved)
+   * @tags phone, textbox, emergency-contact
+   */
+  phoneInput: (page: Page): Locator =>
+    page.getByRole("textbox", { name: "Phone", exact: true }).first(),
+
+  /**
+   * "Person ID" label text in the editor header row — the anchor used to
+   * read the header's containing element for employee-name extraction.
+   * verified 2026-07-08 (inherited from working production code — same
+   * locator, moved)
+   * @tags person, id, text, header, emergency-contact
+   */
+  personIdText: (page: Page): Locator =>
+    page.getByText("Person ID").first(),
 };
 
 // ─── Person Profiles → Oath Signature (standalone deep-link URL) ──────────

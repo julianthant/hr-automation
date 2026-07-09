@@ -115,4 +115,16 @@ export const hrInquiry = {
   // verified 2026-05-01
   submitButton: (page: Page): Locator =>
     page.getByRole("button", { name: "Submit" }),
+
+  /**
+   * Post-upload confirmation of a specific attached filename, anywhere on
+   * the form. A generic filename-text heuristic (attachment widgets
+   * normally surface the uploaded filename) used as a stopgap pending a
+   * confirmed ServiceNow attachment-confirmation element — see
+   * `oath-upload/fill-form.ts`'s `needs-live` note. Pass the exact filename
+   * (e.g. via `basename(attachmentPath)`).
+   */
+  // verified 2026-07-08 (inherited from working production code — same locator, moved)
+  attachmentConfirmationText: (page: Page, filename: string): Locator =>
+    page.getByText(filename, { exact: false }).first(),
 };
