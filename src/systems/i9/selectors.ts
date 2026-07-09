@@ -208,6 +208,23 @@ export const remoteI9 = {
    */
   createI9OkButton: (page: Page): Locator =>
     page.getByRole("button", { name: "OK" }),
+
+  /**
+   * Post-create success confirmation for a Remote - Section 1 Only I-9. After
+   * "Create I-9" → OK, the app confirms the record was created / the Section 1
+   * invitation was sent to the employee. Used by `createI9Employee` to FAIL
+   * LOUD instead of optimistically reporting success when the create silently
+   * failed. Matches the common confirmation wording; the create flow also
+   * detaches `createI9Button` on success, which `createI9Employee` uses as the
+   * structural fallback signal.
+   *
+   * TODO(live-verify): the exact confirmation text/role is NOT yet mapped
+   * against a live post-create page — confirm on a real Remote Section-1 create
+   * (playwright-cli) and tighten this locator + bump the `verified` date.
+   * @tags created, confirmation, success, section1, remote, i9
+   */
+  createSuccessConfirmation: (page: Page): Locator =>
+    page.getByText(/I-?9 (has been |was )?(successfully )?created|Section 1.*(sent|pending|invitation)/i),
 };
 
 // ─── Search dialog ────────────────────────────────────────────────────────

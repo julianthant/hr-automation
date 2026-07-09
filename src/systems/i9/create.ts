@@ -133,6 +133,53 @@ export async function createI9Employee(
       timeout: 10_000,
       label: "i9 create i9 ok button",
     });
+
+    // FAIL LOUD (root CLAUDE.md): clicking "Create I-9" + OK used to report
+    // success unconditionally — a create that silently failed (validation error,
+    // the OK dialog dismissed with no record created) would push a false "I-9
+    // created" into a live onboarding, with the profile-save profileId masking
+    // the miss. Verify a REAL post-create signal before claiming success.
+
+    // 1. A validation/error summary appearing after the confirm = definite failure.
+    const createErrorSummary = profile.errorSummary(page);
+    const createFailed = await createErrorSummary
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    if (createFailed) {
+      return {
+        success: false,
+        profileId,
+        error: `I-9 creation failed with a validation error for profile ${profileId} (error summary shown after Create I-9)`,
+      };
+    }
+
+    // 2. Positive confirmation: the success confirmation surfaces, OR the
+    //    "Create I-9" button detaches (the create section advanced). Neither
+    //    appearing means we cannot confirm the record was created — fail loud
+    //    rather than report a false success.
+    const confirmed = await remoteI9
+      .createSuccessConfirmation(page)
+      .waitFor({ state: "visible", timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    const createSectionAdvanced =
+      confirmed ||
+      (await remoteI9
+        .createI9Button(page)
+        .waitFor({ state: "hidden", timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false));
+    if (!confirmed && !createSectionAdvanced) {
+      return {
+        success: false,
+        profileId,
+        error:
+          `I-9 creation could not be confirmed for profile ${profileId} — neither the creation ` +
+          `confirmation nor the expected post-create page state appeared after Create I-9. ` +
+          `Not reporting a false success. TODO(live-verify) the post-create success signal.`,
+      };
+    }
+
     log.success(`I-9 created for profile ${profileId}`);
 
     return { success: true, profileId };
