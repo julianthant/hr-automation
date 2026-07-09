@@ -21,6 +21,7 @@ import { gotoWithRetry } from "../../infra/browser/launch.js";
 import {
   formatTimecardDate,
   runTimecardCheck,
+  didPeriodLabelSwitch,
   type TimecardDriver,
 } from "../../services/timecard/index.js";
 
@@ -531,6 +532,11 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
   // Use payPeriodTriggerButton (regex-based) so it matches regardless of whether
   // the button shows "Current Pay Period" or a date range after setDateRange runs.
   const periodBtn = timecard.payPeriodTriggerButton(page);
+  // Positive-assert baseline: the trigger button always displays the active
+  // period ("Current Pay Period" / "Previous Pay Period" / a date range), so
+  // its text before the switch is the comparison point for the post-switch
+  // readback below.
+  const beforeLabel = (await periodBtn.textContent().catch(() => null))?.trim() ?? "";
   if (await clickIfPresent(periodBtn, { timeout: 5_000, label: "new kronos pay period trigger button" })) {
     await page.waitForTimeout(2_000);
 
@@ -539,7 +545,22 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
       // Wait for the period dropdown option to close (detach/hide) as a
       // signal the switch was accepted, instead of a blind pause.
       await prevOption.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
-      log.step("[New Kronos] Switched to Previous Pay Period");
+
+      // Positive assert: the option closing only proves the click registered —
+      // it does NOT prove the timecard grid actually switched periods. Re-read
+      // the SAME trigger-button selector and fail loud if it still shows the
+      // pre-switch label (or is still literally "Current Pay Period"), instead
+      // of letting the caller read the grid believing the switch landed.
+      const afterLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
+      if (!didPeriodLabelSwitch(beforeLabel, afterLabel, /current pay period/i)) {
+        throw new Error(
+          `[New Kronos] Previous Pay Period option closed but the pay-period trigger button did not switch ` +
+          `(before="${beforeLabel}", after="${afterLabel}") — refusing to read the grid as though the ` +
+          `previous period is displayed`,
+        );
+      }
+
+      log.step(`[New Kronos] Switched to Previous Pay Period (now showing "${afterLabel}")`);
       return true;
     }
   }
@@ -987,6 +1008,11 @@ export async function setDateRange(
 ): Promise<void> {
   log.step(`[New Kronos] Setting date range: ${startDate} – ${endDate}`);
 
+  // Positive-assert baseline (read BEFORE any interaction): the trigger
+  // button always displays the active period, so its text now is the
+  // comparison point for the post-Apply readback below.
+  const beforeLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
+
   // Step 1: Click the timeframe button to open the dropdown
   // The button text varies: "Current Pay Period", "Previous Pay Period", or a date range string
   await safeClick(timecard.payPeriodTriggerButton(page), {
@@ -1017,7 +1043,25 @@ export async function setDateRange(
   });
   // Wait for WFD to reload the timecard grid with the new range (reduced from 5s).
   await page.waitForTimeout(2_500);
-  log.step("[New Kronos] Date range applied");
+
+  // Positive assert: `setRangeDate`'s readback above only proves the DIALOG
+  // fields accepted the ISO dates — it does not prove the underlying timecard
+  // grid actually switched to that range before a caller (e.g.
+  // `getSeparationTimecardData`) reads it. Re-read the same trigger-button
+  // selector used to open the dropdown (it always displays the active
+  // period) and fail loud if it still shows the PRE-switch label, so a grid
+  // that silently stayed on the OLD period is never read as though the
+  // requested range is active.
+  const afterLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
+  if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
+    throw new Error(
+      `[New Kronos] Date range Apply did not update the displayed period ` +
+      `(before="${beforeLabel}", after="${afterLabel}") for ${startDate}–${endDate} — ` +
+      `refusing to read the timecard grid as though the new range is active`,
+    );
+  }
+
+  log.step(`[New Kronos] Date range applied (now showing "${afterLabel}")`);
 }
 
 /**
