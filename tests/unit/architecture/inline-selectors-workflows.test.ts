@@ -55,9 +55,6 @@ const INLINE_PATTERNS: Array<{ name: string; re: RegExp }> = [
 
 /** file (relative to repo root) -> { count, reason } */
 const ALLOWLIST: Record<string, { count: number; reason: string }> = {
-  "src/workflows/old-kronos-reports/workflow.ts": {
-    count: 1,
-    reason: "Pre-existing single-use old-kronos reports grid locator — not yet promoted to src/systems/old-kronos/selectors.ts.",
   },
 };
 

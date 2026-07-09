@@ -54,4 +54,4 @@ UKG uses deeply nested iframes:
 
 ## Lessons Learned
 
-*(Add entries here when Old Kronos/UKG bugs are fixed — document root cause and fix so the same error never recurs)*
+- **2026-07-08: `switchToPreviousPayPeriod` now asserts the displayed period actually changed, not just that the dropdown closed.** The link-hidden wait (`prevLink.waitFor({state:"hidden"})`) only proves the click registered; it doesn't prove the grid switched. `switchToPreviousPayPeriod` now reads `timecard.periodSelectorInput(f)` (`#timeframe-selector-input`, the same input already used as the click target) before opening the dropdown and again after the link hides, and throws `UKGError` via the shared `didPeriodLabelSwitch` (`src/services/timecard/index.ts`) if the value didn't change. The selector's exact displayed-value semantics are flagged `// TODO(live-verify)` in `selectors.ts` — confirm against a live UKG page when next verifying old-kronos selectors.
