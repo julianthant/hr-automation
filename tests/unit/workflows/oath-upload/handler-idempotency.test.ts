@@ -140,3 +140,58 @@ describe("oath-upload retry/restart idempotency — findPriorTicketForSession", 
     assert.equal(result, "HRC0222222");
   });
 });
+
+import { hasUnverifiedPriorSubmit } from "../../../../src/workflows/oath-upload/handler.js";
+
+describe("oath-upload idempotency window — hasUnverifiedPriorSubmit", () => {
+  function seed(dir: string, data: Record<string, string>, status = "running", step = "submit"): void {
+    const line = JSON.stringify({
+      workflow: "oath-upload",
+      id: "session-window",
+      runId: "crashed-run",
+      timestamp: new Date().toISOString(),
+      status,
+      step,
+      data,
+    });
+    mkdirSync(rowsDir(dir), { recursive: true });
+    writeFileSync(rowFilePath("oath-upload", dateLocal(), dir), line + "\n");
+  }
+
+  it("returns false when no prior rows exist", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-window-"));
+    assert.equal(hasUnverifiedPriorSubmit("session-window", undefined, dir), false);
+  });
+
+  it("returns true when a prior row carries the durable submitAttempted marker (crash between POST and ticket persist)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-window-"));
+    seed(dir, { submitAttempted: "true" });
+    assert.equal(hasUnverifiedPriorSubmit("session-window", undefined, dir), true);
+  });
+
+  it("matches across runIds — the marker is keyed on sessionId (Contract 2 retry gets a new runId)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-window-"));
+    seed(dir, { submitAttempted: "true" });
+    // The caller passes the same sessionId with a brand-new ctx.runId; the
+    // probe never keys on runId at all.
+    assert.equal(hasUnverifiedPriorSubmit("session-window", undefined, dir), true);
+  });
+
+  it("returns false for rows without the marker (a crash BEFORE the submit step is safely retryable)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-window-"));
+    seed(dir, {}, "running", "fill-form");
+    assert.equal(hasUnverifiedPriorSubmit("session-window", undefined, dir), false);
+  });
+
+  it("rejects a marker row whose pdfHash mismatches (different document under a colliding sessionId)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-window-"));
+    seed(dir, { submitAttempted: "true", pdfHash: "hash-aaa" });
+    assert.equal(hasUnverifiedPriorSubmit("session-window", "hash-bbb", dir), false);
+  });
+
+  it("matches when sessionId and pdfHash both align", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oath-window-"));
+    seed(dir, { submitAttempted: "true", pdfHash: "hash-match" });
+    assert.equal(hasUnverifiedPriorSubmit("session-window", "hash-match", dir), true);
+  });
+});
