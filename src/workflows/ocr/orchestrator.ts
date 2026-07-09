@@ -1452,6 +1452,7 @@ async function loadRosterWithRetry(
   }
   throw new Error(
     `[ocr] failed to load roster from ${rosterPath} after ${ROSTER_LOAD_MAX_ATTEMPTS} attempts — refusing to run matching against a missing/partial roster: ${errorMessage(lastErr)}`,
+    { cause: lastErr },
   );
 }
 
