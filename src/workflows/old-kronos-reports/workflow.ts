@@ -18,6 +18,7 @@ import {
   clickGoToReports,
   goBackToMain,
   setDateRange,
+  oldKronosSelectors,
 } from "../../systems/old-kronos/index.js";
 import { handleReportsPage } from "../../systems/old-kronos/reports.js";
 import { validateAndClean, verifyPdfMatch } from "./validate.js";
@@ -219,7 +220,7 @@ export const kronosReportsWorkflow = defineWorkflow({
 
     await ctx.step("searching", async () => {
       await searchEmployee(page, iframe, employeeId);
-      const firstRow = iframe.locator("#row0genieGrid");
+      const firstRow = oldKronosSelectors.employeeGrid.firstRow(iframe);
       const rowExists = await firstRow.count() > 0;
       const rowText = rowExists ? (await firstRow.innerText()).trim() : "";
       if (!rowExists || !rowText || !rowText.includes(employeeId)) {

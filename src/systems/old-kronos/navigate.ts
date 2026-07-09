@@ -17,6 +17,7 @@ import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 import {
   formatTimecardDate,
   runTimecardCheck,
+  didPeriodLabelSwitch,
   type TimecardDriver,
 } from "../../services/timecard/index.js";
 
@@ -426,6 +427,11 @@ export async function switchToPreviousPayPeriod(
   // Playwright's actionability checks block normal clicks on readonly inputs,
   // so we use JS click directly. Then click the "Previous Pay Period" link.
   for (const f of page.frames()) {
+    // Positive-assert baseline: read the displayed period BEFORE opening the
+    // dropdown so a post-switch readback has something to compare against.
+    // See `timecard.periodSelectorInput` JSDoc — TODO(live-verify).
+    const beforeLabel = await timecard.periodSelectorInput(f).inputValue().catch(() => "");
+
     // Use JS to find and click the timeframe selector — bypasses readonly checks
     const clicked = await f.evaluate(() => {
       const input = document.getElementById("timeframe-selector-input");
@@ -444,7 +450,23 @@ export async function switchToPreviousPayPeriod(
       // Wait for the period dropdown to close (the clicked link detaches/
       // hides) as a signal the switch was accepted, instead of a blind pause.
       await prevLink.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
-      log.step("[Old Kronos] Switched to Previous Pay Period");
+
+      // Positive assert: the dropdown closing only proves the link detached —
+      // it does NOT prove the timecard grid actually switched to the previous
+      // period. Read the displayed period back and fail loud on a mismatch
+      // rather than let the caller read the grid believing the switch landed.
+      // TODO(live-verify): see `timecard.periodSelectorInput` JSDoc.
+      const afterLabel = await timecard.periodSelectorInput(f).inputValue().catch(() => "");
+      if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
+        throw new UKGError(
+          `Previous Pay Period link closed but the displayed period did not change ` +
+          `(before="${beforeLabel}", after="${afterLabel}") — refusing to read the grid ` +
+          `as though the switch to Previous Pay Period landed`,
+          "switchToPreviousPayPeriod",
+        );
+      }
+
+      log.step(`[Old Kronos] Switched to Previous Pay Period (now showing "${afterLabel}")`);
       return true;
     }
   }
