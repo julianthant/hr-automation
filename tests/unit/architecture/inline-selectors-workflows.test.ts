@@ -54,9 +54,7 @@ const INLINE_PATTERNS: Array<{ name: string; re: RegExp }> = [
 ];
 
 /** file (relative to repo root) -> { count, reason } */
-const ALLOWLIST: Record<string, { count: number; reason: string }> = {
-  },
-};
+const ALLOWLIST: Record<string, { count: number; reason: string }> = {};
 
 function countInlineSelectors(content: string): number {
   if (content.includes("// allow-inline-selectors")) return 0;
