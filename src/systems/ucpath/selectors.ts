@@ -1722,6 +1722,19 @@ export const oathSignature = {
    */
   existingOathDate: (f: FrameLocator): Locator =>
     f.locator('span[id^="EFFDT"]').first(),
+
+  /**
+   * The Empl ID displayed on the loaded Person Profile header — display-only
+   * span `#JPM_PROFILE_EMPLID$1$` (class `PSEDITBOX_DISPONLY`); prefix-matched
+   * because the `$1$` suffix is a PeopleSoft row index. Exactly ONE match on a
+   * loaded profile (probed live). Read by the pre-add identity gate
+   * (`assertDisplayedIdentity`) to confirm the profile belongs to the searched
+   * EID before add+save. Do NOT use `LASTUPDOPRID$…` (last-updated-by column —
+   * a different person's EID). verified 2026-07-08 (EID 10618178)
+   * @tags empl-id, display, person-profile, identity, gate
+   */
+  emplIdDisplay: (f: FrameLocator): Locator =>
+    f.locator('span[id^="JPM_PROFILE_EMPLID"]').first(),
 };
 
 // ─── Barrel: grouped namespace export ──────────────────────────────────────

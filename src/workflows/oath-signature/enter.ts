@@ -1,5 +1,6 @@
 import type { Page, FrameLocator } from "playwright";
 import { ActionPlan } from "../../systems/ucpath/action-plan.js";
+import { assertDisplayedIdentity } from "../../systems/common/identity.js";
 import { oathSignature, smartHR } from "../../systems/ucpath/selectors.js";
 import { log } from "../../utils/log.js";
 import { UCPATH_PERSON_PROFILES_URL } from "./config.js";
@@ -348,20 +349,15 @@ export function buildOathSignaturePlan(
   plan.add("Extract employee name + probe existing oath", async () => {
     await extractEmployeeName(getFrame(), ctx);
     await probeExistingOath(getFrame(), ctx);
-    // TODO(live-verify): adopt the shared `assertDisplayedIdentity` gate here to
-    // confirm the loaded Person Profile shows `input.emplId` before add+save.
-    // Deferred, not skipped: the Person Profile is reached by an EXACT unique-EID
-    // search (`searchByEmplId`) and the `crm-verify` step already independently
-    // confirms the record's UCPath Employee ID equals the target, so identity is
-    // gated twice already. Wiring an EID readback needs a Person-Profile EID
-    // display selector mapped on a live page (`#ptifrmtgtframe`); no such
-    // selector is verified yet and the current oathSignature group has none for
-    // the EID (only `employeeNameDisplay` / `existingOathDate`). Map it via
-    // playwright-cli, add it to selectors.ts with `// verified <date>`, then:
-    //   await assertDisplayedIdentity({ expected: input.emplId,
-    //     context: `Oath Signature (EID ${input.emplId})`, mode: "word-boundary",
-    //     extract: async () => (await oathSignature.<emplIdDisplay>(getFrame())
-    //       .textContent({ timeout: 3_000 })) ?? "" });
+    // Third identity gate (after the exact unique-EID search + crm-verify):
+    // the profile header's own Empl ID must match before add+save.
+    await assertDisplayedIdentity({
+      expected: input.emplId,
+      context: `Oath Signature (EID ${input.emplId})`,
+      mode: "word-boundary",
+      extract: async () =>
+        (await oathSignature.emplIdDisplay(getFrame()).textContent({ timeout: 3_000 })) ?? "",
+    });
     await options.onProfileLoaded?.();
   });
 
