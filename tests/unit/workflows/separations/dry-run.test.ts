@@ -52,6 +52,10 @@ const mocks = vi.hoisted(() => {
     // Separation Date write-back (real fn drives a live Kuali form — stub it).
     // Live runs now write the derived Separation Date back when it differs.
     updateSeparationDate: vi.fn(),
+    // Kuali timekeeper-name fill on the kronos-search SKIP path (the real fn
+    // drives a live Kuali form — stub it). A rejection here must FAIL the run
+    // loud (no fallback for the required Timekeeper Name field).
+    fillTimekeeperTasks: vi.fn(),
   };
 });
 
@@ -104,6 +108,10 @@ vi.mock("../../../../src/systems/kuali/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/systems/kuali/index.js")>()),
   updateEmployeeName: mocks.updateEmployeeName,
   updateSeparationDate: mocks.updateSeparationDate,
+  // The handler calls fillTimekeeperTasks directly on the kronos-search SKIP
+  // path (non-HDH / prefill / preset) — stub it so the fake page isn't driven,
+  // and so a test can make it reject to assert the fail-loud path.
+  fillTimekeeperTasks: mocks.fillTimekeeperTasks,
 }));
 
 import { INPUT_RUN_REGISTRY } from "../../../../src/dashboard/lib/input-run-registry.js";
@@ -251,6 +259,7 @@ beforeEach(() => {
   });
   mocks.updateEmployeeName.mockResolvedValue(undefined);
   mocks.updateSeparationDate.mockResolvedValue(undefined);
+  mocks.fillTimekeeperTasks.mockResolvedValue(undefined);
 });
 
 describe("SeparationInputSchema (separationsWorkflow.config.schema)", () => {
@@ -858,6 +867,36 @@ describe("separations handler — department gate (skip Kronos for non-HDH)", ()
     // part of the dry-run READ path.
     assert.equal(mocks.runKronosSearch.mock.calls.length, 1, "HDH timecard read still runs in dry-run");
     assert.equal(probe.data.status, "Dry Run Complete");
+  });
+
+  it("fills the Kuali timekeeper name on the non-HDH kronos-skip path", async () => {
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Qualcomm Institute"));
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    // kronos-search is skipped for non-HDH, so the handler fills the timekeeper
+    // name inline via fillTimekeeperTasks (not through the parallel step).
+    assert.equal(mocks.runKronosSearch.mock.calls.length, 0, "kronos-search skipped for non-HDH");
+    assert.equal(mocks.fillTimekeeperTasks.mock.calls.length, 1, "timekeeper name filled on the skip path");
+    assert.equal(mocks.fillTimekeeperTasks.mock.calls[0][1], "Test Timekeeper");
+  });
+
+  it("FAILS LOUD when the timekeeper-name fill fails on the non-HDH kronos-skip path (no silent pass)", async () => {
+    // Regression: the skip-path timekeeper fill failure used to be swallowed
+    // with a log.warn, leaving the required Kuali Timekeeper Name field blank on
+    // a form that would then be finalized. It must abort the run instead — there
+    // is no fallback for this field (root CLAUDE.md "Fail loud").
+    mocks.getJobSummaryIdentity.mockResolvedValueOnce(JS_FOUND("Qualcomm Institute"));
+    mocks.fillTimekeeperTasks.mockRejectedValueOnce(new Error("kuali timekeeper textbox timeout"));
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await assert.rejects(
+      runHandler(ctx, { docId: "4131" }),
+      /kuali timekeeper textbox timeout/,
+      "a failed timekeeper fill on the skip path aborts the run",
+    );
+    // Downstream mutations must NOT have run (the fill throw halts the handler
+    // before the UCPath transaction + Kuali finalization).
+    assert.equal(mocks.runUcpathTransaction.mock.calls.length, 0, "UCPath transaction not reached after a failed timekeeper fill");
+    assert.equal(mocks.runKualiFinalize.mock.calls.length, 0, "Kuali finalization not reached after a failed timekeeper fill");
   });
 });
 
