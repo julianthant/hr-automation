@@ -829,13 +829,16 @@ export const separationsWorkflow = defineWorkflow({
             : `[Step: kronos-search] SKIPPED — department "${departmentDescription}" is not HDH ` +
               `(not timekept in New Kronos — using Kuali dates, lastDayWorked='${kualiData.lastDayWorked}')`,
       );
-      try {
-        const kp = await ctx.page("kuali");
-        await fillTimekeeperTasks(kp, timekeeperName);
-        log.success("[Kuali] Timekeeper name filled (kronos-search skip path)");
-      } catch (e) {
-        log.warn(`[Kuali] timekeeper-name fill failed during kronos-search skip: ${errorMessage(e)}`);
-      }
+      // FAIL LOUD (root CLAUDE.md): the Kuali timekeeper name is a required
+      // field on the separation form and there is NO fallback for it — a
+      // swallowed failure here left the operator to finalize a form silently
+      // missing the timekeeper name. Any fill failure must abort the run so it
+      // surfaces, exactly like the kronos-search parallel path below. (This
+      // draft-only write runs in dry-run too; a broken fill should still fail
+      // loud there.)
+      const kp = await ctx.page("kuali");
+      await fillTimekeeperTasks(kp, timekeeperName);
+      log.success("[Kuali] Timekeeper name filled (kronos-search skip path)");
     } else {
       const phase1 = await ctx.step("kronos-search", () =>
         runKronosSearch(ctx, kualiData, kronosStart, kronosEnd, timekeeperName),
@@ -850,7 +853,19 @@ export const separationsWorkflow = defineWorkflow({
       } else {
         logSettledRejection("New Kronos", phase1.newK);
       }
-      logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper);
+      // FAIL LOUD (root CLAUDE.md): a New Kronos rejection is intentionally
+      // non-fatal (the Kuali dates are the documented fallback — see
+      // runNewKronosTimecard), but the Kuali timekeeper name has NO fallback,
+      // so a rejected timekeeper fill must abort the run rather than pass
+      // silently with the field left blank on the separation form.
+      if (logSettledRejection("Kuali Timekeeper", phase1.kualiTimekeeper)) {
+        throw new Error(
+          `[Kuali] Timekeeper name fill FAILED for EID ${kualiData.eid} (doc ${input.docId}) — ` +
+          `the separation form's required Timekeeper Name field was not filled. ` +
+          `Not finalizing a form with a missing timekeeper name: ` +
+          `${phase1.kualiTimekeeper.status === "rejected" ? errorMessage(phase1.kualiTimekeeper.reason) : "unknown"}`,
+        );
+      }
       log.step(
         `[New Kronos] ${newKronosFound ? "Found" : "Not found"} ` +
         `(lastPunch=${timecard.lastPunchDate ?? "none"}, ` +

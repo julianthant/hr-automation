@@ -132,3 +132,102 @@ test('captureAndStampScreenshot does not stamp a DIFFERENT system\'s file when t
 
   assert.equal(ctx.data.personOrgSearchScreenshot, undefined)
 })
+
+// ─── ctx.retry — signal-aware cancellation behavior ──────────────────────────
+
+/** Build a ctx whose retry is bound to `signal` (mirrors the real makeCtx). */
+function makeRetryCtx(signal: AbortSignal): ReturnType<typeof makeCtx> {
+  const session = Session.forTesting({
+    systems: [{ id: 'ucpath', login: async () => {} }],
+    browsers: new Map(),
+    readyPromises: new Map([['ucpath', Promise.resolve()]]),
+  })
+  const stepper = new Stepper({
+    workflow: 'test',
+    itemId: 't1',
+    runId: 'r1',
+    emitStep: () => {},
+    emitData: () => {},
+    emitFailed: () => {},
+  })
+  return makeCtx({
+    session,
+    stepper,
+    isBatch: false,
+    runId: 'r1',
+    workflow: 'test',
+    itemId: 't1',
+    emitScreenshotEvent: () => {},
+    signal,
+  })
+}
+
+test('ctx.retry retries a transient failure then succeeds', async () => {
+  const ctx = makeRetryCtx(new AbortController().signal)
+  let calls = 0
+  const result = await ctx.retry(
+    async () => {
+      calls += 1
+      if (calls < 3) throw new Error('flaky')
+      return 'ok'
+    },
+    { attempts: 3, backoffMs: 0 },
+  )
+  assert.equal(result, 'ok')
+  assert.equal(calls, 3, 'retried twice then succeeded')
+})
+
+test('ctx.retry throws the abort reason WITHOUT running fn when the signal is already aborted', async () => {
+  const controller = new AbortController()
+  controller.abort(new Error('cancel requested'))
+  const ctx = makeRetryCtx(controller.signal)
+  let calls = 0
+  await assert.rejects(
+    ctx.retry(
+      async () => {
+        calls += 1
+        return 'ok'
+      },
+      { attempts: 3, backoffMs: 0 },
+    ),
+    /cancel requested/,
+    'exits with the abort reason before any attempt',
+  )
+  assert.equal(calls, 0, 'fn is never invoked after cancellation')
+})
+
+test('ctx.retry does NOT retry a cancellation-type error escaping fn', async () => {
+  const ctx = makeRetryCtx(new AbortController().signal)
+  let calls = 0
+  const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' })
+  await assert.rejects(
+    ctx.retry(
+      async () => {
+        calls += 1
+        throw abortErr
+      },
+      { attempts: 3, backoffMs: 0 },
+    ),
+    /aborted/,
+  )
+  assert.equal(calls, 1, 'a cancellation-type error is rethrown, not retried')
+})
+
+test('ctx.retry aborts promptly during the backoff sleep instead of sleeping blind', async () => {
+  const controller = new AbortController()
+  const ctx = makeRetryCtx(controller.signal)
+  let calls = 0
+  // A long backoff would block for ~60s if the sleep were signal-unaware.
+  const p = ctx.retry(
+    async () => {
+      calls += 1
+      throw new Error('flaky')
+    },
+    { attempts: 3, backoffMs: 60_000 },
+  )
+  // Let attempt 1 run and enter the backoff sleep, then abort mid-sleep.
+  await new Promise((r) => setTimeout(r, 20))
+  controller.abort(new Error('cancel requested'))
+  await assert.rejects(p, 'the retry rejects as soon as the signal aborts')
+  assert.equal(calls, 1, 'only the first attempt ran; the backoff did not block for the full delay')
+})

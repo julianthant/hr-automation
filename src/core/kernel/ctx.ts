@@ -1,5 +1,6 @@
 import type { Page } from 'playwright'
 import type { Ctx, RetryOpts } from './types.js'
+import { CancelledError } from './types.js'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { Session } from './session.js'
 import type { Stepper } from './stepper.js'
@@ -59,24 +60,66 @@ export interface MakeCtxOpts {
 }
 
 /**
+ * True for a cancellation/abort-shaped error that must NEVER be retried — a
+ * kernel `CancelledError`, or a DOMException/AbortError raised by an aborted
+ * `AbortSignal` (a signal-aware Playwright call or the backoff `sleep` below).
+ * Retrying one of these would burn attempts racing a run that is already being
+ * torn down, and (worse) delay the cancelled terminal by the full backoff.
+ */
+function isCancellationError(err: unknown): boolean {
+  if (err instanceof CancelledError) return true
+  if (err && typeof err === 'object') {
+    const name = (err as { name?: unknown }).name
+    if (name === 'AbortError') return true
+    const code = (err as { code?: unknown }).code
+    if (code === 'ABORT_ERR' || code === 20) return true
+  }
+  return false
+}
+
+/**
  * Linear-backoff retry primitive. Attempt N waits `backoffMs * (N-1)` before
  * retrying, so defaults (attempts=3, backoffMs=1000) yield waits of 0, 1s, 2s
  * before the three tries. Callers that want instant retries pass `backoffMs: 0`.
  * On exhaustion, the last error thrown by `fn` is rethrown verbatim so callers
  * can inspect the underlying cause.
+ *
+ * SIGNAL-AWARE (the `signal` is bound from the run's per-item AbortController by
+ * `ctx.retry`, so handlers never pass it): the loop
+ *   (a) throws the abort reason BEFORE starting any attempt once the signal is
+ *       aborted (never retries THROUGH a cancellation),
+ *   (b) rethrows a cancellation-type error verbatim instead of retrying it — an
+ *       aborted signal or an AbortError escaping `fn` is a torn-down run, not a
+ *       transient failure, so it surfaces immediately for the kernel to map to
+ *       the standard cancelled terminal (the abort reason is never swallowed),
+ *       and
+ *   (c) sleeps signal-aware, so an abort mid-backoff rejects at once rather than
+ *       blocking the full linear delay.
+ * A genuinely transient error still retries exactly as before.
  */
-async function retry<R>(fn: () => Promise<R>, opts: RetryOpts = {}): Promise<R> {
+async function retry<R>(
+  fn: () => Promise<R>,
+  opts: RetryOpts = {},
+  signal?: AbortSignal,
+): Promise<R> {
   const attempts = opts.attempts ?? 3
   const backoffMs = opts.backoffMs ?? 1000
   let lastErr: unknown
   for (let i = 1; i <= attempts; i++) {
+    // Never START a new attempt after cancellation — throw the abort reason.
+    signal?.throwIfAborted()
     try {
       return await fn()
     } catch (err) {
+      // A cancellation is not a retryable failure: rethrow it verbatim
+      // (preserving the abort reason) so it surfaces immediately.
+      if (signal?.aborted || isCancellationError(err)) throw err
       lastErr = err
       opts.onAttempt?.(i, err)
       if (i < attempts && backoffMs > 0) {
-        await sleep(backoffMs * i)
+        // Signal-aware sleep — an abort during backoff rejects promptly
+        // instead of blocking blind for the full linear delay.
+        await sleep(backoffMs * i, undefined, signal ? { signal } : undefined)
       }
     }
   }
@@ -192,7 +235,9 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     shouldSkipStep: (name: string) => stepper.shouldSkipStep(name),
     parallel: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallel(tasks),
     parallelAll: <T extends Record<string, () => Promise<unknown>>>(tasks: T) => stepper.parallelAll(tasks),
-    retry,
+    // Bind the run's AbortSignal so retries are cancellation-aware without
+    // handlers having to thread the signal (see `retry` above).
+    retry: <R>(fn: () => Promise<R>, opts?: RetryOpts) => retry(fn, opts, signal),
     updateData: (patch: Record<string, unknown>) => stepper.updateData(patch),
     recordData,
     session: {
