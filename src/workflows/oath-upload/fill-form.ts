@@ -116,14 +116,12 @@ export async function fillHrInquiryForm(page: Page, v: HrInquiryFormValues): Pro
   // Verify the attachment actually registered before returning — a fixed
   // sleep with no check would let the caller submit with the PDF MISSING if
   // the upload lagged or silently failed (fail loud, root CLAUDE.md).
-  // needs-live: no confirmed ServiceNow attachment-confirmation selector
-  // exists yet in `servicenow/selectors.ts` — this uses a generic
+  // needs-live: `hrInquiry.attachmentConfirmationText` is a generic
   // filename-text heuristic (attachment widgets normally surface the
-  // uploaded filename) as a stopgap pending live verification. Map the real
-  // confirmation element via playwright-cli and replace this with a
-  // registered `hrInquiry` selector.
+  // uploaded filename), not a confirmed ServiceNow attachment-confirmation
+  // element — stopgap pending live verification via playwright-cli.
   try {
-    await page.getByText(attachmentName, { exact: false }).first().waitFor({
+    await hrInquiry.attachmentConfirmationText(page, attachmentName).waitFor({
       state: "visible",
       timeout: 10_000,
     });
