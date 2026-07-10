@@ -124,16 +124,16 @@ export function buildOcrPrepareHandler(
         body: { ok: false, error: "Reupload requires sessionId and previousRunId" },
       };
     }
-    if (input.rosterMode === "existing" && !input.rosterPath) {
-      return {
-        status: 400,
-        body: { ok: false, error: 'rosterMode="existing" requires rosterPath' },
-      };
-    }
+    // "existing" with no path is only an error when the FORM needs a roster.
+    // A roster-optional form (verify, i9) uploaded from a modal with no roster
+    // section sends no rosterMode at all — the route defaults it to
+    // "existing" — and must proceed rosterless (the orchestrator runs with
+    // roster = [] for `spec.rosterMode === "optional"`). Found live 2026-07-10:
+    // the separations "Run I-9 Check" upload 400'd here.
     if (spec.rosterMode === "required" && input.rosterMode === "existing" && !input.rosterPath) {
       return {
         status: 400,
-        body: { ok: false, error: "Form requires a roster" },
+        body: { ok: false, error: 'rosterMode="existing" requires rosterPath' },
       };
     }
 
