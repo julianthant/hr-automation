@@ -2,16 +2,22 @@ import type { ReactNode } from "react";
 import { resolveOcrPersonDisplayName } from "../../domain/identity/ocr-person-name.js";
 import type { OcrRecordLookupTracker } from "../components/ocr/lookup-status";
 import {
+  parseI9PrepareRowData,
   parseOathPrepareRowData,
   parsePrepareRowData,
   parseVerifyPrepareRowData,
+  type I9PreviewRecord,
   type OathPreviewRecord,
   type PreviewRecord,
   type VerifyLookupKind,
   type VerifyPreviewRecord,
 } from "../components/ocr/types";
 
-export type AnyOcrPreviewRecord = PreviewRecord | OathPreviewRecord | VerifyPreviewRecord;
+export type AnyOcrPreviewRecord =
+  | PreviewRecord
+  | OathPreviewRecord
+  | VerifyPreviewRecord
+  | I9PreviewRecord;
 
 export interface ParsedOcrPrepareRow {
   records: ReadonlyArray<AnyOcrPreviewRecord>;
@@ -31,7 +37,7 @@ export interface ParsedOcrPrepareRow {
  */
 export interface OcrDownstreamConfig {
   /** Which OCR form variant this config produces records for. Drives addBlankRow's variant branch. */
-  formKind: "oath" | "emergency-contact" | "verify";
+  formKind: "oath" | "emergency-contact" | "verify" | "i9";
   /** Parser for the prep row's serialized records / PDF metadata. */
   parseRow: (data: Record<string, string> | undefined) => ParsedOcrPrepareRow | null;
   /** POST endpoint that fans out N kernel queue items on Approve. */
@@ -113,6 +119,11 @@ export function resolveOcrConfigForEntry(entry: {
     if (!hasOcrDownstream("verify")) return null;
     // verify is read-only — no force-research overlay.
     return getOcrDownstream("verify");
+  }
+  if (formType === "i9") {
+    if (!hasOcrDownstream("i9")) return null;
+    // i9 is read-only (UCPath person-check report) — no force-research overlay.
+    return getOcrDownstream("i9");
   }
   if (
     formType !== "oath" &&
@@ -233,6 +244,19 @@ registerOcrDownstream("verify", {
   discardUrl: OCR_DISCARD_URL,
   editsKey: ({ runId }) => `verify-prep-edits:${runId}`,
   cursorKey: ({ runId }) => `verify-prep-cursor:${runId}`,
+  hasSignature: false,
+  supportsForceResearch: false,
+  recordName: (r) => ("checks" in r ? (r).name || "(no name)" : "(no name)"),
+  renderEditor: noopRenderer,
+});
+
+registerOcrDownstream("i9", {
+  formKind: "i9",
+  parseRow: parseI9PrepareRowData,
+  approveUrl: OCR_APPROVE_URL,
+  discardUrl: OCR_DISCARD_URL,
+  editsKey: ({ runId }) => `i9-prep-edits:${runId}`,
+  cursorKey: ({ runId }) => `i9-prep-cursor:${runId}`,
   hasSignature: false,
   supportsForceResearch: false,
   recordName: (r) => ("checks" in r ? (r).name || "(no name)" : "(no name)"),

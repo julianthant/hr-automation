@@ -29,7 +29,7 @@ export interface RecordScreenshotStripProps {
   /** This record's form kind — verify oath records also carry an i9-lookup. */
   formKind: string;
   /** The RUN's form type — sets the person-lookup child item-id prefix. */
-  runFormType: "verify" | "oath" | "emergency-contact";
+  runFormType: "verify" | "oath" | "emergency-contact" | "i9";
   /** Bumps to force a refetch (e.g. when a relookup resolves). */
   refreshKey: number;
 }
@@ -41,14 +41,17 @@ export function RecordScreenshotStrip({
   runFormType,
   refreshKey,
 }: RecordScreenshotStripProps) {
-  // The person-lookup child item-id prefix is set by the RUN's form type
-  // (orchestrator fan-out `ocr-${oath|ec}-…`; verify `ocr-verify-…`).
+  // The person child item-id prefix is set by the RUN's form type
+  // (orchestrator fan-out `ocr-${oath|ec}-…`; verify `ocr-verify-…`; the i9
+  // form fans out person-MATCH children as `ocr-i9-…`).
   const personPrefix =
     runFormType === "oath"
       ? "ocr-oath"
       : runFormType === "emergency-contact"
         ? "ocr-ec"
-        : "ocr-verify";
+        : runFormType === "i9"
+          ? "ocr-i9"
+          : "ocr-verify";
   const personItemId = ocrRunId ? `${personPrefix}-${ocrRunId}-r${recordIndex}` : null;
   // i9-lookup runs only inside verify's enrichRecords (for oath records).
   const i9ItemId =
@@ -56,7 +59,10 @@ export function RecordScreenshotStrip({
       ? `ocr-verify-i9-${ocrRunId}-r${recordIndex}`
       : null;
 
-  const { entries: personEntries } = useRunScreenshots("person-lookup", personItemId, refreshKey);
+  // An i9 run's per-record child is a person-MATCH (UCPath person search);
+  // every other form's child is a person-lookup.
+  const personWorkflow = runFormType === "i9" ? "person-match" : "person-lookup";
+  const { entries: personEntries } = useRunScreenshots(personWorkflow, personItemId, refreshKey);
   const { entries: i9Entries } = useRunScreenshots("i9-lookup", i9ItemId, refreshKey);
 
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);

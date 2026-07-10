@@ -2,6 +2,7 @@ import { Check, Lock, RotateCw, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   verifyCheckLookupKind,
+  type I9PreviewRecord,
   type VerifyCheck,
   type VerifyLookupKind,
   type VerifyPreviewRecord,
@@ -14,7 +15,12 @@ import {
 import { MatchWarnings } from "./shared/MatchWarnings";
 
 export interface VerifyRecordViewProps {
-  record: VerifyPreviewRecord;
+  /**
+   * The completeness-report record. The view reads only the shared report
+   * fields (`checks` / `matchState` / `warnings` / `matchConfidence`), so the
+   * i9 record shape renders through the same component.
+   */
+  record: VerifyPreviewRecord | I9PreviewRecord;
   /** Unused — read-only view; kept for registry signature parity. */
   onChange?: (next: VerifyPreviewRecord) => void;
   /**
