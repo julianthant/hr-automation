@@ -62,6 +62,14 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/kronos-pay-rule/index.js");
     return mod.kronosPayRuleWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // Person Match checks whether a person exists in UCPath via the HR-Tasks
+  // person search (SSN/DOB — the search onboarding uses to tell new hires from
+  // rehires). Delegated-only subworkflow — no dashboard start surface; the i9
+  // OCR form spec fans one match out per extracted I-9 record.
+  "person-match": async () => {
+    const mod = await import("../workflows/person-match/index.js");
+    return mod.personMatchWorkflow as unknown as AnyRegisteredWorkflow;
+  },
 };
 
 /**
