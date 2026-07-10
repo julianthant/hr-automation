@@ -82,7 +82,7 @@ and lets the scheduler patch `data.records` when the retry finishes.
 
 ## Adding a new form type
 
-1. Create the `OcrFormSpec` object (oath/EC/verify live in `src/services/ocr/forms/`).
+1. Create the `OcrFormSpec` object (oath/EC/verify/i9 live in `src/services/ocr/forms/`).
    Mirror oath/EC for prompt + match. Add `approveTo` to enqueue one downstream
    daemon row per approved record; add `approveDocumentTo` to additionally
    enqueue one row per PDF (e.g. a ticket/upload row that waits on the
