@@ -492,7 +492,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     // origin = separate connection pool, won't starve the SSE streams).
     const fullSubmitUrl =
       typeof window !== "undefined"
-        ? `${resolveUploadBaseUrl(window.location)}${submitUrl}`
+        ? `${resolveUploadBaseUrl(window.location, { dev: import.meta.env.DEV })}${submitUrl}`
         : submitUrl;
 
     // Use XHR so we get progress events. Fetch's upload progress is still

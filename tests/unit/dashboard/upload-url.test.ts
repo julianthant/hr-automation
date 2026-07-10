@@ -49,3 +49,39 @@ test("standard-port deployment (no explicit port) falls back to :3839", () => {
     "https://hr.example.edu:3839",
   );
 });
+
+// Live incident 2026-07-10: another project's dev server held :5173, Vite
+// auto-incremented the dashboard page to :5174, and the prod-style port + 1
+// derivation computed :5175 — nothing listens there, so every Run-modal upload
+// died as a bare "Network error". In a DEV bundle the backend is the FIXED
+// vite-proxy target (:3838), so the upload listener is always :3839 no matter
+// where the page landed.
+test("dev bundle on an auto-incremented Vite port (5174) still targets :3839", () => {
+  assert.equal(
+    resolveUploadBaseUrl(
+      { protocol: "http:", hostname: "localhost", port: "5174" },
+      { dev: true },
+    ),
+    "http://localhost:3839",
+  );
+});
+
+test("dev bundle on the canonical Vite port targets :3839", () => {
+  assert.equal(
+    resolveUploadBaseUrl(
+      { protocol: "http:", hostname: "localhost", port: "5173" },
+      { dev: true },
+    ),
+    "http://localhost:3839",
+  );
+});
+
+test("prod bundle on 5174 keeps port + 1 (a backend really serving there)", () => {
+  assert.equal(
+    resolveUploadBaseUrl(
+      { protocol: "http:", hostname: "localhost", port: "5174" },
+      { dev: false },
+    ),
+    "http://localhost:5175",
+  );
+});
