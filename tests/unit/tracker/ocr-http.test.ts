@@ -77,6 +77,45 @@ test("POST /api/ocr/prepare returns 202 with sessionId+runId on happy path", asy
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("POST /api/ocr/prepare accepts a roster-OPTIONAL form with no rosterPath (i9 — found live 2026-07-10)", async () => {
+  // The route defaults rosterMode to "existing" when the modal has no roster
+  // section (separations "Run I-9 Check"). A roster-optional form must proceed
+  // rosterless; only roster-required forms 400 here.
+  const dir = setup();
+  _resetSessionLockForTests();
+  const handler = buildOcrPrepareHandler({
+    trackerDir: dir,
+    runOrchestrator: async () => {/* fire-and-forget stub */},
+  });
+  const resp = await handler({
+    pdfPath: "/tmp/fake-i9.pdf",
+    pdfOriginalName: "fake-i9.pdf",
+    formType: "i9",
+    rosterMode: "existing",
+  });
+  assert.equal(resp.status, 202);
+  assert.equal(resp.body.ok, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("POST /api/ocr/prepare still 400s a roster-REQUIRED form with no rosterPath", async () => {
+  const dir = setup();
+  _resetSessionLockForTests();
+  const handler = buildOcrPrepareHandler({
+    trackerDir: dir,
+    runOrchestrator: async () => {/* fire-and-forget stub */},
+  });
+  const resp = await handler({
+    pdfPath: "/tmp/fake.pdf",
+    pdfOriginalName: "fake.pdf",
+    formType: "oath",
+    rosterMode: "existing",
+  });
+  assert.equal(resp.status, 400);
+  assert.equal(resp.body.ok, false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("POST /api/ocr/prepare passes dryRun to the orchestrator input", async () => {
   const dir = setup();
   _resetSessionLockForTests();
