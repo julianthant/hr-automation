@@ -116,6 +116,15 @@ export const VerifyCheckSchema = z.object({
    * instead of "— not found". The retry stays available.
    */
   unavailable: z.boolean().optional(),
+  /**
+   * Literal text to show for a `missing` check instead of the default
+   * "— not found" — for blank states that carry a DIFFERENT meaning than a
+   * failed lookup (mirrors the client `VerifyCheck.missingLabel`, which the
+   * read-only oath/EC projection already uses for paper booleans). The i9
+   * form uses it so "the search hasn't run / errored" is never displayed as
+   * a definitive "not found".
+   */
+  missingLabel: z.string().optional(),
 });
 export type VerifyCheck = z.infer<typeof VerifyCheckSchema>;
 

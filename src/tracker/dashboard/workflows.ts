@@ -18,6 +18,7 @@ import "../../workflows/sharepoint-download/index.js";
 import "../../workflows/work-study/index.js";
 import "../../workflows/kronos-pay-rule/index.js";
 import "../../workflows/i9-lookup/index.js";
+import "../../workflows/person-match/index.js";
 
 export function buildWorkflowsHandler(): () => WorkflowMetadata[] {
   return () => getAllRegisteredWorkflows();

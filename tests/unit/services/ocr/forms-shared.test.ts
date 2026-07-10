@@ -20,15 +20,23 @@ describe("shared OCR forms", () => {
     assert.equal(parsed.state, "verified");
   });
 
-  it("lists oath, emergency contact, onbase, and verify specs from the shared registry", () => {
+  it("lists oath, emergency contact, onbase, verify, and i9 specs from the shared registry", () => {
     assert.deepEqual(
       listFormTypes().map((f) => f.formType).sort(),
-      ["emergency-contact", "oath", "onbase-emergency-contact", "verify"],
+      ["emergency-contact", "i9", "oath", "onbase-emergency-contact", "verify"],
     );
     assert.equal(getFormSpec("oath")?.formType, "oath");
     assert.equal(getFormSpec("emergency-contact")?.formType, "emergency-contact");
     assert.equal(getFormSpec("onbase-emergency-contact")?.formType, "onbase-emergency-contact");
     assert.equal(getFormSpec("verify")?.formType, "verify");
+    assert.equal(getFormSpec("i9")?.formType, "i9");
+  });
+
+  it("i9 is read-only — optional roster, no approve fan-out", () => {
+    const i9 = listFormTypes().find((f) => f.formType === "i9");
+    assert.ok(i9);
+    assert.equal(i9.rosterMode, "optional");
+    assert.equal(i9.hasApproveFanOut, false);
   });
 
   it("verify is read-only — optional roster, no approve fan-out", () => {

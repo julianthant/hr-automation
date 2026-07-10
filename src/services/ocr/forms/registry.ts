@@ -2,6 +2,7 @@ import { oathOcrFormSpec } from "./oath.js";
 import { emergencyContactOcrFormSpec } from "./emergency-contact.js";
 import { onbaseEmergencyContactOcrFormSpec } from "./onbase-emergency-contact.js";
 import { verifyOcrFormSpec } from "./verify.js";
+import { i9OcrFormSpec } from "./i9.js";
 import type { AnyOcrFormSpec } from "../../../workflows/ocr/types.js";
 
 export const FORM_SPECS = {
@@ -9,6 +10,7 @@ export const FORM_SPECS = {
   "emergency-contact": emergencyContactOcrFormSpec,
   "onbase-emergency-contact": onbaseEmergencyContactOcrFormSpec,
   verify: verifyOcrFormSpec,
+  i9: i9OcrFormSpec,
 } as const;
 
 export type FormType = keyof typeof FORM_SPECS;
@@ -19,6 +21,7 @@ export function getFormSpec(
   formType: "onbase-emergency-contact",
 ): typeof onbaseEmergencyContactOcrFormSpec | null;
 export function getFormSpec(formType: "verify"): typeof verifyOcrFormSpec | null;
+export function getFormSpec(formType: "i9"): typeof i9OcrFormSpec | null;
 export function getFormSpec(formType: string): AnyOcrFormSpec | null;
 export function getFormSpec(
   formType: string,
@@ -27,6 +30,7 @@ export function getFormSpec(
   | typeof emergencyContactOcrFormSpec
   | typeof onbaseEmergencyContactOcrFormSpec
   | typeof verifyOcrFormSpec
+  | typeof i9OcrFormSpec
   | AnyOcrFormSpec
   | null {
   return FORM_SPECS[formType as keyof typeof FORM_SPECS] ?? null;

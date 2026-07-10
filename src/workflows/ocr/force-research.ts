@@ -59,6 +59,15 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
       'force-research does not apply to verify rows — use verify-relookup (per-check ↻) instead',
     );
   }
+  // i9 is read-only like verify: its records are enriched by the person-match
+  // fan-out in the spec's `enrichRecords`, not the oath/EC name-lookup pipeline
+  // force-research replays. Re-running it here would clear identity fields and
+  // corrupt the report — re-upload/re-OCR is the i9 re-run path.
+  if (formType === "i9") {
+    throw new Error(
+      "force-research does not apply to i9 rows — re-upload or re-OCR the PDF instead",
+    );
+  }
   const spec = getFormSpec(formType);
   if (!spec) throw new Error(`Unknown formType "${formType}"`);
 

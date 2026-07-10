@@ -113,8 +113,8 @@ const STATEMENT_CATCH_ALLOWLIST: Record<string, { count: number; reason: string 
     reason: "Cosmetic relative-time-ago string formatting for a search result row.",
   },
   "src/dashboard/components/ocr/types.ts": {
-    count: 3,
-    reason: "Malformed `records` JSON on an OCR preview row -> null (the whole preview row fails to render); it is a read-side preview projection, not the authoritative tracker record.",
+    count: 4,
+    reason: "Malformed `records` JSON on an OCR preview row -> null (the whole preview row fails to render); it is a read-side preview projection, not the authoritative tracker record. (4th: the i9 parser mirrors the EC/oath/verify parsers.)",
   },
   "src/dashboard/components/ui/calendar.tsx": {
     count: 1,
