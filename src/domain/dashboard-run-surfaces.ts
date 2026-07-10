@@ -15,6 +15,10 @@ export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [
   "oath-upload",
   "oath-signature",
   "onbase",
+  // Separations' upload run is the "I-9 mode": upload a scanned I-9 packet,
+  // OCR reads each Section 1 (name/DOB/SSN), and a person-match child checks
+  // whether UCPath knows the person. Standalone OCR prep (no coordinator row).
+  "separations",
 ] as const;
 
 export const RETIRED_DASHBOARD_WORKFLOWS = [

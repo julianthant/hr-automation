@@ -487,6 +487,112 @@ export function parseVerifyPrepareRowData(
   };
 }
 
+// ─── I-9 types (UCPath person-check completeness report) ──────────
+
+/**
+ * One I-9 record (one Section-1 page of a scanned I-9 packet), enriched by the
+ * `i9` form spec's person-match fan-out. Mirrors the server-side
+ * `I9PreviewRecordSchema` (`src/services/ocr/forms/i9.ts`). Renders through
+ * `VerifyRecordView` — it carries the same `checks` / `matchState` /
+ * `warnings` fields the completeness report reads.
+ */
+export interface I9PreviewRecord {
+  formKind: "i9" | "unknown";
+  sourcePage: number;
+  lastName?: string | null;
+  firstName?: string | null;
+  middleInitial?: string | null;
+  /** Section 1 date of birth, as printed. */
+  dateOfBirth?: string | null;
+  /** Section 1 SSN, as printed. */
+  ssn?: string | null;
+  /** Display name ("Last, First M") assembled from the Section 1 name fields. */
+  name: string;
+  /** UCPath person-search outcome — true found, false definitively not found. */
+  ucpathFound?: boolean;
+  matchedEmplId?: string;
+  matchedName?: string;
+  /** State of the person-match child that enriched this record. */
+  personMatchStatus?: "pending" | "running" | "completed" | "failed";
+  /** Trace id of the person-match child that enriched this record. */
+  personMatchTraceId?: string;
+  matchState: MatchState;
+  selected: boolean;
+  warnings: string[];
+  originallyMissing?: string[];
+  documentType?: "expected" | "unknown";
+  checks: VerifyCheck[];
+  matchConfidence?: number;
+}
+
+export interface I9PrepareRowData {
+  mode: "prepare";
+  pdfPath: string;
+  pdfOriginalName: string;
+  pdfFileId?: string;
+  rosterMode: "download" | "existing";
+  rosterPath: string;
+  pageImagesDir?: string;
+  records: I9PreviewRecord[];
+  ocrProvider?: string;
+  ocrAttempts?: number;
+  ocrCached?: boolean;
+  failedPages?: FailedPage[];
+  emptyPages?: number[];
+  pageStatusSummary?: PageStatusSummary;
+}
+
+export function parseI9PrepareRowData(
+  rawData: Record<string, string> | undefined,
+): I9PrepareRowData | null {
+  if (!rawData) return null;
+  if (rawData.mode !== "prepare") return null;
+  let records: I9PreviewRecord[] = [];
+  try {
+    const parsed = JSON.parse(rawData.records ?? "[]");
+    if (Array.isArray(parsed)) records = parsed as I9PreviewRecord[];
+  } catch {
+    return null;
+  }
+  let failedPages: FailedPage[] | undefined;
+  try {
+    if (typeof rawData.failedPages === "string") {
+      const parsed = JSON.parse(rawData.failedPages);
+      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
+    }
+  } catch { /* tolerate */ }
+  let pageStatusSummary: PageStatusSummary | undefined;
+  try {
+    if (typeof rawData.pageStatusSummary === "string") {
+      const parsed = JSON.parse(rawData.pageStatusSummary);
+      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
+    }
+  } catch { /* tolerate */ }
+  let emptyPages: number[] | undefined;
+  try {
+    if (typeof rawData.emptyPages === "string") {
+      const parsed = JSON.parse(rawData.emptyPages);
+      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
+    }
+  } catch { /* tolerate — pre-feature row */ }
+  return {
+    mode: "prepare",
+    pdfPath: rawData.pdfPath ?? "",
+    pdfOriginalName: rawData.pdfOriginalName ?? "",
+    pdfFileId: rawData.pdfFileId || undefined,
+    rosterMode: rawData.rosterMode === "download" ? "download" : "existing",
+    rosterPath: rawData.rosterPath ?? "",
+    pageImagesDir: rawData.pageImagesDir || undefined,
+    records,
+    ocrProvider: rawData.ocrProvider,
+    ocrAttempts: rawData.ocrAttempts ? Number(rawData.ocrAttempts) : undefined,
+    ocrCached: rawData.ocrCached === "true",
+    failedPages,
+    emptyPages,
+    pageStatusSummary,
+  };
+}
+
 // ─── Oath-signature types (was oath-preview-types.ts) ──────────────
 
 export type OathMatchState =

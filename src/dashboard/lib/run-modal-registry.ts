@@ -215,6 +215,28 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       description: file.name,
     }),
   },
+  // Separations "I-9 mode": upload a scanned I-9 packet; OCR reads each
+  // Section 1 (name / DOB / SSN) and a person-match child runs the UCPath
+  // person search (the onboarding new-hire-vs-rehire search) to report whether
+  // each person exists in UCPath. Read-only — a STANDALONE OCR prep (no
+  // `targetWorkflow`, so no coordinator row); the report lands in the OCR
+  // panel and completes `done` after the person-match enrichment.
+  separations: {
+    title: () => "Run I-9 Check",
+    srDescription: () =>
+      "Upload a scanned I-9 PDF. OCR extracts each Section 1 (name, date of birth, SSN), then the UCPath person search checks whether each person can be found. Read-only — review the found/not-found report in the OCR panel.",
+    submitUrl: ({ reuploadFor }) =>
+      reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
+    // No roster (person-match resolves identity via UCPath person search), no
+    // dry-run (nothing is written), workers parallelize the match fan-out.
+    sections: { workers: true },
+    lockedFormType: "i9",
+    allowMultipleFiles: true,
+    buildSuccessToast: (_resp, file) => ({
+      title: "I-9 check started",
+      description: `${file.name} — review the found/not-found report in the OCR panel`,
+    }),
+  },
   onbase: {
     title: () => "Run OnBase Import",
     srDescription: () =>

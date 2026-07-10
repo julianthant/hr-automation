@@ -235,6 +235,14 @@ setOcrDownstreamRenderer("verify", ({ record, onRelookup, relookupPending, looku
     />
   ) : null,
 );
+// i9 renders the same read-only completeness report — its records carry the
+// same `checks`/`matchState`/`warnings` shape. No relookup wiring: the
+// per-check retry route (`/api/ocr/verify-relookup`) is verify-only.
+setOcrDownstreamRenderer("i9", ({ record, lookupTracker }) =>
+  "checks" in record ? (
+    <VerifyRecordView record={record} lookupTracker={lookupTracker} />
+  ) : null,
+);
 
 /**
  * Legacy stacked layout (toolbar + body). Prefer {@link OcrReviewPrepProvider} +
@@ -1153,8 +1161,15 @@ function renderFormCard(args: {
   // force-research button. The screenshot strip (verify only) renders the
   // record's per-lookup PNGs between the header and the body.
   const isVerify = args.cfg.formKind === "verify";
+  // i9 is read-only like verify but has no per-record relookup route and no
+  // force-research — its enrichment is the person-match fan-out, re-run only
+  // via reupload. So it renders through its own registered renderer (below)
+  // with no footer action.
+  const isI9 = args.cfg.formKind === "i9";
   const personRelookupPending = recordRelookupPending?.has("person") ?? false;
-  const footerActionNode: ReactNode = isVerify
+  const footerActionNode: ReactNode = isI9
+    ? undefined
+    : isVerify
     ? args.onRelookup
       ? (
         <button
@@ -1212,7 +1227,7 @@ function renderFormCard(args: {
   // edits feed the downstream write), and `verify` uses its own read-only
   // renderer (which also wires the per-check relookup).
   const recordBody: ReactNode =
-    args.readOnly && !isVerify ? (
+    args.readOnly && !isVerify && !isI9 ? (
       <VerifyRecordView
         record={toReadonlyVerifyRecord(r as OathPreviewRecord | PreviewRecord)}
         lookupTracker={lookupTracker}
@@ -1382,6 +1397,13 @@ function renderDocumentKindChip(formKind: string): ReactNode {
     return (
       <span className="rounded border border-border bg-muted px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         Emergency Contact
+      </span>
+    );
+  }
+  if (formKind === "i9") {
+    return (
+      <span className="rounded border border-border bg-muted px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        I-9
       </span>
     );
   }
