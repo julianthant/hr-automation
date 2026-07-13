@@ -1,10 +1,16 @@
 import { log } from "../../utils/log.js";
 import { diffAddressFields, titleCaseSegment } from "./format.js";
-import type { AddressInput, AddressResolution, ResolvedAddress } from "./types.js";
+import { composeResolvedStreet, parseHouseNumber } from "./street.js";
+import type { AddressConfidence, AddressInput, AddressResolution, ResolvedAddress } from "./types.js";
 
 const CENSUS_BASE = "https://geocoding.geo.census.gov/geocoder/locations";
 
 interface CensusComponents {
+  /**
+   * TIGER block address RANGE endpoints — **NOT** the matched house number.
+   * `3401`/`3499` for a hit on `3449 Invicta Way`. Never build a street from these
+   * (see `street.ts`); they are kept only for diagnostics.
+   */
   fromAddress?: string;
   toAddress?: string;
   preDirection?: string;
@@ -24,30 +30,43 @@ interface CensusResponse {
   result?: { addressMatches?: CensusMatch[] };
 }
 
-function buildStreetFromComponents(c: CensusComponents): string {
-  const number = (c.fromAddress ?? "").trim();
+/** Street NAME only — pre-direction + name + suffix. Carries NO house number by design. */
+function buildStreetNameFromComponents(c: CensusComponents): string {
   const pre = (c.preDirection ?? "").trim();
   const name = (c.streetName ?? "").trim();
   const suffix = (c.suffixType ?? "").trim();
-  const parts = [number, pre, name, suffix].filter(Boolean);
-  return parts.join(" ");
+  return [pre, name, suffix].filter(Boolean).join(" ");
 }
 
-function mapCensusMatch(match: CensusMatch): ResolvedAddress | null {
+function mapCensusMatch(match: CensusMatch, input: AddressInput): ResolvedAddress | null {
   const c = match.addressComponents;
   if (!c) return null;
-  const street = buildStreetFromComponents(c);
+  // House number + unit come from the ORIGINAL street; Census only supplies the name.
+  const street = composeResolvedStreet(input.street, titleCaseSegment(buildStreetNameFromComponents(c)));
   const city = (c.city ?? "").trim();
   const state = (c.state ?? "").trim();
   const zip = (c.zip ?? "").trim();
   if (!street && !city && !state && !zip) return null;
   return {
-    street: street ? titleCaseSegment(street) : "",
+    street,
     city: city ? titleCaseSegment(city) : "",
     state,
     zip,
     country: "US",
   };
+}
+
+/**
+ * Honest confidence — the old hardcoded `"exact"` defeated the `confidence ===
+ * "unverified"` gate downstream. `exact` only when Census matched the SAME house
+ * number the operator's form carried; otherwise the geocoder snapped to a
+ * neighbouring building, so the match is `approximate` at best.
+ */
+function censusConfidence(input: AddressInput, match: CensusMatch): AddressConfidence {
+  const inputHouse = parseHouseNumber(input.street);
+  const matchedHouse = parseHouseNumber(match.matchedAddress);
+  if (!inputHouse || !matchedHouse) return "approximate";
+  return inputHouse.toLowerCase() === matchedHouse.toLowerCase() ? "exact" : "approximate";
 }
 
 export async function geocodeWithCensus(
@@ -102,7 +121,7 @@ export async function geocodeWithCensus(
   const match = data.result?.addressMatches?.[0];
   if (!match) return null;
 
-  const mapped = mapCensusMatch(match);
+  const mapped = mapCensusMatch(match, input);
   if (!mapped) return null;
 
   const changes = diffAddressFields(input, mapped);
@@ -110,7 +129,7 @@ export async function geocodeWithCensus(
 
   return {
     address: mapped,
-    confidence: "exact",
+    confidence: censusConfidence(input, match),
     source: "census",
     matchedLine: match.matchedAddress,
     changes,

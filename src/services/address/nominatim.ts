@@ -1,6 +1,7 @@
 import { log } from "../../utils/log.js";
 import { diffAddressFields, formatAddressOneLine, titleCaseSegment } from "./format.js";
 import { waitForNominatimSlot } from "./rate-limit.js";
+import { composeResolvedStreet } from "./street.js";
 import type { AddressInput, AddressResolution, ResolvedAddress } from "./types.js";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
@@ -28,10 +29,17 @@ interface NominatimResult {
   address?: NominatimAddress;
 }
 
-function buildStreet(addr: NominatimAddress): string {
-  const parts = [addr.house_number, addr.road].filter(Boolean);
-  if (parts.length > 0) return parts.join(" ");
-  return "";
+/**
+ * Street NAME only. OSM's `house_number` is the number of the node it snapped to —
+ * not necessarily the operator's — and no OSM field carries a unit, so the house
+ * number + unit come from the ORIGINAL street (`composeResolvedStreet`).
+ */
+function buildStreet(addr: NominatimAddress, input: AddressInput): string {
+  const road = (addr.road ?? "").trim();
+  if (!road) return "";
+  // When the original carried no house number, compose yields the road name alone
+  // — OSM's `house_number` is never grafted onto a street the operator wrote without one.
+  return composeResolvedStreet(input.street, titleCaseSegment(road));
 }
 
 function pickCity(addr: NominatimAddress): string {
@@ -49,16 +57,16 @@ function pickRegion(addr: NominatimAddress): string {
   return addr.state ?? addr.state_district ?? addr.region ?? "";
 }
 
-function mapNominatimResult(result: NominatimResult): ResolvedAddress | null {
+function mapNominatimResult(result: NominatimResult, input: AddressInput): ResolvedAddress | null {
   const addr = result.address;
   if (!addr) return null;
-  const street = buildStreet(addr);
+  const street = buildStreet(addr, input);
   const city = pickCity(addr);
   const state = pickRegion(addr);
   const zip = (addr.postcode ?? "").trim();
   if (!street && !city && !state && !zip) return null;
   return {
-    street: street ? titleCaseSegment(street) : "",
+    street,
     city: city ? titleCaseSegment(city) : "",
     state: state ? titleCaseSegment(state) : "",
     zip,
@@ -118,7 +126,7 @@ export async function geocodeWithNominatim(
   const hit = data[0];
   if (!hit) return null;
 
-  const mapped = mapNominatimResult(hit);
+  const mapped = mapNominatimResult(hit, input);
   if (!mapped) return null;
 
   const changes = diffAddressFields(input, mapped);
