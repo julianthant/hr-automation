@@ -23,6 +23,7 @@ import {
 } from "../matching/match.js";
 import { resolveAddress } from "../address/index.js";
 import { isLikelyUsAddress, normalizeCountryHint } from "../address/format.js";
+import { isSafeStreetReplacement } from "../address/street.js";
 
 export interface NormalizationChange {
   /** Dotted field path, e.g. `emergencyContact.cellPhone`. */
@@ -315,7 +316,20 @@ async function enrichAddressInPlace(
     country: resolution.address.country,
   });
 
-  addr.street = resolution.address.street || addr.street;
+  // ── Choke-point guard (covers EVERY geocoder, present and future) ───────────
+  // A resolved street may correct the street NAME/suffix only. If it would change
+  // the leading house number or drop a unit the operator's form carried, KEEP THE
+  // ORIGINAL VERBATIM — a plausible-but-wrong street is worse than an un-enriched
+  // one (fail loud: never substitute). City/state/zip normalization still applies.
+  const candidateStreet = resolution.address.street;
+  if (candidateStreet && !isSafeStreetReplacement(addr.street, candidateStreet)) {
+    log.warn(
+      `[address] rejected geocoded street "${candidateStreet}" (${resolution.source}) — `
+      + `would alter the house number or unit of "${addr.street ?? ""}"; keeping the original`,
+    );
+  } else if (candidateStreet) {
+    addr.street = candidateStreet;
+  }
   addr.city = resolution.address.city || addr.city;
   addr.state = us
     ? (normalizeUsState(resolution.address.state) ?? (resolution.address.state || addr.state))
