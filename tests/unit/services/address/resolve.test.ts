@@ -70,6 +70,103 @@ test("geocodeWithCensus maps a Census match", async () => {
   assert.match(result!.address.street, /123 Main/i);
 });
 
+// ─── House-number / unit preservation (2026-07-13 corruption regression) ──────
+// Census `addressComponents.fromAddress`/`toAddress` are the TIGER block address
+// RANGE, not the matched house number — using them REWROTE the operator's OCR'd
+// street to a different building. These pins hold the line.
+
+function censusResponse(matchedAddress: string, components: Record<string, string>) {
+  return async () =>
+    new Response(
+      JSON.stringify({
+        result: { addressMatches: [{ matchedAddress, addressComponents: components }] },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ) as unknown as Response;
+}
+
+test("geocodeWithCensus keeps the input house number when it differs from the TIGER block range", async () => {
+  const fetchImpl = censusResponse("3449 INVICTA WAY, SAN DIEGO, CA, 92154", {
+    fromAddress: "3401",
+    toAddress: "3499",
+    streetName: "INVICTA",
+    suffixType: "WAY",
+    city: "SAN DIEGO",
+    state: "CA",
+    zip: "92154",
+  });
+
+  const result = await geocodeWithCensus(
+    { street: "3449 invicta way", city: "san diego", state: "CA", zip: "92154" },
+    fetchImpl as unknown as typeof fetch,
+  );
+
+  assert.ok(result);
+  assert.equal(result!.address.street, "3449 Invicta Way");
+});
+
+test("geocodeWithCensus preserves an apartment designator Census components omit", async () => {
+  const fetchImpl = censusResponse("1177 MARKET ST, SAN FRANCISCO, CA, 94103", {
+    fromAddress: "1101",
+    toAddress: "1199",
+    streetName: "MARKET",
+    suffixType: "ST",
+    city: "SAN FRANCISCO",
+    state: "CA",
+    zip: "94103",
+  });
+
+  const result = await geocodeWithCensus(
+    { street: "1177 Market St. Apt 1208", city: "San Francisco", state: "CA", zip: "94103" },
+    fetchImpl as unknown as typeof fetch,
+  );
+
+  assert.ok(result);
+  assert.match(result!.address.street, /^1177 Market St/i);
+  assert.match(result!.address.street, /Apt 1208/i);
+});
+
+test("geocodeWithCensus still corrects the street name/suffix while keeping the house number", async () => {
+  const fetchImpl = censusResponse("12677 CANDLEWOOD LN, SAN DIEGO, CA, 92128", {
+    fromAddress: "12601",
+    toAddress: "12699",
+    streetName: "CANDLEWOOD",
+    suffixType: "LN",
+    city: "SAN DIEGO",
+    state: "CA",
+    zip: "92128",
+  });
+
+  const result = await geocodeWithCensus(
+    { street: "12677 Candlewood In", city: "San Diego", state: "CA", zip: "92128" },
+    fetchImpl as unknown as typeof fetch,
+  );
+
+  assert.ok(result);
+  assert.equal(result!.address.street, "12677 Candlewood Ln");
+});
+
+test("geocodeWithCensus does not claim exact confidence when the matched house number differs", async () => {
+  const fetchImpl = censusResponse("3429 INVICTA WAY, SAN DIEGO, CA, 92154", {
+    fromAddress: "3401",
+    toAddress: "3499",
+    streetName: "INVICTA",
+    suffixType: "WAY",
+    city: "SAN DIEGO",
+    state: "CA",
+    zip: "92154",
+  });
+
+  const result = await geocodeWithCensus(
+    { street: "3449 invicta way", city: "san diego", state: "CA", zip: "92154" },
+    fetchImpl as unknown as typeof fetch,
+  );
+
+  assert.ok(result);
+  assert.notEqual(result!.confidence, "exact");
+  assert.equal(result!.address.street, "3449 Invicta Way");
+});
+
 test("geocodeWithNominatim maps international OSM results", async () => {
   __resetNominatimRateLimitForTests();
   const fetchImpl = async () =>
@@ -98,6 +195,35 @@ test("geocodeWithNominatim maps international OSM results", async () => {
   assert.equal(result!.address.country, "GB");
   assert.equal(result!.address.zip, "SW1A 2AA");
   assert.equal(result!.confidence, "exact");
+});
+
+test("geocodeWithNominatim keeps the input house number and unit", async () => {
+  __resetNominatimRateLimitForTests();
+  const fetchImpl = async () =>
+    new Response(
+      JSON.stringify([{
+        display_name: "1177, Market Street, San Francisco, CA, 94103, United States",
+        importance: 0.6,
+        address: {
+          house_number: "1101",
+          road: "Market Street",
+          city: "San Francisco",
+          state: "California",
+          postcode: "94103",
+          country_code: "us",
+        },
+      }]),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+
+  const result = await geocodeWithNominatim(
+    { street: "1177 Market St. Apt 1208", city: "San Francisco", state: "CA", zip: "94103" },
+    fetchImpl as typeof fetch,
+  );
+
+  assert.ok(result);
+  assert.match(result!.address.street, /^1177 Market Street/i);
+  assert.match(result!.address.street, /Apt 1208/i);
 });
 
 test("resolveAddress uses Census for US then falls back to Nominatim", async () => {
