@@ -194,6 +194,100 @@ test("normalizeEmergencyContactRecord makes no changes on already-clean data", a
   assert.equal(changes.length, 0);
 });
 
+// ─── Geocoding at its PRODUCTION default (no `enableGeocoding: false`) ────────
+// The orchestrator calls normalizeEmergencyContactRecord with NO options, so the
+// geocode path is LIVE in production. These pins run it with a stubbed Census
+// fetch and prove the OCR'd street survives the enrichment verbatim.
+
+function censusFetchStub(matchedAddress: string, components: Record<string, string>): typeof fetch {
+  const impl = async () =>
+    new Response(
+      JSON.stringify({
+        result: { addressMatches: [{ matchedAddress, addressComponents: components }] },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  return impl as unknown as typeof fetch;
+}
+
+test("normalizeEmergencyContactRecord (geocoding ON) never rewrites the house number or drops the unit", async () => {
+  __resetUsageTrackerForTests();
+  const record = {
+    emergencyContact: {
+      relationship: "Spouse",
+      cellPhone: "(415) 555-0100",
+      address: {
+        street: "1177 Market St. Apt 1208",
+        city: "san francisco",
+        state: "california",
+        zip: "94103",
+      },
+    },
+  };
+
+  // NOTE: no `enableGeocoding` — this is the production default (geocoding ON).
+  const changes = await normalizeEmergencyContactRecord(record, {
+    pool: [],
+    fetch: censusFetchStub("1177 MARKET ST, SAN FRANCISCO, CA, 94103", {
+      fromAddress: "1101",
+      toAddress: "1199",
+      streetName: "MARKET",
+      suffixType: "ST",
+      city: "SAN FRANCISCO",
+      state: "CA",
+      zip: "94103",
+    }),
+  });
+
+  assert.match(
+    record.emergencyContact.address.street,
+    /^1177 Market St/i,
+    "house number must survive geocoding — the TIGER block range (1101) must never win",
+  );
+  assert.match(
+    record.emergencyContact.address.street,
+    /Apt 1208/i,
+    "the apartment must never be dropped by geocoding",
+  );
+  assert.equal(record.emergencyContact.address.state, "CA");
+  assert.equal(record.emergencyContact.address.zip, "94103");
+  assert.ok(
+    !changes.some((c) => c.method === "geocode" && /Market/.test(c.from) && !/Apt 1208/.test(c.to)),
+    "no reported geocode change may drop the unit",
+  );
+});
+
+test("normalizeEmergencyContactRecord (geocoding ON) keeps a street-name correction that preserves the house number", async () => {
+  __resetUsageTrackerForTests();
+  const record = {
+    emergencyContact: {
+      relationship: "Parent",
+      address: {
+        street: "12677 Candlewood In",
+        city: "San Diego",
+        state: "CA",
+        zip: "92128",
+      },
+    },
+  };
+
+  const changes = await normalizeEmergencyContactRecord(record, {
+    pool: [],
+    fetch: censusFetchStub("12677 CANDLEWOOD LN, SAN DIEGO, CA, 92128", {
+      fromAddress: "12601",
+      toAddress: "12699",
+      streetName: "CANDLEWOOD",
+      suffixType: "LN",
+      city: "SAN DIEGO",
+      state: "CA",
+      zip: "92128",
+    }),
+  });
+
+  assert.equal(record.emergencyContact.address.street, "12677 Candlewood Ln");
+  assert.ok(changes.some((c) => c.method === "geocode"), "the legitimate suffix fix is still applied + reported");
+});
+
 test("summarizeNormalizationChanges renders a compact review warning", () => {
   const warn = summarizeNormalizationChanges([
     { field: "emergencyContact.relationship", from: "husband", to: "Spouse", method: "rule" },
