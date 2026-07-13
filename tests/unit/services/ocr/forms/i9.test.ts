@@ -7,7 +7,11 @@ import {
   buildI9Checks,
   buildI9DisplayName,
   buildI9PersonMatchInput,
+  corroborateI9Records,
+  i9NamesShareToken,
   i9OcrFormSpec,
+  i9SecondOpinionRank,
+  isI9SecondOpinionSuspect,
   normalizeI9Dob,
   normalizeI9Ssn,
   type I9PreviewRecord,
@@ -24,6 +28,10 @@ function makeRecord(overrides: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
     ssn: "123-45-6789",
     documentType: "expected",
     originallyMissing: [],
+    illegible: [],
+    corroboration: "unavailable",
+    disputedFields: [],
+    orphanSection2: false,
     notes: [],
     name: "Doe, Jane A",
     matchState: "extracted",
@@ -288,5 +296,190 @@ describe("i9OcrFormSpec", () => {
     assert.equal(fields!.name, "");
     assert.deepEqual(fields!.checks, []);
     assert.equal(fields!.formKind, "unknown");
+  });
+});
+
+describe("i9SecondOpinionRank / isI9SecondOpinionSuspect", () => {
+  it("ranks by UCPath searchability: 1 = unsearchable, 2 = DOB-only, 3 = SSN", () => {
+    assert.equal(i9SecondOpinionRank(makeRecord()), 3, "full SSN present");
+    assert.equal(
+      i9SecondOpinionRank(makeRecord({ ssn: null })),
+      2,
+      "no SSN but a mm/dd/yyyy DOB is still searchable",
+    );
+    assert.equal(
+      i9SecondOpinionRank(makeRecord({ ssn: "123-45-67", dateOfBirth: "04/01/98" })),
+      1,
+      "partial SSN + 2-digit-year DOB are both unusable",
+    );
+    assert.equal(
+      i9SecondOpinionRank(makeRecord({ firstName: null })),
+      1,
+      "a record without a full name cannot be searched at all",
+    );
+  });
+
+  it("suspect = an i9-classified page whose read is unsearchable", () => {
+    assert.equal(isI9SecondOpinionSuspect(makeRecord()), false, "searchable record is fine");
+    assert.equal(
+      isI9SecondOpinionSuspect(makeRecord({ ssn: "12-34", dateOfBirth: "4/1/98" })),
+      true,
+      "i9 page with garbled identifiers is the misread signature",
+    );
+    assert.equal(
+      isI9SecondOpinionSuspect(
+        makeRecord({ formKind: "unknown", lastName: null, firstName: null, ssn: null, dateOfBirth: null }),
+      ),
+      false,
+      "a non-Section-1 page is expected to carry nothing — not a suspect",
+    );
+  });
+
+  it("the spec wires the second-opinion policy (roster-less tier-1 re-read guard)", () => {
+    const so = i9OcrFormSpec.secondOpinion;
+    assert.ok(so, "i9 declares spec.secondOpinion — without it the roster-gated phase never runs");
+    const garbled = makeRecord({ ssn: "12-34", dateOfBirth: "4/1/98" });
+    assert.equal(so!.isSuspect(garbled), true);
+    assert.equal(so!.rank(garbled), 1);
+    assert.equal(so!.readName(garbled), "Doe, Jane A");
+    assert.match(so!.reason(garbled), /no usable SSN or mm\/dd\/yyyy date of birth/);
+    const nameless = makeRecord({ lastName: null, name: "" });
+    assert.match(so!.reason(nameless), /name is missing or unreadable/);
+    assert.equal(so!.readName(nameless), "Jane A", "blank stamped name falls back to the Section 1 fields");
+  });
+});
+
+// ─── Section 2 corroboration ─────────────────────────────────
+//
+// These cases are REPLAYS of the real misreads from the 2026-07-13 separations
+// I-9 check, where 17 of 29 Section 1 reads were wrong and every wrong one was
+// reported to the operator as a confident UCPath "not found".
+
+describe("corroborateI9Records", () => {
+  const sheet = (over: Partial<I9PreviewRecord>): I9PreviewRecord =>
+    makeRecord({
+      formKind: "unknown",
+      lastName: null,
+      firstName: null,
+      middleInitial: null,
+      dateOfBirth: null,
+      ssn: null,
+      name: "",
+      documentType: "unknown",
+      ...over,
+    });
+
+  it("a Section 1 the employer's Section 2 agrees with is CONFIRMED", () => {
+    const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: "Werker, Trent D", ssn: "602-94-9554" });
+    const s2 = sheet({ sourcePage: 3, section2Name: "Werker, Trent D", section2DocNumber: "602-94-9554" });
+    corroborateI9Records([s2, s1]);
+    assert.equal(s1.corroboration, "confirmed");
+    assert.deepEqual(s1.disputedFields, []);
+    assert.equal(s1.warnings.length, 0);
+  });
+
+  it("REAL CASE (Werker, p55): a one-digit SSN misread is caught by Section 2 and never searched", () => {
+    // OCR read 602-44-9554; the employer's List C says 602-94-9554. UCPath
+    // answers "no results" for the wrong digit — a false "not in UCPath".
+    const s1 = makeRecord({ sourcePage: 55, lastName: "Werker", firstName: "Trent", name: "Werker, Trent D", ssn: "602-44-9554" });
+    const s2 = sheet({ sourcePage: 54, section2Name: "Werker, Trent D", section2DocNumber: "602-94-9554" });
+    corroborateI9Records([s2, s1]);
+
+    assert.equal(s1.corroboration, "disputed");
+    assert.deepEqual(s1.disputedFields, ["ssn"]);
+    assert.match(s1.warnings[0], /SSN disagrees with the employer's Section 2/);
+    assert.ok(!s1.warnings[0].includes("6024495 54".replace(" ", "")), "the warning must not print a whole SSN");
+
+    // The disputed SSN is DROPPED from the search — we search on what still holds.
+    const input = buildI9PersonMatchInput(s1, {});
+    assert.equal(input?.ssn, undefined, "a contradicted SSN is never sent to UCPath");
+    assert.equal(input?.dob, "04/01/1998", "the DOB still searches");
+  });
+
+  it("REAL CASE (Walters, p53): a truncated first name still PAIRS (shared token) and the surname dispute surfaces", () => {
+    // OCR read "Kim"; the paper says "Kimi". The names still share "walters",
+    // so the sheet is paired and the SSN cross-check still runs.
+    const s1 = makeRecord({ sourcePage: 53, lastName: "Walters", firstName: "Kim", name: "Walters, Kim J", ssn: "211-85-2141" });
+    const s2 = sheet({ sourcePage: 52, section2Name: "Walters, Kimi J.", section2DocNumber: "218-51-2141" });
+    corroborateI9Records([s2, s1]);
+    assert.equal(s1.corroboration, "disputed");
+    assert.deepEqual(s1.disputedFields, ["ssn"]);
+  });
+
+  it("REAL CASE (Mihalik, p4): a misread SURNAME is caught even though the given name matches", () => {
+    const s1 = makeRecord({ sourcePage: 4, lastName: "Miralik", firstName: "Joshua", name: "Miralik, Joshua A", ssn: "635-54-2434" });
+    const s2 = sheet({ sourcePage: 3, section2Name: "Mihalik, Joshua A", section2DocNumber: "635-54-2434" });
+    corroborateI9Records([s2, s1]);
+    assert.equal(s1.corroboration, "disputed");
+    assert.deepEqual(s1.disputedFields, ["lastName"]);
+    assert.match(s1.warnings[0], /Last name disagrees.*"Miralik".*"Mihalik, Joshua A"/s);
+  });
+
+  it("a Section 1 with no Section 2 sheet is UNAVAILABLE, not confirmed", () => {
+    const s1 = makeRecord({ sourcePage: 9, lastName: "Solo", firstName: "Han", name: "Solo, Han" });
+    corroborateI9Records([s1]);
+    assert.equal(s1.corroboration, "unavailable");
+    assert.deepEqual(s1.disputedFields, []);
+  });
+
+  it("REAL CASE (Singh, p24): a Section 2 with NO Section 1 page is flagged as an orphan", () => {
+    const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: "Werker, Trent D" });
+    const orphan = sheet({ sourcePage: 24, section2Name: "Singh, Aryaman P" });
+    corroborateI9Records([s1, orphan]);
+    assert.equal(orphan.orphanSection2, true);
+    assert.match(orphan.warnings[0], /Section 1 page is NOT/);
+    assert.equal(s1.orphanSection2, false);
+  });
+
+  it("one Section 2 sheet is claimed by only ONE Section 1 (no double-pairing)", () => {
+    const a = makeRecord({ sourcePage: 2, lastName: "Tan", firstName: "Jiayi", name: "Tan, Jiayi", ssn: "089-35-6758" });
+    const b = makeRecord({ sourcePage: 4, lastName: "Tan", firstName: "Jiayi", name: "Tan, Jiayi", ssn: "089-35-6758" });
+    const s2 = sheet({ sourcePage: 1, section2Name: "Tan, Jiayi", section2DocNumber: "089-35-6758" });
+    corroborateI9Records([s2, a, b]);
+    assert.equal(a.corroboration, "confirmed", "the first Section 1 claims the sheet");
+    assert.equal(b.corroboration, "unavailable", "the second cannot re-use it");
+  });
+});
+
+describe("i9NamesShareToken", () => {
+  it("pairs a partial misread with the true name", () => {
+    assert.equal(i9NamesShareToken("Miralik, Joshua A", "Mihalik, Joshua A"), true);
+    assert.equal(i9NamesShareToken("Walters, Kim J", "Walters, Kimi J."), true);
+  });
+  it("does not pair two different people", () => {
+    assert.equal(i9NamesShareToken("Tan, Jiayi", "Singh, Aryaman P"), false);
+  });
+  it("ignores single-character tokens (a middle initial is not an identity)", () => {
+    assert.equal(i9NamesShareToken("Doe, Jane A", "Roe, Rick A"), false);
+  });
+});
+
+describe("second opinion: an illegible field is suspect", () => {
+  it("a field the model could not read triggers a tier-1 re-read, even when searchable", () => {
+    // The old rule only re-read UNSEARCHABLE records, which is why none of the
+    // 17 real misreads ever got a second opinion — they were all searchable.
+    const rec = makeRecord({ ssn: null, illegible: ["ssn"] });
+    assert.equal(i9SecondOpinionRank(rec), 2, "still searchable by DOB");
+    assert.equal(isI9SecondOpinionSuspect(rec), true, "but the unread field makes it suspect");
+    assert.match(i9OcrFormSpec.secondOpinion!.reason(rec), /could not read ssn/);
+  });
+
+  it("a clean, fully-legible record is NOT re-read", () => {
+    assert.equal(isI9SecondOpinionSuspect(makeRecord()), false);
+  });
+});
+
+describe("buildI9PersonMatchInput: a disputed field is never searched with", () => {
+  it("drops a disputed SSN but keeps the DOB", () => {
+    const rec = makeRecord({ disputedFields: ["ssn"] });
+    const input = buildI9PersonMatchInput(rec, {});
+    assert.equal(input?.ssn, undefined);
+    assert.equal(input?.dob, "04/01/1998");
+  });
+
+  it("a record whose ONLY identifier is disputed becomes unsearchable, not wrongly searched", () => {
+    const rec = makeRecord({ dateOfBirth: null, disputedFields: ["ssn"] });
+    assert.equal(buildI9PersonMatchInput(rec, {}), null);
+    assert.equal(i9SecondOpinionRank(rec), 1);
   });
 });

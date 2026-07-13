@@ -61,6 +61,10 @@ function rec(over: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
     ssn: "123-45-6789",
     documentType: "expected",
     originallyMissing: [],
+    illegible: [],
+    corroboration: "unavailable",
+    disputedFields: [],
+    orphanSection2: false,
     notes: [],
     name: "Doe, Jane",
     matchState: "resolved",
@@ -396,4 +400,77 @@ test("buildI9CheckMembers: the SSN is NEVER written to a log line", () => {
   assert.ok(!blob.includes("123-45-6789") && !blob.includes("123456789"), "no SSN in logs");
   assert.ok(blob.includes("SSN supplied"), "but the log does say an SSN was searched with");
   assert.ok(blob.includes("04/01/1998"), "and states the DOB that was searched");
+});
+
+// ─── A "not found" is only as good as the data behind it ────────────────────
+
+test("buildI9CheckMembers: a NOT-FOUND on a DISPUTED field is a loud failure, not a confident 'Not in UCPath'", () => {
+  // The real 2026-07-13 failure mode: UCPath truthfully returns "no results"
+  // for a misread SSN, and we reported that as "this person is not in UCPath".
+  const members = buildI9CheckMembers([
+    rec({
+      ucpathFound: false,
+      personMatchStatus: "completed",
+      corroboration: "disputed",
+      disputedFields: ["ssn"],
+      sourcePage: 55,
+    }),
+  ]);
+  assert.equal(members[0].status, "failed", "an untrustworthy no-match must not read as an answer");
+  assert.equal(members[0].ucpathFound, undefined, "and must carry NO found/not-found chip");
+  assert.match(members[0].error ?? "", /could not be trusted/);
+  assert.match(members[0].error ?? "", /page 55/);
+});
+
+test("buildI9CheckMembers: a NOT-FOUND on an ILLEGIBLE field is also a failure", () => {
+  const members = buildI9CheckMembers([
+    rec({ ucpathFound: false, personMatchStatus: "completed", illegible: ["ssn", "dateOfBirth"] }),
+  ]);
+  assert.equal(members[0].status, "failed");
+  assert.equal(members[0].ucpathFound, undefined);
+  assert.match(members[0].error ?? "", /not legible on the scan/);
+});
+
+test("buildI9CheckMembers: a FOUND is self-validating — a dispute does NOT downgrade it", () => {
+  // UCPath matched a real person; that is proof regardless of a field dispute.
+  const members = buildI9CheckMembers([
+    rec({
+      ucpathFound: true,
+      matchedEmplId: "10414728",
+      personMatchStatus: "completed",
+      corroboration: "disputed",
+      disputedFields: ["ssn"],
+    }),
+  ]);
+  assert.equal(members[0].status, "done");
+  assert.equal(members[0].ucpathFound, "true");
+  assert.equal(members[0].emplId, "10414728");
+});
+
+test("buildI9CheckMembers: a CONFIRMED not-found stays a confident, actionable 'Not in UCPath'", () => {
+  const members = buildI9CheckMembers([
+    rec({ ucpathFound: false, personMatchStatus: "completed", corroboration: "confirmed" }),
+  ]);
+  assert.equal(members[0].status, "done");
+  assert.equal(members[0].ucpathFound, "false");
+  const blob = members[0].logs.map((l) => l.message).join(" | ");
+  assert.match(blob, /the two readings agree/);
+});
+
+test("buildI9CheckMembers: an orphan Section 2 surfaces the MISSING Section 1 page", () => {
+  const members = buildI9CheckMembers([
+    rec({
+      formKind: "unknown",
+      lastName: null,
+      firstName: null,
+      name: "",
+      sourcePage: 24,
+      section2Name: "Singh, Aryaman P",
+      orphanSection2: true,
+    }),
+  ]);
+  assert.equal(members.length, 1, "an un-checkable person must not be silently dropped");
+  assert.equal(members[0].name, "Singh, Aryaman P");
+  assert.equal(members[0].status, "failed");
+  assert.match(members[0].error ?? "", /Section 1 page is NOT/);
 });
