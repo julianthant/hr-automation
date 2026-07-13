@@ -465,7 +465,10 @@ export async function runOcrOrchestrator(
   // set, OCR-as-a-sub-step of a target workflow) parks at `awaiting-approval`
   // until the operator approves/discards. See the terminal-phase branch near the
   // end and the 2026-06-06 lesson in `src/workflows/ocr/CLAUDE.md`.
-  const completesAfterLookup = !input.parentRunId;
+  // Exception: a spec with `completeDelegatedRun` (read-only, no approve flow —
+  // i9) completes `done` even when delegated under an operation coordinator;
+  // the coordinator's result fan-back consumes the finished report directly.
+  const completesAfterLookup = !input.parentRunId || spec.completeDelegatedRun === true;
 
   let lastAnnouncedPhase: string | undefined;
   // Latest rich preview payload (records + page metadata) emitted via
@@ -785,6 +788,34 @@ export async function runOcrOrchestrator(
         ),
       ),
     );
+    // Stamp the (provider, model) that actually produced each record. The pool
+    // spreads pages across providers/models, and `poolKeyId` — the cell that
+    // succeeded for the page — was computed per page and then THROWN AWAY, so
+    // an extraction could never be attributed to the model that made it. That
+    // is what made "which models are misreading?" unanswerable after the fact
+    // (live 2026-07-13: 17 of 29 I-9 Section 1s misread; only Gemini pages
+    // could be attributed at all, and only from a stray log line). Persisting
+    // it makes per-model accuracy measurable across runs — the evidence for
+    // demoting or dropping a model.
+    for (const r of records) {
+      const rec = r as { sourcePage?: number; extractedBy?: string };
+      if (typeof rec.sourcePage !== "number") continue;
+      const poolKeyId = pages.find((p) => p.page === rec.sourcePage)?.poolKeyId;
+      if (poolKeyId) rec.extractedBy = poolKeyId;
+    }
+    log.step(
+      `[ocr] extraction attributed by model: `
+      + Object.entries(
+          records.reduce<Record<string, number>>((acc, r) => {
+            const by = (r as { extractedBy?: string }).extractedBy ?? "(unattributed)";
+            acc[by] = (acc[by] ?? 0) + 1;
+            return acc;
+          }, {}),
+        )
+        .map(([model, n]) => `${model}=${n}`)
+        .join(" "),
+    );
+
     // Per-record match outcome summary.
     records.forEach((r, i) => {
       const rec = r as { matchState?: string; matchSource?: string; matchConfidence?: number; rosterCandidates?: Array<{ score: number }> };
@@ -794,8 +825,11 @@ export async function runOcrOrchestrator(
     });
 
     // 3a. Second opinion: re-read suspect pages on accuracy-tier models.
-    // Suspect = matched nothing in the roster AND no usable EID (see the
-    // module helpers above). Roster is the oracle — skipped when none loaded.
+    // Generic suspect = matched nothing in the roster AND no usable EID (see
+    // the module helpers above); roster is the oracle, so that path is skipped
+    // when none is loaded. A spec may instead declare its OWN policy
+    // (`spec.secondOpinion` — i9 has no roster oracle), which runs regardless
+    // of roster presence with form-defined suspect/name/rank semantics.
     const secondOpinionFn =
       opts._secondOpinionOverride ??
       (async (args: { pageNum: number; excludeModels: string[] }) =>
@@ -806,10 +840,16 @@ export async function runOcrOrchestrator(
           prompt: spec.prompt,
           excludeModels: args.excludeModels,
         }));
-    if (roster.length > 0) {
+    const specSecondOpinion = spec.secondOpinion;
+    if (specSecondOpinion || roster.length > 0) {
+      const isSuspectFn = specSecondOpinion?.isSuspect ?? isSecondOpinionSuspect;
+      const reasonFn = specSecondOpinion?.reason ?? secondOpinionSuspectReason;
+      const nameFn = specSecondOpinion?.readName ?? readOcrRecordName;
+      const rankFn = specSecondOpinion?.rank ?? matchOutcomeRank;
+      const anchor = specSecondOpinion ? "form-anchored" : "roster-anchored";
       const suspects = records
         .map((rec, index) => ({ rec, index }))
-        .filter(({ rec }) => isSecondOpinionSuspect(rec));
+        .filter(({ rec }) => isSuspectFn(rec));
       const cap = secondOpinionCap();
       if (suspects.length > cap) {
         log.warn(`[ocr/second-opinion] ${suspects.length} suspect record(s); re-reading only the first ${cap} (OCR_SECOND_OPINION_MAX)`);
@@ -821,9 +861,9 @@ export async function runOcrOrchestrator(
         const pageInfo = pages.find((p) => p.page === pageNum);
         // poolKeyId is `<provider>-<keyIndex>:<model>`; model ids may contain ":".
         const firstModel = pageInfo?.poolKeyId?.split(":").slice(1).join(":") ?? "";
-        const oldName = readOcrRecordName(rec);
+        const oldName = nameFn(rec);
         log.step(
-          `[ocr/second-opinion] page ${pageNum}: "${oldName}" ${secondOpinionSuspectReason(rec)} — re-reading on a tier-1 model${firstModel ? ` (first read: ${firstModel})` : ""}`,
+          `[ocr/second-opinion] page ${pageNum}: "${oldName}" ${reasonFn(rec)} — re-reading on a tier-1 model${firstModel ? ` (first read: ${firstModel})` : ""}`,
         );
         const second = await raceOcrPrepWithDiscard(
           id,
@@ -838,9 +878,9 @@ export async function runOcrOrchestrator(
         const candidate = sameRow.length === 1 ? sameRow[0] : pageRecords.length === 1 ? pageRecords[0] : undefined;
         if (!candidate) continue;
         const rematched = await spec.matchRecord({ record: { ...candidate, sourcePage: pageNum }, roster });
-        const newName = readOcrRecordName(rematched);
-        const oldRank = matchOutcomeRank(records[index]);
-        if (matchOutcomeRank(rematched) > oldRank) {
+        const newName = nameFn(rematched);
+        const oldRank = rankFn(records[index]);
+        if (rankFn(rematched) > oldRank) {
           // Positive-identity gate: a rank improvement alone does not prove the
           // re-read is the SAME PERSON. When the ORIGINAL reading still had a
           // usable identity anchor (rank ≥ 2 — roster candidates or a usable
@@ -852,8 +892,11 @@ export async function runOcrOrchestrator(
           // original (matched nothing, no usable EID) has no trustworthy
           // identity to preserve — the roster-anchored re-read IS the identity
           // oracle there — so it adopts on rank alone, still flagged below for
-          // operator confirmation.
-          if (oldRank >= 2 && !namesShareIdentityToken(oldName, newName)) {
+          // operator confirmation. A spec-anchored form (i9) has NO roster
+          // oracle at all, so there the gate is the original NAME itself: any
+          // non-empty first read must share a token with the re-read.
+          const guardIdentity = specSecondOpinion ? oldName.trim() !== "" : oldRank >= 2;
+          if (guardIdentity && !namesShareIdentityToken(oldName, newName)) {
             log.warn(
               `[ocr/second-opinion] page ${pageNum}: re-read "${newName}" ranks better but shares no name tokens with "${oldName}" — NOT adopting (possible different person); flagged for review`,
             );
@@ -863,8 +906,13 @@ export async function runOcrOrchestrator(
             );
             continue;
           }
-          log.success(`[ocr/second-opinion] page ${pageNum}: "${oldName}" → "${newName}" (${second.poolKeyId ?? "tier-1"}) — adopted (roster-anchored)`);
+          log.success(`[ocr/second-opinion] page ${pageNum}: "${oldName}" → "${newName}" (${second.poolKeyId ?? "tier-1"}) — adopted (${anchor})`);
           records[index] = rematched;
+          // Credit the re-read's model — the adopted VALUE came from it, so
+          // per-model accuracy must be attributed to it, not to the first read.
+          if (second.poolKeyId) {
+            (records[index] as { extractedBy?: string }).extractedBy = second.poolKeyId;
+          }
           // Make the adoption visible at the review gate — the operator
           // confirms the corrected reading against the page image instead of
           // the substitution happening silently.
@@ -1480,6 +1528,7 @@ export function operationTraceCode(operationWorkflow: string | undefined): strin
     case "oath-upload": return "ou";
     case "emergency-contact": return "ec";
     case "onbase": return "ob";
+    case "separations": return "se";
     default: return undefined;
   }
 }
