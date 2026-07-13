@@ -81,13 +81,47 @@ function buildMemberLogs(rec: I9PreviewRecord, member: I9CheckMember): I9CheckMe
   const hasSsn = (rec.ssn ?? "").trim().length > 0;
   logs.push({
     level: "step",
-    message: `I-9 Section 1 read from page ${rec.sourcePage} — name "${member.name}"`,
+    message:
+      `I-9 Section 1 read from page ${rec.sourcePage} — name "${member.name}"`
+      + (rec.extractedBy ? ` (extracted by ${rec.extractedBy})` : ""),
   });
+
+  // The corroboration line is the one that tells the operator whether to
+  // believe any of this.
+  if (rec.corroboration === "confirmed") {
+    logs.push({
+      level: "step",
+      message: "Cross-checked against the employer's Section 2 sheet — the two readings agree.",
+    });
+  } else if (rec.corroboration === "disputed") {
+    logs.push({
+      level: "warn",
+      message:
+        `DISPUTED by the employer's Section 2 sheet on: ${rec.disputedFields.join(", ")}. `
+        + `The disputed field(s) were NOT used to search UCPath.`,
+    });
+  } else if (rec.formKind === "i9") {
+    logs.push({
+      level: "step",
+      message: "No Section 2 sheet found for this person — the read could not be cross-checked.",
+    });
+  }
+  if (rec.illegible.length > 0) {
+    logs.push({
+      level: "warn",
+      message:
+        `Not legible on the scan, so left EMPTY rather than guessed: ${rec.illegible.join(", ")}. `
+        + `A guessed digit would have searched UCPath for the wrong person.`,
+    });
+  }
+
+  const searchedWith = (f: string) => !rec.disputedFields.includes(f) && !rec.illegible.includes(f);
   logs.push({
     level: "step",
     message:
       `UCPath person search criteria: name "${member.name}", `
-      + `DOB ${dob || "(none extracted)"}, SSN ${hasSsn ? "supplied" : "(none extracted)"} `
+      + `DOB ${dob && searchedWith("dateOfBirth") ? dob : "(not used)"}, `
+      + `SSN ${hasSsn && searchedWith("ssn") ? "supplied" : "(not used)"} `
       + `— a wrong digit in ANY of these returns "no results", which reads the same as a real absence.`,
   });
   if (member.personMatchTraceId) {
@@ -145,20 +179,56 @@ export function buildI9CheckMembers(records: I9PreviewRecord[]): I9CheckMember[]
   for (let index = 0; index < records.length; index++) {
     const rec = records[index];
     const name = (rec.name ?? "").trim() || buildI9DisplayName(rec);
+
+    // An orphan Section 2 — the employer verified this person, but their
+    // Section 1 page is missing from the packet, so they were never checked.
+    // A missing document is a finding, not filler: surface it as a failed row.
+    if (rec.orphanSection2) {
+      const orphan: I9CheckMember = {
+        index,
+        name: rec.section2Name ?? `Page ${rec.sourcePage} — Section 2, no Section 1`,
+        status: "failed",
+        error:
+          `Section 2 is in the packet but the Section 1 page is NOT — this person was never checked `
+          + `against UCPath. Locate the missing Section 1 page (Section 2 is on page ${rec.sourcePage}).`,
+        logs: [],
+      };
+      orphan.logs = buildMemberLogs(rec, orphan);
+      members.push(orphan);
+      continue;
+    }
+
     if (rec.formKind !== "i9" && !name && !rec.personMatchStatus) {
       // Expected filler page (Section 2 / Lists of Acceptable Documents /
       // blank) — not a person, not an error.
       continue;
     }
     const answered = rec.ucpathFound === true || rec.ucpathFound === false;
+
+    // A NOT-FOUND is only as good as the fields it was searched with. When the
+    // employer's Section 2 contradicts our read, or the model could not read a
+    // field at all, "no results" tells us nothing — UCPath answers "no results"
+    // for a wrong digit exactly as it does for a person who truly isn't there.
+    // Reporting that as a confident "Not in UCPath" is precisely the lie this
+    // pipeline must never tell, so it becomes a loud, actionable failure.
+    // (A FOUND is self-validating — UCPath matched a real person — so a
+    // dispute never downgrades it; the warning still rides the row.)
+    const untrustworthy = [...rec.disputedFields, ...rec.illegible];
+    const notFoundOnBadData = rec.ucpathFound === false && untrustworthy.length > 0;
+
     const member: I9CheckMember = {
       index,
       name: name || `Page ${rec.sourcePage} — unreadable Section 1`,
-      status: answered ? "done" : "failed",
+      status: answered && !notFoundOnBadData ? "done" : "failed",
       logs: [],
     };
     if (rec.personMatchTraceId) member.personMatchTraceId = rec.personMatchTraceId;
-    if (answered) {
+    if (notFoundOnBadData) {
+      member.error =
+        `UCPath returned no match, but this record's ${untrustworthy.join(" + ")} could not be trusted `
+        + `(${rec.disputedFields.length > 0 ? "contradicted by the employer's Section 2" : "not legible on the scan"}), `
+        + `so "not found" is NOT a reliable answer. Verify the fields against page ${rec.sourcePage} and re-run.`;
+    } else if (answered) {
       member.ucpathFound = rec.ucpathFound ? "true" : "false";
       if (rec.ucpathFound && rec.matchedEmplId) member.emplId = rec.matchedEmplId;
       if (rec.ucpathFound && rec.matchedName) member.matchedName = rec.matchedName;
