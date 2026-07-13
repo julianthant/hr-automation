@@ -233,7 +233,7 @@ async function raceNewHireVsRehireSignal(
   const { timeoutMs = 15_000, pollMs = 500 } = opts;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const gridRows = await personSearch.resultRows(frame).count().catch(() => 0);
+    const gridRows = await personSearch.resultEmplIdCells(frame).count().catch(() => 0);
     if (gridRows > 0) return "results-grid";
     if (await isPeopleSoftDialogPresent(page)) return "duplicate-dialog";
     await page.waitForTimeout(pollMs);
@@ -385,28 +385,48 @@ export async function searchPerson(
     return { found: false };
   }
 
-  // Results grid present → rehire
+  // Results grid present → rehire. Extract each match via the grid's stable
+  // per-row field ids (`EMPLID$<row>` / `HTML2$<row>` first / `HTML4$<row>`
+  // last — live-verified 2026-07-10); the grid nests tables, so positional
+  // td-walking double-reads cells and is not usable here.
   log.step("Duplicate person found in UCPath!");
+  let rows: Array<{ emplId: string; firstName: string; lastName: string }>;
   try {
-    const rows = await personSearch
-      .resultRows(frame)
-      .evaluateAll((els) =>
-        els.map((row) => {
-          const cells = Array.from(row.querySelectorAll("td, th"));
-          const emplId = cells.find((c) => /^\d{5,}$/.test(c.textContent?.trim() ?? ""))?.textContent?.trim() ?? "";
-          const allText = cells.map((c) => c.textContent?.trim()).filter(Boolean);
-          return {
-            emplId,
-            firstName: allText[3] ?? "",
-            lastName: allText[5] ?? "",
-          };
-        }),
-      );
-    const validRows = rows.filter((r) => r.emplId);
-    return { found: true, matches: validRows.length > 0 ? validRows : undefined };
-  } catch {
-    return { found: true };
+    // NOTE: declare NO named function inside this browser callback. tsx/esbuild
+    // compiles `const f = () => …` to `const f = __name(() => …, "f")` (keep-names),
+    // and `__name` exists only in the Node module scope — never in the page. A
+    // named helper here throws `ReferenceError: __name is not defined` INSIDE the
+    // page, which killed every match extraction (live 2026-07-13: all 5 found
+    // people came back with no EID and no name). Keep it to anonymous arrows.
+    rows = await personSearch.resultEmplIdCells(frame).evaluateAll((els) =>
+      els.map((el) => {
+        const rowIdx = el.id.split("$")[1] ?? "";
+        const doc = el.ownerDocument;
+        return {
+          emplId: el.textContent?.trim() ?? "",
+          firstName: doc.getElementById(`HTML2$${rowIdx}`)?.textContent?.trim() ?? "",
+          lastName: doc.getElementById(`HTML4$${rowIdx}`)?.textContent?.trim() ?? "",
+        };
+      }),
+    );
+  } catch (err) {
+    // The grid rendered, so `found` is definitive — but the MATCH is the whole
+    // point of the search (the operator needs the EID). Returning a bare
+    // `{ found: true }` here is exactly the silent degradation that hid this
+    // bug: rows rendered "Found" with no person attached. Fail loud.
+    throw new Error(
+      `UCPath person search: results grid rendered for "${firstName} ${lastName}" but the match could not be read `
+      + `(${errorMessage(err)}). The person IS in UCPath — re-run to get the Empl ID.`,
+    );
   }
+  const validRows = rows.filter((r) => /^\d{5,}$/.test(r.emplId));
+  if (validRows.length === 0) {
+    throw new Error(
+      `UCPath person search: results grid rendered for "${firstName} ${lastName}" but no row carried a readable `
+      + `Empl ID (read ${rows.length} row(s)). The person IS in UCPath — the grid layout likely changed.`,
+    );
+  }
+  return { found: true, matches: validRows };
 }
 
 /**
