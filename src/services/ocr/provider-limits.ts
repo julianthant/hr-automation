@@ -38,12 +38,27 @@ export interface ModelSpec {
   id: string;
   limit: ModelLimit;
   /**
-   * Accuracy tier for handwritten-name extraction. 1 (default) = trusted on
-   * hard handwriting; 2 = throughput overflow — observed mangling names
+   * Accuracy tier for handwritten extraction. 1 (default) = trusted on hard
+   * handwriting; 2 = throughput overflow — observed mangling names/digits
    * (live 2026-06-11: ministral-8b read "Barahona Martell" as "Merrell",
    * llama-4-scout produced "Marbell"/"Mian", nemotron "Barbhane Martelli",
    * gemini-2.5-flash-lite "Juun"). Tier 2 cells are only picked when no
    * tier-1 cell has headroom, and are excluded from second-opinion re-OCR.
+   *
+   * **Tier 1 is a CORRECTNESS claim, not a speed one, and it must be EARNED by
+   * measurement — never by reputation or recency of the model.** The bar is not
+   * "reads well"; it is "does not INVENT". A model that emits a confident,
+   * plausible SSN for handwriting it cannot actually read is worse than one that
+   * returns nothing: UCPath answers "no results" for the invented digits, and a
+   * real employee is reported to the operator as a stranger — indistinguishable
+   * from a true absence (see `forms/i9.ts`, the 2026-07-13 batch where 17 of 29
+   * Section 1s were misread and every verdict shipped as confident).
+   *
+   * Before promoting ANY model to tier 1, score it page-by-page against
+   * hand-read paper truth on real scans and count FABRICATIONS separately from
+   * misses (a decline is safe; an invention is not). The 2026-07-14 pass
+   * demoted `gemini-2.5-flash` and `mistral-medium-latest` on exactly that
+   * evidence, and `extractedBy` on each record exists so this stays measurable.
    */
   tier?: 1 | 2;
 }
@@ -71,13 +86,22 @@ const GEMINI_LITE_RPD = 1000; // flash-lite class: higher daily allowance.
 const GEMINI_TPM = 250_000;
 
 const GEMINI_MODELS: ModelSpec[] = [
-  // Primary: GA, good accuracy (handles handwritten EIDs), stable quota.
-  { id: "gemini-2.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1100 } },
-  // Newer, strong vision — but preview RPD is the same ~250.
+  // DEMOTED to tier 2 on 2026-07-14. Benchmarked against hand-read paper truth
+  // on 8 scanned I-9 Section 1s: name 2/8, dob 1/8, ssn 1/8 — and, worse, it
+  // FABRICATED a date of birth AND an SSN on a page whose handwriting is
+  // genuinely illegible, while reporting `illegible: []`. It ignores the
+  // prompt's accuracy rule. A model that invents a plausible SSN is not a weak
+  // model, it is a dangerous one: UCPath answers "no results" for the invented
+  // digits and the operator is told a real employee does not work here.
+  { id: "gemini-2.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1100 }, tier: 2 },
+  // Strongest reader in the 2026-07-14 benchmark: name 8/8, dob 8/8, ssn 7/8.
   { id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 } },
   // Overflow: cheaper tokens + higher daily cap; weaker on hard handwriting.
   { id: "gemini-2.5-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 300 }, tier: 2 },
   { id: "gemini-3.1-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 1125 }, tier: 2 },
+  // Safest reader in the 2026-07-14 benchmark: 7/8 on every field and the ONLY
+  // model that never fabricated — it correctly returned null + `illegible` on
+  // the unreadable page. Declining to answer is the behaviour we want.
   { id: "gemini-3.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 } },
 ];
 
@@ -88,7 +112,13 @@ const GROQ_MODELS: ModelSpec[] = [
 
 // Mistral: free tier not published (≈1 RPS, 1B tok/month). Conservative caps.
 const MISTRAL_MODELS: ModelSpec[] = [
-  { id: "mistral-medium-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 } },
+  // DEMOTED to tier 2 on 2026-07-14. Same benchmark: it reproduced the exact
+  // real-world misreads that started this ("Miralik" for "Mihalik", "Kim" for
+  // "Kimi", 004-96-8589 for 604-96-8589, 602-44-9554 for 602-94-9554), it
+  // fabricated a DOB on the illegible page, and it even corrupted the SECTION 2
+  // cross-check number itself — poisoning the very oracle we use to catch bad
+  // reads. Handwritten boxed digits are its weak spot (0/6, 9/4, 8/9).
+  { id: "mistral-medium-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
   { id: "ministral-8b-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
   { id: "mistral-small-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
 ];
