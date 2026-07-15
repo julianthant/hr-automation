@@ -184,10 +184,22 @@ export function buildCancelRunningHandler(dir: string) {
       if (!workerId || !attemptId) {
         return { ok: false, error: "task has no owning worker", status: 410 };
       }
-      stores.taskStore.requestCancelTask({
+      const cancelResult = stores.taskStore.requestCancelTask({
         taskId: task.taskId,
         reason: DASHBOARD_CANCEL_ERROR,
       });
+      if (cancelResult.kind === "already-terminal") {
+        return { ok: false, error: `item is already ${cancelResult.task.state}`, status: 410 };
+      }
+      if (cancelResult.kind === "not-found") {
+        return { ok: false, error: "task disappeared before cancellation could be recorded", status: 410 };
+      }
+      if (cancelResult.disposition === "cancelled-before-run") {
+        return { ok: false, error: "item returned to the queue — use cancel queued", status: 409, code: "wrong-state" };
+      }
+      // An already-requested cancel is idempotent task state. Enqueueing another
+      // targeted command is safe and preserves the response contract with a
+      // concrete commandId; the worker consumes duplicate cancels harmlessly.
       const commandId = stores.workerStore.enqueueWorkerCommand({
         commandType: "cancel_task",
         workflow: req.workflow,

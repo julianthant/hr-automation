@@ -547,15 +547,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 throw new Error(`Queue invariant violated: task ${item.id} missing runId at claim time`)
               }
               const runId = item.runId
-              // Pre-build the `RunHandle` and register with `runRegistry`
-              // BEFORE `runOneItem` runs so a `cancel_task` worker command
-              // that arrives between claim and handler-start can still
-              // reach the controller. `runOneItem` constructs its own
-              // controller internally and registers the same runId; the
-              // second `register` overwrites the first, leaving the
-              // canonical handle (with the controller the stepper observes)
-              // in place. We keep `state.activeRun` pointing at the
-              // post-runOneItem handle by reading back from the registry.
+              // Build and register the ONE run handle before handler entry.
+              // `runOneItem` receives this exact handle/controller, so a
+              // cancel between claim and handler start cannot be lost through
+              // a same-runId registry replacement.
               if (item.taskId && item.attemptId) {
                 taskStore.markTaskRunning({
                   taskId: item.taskId,
@@ -618,20 +613,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   ...(item.taskId ? { taskId: item.taskId } : {}),
                   ...(item.attemptId ? { attemptId: item.attemptId } : {}),
                   runHandleSource: 'daemon',
-                  onCancelController: (controller) => {
-                    // Keep `state.activeRun` in sync with the controller
-                    // `runOneItem` actually uses inside its stepper. The
-                    // pre-registered handle (above) is replaced by the
-                    // registry when `runOneItem` re-registers; mirror that
-                    // into `state.activeRun` so cancel paths read the same
-                    // controller everywhere.
-                    const fresh = runRegistry.get(runId)
-                    if (fresh) {
-                      state.activeRun = fresh
-                    } else {
-                      state.activeRun = { ...preHandle, controller }
-                    }
-                  },
+                  runHandle: preHandle,
+                  runHandleOwner: 'caller',
                 })
                 emitItemComplete(instance, item.id, trackerDir, runId)
                 for (const sys of wf.config.systems) {
@@ -858,21 +841,37 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 // populated, and a late `/cancel-current` would abort the
                 // dead controller from the previous item.
                 //
-                // `runOneItem`'s own finally also calls
-                // `runRegistry.unregister(runId)`; calling it again here is
-                // idempotent (Map.delete on a missing key is a no-op) and
-                // covers the pre-handler-throw case where `runOneItem`
-                // rejected before reaching its register/unregister window
-                // and our pre-registered handle is still in the registry.
-                runRegistry.unregister(runId)
-                // Release the single-terminal token now that this item's
-                // three-way teardown/cancel branch has had its chance to read
-                // it (E2E-101). Deferred to here — not `unregister` — because
-                // the kernel claims+emits INSIDE `runOneItem` and the daemon
-                // branch reads the token AFTER `runOneItem` returns; clearing it
-                // any earlier would let the daemon branch double-write.
-                runRegistry.releaseTerminalWrite(runId)
-                state.activeRun = null
+                // Daemon calls pass a caller-owned RunHandle, so this claim
+                // loop owns unregistering it. Keep it registered until the
+                // task store confirms the terminal/requeue/peer transition;
+                // the outer shutdown sweep can still abort a retained handle.
+                const taskAfterCleanup = item.taskId ? taskStore.getTask(item.taskId) : null
+                const transitionConfirmed = !item.taskId || (
+                  taskAfterCleanup !== null && (
+                    taskAfterCleanup.state === 'done' ||
+                    taskAfterCleanup.state === 'failed' ||
+                    taskAfterCleanup.state === 'cancelled' ||
+                    taskAfterCleanup.state === 'blocked' ||
+                    taskAfterCleanup.state === 'queued' ||
+                    (taskAfterCleanup.claimedByWorkerId !== undefined && taskAfterCleanup.claimedByWorkerId !== instanceId)
+                  )
+                )
+                if (!transitionConfirmed) {
+                  log.error(
+                    `[Daemon ${instanceId}] retaining RunHandle ${runId}: task transition is not confirmed ` +
+                    `(state=${taskAfterCleanup?.state ?? 'missing'})`,
+                  )
+                } else {
+                  runRegistry.unregister(runId)
+                  // Release the single-terminal token now that this item's
+                  // three-way teardown/cancel branch has had its chance to read
+                  // it (E2E-101). Deferred to here — not `unregister` — because
+                  // the kernel claims+emits INSIDE `runOneItem` and the daemon
+                  // branch reads the token AFTER `runOneItem` returns; clearing it
+                  // any earlier would let the daemon branch double-write.
+                  runRegistry.releaseTerminalWrite(runId)
+                  state.activeRun = null
+                }
               }
               setPhase('idle')
               emitWorkerHeartbeat()

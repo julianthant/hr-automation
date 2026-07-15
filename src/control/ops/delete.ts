@@ -12,6 +12,7 @@ import { PATHS } from "../../config.js";
 import { readSessionEvents } from "../../tracker/session-events.js";
 import { openStateDb } from "../../tracker/state/db.js";
 import { transaction } from "../../infra/sqlite/index.js";
+import { listTaskTreeByRunIds } from "../../core/task-store/queries.js";
 import { rewriteJsonlFile } from "../../tracker/jsonl-rewrite.js";
 import {
   logFilePath,
@@ -59,7 +60,26 @@ function applyDeleteTargets(
   dir: string,
   targets: DeleteTarget[],
   screenshotsDir: string,
-): void {
+): DeleteEntryResult {
+  const screenshotPaths = collectScreenshotPathsForTargets(db, dir, targets, screenshotsDir);
+  const dbResult = transaction(db, () => {
+    const taskIds = collectTaskSubtreeIds(db, targets);
+    const active = findActiveTaskForDelete(db, taskIds);
+    if (active) {
+      return {
+        ok: false as const,
+        status: 409,
+        error: `cannot delete active task ${active.workflow}/${active.itemId} in state ${active.state}`,
+      };
+    }
+    deleteTaskSubtrees(db, taskIds);
+    for (const target of targets) {
+      deleteProjectedEntry(db, target);
+    }
+    return { ok: true as const };
+  });
+  if (!dbResult.ok) return dbResult;
+
   const byFile = groupDeleteTargetsByFile(targets);
   for (const [fileKey, fileTargets] of byFile) {
     const [targetWorkflow, targetDate] = fileKey.split("\0") as [string, string];
@@ -72,15 +92,8 @@ function applyDeleteTargets(
     });
   }
 
-  for (const target of targets) {
-    deleteScreenshotsForEntry(db, dir, target, screenshotsDir);
-  }
-  transaction(db, () => {
-    deleteTaskSubtrees(db, targets);
-    for (const target of targets) {
-      deleteProjectedEntry(db, target);
-    }
-  });
+  deleteScreenshotPaths(screenshotPaths, screenshotsDir);
+  return { ok: true };
 }
 
 export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = {}) {
@@ -92,8 +105,7 @@ export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = 
     }
     const db = openStateDb(dir);
     const targets = collectDeleteTargets(db, dir, req);
-    applyDeleteTargets(db, dir, targets, screenshotsDir);
-    return { ok: true };
+    return applyDeleteTargets(db, dir, targets, screenshotsDir);
   };
 }
 
@@ -141,7 +153,10 @@ export function buildDeleteBulkHandler(dir: string, opts: DeleteEntryOptions = {
     }
 
     const allTargets = collectDeleteTargetsBulk(db, dir, requests);
-    applyDeleteTargets(db, dir, allTargets, screenshotsDir);
+    const applied = applyDeleteTargets(db, dir, allTargets, screenshotsDir);
+    if (!applied.ok) {
+      return { ok: false, count: 0, errors: requests.map((request) => ({ id: request.id, error: applied.error })) };
+    }
     return { ok: true, count, errors };
   };
 }
@@ -155,7 +170,8 @@ export function deleteDelegatedChildrenForRun(
   const db = openStateDb(dir);
   const targets = collectDescendantDeleteTargets(db, dir, [parentRunId]);
   if (targets.length === 0) return;
-  applyDeleteTargets(db, dir, targets, opts.screenshotsDir ?? PATHS.screenshotDir);
+  const result = applyDeleteTargets(db, dir, targets, opts.screenshotsDir ?? PATHS.screenshotDir);
+  if (!result.ok) throw new Error(result.error);
 }
 
 type DeleteTarget = DeleteEntryRequest;
@@ -325,10 +341,12 @@ function matchesAnyDeleteTarget(
   });
 }
 
-function deleteTaskSubtrees(db: ReturnType<typeof openStateDb>, targets: DeleteTarget[]): void {
+function collectTaskSubtreeIds(db: ReturnType<typeof openStateDb>, targets: DeleteTarget[]): string[] {
   const rootTaskIds = new Set<string>();
+  const rootRunIds = new Set<string>();
   for (const target of targets) {
     if (target.runId) {
+      rootRunIds.add(target.runId);
       const rows = db.prepare(`
         SELECT id
         FROM tasks
@@ -344,7 +362,10 @@ function deleteTaskSubtrees(db: ReturnType<typeof openStateDb>, targets: DeleteT
       rows.forEach((row) => rootTaskIds.add(row.id));
     }
   }
-  if (rootTaskIds.size === 0) return;
+  for (const task of listTaskTreeByRunIds(db, { rootRunIds: [...rootRunIds] })) {
+    rootTaskIds.add(task.taskId);
+  }
+  if (rootTaskIds.size === 0) return [];
 
   const allTaskIds = new Set(rootTaskIds);
   const queue = [...rootTaskIds];
@@ -362,7 +383,34 @@ function deleteTaskSubtrees(db: ReturnType<typeof openStateDb>, targets: DeleteT
     }
   }
 
-  const ids = [...allTaskIds];
+  return [...allTaskIds];
+}
+
+function findActiveTaskForDelete(
+  db: ReturnType<typeof openStateDb>,
+  taskIds: string[],
+): { workflow: string; itemId: string; state: string } | null {
+  if (taskIds.length === 0) return null;
+  const placeholders = taskIds.map(() => "?").join(",");
+  const row = db.prepare(`
+    SELECT workflow, item_id, control_state
+    FROM tasks
+    WHERE id IN (${placeholders})
+      AND (control_state IS NULL OR control_state NOT IN ('done', 'failed', 'cancelled'))
+    ORDER BY COALESCE(enqueued_at, created_at) ASC, id ASC
+    LIMIT 1
+  `).get(...taskIds) as { workflow: string; item_id: string; control_state: string | null } | undefined;
+  return row
+    ? {
+        workflow: row.workflow,
+        itemId: row.item_id,
+        state: row.control_state === null ? "invalid-null" : row.control_state,
+      }
+    : null;
+}
+
+function deleteTaskSubtrees(db: ReturnType<typeof openStateDb>, ids: string[]): void {
+  if (ids.length === 0) return;
   const placeholders = ids.map(() => "?").join(",");
   db.prepare(`
     DELETE FROM task_dependencies
@@ -435,12 +483,25 @@ function deleteProjectedEntry(db: ReturnType<typeof openStateDb>, req: DeleteTar
   });
 }
 
-function deleteScreenshotsForEntry(
+function collectScreenshotPathsForTargets(
+  db: ReturnType<typeof openStateDb>,
+  dir: string,
+  targets: DeleteTarget[],
+  screenshotsDir: string,
+): string[] {
+  const names = new Set<string>();
+  for (const target of targets) {
+    for (const name of collectScreenshotNamesForEntry(db, dir, target, screenshotsDir)) names.add(name);
+  }
+  return [...names];
+}
+
+function collectScreenshotNamesForEntry(
   db: ReturnType<typeof openStateDb>,
   dir: string,
   req: DeleteEntryRequest,
   screenshotsDir: string,
-): void {
+): string[] {
   const prefix = `${req.workflow}-${req.id}-`;
   const filenames = new Set<string>();
 
@@ -460,16 +521,16 @@ function deleteScreenshotsForEntry(
       const name = basename(row.storage_path);
       if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
     }
-  } else {
-    try {
-      for (const name of readdirSync(screenshotsDir)) {
-        if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
-      }
-    } catch {
-      return;
+  } else if (existsSync(screenshotsDir)) {
+    for (const name of readdirSync(screenshotsDir)) {
+      if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
     }
   }
 
+  return [...filenames];
+}
+
+function deleteScreenshotPaths(filenames: string[], screenshotsDir: string): void {
   const rootAbs = resolve(screenshotsDir);
   for (const name of filenames) {
     const full = resolve(screenshotsDir, name);

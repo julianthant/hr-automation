@@ -26,6 +26,7 @@ import {
   buildDeleteBulkHandler,
   deleteDelegatedChildrenForRun,
 } from "../../../src/control/ops/delete.js";
+import { openControlStores } from "../../../src/control/ops/shared.js";
 
 const TODAY = "2026-06-02";
 
@@ -112,6 +113,34 @@ describe("buildDeleteEntryHandler — validation", () => {
 });
 
 describe("buildDeleteEntryHandler — JSONL rewrite excludes deleted row", () => {
+  it("rejects deletion when a task-only descendant is still active and preserves both stores", () => {
+    seedRow(tmp, { workflow: "oath-signature", id: "coordinator", runId: "root-run" });
+    const stores = openControlStores(tmp);
+    const [child] = stores.taskStore.enqueueTasks({
+      workflow: "person-lookup",
+      inputs: [{ id: "child" }],
+      deriveItemId: (input) => input.id,
+      parentRunId: "root-run",
+      runIds: ["child-run"],
+    });
+
+    const handler = buildDeleteEntryHandler(tmp, { screenshotsDir });
+    const result = handler({
+      workflow: "oath-signature",
+      id: "coordinator",
+      runId: "root-run",
+      date: TODAY,
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 409);
+      assert.match(result.error, /active task.*child/i);
+    }
+    assert.equal(readRows(tmp, "oath-signature").length, 1, "JSONL must remain untouched on rejection");
+    assert.equal(stores.taskStore.getTask(child.taskId)?.state, "queued", "the active task must remain intact");
+  });
+
   it("removes the matching row from the JSONL file and leaves other rows intact", () => {
     // Seed two rows in the same file
     seedRow(tmp, { workflow: "work-study", id: "item-1", runId: "run-a" });

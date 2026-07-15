@@ -202,16 +202,13 @@ export function makeCtx<TSteps extends readonly string[], TData>(
     ...(forwardRootTracePrefix ? { rootTracePrefix: forwardRootTracePrefix } : {}),
   })
 
-  // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's
-  // signal-injecting Proxy (see `page-proxy.ts`). The wrapper merges
-  // `ctx.signal` into the options object of every Playwright method that
-  // accepts a `signal?: AbortSignal`, and returns proxied Locators / sub-
-  // objects (`keyboard`, `mouse`, `frame`, `mainFrame`) so chained calls
-  // stay signal-aware too. Sync getters (`url`, `title`, `context`, etc.)
-  // pass through verbatim.
+  // `ctx.page(id)` returns a Playwright Page wrapped in the kernel's abort-
+  // racing Proxy. Playwright arguments are untouched; asynchronous calls race
+  // `ctx.signal`. An aborted in-flight call poisons its raw page so Session
+  // closes/replaces it before another item can obtain that system page.
   const page = async (id: string): Promise<Page> => {
     const raw = await session.page(id)
-    return wrapPageWithSignal(raw, signal)
+    return wrapPageWithSignal(raw, signal, (poisoned) => session.poisonPage(id, poisoned))
   }
 
   // Emit one or more data-provenance points on the structured-log channel,

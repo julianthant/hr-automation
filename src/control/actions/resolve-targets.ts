@@ -7,12 +7,15 @@
  * - `row` / `group` / `visible-view` — use the caller-provided targets
  *   verbatim. No expansion, no surprise queries. `visible-view` in
  *   particular must never reach hidden rows, so it stays a pure passthrough.
- * - `tree` — parent rows plus their descendants, walked through the SQLite
- *   `runs.parent_run_id` chain. When the projection DB is unavailable the
- *   walk is skipped and `tree` degrades to the verbatim set (safe: never
- *   cancels/deletes more than the caller asked for).
+ * - `tree` — parent rows plus descendants from the authoritative
+ *   `tasks.parent_run_id` chain. Projection-only display rows remain eligible,
+ *   but a task-backed `runs.parent_run_id` disagreement fails loud instead of
+ *   silently expanding the blast radius. When SQLite is unavailable the walk
+ *   is skipped and `tree` degrades to the verbatim set.
  */
 import { isStateDbReady, openStateDb } from "../../tracker/state/db.js";
+import { getTaskByRunId, listTaskTreeByRunIds } from "../../core/task-store/queries.js";
+import { isTerminalTaskState } from "../../core/task-store/types.js";
 import type { WorkflowActionRequest } from "./types.js";
 
 export interface ResolvedActionTarget {
@@ -45,11 +48,24 @@ function toResolved(
   };
 }
 
-/** BFS over `runs.parent_run_id` to collect every descendant run. */
-function collectDescendants(dir: string, rootRunIds: string[]): ResolvedActionTarget[] {
-  if (rootRunIds.length === 0 || !isStateDbReady(dir)) return [];
+interface ProjectionDescendant {
+  workflow: string;
+  id: string;
+  runId: string;
+  parentRunId: string;
+  date: string;
+  latestStatus: string;
+}
+
+type DescendantResult =
+  | { ok: true; targets: ResolvedActionTarget[] }
+  | { ok: false; error: string };
+
+/** Reconcile the authoritative task tree with its queue projection. */
+function collectDescendants(dir: string, rootRunIds: string[]): DescendantResult {
+  if (rootRunIds.length === 0 || !isStateDbReady(dir)) return { ok: true, targets: [] };
   const db = openStateDb(dir);
-  const out = new Map<string, ResolvedActionTarget>();
+  const projected: ProjectionDescendant[] = [];
   const queue = [...rootRunIds];
   const seen = new Set<string>();
   while (queue.length > 0) {
@@ -57,7 +73,7 @@ function collectDescendants(dir: string, rootRunIds: string[]): ResolvedActionTa
     if (!parentRunId || seen.has(parentRunId)) continue;
     seen.add(parentRunId);
     const children = db.prepare(`
-      SELECT workflow, tracker_date, item_id, run_id, latest_status
+      SELECT workflow, tracker_date, item_id, run_id, parent_run_id, latest_status
       FROM runs
       WHERE parent_run_id = @parentRunId
       ORDER BY tracker_date ASC, workflow ASC, item_id ASC, run_id ASC
@@ -66,29 +82,88 @@ function collectDescendants(dir: string, rootRunIds: string[]): ResolvedActionTa
       tracker_date: string;
       item_id: string;
       run_id: string;
+      parent_run_id: string;
       latest_status: string;
     }>;
     for (const child of children) {
-      // Always enqueue for BFS — a terminal descendant can still have
-      // non-terminal grandchildren that need to be cancelled.
       queue.push(child.run_id);
-      // Skip terminal descendants: cancelling a finished row produces a
-      // spurious 410 error and would make the whole tree-cancel report failure.
-      if (child.latest_status === "done" || child.latest_status === "failed" || child.latest_status === "skipped") {
-        continue;
-      }
-      const resolved: ResolvedActionTarget = {
+      projected.push({
         workflow: child.workflow,
         id: child.item_id,
         runId: child.run_id,
+        parentRunId: child.parent_run_id,
         date: child.tracker_date,
-        status: child.latest_status === "running" ? "running" : "pending",
-      };
-      const key = targetKey(resolved);
-      if (!out.has(key)) out.set(key, resolved);
+        latestStatus: child.latest_status,
+      });
     }
   }
-  return [...out.values()];
+
+  const taskTree = listTaskTreeByRunIds(db, { rootRunIds });
+  const authoritativeTaskIds = new Set(taskTree.map((task) => task.taskId));
+  const projectedRunIds = new Set(projected.map((row) => row.runId));
+
+  for (const row of projected) {
+    if (row.latestStatus === "done" || row.latestStatus === "failed" || row.latestStatus === "skipped") continue;
+    const task = getTaskByRunId(db, row.runId);
+    if (task && !authoritativeTaskIds.has(task.taskId)) {
+      return {
+        ok: false,
+        error:
+          `tree hierarchy disagreement for run ${row.runId}: runs.parent_run_id=${row.parentRunId} ` +
+          `places task ${task.taskId} under the requested root, but tasks.parent_run_id=${task.parentRunId ?? "null"} does not`,
+      };
+    }
+  }
+
+  const out = new Map<string, ResolvedActionTarget>();
+  for (const task of taskTree) {
+    if (isTerminalTaskState(task.state)) continue;
+    const runId = task.currentRunId ?? task.runId;
+    if (runId) {
+      const projection = db.prepare(`
+        SELECT parent_run_id
+        FROM runs
+        WHERE run_id = ?
+        LIMIT 1
+      `).get(runId) as { parent_run_id: string | null } | undefined;
+      if (projection && !projectedRunIds.has(runId)) {
+        return {
+          ok: false,
+          error:
+            `tree hierarchy disagreement for run ${runId}: tasks.parent_run_id=${task.parentRunId ?? "null"} ` +
+            `places task ${task.taskId} under the requested root, but runs.parent_run_id=${projection.parent_run_id ?? "null"} does not`,
+        };
+      }
+    }
+    const resolved: ResolvedActionTarget = {
+      workflow: task.workflow,
+      id: task.itemId,
+      ...(runId ? { runId } : {}),
+      status:
+        task.state === "claimed" ||
+        task.state === "running" ||
+        task.state === "cancel_requested" ||
+        task.state === "cancelling"
+          ? "running"
+          : "pending",
+    };
+    const key = targetKey(resolved);
+    if (!out.has(key)) out.set(key, resolved);
+  }
+
+  for (const row of projected) {
+    if (row.latestStatus === "done" || row.latestStatus === "failed" || row.latestStatus === "skipped") continue;
+    if (getTaskByRunId(db, row.runId)) continue;
+    const resolved: ResolvedActionTarget = {
+      workflow: row.workflow,
+      id: row.id,
+      runId: row.runId,
+      date: row.date,
+      status: row.latestStatus === "running" ? "running" : "pending",
+    };
+    out.set(targetKey(resolved), resolved);
+  }
+  return { ok: true, targets: [...out.values()] };
 }
 
 /**
@@ -114,7 +189,9 @@ export function resolveActionTargets(
   const rootRunIds = base
     .map((t) => t.runId)
     .filter((runId): runId is string => Boolean(runId));
-  for (const descendant of collectDescendants(dir, rootRunIds)) {
+  const descendants = collectDescendants(dir, rootRunIds);
+  if (!descendants.ok) return descendants;
+  for (const descendant of descendants.targets) {
     const key = targetKey(descendant);
     if (!merged.has(key)) merged.set(key, descendant);
   }

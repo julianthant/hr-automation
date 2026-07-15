@@ -1064,6 +1064,95 @@ test('session.reopenSystem: opens a fresh tab, swaps it in, closes the wedged on
   }
 })
 
+test('session.poisonPage: closes the aborted page before replacing it and page() waits for the fresh tab', async () => {
+  const order: string[] = []
+  const oldPage = makeHealthPage({
+    url: () => 'https://example.test/old',
+    onClose: () => { order.push('close-old') },
+  })
+  const freshPage = {
+    ...makeHealthPage({ url: () => 'https://example.test/reset', evaluate: async () => 1 }),
+    goto: async () => { order.push('goto-fresh') },
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => {
+      order.push('new-page')
+      return freshPage
+    },
+  } as unknown as import('playwright').BrowserContext
+  const browser = { close: async () => {} } as unknown as import('playwright').Browser
+  const session = Session.forTesting({
+    systems: [{ id: 'a', resetUrl: 'https://example.test/reset', login: async () => {} }],
+    browsers: new Map([['a', { page: oldPage, context, browser }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+
+  session.poisonPage('a', oldPage)
+  const page = await session.page('a')
+
+  assert.equal(page, freshPage)
+  assert.deepEqual(order, ['close-old', 'new-page', 'goto-fresh'])
+})
+
+test('session.poisonPage: replacement failure never reuses the closed tab and can be explicitly retried', async () => {
+  let newPageCalls = 0
+  let oldClosed = false
+  const oldPage = makeHealthPage({
+    url: () => 'https://example.test/old',
+    onClose: () => { oldClosed = true },
+    isClosed: () => oldClosed,
+  })
+  const freshPage = makeHealthPage({ url: () => 'https://example.test/reset', evaluate: async () => 1 })
+  const context = {
+    close: async () => {},
+    newPage: async () => {
+      newPageCalls++
+      if (newPageCalls === 1) throw new Error('new page failed')
+      return freshPage
+    },
+  } as unknown as import('playwright').BrowserContext
+  const session = Session.forTesting({
+    systems: [{ id: 'a', resetUrl: 'https://example.test/reset', login: async () => {} }],
+    browsers: new Map([['a', { page: oldPage, context, browser: null }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+
+  session.poisonPage('a', oldPage)
+  await assert.rejects(session.page('a'), /new page failed/)
+  assert.equal(oldClosed, true)
+  await assert.rejects(session.page('a'), /page.*poisoned/i, 'the closed original tab is never returned')
+
+  session.poisonPage('a', oldPage)
+  assert.equal(await session.page('a'), freshPage)
+})
+
+test('session.poisonPage: a hung page.close is bounded and escalates to the context', async () => {
+  let contextClosed = false
+  const hungPage = {
+    close: () => new Promise<void>(() => {}),
+    isClosed: () => false,
+    url: () => 'https://example.test/old',
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => { contextClosed = true },
+    newPage: async () => { throw new Error('must not replace on a context closed by escalation') },
+  } as unknown as import('playwright').BrowserContext
+  const session = Session.forTesting({
+    systems: [{ id: 'a', resetUrl: 'https://example.test/reset', login: async () => {} }],
+    browsers: new Map([['a', { page: hungPage, context, browser: null }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+
+  const startedAt = Date.now()
+  session.poisonPage('a', hungPage)
+  await assert.rejects(session.page('a'), /page\.close timed out/)
+
+  assert.ok(Date.now() - startedAt < 1_000, 'hung page.close is bounded below the cancel watchdog threshold')
+  assert.equal(contextClosed, true)
+  await assert.rejects(session.page('a'), /page.*poisoned/i)
+})
+
 test('session: health monitor REFRESHES a soft (chrome-error) fault and recovers', async () => {
   const statuses: string[] = []
   let recovered = false

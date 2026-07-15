@@ -80,6 +80,15 @@ export interface EnqueuedTask {
   parentRunId?: string
 }
 
+export type CancelTaskResult =
+  | {
+      kind: 'accepted'
+      task: TaskRow
+      disposition: 'requested' | 'already-requested' | 'cancelled-before-run'
+    }
+  | { kind: 'already-terminal'; task: TaskRow }
+  | { kind: 'not-found' }
+
 export interface EnqueueTasksRequest<T> {
   workflow: string
   inputs: T[]

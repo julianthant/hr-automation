@@ -24,6 +24,7 @@ import type { WorkflowActionRequest } from "../../../src/control/actions/types.j
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
 import { applyTrackerEntry } from "../../../src/tracker/state/apply.js";
 import type { TrackerEntry } from "../../../src/tracker/jsonl-io.js";
+import { openControlStores } from "../../../src/control/ops/shared.js";
 
 let tmp: string;
 beforeEach(() => {
@@ -155,6 +156,73 @@ describe("resolveActionTargets — verbatim scopes never expand (row/group/visib
 });
 
 describe("resolveActionTargets — scope: tree (descendant walk)", () => {
+  it("fails loud when projection puts a task-backed run inside a different authoritative task tree", () => {
+    insertRun({ workflow: "oath-signature", id: "coord-1", runId: "run-root", status: "running" });
+    insertRun({
+      workflow: "person-lookup",
+      id: "child-1",
+      runId: "run-child-1",
+      parentRunId: "run-root",
+      status: "pending",
+    });
+    const stores = openControlStores(tmp);
+    stores.taskStore.enqueueTasks({
+      workflow: "person-lookup",
+      inputs: [{ id: "child-1" }],
+      deriveItemId: (input) => input.id,
+      parentRunId: "different-root",
+      runIds: ["run-child-1"],
+    });
+
+    const result = resolveActionTargets(baseRequest({ scope: "tree" }), tmp);
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /hierarchy disagreement.*tasks\.parent_run_id=different-root/);
+  });
+
+  it("fails loud when the task tree includes a run projected under a different parent", () => {
+    insertRun({ workflow: "oath-signature", id: "coord-1", runId: "run-root", status: "running" });
+    insertRun({
+      workflow: "person-lookup",
+      id: "child-1",
+      runId: "run-child-1",
+      parentRunId: "different-root",
+      status: "pending",
+    });
+    const stores = openControlStores(tmp);
+    stores.taskStore.enqueueTasks({
+      workflow: "person-lookup",
+      inputs: [{ id: "child-1" }],
+      deriveItemId: (input) => input.id,
+      parentRunId: "run-root",
+      runIds: ["run-child-1"],
+    });
+
+    const result = resolveActionTargets(baseRequest({ scope: "tree" }), tmp);
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /hierarchy disagreement.*runs\.parent_run_id=different-root/);
+  });
+
+  it("includes active descendants that exist only in tasks.parent_run_id", () => {
+    insertRun({ workflow: "oath-signature", id: "coord-1", runId: "run-root", status: "running" });
+    const stores = openControlStores(tmp);
+    stores.taskStore.enqueueTasks({
+      workflow: "person-lookup",
+      inputs: [{ id: "task-only-child" }],
+      deriveItemId: (input) => input.id,
+      parentRunId: "run-root",
+      runIds: ["task-only-run"],
+    });
+
+    const result = resolveActionTargets(baseRequest({ scope: "tree" }), tmp);
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(result.targets.map((target) => target.id).sort(), ["coord-1", "task-only-child"]);
+    assert.equal(result.targets.find((target) => target.id === "task-only-child")?.status, "pending");
+  });
+
   it("includes the root plus every non-terminal descendant", () => {
     insertRun({ workflow: "oath-signature", id: "coord-1", runId: "run-root", status: "running" });
     insertRun({

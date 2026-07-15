@@ -10,6 +10,7 @@ import {
   type ClaimedTask,
   type EnqueuedTask,
   type EnqueueTasksRequest,
+  type CancelTaskResult,
 } from './types.js'
 import { enqueueTasks } from './enqueue.js'
 import {
@@ -43,6 +44,7 @@ import {
   findOriginalInputForRunId,
   listActiveRootTasksForItem,
   listTasksForWorkflow,
+  listTaskTreeByRunIds,
   listAttemptsForTask,
   countQueued,
   type ActiveTaskRef,
@@ -57,6 +59,7 @@ export type {
   ClaimedTask,
   EnqueuedTask,
   EnqueueTasksRequest,
+  CancelTaskResult,
   ReleasedParentTask,
   ActiveTaskRef,
 }
@@ -77,7 +80,7 @@ export interface ControlTaskStore {
   /** Fail only if not already terminal (terminal_at IS NULL); returns whether THIS call won. Cross-process queued-orphan dedup (E2E-105). */
   markTaskFailedIfActive(request: { taskId: string; attemptId?: string; error: string; now?: string }): boolean
   markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string }): void
-  requestCancelTask(request: { taskId: string; reason?: string; now?: string }): TaskRow | null
+  requestCancelTask(request: { taskId: string; reason?: string; now?: string }): CancelTaskResult
   /**
    * Re-enqueue a failed/terminal task as a fresh attempt. `blockedControlStates`
    * (when supplied) guards the reset UPDATE atomically: if the task became one
@@ -110,6 +113,8 @@ export interface ControlTaskStore {
   /** Non-terminal root (non-delegated) tasks for one item — backs enqueue supersede. */
   listActiveRootTasksForItem(request: { workflow: string; itemId: string }): ActiveTaskRef[]
   listTasksForWorkflow(workflow: string): TaskRow[]
+  /** Recursive descendants linked by tasks.parent_run_id; roots are excluded. */
+  listTaskTreeByRunIds(request: { rootRunIds: readonly string[] }): TaskRow[]
   listAttemptsForTask(taskId: string): AttemptRow[]
   returnTaskToQueued(request: { taskId: string; now?: string }): void
   recoverClaimsForDeadWorkers(request: { workflow: string; aliveWorkerIds: Set<string>; now?: string }): TaskRow[]
@@ -151,6 +156,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     findOriginalInputForRunId: bindDb(findOriginalInputForRunId),
     listActiveRootTasksForItem: bindDb(listActiveRootTasksForItem),
     listTasksForWorkflow: bindDb(listTasksForWorkflow),
+    listTaskTreeByRunIds: bindDb(listTaskTreeByRunIds),
     listAttemptsForTask: bindDb(listAttemptsForTask),
     returnTaskToQueued: bindControl(returnTaskToQueued),
     recoverClaimsForDeadWorkers: bindControl(recoverClaimsForDeadWorkers),

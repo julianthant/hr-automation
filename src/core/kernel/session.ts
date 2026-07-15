@@ -80,6 +80,8 @@ const HEALTH_MONITOR_MAX_REOPEN = numEnv('HRAUTO_HEALTH_MONITOR_MAX_REOPEN', 3)
  * underlying chromium process tree directly (no Playwright RPC involved).
  */
 const SESSION_CLOSE_TIMEOUT_MS = numEnv('HRAUTO_SESSION_CLOSE_TIMEOUT_MS', 15_000)
+/** Abort replacement must never wait on a wedged page.close RPC indefinitely. */
+const POISONED_PAGE_CLOSE_TIMEOUT_MS = 500
 
 export function formatCaptureFilename(args: {
   workflow: string
@@ -300,6 +302,10 @@ export class Session {
   private healthTimer: ReturnType<typeof setInterval> | null = null
   /** Health-monitor cadence override (tests). */
   private healthMonitorOverride?: { tickMs: number; maxAutoRefreshes?: number; maxReopens?: number }
+  /** Close-first replacements for pages aborted mid-Playwright operation. */
+  private poisonedPageReplacements = new Map<string, Promise<void>>()
+  /** Systems whose aborted page closed but could not yet be replaced. */
+  private poisonedSystems = new Set<string>()
 
   /**
    * True while the auth chain (`Session.launch` → `loginWithRetry` →
@@ -703,6 +709,19 @@ export class Session {
     const ready = this.state.readyPromises.get(id)
     if (!ready) throw new Error(`unknown system: ${id}`)
     await ready
+    const replacement = this.poisonedPageReplacements.get(id)
+    if (replacement) {
+      try {
+        await replacement
+      } finally {
+        if (this.poisonedPageReplacements.get(id) === replacement) {
+          this.poisonedPageReplacements.delete(id)
+        }
+      }
+    }
+    if (this.poisonedSystems.has(id)) {
+      throw new Error(`page for system ${id} is poisoned after cancellation; explicit replacement/reopen is required`)
+    }
     let slot = this.state.browsers.get(id)
     if (!slot && this.parent) {
       const parentSlot = this.parent.state.browsers.get(id)
@@ -720,6 +739,124 @@ export class Session {
     this.pageAccessSeq += 1
     this.lastAccessedSystem = id
     return slot.page
+  }
+
+  /**
+   * Quarantine a page whose in-flight Playwright promise was abandoned by an
+   * operator abort. Closing first terminates the underlying CDP operation;
+   * only a freshly-created, navigated, and probed page becomes visible to the
+   * next `page(id)` call. Concurrent aborts for the same page share one
+   * replacement promise.
+   */
+  poisonPage(id: string, expectedPage: Page): void {
+    if (this.poisonedPageReplacements.has(id)) return
+    const slot = this.state.browsers.get(id)
+    if (!slot || slot.page !== expectedPage) return
+    // Mark synchronously, before any close/navigation await. Every early
+    // failure (including missing reset URL) must quarantine the original.
+    this.poisonedSystems.add(id)
+    const replacement = this.replacePoisonedPage(id, expectedPage)
+    this.poisonedPageReplacements.set(id, replacement)
+    void replacement.then(undefined, (err) => {
+      log.error(`[Session: ${id}] aborted page replacement failed: ${errorMessage(err)}`)
+    })
+  }
+
+  private async replacePoisonedPage(id: string, expectedPage: Page): Promise<void> {
+    const slot = this.state.browsers.get(id)
+    if (!slot) throw new Error(`poisonPage: no browser for system ${id}`)
+    if (slot.page !== expectedPage) {
+      this.poisonedSystems.delete(id)
+      return
+    }
+    const sys = this.state.systems.find((system) => system.id === id)
+    let target = sys?.resetUrl
+    if (!target) {
+      const current = expectedPage.url()
+      if (current && current !== 'about:blank' && !current.toLowerCase().startsWith('chrome-error') && !isLoginLikeUrl(current)) {
+        target = current
+      }
+    }
+    if (!target) {
+      throw new Error(`poisonPage: system ${id} has no verified reset/current URL for page replacement`)
+    }
+
+    // Close before acquiring the replacement. This is the cancellation rung:
+    // it terminates the still-running CDP call instead of leaving it racing the
+    // next item on a page the workflow has already abandoned.
+    try {
+      await withTimeout(
+        expectedPage.close(),
+        POISONED_PAGE_CLOSE_TIMEOUT_MS,
+        `Session.poisonPage(${id}).page.close`,
+      )
+    } catch (err) {
+      let closed = false
+      try { closed = expectedPage.isClosed() } catch { /* keep false */ }
+      if (!closed) {
+        // The page-level CDP channel is wedged. Escalate to its owning context
+        // under the same bound, then hard-kill tracked chromium if even that
+        // cannot settle. Either way this Session is poisoned; never reuse the
+        // original page or pretend a replacement can safely share the context.
+        try {
+          await withTimeout(
+            slot.context.close(),
+            POISONED_PAGE_CLOSE_TIMEOUT_MS,
+            `Session.poisonPage(${id}).context.close`,
+          )
+        } catch (contextErr) {
+          log.error(`[Session: ${id}] context close escalation failed: ${errorMessage(contextErr)}`)
+          await this.killChromeHard(0)
+        }
+        this.poisonedSystems.add(id)
+        throw err
+      }
+    }
+
+    const health = this.ensureHealthState(id)
+    while (health.reloadInFlight) await sleep(25)
+    if (slot.page !== expectedPage) {
+      this.poisonedSystems.delete(id)
+      return
+    }
+    health.reloadInFlight = true
+    this.setIdleReloadFlag(id, true)
+    let fresh: Page | null = null
+    try {
+      fresh = await slot.context.newPage()
+      await fresh.goto(target, { waitUntil: 'domcontentloaded', timeout: 90_000 })
+      const url = fresh.url()
+      if (!url || url === 'about:blank' || url.toLowerCase().startsWith('chrome-error') || isLoginLikeUrl(url)) {
+        throw new Error(`poisonPage: replacement for ${id} landed on unusable URL ${JSON.stringify(url)}`)
+      }
+      const probe = await fresh.evaluate(() => 1)
+      if (probe !== 1) throw new Error(`poisonPage: replacement liveness probe failed for ${id}`)
+      if (slot.page !== expectedPage) {
+        await fresh.close()
+        return
+      }
+      slot.page = fresh
+      fresh = null
+      this.poisonedSystems.delete(id)
+      health.lastStatus = 'healthy'
+      health.autoRefreshCount = 0
+      health.reopenCount = 0
+      this.emitHealth(id, 'healthy')
+      if (this.idleStates.has(id)) this.noteIdleActivity(id)
+    } catch (err) {
+      if (fresh) {
+        try { await fresh.close() } catch (closeErr) {
+          log.warn(`[Session: ${id}] failed to close unusable replacement page: ${errorMessage(closeErr)}`)
+        }
+      }
+      health.lastStatus = 'failed'
+      this.poisonedSystems.add(id)
+      this.emitHealth(id, 'failed', 'aborted page could not be replaced')
+      throw err
+    } finally {
+      health.reloadInFlight = false
+      this.setIdleReloadFlag(id, false)
+    }
   }
 
   /**
@@ -1136,6 +1273,7 @@ export class Session {
       // Swap: point the slot at the fresh page, then close the wedged one.
       const oldPage = slot.page
       slot.page = newPage
+      this.poisonedSystems.delete(id)
       try { if (!oldPage.isClosed()) await oldPage.close() } catch { /* best-effort */ }
       if (this.idleStates.has(id)) this.noteIdleActivity(id)
       log.success(`[Session: ${id}] reopened on a fresh tab (same auth, no Duo)`)
