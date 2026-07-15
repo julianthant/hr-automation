@@ -15,7 +15,6 @@ export function jsonResponse(
     status,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
       ...extraHeaders,
     },
   });
@@ -29,7 +28,6 @@ export function textResponse(
   return new Response(body, {
     status,
     headers: {
-      "Access-Control-Allow-Origin": "*",
       ...extraHeaders,
     },
   });
@@ -39,7 +37,6 @@ export function preflightResponse(): Response {
   return new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     },
@@ -62,7 +59,6 @@ export async function streamFileResponse(
     "Content-Type": opts.contentType,
     "Content-Length": String(stat.size),
     "Cache-Control": opts.cacheControl,
-    "Access-Control-Allow-Origin": "*",
     ...(opts.disposition ? { "Content-Disposition": opts.disposition } : {}),
   };
 

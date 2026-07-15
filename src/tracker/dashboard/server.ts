@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import {
@@ -16,7 +16,12 @@ import { sweepStaleRunScreenshots } from "../state/screenshot-sweep.js";
 import { PATHS } from "../../config.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { createDashboardHonoApp } from "./hono/app.js";
+import { createDashboardHonoApp, createPublicCaptureHonoApp } from "./hono/app.js";
+import {
+  createDashboardAccessPolicy,
+  REMOTE_ADDRESS_HEADER,
+  resolveDashboardBindHost,
+} from "./hono/security.js";
 import { captureStore } from "./capture-state.js";
 import {
   scanFailurePatterns,
@@ -26,6 +31,17 @@ import { runRowLifecycleDebugSweep } from "../row-lifecycle-debug.js";
 
 let server: Server | null = null;
 
+function withTrustedRemoteAddress(
+  listener: (req: IncomingMessage, res: ServerResponse) => void,
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    // Always overwrite the client-supplied value. Access middleware may trust
+    // this header only because it is injected at the Node socket boundary.
+    req.headers[REMOTE_ADDRESS_HEADER] = req.socket.remoteAddress ?? "";
+    listener(req, res);
+  };
+}
+
 export interface StartDashboardOptions {
   noClean?: boolean;
   cleanMaxAgeDays?: number;
@@ -33,6 +49,8 @@ export interface StartDashboardOptions {
   screenshotsDir?: string;
   uploadPort?: number | null;
   serveStatic?: boolean;
+  host?: string;
+  captureHost?: string;
 }
 
 export interface CreateDashboardServerOptions {
@@ -44,6 +62,8 @@ export interface CreateDashboardServerOptions {
   screenshotsDir?: string;
   uploadPort?: number | null;
   serveStatic?: boolean;
+  host?: string;
+  captureHost?: string;
 }
 
 export function startDashboard(
@@ -63,6 +83,8 @@ export function startDashboard(
     cleanMaxAgeDays: opts.cleanMaxAgeDays,
     screenshotsDir: opts.screenshotsDir,
     serveStatic: opts.serveStatic,
+    host: opts.host,
+    captureHost: opts.captureHost,
   });
 }
 
@@ -70,6 +92,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const workflow = opts.workflow ?? "onboarding";
   const port = opts.port ?? 3838;
   const dir = opts.dir ?? DEFAULT_DIR;
+  const host = resolveDashboardBindHost(opts.host);
 
   if (!opts.noClean) {
     try {
@@ -110,7 +133,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     log.warn(`SQLite projection startup skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
   const staticDir = opts.serveStatic ? resolve(process.cwd(), "dist/dashboard") : undefined;
-  const honoApp = createDashboardHonoApp({
+  const sharedDeps = {
     dir,
     stateDb,
     workflow,
@@ -119,8 +142,10 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     staticDir,
     screenshotsDir: opts.screenshotsDir,
     repoRoot: process.cwd(),
-  });
-  const requestListener = getRequestListener(honoApp.fetch);
+  };
+  const accessPolicy = createDashboardAccessPolicy({ port, bindHost: host });
+  const honoApp = createDashboardHonoApp({ ...sharedDeps, accessPolicy });
+  const requestListener = withTrustedRemoteAddress(getRequestListener(honoApp.fetch));
 
   const localServer: Server = createServer(requestListener);
   const sweepInterval = setInterval(() => {
@@ -161,26 +186,28 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     }
   });
 
-  localServer.listen(port, () => {
+  localServer.listen(port, host, () => {
     const addr = localServer.address();
     const boundPort = typeof addr === "object" && addr ? addr.port : port;
     if (port !== 0) {
-      log.step(`Live dashboard: http://localhost:${boundPort}`);
+      log.step(`Live dashboard: http://${host}:${boundPort}`);
     }
   });
 
   if (opts.uploadPort != null) {
-    const uploadServer: Server = createServer(requestListener);
+    const captureApp = createPublicCaptureHonoApp(sharedDeps);
+    const uploadServer: Server = createServer(getRequestListener(captureApp.fetch));
     uploadServer.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {
         log.step(
-          `Upload port ${opts.uploadPort} in use — uploads will fall back to main port (may queue behind SSE)`,
+          `Capture port ${opts.uploadPort} in use — phone Capture is unavailable until the port is free`,
         );
       }
     });
-    uploadServer.listen(opts.uploadPort, () => {
+    const captureHost = resolveDashboardBindHost(opts.captureHost ?? host);
+    uploadServer.listen(opts.uploadPort, captureHost, () => {
       if (opts.uploadPort !== 0) {
-        log.step(`Upload listener: http://localhost:${opts.uploadPort}`);
+        log.step(`Token-scoped phone Capture: http://${captureHost}:${opts.uploadPort}`);
       }
     });
     localServer.on("close", () => {

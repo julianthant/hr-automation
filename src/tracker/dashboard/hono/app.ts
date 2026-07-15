@@ -24,21 +24,30 @@ import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerWorkflowPresentationRoutes } from "./routes/workflow-presentation.js";
 import { registerWorkflowDesignRoutes } from "./routes/workflow-design.js";
 import { registerAiAssistRoutes } from "./routes/ai-assist.js";
-import { isExternalCaptureRequest, isPublicCaptureRequestAllowed } from "./public-scope.js";
+import { isPublicCaptureRequestAllowed } from "./public-scope.js";
+import {
+  dashboardAccessMiddleware,
+  publicCaptureCorsMiddleware,
+  registerOperatorSessionRoute,
+} from "./security.js";
 
 export type { DashboardHonoDeps } from "./context.js";
 
 export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   const app = new Hono();
 
-  app.options("*", () => preflightResponse());
+  if (deps.accessPolicy) {
+    app.use("*", dashboardAccessMiddleware(deps.accessPolicy));
+    registerOperatorSessionRoute(app, deps.accessPolicy);
+  } else {
+    app.options("*", () => preflightResponse());
+    app.use("*", async (_c, next) => next());
+    app.get("/api/operator/session", () =>
+      jsonResponse({ ok: false, error: "Operator session is available only on a running dashboard" }, 503));
+  }
 
-  // Unhandled exceptions in route handlers must return a CORS-friendly JSON
-  // 500 — Hono's default error response is plain-text without
-  // Access-Control-Allow-Origin, which the browser blocks on cross-origin
-  // requests (dashboard page on :5173/:3838 → upload listener on :3839),
-  // surfacing as a misleading "Network error" in XHR.onerror instead of the
-  // real status.
+  // Unhandled exceptions stay structured; the boundary middleware applies
+  // origin-specific CORS after the route returns.
   app.onError((err, c) => {
     const message = errorMessage(err);
     log.warn(`[dashboard-api] ${c.req.method} ${c.req.path} threw: ${message}`);
@@ -46,24 +55,6 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
       log.warn(err.stack);
     }
     return jsonResponse({ ok: false, error: message }, 500);
-  });
-
-  // SECURITY: public/forwarded Capture scoping. Must run BEFORE any route. The
-  // dashboard is unauthenticated, so when CAPTURE_PUBLIC_URL points at a
-  // forwarded/public phone origin, restrict EXTERNAL requests to the phone's
-  // token-gated capture endpoints only; everything else (SPA, all other APIs,
-  // /events, operator-only capture routes) returns 404. Local operator access is
-  // never external, so it is unaffected. See public-scope.ts.
-  app.use("*", async (c, next) => {
-    const external = isExternalCaptureRequest({
-      hostHeader: c.req.header("host"),
-      publicUrl: process.env.CAPTURE_PUBLIC_URL,
-      cfConnectingIp: c.req.header("cf-connecting-ip"),
-    });
-    if (external && !isPublicCaptureRequestAllowed(c.req.method, c.req.path)) {
-      return c.text("Not found", 404);
-    }
-    return next();
   });
 
   registerProjectionRoutes(app, deps);
@@ -87,5 +78,24 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
   registerHubRoute(app, deps);
   registerStaticRoutes(app, deps);
 
+  return app;
+}
+
+/** Dedicated phone listener: no dashboard APIs, SSE, files, settings, or SPA. */
+export function createPublicCaptureHonoApp(deps: DashboardHonoDeps): Hono {
+  const app = new Hono();
+  app.use("*", publicCaptureCorsMiddleware(process.env.CAPTURE_PUBLIC_URL));
+  app.use("*", async (c, next) => {
+    if (!isPublicCaptureRequestAllowed(c.req.method, c.req.path)) {
+      return c.text("Not found", 404);
+    }
+    return next();
+  });
+  app.onError((err, c) => {
+    const message = errorMessage(err);
+    log.warn(`[capture-api] ${c.req.method} ${c.req.path} threw: ${message}`);
+    return jsonResponse({ ok: false, error: message }, 500);
+  });
+  registerCaptureRoutes(app, deps);
   return app;
 }

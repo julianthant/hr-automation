@@ -188,10 +188,6 @@ const STATEMENT_CATCH_ALLOWLIST: Record<string, { count: number; reason: string 
     count: 1,
     reason: "Optional bundled heic2any dev asset: missing/unreadable file -> undefined, a real 'asset not available' state the caller already handles.",
   },
-  "src/tracker/dashboard/hono/public-scope.ts": {
-    count: 1,
-    reason: "Malformed configured public URL fails the host-match check (false) instead of throwing on every request — a valid negative for a scope guard.",
-  },
   "src/tracker/dashboard/ocr/prepare.ts": {
     count: 1,
     reason: "Registered-file store unavailable while resolving a duplicate-detection hash -> undefined with an inline comment: 'can't prove a duplicate, let the upload proceed' (documented, deliberate direction).",

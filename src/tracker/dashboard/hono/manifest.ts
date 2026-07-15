@@ -5,9 +5,9 @@ export interface DashboardHonoRouteManifestEntry {
 
 const DASHBOARD_HONO_ROUTE_MANIFEST: readonly DashboardHonoRouteManifestEntry[] = [
   { method: "OPTIONS", path: "*" },
-  // Public/forwarded Capture scoping middleware (app.use("*") -> registered as
-  // ALL *). Runs first and restricts external Capture requests to phone endpoints.
+  // Access-control middleware (app.use("*") -> registered as ALL *).
   { method: "ALL", path: "*" },
+  { method: "GET", path: "/api/operator/session" },
   { method: "GET", path: "/api/v2/projection/health" },
   { method: "GET", path: "/api/v2/entries" },
   { method: "GET", path: "/api/v2/runs" },

@@ -1,16 +1,9 @@
 /**
- * Public/forwarded Capture access scoping for the dashboard.
+ * Public/forwarded Capture route allowlist.
  *
- * The dashboard has NO authentication and, when CAPTURE_PUBLIC_URL points at a
- * forwarded/public phone-Capture origin, that origin can become reachable beyond
- * the operator's laptop. Without scoping, that would expose the ENTIRE
- * dashboard — all PII, queue data, workflow controls, settings, logs, and
- * screenshots — to anyone who has (or guesses/leaks) the forwarded URL.
- *
- * This module restricts EXTERNAL forwarded-origin requests to exactly the phone's
- * capture endpoints, each already gated server-side by the 96-bit per-session
- * token. Local operator access (localhost / LAN, no forwarded-origin signal) is
- * never treated as external, so the operator's own dashboard is unaffected.
+ * The public listener owns a separate Hono app and consults this allowlist before
+ * its Capture routes. The main dashboard app has its own Host/Origin/operator
+ * authentication boundary and is never registered on the forwarded listener.
  */
 
 interface AllowRule {
@@ -43,38 +36,4 @@ export function isPublicCaptureRequestAllowed(method: string, path: string): boo
   // CORS preflight carries no data and is answered by the OPTIONS handler.
   if (m === "OPTIONS") return true;
   return PUBLIC_CAPTURE_ALLOW.some((r) => r.method === m && r.re.test(path));
-}
-
-/** Lowercased host with any port stripped; handles bracketed IPv6 (`[::1]:3838`). */
-function hostOnly(hostHeader: string | null | undefined): string | undefined {
-  if (!hostHeader) return undefined;
-  const h = hostHeader.trim().toLowerCase();
-  const v6 = h.match(/^\[([^\]]+)\](?::\d+)?$/);
-  if (v6) return v6[1];
-  return h.replace(/:\d+$/, "");
-}
-
-/**
- * Whether a request arrived via the configured public/forwarded Capture origin
- * (vs. local operator access). External iff a public origin is configured AND
- * the request either carries a known proxy edge header (`cf-connecting-ip`) OR
- * its Host matches the public origin's host. Either signal is enough to fail
- * safe.
- * A local request (localhost / LAN, no cf header, Host ≠ the public host) is
- * never external.
- */
-export function isExternalCaptureRequest(opts: {
-  hostHeader: string | null | undefined;
-  publicUrl: string | undefined;
-  cfConnectingIp: string | null | undefined;
-}): boolean {
-  if (!opts.publicUrl) return false;
-  if (opts.cfConnectingIp) return true;
-  let publicHost: string;
-  try {
-    publicHost = new URL(opts.publicUrl).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  return hostOnly(opts.hostHeader) === publicHost;
 }

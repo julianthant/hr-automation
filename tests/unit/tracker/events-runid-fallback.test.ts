@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { rowFilePath, rowsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 import type { Server } from "http";
+import { once } from "node:events";
 import {
   createDashboardServer,
   filterEventsForRun,
@@ -13,6 +14,11 @@ import {
 } from "../../../src/tracker/dashboard.js";
 import type { SessionEvent } from "../../../src/tracker/session-events.js";
 import { dateLocal, type TrackerEntry } from "../../../src/tracker/jsonl.js";
+
+async function listeningPort(server: Server): Promise<number> {
+  if (!server.listening) await once(server, "listening");
+  return (server.address() as { port: number }).port;
+}
 
 function appendEvent(dir: string, event: Record<string, unknown> & { timestamp?: string }): void {
   const tsStr = typeof event.timestamp === "string" ? event.timestamp : new Date().toISOString();
@@ -545,7 +551,7 @@ describe("/events/run-events operation coordinator SSE (HTTP)", () => {
     appendEvent(tmp, { type: "item_start", timestamp: `${tsBase}3Z`, pid: 9999, workflowInstance: instance, runId: memberRunId, currentItemId: "alice@example.com" });
 
     server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
 
     const hubSubs = encodeURIComponent(
       JSON.stringify([{
@@ -606,7 +612,7 @@ describe("/events/run-events instance-based fallback (HTTP)", () => {
 
     // Start server AFTER seeding so the projection rebuild reads the events.
     server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
 
     const hubSubs = encodeURIComponent(
       JSON.stringify([{ id: "s1", topic: "runEvents", params: { workflow: "onboarding", id: "alice@example.com", runId: "A", date: today } }]),

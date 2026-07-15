@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Server } from "node:http";
+import { once } from "node:events";
 
 import { parseSubsQuery } from "../../../../src/tracker/dashboard/hono/topics.js";
 import { createDashboardServer } from "../../../../src/tracker/dashboard.js";
@@ -18,6 +19,11 @@ import {
   logsDir,
   sessionsDir,
 } from "../../../../src/tracker/jsonl.js";
+
+async function listeningPort(server: Server): Promise<number> {
+  if (!server.listening) await once(server, "listening");
+  return (server.address() as { port: number }).port;
+}
 
 // ── parseSubsQuery validation tests ──────────────────────────────────────────
 
@@ -142,11 +148,11 @@ describe("/events/hub integration", () => {
   let server: Server;
   let port: number;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "hub-test-"));
     // sessions dir is the tracker dir itself
     server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
   });
 
   afterEach(async () => {
@@ -195,11 +201,11 @@ describe("/events/hub entries + sessions topics", () => {
   let server: Server;
   let port: number;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "hub-entries-test-"));
     mkdirSync(dir, { recursive: true });
     server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
   });
 
   afterEach(async () => {
@@ -310,7 +316,7 @@ describe("/events/hub logs + runEvents topics", () => {
   const testItemId = "test-item-1";
   const testRunId = `${testItemId}#1`;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "hub-logs-test-"));
     mkdirSync(rowsDir(dir), { recursive: true });
     mkdirSync(logsDir(dir), { recursive: true });
@@ -369,7 +375,7 @@ describe("/events/hub logs + runEvents topics", () => {
     );
 
     server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
   });
 
   afterEach(async () => {
@@ -593,11 +599,11 @@ describe("/events/hub captureSessions topic", () => {
   let server: Server;
   let port: number;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "hub-capture-test-"));
     mkdirSync(dir, { recursive: true });
     server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
   });
 
   afterEach(async () => {
@@ -645,7 +651,7 @@ describe("/events/hub captureSessions topic", () => {
 test("/events/hub is registered in the Hono app", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hub-manifest-"));
   const server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
-  const port = (server.address() as { port: number }).port;
+  const port = await listeningPort(server);
 
   try {
     // A GET with no subs should return 400, not 404 — proves the route exists

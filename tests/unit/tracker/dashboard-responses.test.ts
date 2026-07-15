@@ -33,20 +33,20 @@ test("readJsonRequest enforces maxBytes", async () => {
   assert.deepEqual(parsed, { ok: false, error: "Request body too large" });
 });
 
-test("jsonResponse uses the dashboard JSON/CORS response shape", async () => {
+test("jsonResponse leaves CORS to the request boundary", async () => {
   const response = jsonResponse({ ok: true }, 202);
   assert.equal(response.status, 202);
   assert.equal(response.headers.get("Content-Type"), "application/json");
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
   assert.equal(await response.text(), "{\"ok\":true}");
 });
 
-test("preflightResponse preserves current preflight headers", () => {
+test("test-only preflight response does not grant wildcard origin access", () => {
   const response = preflightResponse();
   assert.equal(response.status, 204);
   assert.equal(response.headers.get("Access-Control-Allow-Methods"), "GET, POST, OPTIONS");
   assert.equal(response.headers.get("Access-Control-Allow-Headers"), "Content-Type");
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
 });
 
 test("sseResponse preserves event-stream headers and sends JSON data blocks", async () => {
@@ -57,7 +57,7 @@ test("sseResponse preserves event-stream headers and sends JSON data blocks", as
   assert.equal(response.headers.get("Content-Type"), "text/event-stream");
   assert.equal(response.headers.get("Cache-Control"), "no-cache");
   assert.equal(response.headers.get("Connection"), "keep-alive");
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
 
   const reader = response.body!.getReader();
   const { value } = await reader.read();
