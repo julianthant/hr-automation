@@ -380,6 +380,153 @@ test('a stale worker cannot complete a task a peer re-claimed after re-pend (ISS
   }
 })
 
+test('terminal and requeue transitions return explicit owner/attempt/generation-fenced outcomes', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const claimed = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(claimed)
+    store.markTaskRunning({ taskId: queued.taskId, attemptId: claimed.attemptId, workerId: 'w1', now: iso(2) })
+
+    assert.deepEqual(
+      store.markTaskDone({
+        taskId: queued.taskId,
+        attemptId: claimed.attemptId,
+        workerId: 'peer',
+        claimGeneration: claimed.claimGeneration,
+        now: iso(3),
+      }),
+      { kind: 'lease-lost' },
+    )
+    assert.equal(store.getTask(queued.taskId)?.state, 'running')
+
+    assert.deepEqual(
+      store.returnTaskToQueued({
+        taskId: queued.taskId,
+        attemptId: claimed.attemptId,
+        workerId: 'peer',
+        claimGeneration: claimed.claimGeneration,
+        now: iso(4),
+      }),
+      { kind: 'lease-lost' },
+    )
+    assert.equal(store.getTask(queued.taskId)?.state, 'running')
+
+    assert.deepEqual(
+      store.returnTaskToQueued({
+        taskId: queued.taskId,
+        attemptId: claimed.attemptId,
+        workerId: 'w1',
+        claimGeneration: claimed.claimGeneration,
+        now: iso(5),
+      }),
+      { kind: 'applied' },
+    )
+    assert.equal(store.getTask(queued.taskId)?.state, 'queued')
+
+    assert.deepEqual(
+      store.markTaskDone({
+        taskId: queued.taskId,
+        attemptId: claimed.attemptId,
+        workerId: 'w1',
+        claimGeneration: claimed.claimGeneration,
+        now: iso(6),
+      }),
+      { kind: 'lease-lost' },
+    )
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('terminal transitions distinguish applied from an existing terminal row', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const first = store.markTaskDone({ taskId: queued.taskId, attemptId: queued.attemptId, now: iso(1) })
+    const second = store.markTaskFailed({ taskId: queued.taskId, attemptId: queued.attemptId, error: 'late', now: iso(2) })
+    assert.deepEqual(first, { kind: 'applied' })
+    assert.deepEqual(second, { kind: 'already-terminal', state: 'done' })
+    assert.equal(store.getTask(queued.taskId)?.state, 'done')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('terminal fences distinguish missing task and mismatched attempt without mutating either row', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    assert.deepEqual(
+      store.markTaskDone({ taskId: 'missing', attemptId: queued.attemptId, now: iso(1) }),
+      { kind: 'not-found' },
+    )
+    assert.deepEqual(
+      store.markTaskDone({ taskId: queued.taskId, attemptId: 'wrong-attempt', now: iso(2) }),
+      { kind: 'lease-lost' },
+    )
+    assert.equal(store.getTask(queued.taskId)?.state, 'queued')
+    assert.equal(store.getAttempt(queued.attemptId)?.state, 'pending')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('terminal transition rolls back the task update when its current attempt row is missing', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    store.db.exec('PRAGMA foreign_keys = OFF')
+    store.db.prepare('DELETE FROM task_attempts WHERE id = ?').run(queued.attemptId)
+    store.db.exec('PRAGMA foreign_keys = ON')
+
+    assert.throws(
+      () => store.markTaskDone({ taskId: queued.taskId, attemptId: queued.attemptId, now: iso(1) }),
+      /attempt .* did not update/,
+    )
+    assert.equal(store.getTask(queued.taskId)?.state, 'queued', 'task update rolls back with missing attempt')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('uncertain terminal persistence blocks only the exact owner/attempt/generation and closes the attempt', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({ workflow: 'wf', inputs: [{ id: 'a' }], deriveItemId: (x) => x.id, now: iso(0) })
+    const claimed = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(claimed)
+    store.markTaskRunning({ taskId: queued.taskId, attemptId: claimed.attemptId, workerId: 'w1', now: iso(2) })
+
+    assert.deepEqual(store.markTaskBlockedUncertain({
+      taskId: queued.taskId,
+      attemptId: claimed.attemptId,
+      workerId: 'peer',
+      claimGeneration: claimed.claimGeneration,
+      error: 'uncertain submission',
+      now: iso(3),
+    }), { kind: 'lease-lost' })
+
+    assert.deepEqual(store.markTaskBlockedUncertain({
+      taskId: queued.taskId,
+      attemptId: claimed.attemptId,
+      workerId: 'w1',
+      claimGeneration: claimed.claimGeneration,
+      error: 'uncertain submission',
+      now: iso(4),
+    }), { kind: 'applied' })
+    assert.equal(store.getTask(queued.taskId)?.state, 'blocked')
+    assert.equal(store.getAttempt(claimed.attemptId)?.state, 'failed')
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a stale worker cannot complete a re-pended item BEFORE a peer re-claims it (ISS-005 window)', () => {
   // The companion to the test above: the lease is bumped at the per-claim site,
   // but the dangerous window is between `returnTaskToQueued` (re-pend) and the

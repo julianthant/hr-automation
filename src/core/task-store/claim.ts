@@ -10,6 +10,7 @@ import {
   parseJson,
   normalizeTaskState,
   isTerminalTaskState,
+  type TaskTransitionOutcome,
 } from './types.js'
 
 export function claimNextTask(
@@ -208,13 +209,14 @@ export function markTaskRunning(
 export function returnTaskToQueued(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; now?: string },
-): void {
+  request: { taskId: string; attemptId?: string; workerId?: string; claimGeneration?: number; now?: string },
+): TaskTransitionOutcome {
   const now = request.now ?? new Date().toISOString()
-  control.transaction(() => {
+  return control.transaction(() => {
     const task = getTaskRaw(db, request.taskId)
-    if (!task?.current_attempt_id) return
-    db.prepare(`
+    if (!task) return { kind: 'not-found' }
+    if (!task.current_attempt_id) return { kind: 'lease-lost' }
+    const result = db.prepare(`
       UPDATE tasks
       SET control_state = 'queued',
           claimed_by_worker_id = NULL,
@@ -223,7 +225,23 @@ export function returnTaskToQueued(
           claim_generation = claim_generation + 1,
           updated_at = @now
       WHERE id = @taskId AND control_state IN ('claimed', 'running')
-    `).run({ taskId: request.taskId, now })
+        AND (@attemptId IS NULL OR current_attempt_id = @attemptId)
+        AND (@workerId IS NULL OR claimed_by_worker_id = @workerId)
+        AND (@claimGeneration IS NULL OR claim_generation = @claimGeneration)
+    `).run({
+      taskId: request.taskId,
+      attemptId: request.attemptId ?? null,
+      workerId: request.workerId ?? null,
+      claimGeneration: request.claimGeneration ?? null,
+      now,
+    })
+    if (result.changes === 0) {
+      const current = getTaskRaw(db, request.taskId)
+      if (!current) return { kind: 'not-found' }
+      const state = normalizeTaskState(current)
+      if (isTerminalTaskState(state)) return { kind: 'already-terminal', state }
+      return { kind: 'lease-lost' }
+    }
     db.prepare(`
       UPDATE task_attempts
       SET control_state = 'pending',
@@ -232,6 +250,7 @@ export function returnTaskToQueued(
           updated_at = @now
       WHERE id = @attemptId AND control_state IN ('claimed', 'running')
     `).run({ attemptId: task.current_attempt_id, now })
+    return { kind: 'applied' }
   })
 }
 
@@ -263,8 +282,14 @@ export function recoverClaimsForDeadWorkers(
     for (const row of rows) {
       const leaseExpired = row.claim_expires_at !== null && row.claim_expires_at <= now
       if (!row.claimed_by_worker_id || (!leaseExpired && request.aliveWorkerIds.has(row.claimed_by_worker_id))) continue
-      recovered.push(mapTaskRow(row))
-      returnTaskToQueued(db, control, { taskId: row.id, now })
+      const outcome = returnTaskToQueued(db, control, {
+        taskId: row.id,
+        ...(row.current_attempt_id ? { attemptId: row.current_attempt_id } : {}),
+        workerId: row.claimed_by_worker_id,
+        claimGeneration: row.claim_generation,
+        now,
+      })
+      if (outcome.kind === 'applied') recovered.push(mapTaskRow(row))
     }
     return recovered
   })

@@ -563,6 +563,8 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
           // (e.g. multiple dying daemons on the queued-orphan path) exactly one
           // terminal row lands per run.
           claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),
+          commitTerminalWrite: () => runRegistry.commitTerminalWrite(runId),
+          rollbackTerminalWrite: () => runRegistry.rollbackTerminalWrite(runId),
         },
       )
     }, trackerDir)

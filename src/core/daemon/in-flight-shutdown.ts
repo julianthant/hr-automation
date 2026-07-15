@@ -117,6 +117,9 @@ export interface InFlightShutdownItem {
   itemId: string
   runId: string
   taskId?: string
+  attemptId?: string
+  workerId?: string
+  claimGeneration?: number
   input?: unknown
   parentRunId?: string
 }
@@ -179,16 +182,29 @@ export async function reassignInFlightItem<TData, TSteps extends readonly string
   logTag: string
 }): Promise<void> {
   const { wf, item, responsivePeers, taskStore, trackerDir, logTag } = args
-  try {
-    taskStore.returnTaskToQueued({ taskId: item.taskId })
-    emitShutdownRow({ wf, item, status: 'pending', trackerDir })
-    await wakeDaemons(responsivePeers)
-    log.step(
-      `[${logTag}] per-instance stop — reassigned in-flight item ${item.itemId} to ${responsivePeers.length} responsive daemon(s)`,
+  const outcome = taskStore.returnTaskToQueued({
+    taskId: item.taskId,
+    ...(item.attemptId ? { attemptId: item.attemptId } : {}),
+    ...(item.workerId ? { workerId: item.workerId } : {}),
+    ...(item.claimGeneration !== undefined ? { claimGeneration: item.claimGeneration } : {}),
+  })
+  if (outcome.kind !== 'applied') {
+    const current = taskStore.getTask(item.taskId)
+    const handedOff = current !== null && (
+      current.state === 'queued' || current.state === 'done' || current.state === 'failed' ||
+      current.state === 'cancelled' || current.state === 'blocked' ||
+      (current.claimedByWorkerId !== undefined && current.claimedByWorkerId !== item.workerId)
     )
-  } catch {
-    /* best-effort — dead-worker recovery on a peer re-queues it */
+    if (handedOff) return
+    throw new Error(
+      `reassignInFlightItem: task ${item.taskId} requeue was not applied (${outcome.kind}) and no handoff is visible`,
+    )
   }
+  emitShutdownRow({ wf, item, status: 'pending', trackerDir })
+  await wakeDaemons(responsivePeers)
+  log.step(
+    `[${logTag}] per-instance stop — reassigned in-flight item ${item.itemId} to ${responsivePeers.length} responsive daemon(s)`,
+  )
 }
 
 /**
@@ -232,12 +248,38 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
    * context, e.g. the queued-item sweep, pass nothing).
    */
   claimTerminalWrite?: () => boolean
+  commitTerminalWrite?: () => void
+  rollbackTerminalWrite?: () => void
 }): Promise<void> {
   const { wf, item, failReason, taskStore, trackerDir, bestEffort, claimTerminalWrite } = args
   const settleDependency = args.settleDependency ?? true
   const nowIso = args.timestamp ?? new Date().toISOString()
-  const markAndSettle = async (): Promise<void> => {
-    await markItemFailed(wf.config.name, item.itemId, failReason, item.runId, trackerDir)
+  const markAndSettle = async (): Promise<boolean> => {
+    const outcome = await markItemFailed(
+      wf.config.name,
+      item.itemId,
+      failReason,
+      item.runId,
+      trackerDir,
+      item.claimGeneration,
+      item.workerId,
+    )
+    if (outcome.kind !== 'applied') {
+      if (outcome.kind === 'already-terminal') return false
+      if (item.taskId) {
+        const current = taskStore.getTask(item.taskId)
+        const positivelyMoved = current !== null && (
+          current.state === 'queued' || current.state === 'done' || current.state === 'failed' ||
+          current.state === 'cancelled' || current.state === 'blocked' ||
+          (current.claimedByWorkerId !== undefined && current.claimedByWorkerId !== item.workerId)
+        )
+        if (positivelyMoved) return false
+      }
+      throw new Error(
+        `failInFlightItem: task ${item.taskId ?? 'missing'} terminal transition was not applied ` +
+        `(${outcome.kind}) and no terminal/handoff state is visible`,
+      )
+    }
     if (settleDependency && item.taskId) {
       const released = taskStore.markDependencyFromChildTerminal({
         childTaskId: item.taskId,
@@ -248,13 +290,12 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
       // (E2E-017), or it sits queued until its 15-min keepalive tick.
       void wakeDaemonsForReleasedParents(released, trackerDir)
     }
+    return true
   }
-  // Claim the single terminal-row token (E2E-101). The mark/settle below still
-  // runs so SQLite reflects the failure; only the tracker ROW emit is gated.
-  const shouldEmitRow = claimTerminalWrite ? claimTerminalWrite() : true
   if (bestEffort) {
+    let applied = false
     try {
-      await markAndSettle()
+      applied = await markAndSettle()
     } catch (e) {
       // Best-effort — this path is ONLY reached from the SIGINT-grace-window
       // shutdown sweep (the claim-loop caller in daemon.ts never passes
@@ -268,10 +309,13 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
         }`,
       )
     }
+    const shouldEmitRow = applied && (claimTerminalWrite ? claimTerminalWrite() : true)
     if (shouldEmitRow) {
       try {
         emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
+        args.commitTerminalWrite?.()
       } catch (e) {
+        args.rollbackTerminalWrite?.()
         // Best-effort: the SQLite mark/settle above (or its own warn) is the
         // durable signal; this only affects the tracker-row visual signal.
         log.warn(
@@ -283,8 +327,16 @@ export async function failInFlightItem<TData, TSteps extends readonly string[]>(
     }
     return
   }
-  await markAndSettle()
+  const applied = await markAndSettle()
+  if (!applied) return
+  const shouldEmitRow = claimTerminalWrite ? claimTerminalWrite() : true
   if (shouldEmitRow) {
-    emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
+    try {
+      emitShutdownRow({ wf, item, status: 'failed', error: failReason, trackerDir, timestamp: nowIso })
+      args.commitTerminalWrite?.()
+    } catch (err) {
+      args.rollbackTerminalWrite?.()
+      throw err
+    }
   }
 }

@@ -232,6 +232,48 @@ test('runWorkflowDaemon: /stop during launch/auth aborts session launch and fail
   }
 })
 
+test('runWorkflowDaemon: auth readyPromise rejection closes the returned session before teardown', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-int-auth-ready-fail-'))
+  let contextClosed = 0
+  try {
+    const systems: SystemConfig[] = [
+      { id: 'a', login: async () => {} },
+      { id: 'b', login: async () => {} },
+    ]
+    const wf = defineWorkflow({
+      name: 'dint-auth-ready-fail',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems,
+      authSteps: false,
+      handler: async () => {},
+    })
+    const launchFn = (async (_systems: SystemConfig[], opts?: Parameters<typeof Session.launch>[1]) => {
+      const context = { close: async () => { contextClosed++ } } as unknown as import('playwright').BrowserContext
+      const session = Session.forTesting({
+        systems,
+        browsers: new Map(systems.map((system) => [system.id, {
+          page: {} as import('playwright').Page,
+          context,
+          browser: null,
+        }])),
+        readyPromises: new Map([
+          ['a', Promise.resolve()],
+          ['b', Promise.reject(new Error('b auth failed'))],
+        ]),
+      })
+      opts?.onReady?.(session)
+      return session
+    }) as unknown as typeof Session.launch
+
+    await assert.rejects(runWorkflowDaemon(wf, { trackerDir: dir, sessionLaunchFn: launchFn }), /b auth failed/)
+    assert.equal(contextClosed, 2, 'every returned session slot is closed before daemon teardown completes')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row archetype', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-queued-display-'))

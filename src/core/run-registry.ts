@@ -100,6 +100,7 @@ export interface RunHandle {
   /** Daemon-only — for worker-command targeting + heartbeat + shutdown reads. */
   taskId?: string
   attemptId?: string
+  claimGeneration?: number
   /** In-process-only — when present, cancel writes the SQLite audit trail. */
   control?: RunControlAudit
 }
@@ -183,6 +184,10 @@ export interface RunRegistry {
    * is re-entered (shouldn't happen, but harmless) sees `false` and skips.
    */
   claimTerminalWrite(runId: string): boolean
+  /** Commit a previously claimed reservation after the terminal row write succeeds. */
+  commitTerminalWrite(runId: string): void
+  /** Release only an uncommitted reservation so a failed write can be retried. */
+  rollbackTerminalWrite(runId: string): void
   /**
    * Read-only probe of whether a terminal row has already been claimed for
    * `runId` (by `claimTerminalWrite`). Lets a caller decide to defer WITHOUT
@@ -231,7 +236,7 @@ export function createRunRegistry(): RunRegistry {
    * `cancelled` / `cancelOrigins` because a terminal write can be a plain
    * failure, not only a cancel.
    */
-  const terminalWritten = new Set<string>()
+  const terminalWrites = new Map<string, 'reserved' | 'committed'>()
 
   const register = (handle: RunHandle): void => {
     handles.set(handle.runId, handle)
@@ -245,12 +250,23 @@ export function createRunRegistry(): RunRegistry {
     cancelOrigins.get(runId)
 
   const claimTerminalWrite = (runId: string): boolean => {
-    if (terminalWritten.has(runId)) return false
-    terminalWritten.add(runId)
+    if (terminalWrites.has(runId)) return false
+    terminalWrites.set(runId, 'reserved')
     return true
   }
 
-  const hasTerminalWrite = (runId: string): boolean => terminalWritten.has(runId)
+  const commitTerminalWrite = (runId: string): void => {
+    if (terminalWrites.get(runId) !== 'reserved') {
+      throw new Error(`commitTerminalWrite: run ${runId} has no active reservation`)
+    }
+    terminalWrites.set(runId, 'committed')
+  }
+
+  const rollbackTerminalWrite = (runId: string): void => {
+    if (terminalWrites.get(runId) === 'reserved') terminalWrites.delete(runId)
+  }
+
+  const hasTerminalWrite = (runId: string): boolean => terminalWrites.has(runId)
 
   const unregister = (runId: string): void => {
     handles.delete(runId)
@@ -275,7 +291,7 @@ export function createRunRegistry(): RunRegistry {
    * call for a runId that never claimed (no-op).
    */
   const releaseTerminalWrite = (runId: string): void => {
-    terminalWritten.delete(runId)
+    terminalWrites.delete(runId)
   }
 
   const cancel = async (
@@ -358,6 +374,8 @@ export function createRunRegistry(): RunRegistry {
     cancel,
     cancelOrigin,
     claimTerminalWrite,
+    commitTerminalWrite,
+    rollbackTerminalWrite,
     hasTerminalWrite,
     releaseTerminalWrite,
   }

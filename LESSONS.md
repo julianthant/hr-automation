@@ -2,6 +2,16 @@
 
 Cross-codebase patterns and mistakes to avoid. Read this before non-trivial work.
 
+## 2026-07-15 — A tracker terminal is recovery evidence; a task-store terminal is execution authority
+
+**Tried:** Treat daemon terminal writes, queue audit writes, tracker rows, and shutdown requeues as independent best-effort cleanup steps after a handler returned.
+
+**Failed because:** A process can crash after the tracker terminal row reaches disk but before SQLite records the matching terminal task state. Blind dead-worker recovery then requeues the exact run and can repeat a real HR submission. The inverse gap is also dangerous: a terminal SQLite write that throws ambiguously cannot safely be treated as either applied or retryable, and a one-phase run-registry token can strand the only terminal writer when its emit throws.
+
+**Fix:** Fence terminal and requeue transitions by owner, current attempt, and claim generation; return explicit applied/terminal/lease-lost/not-found outcomes; append queue audit only after an applied transition. Terminalization retries and read-reconciles, then moves an exact still-owned claim to `blocked` when persistence stays uncertain. Recovery reconciles an exact-run terminal tracker event before requeueing a dead or lease-expired claim. Terminal-row reservations commit only after emit and roll back after emit failure. An unconfirmed safety block retains the run and prevents another claim.
+
+**Tags:** kernel, daemon, task-store, terminalization, recovery, claim-generation, sqlite, tracker, requeue, fail-loud
+
 ## Selector Mapping
 
 - **Always search before mapping:** `npm run selector:search "<intent>"` first. If found, USE IT — don't remap.

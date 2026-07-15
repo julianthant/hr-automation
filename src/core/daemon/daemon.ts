@@ -67,6 +67,7 @@ import {
   type WorkerCommandContext,
 } from './worker-commands.js'
 import { createDaemonItemAuthTimingResolver } from './auth-timing.js'
+import { terminalizeWithReconciliation, type TerminalizationResult } from './terminalization.js'
 
 export interface DaemonOpts {
   trackerDir?: string
@@ -403,7 +404,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         // activeSession/onReady hooks share this closure's state.
         const { observer, getAuthTimings } = makeObserver('1')
         setPhase('authenticating')
-        let session: Session
+        let session: Session | undefined
         try {
           session = await launchFn(wf.config.systems, {
             observer,
@@ -435,6 +436,19 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
             if (isIdleRefreshSystem(sys.id)) emitIdleSignal(instance, trackerDir, sys.id, 'touch')
           }
         } catch (e) {
+          const failedSession = session ?? state.activeSession
+          if (failedSession) {
+            try {
+              await failedSession.close()
+            } catch (closeErr) {
+              log.warn(
+                `[Daemon ${wf.config.name}/${instanceId}] auth-failure session teardown also failed: ${
+                  closeErr instanceof Error ? closeErr.message : String(closeErr)
+                }`,
+              )
+            }
+          }
+          state.activeSession = null
           if (state.shuttingDown && state.launchAbort.signal.aborted) {
             log.warn(
               `[Daemon ${wf.config.name}/${instanceId}] auth/launch aborted by shutdown`,
@@ -452,6 +466,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           )
           throw e
         }
+
+        if (!session) throw new Error(`[Daemon ${instanceId}] session launch returned no session`)
 
         const itemAuthTimingResolver = createDaemonItemAuthTimingResolver(
           getAuthTimings,
@@ -568,6 +584,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 source: 'daemon',
                 ...(item.taskId ? { taskId: item.taskId } : {}),
                 ...(item.attemptId ? { attemptId: item.attemptId } : {}),
+                ...(item.claimGeneration !== undefined ? { claimGeneration: item.claimGeneration } : {}),
               }
               runRegistry.register(preHandle)
               state.activeRun = preHandle
@@ -588,6 +605,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 ...(trackerDir ? { trackerDir } : {}),
               })
               emitItemStart(instance, item.id, trackerDir, runId, itemTraceId)
+              let itemTransitionConfirmed = false
               try {
                 const r = await runOneItem({
                   wf,
@@ -638,6 +656,64 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   taskStateAfterRun === 'cancelling'
                 const isCancelOutcome = cancelRequestedForThisItem || (!r.ok && r.kind === 'cancelled')
 
+                const terminalizeNormalOutcome = async (
+                  desiredState: 'done' | 'failed',
+                  error?: string,
+                ): Promise<TerminalizationResult> => {
+                  if (!item.taskId || !item.attemptId || item.claimGeneration === undefined) {
+                    return { kind: 'not-found' }
+                  }
+                  while (true) {
+                    const outcome = await terminalizeWithReconciliation({
+                      desiredState,
+                      transition: () => desiredState === 'done'
+                        ? markItemDone(
+                            wf.config.name, item.id, runId, trackerDir,
+                            item.claimGeneration, instanceId,
+                          )
+                        : markItemFailed(
+                            wf.config.name, item.id, error ?? '', runId, trackerDir,
+                            item.claimGeneration, instanceId,
+                          ),
+                      readTask: () => taskStore.getTask(item.taskId!),
+                      blockUncertain: (reason) => taskStore.markTaskBlockedUncertain({
+                        taskId: item.taskId!,
+                        attemptId: item.attemptId!,
+                        workerId: instanceId,
+                        claimGeneration: item.claimGeneration!,
+                        error: reason,
+                      }),
+                    })
+                    if (outcome.kind === 'not-found') {
+                      throw new Error(
+                        `[Daemon ${instanceId}] terminalization target ${item.taskId} disappeared; ` +
+                        `refusing to claim another item`,
+                      )
+                    }
+                    if (outcome.kind === 'lease-lost') {
+                      const current = taskStore.getTask(item.taskId)
+                      const positivelyHandedOff = current !== null && (
+                        current.state === 'queued' || current.state === 'done' ||
+                        current.state === 'failed' || current.state === 'cancelled' ||
+                        current.state === 'blocked' ||
+                        (current.claimedByWorkerId !== undefined && current.claimedByWorkerId !== instanceId)
+                      )
+                      if (positivelyHandedOff) return outcome
+                    } else if (outcome.kind !== 'unconfirmed') {
+                      return outcome
+                    }
+                    log.error(
+                      `[Daemon ${instanceId}] terminalization remains unconfirmed for ${item.id}; ` +
+                      `retaining the run and retrying before another item can be claimed: ${
+                        outcome.kind === 'unconfirmed'
+                          ? outcome.error
+                          : 'lease-lost outcome had no visible handoff or terminal state'
+                      }`,
+                    )
+                    await new Promise<void>((resolve) => setTimeout(resolve, 250))
+                  }
+                }
+
                 if (isCancelOutcome) {
                   // An aborted controller surfaces three distinct stop intents.
                   // Resolve the live peer set ONCE (only when a stop is in
@@ -672,6 +748,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     itemId: item.id,
                     runId,
                     ...(item.taskId ? { taskId: item.taskId } : {}),
+                    ...(item.attemptId ? { attemptId: item.attemptId } : {}),
+                    workerId: instanceId,
+                    ...(item.claimGeneration !== undefined ? { claimGeneration: item.claimGeneration } : {}),
                     input: item.input,
                     ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                   }
@@ -726,6 +805,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       taskStore,
                       trackerDir,
                       claimTerminalWrite: () => runRegistry.claimTerminalWrite(runId),
+                      commitTerminalWrite: () => runRegistry.commitTerminalWrite(runId),
+                      rollbackTerminalWrite: () => runRegistry.rollbackTerminalWrite(runId),
                     })
                   } else {
                     // Deliberate per-item cancel (/cancel-current); the daemon
@@ -735,8 +816,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                       !r.ok && r.kind === 'cancelled'
                         ? r.error
                         : 'cancelled by user from dashboard'
-                    await markItemCancelled(wf.config.name, item.id, cancelError, runId, trackerDir)
-                    if (item.taskId) {
+                    const cancelOutcome = await markItemCancelled(
+                      wf.config.name, item.id, cancelError, runId, trackerDir,
+                      item.claimGeneration, instanceId,
+                    )
+                    if (item.taskId && cancelOutcome.kind === 'applied') {
                       const released = taskStore.markDependencyFromChildTerminal({
                         childTaskId: item.taskId,
                         childState: 'cancelled',
@@ -756,9 +840,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     // token is free here, so we write. Overwrites a racing
                     // `done` row (handler returned r.ok=true the same instant the
                     // cancel landed) so the badge shows Cancelled.
-                    if (runRegistry.claimTerminalWrite(runId)) {
-                      emitTrackerRow(
-                        {
+                    if (cancelOutcome.kind === 'applied' && runRegistry.claimTerminalWrite(runId)) {
+                      try {
+                        emitTrackerRow(
+                          {
                           workflow: wf.config.name,
                           timestamp: new Date().toISOString(),
                           id: item.id,
@@ -775,8 +860,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                           ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
                           error: cancelError,
                         },
-                        trackerDir,
-                      )
+                          trackerDir,
+                        )
+                        runRegistry.commitTerminalWrite(runId)
+                      } catch (emitErr) {
+                        runRegistry.rollbackTerminalWrite(runId)
+                        throw emitErr
+                      }
                     }
                     emitItemCancelled(instance, item.id, cancelError, trackerDir, runId)
                   }
@@ -789,8 +879,30 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   // SQLite, and the peer's terminal is the single real one. The
                   // dependency settle is then skipped when the guarded mark did
                   // not actually terminalize this task.
-                  await markItemDone(wf.config.name, item.id, runId, trackerDir, item.claimGeneration)
-                  if (item.taskId && taskStore.getTask(item.taskId)?.state === 'done') {
+                  const terminal = await terminalizeNormalOutcome('done')
+                  if (terminal.kind === 'blocked-uncertain') {
+                    // Intentional corrective terminal event: the kernel may
+                    // already have emitted `done`, but SQLite could not confirm
+                    // that terminal outcome. This later failed row must override
+                    // it visibly; it is the one deliberate exception to the
+                    // run-registry's single-terminal presentation fence.
+                    emitTrackerRow({
+                      workflow: wf.config.name,
+                      timestamp: new Date().toISOString(),
+                      id: item.id,
+                      runId,
+                      status: 'failed',
+                      step: 'terminalization-uncertain',
+                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId, { runId, trackerDir }) as StampedData,
+                      ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                      error: terminal.error,
+                    }, trackerDir)
+                  }
+                  if (
+                    item.taskId &&
+                    (terminal.kind === 'applied' || terminal.kind === 'reconciled') &&
+                    taskStore.getTask(item.taskId)?.state === 'done'
+                  ) {
                     const released = taskStore.markDependencyFromChildTerminal({
                       childTaskId: item.taskId,
                       childState: 'done',
@@ -802,8 +914,27 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     void wakeDaemonsForReleasedParents(released, trackerDir)
                   }
                 } else {
-                  await markItemFailed(wf.config.name, item.id, r.error, runId, trackerDir, item.claimGeneration)
-                  if (item.taskId && taskStore.getTask(item.taskId)?.state === 'failed') {
+                  const terminal = await terminalizeNormalOutcome('failed', r.error)
+                  if (terminal.kind === 'blocked-uncertain') {
+                    // See the success branch above: this is a corrective
+                    // terminal override, not a competing ordinary emitter.
+                    emitTrackerRow({
+                      workflow: wf.config.name,
+                      timestamp: new Date().toISOString(),
+                      id: item.id,
+                      runId,
+                      status: 'failed',
+                      step: 'terminalization-uncertain',
+                      data: buildShutdownTrackerData(wf, item.input, item.parentRunId, { runId, trackerDir }) as StampedData,
+                      ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                      error: terminal.error,
+                    }, trackerDir)
+                  }
+                  if (
+                    item.taskId &&
+                    (terminal.kind === 'applied' || terminal.kind === 'reconciled') &&
+                    taskStore.getTask(item.taskId)?.state === 'failed'
+                  ) {
                     const released = taskStore.markDependencyFromChildTerminal({
                       childTaskId: item.taskId,
                       childState: 'failed',
@@ -862,6 +993,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                     `(state=${taskAfterCleanup?.state ?? 'missing'})`,
                   )
                 } else {
+                  itemTransitionConfirmed = true
                   runRegistry.unregister(runId)
                   // Release the single-terminal token now that this item's
                   // three-way teardown/cancel branch has had its chance to read
@@ -872,6 +1004,11 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                   runRegistry.releaseTerminalWrite(runId)
                   state.activeRun = null
                 }
+              }
+              if (!itemTransitionConfirmed) {
+                throw new Error(
+                  `[Daemon ${instanceId}] refusing to return idle after unconfirmed transition for ${item.id}`,
+                )
               }
               setPhase('idle')
               emitWorkerHeartbeat()

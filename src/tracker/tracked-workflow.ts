@@ -159,6 +159,10 @@ export interface WithTrackedWorkflowOpts {
    * in-process `runWorkflow`) → emit unconditionally as before.
    */
   claimTerminalWrite?: () => boolean;
+  /** Commit a claimed terminal reservation after the row write succeeds. */
+  commitTerminalWrite?: () => void;
+  /** Release a claimed reservation when the row write throws so it can retry. */
+  rollbackTerminalWrite?: () => void;
 }
 
 export async function withTrackedWorkflow<T>(
@@ -411,7 +415,15 @@ export async function withTrackedWorkflow<T>(
       }
     }
 
-    emit("done");
+    if (opts.claimTerminalWrite?.() ?? true) {
+      try {
+        emit("done");
+        opts.commitTerminalWrite?.();
+      } catch (emitErr) {
+        opts.rollbackTerminalWrite?.();
+        throw emitErr;
+      }
+    }
     // Run-scope `run:terminal` event (outcome=completed). The Tier-1 harness
     // `waitForEvent("run:terminal", { runId })` to await deterministic run
     // completion. Run-scope log → logs/<workflow>-<date>.jsonl; see
@@ -477,7 +489,13 @@ export async function withTrackedWorkflow<T>(
     // terminal — claiming-then-not-emitting would steal the token and leave the
     // run with NO terminal row at all.
     if (!suppressCancelledRow && (opts.claimTerminalWrite?.() ?? true)) {
-      emit("failed", { error, ...(terminalStep ? { step: terminalStep } : {}) });
+      try {
+        emit("failed", { error, ...(terminalStep ? { step: terminalStep } : {}) });
+        opts.commitTerminalWrite?.();
+      } catch (emitErr) {
+        opts.rollbackTerminalWrite?.();
+        throw emitErr;
+      }
     }
     if (!opts.preAssignedInstance) emitWorkflowEnd(instanceName, "failed", dir);
     throw e;

@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { daemonsDir, ensureDaemonsDir } from './registry.js'
 import type { QueueEvent, QueueItem, QueueState } from './types.js'
 import { openControlDb } from '../control-db.js'
-import { createTaskStore, type TaskRow } from '../task-store/index.js'
+import { createTaskStore, type TaskRow, type TaskTransitionOutcome } from '../task-store/index.js'
 import { mapTaskRow, type TaskDbRow } from '../task-store/types.js'
+import { findLatestEntryForPredicate } from '../../tracker/find-latest-entry.js'
 
 function openQueueTaskStore(trackerDir?: string) {
   return createTaskStore(openControlDb({ trackerDir }))
@@ -213,9 +214,10 @@ async function markTaskTerminal(
   payload: { error?: string; reason?: string },
   trackerDir: string | undefined,
   claimGeneration?: number,
-): Promise<void> {
+  workerId?: string,
+): Promise<TaskTransitionOutcome> {
   const store = openQueueTaskStore(trackerDir)
-  store.control.transaction(() => {
+  return store.control.transaction(() => {
     const ts = nowIso()
     const task = store.findTaskByIdentity({ workflow, itemId, runId })
     const attemptId = task ? resolveCurrentAttemptId(store, task, runId, ts) : undefined
@@ -227,30 +229,32 @@ async function markTaskTerminal(
     // audit-only and the SQLite state is authoritative).
     const gen = claimGeneration
 
+    let outcome: TaskTransitionOutcome = { kind: 'not-found' }
     if (task) {
       if (status === 'done') {
-        if (attemptId) store.markTaskDone({ taskId: task.taskId, attemptId, ...(gen !== undefined ? { claimGeneration: gen } : {}), now: ts })
-        else markTaskTerminalWithoutAttempt(store, task.taskId, 'done', ts)
+        if (attemptId) outcome = store.markTaskDone({ taskId: task.taskId, attemptId, ...(workerId !== undefined ? { workerId } : {}), ...(gen !== undefined ? { claimGeneration: gen } : {}), now: ts })
       } else if (status === 'failed') {
-        if (attemptId) store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '', ...(gen !== undefined ? { claimGeneration: gen } : {}), now: ts })
-        else markTaskTerminalWithoutAttempt(store, task.taskId, 'failed', ts, payload.error)
+        if (attemptId) outcome = store.markTaskFailed({ taskId: task.taskId, attemptId, error: payload.error ?? '', ...(workerId !== undefined ? { workerId } : {}), ...(gen !== undefined ? { claimGeneration: gen } : {}), now: ts })
       } else {
-        store.markTaskCancelled({
+        outcome = store.markTaskCancelled({
           taskId: task.taskId,
           ...(attemptId ? { attemptId } : {}),
           reason: payload.reason ?? '',
+          ...(workerId !== undefined ? { workerId } : {}),
           ...(gen !== undefined ? { claimGeneration: gen } : {}),
           now: ts,
         })
       }
     }
 
+    if (outcome.kind !== 'applied') return outcome
     if (status === 'done') {
       appendEvent(workflow, { type: 'done', id: itemId, completedAt: ts, runId }, trackerDir)
     } else {
       const error = status === 'failed' ? (payload.error ?? '') : (payload.reason ?? '')
       appendEvent(workflow, { type: 'failed', id: itemId, failedAt: ts, runId, error }, trackerDir)
     }
+    return outcome
   })
 }
 
@@ -260,8 +264,9 @@ export async function markItemDone(
   runId: string,
   trackerDir?: string,
   claimGeneration?: number,
-): Promise<void> {
-  return markTaskTerminal(workflow, itemId, runId, 'done', {}, trackerDir, claimGeneration)
+  workerId?: string,
+): Promise<TaskTransitionOutcome> {
+  return markTaskTerminal(workflow, itemId, runId, 'done', {}, trackerDir, claimGeneration, workerId)
 }
 
 export async function markItemFailed(
@@ -271,8 +276,9 @@ export async function markItemFailed(
   runId: string,
   trackerDir?: string,
   claimGeneration?: number,
-): Promise<void> {
-  return markTaskTerminal(workflow, itemId, runId, 'failed', { error }, trackerDir, claimGeneration)
+  workerId?: string,
+): Promise<TaskTransitionOutcome> {
+  return markTaskTerminal(workflow, itemId, runId, 'failed', { error }, trackerDir, claimGeneration, workerId)
 }
 
 export async function markItemCancelled(
@@ -282,8 +288,9 @@ export async function markItemCancelled(
   runId: string,
   trackerDir?: string,
   claimGeneration?: number,
-): Promise<void> {
-  return markTaskTerminal(workflow, itemId, runId, 'cancelled', { reason }, trackerDir, claimGeneration)
+  workerId?: string,
+): Promise<TaskTransitionOutcome> {
+  return markTaskTerminal(workflow, itemId, runId, 'cancelled', { reason }, trackerDir, claimGeneration, workerId)
 }
 
 /**
@@ -350,6 +357,70 @@ export async function recoverOrphanedClaims(
   const store = openQueueTaskStore(trackerDir)
   return store.control.transaction(() => {
     const ts = nowIso()
+    // Crash window: the workflow's terminal tracker row can reach disk before
+    // the SQLite terminal transition. Reconcile that exact run first; requeueing
+    // it would rerun an HR action that may already have submitted successfully.
+    const candidates = store.db.prepare(`
+      SELECT * FROM tasks
+      WHERE workflow = @workflow
+        AND task_kind = 'workflow_item'
+        AND source = 'daemon'
+        AND control_state IN ('claimed', 'running')
+        AND claimed_by_worker_id IS NOT NULL
+        AND cancel_requested_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM worker_commands c
+          WHERE c.target_task_id = tasks.id
+            AND c.command_type IN ('cancel_task', 'force_stop_task')
+            AND c.state IN ('queued', 'acknowledged')
+        )
+    `).all({ workflow }) as TaskDbRow[]
+    for (const row of candidates) {
+      const leaseExpired = row.claim_expires_at !== null && row.claim_expires_at <= ts
+      if (!leaseExpired && row.claimed_by_worker_id && aliveInstanceIds.has(row.claimed_by_worker_id)) continue
+      const task = mapTaskRow(row)
+      if (!task.currentRunId || !task.currentAttemptId || !task.claimedByWorkerId) continue
+      if (task.claimGeneration === undefined) {
+        throw new Error(`recoverOrphanedClaims: active task ${task.taskId} has no claim generation`)
+      }
+      const terminal = findLatestEntryForPredicate({
+        workflow,
+        trackerDir,
+        runId: task.currentRunId,
+        itemId: task.itemId,
+        predicate: (entry) =>
+          entry.id === task.itemId && entry.runId === task.currentRunId &&
+          (entry.status === 'done' || entry.status === 'failed'),
+      })
+      if (!terminal) continue
+      if (terminal.status === 'done') {
+        store.markTaskDone({
+          taskId: task.taskId,
+          attemptId: task.currentAttemptId,
+          workerId: task.claimedByWorkerId,
+          claimGeneration: task.claimGeneration,
+          now: ts,
+        })
+      } else if (terminal.step === 'cancelled' || terminal.step === 'discarded') {
+        store.markTaskCancelled({
+          taskId: task.taskId,
+          attemptId: task.currentAttemptId,
+          workerId: task.claimedByWorkerId,
+          claimGeneration: task.claimGeneration,
+          reason: terminal.error,
+          now: ts,
+        })
+      } else {
+        store.markTaskFailed({
+          taskId: task.taskId,
+          attemptId: task.currentAttemptId,
+          workerId: task.claimedByWorkerId,
+          claimGeneration: task.claimGeneration,
+          error: terminal.error ?? 'terminal tracker row recorded before task-store recovery',
+          now: ts,
+        })
+      }
+    }
     const recovered = store.recoverClaimsForDeadWorkers({ workflow, aliveWorkerIds: aliveInstanceIds, now: ts })
     for (const task of recovered) {
       appendEvent(workflow, { type: 'unclaim', id: task.itemId, reason: 'recovered', ts }, trackerDir)
@@ -404,25 +475,6 @@ function resolveCurrentAttemptId(
     WHERE id = @taskId
   `).run({ taskId: task.taskId, attemptId: row.id, now })
   return row.id
-}
-
-function markTaskTerminalWithoutAttempt(
-  store: ReturnType<typeof openQueueTaskStore>,
-  taskId: string,
-  state: 'done' | 'failed',
-  now: string = nowIso(),
-  error?: string,
-): void {
-  store.db.prepare(`
-    UPDATE tasks
-    SET control_state = @state,
-        terminal_error = @error,
-        terminal_at = COALESCE(terminal_at, @now),
-        claimed_by_worker_id = NULL,
-        claim_expires_at = NULL,
-        updated_at = @now
-    WHERE id = @taskId
-  `).run({ taskId, state, error: error ?? null, now })
 }
 
 function queueStateFromTask(task: TaskRow): QueueItem['state'] {
