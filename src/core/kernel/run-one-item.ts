@@ -104,6 +104,14 @@ export interface RunOneItemOpts<TData, TSteps extends readonly string[]> {
    * branch on source).
    */
   runHandleSource?: 'daemon' | 'in-process'
+  /**
+   * Caller-created handle for claim-time registration. Daemons pass the same
+   * handle they expose as `state.activeRun`, closing the pre-handler cancel
+   * window without replacing its controller at handler start.
+   */
+  runHandle?: RunHandle
+  /** Who owns unregistering `runHandle`; defaults to run-one-item. */
+  runHandleOwner?: 'run-one-item' | 'caller'
 }
 
 /**
@@ -248,7 +256,18 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   //      daemon's `cancel_task` worker-command handler, the dashboard's
   //      HTTP cancel route for in-process runs, the browser-disconnect
   //      handler, and the daemon shutdown sweep.
-  const controller = new AbortController()
+  const callerHandle = args.runHandle
+  if (callerHandle) {
+    if (callerHandle.runId !== runId || callerHandle.itemId !== itemId || callerHandle.workflow !== wf.config.name) {
+      throw new Error(
+        `runOneItem: supplied RunHandle identity does not match workflow=${wf.config.name} itemId=${itemId} runId=${runId}`,
+      )
+    }
+    if (callerHandle.session !== session) {
+      throw new Error(`runOneItem: supplied RunHandle for ${runId} belongs to a different Session`)
+    }
+  }
+  const controller = callerHandle?.controller ?? new AbortController()
   args.onCancelController?.(controller)
 
   // Register with the unified `runRegistry` so an external `cancel(runId)`
@@ -256,18 +275,23 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
   // without going through any daemon-internal state. Unregister in `finally`
   // below to keep the registry's `list()` view in lockstep with what's
   // actually in flight.
-  const runHandle: RunHandle = {
-    runId,
-    itemId,
-    workflow: wf.config.name,
-    controller,
-    session,
-    startedAt: Date.now(),
-    source: args.runHandleSource ?? 'daemon',
-    ...(args.taskId ? { taskId: args.taskId } : {}),
-    ...(args.attemptId ? { attemptId: args.attemptId } : {}),
+  const runHandle: RunHandle = callerHandle ?? {
+      runId,
+      itemId,
+      workflow: wf.config.name,
+      controller,
+      session,
+      startedAt: Date.now(),
+      source: args.runHandleSource ?? 'daemon',
+      ...(args.taskId ? { taskId: args.taskId } : {}),
+      ...(args.attemptId ? { attemptId: args.attemptId } : {}),
+    }
+  const ownsRunHandle = (args.runHandleOwner ?? 'run-one-item') === 'run-one-item'
+  if (ownsRunHandle) {
+    runRegistry.register(runHandle)
+  } else if (runRegistry.get(runId) !== runHandle) {
+    throw new Error(`runOneItem: caller-owned RunHandle ${runId} must be registered before handler entry`)
   }
-  runRegistry.register(runHandle)
   // Unified between-step cancel probe — `controller.signal.aborted` is the
   // single source of truth post-Phase 1, fed by every cancel trigger
   // (daemon worker-command `cancel_task`, HTTP `/cancel-current`,
@@ -374,7 +398,7 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
       }
       return { ok: false, error: classifyRunError(err) }
     } finally {
-      runRegistry.unregister(runId)
+      if (ownsRunHandle) runRegistry.unregister(runId)
     }
   }
 
@@ -549,6 +573,6 @@ export async function runOneItem<TData, TSteps extends readonly string[]>(
     }
     return { ok: false, error: classifyRunError(err) }
   } finally {
-    runRegistry.unregister(runId)
+    if (ownsRunHandle) runRegistry.unregister(runId)
   }
 }

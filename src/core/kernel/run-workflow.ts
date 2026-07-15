@@ -220,7 +220,6 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
         completed = true
       } finally {
         if (sigintHandler) process.off('SIGINT', sigintHandler)
-        if (detachParentListener) detachParentListener()
         await session.close()
       }
     } catch (err) {
@@ -228,6 +227,7 @@ export async function runWorkflow<TData, TSteps extends readonly string[]>(
       terminalWritten = true
       throw err
     } finally {
+      if (detachParentListener) detachParentListener()
       if (completed && !terminalWritten) markInProcessControlTerminal(inProcessControl, true)
       if (registryRegistered) runRegistry.unregister(runId)
       inProcessControl?.controlDb.close()

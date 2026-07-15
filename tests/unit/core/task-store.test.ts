@@ -705,3 +705,105 @@ test('markTaskRunning no-ops (without throwing) on a cancel_requested task, pres
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('requestCancelTask returns an authoritative result and never resurrects terminal tasks', () => {
+  const { dir, store } = openTempStore()
+  try {
+    for (const terminalState of ['done', 'failed', 'cancelled'] as const) {
+      const [queued] = store.enqueueTasks({
+        workflow: 'wf',
+        inputs: [{ id: terminalState }],
+        deriveItemId: (x) => x.id,
+        now: iso(0),
+      })
+      if (terminalState === 'done') {
+        store.markTaskDone({ taskId: queued.taskId, attemptId: queued.attemptId, now: iso(1) })
+      } else if (terminalState === 'failed') {
+        store.markTaskFailed({ taskId: queued.taskId, attemptId: queued.attemptId, error: 'boom', now: iso(1) })
+      } else {
+        store.markTaskCancelled({ taskId: queued.taskId, attemptId: queued.attemptId, reason: 'first cancel', now: iso(1) })
+      }
+
+      const result = store.requestCancelTask({ taskId: queued.taskId, reason: 'late cancel', now: iso(2) })
+
+      assert.equal(result.kind, 'already-terminal')
+      assert.equal(result.task.state, terminalState)
+      assert.equal(store.getTask(queued.taskId)?.state, terminalState)
+      assert.equal(store.getAttempt(queued.attemptId)?.state, terminalState)
+    }
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('requestCancelTask atomically distinguishes accepted, already-terminal, and not-found', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [queued] = store.enqueueTasks({
+      workflow: 'wf',
+      inputs: [{ id: 'a' }],
+      deriveItemId: (x) => x.id,
+      now: iso(0),
+    })
+    const claim = store.claimNextTask({ workflow: 'wf', workerId: 'w1', now: iso(1) })
+    assert.ok(claim)
+
+    const accepted = store.requestCancelTask({ taskId: queued.taskId, reason: 'operator', now: iso(2) })
+    assert.equal(accepted.kind, 'accepted')
+    if (accepted.kind === 'accepted') assert.equal(accepted.disposition, 'requested')
+    assert.equal(accepted.task.state, 'cancel_requested')
+    assert.equal(store.getAttempt(queued.attemptId)?.state, 'cancel_requested')
+
+    const repeated = store.requestCancelTask({ taskId: queued.taskId, reason: 'operator again', now: iso(3) })
+    assert.equal(repeated.kind, 'accepted')
+    if (repeated.kind === 'accepted') {
+      assert.equal(repeated.disposition, 'already-requested')
+      assert.equal(repeated.task.state, 'cancel_requested')
+    }
+
+    assert.deepEqual(store.requestCancelTask({ taskId: 'missing', now: iso(4) }), { kind: 'not-found' })
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('listTaskTreeByRunIds follows recursive parent_run_id links through terminal intermediates', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [child] = store.enqueueTasks({
+      workflow: 'child-wf',
+      inputs: [{ id: 'child' }],
+      deriveItemId: (x) => x.id,
+      parentRunId: 'root-run',
+      runIds: ['child-run'],
+      now: iso(0),
+    })
+    store.markTaskDone({ taskId: child.taskId, attemptId: child.attemptId, now: iso(1) })
+    const [grandchild] = store.enqueueTasks({
+      workflow: 'grandchild-wf',
+      inputs: [{ id: 'grandchild' }],
+      deriveItemId: (x) => x.id,
+      parentRunId: child.runId,
+      runIds: ['grandchild-run'],
+      now: iso(2),
+    })
+    store.enqueueTasks({
+      workflow: 'other-wf',
+      inputs: [{ id: 'unrelated' }],
+      deriveItemId: (x) => x.id,
+      parentRunId: 'other-root',
+      runIds: ['unrelated-run'],
+      now: iso(2),
+    })
+
+    const tree = store.listTaskTreeByRunIds({ rootRunIds: ['root-run'] })
+
+    assert.deepEqual(tree.map((task) => task.taskId), [child.taskId, grandchild.taskId])
+    assert.deepEqual(tree.map((task) => task.state), ['done', 'queued'])
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

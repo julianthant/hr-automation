@@ -508,6 +508,8 @@ describe("buildDeleteEntryHandler", () => {
       childTaskId: child.taskId,
       onChildFailed: "block_parent",
     });
+    store.markTaskDone({ taskId: child.taskId, attemptId: child.attemptId });
+    store.markTaskDone({ taskId: parent.taskId, attemptId: parent.attemptId });
 
     const result = buildDeleteEntryHandler(tmp)({
       workflow: "ocr",

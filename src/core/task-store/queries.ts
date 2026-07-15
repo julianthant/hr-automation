@@ -135,6 +135,40 @@ export function listTasksForWorkflow(db: Database, workflow: string): TaskRow[] 
   return rows.map(mapTaskRow)
 }
 
+/**
+ * Return every task descended from one of `rootRunIds` through the authoritative
+ * `tasks.parent_run_id -> tasks.run_id` relationship. The roots themselves are
+ * not returned. `UNION` makes a malformed cycle converge instead of recursing
+ * forever, while terminal intermediates remain in the CTE so active
+ * grandchildren are never hidden behind a completed parent.
+ */
+export function listTaskTreeByRunIds(
+  db: Database,
+  request: { rootRunIds: readonly string[] },
+): TaskRow[] {
+  const rootRunIds = [...new Set(request.rootRunIds.filter(Boolean))]
+  if (rootRunIds.length === 0) return []
+  const rows = db.prepare(`
+    WITH RECURSIVE task_tree AS (
+      SELECT t.*
+      FROM tasks t
+      JOIN json_each(@rootRunIdsJson) roots
+        ON t.parent_run_id = roots.value
+
+      UNION
+
+      SELECT child.*
+      FROM tasks child
+      JOIN task_tree parent
+        ON child.parent_run_id = parent.run_id
+    )
+    SELECT *
+    FROM task_tree
+    ORDER BY COALESCE(enqueued_at, created_at) ASC, id ASC
+  `).all({ rootRunIdsJson: JSON.stringify(rootRunIds) }) as TaskDbRow[]
+  return rows.map(mapTaskRow)
+}
+
 export function listAttemptsForTask(db: Database, taskId: string): AttemptRow[] {
   const rows = db.prepare(`
     SELECT *

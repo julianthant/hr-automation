@@ -51,6 +51,9 @@ export async function runPooledBatch<TData, TSteps extends readonly string[]>(
   makeStrategy: (api: PoolStrategyApi) => Promise<WorkerStrategy>,
 ): Promise<BatchResult> {
   const poolSize = opts.poolSize ?? wf.config.batch?.poolSize ?? 4
+  if (!Number.isInteger(poolSize) || poolSize <= 0) {
+    throw new Error(`poolSize must be a positive integer; received ${String(poolSize)}`)
+  }
 
   const perItem: PerItem<TData>[] = validateAndPrepareItems(wf, items, opts, (item) =>
     wf.config.schema.parse(item),

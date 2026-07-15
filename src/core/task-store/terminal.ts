@@ -6,6 +6,7 @@ import {
   type TaskState,
   type AttemptState,
   type TaskDbRow,
+  type CancelTaskResult,
   getTaskRaw,
   getMappedTask,
   normalizeTaskState,
@@ -169,12 +170,22 @@ export function requestCancelTask(
   db: Database,
   control: ControlDb,
   request: { taskId: string; reason?: string; now?: string },
-): TaskRow | null {
+): CancelTaskResult {
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
     const task = getTaskRaw(db, request.taskId)
-    if (!task) return null
+    if (!task) return { kind: 'not-found' }
     const state = normalizeTaskState(task)
+    if (isTerminalTaskState(state)) {
+      return { kind: 'already-terminal', task: mapRequiredTask(db, request.taskId) }
+    }
+    if (state === 'cancel_requested' || state === 'cancelling') {
+      return {
+        kind: 'accepted',
+        disposition: 'already-requested',
+        task: mapRequiredTask(db, request.taskId),
+      }
+    }
     if (state === 'queued' || state === 'waiting_dependencies' || state === 'blocked') {
       markTaskCancelled(db, control, {
         taskId: request.taskId,
@@ -182,7 +193,11 @@ export function requestCancelTask(
         reason: request.reason,
         now,
       })
-      return getMappedTask(db, request.taskId)
+      return {
+        kind: 'accepted',
+        disposition: 'cancelled-before-run',
+        task: mapRequiredTask(db, request.taskId),
+      }
     }
     db.prepare(`
       UPDATE tasks
@@ -200,8 +215,18 @@ export function requestCancelTask(
         WHERE id = @attemptId
       `).run({ attemptId: task.current_attempt_id, now })
     }
-    return getMappedTask(db, request.taskId)
+    return {
+      kind: 'accepted',
+      disposition: 'requested',
+      task: mapRequiredTask(db, request.taskId),
+    }
   })
+}
+
+function mapRequiredTask(db: Database, taskId: string): TaskRow {
+  const task = getMappedTask(db, taskId)
+  if (!task) throw new Error(`requestCancelTask: task ${taskId} disappeared inside its transaction`)
+  return task
 }
 
 export function requestCancelParentAndChildren(

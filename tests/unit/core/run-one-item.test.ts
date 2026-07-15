@@ -10,6 +10,7 @@ import { Session } from '../../../src/core/kernel/session.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
 import { rowFilePath } from '../../../src/tracker/paths.js'
 import { runIdFragment, tracePrefix } from '../../../src/domain/queue-trace-id.js'
+import { runRegistry, type RunHandle } from '../../../src/core/run-registry.js'
 
 const TMP = () => mkdtempSync(join(tmpdir(), 'hrauto-runone-'))
 
@@ -437,6 +438,55 @@ test('runOneItem: cancel sticks after controller.abort() even when underlying pr
   // `|| controller.signal.aborted` is what makes this true.
   assert.equal(result.ok, false)
   assert.equal(result.kind, 'cancelled', 'cancel sticks via controller.signal.aborted even when probe returns false')
+})
+
+test('runOneItem: caller-owned RunHandle uses the pre-registered controller and survives handler return', async () => {
+  const wf = defineWorkflow({
+    name: 'shared-handle-test',
+    systems: [],
+    steps: ['work'] as const,
+    schema: z.object({ id: z.string() }),
+    authSteps: false,
+    handler: async (ctx) => {
+      assert.equal(ctx.signal, handle.controller.signal, 'handler must observe the claim-time controller')
+      await ctx.step('work', async () => {})
+    },
+  })
+  const session = Session.forTesting({ systems: [], browsers: new Map(), readyPromises: new Map() })
+  const handle: RunHandle = {
+    runId: 'shared-handle-run',
+    itemId: 'item',
+    workflow: wf.config.name,
+    controller: new AbortController(),
+    session,
+    startedAt: Date.now(),
+    source: 'daemon',
+    taskId: 'task',
+    attemptId: 'attempt',
+  }
+  runRegistry.register(handle)
+  let callbackController: AbortController | undefined
+  try {
+    const result = await runOneItem({
+      wf,
+      session,
+      item: { id: 'item' },
+      itemId: 'item',
+      runId: handle.runId,
+      callerPreEmits: false,
+      trackerStub: true,
+      runHandle: handle,
+      runHandleOwner: 'caller',
+      onCancelController: (controller) => { callbackController = controller },
+    })
+
+    assert.deepEqual(result, { ok: true })
+    assert.equal(callbackController, handle.controller)
+    assert.equal(runRegistry.get(handle.runId), handle, 'caller-owned handle remains registered until queue transition')
+  } finally {
+    runRegistry.unregister(handle.runId)
+    runRegistry.releaseTerminalWrite(handle.runId)
+  }
 })
 
 test('runOneItem: browser disconnect + target-closed error → cancelled, not failed', async () => {

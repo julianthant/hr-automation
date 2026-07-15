@@ -64,6 +64,33 @@ test('runWorkflowPool: distributes items across N workers, each with own Session
   assert.equal(launchCalls, 2, 'should launch once per worker')
 })
 
+test('runWorkflowPool rejects a non-positive or non-integer poolSize before launching workers', async () => {
+  let launchCalls = 0
+  const wf = defineWorkflow({
+    name: 'pool-size-validation',
+    systems: [{ id: 'ukg', login: async () => {} }],
+    steps: ['s1'] as const,
+    schema: z.object({ n: z.number() }),
+    batch: { mode: 'pool', poolSize: 2 },
+    handler: async () => {},
+  })
+
+  for (const poolSize of [0, -1, 1.5, Number.NaN]) {
+    await assert.rejects(
+      runWorkflowPool(wf, [{ n: 1 }], {
+        poolSize,
+        trackerStub: true,
+        launchFn: () => {
+          launchCalls++
+          return Promise.resolve(fakeSlot())
+        },
+      }),
+      /poolSize must be a positive integer/,
+    )
+  }
+  assert.equal(launchCalls, 0)
+})
+
 test('runWorkflowPool: one worker Session.launch failure does NOT abandon the surviving worker\'s items', async () => {
   // Worker-failure isolation — the reason the pools use Promise.allSettled, not
   // Promise.all. If worker B's Session.launch throws (e.g. Duo denied), worker

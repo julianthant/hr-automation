@@ -7,6 +7,7 @@
  */
 import { test, describe, vi } from 'vitest'
 import assert from 'node:assert/strict'
+import { getEventListeners } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,7 +15,7 @@ import { z } from 'zod'
 import { makeCtx } from '../../../src/core/kernel/ctx.js'
 import { Session } from '../../../src/core/kernel/session.js'
 import { Stepper } from '../../../src/core/kernel/stepper.js'
-import { defineWorkflow } from '../../../src/core/index.js'
+import { defineWorkflow, runWorkflow } from '../../../src/core/index.js'
 import { delegateToImpl } from '../../../src/core/delegate.js'
 import type { Page } from 'playwright'
 
@@ -94,6 +95,31 @@ describe('ctx.signal', () => {
 })
 
 describe('in-process delegation propagates parent signal (Finding #7)', () => {
+  test('failed Session.launch detaches the delegated parent abort listener', async () => {
+    const child = defineWorkflow({
+      name: 'parent-listener-launch-failure',
+      systems: [{ id: 'ucpath', login: async () => {} }],
+      authSteps: false,
+      steps: ['noop'] as const,
+      schema: z.object({ payload: z.string() }),
+      handler: async () => {},
+    })
+    const parent = new AbortController()
+
+    for (let i = 0; i < 12; i++) {
+      await assert.rejects(
+        runWorkflow(child, { payload: String(i) }, {
+          trackerStub: true,
+          parentSignal: parent.signal,
+          launchFn: async () => { throw new Error('launch failed') },
+        }),
+        /launch failed/,
+      )
+    }
+
+    assert.equal(getEventListeners(parent.signal, 'abort').length, 0)
+  })
+
   test('parent abort flips child ctx.signal.aborted to true mid-run', async (t) => {
     const trackerDir = mkdtempSync(join(tmpdir(), 'parent-signal-delegate-'))
     t.onTestFinished(() => rmSync(trackerDir, { recursive: true, force: true }))
@@ -199,15 +225,15 @@ describe('in-process delegation propagates parent signal (Finding #7)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Finding #16 — ctx.page(id) returns a proxy that injects signal into action
-// methods but leaves evaluate args clean (Bug #3 regression).
+// ctx.page(id) returns a proxy that races async Playwright operations against
+// ctx.signal while preserving the caller's exact argument list.
 //
 // Motivation: Bug #3 was that evaluate/evaluateHandle/$eval/$$eval were in
 // SIGNAL_METHODS, causing phantom signal injection into the function's arg
 // parameter. These tests pin the correct behavior so a refactor can't silently
 // re-add them.
 // ---------------------------------------------------------------------------
-describe('ctx.page(id) proxy — signal injection', () => {
+describe('ctx.page(id) proxy — abort race', () => {
   /**
    * Build a minimal fake Page with vi.fn() stubs for the methods we probe,
    * wire it into a Session.forTesting browser slot, then get a ctx via
@@ -259,7 +285,7 @@ describe('ctx.page(id) proxy — signal injection', () => {
     return { ctx, fakePage, clickMock, evaluateMock, gotoMock }
   }
 
-  test('click() injects signal into options arg', async () => {
+  test('click() keeps the original argument list', async () => {
     const controller = new AbortController()
     const { ctx, clickMock } = buildCtxWithFakePage(controller)
 
@@ -267,12 +293,10 @@ describe('ctx.page(id) proxy — signal injection', () => {
     await proxyPage.click('button')
 
     assert.equal(clickMock.mock.calls.length, 1, 'click was called once')
-    const [, opts] = clickMock.mock.calls[0] as [string, { signal?: AbortSignal }]
-    assert.ok(opts && typeof opts === 'object', 'options object was appended')
-    assert.equal(opts.signal, controller.signal, 'ctx.signal was injected into click options')
+    assert.deepEqual(clickMock.mock.calls[0], ['button'])
   })
 
-  test('goto() injects signal into options arg', async () => {
+  test('goto() keeps the original argument list', async () => {
     const controller = new AbortController()
     const { ctx, gotoMock } = buildCtxWithFakePage(controller)
 
@@ -280,9 +304,7 @@ describe('ctx.page(id) proxy — signal injection', () => {
     await proxyPage.goto('about:blank')
 
     assert.equal(gotoMock.mock.calls.length, 1, 'goto was called once')
-    const [, opts] = gotoMock.mock.calls[0] as [string, { signal?: AbortSignal }]
-    assert.ok(opts && typeof opts === 'object', 'options object was appended')
-    assert.equal(opts.signal, controller.signal, 'ctx.signal was injected into goto options')
+    assert.deepEqual(gotoMock.mock.calls[0], ['about:blank'])
   })
 
   test('evaluate(fn) with no second arg — underlying evaluate called with exactly one arg (Bug #3 regression)', async () => {
@@ -318,17 +340,12 @@ describe('ctx.page(id) proxy — signal injection', () => {
     )
   })
 
-  test('caller-provided signal on a SIGNAL_METHOD is not clobbered', async () => {
-    // The proxy must NOT override a caller-supplied signal — callers that
-    // wire their own AbortController for finer-grain control must win.
+  test('caller-provided options are passed through unchanged', async () => {
     const controller = new AbortController()
     const { ctx, clickMock } = buildCtxWithFakePage(controller)
 
     const callerController = new AbortController()
     const proxyPage = await ctx.page('ucpath')
-    // The proxy's signal injection itself uses a known Page method type; cast
-    // here to allow the test to pass an explicit options.signal that Playwright's
-    // type surface doesn't formally publish (it does support it at runtime).
     await (proxyPage.click as (sel: string, opts: { signal?: AbortSignal }) => Promise<void>)(
       'button',
       { signal: callerController.signal },
@@ -338,7 +355,7 @@ describe('ctx.page(id) proxy — signal injection', () => {
     assert.equal(
       opts.signal,
       callerController.signal,
-      'caller-provided signal must not be clobbered by ctx.signal',
+      'caller-provided signal must pass through unchanged',
     )
     assert.notEqual(opts.signal, controller.signal)
   })
