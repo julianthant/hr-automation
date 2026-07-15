@@ -1,5 +1,6 @@
 import { type Database } from "../../../infra/sqlite/index.js";
 import { openStateDb } from "../../state/db.js";
+import type { DashboardAccessPolicy } from "./security.js";
 
 export interface DashboardHonoDeps {
   dir: string;
@@ -11,6 +12,8 @@ export interface DashboardHonoDeps {
   staticDir?: string;
   /** Repo root for the workflow-presentation override store (`<root>/config/workflow-presentation/*.json`). Defaults to `process.cwd()` at the call site. */
   repoRoot?: string;
+  /** Present on real servers; omitted by focused route-unit tests. */
+  accessPolicy?: DashboardAccessPolicy;
 }
 
 export function getDefaultWorkflow(deps: DashboardHonoDeps): string {

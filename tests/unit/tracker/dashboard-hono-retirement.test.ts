@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Server } from "node:http";
+import { once } from "node:events";
 
 import { createDashboardServer } from "../../../src/tracker/dashboard.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
@@ -79,6 +80,7 @@ test("Hono manifest covers the dashboard public route inventory", () => {
   const manifest = getDashboardHonoRouteManifest();
   const expected: Array<[string, string]> = [
     ["OPTIONS", "*"],
+    ["GET", "/api/operator/session"],
     ["GET", "/api/v2/projection/health"],
     ["GET", "/api/v2/entries"],
     ["GET", "/api/v2/runs"],
@@ -227,6 +229,7 @@ test("dashboard server Hono-only listener serves representative routes", async (
   });
 
   server = createDashboardServer({ port: 0, dir, noClean: true, uploadPort: null });
+  if (!server.listening) await once(server, "listening");
   const port = (server.address() as { port: number }).port;
 
   const definitions = await fetch(`http://localhost:${port}/api/workflow-definitions`);

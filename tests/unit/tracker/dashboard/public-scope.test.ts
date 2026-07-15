@@ -1,9 +1,6 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
-import {
-  isExternalCaptureRequest,
-  isPublicCaptureRequestAllowed,
-} from "../../../../src/tracker/dashboard/hono/public-scope.js";
+import { isPublicCaptureRequestAllowed } from "../../../../src/tracker/dashboard/hono/public-scope.js";
 
 describe("isPublicCaptureRequestAllowed", () => {
   it("allows exactly the phone-side capture endpoints", () => {
@@ -47,55 +44,5 @@ describe("isPublicCaptureRequestAllowed", () => {
 
   it("allows OPTIONS preflight through (answered by the CORS handler)", () => {
     assert.equal(isPublicCaptureRequestAllowed("OPTIONS", "/api/entries"), true);
-  });
-});
-
-describe("isExternalCaptureRequest", () => {
-  const publicUrl = "https://capture.example.test";
-
-  it("is never external when no public origin is configured", () => {
-    assert.equal(
-      isExternalCaptureRequest({
-        hostHeader: "capture.example.test",
-        publicUrl: undefined,
-        cfConnectingIp: "203.0.113.7",
-      }),
-      false,
-    );
-  });
-
-  it("is external when a supported proxy edge header is present", () => {
-    assert.equal(
-      isExternalCaptureRequest({ hostHeader: "anything", publicUrl, cfConnectingIp: "203.0.113.7" }),
-      true,
-    );
-  });
-
-  it("is external when the Host matches the public origin's host", () => {
-    assert.equal(
-      isExternalCaptureRequest({
-        hostHeader: "capture.example.test",
-        publicUrl,
-        cfConnectingIp: null,
-      }),
-      true,
-    );
-  });
-
-  it("is NOT external for local operator access (localhost / LAN, no cf header)", () => {
-    for (const host of ["localhost:3838", "127.0.0.1:3838", "[::1]:3838", "100.64.71.114:3838"]) {
-      assert.equal(
-        isExternalCaptureRequest({ hostHeader: host, publicUrl, cfConnectingIp: null }),
-        false,
-        `expected ${host} to be local`,
-      );
-    }
-  });
-
-  it("returns false on an unparseable publicUrl (fail closed to local-only, no crash)", () => {
-    assert.equal(
-      isExternalCaptureRequest({ hostHeader: "whatever", publicUrl: "not a url", cfConnectingIp: null }),
-      false,
-    );
   });
 });

@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type Server } from "http";
 import { getRequestListener } from "@hono/node-server";
+import { once } from "node:events";
 import { createDashboardServer } from "../../../src/tracker/dashboard.js";
 import { createDashboardHonoApp } from "../../../src/tracker/dashboard/hono/app.js";
 import { closeStateDbForTests, openStateDb, stateDbPath } from "../../../src/tracker/state/db.js";
@@ -12,6 +13,11 @@ import { emitSessionEvent, readSessionEvents } from "../../../src/tracker/sessio
 import { querySessionEventsForRun } from "../../../src/tracker/state/queries.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 import { rowFilePath, rowsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
+
+async function listeningPort(server: Server): Promise<number> {
+  if (!server.listening) await once(server, "listening");
+  return (server.address() as { port: number }).port;
+}
 
 /**
  * Build a hub URL for a single subscription.
@@ -71,13 +77,13 @@ describe("/events/run-events SSE", () => {
   let server: Server;
   let port: number;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmp = mkdtempSync(join(tmpdir(), "run-evt-sse-"));
     // Open the DB first so that emitSessionEvent can populate SQLite via the
     // live projection path (applySessionEventLive -> isStateDbReady -> true).
     openStateDb(tmp);
     server = createDashboardServer({ port: 0, dir: tmp, noClean: true });
-    port = (server.address() as { port: number }).port;
+    port = await listeningPort(server);
   });
 
   afterEach(async () => {

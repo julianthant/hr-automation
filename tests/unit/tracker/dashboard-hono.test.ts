@@ -104,7 +104,7 @@ test("Hono OPTIONS for migrated routes returns dashboard CORS preflight shape", 
     const app = createDashboardHonoApp({ dir, stateDb: db });
     const res = await app.request("/api/workflow-definitions", { method: "OPTIONS" });
     assert.equal(res.status, 204);
-    assert.equal(res.headers.get("access-control-allow-origin"), "*");
+    assert.equal(res.headers.get("access-control-allow-origin"), null);
     assert.equal(res.headers.get("access-control-allow-methods"), "GET, POST, OPTIONS");
     assert.equal(res.headers.get("access-control-allow-headers"), "Content-Type");
   } finally {

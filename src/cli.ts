@@ -127,6 +127,7 @@ program
   .command("dashboard")
   .description("Start the live monitoring dashboard (run in a separate terminal)")
   .option("-p, --port <port>", "SSE server port", (v) => parsePositiveInt(v, "--port"))
+  .option("--host <host>", "Dashboard bind host (non-loopback also requires HRAUTO_DASHBOARD_ALLOW_LAN=1)")
   .option("--prod", "Serve built dashboard instead of Vite dev server")
   .option("--no-clean", "Skip the one-time startup prune of old tracker files")
   .option("--capture-ngrok", "Start ngrok and use its public URL for phone Capture QR links")
@@ -138,6 +139,7 @@ program
       clean?: boolean;
       captureNgrok?: boolean;
       captureNgrokUrl?: string;
+      host?: string;
     }) => {
     // Dashboard runs default to hands-off Duo. Without it, a daemon login
     // (person-lookup, oath-signature, …) stalls on Duo's native "insert your
@@ -169,8 +171,9 @@ program
           `CAPTURE_PUBLIC_URL=${process.env.CAPTURE_PUBLIC_URL} will be replaced by the ngrok URL for this dashboard process.`,
         );
       }
-      log.step(`Starting ngrok tunnel for Capture: https://ngrok → http://localhost:${port}`);
-      const captureNgrokTunnel = await startNgrokTunnel(port, { url: captureNgrokUrl });
+      const capturePort = port + 1;
+      log.step(`Starting ngrok tunnel for Capture: https://ngrok → http://127.0.0.1:${capturePort}`);
+      const captureNgrokTunnel = await startNgrokTunnel(capturePort, { url: captureNgrokUrl });
       if (captureNgrokTunnel) {
         process.env.CAPTURE_PUBLIC_URL = captureNgrokTunnel.url;
         registerTunnelCleanup(captureNgrokTunnel);
@@ -202,6 +205,7 @@ program
       // daemons — otherwise HRAUTO_E2E_STUBS runs write rows/state.db into the
       // real `.tracker/` while daemons write the isolated root (split-brain).
       dir: process.env.HRAUTO_TRACKER_DIR,
+      host: opts.host,
     });
 
     if (opts.prod) {
