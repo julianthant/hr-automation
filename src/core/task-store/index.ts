@@ -11,6 +11,7 @@ import {
   type EnqueuedTask,
   type EnqueueTasksRequest,
   type CancelTaskResult,
+  type TaskTransitionOutcome,
 } from './types.js'
 import { enqueueTasks } from './enqueue.js'
 import {
@@ -23,6 +24,7 @@ import {
 import {
   markTaskDone,
   markTaskFailed,
+  markTaskBlockedUncertain,
   markTaskFailedIfActive,
   markTaskCancelled,
   requestCancelTask,
@@ -60,6 +62,7 @@ export type {
   EnqueuedTask,
   EnqueueTasksRequest,
   CancelTaskResult,
+  TaskTransitionOutcome,
   ReleasedParentTask,
   ActiveTaskRef,
 }
@@ -75,11 +78,12 @@ export interface ControlTaskStore {
   /** Extend a still-held claim's lease (worker heartbeat); returns whether a row matched. */
   renewClaim(request: { taskId: string; workerId: string; now?: string; leaseMs?: number }): boolean
   markTaskRunning(request: { taskId: string; attemptId: string; workerId: string; now?: string }): void
-  markTaskDone(request: { taskId: string; attemptId: string; claimGeneration?: number; now?: string }): void
-  markTaskFailed(request: { taskId: string; attemptId: string; error: string; claimGeneration?: number; now?: string }): void
+  markTaskDone(request: { taskId: string; attemptId: string; workerId?: string; claimGeneration?: number; now?: string }): TaskTransitionOutcome
+  markTaskFailed(request: { taskId: string; attemptId: string; error: string; workerId?: string; claimGeneration?: number; now?: string }): TaskTransitionOutcome
+  markTaskBlockedUncertain(request: { taskId: string; attemptId: string; workerId: string; claimGeneration: number; error: string; now?: string }): TaskTransitionOutcome
   /** Fail only if not already terminal (terminal_at IS NULL); returns whether THIS call won. Cross-process queued-orphan dedup (E2E-105). */
   markTaskFailedIfActive(request: { taskId: string; attemptId?: string; error: string; now?: string }): boolean
-  markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string }): void
+  markTaskCancelled(request: { taskId: string; attemptId?: string; reason?: string; workerId?: string; claimGeneration?: number; now?: string }): TaskTransitionOutcome
   requestCancelTask(request: { taskId: string; reason?: string; now?: string }): CancelTaskResult
   /**
    * Re-enqueue a failed/terminal task as a fresh attempt. `blockedControlStates`
@@ -116,7 +120,7 @@ export interface ControlTaskStore {
   /** Recursive descendants linked by tasks.parent_run_id; roots are excluded. */
   listTaskTreeByRunIds(request: { rootRunIds: readonly string[] }): TaskRow[]
   listAttemptsForTask(taskId: string): AttemptRow[]
-  returnTaskToQueued(request: { taskId: string; now?: string }): void
+  returnTaskToQueued(request: { taskId: string; attemptId?: string; workerId?: string; claimGeneration?: number; now?: string }): TaskTransitionOutcome
   recoverClaimsForDeadWorkers(request: { workflow: string; aliveWorkerIds: Set<string>; now?: string }): TaskRow[]
   countQueued(workflow: string): number
 }
@@ -140,6 +144,7 @@ export function createTaskStore(control: ControlDb): ControlTaskStore {
     markTaskRunning: bindControl(markTaskRunning),
     markTaskDone: bindControl(markTaskDone),
     markTaskFailed: bindControl(markTaskFailed),
+    markTaskBlockedUncertain: bindControl(markTaskBlockedUncertain),
     markTaskFailedIfActive: bindControl(markTaskFailedIfActive),
     markTaskCancelled: bindControl(markTaskCancelled),
     requestCancelTask: bindControl(requestCancelTask),

@@ -19,6 +19,18 @@ interface FakeSession {
   killCalls: number[]
 }
 
+test('terminal write reservation rolls back after an emit failure and commits only after success', () => {
+  const registry = createRunRegistry()
+  assert.equal(registry.claimTerminalWrite('run-terminal'), true)
+  assert.equal(registry.claimTerminalWrite('run-terminal'), false, 'an in-flight reservation excludes a sibling writer')
+
+  registry.rollbackTerminalWrite('run-terminal')
+  assert.equal(registry.claimTerminalWrite('run-terminal'), true, 'failed emit releases the reservation for retry')
+  registry.commitTerminalWrite('run-terminal')
+  assert.equal(registry.hasTerminalWrite('run-terminal'), true)
+  assert.equal(registry.claimTerminalWrite('run-terminal'), false, 'committed terminal remains fenced')
+})
+
 function makeFakeSession(opts: { throwOnKill?: boolean } = {}): FakeSession {
   const calls: number[] = []
   return {

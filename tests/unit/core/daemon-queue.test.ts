@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, appendFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, rmSync, appendFileSync, existsSync, mkdirSync, unlinkSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { UUID } from 'node:crypto'
@@ -19,6 +19,7 @@ import {
 import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createOcrEidLookupDependencyBatch } from '../../../src/tracker/tasks/store.js'
+import { emitTrackerRow } from '../../../src/tracker/jsonl-io.js'
 
 const TMP = (): string => mkdtempSync(join(tmpdir(), 'daemon-q-'))
 
@@ -200,6 +201,35 @@ test('markItemFailed transitions claimed → failed with error message', async (
   }
 })
 
+test('markItemDone appends terminal audit only when the fenced SQLite transition applied', async () => {
+  const dir = TMP()
+  try {
+    await enqueueItems('wf', [{}], () => 'x', dir)
+    const claimed = await claimNextItem('wf', 'w1', dir)
+    assert.ok(claimed?.taskId)
+    const store = createTaskStore(openControlDb({ trackerDir: dir }))
+    try {
+      const requeued = store.returnTaskToQueued({
+        taskId: claimed.taskId,
+        attemptId: claimed.attemptId,
+        workerId: 'w1',
+        claimGeneration: claimed.claimGeneration,
+      })
+      assert.deepEqual(requeued, { kind: 'applied' })
+    } finally {
+      store.close()
+    }
+
+    const outcome = await markItemDone('wf', 'x', claimed.runId!, dir, claimed.claimGeneration, 'w1')
+    assert.deepEqual(outcome, { kind: 'lease-lost' })
+    const events = readFileSync(queueFilePath('wf', dir), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line) as { type: string })
+    assert.equal(events.filter((event) => event.type === 'done').length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('unclaimItem transitions claimed → queued and clears claimedBy', async () => {
   const dir = TMP()
   try {
@@ -259,6 +289,43 @@ test('recoverOrphanedClaims re-queues claims whose owner is not alive', async ()
     const state = await readQueueState('wf', dir)
     assert.deepEqual(state.queued.map((q) => q.id), ['orphan'])
     assert.equal(state.claimed.length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('recoverOrphanedClaims reconciles an exact terminal tracker row instead of rerunning the submitted action', async () => {
+  const dir = TMP()
+  try {
+    await enqueueItems('wf', [{}], () => 'submitted', dir)
+    const claimed = await claimNextItem('wf', 'dead-worker', dir)
+    assert.ok(claimed?.taskId)
+    emitTrackerRow({
+      workflow: 'wf',
+      timestamp: new Date().toISOString(),
+      id: 'submitted',
+      runId: claimed.runId,
+      status: 'done',
+      data: { archetype: 'single' },
+    }, dir)
+    const beforeRecovery = createTaskStore(openControlDb({ trackerDir: dir }))
+    try {
+      beforeRecovery.db.prepare('UPDATE tasks SET claim_expires_at = ? WHERE id = ?').run(
+        '2000-01-01T00:00:00.000Z',
+        claimed.taskId,
+      )
+    } finally {
+      beforeRecovery.close()
+    }
+
+    const count = await recoverOrphanedClaims('wf', new Set(['dead-worker']), dir)
+    assert.equal(count, 0)
+    const store = createTaskStore(openControlDb({ trackerDir: dir }))
+    try {
+      assert.equal(store.getTask(claimed.taskId)?.state, 'done')
+    } finally {
+      store.close()
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

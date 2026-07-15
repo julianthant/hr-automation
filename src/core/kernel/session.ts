@@ -208,6 +208,25 @@ interface SessionState {
   screenshotDir?: string
 }
 
+/** Close every owned handle for one system while preserving the first failure. */
+async function closeSystemSlot(slot: SystemSlot): Promise<void> {
+  const errors: unknown[] = []
+  try {
+    await slot.context.close()
+  } catch (err) {
+    errors.push(err)
+  }
+  if (slot.browser) {
+    try {
+      await slot.browser.close()
+    } catch (err) {
+      errors.push(err)
+    }
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length > 1) throw new AggregateError(errors, 'multiple browser handles failed to close')
+}
+
 export interface LaunchOpts {
   /**
    * Override the inter-submit stagger between consecutive Submit clicks.
@@ -406,14 +425,37 @@ export class Session {
     opts.onReady?.(session)
     throwIfAborted(abortSignal)
 
+    const cleanupLaunchFailure = async (err: unknown): Promise<never> => {
+      try {
+        // Use the public bounded path: a wedged CDP close during startup must
+        // escalate through close()'s timeout→killChromeHard fallback instead
+        // of hanging daemon authentication teardown forever.
+        await session.close()
+      } catch (closeErr) {
+        log.warn(`[Session] browser cleanup after launch/auth failure also failed: ${errorMessage(closeErr)}`)
+      }
+      throw err
+    }
+
     // Launch all browsers in parallel. Windows land wherever Chromium drops
     // them — tiling was removed 2026-04-23 once Playwright's default window
     // placement proved fine for the small (≤4) browser counts we actually use.
-    const slots = await raceAbort(Promise.all(
-      systems.map((s) => launchOne({ system: s })),
-    ), abortSignal)
-    systems.forEach((s, i) => browsers.set(s.id, slots[i]))
-    throwIfAborted(abortSignal)
+    const launchPromises = systems.map(async (system) => {
+      const slot = await launchOne({ system })
+      if (abortSignal?.aborted || session.isClosing()) {
+        try { await closeSystemSlot(slot) } catch (closeErr) {
+          log.warn(`[Session: ${system.id}] late browser cleanup failed: ${errorMessage(closeErr)}`)
+        }
+        return
+      }
+      browsers.set(system.id, slot)
+    })
+    try {
+      await raceAbort(Promise.all(launchPromises), abortSignal)
+      throwIfAborted(abortSignal)
+    } catch (err) {
+      await cleanupLaunchFailure(err)
+    }
 
     // Fire onBrowserLaunch for each system. browserId === systemId today
     // (one browser per system); if that changes later, mint UUIDs here.
@@ -455,19 +497,23 @@ export class Session {
     const toPrepare = systems.filter((s) => typeof s.prepareLogin === 'function')
     if (toPrepare.length > 0) {
       log.step(`[Session] Prepare-login in parallel for ${toPrepare.length} system(s): ${toPrepare.map((s) => s.id).join(', ')}`)
-      await raceAbort(Promise.allSettled(
-        toPrepare.map(async (s) => {
-          const slot = browsers.get(s.id)
-          if (!slot) return
-          try {
-            throwIfAborted(abortSignal)
-            await s.prepareLogin!(slot.page)
-          } catch (err) {
-            if (abortSignal?.aborted) throw abortReason(abortSignal)
-            log.warn(`[Session: ${s.id}] prepareLogin failed — login phase will re-prepare: ${errorMessage(err)}`)
-          }
-        }),
-      ), abortSignal)
+      try {
+        await raceAbort(Promise.allSettled(
+          toPrepare.map(async (s) => {
+            const slot = browsers.get(s.id)
+            if (!slot) return
+            try {
+              throwIfAborted(abortSignal)
+              await s.prepareLogin!(slot.page)
+            } catch (err) {
+              if (abortSignal?.aborted) throw abortReason(abortSignal)
+              log.warn(`[Session: ${s.id}] prepareLogin failed — login phase will re-prepare: ${errorMessage(err)}`)
+            }
+          }),
+        ), abortSignal)
+      } catch (err) {
+        await cleanupLaunchFailure(err)
+      }
     }
 
     // Auth strategy — one shape for every workflow:
@@ -520,6 +566,8 @@ export class Session {
           )
           opts.observer?.onAuthComplete?.(sys.id, sys.id)
           readyPromises.set(sys.id, Promise.resolve())
+        } catch (err) {
+          await cleanupLaunchFailure(err)
         } finally {
           session.authInProgress = false
         }
@@ -706,6 +754,7 @@ export class Session {
   }
 
   async page(id: string): Promise<Page> {
+    if (this.isClosing()) throw new Error(`session is closing; page for system ${id} is unavailable`)
     const ready = this.state.readyPromises.get(id)
     if (!ready) throw new Error(`unknown system: ${id}`)
     await ready
@@ -749,6 +798,7 @@ export class Session {
    * replacement promise.
    */
   poisonPage(id: string, expectedPage: Page): void {
+    if (this.isClosing()) return
     if (this.poisonedPageReplacements.has(id)) return
     const slot = this.state.browsers.get(id)
     if (!slot || slot.page !== expectedPage) return
@@ -813,8 +863,17 @@ export class Session {
       }
     }
 
+    if (this.isClosing()) {
+      throw new Error(`poisonPage: session is closing; replacement for ${id} was cancelled`)
+    }
+
     const health = this.ensureHealthState(id)
-    while (health.reloadInFlight) await sleep(25)
+    while (health.reloadInFlight) {
+      if (this.isClosing()) {
+        throw new Error(`poisonPage: session is closing; replacement for ${id} was cancelled`)
+      }
+      await sleep(25)
+    }
     if (slot.page !== expectedPage) {
       this.poisonedSystems.delete(id)
       return
@@ -824,6 +883,9 @@ export class Session {
     let fresh: Page | null = null
     try {
       fresh = await slot.context.newPage()
+      if (this.isClosing()) {
+        throw new Error(`poisonPage: session is closing; replacement for ${id} was cancelled`)
+      }
       await fresh.goto(target, { waitUntil: 'domcontentloaded', timeout: 90_000 })
       const url = fresh.url()
       if (!url || url === 'about:blank' || url.toLowerCase().startsWith('chrome-error') || isLoginLikeUrl(url)) {
@@ -831,6 +893,9 @@ export class Session {
       }
       const probe = await fresh.evaluate(() => 1)
       if (probe !== 1) throw new Error(`poisonPage: replacement liveness probe failed for ${id}`)
+      if (this.isClosing()) {
+        throw new Error(`poisonPage: session is closing; replacement for ${id} was cancelled`)
+      }
       if (slot.page !== expectedPage) {
         await fresh.close()
         return
@@ -911,10 +976,21 @@ export class Session {
   }
 
   private async closeAllBrowsers(): Promise<void> {
-    for (const slot of this.state.browsers.values()) {
-      await slot.context.close()
-      if (slot.browser) await slot.browser.close()
-    }
+    const results = await Promise.allSettled(
+      [...this.state.browsers.values()].map((slot) => closeSystemSlot(slot)),
+    )
+    // A poison replacement may already be between closing the abandoned page
+    // and observing `closing`. Drain it so close() never returns while a late
+    // tab cleanup is still running. Rejections here are expected cancellation;
+    // the original close failures remain the teardown outcome.
+    await Promise.allSettled([...this.poisonedPageReplacements.values()])
+
+    const errors = results.flatMap((result): unknown[] => {
+      if (result.status === 'fulfilled') return []
+      return result.reason instanceof AggregateError ? result.reason.errors : [result.reason]
+    })
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1) throw new AggregateError(errors, 'multiple browser handles failed to close')
   }
 
   /**
@@ -2228,23 +2304,66 @@ function listDescendantPids(rootPid: number): number[] {
   }
 }
 
-async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
+interface DefaultLaunchRuntime {
+  launchBrowser: typeof launchBrowser
+  listChildPids: typeof listChildPids
+  signalProcess: (pid: number, signal: NodeJS.Signals | 0) => void
+  delay: (ms: number) => Promise<void>
+}
+
+const DEFAULT_LAUNCH_RUNTIME: DefaultLaunchRuntime = {
+  launchBrowser,
+  listChildPids,
+  signalProcess: (pid, signal) => process.kill(pid, signal),
+  delay: async (ms) => { await sleep(ms) },
+}
+let defaultLaunchTail: Promise<void> = Promise.resolve()
+
+/**
+ * Serialize the before/launch/after PID diff as one critical section. Without
+ * this fence, parallel browser launches can both observe the same new child and
+ * attribute one Chromium PID to two systems.
+ */
+export async function defaultLaunchOne(
+  opts: LaunchOneOpts,
+  runtime: DefaultLaunchRuntime = DEFAULT_LAUNCH_RUNTIME,
+): Promise<SystemSlot> {
+  const previous = defaultLaunchTail
+  let release!: () => void
+  defaultLaunchTail = new Promise<void>((resolve) => { release = resolve })
+  await previous
+
   const systemId = opts.system.id
   const sessionDir = opts.system.sessionDir
   // Snapshot child pids so we can diff out the new Chromium process after
   // launch. Playwright spawns Chromium as a direct child of the Node parent;
   // there's only one new direct child per launchBrowser() call.
-  const childrenBefore = new Set(listChildPids(process.pid))
+  const childrenBefore = new Set(runtime.listChildPids(process.pid))
   try {
-    const { browser, context, page } = await launchBrowser({
+    const { browser, context, page } = await runtime.launchBrowser({
       sessionDir,
       acceptDownloads: opts.system.acceptDownloads,
     })
-    const childrenAfter = listChildPids(process.pid)
+    const childrenAfter = runtime.listChildPids(process.pid)
     const newChildren = childrenAfter.filter((p) => !childrenBefore.has(p))
     const chromiumPid = newChildren[0]
     return { page, context, browser, chromiumPid }
   } catch (e) {
+    // launchBrowser may have acquired Chromium before context/page setup or its
+    // own graceful cleanup failed. Diff the same pre-launch snapshot and reap
+    // only children created by THIS serialized launch attempt.
+    const childrenAfterFailure = runtime.listChildPids(process.pid)
+    const acquired = childrenAfterFailure.filter((pid) => !childrenBefore.has(pid))
+    for (const pid of acquired) {
+      try { runtime.signalProcess(pid, 'SIGTERM') } catch { /* already gone */ }
+    }
+    if (acquired.length > 0) await runtime.delay(100)
+    for (const pid of acquired) {
+      try {
+        runtime.signalProcess(pid, 0)
+        runtime.signalProcess(pid, 'SIGKILL')
+      } catch { /* exited after SIGTERM */ }
+    }
     const classified = classifyPlaywrightError(e)
     if (classified.kind === 'process-singleton') {
       log.error(`[Session: ${systemId}] ProcessSingleton collision — another process holds the Chrome profile lock. pid=${process.pid} sessionDir='${sessionDir ?? '<ephemeral>'}'`)
@@ -2252,6 +2371,8 @@ async function defaultLaunchOne(opts: LaunchOneOpts): Promise<SystemSlot> {
       log.error(`[Session: ${systemId}] launch failed: ${classified.kind} — ${classified.summary}`)
     }
     throw e
+  } finally {
+    release()
   }
 }
 

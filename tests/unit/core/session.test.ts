@@ -1,7 +1,7 @@
 import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { Session, walkDescendantPids } from '../../../src/core/kernel/session.js'
+import { Session, defaultLaunchOne, walkDescendantPids } from '../../../src/core/kernel/session.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 import { log } from '../../../src/utils/log.js'
 
@@ -246,6 +246,79 @@ test('session.launch: abortSignal rejects an in-progress login without waiting f
     ]),
     /stop requested during auth|aborted/i,
   )
+})
+
+test('session.launch: a failed sibling closes already-launched and late-resolving browser slots', async () => {
+  const closed: string[] = []
+  const makeSlot = async (id: string) => ({
+    page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
+    context: { close: async () => { closed.push(`${id}:context`) } } as unknown as import('playwright').BrowserContext,
+    browser: { close: async () => { closed.push(`${id}:browser`) } } as unknown as import('playwright').Browser,
+  })
+  let resolveLate!: (slot: Awaited<ReturnType<typeof makeSlot>>) => void
+  const late = new Promise<Awaited<ReturnType<typeof makeSlot>>>((resolve) => { resolveLate = resolve })
+  const systems = [makeSystem('ready'), makeSystem('failed'), makeSystem('late')]
+
+  const launched = Session.launch(systems, {
+    launchFn: ({ system }) => {
+      if (system.id === 'failed') return Promise.reject(new Error('launch failed'))
+      if (system.id === 'late') return late
+      return makeSlot(system.id)
+    },
+  })
+
+  await assert.rejects(launched, /launch failed/)
+  resolveLate(await makeSlot('late'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(closed.sort(), [
+    'late:browser',
+    'late:context',
+    'ready:browser',
+    'ready:context',
+  ])
+})
+
+test('session.launch: abort during browser launch closes fulfilled and late-resolving slots', async () => {
+  const controller = new AbortController()
+  const closed: string[] = []
+  const makeSlot = async (id: string) => ({
+    page: { bringToFront: async () => {} } as unknown as import('playwright').Page,
+    context: { close: async () => { closed.push(`${id}:context`) } } as unknown as import('playwright').BrowserContext,
+    browser: { close: async () => { closed.push(`${id}:browser`) } } as unknown as import('playwright').Browser,
+  })
+  let resolveLate!: (slot: Awaited<ReturnType<typeof makeSlot>>) => void
+  const late = new Promise<Awaited<ReturnType<typeof makeSlot>>>((resolve) => { resolveLate = resolve })
+
+  const launched = Session.launch([makeSystem('ready'), makeSystem('late')], {
+    abortSignal: controller.signal,
+    launchFn: ({ system }) => system.id === 'late' ? late : makeSlot(system.id),
+  })
+  await Promise.resolve()
+  controller.abort(new Error('stop during launch'))
+  await assert.rejects(launched, /stop during launch/)
+  resolveLate(await makeSlot('late'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.deepEqual(closed.sort(), [
+    'late:browser',
+    'late:context',
+    'ready:browser',
+    'ready:context',
+  ])
+})
+
+test('session.launch: one-system auth-stage failure closes its launched slot', async () => {
+  const closed: string[] = []
+  const sys = makeSystem('solo')
+  const launchFn = async () => ({
+    page: { bringToFront: async () => { throw new Error('auth stage failed') } } as unknown as import('playwright').Page,
+    context: { close: async () => { closed.push('context') } } as unknown as import('playwright').BrowserContext,
+    browser: { close: async () => { closed.push('browser') } } as unknown as import('playwright').Browser,
+  })
+
+  await assert.rejects(Session.launch([sys], { launchFn }), /auth stage failed/)
+  assert.deepEqual(closed, ['context', 'browser'])
 })
 
 test('session.launch (parallel-staggered): submits fire `staggerMs` apart, settle delays the first', async () => {
@@ -1151,6 +1224,151 @@ test('session.poisonPage: a hung page.close is bounded and escalates to the cont
   assert.ok(Date.now() - startedAt < 1_000, 'hung page.close is bounded below the cancel watchdog threshold')
   assert.equal(contextClosed, true)
   await assert.rejects(session.page('a'), /page.*poisoned/i)
+})
+
+test('session.poisonPage: close racing a replacement never opens a fresh page after teardown starts', async () => {
+  let resolveOldClose!: () => void
+  const oldClose = new Promise<void>((resolve) => { resolveOldClose = resolve })
+  let newPageCalls = 0
+  const oldPage = {
+    close: () => oldClose,
+    isClosed: () => false,
+    url: () => 'https://example.test/old',
+  } as unknown as import('playwright').Page
+  const context = {
+    close: async () => {},
+    newPage: async () => {
+      newPageCalls++
+      return makeHealthPage({ url: () => 'https://example.test/reset' })
+    },
+  } as unknown as import('playwright').BrowserContext
+  const session = Session.forTesting({
+    systems: [{ id: 'a', resetUrl: 'https://example.test/reset', login: async () => {} }],
+    browsers: new Map([['a', { page: oldPage, context, browser: null }]]),
+    readyPromises: new Map([['a', Promise.resolve()]]),
+  })
+
+  session.poisonPage('a', oldPage)
+  const closing = session.close()
+  resolveOldClose()
+  await closing
+  await assert.rejects(session.page('a'), /closing|poisoned/i)
+  assert.equal(newPageCalls, 0)
+})
+
+test('session.close: ordinary close failures do not skip the slot browser or sibling slots', async () => {
+  const closed: string[] = []
+  const page = {} as import('playwright').Page
+  const session = Session.forTesting({
+    systems: [makeSystem('a'), makeSystem('b')],
+    browsers: new Map([
+      ['a', {
+        page,
+        context: { close: async () => { closed.push('a:context'); throw new Error('a context failed') } } as unknown as import('playwright').BrowserContext,
+        browser: { close: async () => { closed.push('a:browser') } } as unknown as import('playwright').Browser,
+      }],
+      ['b', {
+        page,
+        context: { close: async () => { closed.push('b:context') } } as unknown as import('playwright').BrowserContext,
+        browser: { close: async () => { closed.push('b:browser') } } as unknown as import('playwright').Browser,
+      }],
+    ]),
+    readyPromises: new Map(),
+  })
+
+  await assert.rejects(session.close(), /a context failed/)
+  assert.deepEqual(closed.sort(), ['a:browser', 'a:context', 'b:browser', 'b:context'])
+})
+
+test('session.close: multiple close failures are reported in deterministic slot/handle order', async () => {
+  const fail = (message: string): (() => Promise<never>) => async () => { throw new Error(message) }
+  const page = {} as import('playwright').Page
+  const session = Session.forTesting({
+    systems: [makeSystem('a'), makeSystem('b')],
+    browsers: new Map([
+      ['a', {
+        page,
+        context: { close: fail('a context') } as unknown as import('playwright').BrowserContext,
+        browser: { close: fail('a browser') } as unknown as import('playwright').Browser,
+      }],
+      ['b', {
+        page,
+        context: { close: fail('b context') } as unknown as import('playwright').BrowserContext,
+        browser: { close: fail('b browser') } as unknown as import('playwright').Browser,
+      }],
+    ]),
+    readyPromises: new Map(),
+  })
+
+  const err = await session.close().then(
+    () => undefined,
+    (caught: unknown) => caught,
+  )
+  assert.ok(err instanceof AggregateError)
+  assert.deepEqual(
+    err.errors.map((failure: Error) => failure.message),
+    ['a context', 'a browser', 'b context', 'b browser'],
+  )
+})
+
+test('defaultLaunchOne: serializes pid snapshots so concurrent systems receive distinct Chromium pids', async () => {
+  const page = {} as import('playwright').Page
+  const context = {} as import('playwright').BrowserContext
+  const browser = {} as import('playwright').Browser
+  let releaseFirst!: () => void
+  const firstLaunch = new Promise<void>((resolve) => { releaseFirst = resolve })
+  let launchCalls = 0
+  let activeLaunches = 0
+  let maxActiveLaunches = 0
+  const launch = async () => {
+    launchCalls++
+    activeLaunches++
+    maxActiveLaunches = Math.max(maxActiveLaunches, activeLaunches)
+    if (launchCalls === 1) await firstLaunch
+    activeLaunches--
+    return { page, context, browser }
+  }
+  const pidSnapshots = [[100], [100, 201], [100, 201], [100, 201, 202]]
+  const listPids = () => pidSnapshots.shift() ?? []
+
+  const runtime = {
+    launchBrowser: launch,
+    listChildPids: listPids,
+    signalProcess: () => {},
+    delay: async () => {},
+  }
+  const first = defaultLaunchOne({ system: makeSystem('a') }, runtime)
+  const second = defaultLaunchOne({ system: makeSystem('b') }, runtime)
+  await Promise.resolve()
+  assert.equal(launchCalls, 1, 'the second pid snapshot must wait until the first launch is attributed')
+  releaseFirst()
+
+  const [a, b] = await Promise.all([first, second])
+  assert.equal(maxActiveLaunches, 1)
+  assert.equal(a.chromiumPid, 201)
+  assert.equal(b.chromiumPid, 202)
+})
+
+test('defaultLaunchOne: failed launch terminates only newly acquired Chromium child pids', async () => {
+  const signals: Array<[number, NodeJS.Signals | 0]> = []
+  const snapshots = [[100], [100, 201, 202]]
+  await assert.rejects(
+    defaultLaunchOne(
+      { system: makeSystem('a') },
+      {
+        launchBrowser: async () => { throw new Error('page creation failed') },
+        listChildPids: () => snapshots.shift() ?? [],
+        signalProcess: (pid, signal) => { signals.push([pid, signal]) },
+        delay: async () => {},
+      },
+    ),
+    /page creation failed/,
+  )
+  assert.deepEqual(signals, [
+    [201, 'SIGTERM'], [202, 'SIGTERM'],
+    [201, 0], [201, 'SIGKILL'],
+    [202, 0], [202, 'SIGKILL'],
+  ])
 })
 
 test('session: health monitor REFRESHES a soft (chrome-error) fault and recovers', async () => {

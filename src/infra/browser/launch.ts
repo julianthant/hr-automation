@@ -6,6 +6,9 @@ import {
   type Locator,
 } from "playwright";
 import { log } from "../../utils/log.js";
+import { withTimeout } from "../../utils/with-timeout.js";
+
+const FAILED_LAUNCH_CLEANUP_TIMEOUT_MS = 5_000;
 
 /**
  * Error-message fragments that mean "the website didn't load" — a transient
@@ -145,15 +148,29 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
 
   if (options.sessionDir) {
     log.step(`Launching browser (persistent session: ${options.sessionDir})...`);
-    const context = await chromium.launchPersistentContext(options.sessionDir, {
-      headless,
-      viewport,
-      acceptDownloads: options.acceptDownloads ?? false,
-      args: options.args,
-    });
-    const existingPages = context.pages();
-    const page = existingPages[0] ?? await context.newPage();
-    return { browser: null, context, page };
+    let context: BrowserContext | undefined;
+    try {
+      context = await chromium.launchPersistentContext(options.sessionDir, {
+        headless,
+        viewport,
+        acceptDownloads: options.acceptDownloads ?? false,
+        args: options.args,
+      });
+      const existingPages = context.pages();
+      const page = existingPages[0] ?? await context.newPage();
+      return { browser: null, context, page };
+    } catch (err) {
+      if (context) {
+        await withTimeout(
+          context.close(),
+          FAILED_LAUNCH_CLEANUP_TIMEOUT_MS,
+          "launchBrowser persistent cleanup",
+        ).catch((closeErr: unknown) => {
+          log.warn(`Persistent browser cleanup failed after launch error: ${String(closeErr)}`);
+        });
+      }
+      throw err;
+    }
   }
 
   log.step("Launching browser...");
@@ -161,10 +178,31 @@ export async function launchBrowser(options: LaunchOptions = {}): Promise<{
     headless,
     args: options.args,
   });
-  const context = await browser.newContext({
-    viewport,
-    acceptDownloads: options.acceptDownloads ?? false,
-  });
-  const page = await context.newPage();
-  return { browser, context, page };
+  let context: BrowserContext | undefined;
+  try {
+    context = await browser.newContext({
+      viewport,
+      acceptDownloads: options.acceptDownloads ?? false,
+    });
+    const page = await context.newPage();
+    return { browser, context, page };
+  } catch (err) {
+    if (context) {
+      await withTimeout(
+        context.close(),
+        FAILED_LAUNCH_CLEANUP_TIMEOUT_MS,
+        "launchBrowser context cleanup",
+      ).catch((closeErr: unknown) => {
+        log.warn(`Browser context cleanup failed after launch error: ${String(closeErr)}`);
+      });
+    }
+    await withTimeout(
+      browser.close(),
+      FAILED_LAUNCH_CLEANUP_TIMEOUT_MS,
+      "launchBrowser browser cleanup",
+    ).catch((closeErr: unknown) => {
+      log.warn(`Browser cleanup failed after launch error: ${String(closeErr)}`);
+    });
+    throw err;
+  }
 }

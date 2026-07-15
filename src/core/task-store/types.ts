@@ -25,6 +25,12 @@ export type AttemptState =
 
 export type ChildFailurePolicy = 'fail_parent' | 'block_parent' | 'allow_partial'
 
+export type TaskTransitionOutcome =
+  | { kind: 'applied' }
+  | { kind: 'already-terminal'; state: Extract<TaskState, 'done' | 'failed' | 'cancelled'> }
+  | { kind: 'lease-lost' }
+  | { kind: 'not-found' }
+
 export interface TaskRow {
   taskId: string
   workflow: string
@@ -37,6 +43,7 @@ export interface TaskRow {
   currentAttemptId?: string
   currentRunId?: string
   claimedByWorkerId?: string
+  claimGeneration?: number
   enqueuedAt?: string
   claimedAt?: string
   terminalAt?: string
@@ -140,6 +147,7 @@ export function mapTaskRow(row: TaskDbRow): TaskRow {
     itemId: row.item_id,
     input: parseJson(row.input_json),
     state: normalizeTaskState(row),
+    claimGeneration: row.claim_generation,
   }
   if (row.run_id) {
     task.runId = row.run_id
@@ -213,7 +221,9 @@ export function normalizeAttemptState(row: AttemptDbRow): AttemptState {
   )
 }
 
-export function isTerminalTaskState(state: TaskState): boolean {
+export function isTerminalTaskState(
+  state: TaskState,
+): state is Extract<TaskState, 'done' | 'failed' | 'cancelled'> {
   return state === 'done' || state === 'failed' || state === 'cancelled'
 }
 

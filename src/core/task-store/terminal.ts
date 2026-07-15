@@ -7,6 +7,7 @@ import {
   type AttemptState,
   type TaskDbRow,
   type CancelTaskResult,
+  type TaskTransitionOutcome,
   getTaskRaw,
   getMappedTask,
   normalizeTaskState,
@@ -17,17 +18,69 @@ import { returnTaskToQueued } from './claim.js'
 export function markTaskDone(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; attemptId: string; claimGeneration?: number; now?: string },
-): void {
-  markTerminal(db, control, { ...request, taskState: 'done', attemptState: 'done' })
+  request: { taskId: string; attemptId: string; workerId?: string; claimGeneration?: number; now?: string },
+): TaskTransitionOutcome {
+  return markTerminal(db, control, { ...request, taskState: 'done', attemptState: 'done' })
 }
 
 export function markTaskFailed(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; attemptId: string; error: string; claimGeneration?: number; now?: string },
-): void {
-  markTerminal(db, control, { ...request, taskState: 'failed', attemptState: 'failed', error: request.error })
+  request: { taskId: string; attemptId: string; error: string; workerId?: string; claimGeneration?: number; now?: string },
+): TaskTransitionOutcome {
+  return markTerminal(db, control, { ...request, taskState: 'failed', attemptState: 'failed', error: request.error })
+}
+
+export function markTaskBlockedUncertain(
+  db: Database,
+  control: ControlDb,
+  request: {
+    taskId: string
+    attemptId: string
+    workerId: string
+    claimGeneration: number
+    error: string
+    now?: string
+  },
+): TaskTransitionOutcome {
+  const now = request.now ?? new Date().toISOString()
+  return control.transaction(() => {
+    const result = db.prepare(`
+      UPDATE tasks
+      SET control_state = 'blocked',
+          terminal_error = @error,
+          terminal_at = COALESCE(terminal_at, @now),
+          claimed_by_worker_id = NULL,
+          claim_expires_at = NULL,
+          updated_at = @now
+      WHERE id = @taskId
+        AND control_state IN ('claimed', 'running')
+        AND current_attempt_id = @attemptId
+        AND claimed_by_worker_id = @workerId
+        AND claim_generation = @claimGeneration
+        AND terminal_at IS NULL
+    `).run({ ...request, now })
+    if (result.changes === 0) {
+      const current = getTaskRaw(db, request.taskId)
+      if (!current) return { kind: 'not-found' }
+      const state = normalizeTaskState(current)
+      if (isTerminalTaskState(state)) return { kind: 'already-terminal', state }
+      return { kind: 'lease-lost' }
+    }
+    const attempt = db.prepare(`
+      UPDATE task_attempts
+      SET control_state = 'failed',
+          failed_at = COALESCE(failed_at, @now),
+          terminal_at = COALESCE(terminal_at, @now),
+          error = @error,
+          updated_at = @now
+      WHERE id = @attemptId AND task_id = @taskId
+    `).run({ ...request, now })
+    if (attempt.changes === 0) {
+      throw new Error(`markTaskBlockedUncertain: attempt ${request.attemptId} did not update; rolling back`)
+    }
+    return { kind: 'applied' }
+  })
 }
 
 /**
@@ -62,7 +115,7 @@ export function markTaskFailedIfActive(
     `).run({ taskId: request.taskId, error: request.error, now })
     if (result.changes === 0) return false
     if (request.attemptId) {
-      db.prepare(`
+      const attemptResult = db.prepare(`
         UPDATE task_attempts
         SET control_state = 'failed',
             failed_at = COALESCE(failed_at, @now),
@@ -71,6 +124,9 @@ export function markTaskFailedIfActive(
             updated_at = @now
         WHERE id = @attemptId
       `).run({ attemptId: request.attemptId, error: request.error, now })
+      if (attemptResult.changes === 0) {
+        throw new Error(`markTaskFailedIfActive: attempt ${request.attemptId} did not update; rolling back`)
+      }
     }
     return true
   })
@@ -79,17 +135,18 @@ export function markTaskFailedIfActive(
 export function markTaskCancelled(
   db: Database,
   control: ControlDb,
-  request: { taskId: string; attemptId?: string; reason?: string; claimGeneration?: number; now?: string },
-): void {
+  request: { taskId: string; attemptId?: string; reason?: string; workerId?: string; claimGeneration?: number; now?: string },
+): TaskTransitionOutcome {
   const task = getTaskRaw(db, request.taskId)
   const attemptId = request.attemptId ?? task?.current_attempt_id ?? undefined
-  markTerminal(db, control, {
+  return markTerminal(db, control, {
     taskId: request.taskId,
     ...(attemptId ? { attemptId } : {}),
     taskState: 'cancelled',
     attemptState: 'cancelled',
     error: request.reason,
     ...(request.claimGeneration !== undefined ? { claimGeneration: request.claimGeneration } : {}),
+    ...(request.workerId !== undefined ? { workerId: request.workerId } : {}),
     now: request.now,
   })
 }
@@ -113,12 +170,15 @@ function markTerminal(
      * / non-daemon callers) → unconditional, the prior behavior.
      */
     claimGeneration?: number
+    workerId?: string
     now?: string
   },
-): void {
+): TaskTransitionOutcome {
   const now = request.now ?? new Date().toISOString()
-  control.transaction(() => {
+  return control.transaction(() => {
     const generationGuard = request.claimGeneration !== undefined ? 'AND claim_generation = @claimGeneration' : ''
+    const attemptGuard = request.attemptId !== undefined ? 'AND current_attempt_id = @attemptId' : ''
+    const workerGuard = request.workerId !== undefined ? 'AND claimed_by_worker_id = @workerId' : ''
     const result = db.prepare(`
       UPDATE tasks
       SET control_state = @taskState,
@@ -127,33 +187,26 @@ function markTerminal(
           claimed_by_worker_id = CASE WHEN @taskState IN ('done', 'failed', 'cancelled') THEN NULL ELSE claimed_by_worker_id END,
           claim_expires_at = NULL,
           updated_at = @now
-      WHERE id = @taskId
+      WHERE id = @taskId AND terminal_at IS NULL
       ${generationGuard}
+      ${attemptGuard}
+      ${workerGuard}
     `).run({
       ...request,
       error: request.error ?? null,
       ...(request.claimGeneration !== undefined ? { claimGeneration: request.claimGeneration } : {}),
+      ...(request.workerId !== undefined ? { workerId: request.workerId } : {}),
       now,
     })
     if (result.changes === 0) {
-      // A guarded write (claimGeneration supplied) that matched no row is a
-      // STALE completion (the lease moved on to a peer) — a documented,
-      // verified valid state (ISS-005; see task-store.test.ts). Leave the
-      // attempt untouched so the task + attempt stay consistent.
-      if (request.claimGeneration !== undefined) return
-      // Unguarded (no claimGeneration) and STILL no row matched means
-      // `request.taskId` does not exist — never a valid state for a caller
-      // that resolved the task first. Silently returning here would mask the
-      // failure: the attempt write below would proceed unconditionally
-      // against a task that was never terminalized, and callers (e.g.
-      // `markTaskTerminal` in daemon/queue.ts) append a success audit event
-      // regardless of this function's (void) return. Fail loud instead.
-      throw new Error(
-        `markTerminal: no task found for taskId ${request.taskId} (taskState=${request.taskState})`,
-      )
+      const current = getTaskRaw(db, request.taskId)
+      if (!current) return { kind: 'not-found' }
+      const state = normalizeTaskState(current)
+      if (isTerminalTaskState(state)) return { kind: 'already-terminal', state }
+      return { kind: 'lease-lost' }
     }
     if (request.attemptId) {
-      db.prepare(`
+      const attemptResult = db.prepare(`
         UPDATE task_attempts
         SET control_state = @attemptState,
             failed_at = CASE WHEN @attemptState = 'failed' THEN COALESCE(failed_at, @now) ELSE failed_at END,
@@ -162,7 +215,13 @@ function markTerminal(
             updated_at = @now
         WHERE id = @attemptId
       `).run({ ...request, error: request.error ?? null, now })
+      if (attemptResult.changes === 0) {
+        throw new Error(
+          `markTerminal: task ${request.taskId} updated but attempt ${request.attemptId} did not update; rolling back`,
+        )
+      }
     }
+    return { kind: 'applied' }
   })
 }
 

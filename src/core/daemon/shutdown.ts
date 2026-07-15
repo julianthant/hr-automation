@@ -35,6 +35,7 @@ import {
   type ShutdownTrackerDataOpts,
 } from './in-flight-shutdown.js'
 import { resolveTeardownTransition } from './teardown-transition.js'
+import { terminalizeWithReconciliation } from './terminalization.js'
 
 // Re-export the row-data builder (moved to `in-flight-shutdown.ts` to break the
 // shutdown ↔ in-flight-helpers module cycle) so existing importers — `daemon.ts`
@@ -201,6 +202,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
           runId: activeRunSnapshot.runId,
           ...(activeRunSnapshot.taskId ? { taskId: activeRunSnapshot.taskId } : {}),
           ...(activeRunSnapshot.attemptId ? { attemptId: activeRunSnapshot.attemptId } : {}),
+          ...(activeRunSnapshot.claimGeneration !== undefined ? { claimGeneration: activeRunSnapshot.claimGeneration } : {}),
         }
       : null
 
@@ -216,7 +218,7 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
     if (inFlightSnapshot) {
       const existingTask = inFlightSnapshot.taskId ? taskStore.getTask(inFlightSnapshot.taskId) : null
       const trackerRoot = trackerDir ?? DEFAULT_DIR
-      let skipShutdownEmit = existingTask?.state === 'done'
+      let skipShutdownEmit = existingTask?.state === 'done' || existingTask?.state === 'blocked'
       if (
         !skipShutdownEmit &&
         (existingTask?.state === 'cancelled' || existingTask?.state === 'failed')
@@ -284,7 +286,10 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
       const shutdownItem = {
         itemId: inFlightSnapshot.itemId,
         runId: inFlightSnapshot.runId,
-        ...(inFlightSnapshot.taskId ? { taskId: inFlightSnapshot.taskId } : {}),
+          ...(inFlightSnapshot.taskId ? { taskId: inFlightSnapshot.taskId } : {}),
+          ...(inFlightSnapshot.attemptId ? { attemptId: inFlightSnapshot.attemptId } : {}),
+          workerId: instanceId,
+          ...(inFlightSnapshot.claimGeneration !== undefined ? { claimGeneration: inFlightSnapshot.claimGeneration } : {}),
         input: existingTask?.input,
         ...(existingTask?.parentRunId ? { parentRunId: existingTask.parentRunId } : {}),
       }
@@ -346,6 +351,8 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
           bestEffort: true,
           settleDependency: false,
           claimTerminalWrite: () => runRegistry.claimTerminalWrite(inFlightSnapshot.runId),
+          commitTerminalWrite: () => runRegistry.commitTerminalWrite(inFlightSnapshot.runId),
+          rollbackTerminalWrite: () => runRegistry.rollbackTerminalWrite(inFlightSnapshot.runId),
         })
         state.activeRun = null
       } else {
@@ -354,20 +361,35 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
         // Cancelled badge (status:failed + step:cancelled).
         const nowIso = new Date().toISOString()
         const cancelReason = 'Daemon stopped while processing this item (browser closed or crashed).'
-        try {
-          await markItemCancelled(
-            wf.config.name,
-            inFlightSnapshot.itemId,
-            cancelReason,
-            inFlightSnapshot.runId,
-            trackerDir,
-          )
-        } catch {
-          /* best-effort — queue event append; tracker row below is the user-visible signal */
-        }
+        const cancelTerminal =
+          inFlightSnapshot.taskId && inFlightSnapshot.attemptId &&
+          inFlightSnapshot.claimGeneration !== undefined
+            ? await terminalizeWithReconciliation({
+                desiredState: 'cancelled',
+                transition: () => markItemCancelled(
+                  wf.config.name,
+                  inFlightSnapshot.itemId,
+                  cancelReason,
+                  inFlightSnapshot.runId,
+                  trackerDir,
+                  inFlightSnapshot.claimGeneration,
+                  instanceId,
+                ),
+                readTask: () => taskStore.getTask(inFlightSnapshot.taskId!),
+                blockUncertain: (reason) => taskStore.markTaskBlockedUncertain({
+                  taskId: inFlightSnapshot.taskId!,
+                  attemptId: inFlightSnapshot.attemptId!,
+                  workerId: instanceId,
+                  claimGeneration: inFlightSnapshot.claimGeneration!,
+                  error: reason,
+                }),
+              })
+            : { kind: 'unconfirmed' as const, error: 'shutdown cancel lacks a complete claim fence' }
+        const shouldEmitCancel = cancelTerminal.kind === 'applied' || cancelTerminal.kind === 'reconciled'
         try {
           const parentRunId = existingTask?.parentRunId
-          emitTrackerRow(
+          const claimedTerminalWrite = shouldEmitCancel && runRegistry.claimTerminalWrite(inFlightSnapshot.runId)
+          if (claimedTerminalWrite) emitTrackerRow(
             {
               workflow: wf.config.name,
               timestamp: nowIso,
@@ -384,15 +406,49 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
             },
             trackerDir,
           )
-        } catch {
-          /* best-effort */
+          if (claimedTerminalWrite) {
+            runRegistry.commitTerminalWrite(inFlightSnapshot.runId)
+          }
+        } catch (emitErr) {
+          runRegistry.rollbackTerminalWrite(inFlightSnapshot.runId)
+          log.warn(
+            `[Daemon ${wf.config.name}/${instanceId}] shutdown cancelled-row emit failed: ${
+              emitErr instanceof Error ? emitErr.message : String(emitErr)
+            }`,
+          )
+        }
+        if (cancelTerminal.kind === 'blocked-uncertain') {
+          try {
+            const parentRunId = existingTask?.parentRunId
+            emitTrackerRow({
+              workflow: wf.config.name,
+              timestamp: nowIso,
+              id: inFlightSnapshot.itemId,
+              runId: inFlightSnapshot.runId,
+              status: 'failed',
+              step: 'terminalization-uncertain',
+              data: buildShutdownTrackerData(wf, existingTask?.input, parentRunId, {
+                runId: inFlightSnapshot.runId,
+                trackerDir,
+              }) as StampedData,
+              ...(parentRunId ? { parentRunId } : {}),
+              error: cancelTerminal.error,
+            }, trackerDir)
+          } catch (emitErr) {
+            log.warn(`[Daemon ${wf.config.name}/${instanceId}] uncertainty-row emit failed: ${String(emitErr)}`)
+          }
+        } else if (cancelTerminal.kind === 'unconfirmed') {
+          log.error(
+            `[Daemon ${wf.config.name}/${instanceId}] shutdown terminalization remains unconfirmed; ` +
+            `task stays non-queued for recovery: ${cancelTerminal.error}`,
+          )
         }
         try {
           // Best-effort emit; if the daemon never reached the
           // withBatchLifecycle body (e.g. session.launch threw), the
           // closure variable was never assigned and we skip the event —
           // the tracker row above is the authoritative user-visible signal.
-          if (state.workflowInstanceForCleanup) {
+          if (shouldEmitCancel && state.workflowInstanceForCleanup) {
             emitItemCancelled(
               state.workflowInstanceForCleanup,
               inFlightSnapshot.itemId,
