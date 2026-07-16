@@ -36,6 +36,17 @@ export function enqueueTasks<T>(db: Database, control: ControlDb, request: Enque
         runId,
       })
       if (existing) {
+        if (request.existingTaskPolicy === 'idempotent') {
+          return reuseExistingTaskIdempotently(db, {
+            task: existing,
+            workflow: request.workflow,
+            itemId,
+            runId,
+            inputJson,
+            parentRunId: request.parentRunId,
+            position: basePosition + index + 1,
+          })
+        }
         return adoptExistingTaskForEnqueue(db, {
           task: existing,
           workflow: request.workflow,
@@ -107,6 +118,47 @@ export function enqueueTasks<T>(db: Database, control: ControlDb, request: Enque
       }
     })
   })
+}
+
+function reuseExistingTaskIdempotently(
+  db: Database,
+  request: {
+    task: TaskDbRow
+    workflow: string
+    itemId: string
+    runId: string
+    inputJson: string
+    parentRunId?: string
+    position: number
+  },
+): EnqueuedTask {
+  if (request.task.input_json !== request.inputJson) {
+    throw new Error(
+      `enqueueTasks idempotent replay: input for ${request.workflow}/${request.itemId}/${request.runId} disagrees with the persisted task`,
+    )
+  }
+  if ((request.task.parent_run_id ?? undefined) !== request.parentRunId) {
+    throw new Error(
+      `enqueueTasks idempotent replay: parentRunId for ${request.workflow}/${request.itemId}/${request.runId} disagrees with the persisted task`,
+    )
+  }
+  const attempt = request.task.current_attempt_id
+    ? db.prepare('SELECT * FROM task_attempts WHERE id = ?').get(request.task.current_attempt_id) as AttemptDbRow | undefined
+    : undefined
+  if (!attempt || attempt.run_id !== request.runId || attempt.task_id !== request.task.id) {
+    throw new Error(
+      `enqueueTasks idempotent replay: current attempt for ${request.workflow}/${request.itemId}/${request.runId} is missing or inconsistent`,
+    )
+  }
+  return {
+    id: request.itemId,
+    itemId: request.itemId,
+    taskId: request.task.id,
+    attemptId: attempt.id,
+    runId: request.runId,
+    position: request.position,
+    ...(request.parentRunId ? { parentRunId: request.parentRunId } : {}),
+  }
 }
 
 function adoptExistingTaskForEnqueue(

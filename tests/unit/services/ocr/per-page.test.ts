@@ -10,6 +10,7 @@ import {
 } from "../../../../src/services/ocr/per-page.js";
 import type { PoolKey } from "../../../../src/services/ocr/per-page-pool.js";
 import { __resetKeyRotationCacheForTests } from "../../../../src/services/ocr/rotation.js";
+import { __resetUsageTrackerForTests } from "../../../../src/services/ocr/usage-tracker.js";
 
 const RecordSchema = z.object({ name: z.string() });
 
@@ -384,6 +385,82 @@ test("concurrent per-page Gemini runs share in-memory key throttle state", async
   } finally {
     releaseFirstCall.resolve();
     __resetKeyRotationCacheForTests();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOcrPerPage composes operator cancellation into an in-flight provider request", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "per-page-abort-"));
+  const started = Promise.withResolvers<AbortSignal>();
+  const controller = new AbortController();
+  const pool: PoolKey[] = [{
+    id: "gemini-1",
+    providerId: "gemini",
+    keyIndex: 1,
+    rotationKey: "test-key",
+    priority: 1,
+    models: [{ id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: 10_000, rpd: 100, imgTokens: 100 } }],
+    callOcr: async (_imagePath, _prompt, _model, signal) => {
+      assert.ok(signal, "provider attempt receives a composed AbortSignal");
+      started.resolve(signal);
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  }];
+  try {
+    const run = runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: RecordSchema,
+      pool,
+      cacheDir: dir,
+      signal: controller.signal,
+    });
+    await started.promise;
+    controller.abort(new Error("operator cancelled OCR"));
+    await assert.rejects(run, /operator cancelled OCR/);
+  } finally {
+    __resetUsageTrackerForTests();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOcrPerPage bounds a hung provider attempt with its per-attempt timeout", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "per-page-attempt-timeout-"));
+  const prior = process.env.OCR_PROVIDER_ATTEMPT_TIMEOUT_MS;
+  process.env.OCR_PROVIDER_ATTEMPT_TIMEOUT_MS = "10";
+  const pool: PoolKey[] = [{
+    id: "gemini-1",
+    providerId: "gemini",
+    keyIndex: 1,
+    rotationKey: "test-key",
+    priority: 1,
+    models: [{ id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: 10_000, rpd: 100, imgTokens: 100 } }],
+    callOcr: async (_imagePath, _prompt, _model, signal) => {
+      assert.ok(signal);
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  }];
+  try {
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: RecordSchema,
+      pool,
+      cacheDir: dir,
+    });
+    assert.equal(out.pages[0]?.success, false);
+    assert.match(out.pages[0]?.error ?? "", /timeout|aborted/i);
+    assert.equal(out.pages[0]?.attempts, 1);
+  } finally {
+    if (prior === undefined) delete process.env.OCR_PROVIDER_ATTEMPT_TIMEOUT_MS;
+    else process.env.OCR_PROVIDER_ATTEMPT_TIMEOUT_MS = prior;
+    __resetUsageTrackerForTests();
     rmSync(dir, { recursive: true, force: true });
   }
 });

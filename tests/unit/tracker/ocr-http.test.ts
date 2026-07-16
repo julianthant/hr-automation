@@ -462,6 +462,17 @@ test("sweepStuckOcrRows omits step for a step-less stuck row (keeps the step-0 f
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("sweepStuckOcrRows preserves a durable awaiting-approval review across restart", () => {
+  const dir = setup();
+  seedOcrPriorRow(dir, "s-await-restart", "r-await-restart");
+  sweepStuckOcrRows(dir);
+  const lines = readFileSync(rowFilePath("ocr", todayLocal(), dir), "utf-8")
+    .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const latest = lines[lines.length - 1];
+  assert.equal(latest.status, "running");
+  assert.equal(latest.step, "awaiting-approval");
+});
+
 test("buildOcrRetryPageHandler rejects concurrent retries on the same row", async () => {
   const dir = join(tmpdir(), `ocr-http-mutex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(rowsDir(dir), { recursive: true });

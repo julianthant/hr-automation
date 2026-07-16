@@ -373,10 +373,16 @@ test("prepare with targetWorkflow=oath-upload enqueues the oath-upload task and 
         enqueueArgs = args;
         return { runId: "oath-upload-run-xyz", traceId: "ou-215457-f17e" };
       },
+      // A real oath-upload full run always arrives with a registered pdfFileId
+      // (routes/ocr.ts registers the file before prepare); the strict ISS-001
+      // duplicate probe then runs. Stub a clean miss so this test exercises the
+      // option-A enqueue path, not the (separately tested) duplicate refusal.
+      findPriorOathUploadTicket: () => undefined,
     });
     const resp = await handler({
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "oaths.pdf",
+      pdfFileId: "a".repeat(32),
       formType: "oath",
       targetWorkflow: "oath-upload",
       rosterMode: "existing",
@@ -411,10 +417,14 @@ test("prepare fails loud (aborts the OCR run) when the oath-upload task cannot b
       },
       // Simulate the born-at-upload oath-upload task failing to materialize.
       enqueueOathUploadAtPrepare: async () => undefined,
+      // Clean duplicate miss — the abort under test is the enqueue failure, not
+      // the duplicate refusal (see the option-A test above).
+      findPriorOathUploadTicket: () => undefined,
     });
     const resp = await handler({
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "oaths.pdf",
+      pdfFileId: "b".repeat(32),
       formType: "oath",
       targetWorkflow: "oath-upload",
       rosterMode: "existing",
@@ -498,6 +508,42 @@ test("prepare with targetWorkflow=oath-upload returns a structured duplicate (no
       0,
       "no new oath-upload row for a refused duplicate",
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("prepare refuses oath-upload when the duplicate index probe fails", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-op-ou-dup-fail-"));
+  _resetSessionLockForTests();
+  try {
+    let enqueueCalled = false;
+    const handler = buildOcrPrepareHandler({
+      trackerDir: dir,
+      runOrchestrator: async () => {},
+      enqueueOathUploadAtPrepare: async () => {
+        enqueueCalled = true;
+        return { runId: "must-not-launch" };
+      },
+      findPriorOathUploadTicket: () => {
+        throw new Error("duplicate index corrupt");
+      },
+    });
+    const resp = await handler({
+      pdfPath: "/tmp/fake.pdf",
+      pdfOriginalName: "oaths.pdf",
+      pdfFileId: "file-index-fail",
+      formType: "oath",
+      targetWorkflow: "oath-upload",
+      rosterMode: "existing",
+      rosterPath: "/tmp/roster.xlsx",
+      sessionId: "sess-ou-index-fail",
+    });
+
+    assert.equal(resp.status, 500);
+    assert.equal(resp.body.ok, false);
+    assert.match("error" in resp.body ? resp.body.error : "", /duplicate index corrupt/);
+    assert.equal(enqueueCalled, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

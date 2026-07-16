@@ -48,7 +48,7 @@ export interface PoolKey {
   /** Provider priority (lower = preferred). */
   priority: number;
   /** Run OCR on a single PNG with a specific model. Returns parsed JSON + token usage. */
-  callOcr(imagePath: string, prompt: string, model: string): Promise<OcrCallOutcome>;
+  callOcr(imagePath: string, prompt: string, model: string, signal?: AbortSignal): Promise<OcrCallOutcome>;
 }
 
 // ─── Env reading ─────────────────────────────────────────────
@@ -134,13 +134,14 @@ function parseOcrResponse(provider: VisionProviderId, model: string, text: strin
 
 // ─── Provider call implementations ───────────────────────────
 
-async function callGemini(apiKey: string, imagePath: string, prompt: string, model: string): Promise<OcrCallOutcome> {
-  const png = await fs.readFile(imagePath);
+async function callGemini(apiKey: string, imagePath: string, prompt: string, model: string, signal?: AbortSignal): Promise<OcrCallOutcome> {
+  const png = await fs.readFile(imagePath, { signal });
   log.step(`[ocr/gemini] page ${imagePath.split("/").pop()} → model=${model}, prompt=${prompt.length}c, image=${png.length}B`);
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [
@@ -170,8 +171,9 @@ async function callOpenAICompatVision(args: {
   imagePath: string;
   prompt: string;
   jsonMode: boolean;
+  signal?: AbortSignal;
 }): Promise<OcrCallOutcome> {
-  const png = await fs.readFile(args.imagePath);
+  const png = await fs.readFile(args.imagePath, { signal: args.signal });
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
   const body: Record<string, unknown> = {
     model: args.model,
@@ -189,6 +191,7 @@ async function callOpenAICompatVision(args: {
   if (args.jsonMode) body.response_format = { type: "json_object" };
   const resp = await fetch(args.endpoint, {
     method: "POST",
+    signal: args.signal,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${args.apiKey}` },
     body: JSON.stringify(body),
   });
@@ -228,9 +231,9 @@ export function buildVisionPool(): PoolKey[] {
         rotationKey: key,
         models,
         priority: cfg.priority,
-        callOcr: (imagePath, prompt, model) =>
+        callOcr: (imagePath, prompt, model, signal) =>
           cfg.id === "gemini"
-            ? callGemini(key, imagePath, prompt, model)
+            ? callGemini(key, imagePath, prompt, model, signal)
             : callOpenAICompatVision({
                 provider: cfg.id,
                 endpoint: cfg.endpoint!,
@@ -239,6 +242,7 @@ export function buildVisionPool(): PoolKey[] {
                 imagePath,
                 prompt,
                 jsonMode: cfg.jsonMode,
+                signal,
               }),
       });
     });

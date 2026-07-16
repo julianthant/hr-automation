@@ -28,7 +28,7 @@
 import type { DaemonFlags } from "../../core/daemon/types.js";
 import type { ChildRunResult, RegisteredWorkflow } from "../../core/kernel/types.js";
 import type { ChildOutcome, WatchChildRunsOpts } from "../../tracker/delegation/watch-child-runs.js";
-import { watchChildRuns as realWatchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
+import { isChildWatchError, watchChildRuns as realWatchChildRuns } from "../../tracker/delegation/watch-child-runs.js";
 import { isOcrPrepareAbortRequested, isOperatorDiscardAbortError } from "../../tracker/ocr-prepare-abort.js";
 import {
   openTaskStore,
@@ -174,9 +174,13 @@ export async function fanOutAndWatch<TInput>(
     // where reference keying would miss → empty id → invisible row → watch hangs
     // (the 2026-06-02 empty-item_id footgun). This is why the original sites all
     // keyed by `JSON.stringify(input)`.
-    const itemIdByInputJson = new Map<string, string>(
-      children.map((c) => [JSON.stringify(c.input), c.itemId]),
-    );
+    const itemIdsByInputJson = new Map<string, string[]>();
+    for (const child of children) {
+      const key = JSON.stringify(child.input);
+      const queue = itemIdsByInputJson.get(key);
+      if (queue) queue.push(child.itemId);
+      else itemIdsByInputJson.set(key, [child.itemId]);
+    }
     const dispatchResults: ChildRunResult<TInput>[] = await delegateToAllImpl<TInput, readonly string[]>({
       parentRunId,
       trackerDir,
@@ -187,7 +191,11 @@ export async function fanOutAndWatch<TInput>(
       ...(daemonFlags ? { daemonFlags } : {}),
       ...(buildPendingExtras ? { buildPendingExtras } : {}),
       ...(onPreparedItems ? { onPreparedItems: (items) => onPreparedItems(items) } : {}),
-      deriveItemId: (input: TInput) => itemIdByInputJson.get(JSON.stringify(input)) ?? "",
+      deriveItemId: (input: TInput) => {
+        const itemId = itemIdsByInputJson.get(JSON.stringify(input))?.shift();
+        if (!itemId) throw new Error("fanOutAndWatch: dispatched input did not match the FIFO child manifest");
+        return itemId;
+      },
     });
     args.onDispatched?.(dispatchResults.map((r) => ({ itemId: r.itemId, runId: r.runId })));
   }
@@ -205,7 +213,7 @@ export async function fanOutAndWatch<TInput>(
       ...(onProgress ? { onProgress } : {}),
     });
   } catch (err) {
-    if (isOperatorDiscardAbortError(err)) {
+    if (isOperatorDiscardAbortError(err) || (isChildWatchError(err) && err.kind === "cancelled")) {
       // Cancel mid-fan-out: cascade-cancel the still-queued children so a daemon
       // doesn't run them after the operator gave up. Fail-loud — rethrow.
       cancelQueuedChildTasksForParentRun(openTaskStore(trackerDir), { parentRunId });

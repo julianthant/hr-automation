@@ -169,7 +169,7 @@ async function ocrKernelHandler(ctx: Ctx<typeof ocrSteps, OcrInput>, input: OcrI
   let payload: ApprovedPayload;
   try {
     payload = await subscribeToApproval(
-      { workflow: "ocr", sessionId: input.sessionId },
+      { workflow: "ocr", sessionId: input.sessionId, runId: ctx.runId },
       { signal: ctx.signal, trackerDir: ctx.trackerDir },
     );
   } catch (err) {

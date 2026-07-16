@@ -19,6 +19,8 @@ export interface FindPriorRunsOpts {
   trackerDir?: string;
   /** Lookback in days. Default 30. */
   lookbackDays?: number;
+  /** Fail rather than bypass duplicate protection when SQLite cannot be queried. */
+  requireIndex?: boolean;
 }
 
 function parseDataJson(raw: string | null | undefined): Record<string, string> {
@@ -88,8 +90,15 @@ export function findPriorRunsForHash(opts: FindPriorRunsOpts): PriorRunSummary[]
     } finally {
       controlDb.close();
     }
-  } catch {
-    // SQLite unavailable or schema mismatch — fall through to JSONL.
+  } catch (error) {
+    if (opts.requireIndex) {
+      throw new Error(
+        `oath-upload duplicate index unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    // Compatibility reads may still walk legacy JSONL when the projection is
+    // unavailable. Launch-time duplicate checks set requireIndex and fail loud.
   }
 
   // JSONL fallback. Tracker rows live in the `rows/` subdirectory.

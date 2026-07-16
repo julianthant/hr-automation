@@ -100,6 +100,7 @@ export interface ControlTaskStore {
     onChildFailed: ChildFailurePolicy
     cascadeCancel?: boolean
     resumeParentAfterChildRetry?: boolean
+    existingPolicy?: 'reset' | 'idempotent'
     now?: string
   }): string
   /** Returns parents flipped waiting_dependencies→queued — callers wake those workflows' daemons (E2E-017). */

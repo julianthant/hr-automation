@@ -24,6 +24,8 @@ export interface OcrPipelineInput<T> {
   _renderOverride?: (pdfPath: string, pageImagesDir: string) => Promise<string[]>;
   /** Test escape: inject a fake pool. */
   _poolOverride?: PoolKey[];
+  /** Operator/run cancellation threaded through pacing and provider fetches. */
+  signal?: AbortSignal;
 }
 
 export interface OcrPipelineResult<T> {
@@ -69,6 +71,7 @@ export async function runOcrPipeline<T>(
     prompt: input.prompt,
     schema: input.recordSchema,
     pool,
+    signal: input.signal,
   });
 
   return {
@@ -104,6 +107,7 @@ export async function runOcrSecondOpinionPage<T>(input: {
   prompt: string;
   excludeModels: string[];
   _poolOverride?: PoolKey[];
+  signal?: AbortSignal;
 }): Promise<{ records: T[]; poolKeyId?: string } | null> {
   const pool = input._poolOverride ?? buildVisionPool();
   if (pool.length === 0) {
@@ -119,6 +123,7 @@ export async function runOcrSecondOpinionPage<T>(input: {
       pool,
       candidateFilter: (c) =>
         (c.tier ?? 1) === 1 && !input.excludeModels.includes(c.model),
+      signal: input.signal,
     });
     const page = perPage.pages[0];
     if (!page?.success) {
@@ -127,6 +132,7 @@ export async function runOcrSecondOpinionPage<T>(input: {
     }
     return { records: perPage.records, poolKeyId: page.poolKeyId };
   } catch (err) {
+    if (input.signal?.aborted) input.signal.throwIfAborted();
     log.warn(`[ocr/second-opinion] re-read threw for ${input.pageFilename}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }

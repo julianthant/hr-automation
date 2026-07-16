@@ -43,7 +43,7 @@ export interface WatchChildRunsOpts {
   trackerDir?: string;
   /** YYYY-MM-DD; default today (local). */
   date?: string;
-  /** Hard timeout in ms. Default 1h. Rejects with `Error("watchChildRuns timeout")`. */
+  /** Hard timeout in ms. Default 1h. Rejects with `ChildWatchError("timeout", ...)`. */
   timeoutMs?: number;
   /** Custom terminal predicate. Default: status in {done, failed}. */
   isTerminal?: (entry: TrackerEntry) => boolean;
@@ -71,6 +71,24 @@ export interface WatchChildRunsOpts {
   shouldAbort?: () => boolean;
   /** @internal test seam for fs.watch failure/backoff coverage. */
   watcherFactory?: typeof fsWatch;
+}
+
+export type ChildWatchErrorKind = "timeout" | "cancelled" | "blocked-parent" | "infrastructure";
+
+export class ChildWatchError extends Error {
+  constructor(
+    public readonly kind: ChildWatchErrorKind,
+    message: string,
+    public readonly pendingItemIds: readonly string[],
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "ChildWatchError";
+  }
+}
+
+export function isChildWatchError(error: unknown): error is ChildWatchError {
+  return error instanceof ChildWatchError;
 }
 
 const DEFAULT_TIMEOUT_MS = 60 * 60_000;
@@ -181,9 +199,14 @@ async function maybeWatchSqliteChildRuns(
       return null;
     }
     tasks = opts.expectedItemIds.map((itemId) => byItem.get(itemId)!).filter(Boolean);
-  } catch {
+  } catch (error) {
     controlDb?.close();
-    return null;
+    throw new ChildWatchError(
+      "infrastructure",
+      `watchChildRuns could not read authoritative child tasks: ${errorMessage(error)}`,
+      opts.expectedItemIds,
+      { cause: error },
+    );
   }
 
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -199,8 +222,10 @@ async function maybeWatchSqliteChildRuns(
     for (;;) {
       rejectIfDiscardRequested(opts);
       if (readAbortRequestedCached(opts, dir, dateForAbort, abortCache)) {
-        throw new Error(
+        throw new ChildWatchError(
+          "cancelled",
           `watchChildRuns aborted by parent row state (${opts.abortIfRowState!.workflow}/${opts.abortIfRowState!.id} step="${opts.abortIfRowState!.step}")`,
+          tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId),
         );
       }
 
@@ -256,12 +281,20 @@ async function maybeWatchSqliteChildRuns(
       const remainingTaskIds = tasks.filter((t) => !seen.has(t.itemId)).map((t) => t.taskId);
       const blockedParentId = findBlockedParentBatch(taskStore.db, remainingTaskIds);
       if (blockedParentId) {
-        throw new Error(`watchChildRuns blocked by parent task ${blockedParentId}`);
+        throw new ChildWatchError(
+          "blocked-parent",
+          `watchChildRuns blocked by parent task ${blockedParentId}`,
+          tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId),
+        );
       }
 
       if (Date.now() - started > timeoutMs) {
         const waiting = tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId).join(", ");
-        throw new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${waiting}`);
+        throw new ChildWatchError(
+          "timeout",
+          `watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${waiting}`,
+          tasks.filter((task) => !seen.has(task.itemId)).map((task) => task.itemId),
+        );
       }
       await sleep(pollMs);
     }
@@ -469,8 +502,10 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
       if (!sentinel) return;
       if (!readAbortRequestedCached(opts, dir, date, abortCache)) return;
       cleanup();
-      reject(new Error(
+      reject(new ChildWatchError(
+        "cancelled",
         `watchChildRuns aborted by parent row state (${sentinel.workflow}/${sentinel.id} step="${sentinel.step}")`,
+        Array.from(expected),
       ));
     };
 
@@ -478,7 +513,11 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
       if (finalized) return;
       cleanup();
       const stillWaiting = Array.from(expected).join(", ");
-      reject(new Error(`watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${stillWaiting}`));
+      reject(new ChildWatchError(
+        "timeout",
+        `watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${stillWaiting}`,
+        Array.from(expected),
+      ));
     }, timeoutMs);
     timeoutHandle.unref?.();
 

@@ -362,12 +362,11 @@ function resolvePdf(
   }
 }
 
-function deriveHash(path: string): string | undefined {
+function deriveHash(path: string): string {
   try {
     return hashFile(path).sha256;
   } catch (err) {
-    log.warn(`[oath-upload] could not hash PDF at ${path}: ${errorMessage(err)}`);
-    return undefined;
+    throw new Error(`oath-upload: could not hash PDF at ${path}: ${errorMessage(err)}`, { cause: err });
   }
 }
 
@@ -391,14 +390,14 @@ export function findPriorTicketForSession(
   pdfHash: string | undefined,
   trackerDir?: string,
 ): string | null {
-  let controlDb: ReturnType<typeof openControlDb> | undefined;
-  try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
+  const controlDb = openControlDb({ trackerDir });
   try {
     const match = findLatestEntryForPredicate({
       workflow: "oath-upload",
       trackerDir,
       lookbackDays: LOOKBACK_DAYS,
-      ...(controlDb ? { db: controlDb.db, itemId: sessionId } : {}),
+      db: controlDb.db,
+      itemId: sessionId,
       predicate: (e) => {
         if (e.id !== sessionId) return false;
         if (pdfHash && typeof e.data?.pdfHash === "string" && e.data.pdfHash !== pdfHash) return false;
@@ -412,7 +411,7 @@ export function findPriorTicketForSession(
     const t = match.data?.ticketNumber;
     return typeof t === "string" ? t : null;
   } finally {
-    controlDb?.close();
+    controlDb.close();
   }
 }
 
@@ -434,14 +433,14 @@ export function hasUnverifiedPriorSubmit(
   pdfHash: string | undefined,
   trackerDir?: string,
 ): boolean {
-  let controlDb: ReturnType<typeof openControlDb> | undefined;
-  try { controlDb = openControlDb({ trackerDir }); } catch { /* fall through to JSONL */ }
+  const controlDb = openControlDb({ trackerDir });
   try {
     const match = findLatestEntryForPredicate({
       workflow: "oath-upload",
       trackerDir,
       lookbackDays: LOOKBACK_DAYS,
-      ...(controlDb ? { db: controlDb.db, itemId: sessionId } : {}),
+      db: controlDb.db,
+      itemId: sessionId,
       predicate: (e) => {
         if (e.id !== sessionId) return false;
         if (pdfHash && typeof e.data?.pdfHash === "string" && e.data.pdfHash !== pdfHash) return false;
@@ -450,6 +449,6 @@ export function hasUnverifiedPriorSubmit(
     });
     return match !== null;
   } finally {
-    controlDb?.close();
+    controlDb.close();
   }
 }

@@ -29,6 +29,20 @@ test("approval-signal: emitApproved wakes a pending subscriber", async () => {
   assert.deepEqual(payload.records, [{ a: 1 }]);
 });
 
+test("approval-signal: subscribers sharing a session are isolated by runId", async () => {
+  _resetApprovalSignalRegistryForTests();
+  const ctrlA = new AbortController();
+  const ctrlB = new AbortController();
+  const keyA = { workflow: "ocr", sessionId: "shared-session", runId: "run-a" };
+  const keyB = { workflow: "ocr", sessionId: "shared-session", runId: "run-b" };
+  const waitA = subscribeToApproval(keyA, { signal: ctrlA.signal, pollMs: 60_000, initialPollMs: 60_000 });
+  const waitB = subscribeToApproval(keyB, { signal: ctrlB.signal, pollMs: 60_000, initialPollMs: 60_000 });
+  emitApproved(keyB, { records: [{ run: "b" }] });
+  assert.deepEqual(await waitB, { records: [{ run: "b" }] });
+  ctrlA.abort();
+  await assert.rejects(waitA, OcrApprovalCancelledError);
+});
+
 test("approval-signal: emitDiscarded rejects pending subscriber with OcrDiscardedError", async () => {
   _resetApprovalSignalRegistryForTests();
   const key = freshKey();

@@ -61,6 +61,8 @@ export interface ModelSpec {
    * evidence, and `extractedBy` on each record exists so this stays measurable.
    */
   tier?: 1 | 2;
+  /** Tier 1 is allowed only after paper-truth accuracy/fabrication scoring. */
+  trust?: "benchmarked" | "unbenchmarked";
 }
 
 export interface ProviderConfig {
@@ -93,21 +95,21 @@ const GEMINI_MODELS: ModelSpec[] = [
   // prompt's accuracy rule. A model that invents a plausible SSN is not a weak
   // model, it is a dangerous one: UCPath answers "no results" for the invented
   // digits and the operator is told a real employee does not work here.
-  { id: "gemini-2.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1100 }, tier: 2 },
+  { id: "gemini-2.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1100 }, tier: 2, trust: "benchmarked" },
   // Strongest reader in the 2026-07-14 benchmark: name 8/8, dob 8/8, ssn 7/8.
-  { id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 } },
+  { id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 }, tier: 1, trust: "benchmarked" },
   // Overflow: cheaper tokens + higher daily cap; weaker on hard handwriting.
-  { id: "gemini-2.5-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 300 }, tier: 2 },
-  { id: "gemini-3.1-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 1125 }, tier: 2 },
+  { id: "gemini-2.5-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 300 }, tier: 2, trust: "unbenchmarked" },
+  { id: "gemini-3.1-flash-lite", limit: { rpm: 15, tpm: GEMINI_TPM, rpd: GEMINI_LITE_RPD, imgTokens: 1125 }, tier: 2, trust: "unbenchmarked" },
   // Safest reader in the 2026-07-14 benchmark: 7/8 on every field and the ONLY
   // model that never fabricated — it correctly returned null + `illegible` on
   // the unreadable page. Declining to answer is the behaviour we want.
-  { id: "gemini-3.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 } },
+  { id: "gemini-3.5-flash", limit: { rpm: 10, tpm: GEMINI_TPM, rpd: GEMINI_FLASH_RPD, imgTokens: 1125 }, tier: 1, trust: "benchmarked" },
 ];
 
 // Groq: org-level limits, single vision model. ~30 RPM / 30k TPM / 1000 RPD free.
 const GROQ_MODELS: ModelSpec[] = [
-  { id: "meta-llama/llama-4-scout-17b-16e-instruct", limit: { rpm: 30, tpm: 30_000, rpd: 1000, imgTokens: 2400 }, tier: 2 },
+  { id: "meta-llama/llama-4-scout-17b-16e-instruct", limit: { rpm: 30, tpm: 30_000, rpd: 1000, imgTokens: 2400 }, tier: 2, trust: "unbenchmarked" },
 ];
 
 // Mistral: free tier not published (≈1 RPS, 1B tok/month). Conservative caps.
@@ -118,24 +120,24 @@ const MISTRAL_MODELS: ModelSpec[] = [
   // fabricated a DOB on the illegible page, and it even corrupted the SECTION 2
   // cross-check number itself — poisoning the very oracle we use to catch bad
   // reads. Handwritten boxed digits are its weak spot (0/6, 9/4, 8/9).
-  { id: "mistral-medium-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
-  { id: "ministral-8b-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
-  { id: "mistral-small-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2 },
+  { id: "mistral-medium-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2, trust: "benchmarked" },
+  { id: "ministral-8b-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2, trust: "unbenchmarked" },
+  { id: "mistral-small-latest", limit: { rpm: 30, tpm: 500_000, rpd: 2000, imgTokens: 1618 }, tier: 2, trust: "unbenchmarked" },
 ];
 
 // SambaNova: free RPD is brutally low (~20/day) — last-resort overflow only.
 const SAMBANOVA_MODELS: ModelSpec[] = [
-  { id: "Llama-4-Maverick-17B-128E-Instruct", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 2400 } },
-  { id: "gemma-4-31B-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 355 } },
-  { id: "gemma-3-12b-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 1100 }, tier: 2 },
+  { id: "Llama-4-Maverick-17B-128E-Instruct", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 2400 }, tier: 2, trust: "unbenchmarked" },
+  { id: "gemma-4-31B-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 355 }, tier: 2, trust: "unbenchmarked" },
+  { id: "gemma-3-12b-it", limit: { rpm: 20, tpm: 200_000, rpd: 20, imgTokens: 1100 }, tier: 2, trust: "unbenchmarked" },
 ];
 
 // OpenRouter: per-account global ~20 RPM / 50 RPD free (1000 RPD after $10 credit).
 // Free vision models (`:free`) confirmed working via probe-vision.ts.
 const OPENROUTER_MODELS: ModelSpec[] = [
-  { id: "google/gemma-4-31b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 } },
-  { id: "google/gemma-4-26b-a4b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 }, tier: 2 },
-  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 1214 }, tier: 2 },
+  { id: "google/gemma-4-31b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 }, tier: 2, trust: "unbenchmarked" },
+  { id: "google/gemma-4-26b-a4b-it:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 284 }, tier: 2, trust: "unbenchmarked" },
+  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", limit: { rpm: 20, tpm: 200_000, rpd: 50, imgTokens: 1214 }, tier: 2, trust: "unbenchmarked" },
 ];
 
 const PROVIDERS: ProviderConfig[] = [
@@ -200,13 +202,19 @@ export function resolveModelChain(cfg: ProviderConfig): ModelSpec[] {
   if (!listVar && !legacySingle) return cfg.models;
 
   const byId = new Map(cfg.models.map((m) => [m.id, m]));
-  const fallbackLimit = cfg.models[0]?.limit ?? { rpm: 10, tpm: 200_000, rpd: 250, imgTokens: DEFAULT_IMG_TOKENS };
   const ids = (listVar ? listVar.split(",") : [legacySingle])
     .map((s) => s.trim())
     .filter(Boolean);
   if (legacySingle && listVar && !ids.includes(legacySingle)) ids.unshift(legacySingle);
 
-  return ids.map((id) => byId.get(id) ?? { id, limit: fallbackLimit });
+  return ids.map((id) => {
+    const model = byId.get(id);
+    if (!model) throw new Error(`Unknown OCR model "${id}" for provider "${cfg.id}"; register limits and trust tier first`);
+    if (model.tier === 1 && model.trust !== "benchmarked") {
+      throw new Error(`OCR model "${id}" cannot use tier 1 until it is benchmarked against paper truth`);
+    }
+    return model;
+  });
 }
 
 export function visionProviderConfigs(): ProviderConfig[] {
