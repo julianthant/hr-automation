@@ -6,6 +6,7 @@ import {
   verifyTimecardEmployee as verifyNewKronosTimecardEmployee,
   setDateRange as setNewKronosDateRange,
   getSeparationTimecardData,
+  mmddyyyyToDate,
 } from "../../../systems/new-kronos/index.js";
 import type { SeparationTimecardData } from "../../../systems/new-kronos/index.js";
 import { fillTimekeeperTasks } from "../../../systems/kuali/index.js";
@@ -80,7 +81,14 @@ export async function runNewKronosTimecard(
   }
   await page.waitForTimeout(3_000);
   await setNewKronosDateRange(page, kronosStart, kronosEnd);
-  const timecard = await getSeparationTimecardData(page);
+  // Resolve grid dates against the SAME window the view was just set to —
+  // formatTimecardDate picks the year that lands inside it (fail-loud on a
+  // date outside the range), instead of stamping "now"'s year (the Dec→Jan
+  // year bug).
+  const timecard = await getSeparationTimecardData(page, {
+    start: mmddyyyyToDate(kronosStart),
+    end: mmddyyyyToDate(kronosEnd),
+  });
   return { found: true, ...timecard };
 }
 

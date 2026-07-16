@@ -17,6 +17,8 @@ import {
   resolveSearchResult,
   resolveSearchPresence,
   parseMmddyyyy,
+  mmddyyyyToDate,
+  resolveSeparationTimecardDates,
   toIsoDate,
   calendarDayLabelPattern,
   parseCalendarHeaderOrdinal,
@@ -25,6 +27,51 @@ import {
   peopleHeaderShowsEid,
 } from "../../../../src/systems/new-kronos/navigate.js";
 import { log } from "../../../../src/utils/log.js";
+
+describe("mmddyyyyToDate", () => {
+  it("builds a local-midnight Date from M/D/YYYY", () => {
+    assert.equal(mmddyyyyToDate("6/11/2026").getTime(), new Date(2026, 5, 11).getTime());
+    assert.equal(mmddyyyyToDate("01/02/2026").getTime(), new Date(2026, 0, 2).getTime());
+  });
+
+  it("throws on a malformed date string (via parseMmddyyyy)", () => {
+    assert.throws(() => mmddyyyyToDate("2026-06-11"));
+  });
+});
+
+describe("resolveSeparationTimecardDates", () => {
+  // 12/01/2025 – 01/31/2026: the Dec→Jan boundary window that used to
+  // year-stamp December rows with January's year.
+  const range = { start: new Date(2025, 11, 1), end: new Date(2026, 0, 31) };
+
+  it("resolves each raw month/day against the requested range (Dec→Jan safe)", () => {
+    const out = resolveSeparationTimecardDates(
+      {
+        lastPunch: { mon: 12, day: 30 },
+        sick: [{ mon: 1, day: 2 }],
+        holiday: [{ mon: 12, day: 25 }],
+      },
+      range,
+    );
+    assert.deepEqual(out, {
+      lastPunchDate: "12/30/2025",
+      sickDates: ["01/02/2026"],
+      holidayDates: ["12/25/2025"],
+    });
+  });
+
+  it("returns a null lastPunchDate (and empty lists) when the grid had no matching rows", () => {
+    const out = resolveSeparationTimecardDates({ lastPunch: null, sick: [], holiday: [] }, range);
+    assert.deepEqual(out, { lastPunchDate: null, sickDates: [], holidayDates: [] });
+  });
+
+  it("throws (fail loud) when a parsed day cannot fall inside the requested range", () => {
+    assert.throws(
+      () => resolveSeparationTimecardDates({ lastPunch: { mon: 6, day: 15 }, sick: [], holiday: [] }, range),
+      /6\/15/,
+    );
+  });
+});
 
 describe("probeEidInTimecardText", () => {
   it("matches when the searched EID appears in the timecard header text", () => {

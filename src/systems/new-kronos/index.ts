@@ -9,6 +9,7 @@ export {
   getTimecardLastDate,
   checkTimecardDates,
   getSeparationTimecardData,
+  mmddyyyyToDate,
   scrollTimecardToDate as scrollNewKronosTimecardToDate,
   clickGoToPeople,
   verifyPeopleEmployee,
