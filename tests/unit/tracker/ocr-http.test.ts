@@ -18,6 +18,7 @@ import { trackEventForDate } from "../../../src/tracker/jsonl.js";
 import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
+import { readVisibleEntriesForDate } from "../../../src/tracker/deletions/visible.js";
 import { verifyOcrFormSpec } from "../../../src/services/ocr/forms/verify.js";
 import {
   beginOcrApproval,
@@ -325,7 +326,8 @@ test("POST /api/ocr/discard-prepare deletes delegated EID lookup child rows", as
   const eidLines = existsSync(eidFile)
     ? readFileSync(eidFile, "utf-8").split("\n").filter(Boolean)
     : [];
-  assert.deepEqual(eidLines, []);
+  assert.equal(eidLines.length, 1, "append-only audit row remains recoverable");
+  assert.deepEqual(readVisibleEntriesForDate("eid-lookup", date, dir), []);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -372,6 +374,10 @@ test("POST /api/ocr/discard-prepare deletes children for that OCR run only", asy
     : [];
   assert.deepEqual(
     remaining.map((row) => row.id),
+    ["child-for-discarded-run", "child-for-other-run"],
+  );
+  assert.deepEqual(
+    readVisibleEntriesForDate("eid-lookup", date, dir).map((row) => row.id),
     ["child-for-other-run"],
   );
   rmSync(dir, { recursive: true, force: true });

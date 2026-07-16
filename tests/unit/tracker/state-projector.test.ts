@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { openStateDb, closeStateDbForTests } from "../../../src/tracker/state/db.js";
-import { rebuildProjectionForDate } from "../../../src/tracker/state/rebuild.js";
+import {
+  rebuildProjectionForAllDates,
+  rebuildProjectionForDate,
+} from "../../../src/tracker/state/rebuild.js";
 import { applyTrackerEntry } from "../../../src/tracker/state/apply.js";
 import { dateLocal } from "../../../src/tracker/jsonl.js";
 import { rowFilePath, logFilePath, sessionFilePath, rowsDir, logsDir, sessionsDir } from "../../../src/tracker/paths.js";
@@ -50,6 +53,35 @@ test("rebuildProjectionForDate replays tracker and log JSONL into SQLite", () =>
       latest_step: "extraction",
       last_log_message: "Extracting",
     });
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("rebuildProjectionForAllDates restores historical partitions after projection invalidation", () => {
+  const dir = tmpTracker();
+  try {
+    mkdirSync(rowsDir(dir), { recursive: true });
+    for (const [date, id] of [["2026-07-14", "historical"], ["2026-07-16", "current"]] as const) {
+      appendFileSync(rowFilePath("onboarding", date, dir), `${JSON.stringify({
+        workflow: "onboarding",
+        timestamp: `${date}T20:00:00.000Z`,
+        id,
+        runId: `run-${id}`,
+        status: "done",
+        data: { archetype: "single" },
+      })}\n`);
+    }
+    const db = openStateDb(dir);
+    db.exec("DELETE FROM run_events; DELETE FROM runs; DELETE FROM items; DELETE FROM projection_sources;");
+
+    assert.deepEqual(
+      rebuildProjectionForAllDates(db, { dir, includeDates: ["2026-07-16"] }),
+      ["2026-07-14", "2026-07-16"],
+    );
+    const ids = db.prepare("SELECT item_id FROM runs ORDER BY item_id").all() as Array<{ item_id: string }>;
+    assert.deepEqual(ids.map((row) => row.item_id), ["current", "historical"]);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

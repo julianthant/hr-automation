@@ -9,7 +9,7 @@ import {
 import { resumeRecoverableOcrApprovals, sweepStuckOcrRows } from "./ocr/index.js";
 import { sweepStuckOathUploadRows } from "./oath-upload/http.js";
 import { openStateDb } from "../state/db.js";
-import { rebuildProjectionForDate } from "../state/rebuild.js";
+import { rebuildProjectionForAllDates } from "../state/rebuild.js";
 import { startDependencyScheduler } from "../tasks/scheduler.js";
 import { sweepOrphanUploadDirs } from "../../scripts/ops/clean-tracker.js";
 import { sweepStaleRunScreenshots } from "../state/screenshot-sweep.js";
@@ -28,6 +28,7 @@ import {
   scanOrphanedQueueItems,
 } from "./sweeps.js";
 import { runRowLifecycleDebugSweep } from "../row-lifecycle-debug.js";
+import { readOperatorSettingsFileState } from "../settings/store.js";
 
 let server: Server | null = null;
 
@@ -51,6 +52,7 @@ export interface StartDashboardOptions {
   serveStatic?: boolean;
   host?: string;
   captureHost?: string;
+  repoRoot?: string;
 }
 
 export interface CreateDashboardServerOptions {
@@ -64,6 +66,7 @@ export interface CreateDashboardServerOptions {
   serveStatic?: boolean;
   host?: string;
   captureHost?: string;
+  repoRoot?: string;
 }
 
 export function startDashboard(
@@ -85,6 +88,7 @@ export function startDashboard(
     serveStatic: opts.serveStatic,
     host: opts.host,
     captureHost: opts.captureHost,
+    repoRoot: opts.repoRoot,
   });
 }
 
@@ -93,6 +97,9 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const port = opts.port ?? 3838;
   const dir = opts.dir ?? DEFAULT_DIR;
   const host = resolveDashboardBindHost(opts.host);
+  const repoRoot = opts.repoRoot ?? process.cwd();
+  const workflowMutationsAllowed = (): boolean =>
+    readOperatorSettingsFileState(repoRoot).state !== "fault";
 
   if (!opts.noClean) {
     try {
@@ -105,15 +112,19 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
       log.step(`Tracker startup prune skipped: ${err instanceof Error ? err.message : String(err)}`);
     }
     runScreenshotSweep(dir, opts.screenshotsDir);
-    try {
-      sweepStuckOcrRows(dir);
-    } catch (err) {
-      log.step(`OCR sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    try {
-      sweepStuckOathUploadRows(dir);
-    } catch (err) {
-      log.step(`oath-upload sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+    if (workflowMutationsAllowed()) {
+      try {
+        sweepStuckOcrRows(dir);
+      } catch (err) {
+        log.step(`OCR sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      try {
+        sweepStuckOathUploadRows(dir);
+      } catch (err) {
+        log.step(`oath-upload sweep skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else {
+      log.warn("Configuration fault: workflow recovery sweeps are paused");
     }
     void sweepOrphanUploadDirs(dir).then((removed) => {
       if (removed > 0) {
@@ -127,18 +138,23 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   let projectionReady = false;
   const stateDb = openStateDb(dir);
   try {
-    rebuildProjectionForDate(stateDb, { dir, date: dateLocal() });
+    // Incremental for unchanged sources, but includes every retained partition.
+    // This is required after schema migrations invalidate legacy path-keyed
+    // projections; rebuilding only today would make history appear empty.
+    rebuildProjectionForAllDates(stateDb, { dir, includeDates: [dateLocal()] });
     projectionReady = true;
   } catch (err) {
     log.warn(`SQLite projection startup skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
-  void resumeRecoverableOcrApprovals(dir)
-    .then((count) => {
-      if (count > 0) log.step(`Resumed ${count} durable OCR approval${count === 1 ? "" : "s"}`);
-    })
-    .catch((error) => {
-      log.error(`Durable OCR approval recovery failed: ${errorMessage(error)}`);
-    });
+  if (workflowMutationsAllowed()) {
+    void resumeRecoverableOcrApprovals(dir)
+      .then((count) => {
+        if (count > 0) log.step(`Resumed ${count} durable OCR approval${count === 1 ? "" : "s"}`);
+      })
+      .catch((error) => {
+        log.error(`Durable OCR approval recovery failed: ${errorMessage(error)}`);
+      });
+  }
   const staticDir = opts.serveStatic ? resolve(process.cwd(), "dist/dashboard") : undefined;
   const sharedDeps = {
     dir,
@@ -148,7 +164,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
     projectionReady,
     staticDir,
     screenshotsDir: opts.screenshotsDir,
-    repoRoot: process.cwd(),
+    repoRoot,
   };
   const accessPolicy = createDashboardAccessPolicy({ port, bindHost: host });
   const honoApp = createDashboardHonoApp({ ...sharedDeps, accessPolicy });
@@ -157,10 +173,12 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const localServer: Server = createServer(requestListener);
   const sweepInterval = setInterval(() => {
     void scanFailurePatterns(stateDb, projectionReady, dir);
-    void scanOrphanedQueueItems(dir);
-    void resumeRecoverableOcrApprovals(dir).catch((error) => {
-      log.error(`Durable OCR approval recovery sweep failed: ${errorMessage(error)}`);
-    });
+    if (workflowMutationsAllowed()) {
+      void scanOrphanedQueueItems(dir);
+      void resumeRecoverableOcrApprovals(dir).catch((error) => {
+        log.error(`Durable OCR approval recovery sweep failed: ${errorMessage(error)}`);
+      });
+    }
     captureStore.sweepExpired();
   }, 15_000);
   sweepInterval.unref();
@@ -178,6 +196,7 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const dependencyScheduler = startDependencyScheduler({
     trackerDir: dir,
     intervalMs: 1000,
+    canRun: workflowMutationsAllowed,
     onError: (err) => log.warn(`[tasks] dependency scheduler tick failed: ${errorMessage(err)}`),
   });
   const stopBackgroundWork = (): void => {

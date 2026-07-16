@@ -10,6 +10,7 @@ import { buildScreenshotsHandler } from '../../../src/tracker/dashboard.js'
 import { openStateDb, closeStateDbForTests, stateDbPath } from '../../../src/tracker/state/db.js'
 import { trackEvent, emitScreenshotEvent, dateLocal } from '../../../src/tracker/jsonl.js'
 import { sessionFilePath, sessionsDir } from '../../../src/tracker/paths.js'
+import { buildDeleteEntryHandler } from '../../../src/control/ops/delete.js'
 
 test('returns grouped entries only for screenshot session events (ignores orphan disk PNGs)', async () => {
   const trackerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scr-dash-'))
@@ -160,5 +161,32 @@ describe('grouped handler SQLite vs JSONL parity', () => {
       false,
       'orphan PNG on disk without matching screenshot event must not appear',
     )
+  })
+
+  it('does not fall back to raw session events after the owning run is deleted', async () => {
+    const ts = Date.now()
+    const pngPath = join(shotsDir, `separations-3907-form-kuali-saved-kuali-${ts}.png`)
+    writeFileSync(pngPath, 'retained-audit-png')
+    openStateDb(trackerDir)
+    trackEvent({
+      workflow: 'separations', timestamp: new Date(ts).toISOString(), id: '3907',
+      runId: 'run-deleted-shot', status: 'running', data: {},
+    }, trackerDir)
+    emitScreenshotEvent({
+      type: 'screenshot', runId: 'run-deleted-shot', ts,
+      timestamp: new Date(ts).toISOString(), kind: 'form', label: 'kuali-saved',
+      step: 'kuali-finalization', files: [{ system: 'kuali', path: pngPath }],
+    }, { dir: trackerDir })
+    const date = dateLocal(new Date(ts))
+    buildDeleteEntryHandler(trackerDir)({
+      workflow: 'separations', id: '3907', runId: 'run-deleted-shot', date,
+    })
+
+    const handler = buildScreenshotsHandler({ dir: trackerDir, screenshotsDir: shotsDir })
+    assert.deepEqual(await handler({
+      workflow: 'separations', itemId: '3907', runId: 'run-deleted-shot', trackerDate: date,
+    }), [])
+    assert.deepEqual(await handler({ workflow: 'separations', itemId: '3907' }), [])
+    assert.equal(await fs.stat(pngPath).then(() => true), true, 'audit file stays recoverable')
   })
 })

@@ -1,10 +1,11 @@
 import { z } from "zod/v4";
 import { MAX_PARALLEL_WORKERS, MIN_PARALLEL_WORKERS } from "../../domain/run-options.js";
+import { FileAttachmentIdSchema } from "../../tracker/files/file-id.js";
 
 export const OcrInputSchema = z.object({
   pdfPath:          z.string(),
   pdfOriginalName:  z.string(),
-  pdfFileId:        z.string().optional(),
+  pdfFileId:        FileAttachmentIdSchema.optional(),
   formType:         z.string(),
   sessionId:        z.string(),
   rosterPath:       z.string().optional(),

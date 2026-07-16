@@ -3,8 +3,8 @@ import type { Hono } from "hono";
 import {
   listDatesForWorkflow,
   listWorkflows,
-  readEntriesForDate,
 } from "../../../jsonl.js";
+import { readVisibleEntriesForDate } from "../../../deletions/visible.js";
 import { buildFailuresHandler } from "../../failures.js";
 import { buildSearchHandler } from "../../search.js";
 import { buildSelectorWarningsHandler } from "../../selector-warnings.js";
@@ -21,7 +21,7 @@ export function registerSearchRoutes(app: Hono, deps: DashboardHonoDeps): void {
       const handler = buildSearchHandler({
         listWorkflows: () => listWorkflows(deps.dir),
         listDates: (wf) => listDatesForWorkflow(wf, deps.dir),
-        readEntriesForDate: (wf, date) => readEntriesForDate(wf, date, deps.dir),
+        readEntriesForDate: (wf, date) => readVisibleEntriesForDate(wf, date, deps.dir),
       });
       return jsonResponse(handler(q, { workflow, limit, days }));
     } catch {
@@ -37,7 +37,7 @@ export function registerSearchRoutes(app: Hono, deps: DashboardHonoDeps): void {
     try {
       const handler = buildFailuresHandler({
         listWorkflows: () => listWorkflows(deps.dir),
-        readEntriesForDate: (workflow, trackerDate) => readEntriesForDate(workflow, trackerDate, deps.dir),
+        readEntriesForDate: (workflow, trackerDate) => readVisibleEntriesForDate(workflow, trackerDate, deps.dir),
       });
       return jsonResponse(handler({ date }));
     } catch {

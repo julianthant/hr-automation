@@ -1,78 +1,29 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_DIR, dateLocal } from "./jsonl.js";
+import { DEFAULT_DIR, dateLocal } from "./jsonl-core.js";
 import {
   parseSessionFilename,
   sessionFilePath,
   sessionsDir,
 } from "./paths.js";
 import { getLogRunId } from "../utils/log-context.js";
-import { log } from "../utils/log.js";
+import { trackerWarn } from "./log-sink.js";
 import { appendJsonlWithSource } from "./state/jsonl-source.js";
 import { applySessionEventLive } from "./state/runtime.js";
 
 // ── Types ──────────────────────────────────────────────
+//
+// The event shapes live in the leaf `session-event-types.ts` (re-exported
+// here unchanged) so projection modules reachable from this file can consume
+// them without an import edge back into their caller — see that module's
+// header.
 
-/**
- * Structured events emitted by the kernel during workflow execution.
- * Session/browser/auth/item lifecycle + per-step step_change + screenshot.
- */
-export type SessionEventType =
-  | "workflow_start" | "workflow_end"
-  | "session_create" | "session_close"
-  | "browser_launch" | "browser_close"
-  | "browser_health"
-  | "auth_start" | "auth_complete" | "auth_failed"
-  | "duo_request" | "duo_start" | "duo_complete" | "duo_timeout"
-  | "item_start" | "item_complete" | "item_cancelled"
-  | "step_change"
-  | "screenshot"
-  | "idle_signal"
-  | "daemon_phase"
-  | "daemon_log";
-
-export interface ScreenshotSessionEvent {
-  type: "screenshot";
-  runId: string;
-  /** ISO-8601 timestamp. Mirrors SessionEvent.timestamp so the dashboard
-   * doesn't see "Invalid Date" when it renders screenshot events alongside
-   * other session events (which use `timestamp`). Populated from the same
-   * clock as `ts`. */
-  timestamp: string;
-  /** Numeric ms since epoch. Kept for back-compat with existing readers
-   * and to uniquely identify the capture alongside `label` + `system`
-   * inside filenames. */
-  ts: number;
-  kind: "form" | "error" | "manual" | "step";
-  label: string;
-  step: string | null;
-  files: Array<{ system: string; path: string }>;
-}
-
-export interface SessionEvent {
-  type: SessionEventType;
-  timestamp: string;
-  pid: number;
-  workflowInstance: string;
-  sessionId?: string;
-  browserId?: string;
-  system?: string;
-  currentItemId?: string;
-  currentStep?: string;
-  finalStatus?: "done" | "failed";
-  duoRequestId?: string;
-  data?: Record<string, string>;
-  /** Workflow item runId, written when emitted inside a withLogContext + setLogRunId scope. */
-  runId?: string;
-  /** Frozen `data.__traceId` of the item's run, carried on `item_start` so the
-   * session-drawer card can show the running run's trace id — identical to the
-   * subtitle of that run's queue row. */
-  traceId?: string;
-  /** OS pid of the Chromium process for `browser_launch` events. Lets the
-   * dashboard's force-stop path SIGKILL orphaned browsers when the Node
-   * parent dies. Only populated for `type === "browser_launch"`. */
-  chromiumPid?: number;
-}
+export type {
+  SessionEvent,
+  SessionEventType,
+  ScreenshotSessionEvent,
+} from "./session-event-types.js";
+import type { SessionEvent } from "./session-event-types.js";
 
 // ── File paths ─────────────────────────────────────────
 //
@@ -177,7 +128,7 @@ export function readSessionEvents(dir: string = DEFAULT_DIR): SessionEvent[] {
       try {
         events.push(JSON.parse(line) as SessionEvent);
       } catch (err) {
-        log.warn(
+        trackerWarn(
           `[session-events] skipping malformed JSONL line ${i + 1} in ${filePath}: ${(err as Error).message} (raw: ${line.slice(0, 80)})`,
         );
       }

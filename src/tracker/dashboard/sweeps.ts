@@ -1,10 +1,10 @@
 import {
   listWorkflows,
-  readEntries,
   emitTrackerRow,
   dateLocal,
   DEFAULT_DIR,
 } from "../jsonl.js";
+import { readVisibleEntries } from "../deletions/visible.js";
 import type { StampedData, TrackerEntry } from "../jsonl.js";
 import { loadWorkflow } from "../../core/workflow-loaders.js";
 import { deriveRowArchetype, resolveArchetype } from "../../domain/row-archetype.js";
@@ -60,6 +60,12 @@ function readFailedEntriesForScan(
           AND status = 'failed'
           AND error IS NOT NULL
           AND error != ''
+          AND EXISTS (
+            SELECT 1 FROM runs r
+            WHERE r.workflow = run_events.workflow AND r.tracker_date = run_events.tracker_date
+              AND r.item_id = run_events.item_id AND r.run_id = run_events.run_id
+              AND r.deleted_at IS NULL
+          )
       `).all({ date: today }) as Array<{
         workflow: string;
         id: string;
@@ -84,7 +90,7 @@ function readFailedEntriesForScan(
   }
   // JSONL fallback — same as before.
   const workflows = listWorkflows(dir);
-  return workflows.flatMap((w) => readEntries(w, dir));
+  return workflows.flatMap((w) => readVisibleEntries(w, dir));
 }
 
 /**

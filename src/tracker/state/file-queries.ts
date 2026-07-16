@@ -7,6 +7,7 @@ export interface FileRow {
   workflow: string | null;
   item_id: string | null;
   run_id: string | null;
+  tracker_date: string | null;
   source: string;
   bytes: number;
   created_at: string; // ISO-8601
@@ -27,19 +28,31 @@ export function queryScreenshotsForItem(
   const runId = opts.runId?.trim();
   if (runId) {
     return db.prepare(`
-      SELECT file_id, kind, storage_path, workflow, item_id, run_id, source, bytes,
+      SELECT file_id, kind, storage_path, workflow, item_id, run_id, tracker_date, source, bytes,
              created_at, last_accessed_at
       FROM files
       WHERE workflow = @workflow AND item_id = @itemId AND kind = 'screenshot'
         AND run_id = @runId
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = files.workflow AND dt.item_id = files.item_id
+            AND dt.run_id = files.run_id
+            AND (files.tracker_date IS NULL OR dt.tracker_date = files.tracker_date)
+        )
       ORDER BY created_at DESC
     `).all({ workflow: opts.workflow, itemId: opts.itemId, runId }) as FileRow[];
   }
   return db.prepare(`
-    SELECT file_id, kind, storage_path, workflow, item_id, run_id, source, bytes,
+    SELECT file_id, kind, storage_path, workflow, item_id, run_id, tracker_date, source, bytes,
            created_at, last_accessed_at
     FROM files
     WHERE workflow = @workflow AND item_id = @itemId AND kind = 'screenshot'
+      AND NOT EXISTS (
+        SELECT 1 FROM deletion_tombstones dt
+        WHERE dt.workflow = files.workflow AND dt.item_id = files.item_id
+          AND dt.run_id = files.run_id
+          AND (files.tracker_date IS NULL OR dt.tracker_date = files.tracker_date)
+      )
     ORDER BY created_at DESC
   `).all(opts) as FileRow[];
 }

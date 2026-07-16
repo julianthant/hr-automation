@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { transaction, type Database, type Statement } from "../../infra/sqlite/index.js";
 
-import type { TrackerEntry, LogEntry } from "../jsonl-io.js";
-import { dateLocal, getRunIdOr, isTrackerEntry } from "../jsonl-io.js";
+import type { TrackerEntry, LogEntry } from "../jsonl-core.js";
+import { dateLocal, getRunIdOr, isTrackerEntry } from "../jsonl-core.js";
 import { isResolvedPrepEntry } from "../dashboard/prep-rows.js";
-import { log } from "../../utils/log.js";
-import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
+import { trackerWarn } from "../log-sink.js";
+import type { SessionEvent, ScreenshotSessionEvent } from "../session-event-types.js";
 import { registerLocalFile } from "../files/files.js";
 import type { ProjectionSourceRef } from "./types.js";
 
@@ -22,6 +22,7 @@ interface CachedStatements {
   countRunsForScreenshot: Statement;
   updateRunScreenshotCount: Statement;
   assignNextRunOrdinalForRun: Statement;
+  selectSourceGeneration: Statement;
 }
 
 const stmtCache = new WeakMap<Database, CachedStatements>();
@@ -32,11 +33,11 @@ function stmts(db: Database): CachedStatements {
   cached = {
     insertRunEvent: db.prepare(`
       INSERT OR IGNORE INTO run_events (
-        source_path, source_line, source_offset, workflow, tracker_date, item_id,
+        source_path, source_generation, source_line, source_offset, workflow, tracker_date, item_id,
         run_id, parent_run_id, status, step, event_ts, event_ms, data_json,
         typed_data_json, input_json, error, applied_at
       ) VALUES (
-        @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
+        @sourcePath, @sourceGeneration, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
         @runId, @parentRunId, @status, @step, @eventTs, @eventMs, @dataJson,
         @typedDataJson, @inputJson, @error, @appliedAt
       )
@@ -111,10 +112,10 @@ function stmts(db: Database): CachedStatements {
     `),
     insertLog: db.prepare(`
       INSERT OR IGNORE INTO logs (
-        source_path, source_line, source_offset, workflow, tracker_date, item_id,
+        source_path, source_generation, source_line, source_offset, workflow, tracker_date, item_id,
         run_id, level, message, ts, ts_ms, raw_json, applied_at
       ) VALUES (
-        @sourcePath, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
+        @sourcePath, @sourceGeneration, @sourceLine, @sourceOffset, @workflow, @trackerDate, @itemId,
         @runId, @level, @message, @ts, @tsMs, @rawJson, @appliedAt
       )
     `),
@@ -143,15 +144,15 @@ function stmts(db: Database): CachedStatements {
     `),
     insertSessionEvent: db.prepare(`
       INSERT OR IGNORE INTO session_events (
-        source_path, source_line, source_offset, tracker_date, event_type, workflow_instance,
+        source_path, source_generation, source_line, source_offset, tracker_date, event_type, workflow_instance,
         run_id, timestamp, ts_ms, raw_json, applied_at
       ) VALUES (
-        @sourcePath, @sourceLine, @sourceOffset, @trackerDate, @eventType, @workflowInstance,
+        @sourcePath, @sourceGeneration, @sourceLine, @sourceOffset, @trackerDate, @eventType, @workflowInstance,
         @runId, @timestamp, @tsMs, @rawJson, @appliedAt
       )
     `),
     selectRunForScreenshot: db.prepare(`
-      SELECT workflow, item_id
+      SELECT workflow, item_id, tracker_date
       FROM runs
       WHERE run_id = ?
       ORDER BY latest_tracker_ts DESC
@@ -182,9 +183,18 @@ function stmts(db: Database): CachedStatements {
         AND item_id = @itemId
         AND run_id = @runId
     `),
+    selectSourceGeneration: db.prepare(`
+      SELECT generation FROM source_generations WHERE path = ?
+    `),
   };
   stmtCache.set(db, cached);
   return cached;
+}
+
+function sourceGeneration(db: Database, source: ProjectionSourceRef): number {
+  if (source.generation !== undefined) return source.generation;
+  const row = stmts(db).selectSourceGeneration.get(source.path) as { generation: number } | undefined;
+  return row?.generation ?? 1;
 }
 
 function toMs(ts: string | undefined, fallback = 0): number {
@@ -228,7 +238,7 @@ export function applyTrackerEntry(
   source: ProjectionSourceRef,
 ): void {
   if (!isTrackerEntry(entry)) {
-    log.warn(
+    trackerWarn(
       `[apply] skipping invalid tracker entry workflow=${String((entry as TrackerEntry).workflow)} ` +
         `item=${String((entry as TrackerEntry).id)} status=${String((entry as TrackerEntry).status)} ` +
         `source=${source.path}:${source.line ?? "?"}`,
@@ -252,6 +262,7 @@ export function applyTrackerEntry(
   transaction(db, () => {
     s.insertRunEvent.run({
       sourcePath: source.path,
+      sourceGeneration: sourceGeneration(db, source),
       sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
       workflow: entry.workflow,
@@ -337,6 +348,7 @@ export function applyLogEntry(
   transaction(db, () => {
     s.insertLog.run({
       sourcePath: source.path,
+      sourceGeneration: sourceGeneration(db, source),
       sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
       workflow: entry.workflow,
@@ -381,6 +393,7 @@ export function applySessionEvent(
     const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
     const inserted = stmts(db).insertSessionEvent.run({
       sourcePath: source.path,
+      sourceGeneration: sourceGeneration(db, source),
       sourceLine: source.line ?? 0,
       sourceOffset: source.offset,
       trackerDate,
@@ -393,7 +406,7 @@ export function applySessionEvent(
       appliedAt: new Date().toISOString(),
     });
     if (inserted.changes > 0) {
-      applyScreenshotFiles(db, screenshotEvent);
+      applyScreenshotFiles(db, screenshotEvent, dirname(dirname(source.path)));
     }
     return;
   }
@@ -403,6 +416,7 @@ export function applySessionEvent(
   const trackerDate = source.trackerDate ?? trackerDateFromTimestamp(timestamp);
   stmts(db).insertSessionEvent.run({
     sourcePath: source.path,
+    sourceGeneration: sourceGeneration(db, source),
     sourceLine: source.line ?? 0,
     sourceOffset: source.offset,
     trackerDate,
@@ -416,30 +430,41 @@ export function applySessionEvent(
   });
 }
 
-function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void {
+function applyScreenshotFiles(
+  db: Database,
+  event: ScreenshotSessionEvent,
+  trackerDir: string,
+): void {
   const files = Array.isArray(event.files) ? event.files : [];
   // Look up workflow + item_id from the runs table so the files row is
   // queryable by the (workflow, item_id, run_id) index via queryScreenshotsForItem.
   let workflow: string | undefined;
   let itemId: string | undefined;
+  let trackerDate: string | undefined;
   if (event.runId) {
     const s = stmts(db);
     const matchCount = s.countRunsForScreenshot.get(event.runId) as { n: number } | undefined;
     if (matchCount && matchCount.n > 1) {
-      log.warn(
+      trackerWarn(
         `applyScreenshotFiles: run_id ${event.runId} matches ${matchCount.n} runs — using latest tracker row`,
       );
     }
-    const run = s.selectRunForScreenshot.get(event.runId) as { workflow: string; item_id: string } | undefined;
+    const run = s.selectRunForScreenshot.get(event.runId) as {
+      workflow: string;
+      item_id: string;
+      tracker_date: string;
+    } | undefined;
     if (run) {
       workflow = run.workflow;
       itemId = run.item_id;
+      trackerDate = run.tracker_date;
     }
   }
   let registeredCount = 0;
   for (const file of files) {
     if (!file.path || !existsSync(file.path)) continue;
     registerLocalFile(db, {
+      trackerDir,
       kind: "screenshot",
       mimeType: "image/png",
       path: file.path,
@@ -448,6 +473,7 @@ function applyScreenshotFiles(db: Database, event: ScreenshotSessionEvent): void
       runId: event.runId,
       workflow,
       itemId,
+      trackerDate,
       metadata: {
         system: file.system,
         label: event.label,

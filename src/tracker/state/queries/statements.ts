@@ -141,6 +141,11 @@ export function readStmts(db: Database): CachedReadStatements {
         AND tracker_date = @trackerDate
         AND item_id = @itemId
         AND run_id = @runId
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = logs.workflow AND dt.tracker_date = logs.tracker_date
+            AND dt.item_id = logs.item_id AND dt.run_id = logs.run_id
+        )
       ORDER BY ts_ms ASC, id ASC
       LIMIT @limit
     `),
@@ -151,6 +156,11 @@ export function readStmts(db: Database): CachedReadStatements {
         AND tracker_date = @trackerDate
         AND item_id = @itemId
         AND run_id = @runId
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = run_events.workflow AND dt.tracker_date = run_events.tracker_date
+            AND dt.item_id = run_events.item_id AND dt.run_id = run_events.run_id
+        )
       ORDER BY event_ms ASC, id ASC
       LIMIT @limit
     `),
@@ -160,6 +170,11 @@ export function readStmts(db: Database): CachedReadStatements {
       WHERE workflow = @workflow
         AND tracker_date = @trackerDate
         AND run_id = @runId
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = run_events.workflow AND dt.tracker_date = run_events.tracker_date
+            AND dt.item_id = run_events.item_id AND dt.run_id = run_events.run_id
+        )
       ORDER BY event_ms ASC, id ASC
       LIMIT @limit
     `),
@@ -173,6 +188,7 @@ export function readStmts(db: Database): CachedReadStatements {
        AND r.item_id = re.item_id
        AND r.run_id = re.run_id
       WHERE re.workflow = @workflow AND re.tracker_date = @date
+        AND r.deleted_at IS NULL
       ORDER BY re.event_ms ASC, re.id ASC
     `),
     // Continuation events for a set of runs in partitions LATER than @date
@@ -193,6 +209,7 @@ export function readStmts(db: Database): CachedReadStatements {
         AND re.tracker_date > @date
         AND re.tracker_date <= @today
         AND re.run_id IN (SELECT value FROM json_each(@runIds))
+        AND r.deleted_at IS NULL
       ORDER BY re.event_ms ASC, re.id ASC
     `),
     // Continuation run_events (NO runs join → a clean `RunEventRow`) for a set
@@ -206,6 +223,11 @@ export function readStmts(db: Database): CachedReadStatements {
         AND tracker_date > @date
         AND tracker_date <= @today
         AND run_id IN (SELECT value FROM json_each(@runIds))
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = run_events.workflow AND dt.tracker_date = run_events.tracker_date
+            AND dt.item_id = run_events.item_id AND dt.run_id = run_events.run_id
+        )
       ORDER BY event_ms ASC, id ASC
     `),
     // Continuation log lines for a set of runs in partitions LATER than @date
@@ -218,6 +240,11 @@ export function readStmts(db: Database): CachedReadStatements {
         AND tracker_date > @date
         AND tracker_date <= @today
         AND run_id IN (SELECT value FROM json_each(@runIds))
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = logs.workflow AND dt.tracker_date = logs.tracker_date
+            AND dt.item_id = logs.item_id AND dt.run_id = logs.run_id
+        )
       ORDER BY ts_ms ASC, id ASC
     `),
     // Single-row probe: a run's latest projected status on a specific date. Used
@@ -231,9 +258,19 @@ export function readStmts(db: Database): CachedReadStatements {
         AND tracker_date = @date
         AND item_id = @itemId
         AND run_id = @runId
+        AND deleted_at IS NULL
     `),
     selectDistinctWorkflowsForDate: db.prepare(
-      "SELECT DISTINCT workflow FROM items WHERE tracker_date = @date ORDER BY workflow",
+      `SELECT DISTINCT i.workflow
+       FROM items i
+       WHERE i.tracker_date = @date
+         AND EXISTS (
+           SELECT 1 FROM runs r
+           WHERE r.workflow = i.workflow AND r.tracker_date = i.tracker_date
+             AND r.item_id = i.item_id AND r.run_id = i.latest_run_id
+             AND r.deleted_at IS NULL
+         )
+       ORDER BY i.workflow`,
     ),
     selectWfCountRowsForDate: db.prepare(`
       SELECT i.workflow, i.item_id AS id, i.latest_run_id AS runId,
@@ -241,12 +278,13 @@ export function readStmts(db: Database): CachedReadStatements {
              i.latest_status AS status, i.latest_step AS step, i.latest_ts AS timestamp,
              i.latest_data_json AS data_json, i.latest_error AS error
       FROM items i
-      LEFT JOIN runs r
+      JOIN runs r
         ON r.workflow = i.workflow
        AND r.tracker_date = i.tracker_date
        AND r.item_id = i.item_id
        AND r.run_id = i.latest_run_id
       WHERE i.tracker_date = @date
+        AND r.deleted_at IS NULL
     `),
     selectAllLatestRowsForDate: db.prepare(`
       SELECT workflow, latest_ts AS timestamp, item_id AS id, latest_run_id AS runId,
@@ -254,16 +292,28 @@ export function readStmts(db: Database): CachedReadStatements {
              latest_error AS error
       FROM items
       WHERE tracker_date = @date
+        AND EXISTS (
+          SELECT 1 FROM runs r
+          WHERE r.workflow = items.workflow AND r.tracker_date = items.tracker_date
+            AND r.item_id = items.item_id AND r.run_id = items.latest_run_id
+            AND r.deleted_at IS NULL
+        )
     `),
     selectRunsForItem: db.prepare(`
       SELECT * FROM runs
       WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
+        AND deleted_at IS NULL
       ORDER BY run_ordinal ASC
     `),
     selectRunHistoryForItem: db.prepare(`
       SELECT run_id, event_ts AS timestamp, status, step
       FROM run_events
       WHERE workflow = @workflow AND tracker_date = @date AND item_id = @itemId
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = run_events.workflow AND dt.tracker_date = run_events.tracker_date
+            AND dt.item_id = run_events.item_id AND dt.run_id = run_events.run_id
+        )
       ORDER BY event_ms ASC, id ASC
     `),
     selectSessionEventsByRunId: db.prepare(`
@@ -282,6 +332,12 @@ export function readStmts(db: Database): CachedReadStatements {
       WHERE workflow = @workflow
         AND tracker_date >= @cutoff
         AND latest_data_json IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM runs r
+          WHERE r.workflow = items.workflow AND r.tracker_date = items.tracker_date
+            AND r.item_id = items.item_id AND r.run_id = items.latest_run_id
+            AND r.deleted_at IS NULL
+        )
         AND TRIM(json_extract(latest_data_json, '$.' || @key)) = @value
         AND NOT (latest_status = 'failed' AND (latest_step = 'cancelled' OR latest_step = 'discarded'))
       ORDER BY latest_ts DESC
@@ -292,11 +348,22 @@ export function readStmts(db: Database): CachedReadStatements {
       WHERE tracker_date = @date
         AND latest_empl_id IS NOT NULL
         AND TRIM(latest_empl_id) != ''
+        AND EXISTS (
+          SELECT 1 FROM runs r
+          WHERE r.workflow = items.workflow AND r.tracker_date = items.tracker_date
+            AND r.item_id = items.item_id AND r.run_id = items.latest_run_id
+            AND r.deleted_at IS NULL
+        )
     `),
     selectRunEventsByParentRunId: db.prepare(`
       SELECT *
       FROM run_events
       WHERE parent_run_id = @parentRunId
+        AND NOT EXISTS (
+          SELECT 1 FROM deletion_tombstones dt
+          WHERE dt.workflow = run_events.workflow AND dt.tracker_date = run_events.tracker_date
+            AND dt.item_id = run_events.item_id AND dt.run_id = run_events.run_id
+        )
       ORDER BY event_ms ASC, id ASC
       LIMIT @limit
     `),

@@ -58,6 +58,7 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
     const stateDb = getProjectionDb(deps);
     const registered = stateDb
       ? registerLocalFile(stateDb, {
+          trackerDir: deps.dir,
           kind: "pdf",
           mimeType: "application/pdf",
           path: pdfPath,

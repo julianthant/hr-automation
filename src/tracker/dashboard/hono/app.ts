@@ -30,6 +30,7 @@ import {
   publicCaptureCorsMiddleware,
   registerOperatorSessionRoute,
 } from "./security.js";
+import { configurationFaultMiddleware } from "./configuration-fault.js";
 
 export type { DashboardHonoDeps } from "./context.js";
 
@@ -45,6 +46,8 @@ export function createDashboardHonoApp(deps: DashboardHonoDeps): Hono {
     app.get("/api/operator/session", () =>
       jsonResponse({ ok: false, error: "Operator session is available only on a running dashboard" }, 503));
   }
+
+  app.use("*", configurationFaultMiddleware(deps.repoRoot ?? process.cwd()));
 
   // Unhandled exceptions stay structured; the boundary middleware applies
   // origin-specific CORS after the route returns.
@@ -91,6 +94,10 @@ export function createPublicCaptureHonoApp(deps: DashboardHonoDeps): Hono {
     }
     return next();
   });
+  app.use(
+    "*",
+    configurationFaultMiddleware(deps.repoRoot ?? process.cwd(), { publicCapture: true }),
+  );
   app.onError((err, c) => {
     const message = errorMessage(err);
     log.warn(`[capture-api] ${c.req.method} ${c.req.path} threw: ${message}`);

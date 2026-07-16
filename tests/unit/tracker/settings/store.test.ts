@@ -8,15 +8,27 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { operatorSettingsFile } from "../../../../src/tracker/paths.js";
+import {
+  operatorSettingsBackupFile,
+  operatorSettingsFile,
+} from "../../../../src/tracker/paths.js";
 import {
   applyOperatorSettingsEnv,
   deleteOperatorSettings,
   readOperatorSettingsOverride,
+  readOperatorSettingsFileState,
+  recoverOperatorSettingsBackup,
   writeOperatorSettings,
 } from "../../../../src/tracker/settings/store.js";
 
@@ -33,6 +45,7 @@ afterEach(() => {
 describe("read/write/delete round-trip", () => {
   it("returns null when no file exists", () => {
     expect(readOperatorSettingsOverride(root)).toBe(null);
+    expect(readOperatorSettingsFileState(root)).toEqual({ state: "missing" });
   });
 
   it("persists a validated sparse override and reads it back", () => {
@@ -51,14 +64,60 @@ describe("read/write/delete round-trip", () => {
     expect(deleteOperatorSettings(root)).toBe(false);
   });
 
-  it("fail-soft READ: an unparseable file is ignored (null), not thrown", () => {
+  it("reports an unparseable existing file as a configuration fault", () => {
     writeFileSync(operatorSettingsFile(root), "{ not json", "utf8");
-    expect(readOperatorSettingsOverride(root)).toBe(null);
+    expect(readOperatorSettingsFileState(root)).toMatchObject({
+      state: "fault",
+      backupAvailable: false,
+    });
+    expect(() => readOperatorSettingsOverride(root)).toThrow(/configuration fault/i);
   });
 
-  it("fail-soft READ: a schema-invalid file is ignored (null)", () => {
+  it("reports a schema-invalid existing file as a configuration fault", () => {
     writeFileSync(operatorSettingsFile(root), JSON.stringify({ display: { screenWidth: -5 } }), "utf8");
-    expect(readOperatorSettingsOverride(root)).toBe(null);
+    expect(readOperatorSettingsFileState(root)).toMatchObject({
+      state: "fault",
+      backupAvailable: false,
+    });
+    expect(() => readOperatorSettingsOverride(root)).toThrow(/configuration fault/i);
+  });
+
+  it("keeps the last valid settings as an explicit recovery backup", () => {
+    writeOperatorSettings(root, { display: { screenWidth: 3200 } });
+    writeOperatorSettings(root, { display: { screenWidth: 3840 } });
+
+    expect(JSON.parse(readFileSync(operatorSettingsBackupFile(root), "utf8"))).toEqual({
+      display: { screenWidth: 3200 },
+    });
+
+    writeFileSync(operatorSettingsFile(root), "{ broken", "utf8");
+    expect(readOperatorSettingsFileState(root)).toMatchObject({
+      state: "fault",
+      backupAvailable: true,
+    });
+    expect(recoverOperatorSettingsBackup(root)).toEqual({ display: { screenWidth: 3200 } });
+    expect(readOperatorSettingsFileState(root)).toEqual({
+      state: "valid",
+      override: { display: { screenWidth: 3200 } },
+    });
+  });
+
+  it("never advertises or restores a corrupt recovery backup", () => {
+    writeFileSync(operatorSettingsFile(root), "{ broken", "utf8");
+    writeFileSync(operatorSettingsBackupFile(root), "{ also broken", "utf8");
+    expect(readOperatorSettingsFileState(root)).toMatchObject({
+      state: "fault",
+      backupAvailable: false,
+    });
+    expect(() => recoverOperatorSettingsBackup(root)).toThrow(/backup/i);
+  });
+
+  it("reset removes only the active file and preserves the recovery backup", () => {
+    writeOperatorSettings(root, { display: { screenWidth: 3200 } });
+    writeOperatorSettings(root, { display: { screenWidth: 3840 } });
+    expect(deleteOperatorSettings(root)).toBe(true);
+    expect(existsSync(operatorSettingsFile(root))).toBe(false);
+    expect(existsSync(operatorSettingsBackupFile(root))).toBe(true);
   });
 
   it("fail-loud WRITE: an out-of-range value throws", () => {

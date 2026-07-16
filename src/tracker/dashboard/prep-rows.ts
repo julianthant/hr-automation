@@ -1,4 +1,4 @@
-import type { TrackerEntry } from "../jsonl.js";
+import type { TrackerEntry } from "../jsonl-core.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 
 export function isPrepEntry(e: TrackerEntry): boolean {

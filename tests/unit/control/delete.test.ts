@@ -12,13 +12,23 @@
  */
 import { describe, it, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { closeStateDbForTests } from "../../../src/tracker/state/db.js";
-import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
+import { closeStateDbForTests, openStateDb } from "../../../src/tracker/state/db.js";
+import { deletionFilePath, rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
+import { readVisibleEntriesForDate } from "../../../src/tracker/deletions/visible.js";
+import { rebuildProjectionForDate } from "../../../src/tracker/state/rebuild.js";
 import {
+  dateLocal,
   trackEventForDate,
 } from "../../../src/tracker/jsonl.js";
 import {
@@ -112,7 +122,28 @@ describe("buildDeleteEntryHandler — validation", () => {
   });
 });
 
-describe("buildDeleteEntryHandler — JSONL rewrite excludes deleted row", () => {
+describe("buildDeleteEntryHandler — append-only tombstones", () => {
+  it("rejects an active item-scoped task even before any tracker row projects", () => {
+    const stores = openControlStores(tmp);
+    const [task] = stores.taskStore.enqueueTasks({
+      workflow: "work-study",
+      inputs: [{ id: "task-only" }],
+      deriveItemId: (input) => input.id,
+      runIds: ["task-only-run"],
+    });
+
+    const result = buildDeleteEntryHandler(tmp, { screenshotsDir })({
+      workflow: "work-study", id: "task-only", date: TODAY,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 409);
+      assert.match(result.error, /active task/i);
+    }
+    assert.equal(stores.taskStore.getTask(task.taskId)?.state, "queued");
+    assert.equal(existsSync(deletionFilePath(TODAY, tmp)), false);
+  });
+
   it("rejects deletion when a task-only descendant is still active and preserves both stores", () => {
     seedRow(tmp, { workflow: "oath-signature", id: "coordinator", runId: "root-run" });
     const stores = openControlStores(tmp);
@@ -141,23 +172,32 @@ describe("buildDeleteEntryHandler — JSONL rewrite excludes deleted row", () =>
     assert.equal(stores.taskStore.getTask(child.taskId)?.state, "queued", "the active task must remain intact");
   });
 
-  it("removes the matching row from the JSONL file and leaves other rows intact", () => {
+  it("hides the matching row while preserving source JSONL and projected audit history", () => {
     // Seed two rows in the same file
     seedRow(tmp, { workflow: "work-study", id: "item-1", runId: "run-a" });
     seedRow(tmp, { workflow: "work-study", id: "item-2", runId: "run-b" });
 
     const rowsBefore = readRows(tmp, "work-study");
     assert.equal(rowsBefore.length, 2);
+    rebuildProjectionForDate(openStateDb(tmp), { dir: tmp, date: TODAY });
 
     const handler = buildDeleteEntryHandler(tmp, { screenshotsDir });
     const result = handler({ workflow: "work-study", id: "item-1", date: TODAY });
     assert.equal(result.ok, true);
 
     const rowsAfter = readRows(tmp, "work-study");
-    // Only item-2 should remain
-    assert.equal(rowsAfter.length, 1);
-    const remaining = rowsAfter[0] as { id: string };
+    assert.equal(rowsAfter.length, 2, "source JSONL is immutable audit history");
+    const visible = readVisibleEntriesForDate("work-study", TODAY, tmp);
+    assert.equal(visible.length, 1);
+    const remaining = visible[0] as { id: string };
     assert.equal(remaining.id, "item-2");
+    const auditCount = openStateDb(tmp)
+      .prepare("SELECT COUNT(*) AS n FROM run_events WHERE workflow = 'work-study'")
+      .get() as { n: number };
+    assert.equal(auditCount.n, 2, "SQLite audit events remain recoverable");
+    const deletionFiles = readFileSync(deletionFilePath(dateLocal(), tmp), "utf8")
+      .split("\n").filter(Boolean);
+    assert.equal(deletionFiles.length, 1);
   });
 
   it("succeeds even when the JSONL file does not exist (no-op)", () => {
@@ -178,9 +218,10 @@ describe("buildDeleteEntryHandler — JSONL rewrite excludes deleted row", () =>
     const result = handler({ workflow: "work-study", id: "item-1", date: TODAY, runId: "run-a" });
     assert.equal(result.ok, true);
 
-    const rowsAfter = readRows(tmp, "work-study");
-    assert.equal(rowsAfter.length, 1);
-    const remaining = rowsAfter[0] as { id: string; runId: string };
+    assert.equal(readRows(tmp, "work-study").length, 2);
+    const visible = readVisibleEntriesForDate("work-study", TODAY, tmp);
+    assert.equal(visible.length, 1);
+    const remaining = visible[0] as { id: string; runId: string };
     assert.equal(remaining.id, "item-1");
     assert.equal(remaining.runId, "run-b");
   });
@@ -228,9 +269,10 @@ describe("buildDeleteBulkHandler — deletes multiple rows", () => {
     assert.equal(result.ok, true);
     assert.equal(result.count, 2);
 
-    const rowsAfter = readRows(tmp, "work-study");
-    assert.equal(rowsAfter.length, 1);
-    const remaining = rowsAfter[0] as { id: string };
+    assert.equal(readRows(tmp, "work-study").length, 3);
+    const visible = readVisibleEntriesForDate("work-study", TODAY, tmp);
+    assert.equal(visible.length, 1);
+    const remaining = visible[0] as { id: string };
     assert.equal(remaining.id, "item-3");
   });
 
@@ -248,9 +290,10 @@ describe("buildDeleteBulkHandler — deletes multiple rows", () => {
     assert.equal(result.ok, true);
     assert.equal(result.count, 1);
 
-    const rowsAfter = readRows(tmp, "work-study");
-    assert.equal(rowsAfter.length, 1);
-    const remaining = rowsAfter[0] as { id: string; runId: string };
+    assert.equal(readRows(tmp, "work-study").length, 2);
+    const visible = readVisibleEntriesForDate("work-study", TODAY, tmp);
+    assert.equal(visible.length, 1);
+    const remaining = visible[0] as { id: string; runId: string };
     assert.equal(remaining.runId, "run-b");
   });
 
@@ -287,9 +330,10 @@ describe("deleteDelegatedChildrenForRun — cascades to JSONL children", () => {
 
     deleteDelegatedChildrenForRun(tmp, parentRunId, { screenshotsDir });
 
-    const rowsAfter = readRows(tmp, "person-lookup");
-    assert.equal(rowsAfter.length, 1);
-    const remaining = rowsAfter[0] as { id: string };
+    assert.equal(readRows(tmp, "person-lookup").length, 2);
+    const visible = readVisibleEntriesForDate("person-lookup", TODAY, tmp);
+    assert.equal(visible.length, 1);
+    const remaining = visible[0] as { id: string };
     assert.equal(remaining.id, "other-item");
   });
 
@@ -300,5 +344,24 @@ describe("deleteDelegatedChildrenForRun — cascades to JSONL children", () => {
 
     const rowsAfter = readRows(tmp, "work-study");
     assert.equal(rowsAfter.length, 1);
+  });
+
+  it("fails loud on a malformed complete JSONL row instead of omitting descendants", () => {
+    const parentRunId = "parent-corrupt-tree";
+    seedRow(tmp, { workflow: "oath-signature", id: "parent", runId: parentRunId });
+    const childPath = rowFilePath("person-lookup", TODAY, tmp);
+    appendFileSync(childPath, "{malformed complete row}\n");
+    seedRow(tmp, {
+      workflow: "person-lookup", id: "child", runId: "child-corrupt-tree",
+      parentRunId,
+    });
+
+    assert.throws(
+      () => buildDeleteEntryHandler(tmp)({
+        workflow: "oath-signature", id: "parent", runId: parentRunId, date: TODAY,
+      }),
+      /Malformed tracker JSONL/,
+    );
+    assert.equal(existsSync(deletionFilePath(TODAY, tmp)), false);
   });
 });

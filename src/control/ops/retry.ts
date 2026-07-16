@@ -9,7 +9,8 @@
 import { existsSync } from "fs";
 import { RetryTaskBecameActiveError } from "../../core/task-store/index.js";
 import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
-import { byTimestampAsc, readEntries, type TrackerEntry } from "../../tracker/jsonl.js";
+import { byTimestampAsc, type TrackerEntry } from "../../tracker/jsonl.js";
+import { readVisibleEntries } from "../../tracker/deletions/visible.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
 import { ensureDaemonsAvailable } from "../../core/daemon/client.js";
@@ -246,7 +247,7 @@ export function findLatestEntryData(
   id: string,
   dir: string,
 ): Record<string, string> {
-  const rows = readEntries(workflow, dir).filter((e) => e.id === id && e.data);
+  const rows = readVisibleEntries(workflow, dir).filter((e) => e.id === id && e.data);
   return mergeAccumulatedTrackerStrings(rows);
 }
 
@@ -329,6 +330,19 @@ async function reEnqueueEntry(
 
   if (resolvedRunId && !prefilledData) {
     const stores = openControlStores(dir);
+    const deleted = stores.taskStore.db.prepare(`
+      SELECT 1
+      FROM deletion_tombstones
+      WHERE workflow = @workflow AND item_id = @itemId AND run_id = @runId
+        AND (@trackerDate IS NULL OR tracker_date = @trackerDate)
+      LIMIT 1
+    `).get({ workflow: wf, itemId: id, runId: resolvedRunId, trackerDate: date ?? null });
+    if (deleted) {
+      return {
+        ok: false,
+        error: `cannot retry deleted run workflow=${wf} id=${id} runId=${resolvedRunId}`,
+      };
+    }
     const task = findRetryTaskSnapshot(stores.taskStore.db, wf, id, resolvedRunId);
     if (task) {
       // State guard (mirrors cancel.ts:84-96): retry must not race against

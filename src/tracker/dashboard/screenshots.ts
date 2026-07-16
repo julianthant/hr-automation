@@ -6,6 +6,11 @@ import { isStateDbReady, openStateDb } from "../state/db.js";
 import { queryScreenshotsForItem, type FileRow } from "../state/file-queries.js";
 import { querySessionEventsForRun } from "../state/queries.js";
 import type { ScreenshotSessionEvent } from "../session-events.js";
+import {
+  isDeletedRun,
+  isDeletedRunAnyDate,
+  isRunTombstonedInDb,
+} from "../deletions/visible.js";
 
 /** Default root dir for kernel failure screenshots. Matches `screenshotAll`. */
 export const SCREENSHOTS_DIR = PATHS.screenshotDir;
@@ -57,6 +62,7 @@ export function buildScreenshotsHandler(deps: {
   itemId: string;
   /** When set, only screenshots registered to this tracker run (strict SQLite + filtered session events; skips unattributed disk orphans). */
   runId?: string | null;
+  trackerDate?: string | null;
 }) => Promise<ScreenshotGroupedEntry[]>;
 export function buildScreenshotsHandler(
   arg: string | { dir: string; screenshotsDir: string } | undefined = SCREENSHOTS_DIR,
@@ -65,14 +71,21 @@ export function buildScreenshotsHandler(
   if (arg !== null && typeof arg === "object") {
     const { dir, screenshotsDir } = arg;
     return async function groupedHandler(
-      query: { workflow: string; itemId: string; runId?: string | null },
+      query: { workflow: string; itemId: string; runId?: string | null; trackerDate?: string | null },
     ): Promise<ScreenshotGroupedEntry[]> {
       const { workflow, itemId } = query;
       const runId = query.runId?.trim() || undefined;
+      const trackerDate = query.trackerDate?.trim() || undefined;
 
       // Prefer SQLite when ready and populated.
       if (isStateDbReady(dir)) {
         const db = openStateDb(dir);
+        if (runId && isRunTombstonedInDb(db, {
+          workflow,
+          itemId,
+          runId,
+          ...(trackerDate ? { trackerDate } : {}),
+        })) return [];
         const rows = queryScreenshotsForItem(db, { workflow, itemId, runId });
         if (rows.length > 0) {
           const screenshotEvents: ScreenshotSessionEvent[] = [];
@@ -102,6 +115,11 @@ export function buildScreenshotsHandler(
         }
       }
 
+      if (runId && (
+        trackerDate
+          ? isDeletedRun(dir, { workflow, trackerDate, itemId, runId })
+          : isDeletedRunAnyDate(dir, { workflow, itemId, runId })
+      )) return [];
       return groupedHandlerLegacy({ dir, screenshotsDir, workflow, itemId, runId });
     };
   }
@@ -191,6 +209,10 @@ async function groupedHandlerLegacy(opts: {
     ) {
       const screenshotEv = ev as unknown as ScreenshotSessionEvent;
       if (runId && screenshotEv.runId !== runId) continue;
+      if (
+        screenshotEv.runId &&
+        isDeletedRunAnyDate(dir, { workflow, itemId, runId: screenshotEv.runId })
+      ) continue;
       const matches = screenshotEv.files.some((f) => {
         const base = f.path.split(/[/\\]/).pop() ?? "";
         return base.startsWith(prefix);

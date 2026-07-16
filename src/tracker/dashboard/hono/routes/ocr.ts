@@ -175,6 +175,7 @@ async function handlePrepare(
   const stateDb = getProjectionDb(deps);
   if (stateDb && sessionId) {
     const registered = registerLocalFile(stateDb, {
+      trackerDir: deps.dir,
       kind: "pdf",
       mimeType: "application/pdf",
       path: pdfPath,

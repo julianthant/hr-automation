@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 19;
+export const LATEST_SCHEMA_VERSION = 23;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -809,6 +809,258 @@ WHERE state = 'approved' AND presented_at IS NULL AND completed_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ocr_approvals_unpresented_idx
   ON ocr_approvals(state, presented_at);
+    `,
+  },
+  {
+    // Migration 20: operator deletions are durable, append-only tombstones.
+    // Source rows and terminal execution/audit records remain intact; normal
+    // projections hide runs marked by an exact workflow/date/item/run target.
+    version: 20,
+    sql: String.raw`
+ALTER TABLE runs ADD COLUMN deleted_at TEXT;
+ALTER TABLE runs ADD COLUMN deletion_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_runs_visible_workflow_date
+  ON runs(workflow, tracker_date, deleted_at, latest_tracker_ts);
+
+CREATE TABLE IF NOT EXISTS deletion_tombstones (
+  deletion_id TEXT NOT NULL,
+  target_index INTEGER NOT NULL,
+  deleted_at TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  workflow TEXT NOT NULL,
+  tracker_date TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  source_offset INTEGER NOT NULL,
+  manifest_json TEXT NOT NULL,
+  PRIMARY KEY (deletion_id, target_index),
+  UNIQUE (source_path, source_offset, target_index)
+);
+
+CREATE INDEX IF NOT EXISTS deletion_tombstones_target_idx
+  ON deletion_tombstones(workflow, tracker_date, item_id, run_id);
+CREATE INDEX IF NOT EXISTS deletion_tombstones_deleted_at_idx
+  ON deletion_tombstones(deleted_at);
+    `,
+  },
+  {
+    // Migration 21: source generations make offline JSONL compaction safe.
+    // Rewritten files restart byte offsets at zero; generation participates in
+    // every source uniqueness key so an old offset can never suppress a new
+    // compacted row.
+    version: 21,
+    sql: String.raw`
+CREATE TABLE IF NOT EXISTS source_generations (
+  path TEXT PRIMARY KEY,
+  generation INTEGER NOT NULL CHECK (generation >= 1),
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE projection_sources_v21 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_kind TEXT NOT NULL CHECK (source_kind IN ('tracker', 'log', 'session')),
+  workflow TEXT,
+  tracker_date TEXT,
+  path TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 1,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  mtime_ms REAL NOT NULL DEFAULT 0,
+  line_count INTEGER NOT NULL DEFAULT 0,
+  byte_offset INTEGER NOT NULL DEFAULT 0,
+  rebuild_version INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  UNIQUE(source_kind, path, generation)
+);
+INSERT INTO projection_sources_v21 (
+  id, source_kind, workflow, tracker_date, path, generation, size_bytes,
+  mtime_ms, line_count, byte_offset, rebuild_version, updated_at
+)
+SELECT id, source_kind, workflow, tracker_date, path, 1, size_bytes,
+       mtime_ms, line_count, byte_offset, rebuild_version, updated_at
+FROM projection_sources;
+DROP TABLE projection_sources;
+ALTER TABLE projection_sources_v21 RENAME TO projection_sources;
+
+CREATE TABLE run_events_v21 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_path TEXT NOT NULL,
+  source_generation INTEGER NOT NULL DEFAULT 1,
+  source_line INTEGER NOT NULL,
+  source_offset INTEGER NOT NULL,
+  workflow TEXT NOT NULL,
+  tracker_date TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  parent_run_id TEXT,
+  status TEXT NOT NULL,
+  step TEXT,
+  event_ts TEXT NOT NULL,
+  event_ms INTEGER NOT NULL,
+  data_json TEXT,
+  typed_data_json TEXT,
+  input_json TEXT,
+  error TEXT,
+  applied_at TEXT NOT NULL,
+  UNIQUE(source_path, source_generation, source_offset)
+);
+INSERT INTO run_events_v21 (
+  id, source_path, source_generation, source_line, source_offset, workflow,
+  tracker_date, item_id, run_id, parent_run_id, status, step, event_ts,
+  event_ms, data_json, typed_data_json, input_json, error, applied_at
+)
+SELECT id, source_path, 1, source_line, source_offset, workflow,
+       tracker_date, item_id, run_id, parent_run_id, status, step, event_ts,
+       event_ms, data_json, typed_data_json, input_json, error, applied_at
+FROM run_events;
+DROP TABLE run_events;
+ALTER TABLE run_events_v21 RENAME TO run_events;
+CREATE INDEX idx_run_events_workflow_date ON run_events(workflow, tracker_date, event_ms);
+CREATE INDEX idx_run_events_item_run ON run_events(workflow, tracker_date, item_id, run_id, event_ms);
+CREATE INDEX idx_run_events_parent ON run_events(parent_run_id);
+
+CREATE TABLE logs_v21 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_path TEXT NOT NULL,
+  source_generation INTEGER NOT NULL DEFAULT 1,
+  source_line INTEGER NOT NULL,
+  source_offset INTEGER NOT NULL,
+  workflow TEXT NOT NULL,
+  tracker_date TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  level TEXT NOT NULL,
+  message TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  ts_ms INTEGER NOT NULL,
+  raw_json TEXT NOT NULL,
+  applied_at TEXT NOT NULL,
+  UNIQUE(source_path, source_generation, source_offset)
+);
+INSERT INTO logs_v21 (
+  id, source_path, source_generation, source_line, source_offset, workflow,
+  tracker_date, item_id, run_id, level, message, ts, ts_ms, raw_json, applied_at
+)
+SELECT id, source_path, 1, source_line, source_offset, workflow,
+       tracker_date, item_id, run_id, level, message, ts, ts_ms, raw_json, applied_at
+FROM logs;
+DROP TABLE logs;
+ALTER TABLE logs_v21 RENAME TO logs;
+CREATE INDEX idx_logs_item_run ON logs(workflow, tracker_date, item_id, run_id, ts_ms);
+
+CREATE TABLE session_events_v21 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_path TEXT NOT NULL,
+  source_generation INTEGER NOT NULL DEFAULT 1,
+  source_line INTEGER NOT NULL,
+  source_offset INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  workflow_instance TEXT,
+  run_id TEXT,
+  timestamp TEXT NOT NULL,
+  ts_ms INTEGER NOT NULL,
+  tracker_date TEXT NOT NULL DEFAULT '',
+  raw_json TEXT NOT NULL,
+  applied_at TEXT NOT NULL,
+  UNIQUE(source_path, source_generation, source_offset)
+);
+INSERT INTO session_events_v21 (
+  id, source_path, source_generation, source_line, source_offset, event_type,
+  workflow_instance, run_id, timestamp, ts_ms, tracker_date, raw_json, applied_at
+)
+SELECT id, source_path, 1, source_line, source_offset, event_type,
+       workflow_instance, run_id, timestamp, ts_ms, tracker_date, raw_json, applied_at
+FROM session_events;
+DROP TABLE session_events;
+ALTER TABLE session_events_v21 RENAME TO session_events;
+CREATE INDEX idx_session_events_run ON session_events(run_id, ts_ms);
+CREATE INDEX idx_session_events_instance ON session_events(workflow_instance, ts_ms);
+CREATE INDEX idx_session_events_date ON session_events(tracker_date, ts_ms);
+    `,
+  },
+  {
+    // Migration 22: separate immutable content identity from attachment
+    // ownership. `file_blobs` deduplicates bytes by full SHA-256, while each
+    // logical attachment receives its own UUID `files.file_id`. Existing hash
+    // ids remain valid and are backfilled as legacy attachment references so
+    // previously emitted download URLs continue to resolve.
+    version: 22,
+    sql: String.raw`
+CREATE TABLE IF NOT EXISTS file_blobs (
+  blob_id TEXT PRIMARY KEY,
+  sha256 TEXT NOT NULL UNIQUE,
+  bytes INTEGER NOT NULL,
+  storage_path TEXT,
+  created_at TEXT NOT NULL
+);
+
+ALTER TABLE files ADD COLUMN blob_id TEXT;
+ALTER TABLE files ADD COLUMN attachment_key TEXT;
+ALTER TABLE files ADD COLUMN tracker_date TEXT;
+
+CREATE TABLE migration22_file_integrity_guard (
+  ok INTEGER NOT NULL CHECK (ok = 1)
+);
+INSERT INTO migration22_file_integrity_guard (ok)
+SELECT CASE WHEN EXISTS (
+  SELECT 1 FROM files GROUP BY sha256 HAVING MIN(bytes) <> MAX(bytes)
+) THEN 0 ELSE 1 END;
+DROP TABLE migration22_file_integrity_guard;
+
+INSERT INTO file_blobs (blob_id, sha256, bytes, storage_path, created_at)
+SELECT sha256, sha256, MIN(bytes), NULL, MIN(created_at)
+FROM files
+GROUP BY sha256;
+
+UPDATE files SET blob_id = sha256 WHERE blob_id IS NULL;
+UPDATE files SET attachment_key = 'legacy:' || file_id WHERE attachment_key IS NULL;
+UPDATE files
+SET tracker_date = (
+  SELECT r.tracker_date FROM runs r
+  WHERE r.workflow = files.workflow AND r.item_id = files.item_id
+    AND r.run_id = files.run_id
+  ORDER BY r.latest_tracker_ts DESC
+  LIMIT 1
+)
+WHERE tracker_date IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_files_blob ON files(blob_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_files_attachment_key ON files(attachment_key);
+CREATE INDEX IF NOT EXISTS idx_files_exact_owner
+  ON files(workflow, tracker_date, item_id, run_id);
+
+CREATE TRIGGER files_require_blob_insert
+BEFORE INSERT ON files
+WHEN NEW.blob_id IS NULL OR NEW.attachment_key IS NULL
+  OR NOT EXISTS (SELECT 1 FROM file_blobs WHERE blob_id = NEW.blob_id)
+BEGIN
+  SELECT RAISE(ABORT, 'files require a valid blob_id and attachment_key');
+END;
+
+CREATE TRIGGER files_require_blob_update
+BEFORE UPDATE OF blob_id, attachment_key ON files
+WHEN NEW.blob_id IS NULL OR NEW.attachment_key IS NULL
+  OR NOT EXISTS (SELECT 1 FROM file_blobs WHERE blob_id = NEW.blob_id)
+BEGIN
+  SELECT RAISE(ABORT, 'files require a valid blob_id and attachment_key');
+END;
+    `,
+  },
+  {
+    // Migration 23: source paths are canonical absolute identities. Older
+    // projections may contain the same JSONL file under both relative and
+    // absolute spellings; discard only derived projection state so the next
+    // rebuild replays authoritative JSONL once under the canonical key.
+    version: 23,
+    sql: String.raw`
+DELETE FROM run_events;
+DELETE FROM logs;
+DELETE FROM session_events;
+DELETE FROM runs;
+DELETE FROM items;
+DELETE FROM projection_sources;
+DELETE FROM source_generations;
     `,
   },
 ];

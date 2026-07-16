@@ -1,6 +1,7 @@
 import type { Database, Statement } from "../../../infra/sqlite/index.js";
 import type { SessionEvent } from "../../session-events.js";
 import { readStmts } from "./statements.js";
+import { isRunTombstonedInDb } from "../../deletions/visible.js";
 
 /**
  * Cache of the operation-coordinator IN-branch prepared statement, keyed by
@@ -66,8 +67,21 @@ function getCoordinatorStmt(
  */
 export function querySessionEventsForRun(
   db: Database,
-  opts: { runId: string; workflowInstance?: string; memberRunIds?: readonly string[] },
+  opts: {
+    runId: string;
+    workflowInstance?: string;
+    memberRunIds?: readonly string[];
+    workflow?: string;
+    itemId?: string;
+    trackerDate?: string;
+  },
 ): SessionEvent[] {
+  if (opts.workflow && opts.itemId && isRunTombstonedInDb(db, {
+    workflow: opts.workflow,
+    itemId: opts.itemId,
+    runId: opts.runId,
+    ...(opts.trackerDate ? { trackerDate: opts.trackerDate } : {}),
+  })) return [];
   const s = readStmts(db);
   const members = (opts.memberRunIds ?? []).filter((r) => r && r !== opts.runId);
   let rows: Array<{ raw_json: string }>;

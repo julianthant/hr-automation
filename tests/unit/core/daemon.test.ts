@@ -1,6 +1,14 @@
 import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -27,7 +35,7 @@ import { openControlDb } from '../../../src/core/control-db.js'
 import { createTaskStore } from '../../../src/core/task-store/index.js'
 import { createWorkerStore } from '../../../src/core/daemon/worker-store.js'
 import { dateLocal } from '../../../src/tracker/jsonl.js'
-import { rowFilePath } from '../../../src/tracker/paths.js'
+import { operatorSettingsFile, rowFilePath } from '../../../src/tracker/paths.js'
 import type { SystemConfig } from '../../../src/core/kernel/types.js'
 import { log } from '../../../src/utils/log.js'
 
@@ -2095,5 +2103,85 @@ test('runWorkflowDaemon: a claimNextItem THROW is logged loud and retried, not s
   } finally {
     errorSpy.mockRestore()
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: corrupt settings block startup before Session.launch', async () => {
+  clear()
+  const root = mkdtempSync(join(tmpdir(), 'daemon-settings-fault-'))
+  const dir = join(root, '.tracker')
+  mkdirSync(join(root, 'config'), { recursive: true })
+  writeFileSync(operatorSettingsFile(root), '{ corrupt', 'utf8')
+  const launch = vi.fn(stubLaunch())
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-settings-start',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      getId: (data) => data.id,
+      handler: async () => {},
+    })
+    await assert.rejects(
+      runWorkflowDaemon(wf, { trackerDir: dir, repoRoot: root, sessionLaunchFn: launch }),
+      /refused to start/i,
+    )
+    assert.equal(launch.mock.calls.length, 0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('runWorkflowDaemon: a newly corrupt settings file leaves work queued until repaired', async () => {
+  clear()
+  const root = mkdtempSync(join(tmpdir(), 'daemon-settings-live-fault-'))
+  const dir = join(root, '.tracker')
+  mkdirSync(join(root, 'config'), { recursive: true })
+  const seen: string[] = []
+  try {
+    const wf = defineWorkflow({
+      name: 'dint-settings-live',
+      schema: z.object({ id: z.string() }),
+      steps: ['run'],
+      systems: [],
+      authSteps: false,
+      getId: (data) => data.id,
+      handler: async (_ctx, data) => { seen.push(data.id) },
+    })
+    const runPromise = runWorkflowDaemon(wf, {
+      trackerDir: dir,
+      repoRoot: root,
+      sessionLaunchFn: stubLaunch(),
+      idleTimeoutMs: 100,
+      idleRepollMs: 40,
+    })
+    const { port } = await waitForDaemon('dint-settings-live', dir)
+    writeFileSync(operatorSettingsFile(root), '{ corrupt', 'utf8')
+    await enqueueItems('dint-settings-live', [{ id: 'held' }], (data) => data.id, dir)
+    const orphan = await queueModule.claimNextItem('dint-settings-live', 'dead-worker', dir)
+    assert.ok(orphan)
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    const held = await readQueueStateIncludingTerminals('dint-settings-live', dir)
+    assert.equal(held.queued.length, 0)
+    assert.equal(held.claimed.length, 1, 'configuration faults must also gate orphan recovery')
+    assert.deepEqual(seen, [])
+
+    rmSync(operatorSettingsFile(root))
+    await fetch(`http://127.0.0.1:${port}/wake`, { method: 'POST' })
+    await waitFor(async () => {
+      const state = await readQueueStateIncludingTerminals('dint-settings-live', dir)
+      return state.done.length === 1
+    })
+    assert.deepEqual(seen, ['held'])
+
+    await fetch(`http://127.0.0.1:${port}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    await runPromise
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

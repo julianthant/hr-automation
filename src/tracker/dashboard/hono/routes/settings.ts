@@ -7,7 +7,8 @@ import {
 import { OperatorSettingsOverrideSchema } from "../../../settings/schema.js";
 import {
   deleteOperatorSettings,
-  readOperatorSettingsOverride,
+  readOperatorSettingsFileState,
+  recoverOperatorSettingsBackup,
   writeOperatorSettings,
 } from "../../../settings/store.js";
 import type { DashboardHonoDeps } from "../context.js";
@@ -43,11 +44,13 @@ export function registerSettingsRoutes(app: Hono, deps: DashboardHonoDeps): void
   const root = deps.repoRoot ?? process.cwd();
 
   app.get("/api/settings", () => {
-    const override = readOperatorSettingsOverride(root);
+    const fileState = readOperatorSettingsFileState(root);
+    const override = fileState.state === "valid" ? fileState.override : null;
     return jsonResponse({
       ok: true,
-      settings: mergeOperatorSettings(override),
+      settings: fileState.state === "fault" ? null : mergeOperatorSettings(override),
       override,
+      configuration: fileState,
       credentials: credentialStatus(),
     });
   });
@@ -71,6 +74,20 @@ export function registerSettingsRoutes(app: Hono, deps: DashboardHonoDeps): void
       return jsonResponse({ ok: true, reverted, settings: mergeOperatorSettings(null) });
     } catch (err) {
       return jsonResponse({ ok: false, error: String(err) }, 400);
+    }
+  });
+
+  app.post("/api/settings/recover", () => {
+    try {
+      const recovered = recoverOperatorSettingsBackup(root);
+      return jsonResponse({
+        ok: true,
+        settings: mergeOperatorSettings(recovered),
+        override: recovered,
+        configuration: { state: "valid", override: recovered },
+      });
+    } catch (err) {
+      return jsonResponse({ ok: false, error: String(err) }, 409);
     }
   });
 }

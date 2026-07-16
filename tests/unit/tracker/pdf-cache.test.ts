@@ -15,6 +15,7 @@ test("ensurePdfPageCache renders page rows and reuses cache hits", async () => {
     writeFileSync(pdfPath, "%PDF fake");
     const db = openStateDb(dir);
     const file = registerLocalFile(db, {
+      trackerDir: dir,
       kind: "pdf",
       mimeType: "application/pdf",
       path: pdfPath,
@@ -58,6 +59,7 @@ test("ensurePdfPageCache dedupes concurrent renders for the same file", async ()
     writeFileSync(pdfPath, "%PDF fake");
     const db = openStateDb(dir);
     const file = registerLocalFile(db, {
+      trackerDir: dir,
       kind: "pdf",
       mimeType: "application/pdf",
       path: pdfPath,
@@ -79,6 +81,31 @@ test("ensurePdfPageCache dedupes concurrent renders for the same file", async ()
 
     assert.equal(calls, 1);
     assert.equal(a[0].imagePath, b[0].imagePath);
+  } finally {
+    closeStateDbForTests(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ensurePdfPageCache rejects traversal ids before creating paths or calling the renderer", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pdf-cache-traversal-"));
+  try {
+    const db = openStateDb(dir);
+    let renderCalled = false;
+    await assert.rejects(
+      ensurePdfPageCache(db, {
+        trackerDir: dir,
+        fileId: "../../outside",
+        pdfPath: join(dir, "missing.pdf"),
+        render: async () => {
+          renderCalled = true;
+          return [];
+        },
+      }),
+      /invalid file attachment id/i,
+    );
+    assert.equal(renderCalled, false);
+    assert.equal(existsSync(join(dir, "outside")), false);
   } finally {
     closeStateDbForTests(dir);
     rmSync(dir, { recursive: true, force: true });

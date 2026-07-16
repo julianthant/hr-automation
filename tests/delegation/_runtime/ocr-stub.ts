@@ -272,6 +272,7 @@ export async function registerOcrPdf(opts: {
 
   const tryRegister = async (path: string, originalName: string): Promise<string> => {
     const { fileId } = registerLocalFile(db, {
+      trackerDir: opts.trackerDir,
       kind: "pdf",
       mimeType: "application/pdf",
       path,

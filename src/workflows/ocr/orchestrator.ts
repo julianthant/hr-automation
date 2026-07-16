@@ -67,6 +67,7 @@ import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
 import { openControlDb } from "../../core/control-db.js";
 import { markOcrAwaitingApproval } from "../../tracker/state/ocr-approval-store.js";
+import { isFileAttachmentId } from "../../tracker/files/file-id.js";
 import {
   clearOcrPrepareAbort,
   createOperatorDiscardError,
@@ -419,6 +420,9 @@ export async function runOcrOrchestrator(
   const trackerBaseDir = trackerDir ?? ".tracker";
   if (!input.pdfFileId) {
     throw new Error("OCR: pdfFileId is required (legacy page-images path removed)");
+  }
+  if (!isFileAttachmentId(input.pdfFileId)) {
+    throw new Error(`OCR: invalid pdfFileId ${input.pdfFileId}`);
   }
   const pageImagesDir = join(trackerBaseDir, "pdf-cache", input.pdfFileId);
 

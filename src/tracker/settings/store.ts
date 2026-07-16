@@ -1,22 +1,29 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { log } from "../../utils/log.js";
+// NOTE: no `utils/log.js` import — this module loads at `src/config.ts` module
+// init (before the logger can), and the logger itself persists through the
+// tracker layer. Warnings route through the settable tracker log sink
+// (silent until `utils/log.ts` wires it; see `../log-sink.ts`).
+import { trackerWarn } from "../log-sink.js";
 import {
   mergeOperatorSettings,
   type OperatorSettings,
   type OperatorSettingsOverride,
 } from "../../domain/settings/types.js";
-import { operatorSettingsFile } from "../paths.js";
+import { writeFileAtomic, unlinkFileDurable } from "../fs-atomic.js";
+import { operatorSettingsBackupFile, operatorSettingsFile } from "../paths.js";
 import { OperatorSettingsOverrideSchema } from "./schema.js";
 
 /**
  * Operator-settings store — the read/write/apply layer over the single
  * `config/settings.json` override file. Mirrors the workflow-presentation
- * override store: **fail-soft on READ** (a bad file can't crash the dashboard or
- * a daemon — it falls back to defaults with a warning) and **fail-loud on WRITE**
- * (Zod-validated; the POST route maps the throw to a 400).
+ * override store. A missing file means defaults. An existing invalid file is a
+ * first-class configuration fault: dashboard reads can surface it, while launch
+ * and workflow-mutation boundaries block until the operator explicitly resets
+ * the file or restores the last valid backup. A corrupt file is never treated
+ * as equivalent to a missing file.
  *
  * Two consumers:
  *   - the dashboard `/api/settings` route → `readOperatorSettingsOverride` /
@@ -33,29 +40,71 @@ function defaultRepoRoot(): string {
 }
 
 /**
- * Read the raw (sparse) override from disk, or `null` if absent/invalid.
- * Fail-soft: an unparseable or schema-invalid file logs a warning and is ignored
- * so the system falls back to defaults rather than breaking.
+ * The active file's complete state. Error text is deliberately limited to a
+ * parser/schema summary; settings contents (which may contain operator-entered
+ * URLs or paths) are never included.
  */
-export function readOperatorSettingsOverride(
-  repoRoot: string = defaultRepoRoot(),
-): OperatorSettingsOverride | null {
-  const file = operatorSettingsFile(repoRoot);
-  if (!existsSync(file)) return null;
+export type OperatorSettingsFileState =
+  | { state: "missing" }
+  | { state: "valid"; override: OperatorSettingsOverride }
+  | { state: "fault"; error: string; backupAvailable: boolean };
+
+export class OperatorSettingsFaultError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OperatorSettingsFaultError";
+  }
+}
+
+function parseSettingsFile(file: string):
+  | { ok: true; override: OperatorSettingsOverride }
+  | { ok: false; error: string } {
   try {
     const parsed = OperatorSettingsOverrideSchema.safeParse(
       JSON.parse(readFileSync(file, "utf8")),
     );
     if (!parsed.success) {
-      const summary = parsed.error.issues.map((i) => i.message).join("; ");
-      log.warn(`operator settings invalid; ignoring (${summary})`);
-      return null;
+      const summary = parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "settings"}: ${issue.message}`)
+        .join("; ");
+      return { ok: false, error: `Operator settings failed validation (${summary})` };
     }
-    return parsed.data;
-  } catch (err) {
-    log.warn(`operator settings unreadable; ignoring (${String(err)})`);
-    return null;
+    return { ok: true, override: parsed.data };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `Operator settings could not be read (${detail})` };
   }
+}
+
+function validBackup(repoRoot: string): OperatorSettingsOverride | null {
+  const file = operatorSettingsBackupFile(repoRoot);
+  if (!existsSync(file)) return null;
+  const parsed = parseSettingsFile(file);
+  return parsed.ok ? parsed.override : null;
+}
+
+export function readOperatorSettingsFileState(
+  repoRoot: string = defaultRepoRoot(),
+): OperatorSettingsFileState {
+  const file = operatorSettingsFile(repoRoot);
+  if (!existsSync(file)) return { state: "missing" };
+  const parsed = parseSettingsFile(file);
+  if (parsed.ok) return { state: "valid", override: parsed.override };
+  return {
+    state: "fault",
+    error: parsed.error,
+    backupAvailable: validBackup(repoRoot) !== null,
+  };
+}
+
+/** Read the sparse override. Missing is `null`; an existing corrupt file throws. */
+export function readOperatorSettingsOverride(
+  repoRoot: string = defaultRepoRoot(),
+): OperatorSettingsOverride | null {
+  const state = readOperatorSettingsFileState(repoRoot);
+  if (state.state === "missing") return null;
+  if (state.state === "valid") return state.override;
+  throw new OperatorSettingsFaultError(`Configuration fault: ${state.error}`);
 }
 
 /** Validate (fail loud) + persist the override, pretty-printed for git/diff. Returns the validated (trimmed) override. */
@@ -65,20 +114,43 @@ export function writeOperatorSettings(
 ): OperatorSettingsOverride {
   const validated = OperatorSettingsOverrideSchema.parse(override);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
-  writeFileSync(
+  const current = readOperatorSettingsFileState(repoRoot);
+  if (current.state === "valid") {
+    writeFileAtomic(
+      operatorSettingsBackupFile(repoRoot),
+      `${JSON.stringify(current.override, null, 2)}\n`,
+    );
+  }
+  writeFileAtomic(
     operatorSettingsFile(repoRoot),
-    JSON.stringify(validated, null, 2) + "\n",
-    "utf8",
+    `${JSON.stringify(validated, null, 2)}\n`,
   );
   invalidateOperatorSettingsCache();
   return validated;
+}
+
+/** Restore a schema-valid backup. Recovery is always explicit; never automatic. */
+export function recoverOperatorSettingsBackup(
+  repoRoot: string,
+): OperatorSettingsOverride {
+  const backup = validBackup(repoRoot);
+  if (!backup) {
+    throw new OperatorSettingsFaultError("No valid operator settings backup is available");
+  }
+  mkdirSync(join(repoRoot, "config"), { recursive: true });
+  writeFileAtomic(
+    operatorSettingsFile(repoRoot),
+    `${JSON.stringify(backup, null, 2)}\n`,
+  );
+  invalidateOperatorSettingsCache();
+  return backup;
 }
 
 /** Remove the override file (revert to all defaults). Returns whether it existed. */
 export function deleteOperatorSettings(repoRoot: string): boolean {
   const file = operatorSettingsFile(repoRoot);
   if (!existsSync(file)) return false;
-  rmSync(file);
+  unlinkFileDurable(file);
   invalidateOperatorSettingsCache();
   return true;
 }
@@ -90,7 +162,16 @@ let cacheLoaded = false;
 
 function overrideCached(): OperatorSettingsOverride | null {
   if (!cacheLoaded) {
-    cachedOverride = readOperatorSettingsOverride();
+    const state = readOperatorSettingsFileState();
+    if (state.state === "fault") {
+      // Config modules must remain importable so the dashboard can render the
+      // repair surface. Mutation and daemon boundaries independently reject
+      // work while this fault exists; these defaults are control-plane-only.
+      trackerWarn(`operator settings configuration fault (${state.error})`);
+      cachedOverride = null;
+    } else {
+      cachedOverride = state.state === "valid" ? state.override : null;
+    }
     cacheLoaded = true;
   }
   return cachedOverride ?? null;

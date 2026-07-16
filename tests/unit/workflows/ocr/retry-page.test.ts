@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { runOcrRetryPage } from "../../../../src/workflows/ocr/retry-page.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 
+const PDF_FILE_ID = "11111111-1111-4111-8111-111111111111";
+
 function ensurePdfCachePagePng(dir: string, pdfFileId: string, pageNum: number): void {
   const cacheDir = join(dir, "pdf-cache", pdfFileId);
   mkdirSync(cacheDir, { recursive: true });
@@ -34,7 +36,7 @@ test("runOcrRetryPage replaces records for the retried page and clears it from f
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-r1",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-r1",
       recordCount: 2,
       verifiedCount: 1,
@@ -53,7 +55,7 @@ test("runOcrRetryPage replaces records for the retried page and clears it from f
     },
   }) + "\n", "utf-8");
 
-  ensurePdfCachePagePng(dir, "pf-r1", 2);
+  ensurePdfCachePagePng(dir, PDF_FILE_ID, 2);
 
   const writtenEntries: object[] = [];
   await runOcrRetryPage(
@@ -110,7 +112,7 @@ test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry 
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-r2",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-r2",
       recordCount: 0,
       verifiedCount: 0,
@@ -122,7 +124,7 @@ test("runOcrRetryPage keeps page in failedPages with bumped attempts when retry 
     },
   }) + "\n", "utf-8");
 
-  ensurePdfCachePagePng(dir, "pf-r2", 1);
+  ensurePdfCachePagePng(dir, PDF_FILE_ID, 1);
 
   const writtenEntries: object[] = [];
   await runOcrRetryPage(
@@ -170,7 +172,7 @@ test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-rp",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-rp",
       rosterPath: "/tmp/roster.xlsx",
       records: JSON.stringify([]),
@@ -181,7 +183,7 @@ test("runOcrRetryPage preserves rosterPath in the emitted row", async () => {
     },
   }) + "\n", "utf-8");
 
-  ensurePdfCachePagePng(dir, "pf-rp", 1);
+  ensurePdfCachePagePng(dir, PDF_FILE_ID, 1);
 
   const writtenEntries: Array<{ status: string; step?: string; data?: Record<string, string> }> = [];
   await runOcrRetryPage(
@@ -226,7 +228,7 @@ test("runOcrRetryPage keeps row selected when eid-lookup verification is non-hdh
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-nh",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-nh",
       recordCount: 0,
       verifiedCount: 0,
@@ -303,7 +305,7 @@ test("runOcrRetryPage clamps succeeded to 0 when summary.total is 0 (old rows)",
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-clamp",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-clamp",
       records: JSON.stringify([]),
       failedPages: JSON.stringify([
@@ -353,7 +355,7 @@ test("runOcrRetryPage preserves __traceId + queueRowKind on the re-emitted row (
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-tr",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-tr",
       // The frozen trace id + queue-row kind ride EVERY OCR row; retry-page rebuilds
       // `base` explicitly, so it must re-stamp them or the re-run is untraceable.
@@ -413,7 +415,7 @@ test("runOcrRetryPage: two re-OCR'd records sharing the SAME name do not collide
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-collide",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-collide",
       recordCount: 0,
       verifiedCount: 0,
@@ -496,7 +498,7 @@ test("runOcrRetryPage fails loud when data.records is PRESENT but not valid JSON
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-badjson",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-badjson",
       records: "{not valid json",
     },
@@ -529,7 +531,7 @@ test("runOcrRetryPage fails loud when data.records parses to a non-array (does n
       formType: "oath",
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "fake.pdf",
-      pdfFileId: "pf-notarray",
+      pdfFileId: PDF_FILE_ID,
       sessionId: "session-notarray",
       records: JSON.stringify({ oops: "this is an object, not an array" }),
     },

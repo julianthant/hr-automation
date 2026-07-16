@@ -28,6 +28,7 @@ async function setup(): Promise<{
   await writeOnePagePdf(pdfPath);
   const db = openStateDb(dir);
   const { fileId: pdfFileId } = registerLocalFile(db, {
+    trackerDir: dir,
     kind: "pdf",
     mimeType: "application/pdf",
     path: pdfPath,

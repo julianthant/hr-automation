@@ -68,9 +68,15 @@ import {
 } from './worker-commands.js'
 import { createDaemonItemAuthTimingResolver } from './auth-timing.js'
 import { terminalizeWithReconciliation, type TerminalizationResult } from './terminalization.js'
+import {
+  OperatorSettingsFaultError,
+  readOperatorSettingsFileState,
+} from '../../tracker/settings/store.js'
 
 export interface DaemonOpts {
   trackerDir?: string
+  /** Repo root containing config/settings.json. Defaults to the daemon cwd. */
+  repoRoot?: string
   /** Test-only override for `Session.launch` so we don't open real browsers. */
   sessionLaunchFn?: typeof Session.launch
   /** Test-only: cap the idle wait window (default 15min). */
@@ -142,6 +148,13 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   // daemon's lockfile/control-DB/emits land in `.tracker` while the spawner
   // watches the isolated root — the daemon never finds its queue.
   const trackerDir = opts.trackerDir ?? process.env.HRAUTO_TRACKER_DIR
+  const settingsRoot = opts.repoRoot ?? process.cwd()
+  const initialSettingsState = readOperatorSettingsFileState(settingsRoot)
+  if (initialSettingsState.state === 'fault') {
+    throw new OperatorSettingsFaultError(
+      `Daemon ${wf.config.name} refused to start: ${initialSettingsState.error}`,
+    )
+  }
   const launchFn = opts.sessionLaunchFn ?? Session.launch.bind(Session)
   const idleTimeoutMs = opts.idleTimeoutMs ?? DEFAULT_IDLE_MS
   const idleRepollMs = opts.idleRepollMs ?? DEFAULT_IDLE_REPOLL_MS
@@ -365,6 +378,8 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
   }
   const registerBrowserProcesses = createRegisterBrowserProcesses(workerCtx, browserRegistrationState)
   const recoverClaimsFromDeadOrStaleWorkers = createRecoverClaimsFromDeadOrStaleWorkers(workerCtx)
+  const workflowMutationsAllowed = (): boolean =>
+    readOperatorSettingsFileState(settingsRoot).state !== 'fault'
   const handleCommand = createHandleWorkerCommand(workerCtx)
   const pollWorkerCommands = createPollWorkerCommands(workerCtx, handleCommand)
   const workerTickInterval = startWorkerTickInterval(
@@ -513,7 +528,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
         // accidentally unclaim items we just claimed on a previous (crashed)
         // run in the tiny window before writing our own lockfile. SQLite
         // heartbeat staleness wins over a lingering lockfile.
-        const recovered = await recoverClaimsFromDeadOrStaleWorkers()
+        const recovered = workflowMutationsAllowed()
+          ? await recoverClaimsFromDeadOrStaleWorkers()
+          : 0
         if (recovered > 0) {
           log.step(`[Daemon ${instanceId}] recovered ${recovered} orphan claim(s)`)
         }
@@ -525,13 +542,25 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           // for `idleTimeoutMs` since the last claim OR keepalive — preserving
           // the original ~15-min cadence rather than running it every re-poll.
           let lastIdleKeepaliveAt = Date.now()
+          let configurationFaultActive = false
           setPhase('idle')
           emitWorkerHeartbeat()
           while (!state.shuttingDown) {
             await pollWorkerCommands()
             state.queueDepthCache = taskStore.countQueued(wf.config.name)
 
-            const claimed: QueueItem | null | typeof CLAIM_ERROR = state.shuttingDown
+            const settingsState = readOperatorSettingsFileState(settingsRoot)
+            if (settingsState.state === 'fault' && !configurationFaultActive) {
+              log.error(
+                `[Daemon ${instanceId}] configuration fault; leaving queued work unclaimed — ${settingsState.error}`,
+              )
+              configurationFaultActive = true
+            } else if (settingsState.state !== 'fault' && configurationFaultActive) {
+              log.step(`[Daemon ${instanceId}] operator settings repaired; queue claims resumed`)
+              configurationFaultActive = false
+            }
+
+            const claimed: QueueItem | null | typeof CLAIM_ERROR = state.shuttingDown || configurationFaultActive
               ? null
               : await claimNextItem(
                   wf.config.name,
@@ -1075,7 +1104,9 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
                 instanceId,
                 session,
                 systems: wf.config.systems,
-                recoverOrphanedClaims: recoverClaimsFromDeadOrStaleWorkers,
+                recoverOrphanedClaims: async () => workflowMutationsAllowed()
+                  ? recoverClaimsFromDeadOrStaleWorkers()
+                  : 0,
               })
               setPhase('idle')
               lastIdleKeepaliveAt = Date.now()

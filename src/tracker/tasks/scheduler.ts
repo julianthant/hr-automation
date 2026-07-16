@@ -56,13 +56,14 @@ export function startDependencyScheduler(opts: {
   trackerDir?: string;
   intervalMs?: number;
   onError?: (err: unknown) => void;
+  canRun?: () => boolean;
 } = {}): DependencySchedulerHandle {
   const intervalMs = opts.intervalMs ?? 1000;
   let stopped = false;
   let running = false;
 
   const tick = async (): Promise<void> => {
-    if (stopped || running) return;
+    if (stopped || running || opts.canRun?.() === false) return;
     running = true;
     try {
       const result = await runDependencySchedulerTickForTrackerDir(opts.trackerDir);
