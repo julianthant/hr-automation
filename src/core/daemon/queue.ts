@@ -113,7 +113,7 @@ export async function enqueueItems<T>(
   preAssignedRunIds?: ReadonlyArray<UUID>,
   preAssignedParentRunIds?: ReadonlyArray<string | undefined>,
   existingTaskPolicy?: 'adopt' | 'idempotent',
-): Promise<Array<{ id: string; position: number; runId: UUID; taskId?: string; attemptId?: string }>> {
+): Promise<Array<{ id: string; position: number; runId: UUID; taskId?: string; attemptId?: string; reused?: boolean }>> {
   if (inputs.length === 0) return []
   if (preAssignedRunIds && preAssignedRunIds.length !== inputs.length) {
     throw new Error(
@@ -125,6 +125,11 @@ export async function enqueueItems<T>(
       `enqueueItems: preAssignedParentRunIds length ${preAssignedParentRunIds.length} does not match inputs length ${inputs.length}`,
     )
   }
+  const distinctParents = new Set((preAssignedParentRunIds ?? []).filter((value) => value !== undefined))
+  if (distinctParents.size > 1) {
+    throw new Error('enqueueItems: all parent run ids in one enqueue call must match')
+  }
+  const sharedParentRunId = distinctParents.values().next().value
   const store = openQueueTaskStore(trackerDir)
   const enqueued = store.control.transaction(() => {
     const ts = nowIso()
@@ -133,6 +138,7 @@ export async function enqueueItems<T>(
       inputs,
       deriveItemId: idFn,
       runIds: preAssignedRunIds,
+      ...(sharedParentRunId ? { parentRunId: sharedParentRunId } : {}),
       source: 'daemon',
       now: ts,
       ...(existingTaskPolicy ? { existingTaskPolicy } : {}),
@@ -147,7 +153,10 @@ export async function enqueueItems<T>(
           store.db.prepare('UPDATE tasks SET parent_run_id = ? WHERE id = ?').run(parentRunId, row.taskId)
         }
       }
-      // JSONL queue writes are audit-only. Do not use them for claim authority.
+      // JSONL queue writes are audit-only. An idempotent replay reuses the
+      // original audit record; duplicating it makes a terminal child look newly
+      // queued after approval recovery.
+      if (task.reused) continue
       appendEvent(
         workflow,
         {
@@ -171,6 +180,7 @@ export async function enqueueItems<T>(
     runId: task.runId as UUID,
     taskId: task.taskId,
     attemptId: task.attemptId,
+    ...(task.reused ? { reused: true } : {}),
   }))
 }
 

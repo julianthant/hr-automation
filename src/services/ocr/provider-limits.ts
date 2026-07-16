@@ -38,7 +38,7 @@ export interface ModelSpec {
   id: string;
   limit: ModelLimit;
   /**
-   * Accuracy tier for handwritten extraction. 1 (default) = trusted on hard
+   * Accuracy tier for handwritten extraction. 1 = trusted on hard
    * handwriting; 2 = throughput overflow — observed mangling names/digits
    * (live 2026-06-11: ministral-8b read "Barahona Martell" as "Merrell",
    * llama-4-scout produced "Marbell"/"Mian", nemotron "Barbhane Martelli",
@@ -60,9 +60,9 @@ export interface ModelSpec {
    * demoted `gemini-2.5-flash` and `mistral-medium-latest` on exactly that
    * evidence, and `extractedBy` on each record exists so this stays measurable.
    */
-  tier?: 1 | 2;
+  tier: 1 | 2;
   /** Tier 1 is allowed only after paper-truth accuracy/fabrication scoring. */
-  trust?: "benchmarked" | "unbenchmarked";
+  trust: "benchmarked" | "unbenchmarked";
 }
 
 export interface ProviderConfig {
@@ -199,7 +199,18 @@ export function resolveModelChain(cfg: ProviderConfig): ModelSpec[] {
   const listVar = (process.env[cfg.modelsEnvVar] ?? "").trim();
   const legacySingle = (process.env[`OCR_${cfg.id.toUpperCase()}_MODEL`] ?? "").trim();
 
-  if (!listVar && !legacySingle) return cfg.models;
+  const validate = (model: ModelSpec): ModelSpec => {
+    if ((model.tier !== 1 && model.tier !== 2) ||
+        (model.trust !== "benchmarked" && model.trust !== "unbenchmarked")) {
+      throw new Error(`OCR model "${model.id}" must register an explicit limits tier and trust tier`);
+    }
+    if (model.tier === 1 && model.trust !== "benchmarked") {
+      throw new Error(`OCR model "${model.id}" cannot use tier 1 until it is benchmarked against paper truth`);
+    }
+    return model;
+  };
+
+  if (!listVar && !legacySingle) return cfg.models.map(validate);
 
   const byId = new Map(cfg.models.map((m) => [m.id, m]));
   const ids = (listVar ? listVar.split(",") : [legacySingle])
@@ -210,10 +221,7 @@ export function resolveModelChain(cfg: ProviderConfig): ModelSpec[] {
   return ids.map((id) => {
     const model = byId.get(id);
     if (!model) throw new Error(`Unknown OCR model "${id}" for provider "${cfg.id}"; register limits and trust tier first`);
-    if (model.tier === 1 && model.trust !== "benchmarked") {
-      throw new Error(`OCR model "${id}" cannot use tier 1 until it is benchmarked against paper truth`);
-    }
-    return model;
+    return validate(model);
   });
 }
 

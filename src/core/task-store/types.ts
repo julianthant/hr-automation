@@ -85,6 +85,8 @@ export interface EnqueuedTask {
   runId: string
   position: number
   parentRunId?: string
+  /** True when idempotent enqueue adopted an unchanged existing task. */
+  reused?: boolean
 }
 
 export type CancelTaskResult =

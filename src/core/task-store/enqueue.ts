@@ -158,6 +158,7 @@ function reuseExistingTaskIdempotently(
     runId: request.runId,
     position: request.position,
     ...(request.parentRunId ? { parentRunId: request.parentRunId } : {}),
+    reused: true,
   }
 }
 

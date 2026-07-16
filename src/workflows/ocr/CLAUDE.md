@@ -49,6 +49,26 @@ doesn't. See the 2026-06-03 operation-tracking lesson.
 dashboard's Node process via fire-and-forget `runWorkflow` from
 `/api/ocr/prepare`. Same shape as `sharepoint-download`.
 
+Because prepare has no daemon task row, its retry authority is
+`state.db.ocr_prepare_inputs`, not tracker JSONL. The prepare handler persists
+the complete strict `PrepareInput` under `(sessionId, runId)` before returning
+202; retry replays only that validated payload. A legacy/missing/corrupt record
+requires re-upload—never reconstruct `targetWorkflow`, dry-run, file identity,
+worker options, or delegation intent from display-oriented tracker `data`.
+
+Approval dispatch is separately durable in `state.db.ocr_approvals`: the exact
+current row must be `running/awaiting-approval` for the first claim; an immutable
+request hash + stable child-run manifest then drives idempotent fan-out.
+Dispatch leases heartbeat while side effects run, expired manifests are
+reclaimed by the dashboard recovery sweep **directly from that manifest** (no
+JSONL/form-state reconstruction). A dispatch-phase failure releases the lease
+for idempotent replay because an earlier child group may already be committed;
+only loader/schema validation before the first enqueue may terminalize as
+failed. SQLite reaches `approved` before terminal JSONL or process-local wake,
+and `presented_at` checkpoints successful projection so the sweep repairs only
+crash-interrupted presentations. Discard terminalizes the approval so a later
+direct POST cannot resurrect it.
+
 **Archetype:** `preview` — the prep parent is an OCR review/approval row;
 child/delegated scope is represented by `parentRunId`. Lookup wait behavior is
 owned by the OCR orchestrator and SQLite task dependencies, not by child row

@@ -29,7 +29,7 @@ function fakePool(reply: string): TextPoolKey[] {
       keyIndex: 1,
       rotationKey: "k",
       priority: 1,
-      models: [{ id: "m", limit: { rpm: 10, tpm: 250_000, rpd: 250, imgTokens: 1000 } }],
+      models: [{ id: "m", limit: { rpm: 10, tpm: 250_000, rpd: 250, imgTokens: 1000 }, tier: 2, trust: "unbenchmarked" }],
       callText: async () => ({ text: reply }),
     },
   ];

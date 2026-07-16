@@ -70,7 +70,7 @@ function seedOathOcrRow(
       // Approve requires a DELEGATED run (standalone approve was removed
       // 2026-06-11); these tests pin the fan-out MECHANICS on a delegated row.
       parentRunId: "op-parent-run",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       data: {
         formType: "oath",
@@ -158,6 +158,43 @@ test("oath approve fans out BOTH targets: oath-signature signers + one oath-uplo
     assert.equal(docInput.sessionId, "sess-oath");
     assert.equal(docInput.mode, "full");
     assert.deepEqual(uploadCall!.itemIds, ["ocr-oath-upload-ocr-run-oath"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("approval rejects a run whose exact latest row is no longer awaiting approval", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-stale-"));
+  try {
+    seedOathOcrRow(dir, "sess-stale", "ocr-run-stale");
+    appendFileSync(
+      rowFilePath("ocr", todayLocal(), dir),
+      JSON.stringify({
+        workflow: "ocr",
+        timestamp: new Date().toISOString(),
+        id: "sess-stale",
+        runId: "ocr-run-stale",
+        parentRunId: "op-parent-run",
+        status: "failed",
+        step: "discarded",
+        data: { formType: "oath", sessionId: "sess-stale", archetype: "preview" },
+      }) + "\n",
+    );
+    let dispatched = false;
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async () => {
+        dispatched = true;
+      },
+    });
+    const result = await handler({
+      sessionId: "sess-stale",
+      runId: "ocr-run-stale",
+      records: [oathRecord({ employeeId: "10000001" })],
+    });
+    assert.equal(result.status, 409);
+    assert.equal((result.body as { state?: string }).state, "conflict");
+    assert.equal(dispatched, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -113,7 +113,7 @@ function buildCandidates(pool: PoolKey[]): Candidate[] {
       model: m.id,
       limit: m.limit,
       priority: k.priority,
-      tier: m.tier ?? 1,
+      tier: m.tier,
     })),
   );
 }

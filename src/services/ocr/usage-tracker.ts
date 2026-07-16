@@ -140,28 +140,42 @@ export class UsageTracker {
 
   private load(): void {
     const persisted = this.readPersisted();
-    for (const [id, c] of Object.entries(persisted.cells ?? {})) {
+    for (const [id, c] of Object.entries(persisted.cells)) {
       this.cells.set(id, {
         reqTimes: [],
         tokTimes: [],
-        rpdCount: c.rpdCount ?? 0,
-        rpdEpochDay: c.rpdEpochDay ?? 0,
-        cooldownUntilMs: c.cooldownUntilMs ?? 0,
+        rpdCount: c.rpdCount,
+        rpdEpochDay: c.rpdEpochDay,
+        cooldownUntilMs: c.cooldownUntilMs,
         consecFails: 0,
-        dead: c.dead ?? false,
+        dead: c.dead,
       });
     }
   }
 
   private readPersisted(): PersistedState {
     if (!existsSync(this.statePath)) return { cells: {} };
-    try {
-      const parsed = JSON.parse(readFileSync(this.statePath, "utf-8")) as PersistedState;
-      return { cells: parsed.cells ?? {} };
-    } catch {
-      // Corrupt state — start fresh.
-      return { cells: {} };
+    const parsed = JSON.parse(readFileSync(this.statePath, "utf-8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`OCR usage state ${this.statePath} is corrupt: expected an object`);
     }
+    const cells = (parsed as { cells?: unknown }).cells;
+    if (!cells || typeof cells !== "object" || Array.isArray(cells)) {
+      throw new Error(`OCR usage state ${this.statePath} is corrupt: expected a cells object`);
+    }
+    for (const [id, value] of Object.entries(cells)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`OCR usage state ${this.statePath} is corrupt at cell ${id}`);
+      }
+      const cell = value as Record<string, unknown>;
+      if (
+        !Number.isFinite(cell.rpdCount) || !Number.isFinite(cell.rpdEpochDay) ||
+        !Number.isFinite(cell.cooldownUntilMs) || typeof cell.dead !== "boolean"
+      ) {
+        throw new Error(`OCR usage state ${this.statePath} has invalid quota metadata at cell ${id}`);
+      }
+    }
+    return parsed as PersistedState;
   }
 
   flush(): void {

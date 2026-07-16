@@ -16,7 +16,7 @@ The per-page pool's admission control is `UsageTracker`, **not** the old flat-60
 - Limits seed from `provider-limits.ts` (free-tier, best-effort, env-overridable) and are corrected at runtime by parsed `Retry-After` / `x-ratelimit-reset-*` / Gemini `RetryInfo` (`rate-limit-headers.ts`). Pool `callOcr` throws `OcrHttpError` (status + headers + body) so classification is precise.
 - rate-limit → cooldown = server delay (or exponential backoff + jitter); quota → cooldown until ~UTC midnight + cell parked as daily-exhausted; auth → dead; transient → short backoff.
 - **Tier-1 patience** (`reserve(candidates, now, { preferTier1WaitMs })`): if the only cells with headroom RIGHT NOW are tier ≥ 2 (throughput-overflow models observed mangling handwriting) but a tier-1 cell frees within the given window, `reserve` returns `{ kind:"wait" }` for that tier-1 cell instead of granting the tier-2 one. `per-page.ts` passes `OCR_TIER1_PATIENCE_MS` (default 90s, capped by the page's remaining `OCR_PAGE_MAX_WAIT_MS` budget so patience can delay a page but never fail it). Without it, a batch saturates the tier-1 RPM windows after ~15–20 pages and every later page instantly lands on tier-2 — extraction quality degraded as the batch progressed (the 2026-07-13 batch-quality fix). A tier-1 cell walled for longer than the window (daily quota — hours) still falls through to tier-2. `0` disables (old drift behavior). Operator-tunable via Settings → OCR "Tier-1 patience".
-- State persists at `<cacheDir>/ocr-usage-state.json`, one in-memory instance per `cacheDir` (concurrent runs share throttle state). Default `cacheDir` is `.tracker/runtime`. Persistence is durable/merge-safe: `reserve()` and `penalize()` schedule a short debounced flush, `runOcrPerPage` flushes in `finally`, and every **dirty** flush re-reads + merges the on-disk cells before atomic tmp+rename (compact JSON; `max` RPD count for the same day, latest cooldown, OR dead flag) so dashboard and daemon processes do not clobber each other. A clean `flush()` cancels any pending debounce and skips disk I/O.
+- Transactional RPM/TPM/RPD reservations live in `<cacheDir>/ocr-usage.sqlite`; every dashboard/daemon process sharing the cache directory charges the same cells under `BEGIN IMMEDIATE`, so concurrent totals are additive. Cooldown/dead-key metadata remains in `<cacheDir>/ocr-usage-state.json`, merged before atomic tmp+rename; corrupt metadata fails startup instead of silently re-enabling a key. Default `cacheDir` is `.tracker/runtime`.
 - `getOcrKeyStatuses` (`/api/ocr/key-status`) reports each pool key's worst cell state + summed daily count from this file.
 
 `KeyRotation` (`rotation.ts`) still backs the **whole-PDF** path (`index.ts`) and Gemini text helpers (disambiguation/lookup-suggestions), persisting `rotation-state-{provider}.json`. Those text helpers should share that rotation path, not hand-roll key loops.
@@ -24,6 +24,11 @@ The per-page pool's admission control is `UsageTracker`, **not** the old flat-60
 ## Providers — `provider-limits.ts`
 
 The vision pool is config-driven: `visionProviderConfigs()` lists **Gemini → Groq → Mistral → OpenRouter → SambaNova** by priority, each with a model **fallback chain** (free-tier limits are per-model, so one key exhausted on its primary model can still use the next). Override any chain with `OCR_<PROVIDER>_MODELS` (comma list) or the legacy single `OCR_<PROVIDER>_MODEL`. Defaults verified live 2026-06-02; whole-PDF path stays Gemini-only.
+
+Every registered model has explicit limits, accuracy tier, and trust tier.
+Unknown model IDs are rejected; tier 1 additionally requires `benchmarked`
+paper-truth evidence. Omitted tier/trust is invalid—there is no implicit tier-1
+default.
 
 - **Cerebras** is excluded: no Cerebras-hosted model accepts image input (text-only). Useful only for text post-processing, not OCR.
 - **Cohere** is excluded by choice: `command-a-vision` now does image OCR, but it's a single trial key (~1k calls/month).

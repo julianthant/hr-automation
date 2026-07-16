@@ -20,7 +20,7 @@ import {
   readParallelWorkers,
   isOperationCoordinatorWorkflow,
 } from "./shared.js";
-import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
+import { parseParallelWorkers, runOptionsToDaemonFlags } from "../../../domain/run-options.js";
 import type { DaemonFlags } from "../../../core/daemon/types.js";
 import type { OcrApproveRecordContext } from "../../../workflows/ocr/types.js";
 import { emitApproved } from "../../../services/ocr/approval-signal.js";
@@ -29,6 +29,13 @@ import {
   completeOcrApproval,
   failOcrApproval,
   hashOcrApprovalRequest,
+  isOcrApprovalPresentationPending,
+  listRecoverableOcrApprovals,
+  listUnpresentedApprovedOcrApprovals,
+  markOcrApprovalPresented,
+  readExistingOcrApproval,
+  releaseOcrApprovalForRecovery,
+  renewOcrApprovalLease,
   type OcrApprovalManifest,
 } from "../../state/ocr-approval-store.js";
 
@@ -52,7 +59,7 @@ export interface ApproveResponse {
         manifestId: string;
         fannedOut: Array<{ workflow: string; itemId: string }>;
       }
-    | { ok: false; error: string };
+    | { ok: false; error: string; state?: "failed" | "conflict"; manifestId?: string };
 }
 export interface ApproveHandlerOpts {
   trackerDir?: string;
@@ -88,6 +95,45 @@ export function buildOcrApproveHandler(
   return async (input) => {
     if (!input.sessionId || !input.runId || !Array.isArray(input.records)) {
       return { status: 400, body: { ok: false, error: "Missing sessionId/runId/records" } };
+    }
+    const requestHash = hashOcrApprovalRequest({ records: input.records });
+    const approvalStore = openControlDb({ trackerDir });
+    const existingApproval = readExistingOcrApproval(approvalStore, input);
+    if (existingApproval && existingApproval.kind !== "awaiting") {
+      if (existingApproval.requestHash !== null && existingApproval.requestHash !== requestHash) {
+        return {
+          status: 409,
+          body: {
+            ok: false,
+            state: "conflict",
+            ...(existingApproval.manifest ? { manifestId: existingApproval.manifest.id } : {}),
+            error: "This OCR run was already approved with different records",
+          },
+        };
+      }
+      if (existingApproval.kind === "failed") {
+        return {
+          status: 500,
+          body: {
+            ok: false,
+            state: "failed",
+            ...(existingApproval.manifest ? { manifestId: existingApproval.manifest.id } : {}),
+            error: existingApproval.error,
+          },
+        };
+      }
+      if (existingApproval.kind === "approved") {
+        repairApprovedPresentationIfMissing(existingApproval.manifest, approvalStore, trackerDir);
+      }
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          state: existingApproval.kind === "approving" ? "pending" : "approved",
+          manifestId: existingApproval.manifest.id,
+          fannedOut: existingApproval.manifest.children.map(({ workflow, itemId }) => ({ workflow, itemId })),
+        },
+      };
     }
     const formType = readFormType(input.sessionId, trackerDir, input.runId);
     if (!formType) {
@@ -283,7 +329,10 @@ export function buildOcrApproveHandler(
       parentRunId,
       ...(operationWorkflow ? { operationWorkflow } : {}),
       records: input.records,
-      reviewData: latestReviewData,
+      reviewData: {
+        ...latestReviewData,
+        ...(dryRun ? { dryRun: "true" } : {}),
+      },
       children: [
         ...enqueueInputs.map((childInput, index) => ({
           kind: "record" as const,
@@ -297,24 +346,61 @@ export function buildOcrApproveHandler(
           : []),
       ],
     };
-    const requestHash = hashOcrApprovalRequest({ records: input.records });
     const ownerToken = randomUUID();
-    const approvalStore = openControlDb({ trackerDir });
+    const exactLatestRow = findLatestEntryForPredicate({
+      workflow: WORKFLOW,
+      ...(trackerDir !== undefined ? { trackerDir } : {}),
+      lookbackDays: SESSION_LOOKBACK_DAYS,
+      predicate: (entry) => entry.id === input.sessionId && entry.runId === input.runId,
+    });
+    const allowAwaitingClaim =
+      exactLatestRow?.status === "running" && exactLatestRow.step === "awaiting-approval";
     const approvalClaim = beginOcrApproval(approvalStore, {
       sessionId: input.sessionId,
       runId: input.runId,
       requestHash,
       manifest,
       ownerToken,
+      allowAwaitingClaim,
     });
     const storedFannedOut = approvalClaim.manifest.children.map(({ workflow, itemId }) => ({ workflow, itemId }));
     if (approvalClaim.kind === "conflict") {
-      return { status: 409, body: { ok: false, error: "This OCR run was already approved with different records" } };
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          state: "conflict",
+          manifestId: approvalClaim.manifest.id,
+          error: "This OCR run was already approved with different records",
+        },
+      };
+    }
+    if (approvalClaim.kind === "stale") {
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          state: "conflict",
+          manifestId: approvalClaim.manifest.id,
+          error: "This OCR run is no longer awaiting approval",
+        },
+      };
     }
     if (approvalClaim.kind === "failed") {
-      return { status: 500, body: { ok: false, error: approvalClaim.error } };
+      return {
+        status: 500,
+        body: {
+          ok: false,
+          state: "failed",
+          manifestId: approvalClaim.manifest.id,
+          error: approvalClaim.error,
+        },
+      };
     }
     if (approvalClaim.kind === "pending" || approvalClaim.kind === "approved") {
+      if (approvalClaim.kind === "approved") {
+        repairApprovedPresentationIfMissing(approvalClaim.manifest, approvalStore, trackerDir);
+      }
       return {
         status: 200,
         body: {
@@ -368,8 +454,34 @@ export function buildOcrApproveHandler(
     // names task_store-backed children. Specs without approveTo simply write
     // the terminal OCR row and wake the owning workflow to fan out itself.
     // Failures surface as `failed step=approve-failed`.
+    let leaseError: Error | undefined;
+    const renewLease = (): void => {
+      if (leaseError) throw leaseError;
+      try {
+        renewOcrApprovalLease(approvalStore, {
+          sessionId: input.sessionId,
+          runId: input.runId,
+          requestHash,
+          ownerToken,
+          generation: approvalClaim.generation,
+        });
+      } catch (error) {
+        leaseError = error instanceof Error ? error : new Error(String(error));
+        throw leaseError;
+      }
+    };
+    const leaseHeartbeat = setInterval(() => {
+      try {
+        renewLease();
+      } catch (error) {
+        log.error(`[ocr-http] approval lease heartbeat failed: ${errorMessage(error)}`);
+      }
+    }, 10_000);
+    leaseHeartbeat.unref();
+
     void (async () => {
       try {
+        renewLease();
         let dispatchResult: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> } = undefined;
         if (approveTo) {
           // Loaded on BOTH paths so the test-seam fallback derives its row
@@ -435,6 +547,7 @@ export function buildOcrApproveHandler(
                 onPreEmitPending: emitFallbackChildPending,
               },
             );
+            renewLease();
           } else {
             const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
             const childWf = childWfForArchetype;
@@ -484,6 +597,7 @@ export function buildOcrApproveHandler(
                 },
               },
             );
+            renewLease();
           }
         }
         // Capture the actually-enqueued item ids from the dispatch result.
@@ -515,6 +629,7 @@ export function buildOcrApproveHandler(
             ensureDaemonsAndEnqueueOverride: opts.ensureDaemonsAndEnqueueOverride,
             ocrRunId: input.runId,
           });
+          renewLease();
           void docFanItemId; // already reflected in the synchronous `fannedOut` response
         }
 
@@ -537,50 +652,10 @@ export function buildOcrApproveHandler(
           });
         }
 
-        // Under the new approval contract this row IS the OCR row's
-        // terminal `done`: the orchestrator now emits `running
-        // step=awaiting-approval` (not `done`) and the kernel-path handler
-        // suspends on `subscribeToApproval` until the matching
-        // `emitApproved` call below wakes it. Dashboard path has no
-        // kernel wrapping — this row is the only `done` emit.
-        emitTrackerRow(
-          {
-            workflow: WORKFLOW,
-            timestamp: new Date().toISOString(),
-            id: input.sessionId,
-            runId: input.runId,
-            ...(parentRunId ? { parentRunId } : {}),
-            status: "done",
-            step: "approved",
-            data: {
-              ...latestReviewData,
-              archetype: "preview",
-              mode: "prepare",
-              formType,
-              sessionId: input.sessionId,
-              records: JSON.stringify(input.records),
-              recordCount: String(input.records.length),
-              fannedOutCount: String(enqueuedIds.length),
-              fannedOutItemIds: JSON.stringify(enqueuedIds),
-              ...(dryRun ? { dryRun: "true" } : {}),
-            },
-          },
-          trackerDir,
-        );
-        // Mirror "approved" onto the operation coordinator row (oath-signature /
-        // emergency-contact) so its denormalized OCR status doesn't sit stale at
-        // "awaiting review" in the transient window after approve and before the
-        // fanned-out member rows materialize. Parallels the discard/failure
-        // mirrors; no-ops for oath-upload (a real task, not a coordinator row)
-        // and standalone OCR runs (no coordinator row).
-        mirrorOperationApproved({
-          operationWorkflow,
-          sessionId: input.sessionId,
-          parentRunId,
-          trackerDir,
-          fannedOutCount: enqueuedIds.length,
-          childWorkflow: approveTo?.workflow,
-        });
+        // The SQLite approval state is the authority. Commit it before any
+        // JSONL presentation or process-local wake: either of those can fail
+        // independently and must never turn already-enqueued child work into a
+        // durable `failed` approval.
         completeOcrApproval(approvalStore, {
           sessionId: input.sessionId,
           runId: input.runId,
@@ -588,19 +663,37 @@ export function buildOcrApproveHandler(
           ownerToken,
           generation: approvalClaim.generation,
         });
-        // Wake any kernel-path handler subscribed via
-        // `subscribeToApproval`. Dashboard-path runs (no kernel wrapping)
-        // have no subscriber — emitApproved silently no-ops when the
-        // listener registry is empty for this sessionId.
-        emitApproved(
-          { workflow: WORKFLOW, sessionId: input.sessionId, runId: input.runId },
-          { records: input.records, fannedOutItemIds: enqueuedIds },
-        );
+        try {
+          emitApprovedPresentation({
+            trackerDir,
+            manifest: approvalClaim.manifest,
+            fannedOutItemIds: enqueuedIds,
+            childWorkflow: approveTo?.workflow,
+          });
+          markOcrApprovalPresented(approvalStore, {
+            sessionId: approvalClaim.manifest.sessionId,
+            runId: approvalClaim.manifest.runId,
+          });
+        } catch (presentationError) {
+          log.error(
+            `[ocr-http] approval committed but presentation repair failed: ${errorMessage(presentationError)}`,
+          );
+        }
+        try {
+          // Dashboard-path runs have no subscriber. This wake is best-effort;
+          // JSONL polling and startup presentation repair are the backstops.
+          emitApproved(
+            { workflow: WORKFLOW, sessionId: input.sessionId, runId: input.runId },
+            { records: input.records, fannedOutItemIds: enqueuedIds },
+          );
+        } catch (wakeError) {
+          log.error(`[ocr-http] approval committed but subscriber wake failed: ${errorMessage(wakeError)}`);
+        }
       } catch (err) {
         const msg = errorMessage(err);
         log.error(`[ocr-http] approve-batch dispatch failed: ${msg}`);
         try {
-          failOcrApproval(approvalStore, {
+          releaseOcrApprovalForRecovery(approvalStore, {
             sessionId: input.sessionId,
             runId: input.runId,
             requestHash,
@@ -609,43 +702,10 @@ export function buildOcrApproveHandler(
             error: msg,
           });
         } catch (transitionError) {
-          log.error(`[ocr-http] approve-batch durable failure transition failed: ${errorMessage(transitionError)}`);
+          log.error(`[ocr-http] approve-batch recovery release failed: ${errorMessage(transitionError)}`);
         }
-        // Surface the failure on the OCR review row so the operator notices.
-        // INHERIT the prior row's display metadata (__traceId, queueRowKind,
-        // pdfOriginalName, formType, archetype) — a bare re-emit of just
-        // `{ archetype: "preview" }` gets latest-wins-merged and WIPES the row's
-        // identity, so it renders as a cryptic "<sessionId> — failed" with no
-        // title/trace and severs the delegation-trace lineage through this node.
-        try {
-          emitInheritedRow({
-            workflow: WORKFLOW,
-            trackerDir,
-            id: input.sessionId,
-            runId: input.runId,
-            ...(parentRunId ? { parentRunId } : {}),
-            status: "failed",
-            step: "approve-failed",
-            error: msg,
-          });
-        } catch {
-          // No prior row to inherit from — fall back to a bare failure row so the
-          // operator still sees the failure (identity fields unavoidably absent).
-          emitTrackerRow(
-            {
-              workflow: WORKFLOW,
-              timestamp: new Date().toISOString(),
-              id: input.sessionId,
-              runId: input.runId,
-              ...(parentRunId ? { parentRunId } : {}),
-              status: "failed",
-              step: "approve-failed",
-              data: { archetype: "preview" },
-              error: msg,
-            },
-            trackerDir,
-          );
-        }
+      } finally {
+        clearInterval(leaseHeartbeat);
       }
     })();
 
@@ -659,6 +719,299 @@ export function buildOcrApproveHandler(
       },
     };
   };
+}
+
+export interface ApprovalRecoveryOpts {
+  ensureDaemonsAndEnqueueOverride?: ApproveHandlerOpts["ensureDaemonsAndEnqueueOverride"];
+  nowMs?: number;
+}
+
+/**
+ * Resume expired approvals from SQLite alone. In particular, do not route
+ * through the HTTP handler: that path reads form/operation state from JSONL,
+ * which may be missing after the crash we are recovering from.
+ */
+export async function resumeRecoverableOcrApprovals(
+  trackerDir: string,
+  opts: ApprovalRecoveryOpts = {},
+): Promise<number> {
+  const store = openControlDb({ trackerDir });
+  const manifests = listRecoverableOcrApprovals(store, opts.nowMs);
+  let resumed = 0;
+  for (const manifest of manifests) {
+    const requestHash = hashOcrApprovalRequest({ records: manifest.records });
+    const ownerToken = randomUUID();
+    const claim = beginOcrApproval(store, {
+      sessionId: manifest.sessionId,
+      runId: manifest.runId,
+      requestHash,
+      manifest,
+      ownerToken,
+      ...(opts.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
+    });
+    if (claim.kind !== "claimed") continue;
+    try {
+      await dispatchPersistedApprovalManifest({
+        trackerDir,
+        store,
+        manifest: claim.manifest,
+        requestHash,
+        ownerToken,
+        generation: claim.generation,
+        ensureDaemonsAndEnqueueOverride: opts.ensureDaemonsAndEnqueueOverride,
+      });
+      resumed += 1;
+    } catch (error) {
+      const message = errorMessage(error);
+      log.error(
+        `[ocr-http] startup approval recovery failed for ${manifest.sessionId}/${manifest.runId}: ${message}`,
+      );
+      try {
+        // A crashed prior owner may already have committed a child task. No
+        // recovery-time error can prove the manifest is side-effect-free, even
+        // when the current attempt fails during loader/schema validation.
+        releaseOcrApprovalForRecovery(store, {
+          sessionId: manifest.sessionId,
+          runId: manifest.runId,
+          requestHash,
+          ownerToken,
+          generation: claim.generation,
+          error: message,
+        });
+      } catch (transitionError) {
+        log.error(
+          `[ocr-http] startup approval recovery lost its lease while recording outcome: ${errorMessage(transitionError)}`,
+        );
+      }
+    }
+  }
+
+  // A crash can land after the SQLite `approved` commit and before the JSONL
+  // terminal row. Repair that presentation idempotently from the manifest.
+  for (const manifest of listUnpresentedApprovedOcrApprovals(store)) {
+    repairApprovedPresentationIfMissing(manifest, store, trackerDir);
+  }
+  return resumed;
+}
+
+async function dispatchPersistedApprovalManifest(args: {
+  trackerDir: string;
+  store: ReturnType<typeof openControlDb>;
+  manifest: OcrApprovalManifest;
+  requestHash: string;
+  ownerToken: string;
+  generation: number;
+  ensureDaemonsAndEnqueueOverride?: ApproveHandlerOpts["ensureDaemonsAndEnqueueOverride"];
+}): Promise<void> {
+  const { trackerDir, store, manifest, requestHash, ownerToken, generation } = args;
+  const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
+  const groups = new Map<string, OcrApprovalManifest["children"]>();
+  for (const child of manifest.children) {
+    const key = `${child.kind}\0${child.workflow}`;
+    const group = groups.get(key);
+    if (group) group.push(child);
+    else groups.set(key, [child]);
+  }
+  const workflows = new Map<string, NonNullable<Awaited<ReturnType<typeof loadWorkflow>>>>();
+  try {
+    // Validate the complete manifest before the first child-task commit. Only
+    // these pre-dispatch failures are safe to terminalize as approve-failed.
+    for (const children of groups.values()) {
+      const workflowName = children[0].workflow;
+      let workflow = workflows.get(workflowName);
+      if (!workflow) {
+        const loaded = await loadWorkflow(workflowName);
+        if (!loaded) throw new Error(`Unknown OCR approval target workflow "${workflowName}"`);
+        workflow = loaded;
+        workflows.set(workflowName, workflow);
+      }
+      for (const child of children) {
+        const { cleaned } = splitPrefilled(child.input);
+        workflow.config.schema.parse(cleaned);
+      }
+    }
+  } catch (error) {
+    throw new Error(errorMessage(error), { cause: error });
+  }
+
+  let leaseError: Error | undefined;
+  const renewLease = (): void => {
+    if (leaseError) throw leaseError;
+    try {
+      renewOcrApprovalLease(store, {
+        sessionId: manifest.sessionId,
+        runId: manifest.runId,
+        requestHash,
+        ownerToken,
+        generation,
+      });
+    } catch (error) {
+      leaseError = error instanceof Error ? error : new Error(String(error));
+      throw leaseError;
+    }
+  };
+  const heartbeat = setInterval(() => {
+    try {
+      renewLease();
+    } catch (error) {
+      log.error(`[ocr-http] recovered approval lease heartbeat failed: ${errorMessage(error)}`);
+    }
+  }, 10_000);
+  heartbeat.unref();
+
+  const recordItemIds: string[] = [];
+  const persistedParallelWorkers = readManifestParallelWorkers(manifest);
+  const persistedRecordFlags = runOptionsToDaemonFlags(
+    persistedParallelWorkers === undefined ? undefined : { parallelWorkers: persistedParallelWorkers },
+  );
+  try {
+    renewLease();
+    for (const children of groups.values()) {
+      const first = children[0];
+      const workflow = workflows.get(first.workflow);
+      if (!workflow) throw new Error(`Validated OCR approval workflow "${first.workflow}" disappeared`);
+      const logicalInputs = children.map((child) => splitPrefilled(child.input).cleaned);
+      const itemIds = children.map((child) => child.itemId);
+      const runIds = children.map((child) => child.runId);
+      const isRecordGroup = first.kind === "record";
+      const memberShape = isRecordGroup && isOperationCoordinatorWorkflow(manifest.operationWorkflow)
+        ? "operation-member" as const
+        : undefined;
+      const emitPending = (
+        item: unknown,
+        childRunId: string,
+        passedParentRunId: string | undefined,
+        itemId: string,
+      ): void => {
+        const childInput = item && typeof item === "object" && !Array.isArray(item)
+          ? item as Record<string, unknown>
+          : undefined;
+        const rootPrefix = readRootTracePrefixFromInput(item);
+        const memberTraceId = composeFanOutMemberTraceId(rootPrefix, childRunId);
+        emitTrackerRow(
+          {
+            workflow: first.workflow,
+            timestamp: new Date().toISOString(),
+            id: itemId,
+            runId: childRunId,
+            status: "pending",
+            data: {
+              ...buildHttpPendingData(workflow, item, passedParentRunId ?? manifest.parentRunId),
+              ...rootQueueTitleData(readParentSubjectFromInput(item)),
+              ...(memberTraceId ? { __traceId: memberTraceId } : {}),
+              archetype: deriveRowArchetype(
+                resolveArchetype(workflow.config, item),
+                passedParentRunId ?? manifest.parentRunId,
+                memberShape ? { memberShape } : undefined,
+              ),
+            },
+            parentRunId: passedParentRunId ?? manifest.parentRunId,
+            ...(childInput ? { input: childInput } : {}),
+          },
+          trackerDir,
+        );
+      };
+
+      let result: void | { enqueued?: Array<{ id: string; taskId?: string; runId?: string }> };
+      if (args.ensureDaemonsAndEnqueueOverride) {
+        result = await args.ensureDaemonsAndEnqueueOverride(
+          first.workflow,
+          children.map((child) => child.input),
+          (_input, index) => children[index].itemId,
+          {
+            parentRunId: manifest.parentRunId,
+            ...(isRecordGroup && persistedRecordFlags.parallel ? { flags: persistedRecordFlags } : {}),
+            runIds,
+            onPreEmitPending: emitPending,
+          },
+        );
+      } else {
+        const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
+        result = await ensureDaemonsAndEnqueue(
+          workflow,
+          children.map((child) => child.input) as never,
+          isRecordGroup ? persistedRecordFlags : {},
+          {
+            trackerDir,
+            parentRunId: manifest.parentRunId,
+            runIds: runIds as UUID[],
+            deriveItemId: buildFanOutItemIdResolver(logicalInputs, itemIds, first.workflow),
+            existingTaskPolicy: "idempotent",
+            onPreEmitPending: emitPending,
+          },
+        );
+      }
+      renewLease();
+      if (isRecordGroup) {
+        recordItemIds.push(...(result?.enqueued?.map((item) => item.id) ?? itemIds));
+      }
+      if (result?.enqueued) {
+        createApprovalDependencyRows({
+          trackerDir,
+          parentRunId: manifest.parentRunId,
+          childWorkflow: first.workflow,
+          children: result.enqueued,
+        });
+      }
+    }
+
+    completeOcrApproval(store, {
+      sessionId: manifest.sessionId,
+      runId: manifest.runId,
+      requestHash,
+      ownerToken,
+      generation,
+    });
+  } finally {
+    clearInterval(heartbeat);
+  }
+
+  try {
+    emitApprovedPresentation({
+      trackerDir,
+      manifest,
+      fannedOutItemIds: recordItemIds,
+      childWorkflow: manifest.children.find((child) => child.kind === "record")?.workflow,
+    });
+    markOcrApprovalPresented(store, { sessionId: manifest.sessionId, runId: manifest.runId });
+  } catch (error) {
+    log.error(`[ocr-http] recovered approval committed but presentation failed: ${errorMessage(error)}`);
+  }
+  try {
+    emitApproved(
+      { workflow: WORKFLOW, sessionId: manifest.sessionId, runId: manifest.runId },
+      { records: manifest.records, fannedOutItemIds: recordItemIds },
+    );
+  } catch (error) {
+    log.error(`[ocr-http] recovered approval committed but subscriber wake failed: ${errorMessage(error)}`);
+  }
+}
+
+function repairApprovedPresentationIfMissing(
+  manifest: OcrApprovalManifest,
+  store: ReturnType<typeof openControlDb>,
+  trackerDir?: string,
+): void {
+  if (!isOcrApprovalPresentationPending(store, {
+    sessionId: manifest.sessionId,
+    runId: manifest.runId,
+  })) return;
+  try {
+    const itemIds = manifest.children
+      .filter((child) => child.kind === "record")
+      .map((child) => child.itemId);
+    emitApprovedPresentation({
+      trackerDir,
+      manifest,
+      fannedOutItemIds: itemIds,
+      childWorkflow: manifest.children.find((child) => child.kind === "record")?.workflow,
+    });
+    markOcrApprovalPresented(store, { sessionId: manifest.sessionId, runId: manifest.runId });
+  } catch (error) {
+    log.error(
+      `[ocr-http] approved presentation repair failed for ${manifest.sessionId}/${manifest.runId}: ${errorMessage(error)}`,
+    );
+  }
 }
 
 function emitApprovalFailedRow(args: {
@@ -796,6 +1149,51 @@ async function enqueueDocFanOut(args: {
       },
     },
   );
+}
+
+/**
+ * Project a durably-approved manifest into JSONL. This is deliberately
+ * downstream of `completeOcrApproval`: tracker files are presentation and can
+ * be repaired from the immutable SQLite manifest after a crash.
+ */
+function emitApprovedPresentation(args: {
+  trackerDir?: string;
+  manifest: OcrApprovalManifest;
+  fannedOutItemIds: string[];
+  childWorkflow?: string;
+}): void {
+  const { trackerDir, manifest, fannedOutItemIds, childWorkflow } = args;
+  emitTrackerRow(
+    {
+      workflow: WORKFLOW,
+      timestamp: new Date().toISOString(),
+      id: manifest.sessionId,
+      runId: manifest.runId,
+      parentRunId: manifest.parentRunId,
+      status: "done",
+      step: "approved",
+      data: {
+        ...manifest.reviewData,
+        archetype: "preview",
+        mode: "prepare",
+        formType: manifest.formType,
+        sessionId: manifest.sessionId,
+        records: JSON.stringify(manifest.records),
+        recordCount: String(manifest.records.length),
+        fannedOutCount: String(fannedOutItemIds.length),
+        fannedOutItemIds: JSON.stringify(fannedOutItemIds),
+      },
+    },
+    trackerDir,
+  );
+  mirrorOperationApproved({
+    operationWorkflow: manifest.operationWorkflow,
+    sessionId: manifest.sessionId,
+    parentRunId: manifest.parentRunId,
+    trackerDir,
+    fannedOutCount: fannedOutItemIds.length,
+    childWorkflow,
+  });
 }
 
 /**
@@ -954,6 +1352,25 @@ function composeFanOutMemberTraceId(
   childRunId: string,
 ): string | undefined {
   return rootTracePrefix ? `${rootTracePrefix}-${runIdFragment(childRunId)}` : undefined;
+}
+
+function readRootTracePrefixFromInput(input: unknown): string | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const runtime = (input as Record<string, unknown>).__runtimeOptions;
+  if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return undefined;
+  const value = (runtime as Record<string, unknown>).rootTracePrefix;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readManifestParallelWorkers(manifest: OcrApprovalManifest): number | undefined {
+  const raw = manifest.reviewData.parallelWorkers;
+  try {
+    return parseParallelWorkers(raw);
+  } catch (error) {
+    throw new Error(`OCR approval ${manifest.sessionId}/${manifest.runId} has invalid persisted worker count`, {
+      cause: error,
+    });
+  }
 }
 
 function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix: string | undefined): TInput {

@@ -341,7 +341,7 @@ test("concurrent per-page Gemini runs share in-memory key throttle state", async
       priority: 1,
       // Single-model chain so a 429 throttles the whole key and the next page
       // rotates to the other key (the behavior this test pins).
-      models: [{ id: "gemini-2.5-flash", limit: { rpm: 1000, tpm: 1_000_000, rpd: 1000, imgTokens: 1 } }],
+      models: [{ id: "gemini-2.5-flash", limit: { rpm: 1000, tpm: 1_000_000, rpd: 1000, imgTokens: 1 }, tier: 2, trust: "unbenchmarked" }],
       callOcr: async (_imagePath: string, prompt: string) => {
         const seen = seenByPrompt.get(prompt) ?? [];
         seen.push(id);
@@ -399,7 +399,7 @@ test("runOcrPerPage composes operator cancellation into an in-flight provider re
     keyIndex: 1,
     rotationKey: "test-key",
     priority: 1,
-    models: [{ id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: 10_000, rpd: 100, imgTokens: 100 } }],
+    models: [{ id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: 10_000, rpd: 100, imgTokens: 100 }, tier: 1, trust: "benchmarked" }],
     callOcr: async (_imagePath, _prompt, _model, signal) => {
       assert.ok(signal, "provider attempt receives a composed AbortSignal");
       started.resolve(signal);
@@ -437,7 +437,7 @@ test("runOcrPerPage bounds a hung provider attempt with its per-attempt timeout"
     keyIndex: 1,
     rotationKey: "test-key",
     priority: 1,
-    models: [{ id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: 10_000, rpd: 100, imgTokens: 100 } }],
+    models: [{ id: "gemini-3-flash-preview", limit: { rpm: 10, tpm: 10_000, rpd: 100, imgTokens: 100 }, tier: 1, trust: "benchmarked" }],
     callOcr: async (_imagePath, _prompt, _model, signal) => {
       assert.ok(signal);
       return new Promise((_resolve, reject) => {

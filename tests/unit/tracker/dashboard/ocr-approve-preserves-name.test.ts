@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, appendFileSync, readFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOcrApproveHandler } from "../../../../src/tracker/dashboard/ocr/approve.js";
+import { openControlDb } from "../../../../src/core/control-db.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
 
 function todayLocal(): string {
@@ -46,7 +47,7 @@ test("approve-batch threads OCR parentSubject into kernel inputs", async () => {
         id: "sess-x",
         runId: "ocr-run-x",
         parentRunId: "parent-1234",
-        status: "done",
+        status: "running",
         step: "awaiting-approval",
         data: {
           formType: "emergency-contact",
@@ -107,7 +108,7 @@ test("approve-batch omits parentSubject when the review data carries none", asyn
         id: "sess-y",
         runId: "ocr-run-y",
         parentRunId: "op-run-y",
-        status: "done",
+        status: "running",
         step: "awaiting-approval",
         data: { formType: "emergency-contact", sessionId: "sess-y" },
       }) + "\n",
@@ -134,13 +135,9 @@ test("approve-batch omits parentSubject when the review data carries none", asyn
   }
 });
 
-// ISS-006 (e2e run 20260618-2146): when an approve-batch dispatch FAILS, the
-// failed row must INHERIT the prior OCR row's identity (__traceId, queueRowKind,
-// pdfOriginalName, formType). Before the fix it re-emitted a bare
-// `data: { archetype: "preview" }`, which latest-wins-merged and WIPED the row's
-// title + trace (rendered as a cryptic "<sessionId> — failed") and severed the
-// delegation-trace lineage through that node.
-test("approve-batch failure preserves the row's identity fields (ISS-006)", async () => {
+// A dispatch failure can follow a committed child task, so it must stay
+// recoverable rather than overlaying the review row with a terminal failure.
+test("approve-batch dispatch failure preserves row identity and releases durable recovery", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-fail-identity-"));
   try {
     mkdirSync(rowsDir(dir), { recursive: true });
@@ -152,7 +149,7 @@ test("approve-batch failure preserves the row's identity fields (ISS-006)", asyn
         id: "sess-fail",
         runId: "ocr-run-fail",
         parentRunId: "op-fail",
-        status: "done",
+        status: "running",
         step: "awaiting-approval",
         data: {
           archetype: "preview",
@@ -164,7 +161,7 @@ test("approve-batch failure preserves the row's identity fields (ISS-006)", asyn
         },
       }) + "\n",
     );
-    // Force the fan-out dispatch to throw -> exercises the approve-failed emit path.
+    // Force the fan-out dispatch to throw after approval was claimed.
     const handler = buildOcrApproveHandler({
       trackerDir: dir,
       ensureDaemonsAndEnqueueOverride: async () => {
@@ -183,13 +180,20 @@ test("approve-batch failure preserves the row's identity fields (ISS-006)", asyn
     const failed = rows.find(
       (r) => (r as { step?: string }).step === "approve-failed",
     ) as { status?: string; data: Record<string, string> } | undefined;
-    assert.ok(failed, "approve-failed row should exist");
-    assert.equal(failed!.status, "failed");
-    // The failure row must KEEP its identity (was wiped to null before the fix).
-    assert.equal(failed!.data.__traceId, "ec-120000-fa11");
-    assert.equal(failed!.data.queueRowKind, "file");
-    assert.equal(failed!.data.pdfOriginalName, "emergency-contacts.pdf");
-    assert.equal(failed!.data.formType, "emergency-contact");
+    assert.equal(failed, undefined, "dispatch uncertainty must not emit a terminal failure row");
+    const latest = rows.at(-1) as { data: Record<string, string> };
+    assert.equal(latest.data.__traceId, "ec-120000-fa11");
+    assert.equal(latest.data.queueRowKind, "file");
+    assert.equal(latest.data.pdfOriginalName, "emergency-contacts.pdf");
+    assert.equal(latest.data.formType, "emergency-contact");
+
+    const durable = openControlDb({ trackerDir: dir }).db.prepare(`
+      SELECT state, lease_expires_at_ms, error FROM ocr_approvals
+      WHERE session_id = 'sess-fail' AND run_id = 'ocr-run-fail'
+    `).get() as { state: string; lease_expires_at_ms: number; error: string | null };
+    assert.equal(durable.state, "approving");
+    assert.equal(durable.lease_expires_at_ms, 0);
+    assert.match(durable.error ?? "", /simulated dispatch failure/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

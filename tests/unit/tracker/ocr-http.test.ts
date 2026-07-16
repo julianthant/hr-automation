@@ -19,6 +19,12 @@ import { rowFilePath, rowsDir } from "../../../src/tracker/paths.js";
 import { openControlDb } from "../../../src/core/control-db.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { verifyOcrFormSpec } from "../../../src/services/ocr/forms/verify.js";
+import {
+  beginOcrApproval,
+  completeOcrApproval,
+  hashOcrApprovalRequest,
+  type OcrApprovalManifest,
+} from "../../../src/tracker/state/ocr-approval-store.js";
 
 function setup(): string {
   const dir = join(tmpdir(), `ocr-http-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -196,6 +202,52 @@ test("POST /api/ocr/discard-prepare emits failed step=discarded", async () => {
   const last = JSON.parse(lines[lines.length - 1]);
   assert.equal(last.status, "failed");
   assert.equal(last.step, "discarded");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("POST /api/ocr/discard-prepare cannot emit discarded after approval already committed", async () => {
+  const dir = setup();
+  seedOcrPriorRow(dir, "s-approved", "r-approved");
+  const control = openControlDb({ trackerDir: dir });
+  const manifest: OcrApprovalManifest = {
+    version: 1,
+    id: "manifest-approved-race",
+    sessionId: "s-approved",
+    runId: "r-approved",
+    formType: "oath",
+    parentRunId: "parent-approved",
+    records: [{ selected: true }],
+    reviewData: {},
+    children: [],
+  };
+  const requestHash = hashOcrApprovalRequest({ records: manifest.records });
+  beginOcrApproval(control, {
+    sessionId: manifest.sessionId,
+    runId: manifest.runId,
+    requestHash,
+    manifest,
+    ownerToken: "approver",
+    allowAwaitingClaim: true,
+  });
+  completeOcrApproval(control, {
+    sessionId: manifest.sessionId,
+    runId: manifest.runId,
+    requestHash,
+    ownerToken: "approver",
+    generation: 1,
+  });
+
+  const response = await buildOcrDiscardHandler({ trackerDir: dir })({
+    sessionId: manifest.sessionId,
+    runId: manifest.runId,
+    reason: "late operator click",
+  });
+  assert.equal(response.status, 409);
+  const rows = readFileSync(rowFilePath("ocr", todayLocal(), dir), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { step?: string });
+  assert.equal(rows.some((row) => row.step === "discarded"), false);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -534,7 +586,7 @@ test("buildOcrReocrWholePdfHandler replaces records and clears failedPages", asy
       workflow: "ocr",
       id: "s3",
       runId: "r3",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
@@ -596,7 +648,7 @@ test("buildOcrReocrWholePdfHandler assigns distinct itemIds to eid-lookup fan-ou
       workflow: "ocr",
       id: "s-fanout",
       runId: "r-fanout",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
@@ -657,7 +709,7 @@ test("buildOcrReocrWholePdfHandler parents lookup children under the operation/O
       id: "s-parent",
       runId: "r-parent",
       parentRunId: "operation-parent",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
@@ -920,7 +972,7 @@ test("buildOcrApproveHandler forwards parentRunId to ensureDaemonsAndEnqueueOver
       workflow: "ocr",
       id: "session-approve-1",
       runId: "run-approve-1",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       parentRunId: "oath-upload-run-1",
@@ -997,7 +1049,7 @@ test("buildOcrApproveHandler provides downstream pre-emit hook before daemon aut
       workflow: "ocr",
       id: "session-preemit-approve",
       runId: "run-preemit-approve",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       parentRunId: "parent-preemit-approve",
@@ -1049,7 +1101,7 @@ test("buildOcrApproveHandler propagates dryRun from OCR row to downstream inputs
       id: "session-approve-dry",
       runId: "run-approve-dry",
       parentRunId: "op-parent-dry",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
@@ -1100,7 +1152,7 @@ test("buildOcrApproveHandler creates SQLite dependency rows from approval fan-ou
       workflow: "ocr",
       id: "session-approve-deps",
       runId: "run-approve-deps",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       parentRunId: "oath-upload-run-deps",
@@ -1159,7 +1211,7 @@ test("buildOcrApproveHandler: standalone OCR run (no parentRunId) is REJECTED wi
       workflow: "ocr",
       id: "session-approve-2",
       runId: "run-approve-2",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
@@ -1214,7 +1266,7 @@ test("buildOcrApproveHandler approves without preview readiness props", async ()
       id: "session-preview-props-removed",
       runId: "run-preview-props-removed",
       parentRunId: "op-parent-preview-props",
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       timestamp: "2026-05-01T00:00:00Z",
       data: {
