@@ -30,7 +30,7 @@ import {
 } from "@/lib/onbase-document-types";
 import { resolveOnbaseModalFormType } from "@/components/run-modal/onbase-form-type";
 import { AUTO_WORKERS, workerChoiceToParam, type WorkerChoice } from "@/lib/run-settings";
-import { resolveUploadBaseUrl } from "@/lib/upload-url";
+import { getOperatorSession } from "@/lib/operator-auth";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
 
@@ -487,13 +487,21 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
     const submitUrl = config.submitUrl(ctx);
 
-    // Uploads go to the dashboard's dedicated upload port, derived from the
-    // serving location — see `resolveUploadBaseUrl` for the why (separate
-    // origin = separate connection pool, won't starve the SSE streams).
-    const fullSubmitUrl =
-      typeof window !== "undefined"
-        ? `${resolveUploadBaseUrl(window.location, { dev: import.meta.env.DEV })}${submitUrl}`
-        : submitUrl;
+    // Same-origin relative URL — Vite proxies `/api` in dev; prod serves the
+    // SPA from the API host. Do NOT post to `port + 1`: that listener is
+    // phone Capture only (2026-07-15), and a cross-origin miss surfaces as a
+    // bare XHR "Network error".
+    //
+    // XHR (needed for upload progress) bypasses the `fetch` operator-token
+    // wrapper, so attach the session header explicitly.
+    let operatorAuth: { header: string; token: string };
+    try {
+      operatorAuth = await getOperatorSession();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Operator session unavailable");
+      setSubmitting(false);
+      return;
+    }
 
     // Use XHR so we get progress events. Fetch's upload progress is still
     // not widely supported across browsers as of 2026.
@@ -538,7 +546,8 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
             fd.append("previousRunId", reuploadFor.previousRunId);
           }
           const xhr = new XMLHttpRequest();
-          xhr.open("POST", fullSubmitUrl);
+          xhr.open("POST", submitUrl);
+          xhr.setRequestHeader(operatorAuth.header, operatorAuth.token);
           xhr.upload.addEventListener("progress", (ev) => {
             if (ev.lengthComputable) {
               uploadedByIndex.set(index, ev.loaded);
