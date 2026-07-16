@@ -235,3 +235,111 @@ describe("UsageTracker — accuracy tiers", () => {
     if (r.kind === "ok") assert.equal(r.token.model, "untiered-model");
   });
 });
+
+describe("UsageTracker — tier-1 patience (preferTier1WaitMs)", () => {
+  // The batch-drift fix: without patience, the instant every tier-1 cell's RPM
+  // window fills (~15-20 pages into a batch), reserve() hands the next page a
+  // tier-2 (handwriting-mangling) cell. With patience, the page WAITS for a
+  // tier-1 cell that frees soon instead.
+  let tmp: string;
+  const dirs: string[] = [];
+  const fresh = (): UsageTracker => {
+    tmp = mkdtempSync(join(tmpdir(), "ocr-usage-patience-"));
+    dirs.push(tmp);
+    return new UsageTracker(tmp);
+  };
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const T0 = 1_750_000_000_000; // fixed clock — mid-day UTC, no midnight rollover
+
+  it("waits for a tier-1 cell that frees within patience instead of granting a free tier-2 cell", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM({ rpm: 1 })), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    assert.equal(t.reserve([strong, weak], T0).kind, "ok"); // strong now rpm-busy for 60s
+    const r = t.reserve([strong, weak], T0 + 10_000, { preferTier1WaitMs: 60_000 });
+    assert.equal(r.kind, "wait", "tier-2 is free but a tier-1 cell frees within patience — wait");
+    if (r.kind === "wait") assert.equal(r.waitMs, 50_000, "waits exactly until the tier-1 RPM window frees");
+  });
+
+  it("grants the tier-2 cell when patience is smaller than the tier-1 wait", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM({ rpm: 1 })), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    assert.equal(t.reserve([strong, weak], T0).kind, "ok");
+    const r = t.reserve([strong, weak], T0 + 10_000, { preferTier1WaitMs: 30_000 });
+    assert.equal(r.kind, "ok", "tier-1 frees in 50s > 30s patience — take the overflow cell");
+    if (r.kind === "ok") assert.equal(r.token.model, "weak-model");
+  });
+
+  it("grants the tier-2 cell immediately when tier-1 is daily-walled (wait far exceeds patience)", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM({ rpd: 1 })), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    assert.equal(t.reserve([strong, weak], T0).kind, "ok"); // strong hits its daily wall
+    const r = t.reserve([strong, weak], T0 + 61_000, { preferTier1WaitMs: 90_000 });
+    assert.equal(r.kind, "ok", "tier-1 frees at UTC midnight — hours away, never wait that out");
+    if (r.kind === "ok") assert.equal(r.token.model, "weak-model");
+  });
+
+  it("without the option (or with 0) keeps today's behavior: best free cell wins immediately", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM({ rpm: 1 })), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    assert.equal(t.reserve([strong, weak], T0).kind, "ok");
+    const noOpt = t.reserve([strong, weak], T0 + 10_000);
+    assert.equal(noOpt.kind, "ok");
+    if (noOpt.kind === "ok") assert.equal(noOpt.token.model, "weak-model");
+    const zero = t.reserve([strong, weak], T0 + 11_000, { preferTier1WaitMs: 0 });
+    assert.equal(zero.kind, "ok");
+    if (zero.kind === "ok") assert.equal(zero.token.model, "weak-model");
+  });
+
+  it("patience never blocks a tier-1 grant (free tier-1 cell still wins instantly)", () => {
+    const t = fresh();
+    const strong: Candidate = { ...cand("k1", "strong-model", LIM()), tier: 1 };
+    const weak: Candidate = { ...cand("k2", "weak-model", LIM(), 2), tier: 2 };
+    const r = t.reserve([weak, strong], T0, { preferTier1WaitMs: 60_000 });
+    assert.equal(r.kind, "ok");
+    if (r.kind === "ok") assert.equal(r.token.model, "strong-model");
+  });
+});
+
+it("UsageTracker reservations are immediately additive across process-like instances", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-usage-multiprocess-"));
+  try {
+    const a = new UsageTracker(dir);
+    const b = new UsageTracker(dir);
+    const candidate = cand("shared-key", "shared-model", LIM({ rpm: 1, rpd: 2 }));
+    assert.equal(a.reserve([candidate], 1_750_000_000_000).kind, "ok");
+    const blocked = b.reserve([candidate], 1_750_000_000_001);
+    assert.equal(blocked.kind, "wait", "second process sees the first process minute reservation without flush");
+    const nextMinute = b.reserve([candidate], 1_750_000_061_000);
+    assert.equal(nextMinute.kind, "ok");
+    const dailyWall = a.reserve([candidate], 1_750_000_122_000);
+    assert.equal(dailyWall.kind, "wait", "two process reservations add to the shared daily limit");
+    a.close();
+    b.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("UsageTracker shares token-per-minute reservations across process-like instances", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ocr-usage-multiprocess-tpm-"));
+  const a = new UsageTracker(dir);
+  const b = new UsageTracker(dir);
+  try {
+    const candidate = cand("shared-key", "shared-model", LIM({ rpm: 10, tpm: 150, imgTokens: 100 }));
+    assert.equal(a.reserve([candidate], 1_750_000_000_000).kind, "ok");
+    const blocked = b.reserve([candidate], 1_750_000_000_001);
+    assert.equal(blocked.kind, "wait", "second process includes the first process estimated tokens");
+    assert.equal(b.reserve([candidate], 1_750_000_061_000).kind, "ok");
+  } finally {
+    a.close();
+    b.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

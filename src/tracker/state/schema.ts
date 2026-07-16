@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 16;
+export const LATEST_SCHEMA_VERSION = 17;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -742,6 +742,34 @@ CREATE INDEX IF NOT EXISTS worker_commands_worker_state_idx
 
 CREATE INDEX IF NOT EXISTS worker_commands_task_state_idx
   ON worker_commands(target_task_id, state, requested_at);
+    `,
+  },
+  {
+    // Migration 17: durable OCR approval dispatch. Approval owns one immutable
+    // request hash + child manifest. Provider quota reservations intentionally
+    // live in the OCR runtime cache DB so dashboard/daemon processes using the
+    // same cache directory share the existing UsageTracker authority.
+    version: 17,
+    sql: String.raw`
+CREATE TABLE IF NOT EXISTS ocr_approvals (
+  session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('awaiting-approval', 'approving', 'approved', 'failed')),
+  request_hash TEXT,
+  manifest_id TEXT UNIQUE,
+  manifest_json TEXT,
+  owner_token TEXT,
+  lease_expires_at_ms INTEGER,
+  claim_generation INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  error TEXT,
+  PRIMARY KEY (session_id, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS ocr_approvals_state_lease_idx
+  ON ocr_approvals(state, lease_expires_at_ms);
     `,
   },
 ];

@@ -30,6 +30,8 @@ export interface PerPageOcrRequest<T> {
    * produced the suspect reading. All filtered out → pages fail loud.
    */
   candidateFilter?: (c: Candidate) => boolean;
+  /** Operator/run cancellation, composed with every provider-attempt timeout. */
+  signal?: AbortSignal;
 }
 
 export interface PerPageOcrResult<T> {
@@ -79,7 +81,24 @@ function maxWaitMs(): number {
   const env = Number.parseInt(process.env.OCR_PAGE_MAX_WAIT_MS ?? "", 10);
   return Number.isFinite(env) && env >= 0 ? env : 120_000;
 }
+/**
+ * Tier-1 patience: how long a page may wait for a trusted (tier-1) cell to
+ * free up before overflowing to a tier-2 (handwriting-mangling) model. Without
+ * this, a batch saturates the tier-1 RPM windows after ~15-20 pages and every
+ * later page instantly lands on tier-2 — quality degrades as the batch
+ * progresses. Always capped by the remaining page budget, so patience can
+ * delay a page but never fail it. 0 disables (old drift behavior).
+ */
+function tier1PatienceMs(): number {
+  const env = Number.parseInt(process.env.OCR_TIER1_PATIENCE_MS ?? "", 10);
+  return Number.isFinite(env) && env >= 0 ? env : 90_000;
+}
 const MAX_SINGLE_WAIT_MS = 15_000;
+
+function providerAttemptTimeoutMs(): number {
+  const env = Number.parseInt(process.env.OCR_PROVIDER_ATTEMPT_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(env) && env > 0 ? env : 60_000;
+}
 
 function comboId(provider: string, keyIndex: number, model: string): string {
   return `${provider}-${keyIndex}:${model}`;
@@ -99,7 +118,25 @@ function buildCandidates(pool: PoolKey[]): Candidate[] {
   );
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
+  if (signal?.aborted) {
+    reject(signal?.reason ?? new DOMException("OCR pacing aborted", "AbortError"));
+    return;
+  }
+  const onAbort = (): void => {
+    clearTimeout(timer);
+    reject(signal?.reason ?? new DOMException("OCR pacing aborted", "AbortError"));
+  };
+  const timer = setTimeout(() => {
+    signal?.removeEventListener("abort", onAbort);
+    resolve();
+  }, ms);
+  signal?.addEventListener("abort", onAbort, { once: true });
+});
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) signal.throwIfAborted();
+}
 
 /**
  * OCR every page of a pre-rendered PDF in parallel. Each page is dispatched
@@ -114,6 +151,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * `records`; the caller decides whether to surface the partial result.
  */
 export async function runOcrPerPage<T>(req: PerPageOcrRequest<T>): Promise<PerPageOcrResult<T>> {
+  throwIfAborted(req.signal);
   const pool = req.pool ?? buildVisionPool();
   const poolSummary = summarizePool(pool);
   if (pool.length === 0 && !_callSinglePageForTests) {
@@ -152,8 +190,8 @@ export async function runOcrPerPage<T>(req: PerPageOcrRequest<T>): Promise<PerPa
       tasks.map((t) =>
         limit(async () => {
           results[t.pageNum - 1] = tracker
-            ? await ocrPageViaPool(t.pageNum, t.imagePath, req.prompt, candidates, poolByKey, tracker)
-            : await ocrPageViaTestFn(t.pageNum, t.imagePath, req.prompt, pool);
+            ? await ocrPageViaPool(t.pageNum, t.imagePath, req.prompt, candidates, poolByKey, tracker, req.signal)
+            : await ocrPageViaTestFn(t.pageNum, t.imagePath, req.prompt, pool, req.signal);
         }),
       ),
     );
@@ -170,11 +208,13 @@ async function ocrPageViaTestFn(
   imagePath: string,
   prompt: string,
   pool: PoolKey[],
+  signal?: AbortSignal,
 ): Promise<PageOutcome> {
   // The page's assigned pool key id — reported as the attempted key on failure
   // (the test-fn supplies its own poolKeyId on success).
   const assignedId = pool.length > 0 ? pool[(pageNum - 1) % pool.length].id : undefined;
   try {
+    throwIfAborted(signal);
     const { json, poolKeyId } = await _callSinglePageForTests!({ imagePath, prompt, pageNum });
     return {
       page: pageNum,
@@ -185,6 +225,7 @@ async function ocrPageViaTestFn(
       rawRecords: Array.isArray(json) ? (json as unknown[]) : [json],
     };
   } catch (err) {
+    throwIfAborted(signal);
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(`runOcrPerPage page ${pageNum} failed: ${msg}`);
     return {
@@ -206,6 +247,7 @@ async function ocrPageViaPool(
   candidates: Candidate[],
   poolByKey: Map<string, PoolKey>,
   tracker: UsageTracker,
+  signal?: AbortSignal,
 ): Promise<PageOutcome> {
   const tried = new Set<string>();
   let remaining = [...candidates];
@@ -214,9 +256,15 @@ async function ocrPageViaPool(
   let lastError: unknown;
   let lastPoolKeyId: string | undefined;
   const budget = maxWaitMs();
+  const patience = tier1PatienceMs();
 
   while (remaining.length > 0) {
-    const res = tracker.reserve(remaining);
+    throwIfAborted(signal);
+    // Patience shrinks as the page waits and never exceeds the remaining
+    // budget — a page degrades to tier-2 rather than failing on patience.
+    const res = tracker.reserve(remaining, Date.now(), {
+      preferTier1WaitMs: Math.max(0, Math.min(patience, budget) - waited),
+    });
     if (res.kind === "exhausted") {
       lastError = lastError ?? new Error("all vision keys exhausted (rate-limited, quota-out, or dead)");
       break;
@@ -228,7 +276,7 @@ async function ocrPageViaPool(
         break;
       }
       waited += w;
-      await sleep(w);
+      await sleep(w, signal);
       continue;
     }
 
@@ -240,8 +288,11 @@ async function ocrPageViaPool(
     if (!key) continue;
     lastPoolKeyId = key.id;
     attempts += 1;
+    const attemptSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(providerAttemptTimeoutMs())])
+      : AbortSignal.timeout(providerAttemptTimeoutMs());
     try {
-      const outcome = await key.callOcr(imagePath, prompt, token.model);
+      const outcome = await key.callOcr(imagePath, prompt, token.model, attemptSignal);
       tracker.commit(token, outcome.promptTokens);
       const arr = Array.isArray(outcome.json) ? (outcome.json as unknown[]) : [outcome.json];
       return {
@@ -253,8 +304,14 @@ async function ocrPageViaPool(
         rawRecords: arr,
       };
     } catch (err) {
+      throwIfAborted(signal);
       lastError = err;
-      tracker.penalize(token, errorToRateLimitInfo(token.provider, err));
+      tracker.penalize(
+        token,
+        attemptSignal.aborted
+          ? { kind: "transient", retryAfterMs: 0 }
+          : errorToRateLimitInfo(token.provider, err),
+      );
     }
   }
 

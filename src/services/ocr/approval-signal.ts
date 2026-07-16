@@ -25,6 +25,8 @@ import { dateLocal, rowFilePath } from "../../tracker/jsonl.js";
 export interface ApprovalKey {
   workflow: string;
   sessionId: string;
+  /** Exact OCR run identity. Optional only for legacy persisted waiters. */
+  runId?: string;
 }
 
 export interface ApprovedPayload {
@@ -79,7 +81,7 @@ interface Listener {
 const listenersByKey = new Map<string, Set<Listener>>();
 
 function keyOf(k: ApprovalKey): string {
-  return `${k.workflow}\0${k.sessionId}`;
+  return `${k.workflow}\0${k.sessionId}\0${k.runId ?? ""}`;
 }
 
 function ensureBucket(key: string): Set<Listener> {
@@ -167,7 +169,7 @@ export function subscribeToApproval(
 
     const pollOnce = (): void => {
       if (settled) return;
-      const latest = readLatestOcrApprovalState(trackerDir, key.sessionId);
+      const latest = readLatestOcrApprovalState(trackerDir, key.sessionId, key.runId);
       if (latest === null) {
         scheduleNextPoll();
         return;
@@ -296,6 +298,7 @@ type JsonlLatestApproval =
 function readLatestOcrApprovalState(
   trackerDir: string,
   sessionId: string,
+  runId?: string,
 ): JsonlLatestApproval | null {
   const today = dateLocal();
   // Walk today + yesterday in newest-first order.
@@ -324,6 +327,7 @@ function readLatestOcrApprovalState(
       const row = parsed as Partial<ApprovalRow> | null;
       if (!row || typeof row !== "object") continue;
       if (row.id !== sessionId) continue;
+      if (runId !== undefined && row.runId !== runId) continue;
       if (typeof row.timestamp !== "string") continue;
       const kind = classifyApprovalRow(row);
       if (kind === null) continue;
@@ -338,6 +342,7 @@ function readLatestOcrApprovalState(
 
 interface ApprovalRow {
   id?: string;
+  runId?: string;
   timestamp?: string;
   status?: string;
   step?: string;

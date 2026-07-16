@@ -8,6 +8,10 @@ const WORKFLOW = "ocr";
 export function sweepStuckOcrRows(trackerDir: string): void {
   const latestById = readLatestTrackerEntriesByRunKey(WORKFLOW, trackerDir);
   for (const e of latestById.values()) {
+    // Awaiting approval is an intentional parked state, not interrupted work.
+    // Its durable approval row/manifest survives process restart and is claimed
+    // or replayed by the approve route; sweeping it would destroy recoverability.
+    if (e.status === "running" && e.step === "awaiting-approval") continue;
     if (e.status === "pending" || e.status === "running") {
       // Inherit archetype from the stuck row so the sweep marker matches
       // the row type it's replacing (normally "preview" for OCR, but

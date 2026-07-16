@@ -18,11 +18,44 @@ export function createDependency(
     onChildFailed: ChildFailurePolicy
     cascadeCancel?: boolean
     resumeParentAfterChildRetry?: boolean
+    existingPolicy?: 'reset' | 'idempotent'
     now?: string
   },
 ): string {
   const now = request.now ?? new Date().toISOString()
   return control.transaction(() => {
+    const existing = db.prepare(`
+      SELECT id, failure_policy, on_child_failed, cascade_cancel, resume_parent_after_child_retry
+      FROM task_dependencies
+      WHERE parent_task_id = @parentTaskId AND child_task_id = @childTaskId AND kind = 'control'
+    `).get(request) as {
+      id: string
+      failure_policy: string
+      on_child_failed: string
+      cascade_cancel: number
+      resume_parent_after_child_retry: number
+    } | undefined
+    const expectedFailurePolicy =
+      request.onChildFailed === 'fail_parent'
+        ? 'fail_parent'
+        : request.onChildFailed === 'allow_partial'
+          ? 'ignore'
+          : 'record_unresolved'
+    const expectedCascade = request.cascadeCancel === false ? 0 : 1
+    const expectedResume = request.resumeParentAfterChildRetry === false ? 0 : 1
+    if (existing && request.existingPolicy === 'idempotent') {
+      if (
+        existing.failure_policy !== expectedFailurePolicy ||
+        existing.on_child_failed !== request.onChildFailed ||
+        existing.cascade_cancel !== expectedCascade ||
+        existing.resume_parent_after_child_retry !== expectedResume
+      ) {
+        throw new Error(
+          `createDependency idempotent replay disagrees with persisted dependency ${existing.id}`,
+        )
+      }
+      return existing.id
+    }
     const id = randomUUID()
     db.prepare(`
       INSERT INTO task_dependencies (
@@ -46,15 +79,10 @@ export function createDependency(
       id,
       parentTaskId: request.parentTaskId,
       childTaskId: request.childTaskId,
-      failurePolicy:
-        request.onChildFailed === 'fail_parent'
-          ? 'fail_parent'
-          : request.onChildFailed === 'allow_partial'
-            ? 'ignore'
-            : 'record_unresolved',
+      failurePolicy: expectedFailurePolicy,
       onChildFailed: request.onChildFailed,
-      cascadeCancel: request.cascadeCancel === false ? 0 : 1,
-      resumeParentAfterChildRetry: request.resumeParentAfterChildRetry === false ? 0 : 1,
+      cascadeCancel: expectedCascade,
+      resumeParentAfterChildRetry: expectedResume,
       now,
     })
     db.prepare(`

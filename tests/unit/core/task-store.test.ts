@@ -52,6 +52,77 @@ test('enqueueTasks creates tasks plus pending attempts', () => {
   }
 })
 
+test('idempotent enqueue reuses an exact terminal task without resurrecting it', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const request = {
+      workflow: 'oath-signature',
+      inputs: [{ emplId: '10000001' }],
+      deriveItemId: () => 'signer-1',
+      runIds: ['stable-child-run'],
+      parentRunId: 'approval-parent',
+    }
+    const [first] = store.enqueueTasks(request)
+    store.db.prepare(`
+      UPDATE tasks SET control_state = 'done', terminal_at = @now WHERE id = @taskId
+    `).run({ taskId: first.taskId, now: iso(1) })
+    store.db.prepare(`
+      UPDATE task_attempts SET control_state = 'done', terminal_at = @now WHERE id = @attemptId
+    `).run({ attemptId: first.attemptId, now: iso(1) })
+
+    const [replay] = store.enqueueTasks({ ...request, existingTaskPolicy: 'idempotent' })
+    assert.equal(replay.taskId, first.taskId)
+    assert.equal(replay.attemptId, first.attemptId)
+    assert.equal(store.getTask(first.taskId)?.state, 'done')
+    assert.equal(store.listAttemptsForTask(first.taskId).length, 1)
+
+    assert.throws(
+      () => store.enqueueTasks({
+        ...request,
+        inputs: [{ emplId: '10000002' }],
+        existingTaskPolicy: 'idempotent',
+      }),
+      /input.*disagrees/i,
+    )
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('idempotent dependency reconciliation preserves a satisfied dependency', () => {
+  const { dir, store } = openTempStore()
+  try {
+    const [parent] = store.enqueueTasks({ workflow: 'parent', inputs: [{ id: 'p' }], deriveItemId: (x) => x.id })
+    const [child] = store.enqueueTasks({ workflow: 'child', inputs: [{ id: 'c' }], deriveItemId: (x) => x.id })
+    const dependencyId = store.createDependency({
+      parentTaskId: parent.taskId,
+      childTaskId: child.taskId,
+      onChildFailed: 'block_parent',
+    })
+    store.db.prepare(`
+      UPDATE task_dependencies SET status = 'satisfied', terminal_at = @now WHERE id = @id
+    `).run({ id: dependencyId, now: iso(1) })
+
+    const replayId = store.createDependency({
+      parentTaskId: parent.taskId,
+      childTaskId: child.taskId,
+      onChildFailed: 'block_parent',
+      existingPolicy: 'idempotent',
+    })
+    assert.equal(replayId, dependencyId)
+    const row = store.db.prepare('SELECT status, terminal_at FROM task_dependencies WHERE id = ?').get(dependencyId) as {
+      status: string
+      terminal_at: string | null
+    }
+    assert.equal(row.status, 'satisfied')
+    assert.equal(row.terminal_at, iso(1))
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('claimNextTask claims each queued task exactly once', () => {
   const { dir, store } = openTempStore()
   try {

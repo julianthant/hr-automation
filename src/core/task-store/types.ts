@@ -106,6 +106,8 @@ export interface EnqueueTasksRequest<T> {
   runIds?: ReadonlyArray<string>
   source?: string
   metadata?: Record<string, unknown>
+  /** Exact replay: verify and return an existing identity without mutating it. */
+  existingTaskPolicy?: 'adopt' | 'idempotent'
 }
 
 // ── Internal DB row shapes ────────────────────────────────────────────────────

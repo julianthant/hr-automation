@@ -112,6 +112,7 @@ export async function enqueueItems<T>(
   trackerDir?: string,
   preAssignedRunIds?: ReadonlyArray<UUID>,
   preAssignedParentRunIds?: ReadonlyArray<string | undefined>,
+  existingTaskPolicy?: 'adopt' | 'idempotent',
 ): Promise<Array<{ id: string; position: number; runId: UUID; taskId?: string; attemptId?: string }>> {
   if (inputs.length === 0) return []
   if (preAssignedRunIds && preAssignedRunIds.length !== inputs.length) {
@@ -134,6 +135,7 @@ export async function enqueueItems<T>(
       runIds: preAssignedRunIds,
       source: 'daemon',
       now: ts,
+      ...(existingTaskPolicy ? { existingTaskPolicy } : {}),
     })
     const enqueuedBy = `cli-${process.pid}`
     for (let i = 0; i < rows.length; i++) {

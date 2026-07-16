@@ -23,7 +23,7 @@ import { log } from "../../../utils/log.js";
 import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
 import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
 import { buildTraceId } from "../../../domain/queue-trace-id.js";
-import { type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
+import { isChildWatchError, type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
 import {
   isOcrPrepareAbortRequested,
   isOperatorDiscardAbortError,
@@ -814,6 +814,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
       onProgress: (outcome) => applyOutcome(outcome),
     }).catch((err: unknown): FanOutResult => {
       if (isOperatorDiscardAbortError(err)) throw err; // operator cancel — rethrow
+      if (!isChildWatchError(err) || err.kind !== "timeout") throw err;
       // Timeout (or other non-abort watch failure): mark all unprocessed
       // children as failed and degrade to a partial report.
       const timedOut = pmItemIds.filter((id) => !processedItemIds.has(id));

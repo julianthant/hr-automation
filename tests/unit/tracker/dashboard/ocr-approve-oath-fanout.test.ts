@@ -163,6 +163,54 @@ test("oath approve fans out BOTH targets: oath-signature signers + one oath-uplo
   }
 });
 
+test("concurrent identical approval replays dispatch one stable child-run manifest", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "approve-oath-idempotent-"));
+  try {
+    seedOathOcrRow(dir, "sess-idempotent", "ocr-run-idempotent", undefined, {
+      operationWorkflow: "oath-signature",
+    });
+    const calls: Array<{ workflow: string; runIds: string[] }> = [];
+    let releaseDispatch!: () => void;
+    const dispatchGate = new Promise<void>((resolve) => { releaseDispatch = resolve; });
+    const handler = buildOcrApproveHandler({
+      trackerDir: dir,
+      ensureDaemonsAndEnqueueOverride: async (workflow, inputs, deriveItemId, opts) => {
+        const runIds = (opts as { runIds?: string[] } | undefined)?.runIds;
+        assert.ok(runIds, "approval dispatch receives manifest-owned child runIds");
+        calls.push({ workflow, runIds });
+        await dispatchGate;
+        return {
+          enqueued: inputs.map((input, index) => ({
+            id: deriveItemId(input, index),
+            runId: runIds[index],
+          })),
+        };
+      },
+    });
+    const request = {
+      sessionId: "sess-idempotent",
+      runId: "ocr-run-idempotent",
+      records: [oathRecord({ employeeId: "10000001" })],
+    };
+
+    const first = await handler(request);
+    const replay = await handler(request);
+    assert.equal(first.status, 200);
+    assert.equal(replay.status, 200);
+    assert.equal((replay.body as { state?: string }).state, "pending");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(calls.length, 1, "only the CAS winner may dispatch children");
+    releaseDispatch();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const approvedReplay = await handler(request);
+    assert.equal((approvedReplay.body as { state?: string }).state, "approved");
+    assert.equal(calls.length, 1, "approved replay returns the stored manifest without redispatch");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("oath approve: selected-but-EID-less records are NOT enqueued and NOT waited on", async () => {
   const dir = mkdtempSync(join(tmpdir(), "approve-oath-skip-"));
   try {

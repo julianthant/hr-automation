@@ -65,6 +65,8 @@ import { buildTraceId, tracePrefix } from "../../domain/queue-trace-id.js";
 import { runOptionsToDaemonFlags, serializeRunOptionsForData } from "../../domain/run-options.js";
 import { toLastFirstSearchName } from "../../domain/identity/person-name.js";
 import { buildHttpPendingData } from "../../core/daemon/enqueue-dispatch.js";
+import { openControlDb } from "../../core/control-db.js";
+import { markOcrAwaitingApproval } from "../../tracker/state/ocr-approval-store.js";
 import {
   clearOcrPrepareAbort,
   createOperatorDiscardError,
@@ -237,9 +239,7 @@ export interface OcrOrchestratorOpts {
   /**
    * Optional per-run AbortSignal. Kernel-path callers thread `ctx.signal`
    * through so an operator cancel propagates without waiting on the
-   * existing OCR-discard polling loop. Today this is informational only
-   * (the orchestrator's internal raceOcrPrepWithDiscard already covers
-   * its own polling); the field is reserved for future cancel paths.
+   * existing OCR-discard polling loop and into provider fetches/timeouts.
    */
   signal?: AbortSignal;
   /**
@@ -429,6 +429,7 @@ export async function runOcrOrchestrator(
       recordSchema: s.ocrRecordSchema,
       schemaName: s.schemaName,
       prompt: s.prompt,
+      signal: opts.signal,
       // Skip re-rendering when we already rendered to seed placeholders.
       ...(preRenderedPages
         ? { _renderOverride: async () => preRenderedPages }
@@ -839,6 +840,7 @@ export async function runOcrOrchestrator(
           recordSchema: spec.ocrRecordSchema,
           prompt: spec.prompt,
           excludeModels: args.excludeModels,
+          signal: opts.signal,
         }));
     const specSecondOpinion = spec.secondOpinion;
     if (specSecondOpinion || roster.length > 0) {
@@ -1422,6 +1424,10 @@ export async function runOcrOrchestrator(
       failedPages,
       emptyPages,
       pageStatusSummary,
+    });
+    markOcrAwaitingApproval(openControlDb({ trackerDir }), {
+      sessionId: input.sessionId,
+      runId,
     });
     return { status: "awaiting-approval" };
   } catch (err) {

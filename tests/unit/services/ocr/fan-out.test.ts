@@ -200,4 +200,30 @@ describe("fanOutAndWatch", () => {
     assert.deepEqual(dispatchedItemIds.sort(), ["item-a", "item-b"]);
     vi.doUnmock("../../../../src/core/delegate.js");
   });
+
+  it("assigns duplicate logical inputs distinct itemIds in FIFO order", async () => {
+    vi.resetModules();
+    vi.doMock("../../../../src/core/delegate.js", () => ({
+      delegateToAllImpl: async (opts: {
+        inputs: ReadonlyArray<{ name: string }>;
+        deriveItemId: (input: { name: string }) => string;
+      }) => opts.inputs.map((input, index) => ({
+        itemId: opts.deriveItemId(JSON.parse(JSON.stringify(input))),
+        runId: `duplicate-${index}`,
+      })),
+    }));
+    const { fanOutAndWatch } = await import("../../../../src/services/ocr/fan-out.js");
+    const dispatched: string[] = [];
+    await fanOutAndWatch({
+      sessionId: "s-duplicate", runId: "r-duplicate", parentRunId: "p-duplicate",
+      trackerDir: undefined, date: "2026-07-15",
+      child: fakeChild,
+      children: [child("duplicate-a", "Same Person"), child("duplicate-b", "Same Person")],
+      timeoutMs: 100,
+      onDispatched: (rows) => { dispatched.push(...rows.map((row) => row.itemId)); },
+      watch: async () => [],
+    });
+    assert.deepEqual(dispatched, ["duplicate-a", "duplicate-b"]);
+    vi.doUnmock("../../../../src/core/delegate.js");
+  });
 });

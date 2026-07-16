@@ -12,13 +12,21 @@ const SESSION_LOOKBACK_DAYS = 7;
  * this set: it is a real daemon task born at upload as a `single` row, not a
  * display coordinator. `onbase` IS a coordinator: the combined-PDF upload row
  * tracks the whole document, with per-person imports fanned out as
- * operation-members. A standalone OCR run (no targetWorkflow) gets none.
+ * operation-members. `separations` is the "Run I-9 Check" coordinator: one row
+ * per uploaded I-9 packet, with per-person found/not-found member rows fanned
+ * back by prepare's result fan-back when the (approve-less) i9 OCR run
+ * completes. A standalone OCR run (no targetWorkflow) gets none.
  *
  * The single source of truth for "does this OCR run have a coordinator row?" —
  * shared by `prepare` (creates the row) and `approve` (mirrors `approved` onto
  * it). Discard reaches the same rows via its own parent-mirror path.
  */
-export const OPERATION_COORDINATOR_WORKFLOWS = new Set(["oath-signature", "emergency-contact", "onbase"]);
+export const OPERATION_COORDINATOR_WORKFLOWS = new Set([
+  "oath-signature",
+  "emergency-contact",
+  "onbase",
+  "separations",
+]);
 
 export function isOperationCoordinatorWorkflow(workflow: string | undefined): boolean {
   return workflow !== undefined && OPERATION_COORDINATOR_WORKFLOWS.has(workflow);
@@ -38,27 +46,29 @@ function walkOcrJsonl(
   sessionId: string,
   trackerDir: string | undefined,
   predicate: (e: TrackerEntry) => boolean,
+  runId?: string,
 ): TrackerEntry | undefined {
   return (
     findLatestEntryForPredicate({
       workflow: WORKFLOW,
       ...(trackerDir !== undefined ? { trackerDir } : {}),
       lookbackDays: SESSION_LOOKBACK_DAYS,
-      predicate: (e) => e.id === sessionId && predicate(e),
+      predicate: (e) => e.id === sessionId && (runId === undefined || e.runId === runId) && predicate(e),
     }) ?? undefined
   );
 }
 
-export function readFormType(sessionId: string, trackerDir: string | undefined): string | null {
-  const e = walkOcrJsonl(sessionId, trackerDir, (row) => typeof row.data?.formType === "string");
+export function readFormType(sessionId: string, trackerDir: string | undefined, runId?: string): string | null {
+  const e = walkOcrJsonl(sessionId, trackerDir, (row) => typeof row.data?.formType === "string", runId);
   return e ? (e.data!.formType) : null;
 }
 
-export function readParentRunId(sessionId: string, trackerDir: string | undefined): string | undefined {
+export function readParentRunId(sessionId: string, trackerDir: string | undefined, runId?: string): string | undefined {
   const e = walkOcrJsonl(
     sessionId,
     trackerDir,
     (row) => typeof row.parentRunId === "string" && row.parentRunId.length > 0,
+    runId,
   );
   return e?.parentRunId;
 }
@@ -69,21 +79,22 @@ export function readParentRunId(sessionId: string, trackerDir: string | undefine
  * from `OcrInput.operationWorkflow`. `undefined` for a standalone OCR-hub upload.
  * Lets the approve route route the fan-out by intent.
  */
-export function readOperationWorkflow(sessionId: string, trackerDir: string | undefined): string | undefined {
+export function readOperationWorkflow(sessionId: string, trackerDir: string | undefined, runId?: string): string | undefined {
   const e = walkOcrJsonl(
     sessionId,
     trackerDir,
     (row) => typeof row.data?.operationWorkflow === "string" && row.data.operationWorkflow.length > 0,
+    runId,
   );
   const value = e?.data?.operationWorkflow;
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export function readDryRun(sessionId: string, trackerDir: string | undefined): boolean {
+export function readDryRun(sessionId: string, trackerDir: string | undefined, runId?: string): boolean {
   const e = walkOcrJsonl(sessionId, trackerDir, (row) => {
     const v = row.data?.dryRun;
     return v === "true" || v === "1";
-  });
+  }, runId);
   return e !== undefined;
 }
 
@@ -96,11 +107,12 @@ export function readDryRun(sessionId: string, trackerDir: string | undefined): b
  * value (returns `undefined`) — readers don't fail loud; the stamp came from our
  * own serializer, so this is belt-and-suspenders.
  */
-export function readParallelWorkers(sessionId: string, trackerDir: string | undefined): number | undefined {
+export function readParallelWorkers(sessionId: string, trackerDir: string | undefined, runId?: string): number | undefined {
   const e = walkOcrJsonl(
     sessionId,
     trackerDir,
     (row) => row.data?.parallelWorkers !== undefined && row.data.parallelWorkers !== "",
+    runId,
   );
   const raw = e?.data?.parallelWorkers;
   if (raw === undefined) return undefined;

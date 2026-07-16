@@ -123,6 +123,10 @@ const ALLOWLIST: Record<string, { count: number; reason: string }> = {
     count: 1,
     reason: "`entry.runId ?? \"\"` feeds a composite queue-surface key for a root (non-delegated) row that has no runId scope segment.",
   },
+  "src/tracker/state/ocr-approval-store.ts": {
+    count: 2,
+    reason: "`row.error ?? \"approval failed\"` supplies a generic message only when an ALREADY-failed approval row stored no explicit error (a valid state, not a masked check); `(row.lease_expires_at_ms ?? 0) <= nowMs` treats a null lease as expired/reclaimable — the safe direction, mirrored by the atomic `COALESCE(lease_expires_at_ms, 0)` UPDATE guard that is the authoritative gate. Both read the authoritative SQLite ocr_approvals row, never employee/transaction data.",
+  },
   "src/tracker/tasks/http.ts": {
     count: 1,
     reason: "`input.parentRunId ?? \"\"` then `.trim()` — an absent parent scope becomes empty string, which the caller's subsequent lookup treats as 'no parent', a valid state.",

@@ -1,6 +1,8 @@
 import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 
+const watchControl = vi.hoisted(() => ({ failureKind: "timeout" }));
+
 /**
  * ISS-003 pin: watchChildRuns timeout in enrichRecords must NOT hard-fail the
  * whole OCR verify run. Instead:
@@ -56,7 +58,16 @@ vi.mock("../../../../../src/tracker/tasks/store.js", () => ({
 // The person-lookup call throws after calling onProgress for itemId[0] only.
 // The i9-lookup call resolves normally (record 0 has no officerSigned).
 
-vi.mock("../../../../../src/tracker/delegation/watch-child-runs.js", () => ({
+vi.mock("../../../../../src/tracker/delegation/watch-child-runs.js", () => {
+  class ChildWatchError extends Error {
+    constructor(public readonly kind: string, message: string, public readonly pendingItemIds: string[]) {
+      super(message);
+      this.name = "ChildWatchError";
+    }
+  }
+  return {
+  ChildWatchError,
+  isChildWatchError: (error: unknown) => error instanceof ChildWatchError,
   watchChildRuns: vi.fn(
     async (opts: {
       workflow: string;
@@ -95,8 +106,10 @@ vi.mock("../../../../../src/tracker/delegation/watch-child-runs.js", () => ({
         );
         // Then the second record never settles → timeout.
         const timeoutMs = 500; // tiny timeout for the test
-        throw new Error(
+        throw new ChildWatchError(
+          watchControl.failureKind,
           `watchChildRuns timeout (${timeoutMs}ms) — still waiting for: ${opts.expectedItemIds[1] ?? ""}`,
+          opts.expectedItemIds.slice(1),
         );
       }
       // i9-lookup: single record, resolves normally.
@@ -113,7 +126,8 @@ vi.mock("../../../../../src/tracker/delegation/watch-child-runs.js", () => ({
       return [outcome];
     },
   ),
-}));
+  };
+});
 
 describe("verifyOcrFormSpec.enrichRecords timeout handling (ISS-003)", () => {
   it("resolves with a partial report when person-lookup times out (not a hard-fail)", async () => {
@@ -220,5 +234,52 @@ describe("verifyOcrFormSpec.enrichRecords timeout handling (ISS-003)", () => {
       "Smith, John",
       "record 0 must carry the enriched officialSigner from i9-lookup",
     );
+  });
+
+  it("propagates infrastructure child-watch failures instead of partializing them", async () => {
+    watchControl.failureKind = "infrastructure";
+    vi.resetModules();
+    try {
+      const { verifyOcrFormSpec } = await import(
+        "../../../../../src/services/ocr/forms/verify.js"
+      );
+      const records: any[] = [{
+        formKind: "oath",
+        sourcePage: 1,
+        printedName: "Doe, Jane",
+        employeeId: "",
+        paperEmploymentDate: null,
+        paperDateSigned: null,
+        employeeSigned: true,
+        officerSigned: true,
+        paperOfficialName: null,
+        documentType: "expected",
+        originallyMissing: [],
+        notes: [],
+        name: "Doe, Jane",
+        matchState: "extracted",
+        selected: true,
+        warnings: [],
+        checks: [],
+      }];
+
+      assert.ok(verifyOcrFormSpec.enrichRecords);
+      await assert.rejects(
+        verifyOcrFormSpec.enrichRecords({
+          records,
+          runId: "ocr-run-infra",
+          sessionId: "session-infra",
+          trackerDir: "unused",
+          date: "2026-06-17",
+          parentSubject: undefined,
+          rootTracePrefix: "vf-101010",
+          runOptions: undefined,
+          emitProgress: () => {},
+        }),
+        (error: unknown) => error instanceof Error && error.name === "ChildWatchError",
+      );
+    } finally {
+      watchControl.failureKind = "timeout";
+    }
   });
 });

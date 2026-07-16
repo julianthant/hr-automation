@@ -26,7 +26,7 @@ import {
   patchOcrRecordUnresolved,
 } from "../eid-lookup-results.js";
 import { applyPersonLookupNameToOcrRecord } from "../../../domain/identity/ocr-person-name.js";
-import { type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
+import { isChildWatchError, type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
 import {
   isOcrPrepareAbortRequested,
   isOperatorDiscardAbortError,
@@ -707,6 +707,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         onProgress: (outcome) => applyPersonLookupOutcome(outcome),
       }).catch((err: unknown): FanOutResult => {
         if (isOperatorDiscardAbortError(err)) throw err; // operator cancel — rethrow
+        if (!isChildWatchError(err) || err.kind !== "timeout") throw err;
         // Timeout (or other non-abort watch failure): mark all unprocessed
         // children as failed and degrade to a partial report.
         const timedOut = plItemIds.filter((id) => !processedPlItemIds.has(id));
@@ -775,8 +776,8 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
       // workflow is i9-lookup (not the default child name), so pass it explicitly.
       //
       // ISS-003: same graceful-timeout handling as the person fan-out above.
-      // Operator-abort errors still rethrow; a plain watch timeout degrades to a
-      // partial report with the unsettled records marked failed.
+      // Every non-timeout watch failure still rethrows; only an explicit typed
+      // timeout degrades to a partial report with unsettled records marked failed.
       const i9WatchResult = await fanOutAndWatch<I9ChildInput>({
         sessionId,
         runId,
@@ -817,6 +818,7 @@ export const verifyOcrFormSpec: OcrFormSpec<VerifyOcrRecord, VerifyPreviewRecord
         onProgress: (outcome) => applyI9Outcome(outcome),
       }).catch((err: unknown): FanOutResult => {
         if (isOperatorDiscardAbortError(err)) throw err; // operator cancel — rethrow
+        if (!isChildWatchError(err) || err.kind !== "timeout") throw err;
         // Timeout (or other non-abort watch failure): mark all unprocessed
         // i9-lookup children as failed and continue with partial results.
         const timedOut = i9ItemIds.filter((id) => !processedI9ItemIds.has(id));

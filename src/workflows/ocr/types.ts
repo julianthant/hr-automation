@@ -164,6 +164,42 @@ export interface OcrFormSpec<TOcr, TPreview, TFanOut = unknown, TDocFanOut = unk
   rosterMode: "required" | "optional";
 
   /**
+   * Optional form-owned second-opinion policy. The orchestrator's tier-1
+   * re-read of suspect pages is otherwise ROSTER-anchored (suspect = matched
+   * nothing in the roster and no usable EID) and skipped entirely when no
+   * roster is loaded — which left roster-less forms (i9) with no guard against
+   * weak-tier model misreads. Declaring this runs the second-opinion phase
+   * regardless of roster presence, with the form defining what "suspect" and
+   * "better" mean for its own record shape:
+   * - `isSuspect` — flags a post-match record whose extraction looks like a
+   *   misread (i9: an i9-classified page with no searchable name + SSN/DOB).
+   * - `reason` — operator-legible one-liner for the re-read log.
+   * - `readName` — the record's person name (for logs + the identity gate).
+   * - `rank` — extraction-quality ordinal (higher = better). A re-read is
+   *   adopted only when its rank strictly improves, and the orchestrator
+   *   additionally keeps the original when it had a non-empty name sharing no
+   *   tokens with the re-read (possible different person — flagged for review).
+   */
+  secondOpinion?: {
+    isSuspect: (record: TPreview) => boolean;
+    reason: (record: TPreview) => string;
+    readName: (record: TPreview) => string;
+    rank: (record: TPreview) => number;
+  };
+
+  /**
+   * Read-only forms with NO approve flow (neither `approveTo` nor
+   * `approveDocumentTo`): a DELEGATED run (parentRunId set — OCR under an
+   * operation coordinator) also completes terminal `done` right after
+   * enrichment instead of parking at `awaiting-approval`. There is nothing to
+   * approve — the finished report IS the outcome, and the coordinator's own
+   * result fan-back (e.g. the i9 check's per-person member rows in the
+   * separations panel) consumes it as soon as the run completes. Never set
+   * this on a spec that declares an approve target.
+   */
+  completeDelegatedRun?: boolean;
+
+  /**
    * Form-specific fields for the loading-phase placeholder records the
    * orchestrator seeds (one per rendered page) before extraction completes.
    * Record SHAPE is set by the RUN (see the F6 lesson), so the placeholder

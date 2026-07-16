@@ -105,7 +105,7 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
     // own raceOcrPrepWithDiscard polling loop sees the abort flag set
     // above and stops emitting.
     emitDiscarded(
-      { workflow: WORKFLOW, sessionId: input.sessionId },
+      { workflow: WORKFLOW, sessionId: input.sessionId, runId: input.runId },
       input.reason ?? "operator discarded OCR prep",
     );
     // Cancel the prep's still-queued delegated child TASKS (person-lookup

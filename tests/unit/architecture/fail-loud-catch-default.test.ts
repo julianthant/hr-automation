@@ -188,10 +188,6 @@ const STATEMENT_CATCH_ALLOWLIST: Record<string, { count: number; reason: string 
     count: 1,
     reason: "Optional bundled heic2any dev asset: missing/unreadable file -> undefined, a real 'asset not available' state the caller already handles.",
   },
-  "src/tracker/dashboard/ocr/prepare.ts": {
-    count: 1,
-    reason: "Registered-file store unavailable while resolving a duplicate-detection hash -> undefined with an inline comment: 'can't prove a duplicate, let the upload proceed' (documented, deliberate direction).",
-  },
   "src/tracker/dashboard/ocr/reocr-whole-pdf.ts": {
     count: 1,
     reason: "Malformed `parallelWorkers` row field -> undefined (kernel's own default applies); the row's real fields are read from elsewhere already.",

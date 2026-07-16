@@ -351,6 +351,13 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
      * of an oath-upload parent).
      */
     parentRunId?: string
+    /**
+     * Caller-owned stable run ids for a durable dispatch manifest. Length must
+     * match `inputs`. Replaying the same manifest then adopts the exact same
+     * task rows instead of minting a second child set.
+     */
+    runIds?: ReadonlyArray<UUID>
+    existingTaskPolicy?: 'adopt' | 'idempotent'
   } = {},
 ): Promise<EnqueueResult> {
   const { trackerDir, quiet, onPreEmitPending, onPreEmitFailed, onPreparedItems, parentRunId } = opts
@@ -425,7 +432,12 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
 
   // Step 1: pre-assign runIds. Generated synchronously so step 2 has them.
   const ids = inputs.map(idFn)
-  const runIds: UUID[] = inputs.map(() => randomUUID())
+  if (opts.runIds && opts.runIds.length !== inputs.length) {
+    throw new Error(
+      `ensureDaemonsAndEnqueue: runIds length ${opts.runIds.length} does not match inputs length ${inputs.length}`,
+    )
+  }
+  const runIds: UUID[] = opts.runIds ? [...opts.runIds] : inputs.map(() => randomUUID())
 
   if (onPreparedItems) {
     await onPreparedItems(
@@ -499,6 +511,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
       trackerDir,
       runIds,
       parentRunId ? inputs.map(() => parentRunId) : undefined,
+      opts.existingTaskPolicy,
     )
 
     // Step 6: wake daemons AFTER task rows are committed so an idle daemon's

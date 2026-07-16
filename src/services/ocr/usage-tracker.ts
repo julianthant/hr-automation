@@ -18,7 +18,9 @@
  * cacheDir lets concurrent runs share throttle state.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
 import { numEnv } from "../../utils/env.js";
 import type { ModelLimit, VisionProviderId } from "./provider-limits.js";
 import { hashKeyValue } from "./rotation.js";
@@ -50,6 +52,7 @@ export interface Candidate {
 
 /** Handle returned by reserve(); pass back to commit()/penalize(). */
 export interface ReservedToken {
+  reservationId?: string;
   provider: VisionProviderId;
   keyHash: string;
   keyIndex: number;
@@ -61,6 +64,20 @@ export type ReserveResult =
   | { kind: "ok"; token: ReservedToken }
   | { kind: "wait"; waitMs: number }
   | { kind: "exhausted" };
+
+export interface ReserveOpts {
+  /**
+   * Tier-1 patience: when the only cells with headroom RIGHT NOW are tier ≥ 2
+   * (throughput-overflow models observed mangling handwriting) but some tier-1
+   * cell frees within this many ms, return `wait` for that tier-1 cell instead
+   * of granting the tier-2 one. This is what stops a batch from drifting onto
+   * weak models as the tier-1 RPM windows saturate mid-run — the caller pays a
+   * short pause for a trusted read. 0 / absent = today's behavior (take the
+   * best free cell immediately). A tier-1 cell walled for longer than this
+   * (e.g. daily quota — hours) still falls through to tier-2.
+   */
+  preferTier1WaitMs?: number;
+}
 
 interface CellState {
   // Ephemeral (not persisted) — only meaningful within the current minute.
@@ -99,9 +116,25 @@ export class UsageTracker {
   private readonly statePath: string;
   private dirty = false;
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly quotaDb: Database;
+  private closed = false;
 
   constructor(cacheDir: string) {
+    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
     this.statePath = join(cacheDir, "ocr-usage-state.json");
+    this.quotaDb = openDatabase(join(cacheDir, "ocr-usage.sqlite"));
+    this.quotaDb.exec(`
+      CREATE TABLE IF NOT EXISTS reservations (
+        reservation_id TEXT PRIMARY KEY,
+        cell_id TEXT NOT NULL,
+        reserved_at_ms INTEGER NOT NULL,
+        epoch_day INTEGER NOT NULL,
+        estimated_tokens INTEGER NOT NULL,
+        actual_tokens INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS reservations_cell_time_idx ON reservations(cell_id, reserved_at_ms);
+      CREATE INDEX IF NOT EXISTS reservations_cell_day_idx ON reservations(cell_id, epoch_day);
+    `);
     this.load();
   }
 
@@ -241,18 +274,40 @@ export class UsageTracker {
   }
 
   /** ms until this cell can next accept a request of `estTokens` (0 = now). */
-  private msUntilFree(c: CellState, limit: ModelLimit, estTokens: number, nowMs: number): number {
+  private sharedUsage(id: string, nowMs: number): {
+    minute: Array<{ reserved_at_ms: number; tokens: number }>;
+    rpdCount: number;
+  } {
+    const minute = this.quotaDb.prepare(`
+      SELECT reserved_at_ms, COALESCE(actual_tokens, estimated_tokens) AS tokens
+      FROM reservations WHERE cell_id = @id AND reserved_at_ms > @cutoff
+      ORDER BY reserved_at_ms ASC
+    `).all({ id, cutoff: nowMs - WINDOW_MS }) as Array<{ reserved_at_ms: number; tokens: number }>;
+    const daily = this.quotaDb.prepare(`
+      SELECT COUNT(*) AS count FROM reservations WHERE cell_id = @id AND epoch_day = @day
+    `).get({ id, day: dayUtc(nowMs) }) as { count: number };
+    return { minute, rpdCount: daily.count };
+  }
+
+  private msUntilFree(
+    c: CellState,
+    limit: ModelLimit,
+    estTokens: number,
+    nowMs: number,
+    shared: { minute: Array<{ reserved_at_ms: number; tokens: number }>; rpdCount: number },
+  ): number {
     if (c.dead) return Number.POSITIVE_INFINITY;
     let wait = Math.max(0, c.cooldownUntilMs - nowMs);
-    if (limit.rpd > 0 && c.rpdCount >= limit.rpd) {
+    if (limit.rpd > 0 && Math.max(c.rpdCount, shared.rpdCount) >= limit.rpd) {
       wait = Math.max(wait, nextUtcMidnight(nowMs) - nowMs);
     }
-    if (c.reqTimes.length >= limit.rpm) {
-      const oldest = c.reqTimes[c.reqTimes.length - limit.rpm];
+    if (shared.minute.length >= limit.rpm) {
+      const oldest = shared.minute[shared.minute.length - limit.rpm].reserved_at_ms;
       wait = Math.max(wait, oldest + WINDOW_MS - nowMs);
     }
-    if (this.tpmUsed(c) + estTokens > limit.tpm && c.tokTimes.length) {
-      wait = Math.max(wait, c.tokTimes[0].t + WINDOW_MS - nowMs);
+    const sharedTokens = shared.minute.reduce((sum, row) => sum + row.tokens, 0);
+    if (sharedTokens + estTokens > limit.tpm && shared.minute.length) {
+      wait = Math.max(wait, shared.minute[0].reserved_at_ms + WINDOW_MS - nowMs);
     }
     return wait;
   }
@@ -265,33 +320,57 @@ export class UsageTracker {
    * name-mangling overflow models while trusted ones are free), then the
    * lowest daily count to spread load within the tier, tie-broken by supplied
    * order. Charges the cell optimistically. If nothing is free, returns the
-   * minimal wait; if every cell is dead, returns "exhausted".
+   * minimal wait; if every cell is dead, returns "exhausted". With
+   * `opts.preferTier1WaitMs`, a tier-2-only "free now" set additionally waits
+   * for a tier-1 cell that frees within that window (see `ReserveOpts`).
    */
-  reserve(candidates: Candidate[], nowMs = Date.now()): ReserveResult {
+  reserve(candidates: Candidate[], nowMs = Date.now(), opts: ReserveOpts = {}): ReserveResult {
+    return transaction(this.quotaDb, () => this.reserveLocked(candidates, nowMs, opts));
+  }
+
+  private reserveLocked(candidates: Candidate[], nowMs: number, opts: ReserveOpts): ReserveResult {
+    this.quotaDb.prepare("DELETE FROM reservations WHERE epoch_day < @day").run({ day: dayUtc(nowMs) });
     if (candidates.length === 0) return { kind: "exhausted" };
-    let best: { idx: number; cell: CellState; c: Candidate } | null = null;
+    let best: { idx: number; cell: CellState; c: Candidate; id: string; sharedRpdCount: number } | null = null;
     let minWait = Number.POSITIVE_INFINITY;
+    let minWaitTier1 = Number.POSITIVE_INFINITY;
     let anyAlive = false;
 
     for (let i = 0; i < candidates.length; i++) {
       const cand = candidates[i];
       const id = cellId(cand.provider, hashKeyValue(cand.keyValue), cand.model);
       const cell = this.cell(id, nowMs);
+      const shared = this.sharedUsage(id, nowMs);
       if (!cell.dead) anyAlive = true;
-      const wait = this.msUntilFree(cell, cand.limit, cand.limit.imgTokens, nowMs);
+      const wait = this.msUntilFree(cell, cand.limit, cand.limit.imgTokens, nowMs, shared);
       if (wait === 0) {
         const tier = cand.tier ?? 1;
         const bestTier = best ? (best.c.tier ?? 1) : Number.POSITIVE_INFINITY;
-        if (!best || tier < bestTier || (tier === bestTier && cell.rpdCount < best.cell.rpdCount)) {
-          best = { idx: i, cell, c: cand };
+        const rpdCount = Math.max(cell.rpdCount, shared.rpdCount);
+        if (!best || tier < bestTier || (tier === bestTier && rpdCount < best.sharedRpdCount)) {
+          best = { idx: i, cell, c: cand, id, sharedRpdCount: rpdCount };
         }
       } else if (Number.isFinite(wait)) {
         minWait = Math.min(minWait, wait);
+        if ((cand.tier ?? 1) === 1) minWaitTier1 = Math.min(minWaitTier1, wait);
       }
+    }
+
+    // Tier-1 patience: only tier-2 cells are free now, but a tier-1 cell
+    // frees soon — wait for it rather than feeding the page to a weak model.
+    const { preferTier1WaitMs: patience = 0 } = opts;
+    if (best && (best.c.tier ?? 1) >= 2 && patience > 0 && minWaitTier1 <= patience) {
+      return { kind: "wait", waitMs: minWaitTier1 };
     }
 
     if (best) {
       const estTokens = best.c.limit.imgTokens;
+      const reservationId = randomUUID();
+      this.quotaDb.prepare(`
+        INSERT INTO reservations (
+          reservation_id, cell_id, reserved_at_ms, epoch_day, estimated_tokens, actual_tokens
+        ) VALUES (@reservationId, @cellId, @nowMs, @epochDay, @estTokens, NULL)
+      `).run({ reservationId, cellId: best.id, nowMs, epochDay: dayUtc(nowMs), estTokens });
       best.cell.reqTimes.push(nowMs);
       best.cell.tokTimes.push({ t: nowMs, tok: estTokens });
       best.cell.rpdCount += 1;
@@ -299,6 +378,7 @@ export class UsageTracker {
       return {
         kind: "ok",
         token: {
+          reservationId,
           provider: best.c.provider,
           keyHash: hashKeyValue(best.c.keyValue),
           keyIndex: best.c.keyIndex,
@@ -313,6 +393,11 @@ export class UsageTracker {
 
   /** Reconcile the optimistic token estimate with the real prompt-token count. */
   commit(token: ReservedToken, actualTokens: number | undefined, nowMs = Date.now()): void {
+    if (token.reservationId && actualTokens != null) {
+      this.quotaDb.prepare(`
+        UPDATE reservations SET actual_tokens = @actualTokens WHERE reservation_id = @reservationId
+      `).run({ actualTokens, reservationId: token.reservationId });
+    }
     const c = this.cells.get(cellId(token.provider, token.keyHash, token.model));
     if (!c) return;
     c.consecFails = 0;
@@ -380,6 +465,14 @@ export class UsageTracker {
     }
     return out;
   }
+
+  /** Flush legacy cooldown/dead metadata and release the shared quota handle. */
+  close(): void {
+    if (this.closed) return;
+    this.flush();
+    this.quotaDb.close();
+    this.closed = true;
+  }
 }
 
 function mergeCell(a: PersistedCell, b: PersistedCell): PersistedCell {
@@ -409,5 +502,6 @@ export function getUsageTracker(cacheDir: string): UsageTracker {
 }
 
 export function __resetUsageTrackerForTests(): void {
+  for (const tracker of trackerCache.values()) tracker.close();
   trackerCache.clear();
 }

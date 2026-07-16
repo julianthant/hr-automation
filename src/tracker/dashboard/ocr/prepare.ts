@@ -10,6 +10,11 @@ import { operationTraceCode, runOcrOrchestrator, type OcrOrchestratorOpts } from
 import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
 import { OPERATION_COORDINATOR_WORKFLOWS } from "./shared.js";
+import {
+  emitI9CheckResultRows,
+  type EmitI9CheckResultRowsArgs,
+  type I9CheckFanBackSummary,
+} from "./i9-check-results.js";
 import { clearOcrPrepareAbort, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
 import { runRegistry, type RunHandle } from "../../../core/run-registry.js";
 import { openControlDb } from "../../../core/control-db.js";
@@ -90,11 +95,19 @@ export interface PrepareHandlerOpts {
    * hash from the registered-file store and queries the oath-upload tracker for a
    * filed ticket; tests stub it. When a prior ticket is found, prepare refuses the
    * upload with a structured `duplicate` response and does NOT enqueue a second
-   * ticket.
+   * ticket. Probe failures also refuse launch; a clean miss is distinct from an
+   * unavailable duplicate index.
    */
   findPriorOathUploadTicket?: (
     args: { pdfFileId?: string; trackerDir?: string },
   ) => PriorOathUploadTicket | undefined;
+  /**
+   * Test seam for the approve-less delegated-run result fan-back (the i9 check's
+   * per-person `operation-member` rows into the separations panel). The real
+   * implementation reads the completed OCR run's records and emits one row per
+   * checked person; tests stub it to capture the call.
+   */
+  emitI9CheckResults?: (args: EmitI9CheckResultRowsArgs) => I9CheckFanBackSummary;
 }
 
 export interface OathUploadPrepareEnqueueArgs {
@@ -148,7 +161,18 @@ export function buildOcrPrepareHandler(
     const isOathUploadTargetUp = !input.isReupload && input.targetWorkflow === "oath-upload";
     if (isOathUploadTargetUp) {
       const findPrior = opts.findPriorOathUploadTicket ?? defaultFindPriorOathUploadTicket;
-      const prior = findPrior({ pdfFileId: input.pdfFileId, trackerDir });
+      let prior: PriorOathUploadTicket | undefined;
+      try {
+        prior = findPrior({ pdfFileId: input.pdfFileId, trackerDir });
+      } catch (error) {
+        return {
+          status: 500,
+          body: {
+            ok: false,
+            error: `Oath Upload duplicate check failed; no task was launched: ${errorMessage(error)}`,
+          },
+        };
+      }
       if (prior) {
         log.warn(
           `[ocr-http] prepare: refusing duplicate oath-upload — PDF already filed ticket ${prior.ticketNumber} (session ${prior.sessionId})`,
@@ -247,7 +271,7 @@ export function buildOcrPrepareHandler(
     const emitOperationRow = (
       ocrStatus: string,
       ocrStep: string,
-      rowStatus: "running" | "failed" = "running",
+      rowStatus: "running" | "failed" | "done" = "running",
       rowStep = "ocr-prep",
     ): void => {
       if (!operationRef) return;
@@ -428,6 +452,40 @@ export function buildOcrPrepareHandler(
             },
           );
         }, trackerDir);
+
+        // ─── Result fan-back for an approve-less delegated run (i9 check) ─────
+        // A `completeDelegatedRun` spec has no approval gate — the OCR run just
+        // COMPLETED with its report. Fan the per-person results back into the
+        // coordinator's own panel as `operation-member` rows (separations'
+        // "Run I-9 Check": name + EID, done/failed, found/not-found tag), then
+        // drive the coordinator terminal. A fan-back failure is LOUD: the
+        // coordinator goes `failed` rather than sitting on an empty operation
+        // that reads as "checked, nobody found".
+        if (spec.completeDelegatedRun && operationRef) {
+          const fanBack = opts.emitI9CheckResults ?? emitI9CheckResultRows;
+          try {
+            const summary = fanBack({
+              sessionId,
+              ocrRunId: runId,
+              operation: {
+                workflow: operationRef.workflow,
+                runId: operationRef.runId,
+                traceId: operationRef.baseData.__traceId,
+              },
+              trackerDir,
+            });
+            emitOperationRow("complete", "results", "done", "i9-check");
+            logOnCoordinator(
+              `I-9 check complete — ${summary.emitted} person(s): ${summary.found} found in UCPath, ${summary.notFound} not found, ${summary.failed} unresolved`,
+              "operation:ocr-status",
+            );
+          } catch (fanBackErr) {
+            log.error(
+              `[ocr-http] i9 result fan-back failed for session ${sessionId}: ${errorMessage(fanBackErr)}`,
+            );
+            emitOperationRow("failed", "results-failed", "failed", "i9-check-failed");
+          }
+        }
       } catch (err) {
         log.error(`[ocr-http] orchestrator threw: ${errorMessage(err)}`);
         if (isOperatorDiscardAbortError(err)) {
@@ -483,30 +541,26 @@ function isFiledOathUploadTicket(ticketNumber: string | undefined): ticketNumber
  * content hash from the registered-file store (the `pdfFileId` is only the
  * first 32 hex of the sha256; the dup index keys on the full 64-hex `pdfHash`),
  * then looks for a prior oath-upload run that already FILED a ServiceNow ticket
- * for that same content. Returns undefined on any miss (no fileId, unregistered,
- * no prior filed ticket) so prepare proceeds normally — fail-safe, never blocks
- * a genuinely new upload.
+ * for that same content. A healthy index with no filed ticket is a clean miss.
+ * Missing file identity, hash resolution, or index/database failures throw so
+ * launch is rejected; bypassing duplicate protection could file a second ticket.
  */
 function defaultFindPriorOathUploadTicket(args: {
   pdfFileId?: string;
   trackerDir?: string;
 }): PriorOathUploadTicket | undefined {
-  if (!args.pdfFileId) return undefined;
+  if (!args.pdfFileId) throw new Error("oath-upload duplicate check requires pdfFileId");
   let sha256: string | undefined;
   let controlDb: ReturnType<typeof openControlDb> | undefined;
   try {
     controlDb = openControlDb({ trackerDir: args.trackerDir });
     const registered = getRegisteredFile(controlDb.db, args.pdfFileId);
     sha256 = registered?.sha256;
-  } catch {
-    // Registered-file store unavailable — can't resolve the hash, so we can't
-    // prove a duplicate. Let the upload proceed.
-    return undefined;
   } finally {
     controlDb?.close();
   }
-  if (!sha256) return undefined;
-  const priors = findPriorRunsForHash({ hash: sha256, trackerDir: args.trackerDir });
+  if (!sha256) throw new Error(`registered file ${args.pdfFileId} has no SHA-256 content hash`);
+  const priors = findPriorRunsForHash({ hash: sha256, trackerDir: args.trackerDir, requireIndex: true });
   const filed = priors.find((p) => isFiledOathUploadTicket(p.ticketNumber));
   if (!filed) return undefined;
   return {
