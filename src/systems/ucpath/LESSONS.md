@@ -249,3 +249,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `personSearch.resultEmplIdCells` in `selectors.ts` (replaces `personSearch.resultRows`)
 **Tags:** person-search, results-grid, rehire, duplicate, emplid, dead-selector, race, ambiguous, fail-loud, l0person, person-match
 **References:** `src/systems/ucpath/navigate.ts` (`raceNewHireVsRehireSignal`, `searchPerson`); `src/workflows/person-match/CLAUDE.md`. Live-probed 2026-07-13 via `playwright-cli` + Duo Autopilot on a real PERSON_SEARCH → PERSON_RESULTS match.
+
+## 2026-07-16 — Last Day Worked in comments does not set the UCPath transaction field
+
+**Tried:** Carrying the reconciled Last Day Worked only inside the Smart HR comments, with no write to the dedicated field or override checkbox.
+**Failed because:** A live read-only termination showed comments saying Last Day Worked 06/14/2026 while `HR_TBH_SCR_WRK_TBH_DATE$3` displayed 06/12/2026 and `HR_TBH_SCR_WRK_TBH_CHK2$3` was the separate override. Comments are audit context, not transaction state.
+**Fix:** Added input-specific termination selectors and `fillTerminationLastDateWorked`: check the override, fill the reconciled date, require each original control to detach/hide during its PeopleSoft fragment refresh (independent of spinner timing), re-resolve both controls, and require checked + exact value readback. Separations converts any uncertainty to fatal `LastDateWorkedVerificationError` before submit and records provenance only after success. A delayed/no-spinner regression test proves readback cannot begin against the pre-refresh DOM.
+**Tags:** termination, last-date-worked, override, peoplesoft, readback, provenance, fail-loud, live-verified

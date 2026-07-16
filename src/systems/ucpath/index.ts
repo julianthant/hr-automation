@@ -18,6 +18,7 @@ export {
   selectReasonCode,
   fillPersonalData,
   fillComments,
+  fillTerminationLastDateWorked,
   clickJobDataTab,
   fillJobData,
   clickEarnsDistTab,

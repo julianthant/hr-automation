@@ -120,9 +120,9 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 
 **Tried:** After `clickGoToTimecard` returned true, `runNewKronosTimecard` went straight to `setDateRange` + `getSeparationTimecardData`, trusting that the open timecard was the searched employee's.
 **Failed because:** Go To → Timecard does not always switch employees — the PREVIOUS employee's timecard can stay on screen even though the search selected a new person. Live (operator screenshot): a search for 10603110 (Lua-Sandoval) left Yang, Elaine C / 10832819 displayed; the parse then attributed Yang's punches/sick/holiday to Lua-Sandoval's separation. The Go To render-race fix (same date) reduces this but doesn't eliminate the stale-timecard window.
-**Fix:** `verifyTimecardEmployee(page, eid)` runs after `clickGoToTimecard`: it closes the search slide-out first (so its "Results for <eid>" text can't false-pass), then polls the top-level timecard text (where the grid + header render — `getSeparationTimecardData` reads them via `page.evaluate`, not the iframe) for the searched EID up to ~8s, reporting any other 8-digit id found. `runNewKronosTimecard` THROWS on a miss — logged + non-fatal in the settled `ctx.parallel` block (the run completes on the Kuali fallback), but VISIBLE rather than silently reading the wrong person.
+**Fix:** `verifyTimecardEmployee(page, eid)` runs after `clickGoToTimecard` and throws before reading punches when the open employee cannot be positively verified. The original page-wide scan was superseded 2026-07-16: both the navigation wait and final gate now read only the authoritative `.emp-nav-id` header and require an exact EID, because retained search/body text can contain the requested EID while another employee remains open. The throw is logged + non-fatal in the settled `ctx.parallel` block (the run completes on the Kuali fallback), but visible rather than silently reading the wrong person.
 **Selector:** `verifyTimecardEmployee` in `navigate.ts`; `runNewKronosTimecard` in `src/workflows/separations/steps/kronos-search.ts`
-**Tags:** timecard, stale, wrong-person, employee-id, verify, go-to, fail-loud, page-text, separation
+**Tags:** timecard, stale, wrong-person, employee-id, verify, go-to, fail-loud, emp-nav-id, separation
 **References:** `src/workflows/separations/CLAUDE.md` "Found-but-can't-open / wrong-person fails loud"
 
 ## 2026-07-02 — People editor (Timekeeper / Pay Rule) renders in a `managePeople` frame, not the top-level page
@@ -168,3 +168,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `people.saveButton` (state contract documented in its JSDoc); `savePersonRecord` in `navigate.ts`
 **Tags:** people, save, readback, disabled, jqx, commit, kronos-pay-rule, fail-loud
 **References:** `src/workflows/kronos-pay-rule/CLAUDE.md`, `scripts/verify-kronos-save-state.ts`
+
+## 2026-07-16 — Timecard identity must use the authoritative header, not page-wide EID text
+
+**Tried:** `waitForTimecardEmployee` and `verifyTimecardEmployee` searched `document.body.innerText` for the requested EID after Go To → Timecard.
+**Failed because:** New Kronos retains the requested EID in search chrome while the open timecard can still belong to the previous employee, so the target appeared somewhere on the page and falsely passed. Live mapping found the authoritative desktop header at `<div class="emp-nav-id">10403587</div>`.
+**Fix:** Added `timecard.loadedEmployeeId` and routed both gates through `scanTimecardEmployeeHeader`, which reads only `.emp-nav-id` and requires an exact EID. The legacy probe export now has header-only exact semantics; unit coverage proves body-like text containing the target cannot pass.
+**Tags:** timecard, employee, identity, eid, emp-nav-id, wrong-person, fail-loud, live-verified

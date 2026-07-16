@@ -195,11 +195,9 @@ export const timecard = {
    * its displayed value via `.inputValue()` does NOT require actionability
    * checks, so it's used as the positive "did the displayed period actually
    * change" signal after a period switch.
-   * // TODO(live-verify): the exact displayed value/format of this input
-   * before vs. after switching to Previous Pay Period has not been confirmed
-   * against a live UKG page — this selector is inherited from the existing
-   * click-target id (mapped 2026-04-01), not a fresh snapshot of its value
-   * semantics.
+   * Live verification confirmed its value changes from "Current Pay Period"
+   * to "Previous Pay Period" and the rendered rows changed from 7/05–7/18 to
+   * 6/21–7/04. verified 2026-07-16
    * @tags timeframe, selector, input, period, readback, timecard, ukg, old-kronos
    */
   periodSelectorInput: (f: Frame): Locator => f.locator("#timeframe-selector-input"),

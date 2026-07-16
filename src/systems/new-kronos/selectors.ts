@@ -222,6 +222,15 @@ export const goToMenu = {
 
 export const timecard = {
   /**
+   * Authoritative employee EID in the open desktop timecard header. The live
+   * WFD DOM renders `<div class="emp-nav-id">10403587</div>` next to the
+   * employee-name control; unlike page-wide text, this cannot match an EID
+   * lingering in search chrome. verified 2026-07-16
+   * @tags employee, eid, identity, header, timecard, new-kronos
+   */
+  loadedEmployeeId: (page: Page): Locator => page.locator(".emp-nav-id").first(),
+
+  /**
    * Pay-period trigger button — text varies ("Current Pay Period",
    * "Previous Pay Period", or a date range). Match all three.
    * verified 2026-06-18

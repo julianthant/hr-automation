@@ -1059,11 +1059,9 @@ export const separationsWorkflow = defineWorkflow({
     // kronos-search skip. Nothing to do here.)
 
     // ─── Step 6: UCPath Smart HR Transaction ───
-    // TODO(separations): explicitly set UCPath Last Date Worked = lastDayWorked
-    // + Override Last Date Worked checkbox (needs live UCPath selector mapping).
-    // Today the reconciled lastDayWorked flows only through finalComments →
-    // fillComments; the UCPath form field / override checkbox are NOT set
-    // because those selectors don't exist yet (deferred — needs a live mapping).
+    // The reconciled `lastDayWorked` is written to UCPath's dedicated field;
+    // the driver checks Override Last Date Worked and requires an exact value +
+    // checkbox readback before Save & Submit can run.
     // Two reasons the UCPath transaction step is skipped with a known number:
     //   1. Edit-and-resume: a prefilled `transactionNumber` means UCPath already
     //      accepted the submit on a prior run and the user just wants Kuali
@@ -1106,6 +1104,7 @@ export const separationsWorkflow = defineWorkflow({
         finalComments,
         template,
         transactionNumber,
+        lastDayWorked,
       );
       transactionNumber = result.transactionNumber;
       submittedWithoutTxnNumber = result.submittedWithoutTxnNumber;

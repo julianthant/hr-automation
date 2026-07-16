@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
     // Kuali name write the identity-check "similar" branch makes (real fn drives
     // a live Kuali form — stub it).
     updateEmployeeName: vi.fn(),
+    updateLastDayWorked: vi.fn(),
     // Separation Date write-back (real fn drives a live Kuali form — stub it).
     // Live runs now write the derived Separation Date back when it differs.
     updateSeparationDate: vi.fn(),
@@ -107,6 +108,7 @@ vi.mock("../../../../src/systems/ucpath/index.js", async (importOriginal) => ({
 vi.mock("../../../../src/systems/kuali/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../src/systems/kuali/index.js")>()),
   updateEmployeeName: mocks.updateEmployeeName,
+  updateLastDayWorked: mocks.updateLastDayWorked,
   updateSeparationDate: mocks.updateSeparationDate,
   // The handler calls fillTimekeeperTasks directly on the kronos-search SKIP
   // path (non-HDH / prefill / preset) — stub it so the fake page isn't driven,
@@ -258,6 +260,7 @@ beforeEach(() => {
     data: { deptId: "", departmentDescription: "", jobCode: "", jobDescription: "" },
   });
   mocks.updateEmployeeName.mockResolvedValue(undefined);
+  mocks.updateLastDayWorked.mockResolvedValue(undefined);
   mocks.updateSeparationDate.mockResolvedValue(undefined);
   mocks.fillTimekeeperTasks.mockResolvedValue(undefined);
 });
@@ -444,6 +447,25 @@ describe("separations handler — live (non-dry-run) gates the writes", () => {
     const { ctx } = makeFakeCtx({ docId: "4131" });
     await runHandler(ctx, { docId: "4131" });
     assert.equal(mocks.runUcpathTransaction.mock.calls.length, 1);
+  });
+
+  it("passes the Kuali Last Day Worked into UCPath when Kronos has no punch", async () => {
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runUcpathTransaction.mock.calls[0][7], "01/15/2026");
+  });
+
+  it("passes the reconciled New Kronos punch into the UCPath Last Date Worked field", async () => {
+    mocks.runKronosSearch.mockResolvedValueOnce({
+      newK: {
+        status: "fulfilled",
+        value: { found: true, lastPunchDate: "01/20/2026", sickDates: [], holidayDates: [] },
+      },
+      kualiTimekeeper: { status: "fulfilled", value: undefined },
+    });
+    const { ctx } = makeFakeCtx({ docId: "4131" });
+    await runHandler(ctx, { docId: "4131" });
+    assert.equal(mocks.runUcpathTransaction.mock.calls[0][7], "01/20/2026");
   });
 
   it("DOES call runKualiFinalize when dryRun is absent", async () => {
