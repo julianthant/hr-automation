@@ -12,10 +12,12 @@ import {
   hrTasks,
   personalData as personalDataSelectors,
   comments as commentsSelectors,
+  termination as terminationSelectors,
   jobData as jobDataSelectors,
   getContentFrame,
 } from "./selectors.js";
 import { log } from "../../utils/log.js";
+import { errorMessage } from "../../utils/errors.js";
 import { dismissPeopleSoftModalMask } from "../common/modal.js";
 import { clickIfPresent, safeClick, safeFill } from "../common/index.js";
 
@@ -511,6 +513,101 @@ export async function fillComments(
   });
 
   log.success("Comments filled");
+}
+
+/** Positive readback gate for the termination Last Date Worked controls. */
+export function assertTerminationLastDateWorkedReadback(
+  overrideChecked: boolean,
+  actualValue: string,
+  expectedValue: string,
+): void {
+  if (!overrideChecked) {
+    throw new Error("UCPath Last Date Worked override is not checked after the write");
+  }
+  const actual = actualValue.trim();
+  const expected = expectedValue.trim();
+  if (!actual) {
+    throw new Error("UCPath Last Date Worked readback is blank after the write");
+  }
+  if (actual !== expected) {
+    throw new Error(
+      `UCPath Last Date Worked readback mismatch: expected "${expected}", got "${actual}"`,
+    );
+  }
+}
+
+/** @internal Exported so delayed/no-spinner fragment-refresh behavior is regression tested. */
+export async function requirePeopleSoftControlRefresh(
+  locator: Locator,
+  action: () => Promise<void>,
+  label: string,
+): Promise<void> {
+  const handle = await locator.elementHandle({ timeout: 10_000 });
+  if (!handle) {
+    throw new Error(`UCPath ${label} control was not attached before the write`);
+  }
+  const refreshResult = handle
+    .waitForElementState("hidden", { timeout: 15_000 })
+    .then(() => null, (error: unknown) => error);
+  try {
+    await action();
+    const refreshError = await refreshResult;
+    if (refreshError) {
+      throw new Error(
+        `UCPath ${label} did not detach/hide during its PeopleSoft fragment refresh: ` +
+        errorMessage(refreshError),
+      );
+    }
+  } finally {
+    await handle.dispose();
+  }
+}
+
+/**
+ * Check the termination override, write Last Date Worked, then re-resolve and
+ * positively verify both controls after PeopleSoft's fragment refreshes.
+ */
+export async function fillTerminationLastDateWorked(
+  page: Page,
+  frame: FrameLocator,
+  expectedDate: string,
+): Promise<void> {
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(expectedDate)) {
+    throw new Error(
+      `UCPath Last Date Worked "${expectedDate}" is malformed (expected MM/DD/YYYY)`,
+    );
+  }
+  await dismissPeopleSoftModalMask(page);
+
+  const initialOverride = terminationSelectors.overrideLastDateWorkedCheckbox(frame);
+  if (!(await initialOverride.isChecked())) {
+    await requirePeopleSoftControlRefresh(
+      initialOverride,
+      () => initialOverride.check({ timeout: 10_000 }),
+      "Last Date Worked override",
+    );
+    await waitForPeopleSoftProcessing(frame, 30_000);
+  }
+
+  const input = terminationSelectors.lastDateWorkedInput(frame);
+  await safeFill(input, expectedDate, {
+    timeout: 10_000,
+    label: "ucpath termination last date worked",
+  });
+  await requirePeopleSoftControlRefresh(
+    input,
+    () => input.press("Tab"),
+    "Last Date Worked",
+  );
+  await waitForPeopleSoftProcessing(frame, 30_000);
+
+  const refreshedOverride = terminationSelectors.overrideLastDateWorkedCheckbox(frame);
+  const refreshedInput = terminationSelectors.lastDateWorkedInput(frame);
+  await refreshedInput.waitFor({ state: "visible", timeout: 15_000 });
+  const checked = await refreshedOverride.isChecked({ timeout: 10_000 });
+  const actual = await refreshedInput.inputValue({ timeout: 10_000 });
+  assertTerminationLastDateWorkedReadback(checked, actual, expectedDate);
+  log.success(`Last Date Worked verified as ${expectedDate} with override checked`);
 }
 
 // ─── STEP 6: Click Job Data tab ───

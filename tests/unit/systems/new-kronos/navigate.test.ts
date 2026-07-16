@@ -23,6 +23,7 @@ import {
   calendarDayLabelPattern,
   parseCalendarHeaderOrdinal,
   probeEidInTimecardText,
+  scanTimecardEmployeeHeader,
   payRuleCodeCommittedInCell,
   peopleHeaderShowsEid,
 } from "../../../../src/systems/new-kronos/navigate.js";
@@ -36,6 +37,11 @@ describe("mmddyyyyToDate", () => {
 
   it("throws on a malformed date string (via parseMmddyyyy)", () => {
     assert.throws(() => mmddyyyyToDate("2026-06-11"));
+  });
+
+  it("throws on an impossible calendar date instead of accepting JS Date rollover", () => {
+    assert.throws(() => mmddyyyyToDate("2/30/2026"), /invalid calendar date/);
+    assert.throws(() => mmddyyyyToDate("2/29/2026"), /invalid calendar date/);
   });
 });
 
@@ -74,28 +80,59 @@ describe("resolveSeparationTimecardDates", () => {
 });
 
 describe("probeEidInTimecardText", () => {
-  it("matches when the searched EID appears in the timecard header text", () => {
-    const probe = probeEidInTimecardText(
-      "Employee timecards\n10864213 · Argumedo, Zaira N\nMon 6/23",
-      "10864213",
-    );
+  it("matches the exact EID in the authoritative timecard header", () => {
+    const probe = probeEidInTimecardText(" 10864213 ", "10864213");
     assert.equal(probe.match, true);
     assert.equal(probe.otherEid, null);
   });
 
   it("reports a different 8-digit EID as a wrong-person signal", () => {
     const probe = probeEidInTimecardText(
-      "Employee timecards\n10851756 · Someone Else\nMon 6/23",
+      "10851756",
       "10864213",
     );
     assert.equal(probe.match, false);
     assert.equal(probe.otherEid, "10851756");
   });
 
-  it("returns no otherEid when no 8-digit id is visible", () => {
-    const probe = probeEidInTimecardText("Employee timecards\nLoading…", "10864213");
+  it("returns no otherEid when the header is blank or malformed", () => {
+    const probe = probeEidInTimecardText("Loading…", "10864213");
     assert.equal(probe.match, false);
     assert.equal(probe.otherEid, null);
+  });
+
+  it("does not match a target EID embedded elsewhere in body-like text", () => {
+    const probe = probeEidInTimecardText(
+      "Employee Search 10864213 … header 10851756",
+      "10864213",
+    );
+    assert.equal(probe.match, false);
+    assert.equal(probe.otherEid, null);
+  });
+});
+
+describe("scanTimecardEmployeeHeader", () => {
+  it("reads only .emp-nav-id and never page-wide text", async () => {
+    let evaluateCalled = false;
+    const locator = {
+      first: () => locator,
+      innerText: async () => "10851756",
+    };
+    const page = {
+      locator: (selector: string) => {
+        assert.equal(selector, ".emp-nav-id");
+        return locator;
+      },
+      evaluate: async () => {
+        evaluateCalled = true;
+        return "Employee Search 10864213";
+      },
+    };
+    assert.deepEqual(
+      await scanTimecardEmployeeHeader(page as never, "10864213"),
+      { ok: false, shownEid: "10851756" },
+    );
+    assert.equal(evaluateCalled, false);
   });
 });
 

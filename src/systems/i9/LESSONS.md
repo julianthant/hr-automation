@@ -69,3 +69,10 @@ Each entry has the same shape so `npm run selector:search` can index it. Require
 **Selector:** `login.appLaunchLink`, `login.idpSelect`, `login.idpSelectButton` in `selectors.ts`; SSO form + Duo are the shared `src/infra/auth/sso-fields.ts` / `duo-poll.ts` selectors.
 **References:** Mapped + verified end-to-end live 2026-07-01 via `playwright-cli` + Duo Autopilot (landed on `wwwe.i9complete.com` Required Training Notification, logged in). Supersedes the retired 2026-06-04 "I-9 credentials can differ from UCPath" and 2026-06-24 "waitForURL(wwwe) masked a stale password" entries — both described the now-deleted vendor login.
 **Tags:** i9, login, sso, shibboleth, duo, ucop, samlproxy, wayf, triton, credentials, migration
+
+## 2026-07-16 — Remote I-9 create success is the exact callback alert plus same-profile redirect
+
+**Tried:** Clicking a generic OK immediately after Create I-9, then accepting a broad success phrase or the Create button becoming hidden; onboarding retried the mutation twice after one SSN preflight search.
+**Failed because:** The definitive alert was dismissed before inspection, hidden structure did not prove a record existed, and a server-side success with a lost callback could be created again by the inner retry. Live-loaded production `employee.profile.js` showed the real callback: POST `/form-remoteaccess/create-newhire`, errors bound through `.ErrorMessage`, exact email(s)/message(s) success alerts, then redirect to the same profile after OK.
+**Fix:** Observe error/success first with error precedence; accept only the two anchored success strings; click OK only after success; require `/employee/profile/{sameId}` (or the documented mobile query). Remove the hidden-button fallback and make onboarding creation single-attempt so a later retry repeats the authoritative SSN search.
+**Tags:** i9, remote, create, callback, confirmation, redirect, idempotency, retry, fail-loud, live-verified

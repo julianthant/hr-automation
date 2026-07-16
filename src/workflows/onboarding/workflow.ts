@@ -423,26 +423,24 @@ export const onboardingWorkflow = defineWorkflow({
         await i9Page.keyboard.press("Escape");
         await i9Page.waitForTimeout(500);
 
-        const i9Result = await ctx.retry(
-          async () => {
-            const result = await createI9Employee(i9Page, {
-              firstName: data!.firstName,
-              middleName: data!.middleName,
-              lastName: data!.lastName,
-              ssn: data!.ssn!,
-              dob: data!.dob!,
-              email: data!.email ?? email,
-              departmentNumber: data!.departmentNumber!,
-              startDate: data!.effectiveDate,
-            });
-            if (!result.success || !result.profileId) {
-              throw new Error(result.error ?? "I-9 creation returned no profile ID");
-            }
-            return result;
-          },
-          { attempts: 2, backoffMs: 3_000 },
-        );
-        const pid = i9Result.profileId!;
+        // Create is deliberately single-attempt. If the remote mutation lands
+        // but its callback/redirect cannot be verified, retrying here could
+        // create a duplicate because the authoritative SSN search happened
+        // before this call. The next operator retry starts from that search.
+        const i9Result = await createI9Employee(i9Page, {
+          firstName: data.firstName,
+          middleName: data.middleName,
+          lastName: data.lastName,
+          ssn: data.ssn,
+          dob: data.dob,
+          email: data.email ?? email,
+          departmentNumber: data.departmentNumber,
+          startDate: data.effectiveDate,
+        });
+        if (!i9Result.success || !i9Result.profileId) {
+          throw new Error(i9Result.error ?? "I-9 creation returned no profile ID");
+        }
+        const pid = i9Result.profileId;
         log.success(`I-9 profile created: ${pid}`);
         ctx.updateData({ i9ProfileId: pid });
         resultPid = pid;

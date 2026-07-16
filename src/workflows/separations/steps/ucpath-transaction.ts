@@ -10,6 +10,7 @@ import {
   clickCreateTransaction,
   selectReasonCode,
   fillComments,
+  fillTerminationLastDateWorked,
   clickSaveAndSubmit,
   findExistingTerminationTransaction,
   scrollToTransactionReadbackArea,
@@ -44,6 +45,17 @@ export class EmplIdNotRecognizedError extends WorkflowError {
   }
 }
 
+/** Fatal: the editable UCPath LDW controls could not be positively read back. */
+export class LastDateWorkedVerificationError extends WorkflowError {
+  constructor(expectedDate: string, detail: string) {
+    super(
+      `UCPath could not verify Last Date Worked "${expectedDate}" with the override checked — ` +
+      `${detail}. The transaction was not submitted; review the Smart HR form before retrying.`,
+    );
+    this.name = "LastDateWorkedVerificationError";
+  }
+}
+
 /**
  * Body of the `ucpath-transaction` step.
  * Creates the UCPath Smart HR termination transaction.
@@ -58,6 +70,7 @@ export async function runUcpathTransaction(
   finalComments: string,
   template: string,
   initialTransactionNumber: string,
+  lastDayWorked: string,
 ): Promise<UcpathTransactionResult> {
   const t0 = Date.now();
   log.debug(`[Step: ucpath-transaction] START empl='${kualiData.eid}' template='${template}'`);
@@ -135,6 +148,25 @@ export async function runUcpathTransaction(
         throw e;
       }
 
+      try {
+        await fillTerminationLastDateWorked(ucpathPage, frame, lastDayWorked);
+      } catch (e) {
+        await ctx.screenshot({
+          kind: "error",
+          label: "ucpath-last-date-worked-unverified",
+          systems: ["ucpath"],
+          stitch: true,
+        });
+        throw new LastDateWorkedVerificationError(lastDayWorked, errorMessage(e));
+      }
+      ctx.recordData({
+        direction: "write",
+        field: "lastDayWorked",
+        label: "Last Date Worked",
+        value: lastDayWorked,
+        system: "UCPath Smart HR",
+      });
+
       const submitResult = await clickSaveAndSubmit(ucpathPage, frame, kualiData.eid);
       transactionNumber = submitResult.transactionNumber ?? "";
       log.step(
@@ -172,7 +204,7 @@ export async function runUcpathTransaction(
       // Empl-ID-not-recognized is FATAL and self-explanatory — let it escape so
       // the run fails with the clear message (its own screenshot already fired)
       // instead of falling through to a blank Kuali finalization.
-      if (e instanceof EmplIdNotRecognizedError) throw e;
+      if (e instanceof EmplIdNotRecognizedError || e instanceof LastDateWorkedVerificationError) throw e;
       log.error(`[UCPath Txn] Failed: ${errorMessage(e)}`);
       // Diagnostic capture for this soft-failure path. The error is swallowed
       // here (kuali-finalization still runs, preps the form blank for manual

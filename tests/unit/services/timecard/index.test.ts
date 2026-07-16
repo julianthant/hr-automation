@@ -26,6 +26,9 @@ import assert from "node:assert/strict";
 import {
   didPeriodLabelSwitch,
   formatTimecardDate,
+  resolveCurrentVisibleTimecardRange,
+  resolvePreviousVisibleTimecardRange,
+  runTimecardCheck,
   timecardCheckWindows,
 } from "../../../../src/services/timecard/index.js";
 
@@ -71,6 +74,13 @@ describe("formatTimecardDate", () => {
     assert.throws(() => formatTimecardDate(3, 32, winterWindow));
   });
 
+  it("throws when a caller supplies an invalid Date endpoint", () => {
+    assert.throws(
+      () => formatTimecardDate(1, 2, { start: new Date(Number.NaN), end: new Date(2026, 0, 31) }),
+      /range start is not a valid Date/,
+    );
+  });
+
   it("resolves Feb 29 only when a candidate year is a leap year", () => {
     const leap = { start: new Date(2028, 0, 1), end: new Date(2028, 11, 31) };
     assert.equal(formatTimecardDate(2, 29, leap), "02/29/2028");
@@ -95,6 +105,93 @@ describe("timecardCheckWindows", () => {
   it("kills the Dec→Jan bug: a Dec 30 row read while running on Jan 15 resolves to LAST year", () => {
     const { current } = timecardCheckWindows(new Date(2026, 0, 15));
     assert.equal(formatTimecardDate(12, 30, current), "12/30/2025");
+  });
+});
+
+describe("visible timecard ranges", () => {
+  it("resolves a current pay period from the actual rendered first/last rows", () => {
+    assert.deepEqual(
+      resolveCurrentVisibleTimecardRange(
+        { first: { month: 12, day: 21 }, last: { month: 1, day: 3 } },
+        new Date(2026, 0, 2, 14, 30),
+      ),
+      { start: new Date(2025, 11, 21), end: new Date(2026, 0, 3) },
+    );
+  });
+
+  it("does not reject a leap-day endpoint merely because an adjacent candidate year is non-leap", () => {
+    assert.deepEqual(
+      resolveCurrentVisibleTimecardRange(
+        { first: { month: 2, day: 29 }, last: { month: 3, day: 13 } },
+        new Date(2028, 2, 1),
+      ),
+      { start: new Date(2028, 1, 29), end: new Date(2028, 2, 13) },
+    );
+  });
+
+  it("resolves the previous rendered range relative to the verified current range", () => {
+    const current = { start: new Date(2026, 0, 4), end: new Date(2026, 0, 17) };
+    assert.deepEqual(
+      resolvePreviousVisibleTimecardRange(
+        { first: { month: 12, day: 21 }, last: { month: 1, day: 3 } },
+        current,
+      ),
+      { start: new Date(2025, 11, 21), end: new Date(2026, 0, 3) },
+    );
+  });
+
+  it("fails loud when the rendered current rows do not contain the current date", () => {
+    assert.throws(
+      () => resolveCurrentVisibleTimecardRange(
+        { first: { month: 6, day: 1 }, last: { month: 6, day: 14 } },
+        new Date(2026, 6, 16),
+      ),
+      /does not contain/,
+    );
+  });
+
+  it("fails loud on impossible rendered endpoints instead of accepting Date rollover", () => {
+    assert.throws(
+      () => resolveCurrentVisibleTimecardRange(
+        { first: { month: 2, day: 30 }, last: { month: 3, day: 14 } },
+        new Date(2026, 2, 1),
+      ),
+      /impossible/,
+    );
+  });
+});
+
+describe("runTimecardCheck", () => {
+  it("passes exact visible current and previous ranges to the driver", async () => {
+    const ranges = [
+      { first: { month: 1, day: 4 }, last: { month: 1, day: 17 } },
+      { first: { month: 12, day: 21 }, last: { month: 1, day: 3 } },
+    ];
+    const seen: Array<{ start: Date; end: Date }> = [];
+    const page = { waitForTimeout: async () => {} };
+    const result = await runTimecardCheck(
+      page as never,
+      {
+        goToTimecard: async () => true,
+        switchPeriod: async () => true,
+        readVisibleMonthDays: async () => {
+          const next = ranges.shift();
+          assert.ok(next);
+          return next;
+        },
+        readLastDate: async (_page, range) => {
+          seen.push(range);
+          return seen.length === 1 ? null : "12/30/2025";
+        },
+      },
+      new Date(2026, 0, 15, 9),
+    );
+
+    assert.equal(result, "12/30/2025");
+    assert.deepEqual(seen, [
+      { start: new Date(2026, 0, 4), end: new Date(2026, 0, 17) },
+      { start: new Date(2025, 11, 21), end: new Date(2026, 0, 3) },
+    ]);
   });
 });
 

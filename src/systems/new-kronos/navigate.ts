@@ -24,6 +24,7 @@ import {
   didPeriodLabelSwitch,
   type TimecardDateRange,
   type TimecardDriver,
+  type VisibleTimecardMonthDays,
 } from "../../services/timecard/index.js";
 
 export const NEW_KRONOS_URL = "https://ucsd-sso.prd.mykronos.com/wfd/home";
@@ -300,24 +301,39 @@ export async function selectEmployeeResult(page: Page): Promise<boolean> {
 }
 
 /**
- * Probe top-level page text for the searched EID on the open timecard.
- * Pure + unit-pinned — the live evaluate wrapper passes `document.body.innerText`.
+ * Probe the authoritative `.emp-nav-id` timecard-header value for the searched
+ * EID. Kept under the existing export name for direct-module compatibility.
  */
 export function probeEidInTimecardText(
   text: string,
   searchedEid: string,
 ): { match: boolean; otherEid: string | null } {
-  // Delegates to the shared identity primitive (`checkDisplayedIdentity`):
-  // word-boundary match on the searched EID, and any competing 8-digit id on the
-  // timecard reported as a positive wrong-person signal.
-  const r = checkDisplayedIdentity(searchedEid, text);
-  return { match: r.ok, otherEid: r.shown };
+  const header = text.trim();
+  const r = checkDisplayedIdentity(searchedEid, header, { mode: "exact" });
+  return {
+    match: r.ok,
+    otherEid: !r.ok && /^\d{8}$/.test(header) ? header : null,
+  };
+}
+
+export interface TimecardEmployeeCheck {
+  ok: boolean;
+  /** A DIFFERENT 8-digit id visible on the timecard when `ok` is false. */
+  shownEid: string | null;
+}
+
+/** Read only the live-verified timecard identity header; never page-wide text. */
+export async function scanTimecardEmployeeHeader(
+  page: Page,
+  eid: string,
+): Promise<TimecardEmployeeCheck> {
+  const header = await timecard.loadedEmployeeId(page).innerText({ timeout: 500 });
+  const probe = probeEidInTimecardText(header, eid);
+  return { ok: probe.match, shownEid: probe.match ? eid : probe.otherEid };
 }
 
 /**
- * Poll the open timecard until the searched EID appears in the header/text.
- * NEEDS LIVE RE-VERIFY 2026-06-29: confirm the searched EID renders as visible
- * text in the WFD timecard employee header (basis of this check).
+ * Poll the open timecard until its authoritative header shows the searched EID.
  */
 async function waitForTimecardEmployee(
   page: Page,
@@ -326,15 +342,11 @@ async function waitForTimecardEmployee(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    // TODO(live-verify): scope this to a pinpoint WFD timecard employee-header
-    // selector once one can be live-mapped (needs a found employee's open
-    // timecard). document.body.innerText EXCLUDES <input> values, so the searched
-    // EID cannot leak from the search box. Compare/throw is routed through the
-    // shared identity primitive via `probeEidInTimecardText`.
-    const bodyText = await page
-      .evaluate(() => document.body?.innerText ?? "")
-      .catch(() => null);
-    if (bodyText !== null && probeEidInTimecardText(bodyText, eid).match) return true;
+    try {
+      if ((await scanTimecardEmployeeHeader(page, eid)).ok) return true;
+    } catch {
+      // Header not rendered yet. Keep polling; timeout remains fail-closed.
+    }
     await page.waitForTimeout(500);
   }
   return false;
@@ -463,14 +475,6 @@ export async function clickGoToTimecard(page: Page, eid: string): Promise<boolea
   return false;
 }
 
-/** Result of confirming the open timecard belongs to the searched employee. */
-export interface TimecardEmployeeCheck {
-  /** True when the searched EID is shown on the open timecard header. */
-  ok: boolean;
-  /** A DIFFERENT 8-digit id visible on the timecard when `ok` is false (else null). */
-  shownEid: string | null;
-}
-
 /**
  * Confirm the OPEN timecard belongs to the searched employee.
  *
@@ -481,14 +485,9 @@ export interface TimecardEmployeeCheck {
  * (2026-06-24). Reading that stale grid would attribute the wrong person's
  * punches/sick/holiday to this separation.
  *
- * The search slide-out is closed FIRST so its "Results for <eid>" text can't
- * false-pass the check, then the top-level timecard text is polled for the
- * searched EID (the grid + header render top-level — `getSeparationTimecardData`
- * reads them via `page.evaluate`, not the iframe). On a miss it reports any other
- * 8-digit id found (the wrong employee) so the caller can fail loud with detail.
- *
- * NEEDS LIVE VERIFY: confirm the searched EID renders as visible text in the WFD
- * timecard employee header (the basis of this check).
+ * The search slide-out is closed FIRST, then the live-verified `.emp-nav-id`
+ * header is polled. On a miss it reports a different exact 8-digit header value
+ * so the caller can fail loud with the wrong employee's EID.
  */
 export async function verifyTimecardEmployee(
   page: Page,
@@ -499,25 +498,12 @@ export async function verifyTimecardEmployee(
   const deadline = Date.now() + 8_000;
   let shownEid: string | null = null;
   while (Date.now() < deadline) {
-    // TODO(live-verify): scope this to a pinpoint WFD timecard employee-header
-    // selector once one can be live-mapped (needs a found employee's open
-    // timecard). document.body.innerText EXCLUDES <input> values and the search
-    // slide-out is closed above, so the searched EID cannot linger from the
-    // global Employee Search box. The compare/throw is routed through the shared
-    // identity primitive via `probeEidInTimecardText` (word-boundary + competing
-    // 8-digit id capture).
-    //
-    // Fail SAFE, not open: a probe EXCEPTION must NOT confirm the employee. This
-    // gate stops a stale/wrong employee's timecard from being read into a
-    // separation — a thrown probe means "could not verify" (keep polling, then
-    // the caller throws).
-    const bodyText = await page
-      .evaluate(() => document.body?.innerText ?? "")
-      .catch(() => null);
-    if (bodyText !== null) {
-      const probe = probeEidInTimecardText(bodyText, eid);
-      if (probe.match) return { ok: true, shownEid: eid };
-      shownEid = probe.otherEid;
+    try {
+      const probe = await scanTimecardEmployeeHeader(page, eid);
+      if (probe.ok) return probe;
+      shownEid = probe.shownEid;
+    } catch {
+      // Header not readable yet. Keep polling; final result remains fail-closed.
     }
     await page.waitForTimeout(500);
   }
@@ -639,6 +625,28 @@ export async function getTimecardLastDate(
   return null;
 }
 
+/** Read the actual first/last month-day pairs rendered in the WFD date grid. */
+export async function getVisibleTimecardMonthDays(
+  page: Page,
+): Promise<VisibleTimecardMonthDays> {
+  const dates = await page.evaluate(() => {
+    const viewport = document.querySelectorAll(".ui-grid-viewport")[0];
+    if (!viewport) return [];
+    return Array.from(viewport.querySelectorAll("[role='row']"))
+      .map((row) => {
+        const text = row.textContent;
+        return typeof text === "string" ? text.replace(/[^\w\s/]/g, "").trim() : "";
+      })
+      .map((text) => text.match(/^[A-Z][a-z]{2}\s+(\d+)\/(\d+)$/))
+      .filter((match): match is RegExpMatchArray => match !== null)
+      .map((match) => ({ month: Number(match[1]), day: Number(match[2]) }));
+  });
+  if (dates.length === 0) {
+    throw new Error("[New Kronos] could not read any visible timecard date rows");
+  }
+  return { first: dates[0], last: dates[dates.length - 1] };
+}
+
 /**
  * Scroll the New Kronos timecard grid so the row for `targetDate`
  * (MM/DD/YYYY) is CENTERED in the view. Used to position the browser
@@ -707,6 +715,7 @@ export async function checkTimecardDates(page: Page, eid: string): Promise<strin
     afterSwitch: async (p) => {
       await debugScreenshot(p, "new-kronos-timecard-02-previous");
     },
+    readVisibleMonthDays: (p) => getVisibleTimecardMonthDays(p),
     readLastDate: (p, range) => getTimecardLastDate(p, range),
   };
   return runTimecardCheck(page, driver);
@@ -850,6 +859,14 @@ export function parseMmddyyyy(dateStr: string): ParsedDate {
   const year = Number(m[3]);
   if (monthIndex < 0 || monthIndex > 11 || day < 1 || day > 31) {
     throw new Error(`[New Kronos] out-of-range date "${dateStr}"`);
+  }
+  const roundTrip = new Date(year, monthIndex, day);
+  if (
+    roundTrip.getFullYear() !== year ||
+    roundTrip.getMonth() !== monthIndex ||
+    roundTrip.getDate() !== day
+  ) {
+    throw new Error(`[New Kronos] invalid calendar date "${dateStr}"`);
   }
   return { year, monthIndex, day };
 }
@@ -1769,4 +1786,3 @@ export async function savePersonRecord(page: Page): Promise<void> {
       "Refusing to report the person record as saved.",
   );
 }
-

@@ -8,7 +8,93 @@ import {
   parsePayRate,
   waitForNamedCondition,
   interpretPostSubmitTxnReadback,
+  assertTerminationLastDateWorkedReadback,
+  requirePeopleSoftControlRefresh,
 } from "../../../../src/systems/ucpath/transaction.js";
+
+describe("requirePeopleSoftControlRefresh", () => {
+  test("waits for the original control to detach even when no spinner is observed", async () => {
+    let releaseRefresh: (() => void) | undefined;
+    const refresh = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let actionRan = false;
+    let disposed = false;
+    const locator = {
+      elementHandle: async () => ({
+        waitForElementState: async () => refresh,
+        dispose: async () => {
+          disposed = true;
+        },
+      }),
+    } as unknown as Locator;
+
+    let settled = false;
+    const pending = requirePeopleSoftControlRefresh(
+      locator,
+      async () => {
+        actionRan = true;
+      },
+      "test control",
+    ).finally(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(actionRan, true);
+    assert.equal(settled, false, "must not read back before the old fragment detaches");
+    releaseRefresh?.();
+    await pending;
+    assert.equal(disposed, true);
+  });
+
+  test("fails loud when the original control never refreshes", async () => {
+    let disposed = false;
+    const locator = {
+      elementHandle: async () => ({
+        waitForElementState: async () => {
+          throw new Error("Timeout 15000ms exceeded (fake no-rerender)");
+        },
+        dispose: async () => {
+          disposed = true;
+        },
+      }),
+    } as unknown as Locator;
+
+    await assert.rejects(
+      requirePeopleSoftControlRefresh(locator, async () => undefined, "test control"),
+      /did not detach\/hide.*no-rerender/i,
+    );
+    assert.equal(disposed, true);
+  });
+});
+
+describe("assertTerminationLastDateWorkedReadback", () => {
+  test("accepts only a checked override and an exact normalized date", () => {
+    assert.doesNotThrow(() =>
+      assertTerminationLastDateWorkedReadback(true, " 06/14/2026 ", "06/14/2026"),
+    );
+  });
+
+  test("rejects an unchecked override", () => {
+    assert.throws(
+      () => assertTerminationLastDateWorkedReadback(false, "06/14/2026", "06/14/2026"),
+      /override.*not checked/i,
+    );
+  });
+
+  test("rejects a blank or mismatched Last Date Worked value", () => {
+    assert.throws(
+      () => assertTerminationLastDateWorkedReadback(true, "", "06/14/2026"),
+      /blank/i,
+    );
+    assert.throws(
+      () => assertTerminationLastDateWorkedReadback(true, "06/12/2026", "06/14/2026"),
+      /expected.*06\/14\/2026.*06\/12\/2026/i,
+    );
+  });
+});
 
 /**
  * Minimal fake Locator for waitForNamedCondition: records the waitFor options

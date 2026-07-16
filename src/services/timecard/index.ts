@@ -9,6 +9,18 @@ export interface TimecardDateRange {
   end: Date;
 }
 
+/** Month/day pair read directly from a visible Kronos grid row. */
+export interface TimecardMonthDay {
+  month: number;
+  day: number;
+}
+
+/** First and last dates actually rendered in the selected timecard period. */
+export interface VisibleTimecardMonthDays {
+  first: TimecardMonthDay;
+  last: TimecardMonthDay;
+}
+
 /** Local-midnight timestamp for `d` (day-granularity comparisons). */
 function startOfDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -19,6 +31,129 @@ function describeRange(range: TimecardDateRange): string {
   const f = (d: Date) =>
     `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
   return `${f(range.start)} – ${f(range.end)}`;
+}
+
+function assertValidDate(d: Date, label: string): void {
+  if (!Number.isFinite(d.getTime())) {
+    throw new Error(`[timecard] ${label} is not a valid Date`);
+  }
+}
+
+function assertValidMonthDayBounds(value: TimecardMonthDay, label: string): void {
+  if (
+    !Number.isInteger(value.month) ||
+    !Number.isInteger(value.day) ||
+    value.month < 1 ||
+    value.month > 12 ||
+    value.day < 1 ||
+    value.day > 31
+  ) {
+    throw new Error(
+      `[timecard] impossible ${label} grid date ${value.month}/${value.day}`,
+    );
+  }
+}
+
+function composeMonthDay(value: TimecardMonthDay, year: number): Date | null {
+  const composed = new Date(year, value.month - 1, value.day);
+  if (
+    composed.getFullYear() !== year ||
+    composed.getMonth() !== value.month - 1 ||
+    composed.getDate() !== value.day
+  ) {
+    return null;
+  }
+  return composed;
+}
+
+function visibleRangeCandidate(
+  visible: VisibleTimecardMonthDays,
+  startYear: number,
+): TimecardDateRange | null {
+  const firstOrdinal = visible.first.month * 100 + visible.first.day;
+  const lastOrdinal = visible.last.month * 100 + visible.last.day;
+  const endYear = lastOrdinal < firstOrdinal ? startYear + 1 : startYear;
+  const start = composeMonthDay(visible.first, startYear);
+  const end = composeMonthDay(visible.last, endYear);
+  if (!start || !end) return null;
+  const spanDays = (startOfDay(end) - startOfDay(start)) / (24 * 60 * 60 * 1000);
+  if (spanDays < 0 || spanDays > 62) return null;
+  return { start, end };
+}
+
+function requireSingleVisibleRange(
+  candidates: TimecardDateRange[],
+  detail: string,
+): TimecardDateRange {
+  if (candidates.length !== 1) {
+    throw new Error(
+      `[timecard] visible range ${detail} resolved to ${candidates.length} candidate periods — refusing to guess`,
+    );
+  }
+  return candidates[0];
+}
+
+/** Resolve the exact visible current-period bounds; the period must contain `now`. */
+export function resolveCurrentVisibleTimecardRange(
+  visible: VisibleTimecardMonthDays,
+  now: Date = new Date(),
+): TimecardDateRange {
+  assertValidDate(now, "current-period reference");
+  assertValidMonthDayBounds(visible.first, "first visible");
+  assertValidMonthDayBounds(visible.last, "last visible");
+  const anchor = startOfDay(now);
+  const candidates: TimecardDateRange[] = [];
+  let composable = false;
+  for (let year = now.getFullYear() - 1; year <= now.getFullYear() + 1; year++) {
+    const candidate = visibleRangeCandidate(visible, year);
+    if (candidate) composable = true;
+    if (
+      candidate &&
+      startOfDay(candidate.start) <= anchor &&
+      anchor <= startOfDay(candidate.end)
+    ) {
+      candidates.push(candidate);
+    }
+  }
+  if (!composable) {
+    throw new Error(
+      `[timecard] impossible visible current period ${visible.first.month}/${visible.first.day}–${visible.last.month}/${visible.last.day}`,
+    );
+  }
+  if (candidates.length === 0) {
+    throw new Error(
+      `[timecard] visible current period ${visible.first.month}/${visible.first.day}–${visible.last.month}/${visible.last.day} does not contain ${now.toLocaleDateString("en-US")}`,
+    );
+  }
+  return requireSingleVisibleRange(candidates, "for the current pay period");
+}
+
+/** Resolve the exact previous-period bounds relative to an already verified current range. */
+export function resolvePreviousVisibleTimecardRange(
+  visible: VisibleTimecardMonthDays,
+  current: TimecardDateRange,
+): TimecardDateRange {
+  assertValidDate(current.start, "current range start");
+  assertValidDate(current.end, "current range end");
+  assertValidMonthDayBounds(visible.first, "first visible");
+  assertValidMonthDayBounds(visible.last, "last visible");
+  const currentStart = startOfDay(current.start);
+  const candidates: TimecardDateRange[] = [];
+  let composable = false;
+  for (let year = current.start.getFullYear() - 1; year <= current.start.getFullYear(); year++) {
+    const candidate = visibleRangeCandidate(visible, year);
+    if (!candidate) continue;
+    composable = true;
+    const end = startOfDay(candidate.end);
+    const gapDays = (currentStart - end) / (24 * 60 * 60 * 1000);
+    if (end < currentStart && gapDays <= 62) candidates.push(candidate);
+  }
+  if (!composable) {
+    throw new Error(
+      `[timecard] impossible visible previous period ${visible.first.month}/${visible.first.day}–${visible.last.month}/${visible.last.day}`,
+    );
+  }
+  return requireSingleVisibleRange(candidates, "before the verified current pay period");
 }
 
 /**
@@ -50,6 +185,8 @@ export function formatTimecardDate(
   day: number,
   range: TimecardDateRange,
 ): string {
+  assertValidDate(range.start, "range start");
+  assertValidDate(range.end, "range end");
   if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12 || day < 1 || day > 31) {
     throw new Error(
       `[timecard] invalid month/day ${month}/${day} parsed from the timecard grid — cannot resolve a date`,
@@ -162,6 +299,8 @@ export interface TimecardDriver {
   afterSwitch?(page: Page): Promise<void>;
   /** Switch to the previous pay period. Returns true if switched. */
   switchPeriod(page: Page): Promise<boolean>;
+  /** Read the first/last month-day pairs actually rendered in the grid. */
+  readVisibleMonthDays(page: Page): Promise<VisibleTimecardMonthDays>;
   /**
    * Read the last date with time entries from the current view. `range` is
    * the inclusive window the displayed pay period must fall inside — resolve
@@ -198,16 +337,19 @@ export async function runTimecardCheck(
   driver: TimecardDriver,
   now: Date = new Date(),
 ): Promise<string | null> {
-  const windows = timecardCheckWindows(now);
-
   const ok = await driver.goToTimecard(page);
   if (!ok) return null;
 
   await page.waitForTimeout(3_000);
   if (driver.afterGoTo) await driver.afterGoTo(page);
 
-  // Check current pay period
-  let lastDate = await driver.readLastDate(page, windows.current);
+  // Resolve the exact current range from the visible first/last rows before
+  // parsing any yearless punch dates.
+  const currentRange = resolveCurrentVisibleTimecardRange(
+    await driver.readVisibleMonthDays(page),
+    now,
+  );
+  let lastDate = await driver.readLastDate(page, currentRange);
   if (lastDate) return lastDate;
 
   // No entries in current — try previous pay period
@@ -215,7 +357,11 @@ export async function runTimecardCheck(
   if (switched) {
     await page.waitForTimeout(3_000);
     if (driver.afterSwitch) await driver.afterSwitch(page);
-    lastDate = await driver.readLastDate(page, windows.previous);
+    const previousRange = resolvePreviousVisibleTimecardRange(
+      await driver.readVisibleMonthDays(page),
+      currentRange,
+    );
+    lastDate = await driver.readLastDate(page, previousRange);
   }
 
   return lastDate;

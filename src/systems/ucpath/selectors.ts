@@ -294,6 +294,29 @@ export const comments = {
     f.locator("#UC_SS_TRANSACT_COMMENTS"),
 };
 
+// ─── Termination fields (inside transaction form) ─────────────────────────
+
+export const termination = {
+  /**
+   * "Override Last Date Worked" checkbox. The live PeopleSoft DOM rendered
+   * `HR_TBH_SCR_WRK_TBH_CHK2$3`; prefix matching preserves the row suffix.
+   * verified 2026-07-16
+   * @tags termination, override, last-date-worked, checkbox, ucpath
+   */
+  overrideLastDateWorkedCheckbox: (f: FrameLocator): Locator =>
+    f.locator('input[id^="HR_TBH_SCR_WRK_TBH_CHK2$"]'),
+
+  /**
+   * Editable "Last Date Worked" input. The live read-only transaction rendered
+   * the corresponding `HR_TBH_SCR_WRK_TBH_DATE$3` span; this selector is
+   * deliberately input-specific so a read-only/reused transaction fails closed
+   * instead of masquerading as an editable form. verified 2026-07-16
+   * @tags termination, last-date-worked, date, input, ucpath
+   */
+  lastDateWorkedInput: (f: FrameLocator): Locator =>
+    f.locator('input[id^="HR_TBH_SCR_WRK_TBH_DATE$"]'),
+};
+
 // ─── Job Data tab (inside transaction form) ───────────────────────────────
 
 export const jobData = {
@@ -1846,6 +1869,7 @@ export const ucpathSelectors = {
   smartHR,
   personalData,
   comments,
+  termination,
   jobData,
   personSearch,
   jobSummary,

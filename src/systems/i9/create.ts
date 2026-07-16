@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { I9EmployeeInput, I9Result } from "./types.js";
@@ -10,6 +11,47 @@ import {
 } from "./navigate.js";
 import { I9_APP_URL } from "../../config.js";
 import { safeClick, safeFill } from "../common/index.js";
+
+export function classifyI9CreateSignals(
+  errorVisible: boolean,
+  successVisible: boolean,
+): "error" | "success" | "pending" {
+  if (errorVisible) return "error";
+  if (successVisible) return "success";
+  return "pending";
+}
+
+/** Strict same-profile route confirmation after the success alert is accepted. */
+export function isI9PostCreateRoute(rawUrl: string, expectedProfileId: string): boolean {
+  if (!URL.canParse(rawUrl)) return false;
+  const url = new URL(rawUrl);
+  if (url.origin !== new URL(I9_APP_URL).origin) return false;
+  if (url.pathname !== `/employee/profile/${encodeURIComponent(expectedProfileId)}`) return false;
+  if (url.hash) return false;
+  if (url.search === "") return true;
+  return (
+    url.searchParams.size === 1 &&
+    url.searchParams.get("isNewProfileCreated") === "true"
+  );
+}
+
+async function waitForI9CreateOutcome(
+  page: Page,
+  timeoutMs = 15_000,
+): Promise<"error" | "success" | "timeout"> {
+  const errorLocator = remoteI9.createErrorMessage(page);
+  const successLocator = remoteI9.createSuccessConfirmation(page);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const signal = classifyI9CreateSignals(
+      await errorLocator.isVisible(),
+      await successLocator.isVisible(),
+    );
+    if (signal !== "pending") return signal;
+    await sleep(250);
+  }
+  return "timeout";
+}
 
 /**
  * Create a new I-9 employee record in I9 Complete.
@@ -128,55 +170,47 @@ export async function createI9Employee(
       label: "i9 create i9 button",
     });
 
-    // Confirm creation dialog
-    await safeClick(remoteI9.createI9OkButton(page), {
-      timeout: 10_000,
-      label: "i9 create i9 ok button",
-    });
-
-    // FAIL LOUD (root CLAUDE.md): clicking "Create I-9" + OK used to report
-    // success unconditionally — a create that silently failed (validation error,
-    // the OK dialog dismissed with no record created) would push a false "I-9
-    // created" into a live onboarding, with the profile-save profileId masking
-    // the miss. Verify a REAL post-create signal before claiming success.
-
-    // 1. A validation/error summary appearing after the confirm = definite failure.
-    const createErrorSummary = profile.errorSummary(page);
-    const createFailed = await createErrorSummary
-      .isVisible({ timeout: 3_000 })
-      .catch(() => false);
-    if (createFailed) {
-      return {
-        success: false,
-        profileId,
-        error: `I-9 creation failed with a validation error for profile ${profileId} (error summary shown after Create I-9)`,
-      };
-    }
-
-    // 2. Positive confirmation: the success confirmation surfaces, OR the
-    //    "Create I-9" button detaches (the create section advanced). Neither
-    //    appearing means we cannot confirm the record was created — fail loud
-    //    rather than report a false success.
-    const confirmed = await remoteI9
-      .createSuccessConfirmation(page)
-      .waitFor({ state: "visible", timeout: 10_000 })
-      .then(() => true)
-      .catch(() => false);
-    const createSectionAdvanced =
-      confirmed ||
-      (await remoteI9
-        .createI9Button(page)
-        .waitFor({ state: "hidden", timeout: 5_000 })
-        .then(() => true)
-        .catch(() => false));
-    if (!confirmed && !createSectionAdvanced) {
+    // Observe the definitive callback signal BEFORE dismissing its alert. The
+    // live app reports remote-create failures through `.ErrorMessage` and
+    // success through one of two exact alert strings. Error wins a tie.
+    const createOutcome = await waitForI9CreateOutcome(page);
+    if (createOutcome === "error") {
+      const detail = (await remoteI9.createErrorMessage(page).innerText()).trim();
       return {
         success: false,
         profileId,
         error:
-          `I-9 creation could not be confirmed for profile ${profileId} — neither the creation ` +
-          `confirmation nor the expected post-create page state appeared after Create I-9. ` +
-          `Not reporting a false success. TODO(live-verify) the post-create success signal.`,
+          `I-9 creation failed for profile ${profileId}: ` +
+          (detail || "the remote-create error surface was visible but blank"),
+      };
+    }
+    if (createOutcome === "timeout") {
+      return {
+        success: false,
+        profileId,
+        error:
+          `I-9 creation outcome is unknown for profile ${profileId} — neither the exact success ` +
+          `alert nor the remote-create error surface appeared. Refusing to retry or report success.`,
+      };
+    }
+
+    await safeClick(remoteI9.createI9OkButton(page), {
+      timeout: 10_000,
+      label: "i9 remote create success ok button",
+    });
+
+    try {
+      await page.waitForURL(
+        (url) => isI9PostCreateRoute(url.href, profileId),
+        { timeout: 15_000 },
+      );
+    } catch {
+      return {
+        success: false,
+        profileId,
+        error:
+          `I-9 success alert appeared for profile ${profileId}, but the app did not return to ` +
+          `that profile's post-create route. Outcome requires operator review; refusing to retry.`,
       };
     }
 

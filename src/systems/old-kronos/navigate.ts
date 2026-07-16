@@ -20,7 +20,30 @@ import {
   didPeriodLabelSwitch,
   type TimecardDateRange,
   type TimecardDriver,
+  type VisibleTimecardMonthDays,
 } from "../../services/timecard/index.js";
+
+/** Parse visible Old Kronos date-cell text; non-timecard frames return null. */
+export function parseOldKronosVisibleDateTexts(
+  texts: string[],
+): VisibleTimecardMonthDays | null {
+  const dates = texts
+    .map((text) => text.trim().match(/^[A-Z][a-z]{2}\s+(\d+)\/(\d+)$/))
+    .filter((match): match is RegExpMatchArray => match !== null)
+    .map((match) => ({ month: Number(match[1]), day: Number(match[2]) }));
+  if (dates.length === 0) return null;
+  return { first: dates[0], last: dates[dates.length - 1] };
+}
+
+async function readOldKronosFrameDateTexts(frame: Frame): Promise<string[]> {
+  return frame.evaluate(() =>
+    Array.from(document.querySelectorAll("[role='row']"))
+      .map((row) => {
+        const cells = row.querySelectorAll("[role='gridcell']");
+        return cells.length >= 10 ? cells[2]?.textContent?.trim() || "" : "";
+      }),
+  );
+}
 
 /**
  * Dismiss any OK/Close modal dialog in the iframe.
@@ -428,16 +451,17 @@ export async function switchToPreviousPayPeriod(
   // Playwright's actionability checks block normal clicks on readonly inputs,
   // so we use JS click directly. Then click the "Previous Pay Period" link.
   for (const f of page.frames()) {
+    // The Genies frame has the SAME #timeframe-selector-input. Only a frame
+    // with actual timecard date rows is allowed to receive the switch.
+    if (!parseOldKronosVisibleDateTexts(await readOldKronosFrameDateTexts(f))) continue;
+
     // Positive-assert baseline: read the displayed period BEFORE opening the
     // dropdown so a post-switch readback has something to compare against.
-    // See `timecard.periodSelectorInput` JSDoc — TODO(live-verify).
     const beforeLabel = await timecard.periodSelectorInput(f).inputValue().catch(() => "");
 
-    // Use JS to find and click the timeframe selector — bypasses readonly checks
-    const clicked = await f.evaluate(() => {
-      const input = document.getElementById("timeframe-selector-input");
-      if (!input) return false;
-      (input).click();
+    // Use the registry locator with a DOM click to bypass readonly actionability.
+    const clicked = await timecard.periodSelectorInput(f).evaluate((input: HTMLInputElement) => {
+      input.click();
       return true;
     }).catch(() => false);
 
@@ -456,7 +480,6 @@ export async function switchToPreviousPayPeriod(
       // it does NOT prove the timecard grid actually switched to the previous
       // period. Read the displayed period back and fail loud on a mismatch
       // rather than let the caller read the grid believing the switch landed.
-      // TODO(live-verify): see `timecard.periodSelectorInput` JSDoc.
       const afterLabel = await timecard.periodSelectorInput(f).inputValue().catch(() => "");
       if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
         const detail = beforeLabel.trim()
@@ -536,6 +559,20 @@ export async function getTimecardLastDate(
 
   log.step("[Old Kronos] No In/Out entries found in current pay period");
   return null;
+}
+
+/** Read the actual first/last month-day pairs rendered in the Old Kronos grid. */
+export async function getVisibleTimecardMonthDays(
+  page: Page,
+): Promise<VisibleTimecardMonthDays> {
+  for (const f of page.frames()) {
+    const visible = parseOldKronosVisibleDateTexts(await readOldKronosFrameDateTexts(f));
+    if (visible) return visible;
+  }
+  throw new UKGError(
+    "Could not locate the verified timecard period frame while reading visible dates",
+    "getVisibleTimecardMonthDays",
+  );
 }
 
 /**
@@ -618,6 +655,7 @@ export async function checkTimecardDates(
       await dismissModal(p, iframe);
       await debugScreenshot(p, "ukg-timecard-02-previous");
     },
+    readVisibleMonthDays: (p) => getVisibleTimecardMonthDays(p),
     readLastDate: (p, range) => getTimecardLastDate(p, range),
   };
   return runTimecardCheck(page, driver);

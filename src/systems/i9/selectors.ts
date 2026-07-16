@@ -180,6 +180,10 @@ export const profile = {
 
 // ─── Remote I-9 section (post-save) ───────────────────────────────────────
 
+/** Exact live production callback text for a successful Remote Section 1 create. */
+export const REMOTE_I9_CREATE_SUCCESS_RE =
+  /^Remote Access Form I-9 (?:email\(s\)|message\(s\)) has been sent$/;
+
 export const remoteI9 = {
   /**
    * Remote - Section 1 Only radio. verified 2026-03-16
@@ -210,21 +214,23 @@ export const remoteI9 = {
     page.getByRole("button", { name: "OK" }),
 
   /**
-   * Post-create success confirmation for a Remote - Section 1 Only I-9. After
-   * "Create I-9" → OK, the app confirms the record was created / the Section 1
-   * invitation was sent to the employee. Used by `createI9Employee` to FAIL
-   * LOUD instead of optimistically reporting success when the create silently
-   * failed. Matches the common confirmation wording; the create flow also
-   * detaches `createI9Button` on success, which `createI9Employee` uses as the
-   * structural fallback signal.
-   *
-   * TODO(live-verify): the exact confirmation text/role is NOT yet mapped
-   * against a live post-create page — confirm on a real Remote Section-1 create
-   * (playwright-cli) and tighten this locator + bump the `verified` date.
+   * Exact success alert emitted by the live production
+   * `/form-remoteaccess/create-newhire` callback. The loaded production JS has
+   * two variants: email(s) and message(s). No structural fallback is accepted.
+   * verified 2026-07-16
    * @tags created, confirmation, success, section1, remote, i9
    */
   createSuccessConfirmation: (page: Page): Locator =>
-    page.getByText(/I-?9 (has been |was )?(successfully )?created|Section 1.*(sent|pending|invitation)/i),
+    page.getByText(REMOTE_I9_CREATE_SUCCESS_RE, { exact: true }).first(),
+
+  /**
+   * Error surface populated by `BindRemoteAccessNewHireErrors` in the live
+   * production create callback. Error takes precedence if both it and a success
+   * alert are briefly painted. verified 2026-07-16
+   * @tags error, validation, remote, create, i9
+   */
+  createErrorMessage: (page: Page): Locator =>
+    page.locator(".ErrorMessage:visible").first(),
 };
 
 // ─── Search dialog ────────────────────────────────────────────────────────
