@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "vitest";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UsageTracker, type Candidate } from "../../../../src/services/ocr/usage-tracker.js";
@@ -131,6 +131,13 @@ describe("UsageTracker", () => {
     const raw = readFileSync(join(tmp, "ocr-usage-state.json"), "utf-8");
     assert.ok(!raw.includes("\n  "), "persisted state should be compact JSON");
     assert.ok(raw.startsWith("{"));
+  });
+
+  it("rejects corrupt persisted cooldown/auth metadata instead of reusing a key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ocr-usage-corrupt-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "ocr-usage-state.json"), "{not-json", "utf8");
+    assert.throws(() => new UsageTracker(dir), /JSON|corrupt/i);
   });
 
   it("persists cooldown + dead state across instances", () => {

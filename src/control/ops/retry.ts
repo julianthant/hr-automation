@@ -9,7 +9,7 @@
 import { existsSync } from "fs";
 import { RetryTaskBecameActiveError } from "../../core/task-store/index.js";
 import { listRosters, resolveRosterDirs } from "../../services/matching/roster-loader.js";
-import { byTimestampAsc, readEntries, readEntriesForDate, type TrackerEntry } from "../../tracker/jsonl.js";
+import { byTimestampAsc, readEntries, type TrackerEntry } from "../../tracker/jsonl.js";
 import { findLatestEntryForPredicate } from "../../tracker/find-latest-entry.js";
 import { enqueueFromHttp } from "../../core/daemon/enqueue-dispatch.js";
 import { ensureDaemonsAvailable } from "../../core/daemon/client.js";
@@ -25,6 +25,8 @@ import {
 } from "./shared.js";
 import { emitInheritedRow, findInheritedPriorEntry } from "./emit-inherited.js";
 import { log } from "../../utils/log.js";
+import { openControlDb } from "../../core/control-db.js";
+import { readOcrPrepareInput } from "../../tracker/state/ocr-prepare-input-store.js";
 
 /**
  * Contract 2 (Uniform Retry): the kernel retries every workflow the same
@@ -559,69 +561,64 @@ async function reEnqueueInProcessEntry(
   return { ok: false, error: `in-process retry not implemented for "${workflow}"` };
 }
 
-async function reEnqueueOcrEntry(
+export async function reEnqueueOcrEntry(
   id: string,
   runId: string | undefined,
   dir: string,
-  date?: string,
+  _date?: string,
+  prepareOverride?: (
+    input: import("../../tracker/dashboard/ocr/prepare-contract.js").PrepareInput,
+  ) => Promise<{ body: { ok: boolean; error?: string } }>,
 ): Promise<ReEnqueueResult> {
-  // The OCR orchestrator only writes pdfPath/pdfOriginalName on the pending
-  // row — later rows (loading-roster, ocr, awaiting-approval, failed) drop
-  // them. findEntryInput's latest-row fallback would miss them, so merge
-  // across every row for this id and keep the latest non-empty value per key.
-  const source = date ? readEntriesForDate("ocr", date, dir) : readEntries("ocr", dir);
-  const entries = source.filter((e) => e.id === id);
-  if (entries.length === 0) {
-    return { ok: false, error: `no tracker entry found for id=${id}` };
+  if (!runId) {
+    return {
+      ok: false,
+      error: "OCR retry requires the exact prior runId; please re-upload the PDF",
+    };
   }
-  const matching = runId ? entries.filter((e) => e.runId === runId) : entries;
-  if (matching.length === 0) {
-    return { ok: false, error: `no tracker entry found for id=${id} runId=${runId}` };
-  }
-  const merged: Record<string, string> = {};
-  [...matching].sort(byTimestampAsc).forEach((e) => {
-    for (const [k, v] of Object.entries(e.data ?? {})) {
-      if (v === undefined || v === null || v === "") continue;
-      merged[k] = String(v);
-    }
-  });
-
-  const pdfPath = merged.pdfPath ?? "";
-  const pdfOriginalName = merged.pdfOriginalName ?? "";
-  const formType = merged.formType ?? "";
-  const sessionId = merged.sessionId || id;
-  let retryRosterPath: string | undefined;
+  let persisted: unknown;
   try {
-    retryRosterPath = resolveRetryRosterPath(dir, merged.rosterPath || undefined);
-  } catch (err) {
+    persisted = readOcrPrepareInput(openControlDb({ trackerDir: dir }), {
+      sessionId: id,
+      runId,
+    });
+  } catch (error) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "OCR retry: failed to resolve roster path",
+      error: `OCR retry input is corrupt for ${id}/${runId}; please re-upload the PDF: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     };
   }
-  const rosterMode: "existing" | "download" = retryRosterPath ? "existing" : "download";
-
-  if (!pdfPath || !pdfOriginalName || !formType) {
+  if (persisted === undefined) {
     return {
       ok: false,
-      error: "OCR retry: entry data missing pdfPath/pdfOriginalName/formType",
+      error:
+        `OCR retry input is unavailable for legacy run ${id}/${runId}; ` +
+        "tracker display data is not authoritative — please re-upload the PDF",
     };
   }
-  if (!existsSync(pdfPath)) {
-    return { ok: false, error: `OCR retry: PDF no longer exists at ${pdfPath}` };
-  }
 
-  const { buildOcrPrepareHandler } = await import("../../tracker/dashboard/ocr/prepare.js");
-  const handler = buildOcrPrepareHandler({ trackerDir: dir });
-  const result = await handler({
-    pdfPath,
-    pdfOriginalName,
-    formType,
-    sessionId,
-    rosterMode,
-    ...(retryRosterPath ? { rosterPath: retryRosterPath } : {}),
-  });
-  if (!result.body.ok) return { ok: false, error: result.body.error };
+  const { buildOcrPrepareHandler, OcrPrepareInputSchema } = await import(
+    "../../tracker/dashboard/ocr/index.js"
+  );
+  const parsed = OcrPrepareInputSchema.safeParse(persisted);
+  if (!parsed.success || parsed.data.sessionId !== id) {
+    return {
+      ok: false,
+      error:
+        `OCR retry input failed validation for ${id}/${runId}; please re-upload the PDF` +
+        (parsed.success ? " (session identity mismatch)" : `: ${parsed.error.message}`),
+    };
+  }
+  const handler = prepareOverride ?? buildOcrPrepareHandler({ trackerDir: dir });
+  const result = await handler(parsed.data);
+  if (!result.body.ok) {
+    if (typeof result.body.error !== "string" || result.body.error.length === 0) {
+      throw new Error("OCR retry prepare handler returned a failed response without an error");
+    }
+    return { ok: false, error: result.body.error };
+  }
   return { ok: true };
 }
 

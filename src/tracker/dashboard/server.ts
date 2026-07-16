@@ -6,7 +6,7 @@ import {
   DEFAULT_DIR,
   dateLocal,
 } from "../jsonl.js";
-import { sweepStuckOcrRows } from "./ocr/index.js";
+import { resumeRecoverableOcrApprovals, sweepStuckOcrRows } from "./ocr/index.js";
 import { sweepStuckOathUploadRows } from "./oath-upload/http.js";
 import { openStateDb } from "../state/db.js";
 import { rebuildProjectionForDate } from "../state/rebuild.js";
@@ -132,6 +132,13 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   } catch (err) {
     log.warn(`SQLite projection startup skipped: ${err instanceof Error ? err.message : String(err)}`);
   }
+  void resumeRecoverableOcrApprovals(dir)
+    .then((count) => {
+      if (count > 0) log.step(`Resumed ${count} durable OCR approval${count === 1 ? "" : "s"}`);
+    })
+    .catch((error) => {
+      log.error(`Durable OCR approval recovery failed: ${errorMessage(error)}`);
+    });
   const staticDir = opts.serveStatic ? resolve(process.cwd(), "dist/dashboard") : undefined;
   const sharedDeps = {
     dir,
@@ -151,6 +158,9 @@ export function createDashboardServer(opts: CreateDashboardServerOptions = {}): 
   const sweepInterval = setInterval(() => {
     void scanFailurePatterns(stateDb, projectionReady, dir);
     void scanOrphanedQueueItems(dir);
+    void resumeRecoverableOcrApprovals(dir).catch((error) => {
+      log.error(`Durable OCR approval recovery sweep failed: ${errorMessage(error)}`);
+    });
     captureStore.sweepExpired();
   }, 15_000);
   sweepInterval.unref();

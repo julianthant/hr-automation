@@ -2,6 +2,16 @@
 
 Cross-codebase patterns and mistakes to avoid. Read this before non-trivial work.
 
+## 2026-07-16 — In-process workflows need their own immutable retry authority
+
+**Tried:** Retry `/api/ocr/prepare` by merging the latest non-empty tracker `data.*` fields and reconstructing a new `PrepareInput`, mirroring daemon retry behavior without a task row.
+
+**Failed because:** Tracker rows are presentation projections, not complete launch contracts. The reconstruction dropped `pdfFileId`, `targetWorkflow`, `dryRun`, `runOptions`, reupload identity, and operation scope, so retrying a delegated OCR operation could silently become a standalone run with different behavior. OCR prepare runs in the dashboard process and therefore have no `tasks.original_input_json` to read.
+
+**Fix:** Persist the strict, complete prepare request before returning 202, keyed by exact `(session_id, run_id)` with a version and integrity hash. Retry reads only that record and validates it again; missing legacy or corrupt records require an explicit PDF re-upload. Never reconstruct executable workflow input from tracker display data.
+
+**Tags:** ocr, retry, in-process, original-input, sqlite, tracker, delegation, operation, fail-loud
+
 ## 2026-07-15 — A tracker terminal is recovery evidence; a task-store terminal is execution authority
 
 **Tried:** Treat daemon terminal writes, queue audit writes, tracker rows, and shutdown requeues as independent best-effort cleanup steps after a handler returned.

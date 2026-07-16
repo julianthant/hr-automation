@@ -36,7 +36,18 @@ export type BeginOcrApprovalResult =
   | { kind: "pending"; manifest: OcrApprovalManifest }
   | { kind: "approved"; manifest: OcrApprovalManifest }
   | { kind: "failed"; manifest: OcrApprovalManifest; error: string }
-  | { kind: "conflict"; manifest: OcrApprovalManifest };
+  | { kind: "conflict"; manifest: OcrApprovalManifest }
+  | { kind: "stale"; manifest: OcrApprovalManifest };
+
+export type ExistingOcrApproval =
+  | { kind: "awaiting" }
+  | { kind: "approving" | "approved"; requestHash: string; manifest: OcrApprovalManifest }
+  | {
+      kind: "failed";
+      requestHash: string | null;
+      manifest?: OcrApprovalManifest;
+      error: string;
+    };
 
 interface ApprovalRow {
   state: "awaiting-approval" | "approving" | "approved" | "failed";
@@ -104,6 +115,44 @@ function validateManifest(value: OcrApprovalManifest, sessionId: string, runId: 
   }
 }
 
+/**
+ * Read a durable approval outcome before consulting JSONL presentation data.
+ * This keeps identical replays authoritative after tracker compaction/loss.
+ */
+export function readExistingOcrApproval(
+  store: Pick<OcrApprovalStore, "db">,
+  args: { sessionId: string; runId: string },
+): ExistingOcrApproval | null {
+  const row = store.db.prepare(`
+    SELECT state, request_hash, manifest_json, error,
+           lease_expires_at_ms, claim_generation
+    FROM ocr_approvals
+    WHERE session_id = @sessionId AND run_id = @runId
+  `).get(args) as ApprovalRow | undefined;
+  if (!row) return null;
+  if (row.state === "awaiting-approval") return { kind: "awaiting" };
+  if (row.state === "failed" && row.request_hash === null && row.manifest_json === null) {
+    if (!row.error) throw new Error(`OCR approval ${args.sessionId}/${args.runId} is failed without a durable error`);
+    return { kind: "failed", requestHash: null, error: row.error };
+  }
+  if (!row.request_hash) {
+    throw new Error(`OCR approval ${args.sessionId}/${args.runId} has no persisted request hash`);
+  }
+  const manifest = readManifest(row, args.sessionId, args.runId);
+  if (row.state === "failed") {
+    if (!row.error) {
+      throw new Error(`OCR approval ${args.sessionId}/${args.runId} is failed without a durable error`);
+    }
+    return {
+      kind: "failed",
+      requestHash: row.request_hash,
+      manifest,
+      error: row.error,
+    };
+  }
+  return { kind: row.state, requestHash: row.request_hash, manifest };
+}
+
 export function markOcrAwaitingApproval(
   store: OcrApprovalStore,
   args: { sessionId: string; runId: string; now?: string },
@@ -127,6 +176,8 @@ export function beginOcrApproval(
     now?: string;
     nowMs?: number;
     leaseMs?: number;
+    /** True only when the exact latest tracker row is running/awaiting-approval. */
+    allowAwaitingClaim?: boolean;
   },
 ): BeginOcrApprovalResult {
   const now = args.now ?? new Date().toISOString();
@@ -134,30 +185,37 @@ export function beginOcrApproval(
   const leaseExpiresAtMs = nowMs + (args.leaseMs ?? DEFAULT_LEASE_MS);
   validateManifest(args.manifest, args.sessionId, args.runId);
   return store.transaction(() => {
-    const inserted = store.db.prepare(`
-      INSERT INTO ocr_approvals (
-        session_id, run_id, state, request_hash, manifest_json, manifest_id,
-        owner_token, lease_expires_at_ms, claim_generation, created_at, updated_at
-      ) VALUES (
-        @sessionId, @runId, 'approving', @requestHash, @manifestJson, @manifestId,
-        @ownerToken, @leaseExpiresAtMs, 1, @now, @now
-      ) ON CONFLICT(session_id, run_id) DO NOTHING
-    `).run({
-      ...args,
-      manifestJson: JSON.stringify(args.manifest),
-      manifestId: args.manifest.id,
-      leaseExpiresAtMs,
-      now,
-    });
-    if (inserted.changes === 1) return { kind: "claimed", manifest: args.manifest, generation: 1 };
-
     let row = store.db.prepare(`
       SELECT state, request_hash, manifest_json, error, lease_expires_at_ms, claim_generation
       FROM ocr_approvals WHERE session_id = @sessionId AND run_id = @runId
     `).get(args) as ApprovalRow | undefined;
-    if (!row) throw new Error(`OCR approval ${args.sessionId}/${args.runId} disappeared after claim`);
+    if (!row) {
+      if (!args.allowAwaitingClaim) return { kind: "stale", manifest: args.manifest };
+      const inserted = store.db.prepare(`
+        INSERT INTO ocr_approvals (
+          session_id, run_id, state, request_hash, manifest_json, manifest_id,
+          owner_token, lease_expires_at_ms, claim_generation, created_at, updated_at
+        ) VALUES (
+          @sessionId, @runId, 'approving', @requestHash, @manifestJson, @manifestId,
+          @ownerToken, @leaseExpiresAtMs, 1, @now, @now
+        ) ON CONFLICT(session_id, run_id) DO NOTHING
+      `).run({
+        ...args,
+        manifestJson: JSON.stringify(args.manifest),
+        manifestId: args.manifest.id,
+        leaseExpiresAtMs,
+        now,
+      });
+      if (inserted.changes === 1) return { kind: "claimed", manifest: args.manifest, generation: 1 };
+      row = store.db.prepare(`
+        SELECT state, request_hash, manifest_json, error, lease_expires_at_ms, claim_generation
+        FROM ocr_approvals WHERE session_id = @sessionId AND run_id = @runId
+      `).get(args) as ApprovalRow | undefined;
+      if (!row) throw new Error(`OCR approval ${args.sessionId}/${args.runId} disappeared during claim`);
+    }
 
     if (row.state === "awaiting-approval" && row.request_hash === null) {
+      if (!args.allowAwaitingClaim) return { kind: "stale", manifest: args.manifest };
       const update = store.db.prepare(`
         UPDATE ocr_approvals
         SET state = 'approving', request_hash = @requestHash, manifest_json = @manifestJson,
@@ -168,6 +226,15 @@ export function beginOcrApproval(
           AND state = 'awaiting-approval' AND request_hash IS NULL
       `).run({ ...args, manifestJson: JSON.stringify(args.manifest), manifestId: args.manifest.id, leaseExpiresAtMs, now });
       if (update.changes === 1) return { kind: "claimed", manifest: args.manifest, generation: row.claim_generation + 1 };
+    }
+
+    // Explicit discard can terminalize a parked approval before any request
+    // hash/manifest exists. It must stay terminal and reject every later POST.
+    if (row.state === "failed" && row.request_hash === null && row.manifest_json === null) {
+      if (typeof row.error !== "string" || row.error.length === 0) {
+        throw new Error(`OCR approval ${args.sessionId}/${args.runId} is failed without a durable error`);
+      }
+      return { kind: "failed", manifest: args.manifest, error: row.error };
     }
 
     if (row.request_hash !== args.requestHash) {
@@ -215,6 +282,160 @@ export function failOcrApproval(
   },
 ): void {
   transitionApproval(store, { ...args, state: "failed" });
+}
+
+/** Keep a live dispatcher from being reclaimed while it performs side effects. */
+export function renewOcrApprovalLease(
+  store: OcrApprovalStore,
+  args: {
+    sessionId: string;
+    runId: string;
+    requestHash: string;
+    ownerToken: string;
+    generation: number;
+    now?: string;
+    nowMs?: number;
+    leaseMs?: number;
+  },
+): void {
+  const now = args.now ?? new Date().toISOString();
+  const leaseExpiresAtMs = (args.nowMs ?? Date.now()) + (args.leaseMs ?? DEFAULT_LEASE_MS);
+  const result = store.db.prepare(`
+    UPDATE ocr_approvals
+    SET lease_expires_at_ms = @leaseExpiresAtMs, updated_at = @now
+    WHERE session_id = @sessionId AND run_id = @runId
+      AND state = 'approving' AND request_hash = @requestHash
+      AND owner_token = @ownerToken AND claim_generation = @generation
+  `).run({ ...args, leaseExpiresAtMs, now });
+  if (result.changes !== 1) {
+    throw new Error(`OCR approval ${args.sessionId}/${args.runId} lost its dispatch lease`);
+  }
+}
+
+export function listRecoverableOcrApprovals(
+  store: OcrApprovalStore,
+  nowMs: number = Date.now(),
+): OcrApprovalManifest[] {
+  const rows = store.db.prepare(`
+    SELECT session_id, run_id, state, request_hash, manifest_json, error,
+           lease_expires_at_ms, claim_generation
+    FROM ocr_approvals
+    WHERE state = 'approving' AND COALESCE(lease_expires_at_ms, 0) <= @nowMs
+    ORDER BY updated_at ASC
+  `).all({ nowMs }) as Array<ApprovalRow & { session_id: string; run_id: string }>;
+  return rows.map((row) => readManifest(row, row.session_id, row.run_id));
+}
+
+/** Approved, not-yet-projected manifests are the JSONL repair authority. */
+export function listUnpresentedApprovedOcrApprovals(store: OcrApprovalStore): OcrApprovalManifest[] {
+  const rows = store.db.prepare(`
+    SELECT session_id, run_id, state, request_hash, manifest_json, error,
+           lease_expires_at_ms, claim_generation
+    FROM ocr_approvals
+    WHERE state = 'approved' AND presented_at IS NULL
+    ORDER BY updated_at ASC
+  `).all() as Array<ApprovalRow & { session_id: string; run_id: string }>;
+  return rows.map((row) => readManifest(row, row.session_id, row.run_id));
+}
+
+export function markOcrApprovalPresented(
+  store: Pick<OcrApprovalStore, "db">,
+  args: { sessionId: string; runId: string; now?: string },
+): void {
+  const now = args.now ?? new Date().toISOString();
+  const result = store.db.prepare(`
+    UPDATE ocr_approvals
+    SET presented_at = @now, updated_at = @now
+    WHERE session_id = @sessionId AND run_id = @runId
+      AND state = 'approved' AND presented_at IS NULL
+  `).run({ ...args, now });
+  if (result.changes !== 1) {
+    const row = store.db.prepare(`
+      SELECT state, presented_at FROM ocr_approvals
+      WHERE session_id = @sessionId AND run_id = @runId
+    `).get(args) as { state: string; presented_at: string | null } | undefined;
+    if (row?.state === "approved" && row.presented_at !== null) return;
+    throw new Error(`OCR approval ${args.sessionId}/${args.runId} could not checkpoint its presentation`);
+  }
+}
+
+export function isOcrApprovalPresentationPending(
+  store: Pick<OcrApprovalStore, "db">,
+  args: { sessionId: string; runId: string },
+): boolean {
+  const row = store.db.prepare(`
+    SELECT 1 AS pending FROM ocr_approvals
+    WHERE session_id = @sessionId AND run_id = @runId
+      AND state = 'approved' AND presented_at IS NULL
+  `).get(args) as { pending: 1 } | undefined;
+  return row?.pending === 1;
+}
+
+/**
+ * A dispatch-phase failure may follow one or more committed idempotent child
+ * enqueues. Keep the approval recoverable instead of falsely terminalizing it.
+ */
+export function releaseOcrApprovalForRecovery(
+  store: Pick<OcrApprovalStore, "db">,
+  args: {
+    sessionId: string;
+    runId: string;
+    requestHash: string;
+    ownerToken: string;
+    generation: number;
+    error: string;
+    now?: string;
+  },
+): void {
+  const now = args.now ?? new Date().toISOString();
+  const result = store.db.prepare(`
+    UPDATE ocr_approvals
+    SET owner_token = NULL, lease_expires_at_ms = 0, error = @error, updated_at = @now
+    WHERE session_id = @sessionId AND run_id = @runId
+      AND state = 'approving' AND request_hash = @requestHash
+      AND owner_token = @ownerToken AND claim_generation = @generation
+  `).run({ ...args, now });
+  if (result.changes !== 1) {
+    throw new Error(`OCR approval ${args.sessionId}/${args.runId} lost its dispatch lease before recovery release`);
+  }
+}
+
+/** Terminalize a parked/in-flight approval after an explicit operator discard. */
+export type DiscardOcrApprovalResult =
+  | "discarded"
+  | "already-approved"
+  | "already-failed"
+  | "not-found";
+
+export function discardOcrApproval(
+  store: Pick<OcrApprovalStore, "db" | "transaction">,
+  args: { sessionId: string; runId: string; error: string; now?: string },
+): DiscardOcrApprovalResult {
+  const now = args.now ?? new Date().toISOString();
+  return store.transaction(() => {
+    const updated = store.db.prepare(`
+      UPDATE ocr_approvals
+      SET state = 'failed', error = @error, completed_at = @now, updated_at = @now,
+          owner_token = NULL, lease_expires_at_ms = NULL
+      WHERE session_id = @sessionId AND run_id = @runId
+        AND state IN ('awaiting-approval', 'approving')
+    `).run({ ...args, now });
+    if (updated.changes === 1) return "discarded";
+    const inserted = store.db.prepare(`
+      INSERT INTO ocr_approvals (
+        session_id, run_id, state, created_at, updated_at, completed_at, error
+      ) VALUES (
+        @sessionId, @runId, 'failed', @now, @now, @now, @error
+      ) ON CONFLICT(session_id, run_id) DO NOTHING
+    `).run({ ...args, now });
+    if (inserted.changes === 1) return "discarded";
+    const row = store.db.prepare(`
+      SELECT state FROM ocr_approvals
+      WHERE session_id = @sessionId AND run_id = @runId
+    `).get(args) as { state: ApprovalRow["state"] } | undefined;
+    if (!row) return "not-found";
+    return row.state === "approved" ? "already-approved" : "already-failed";
+  });
 }
 
 function transitionApproval(

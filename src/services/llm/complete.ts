@@ -98,7 +98,7 @@ function buildCandidates(pool: TextPoolKey[], estTokens: number): Candidate[] {
       model: m.id,
       limit: { ...m.limit, imgTokens: estTokens },
       priority: k.priority,
-      tier: m.tier ?? 1,
+      tier: m.tier,
     })),
   );
 }

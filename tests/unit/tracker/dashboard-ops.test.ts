@@ -17,6 +17,7 @@ import { dateLocal, readLogEntries, trackEvent, trackEventForDate } from "../../
 import { rowFilePath, rowsDir, logFilePath, logsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
+import { persistOcrPrepareInput } from "../../../src/tracker/state/ocr-prepare-input-store.js";
 import { createTaskStore } from "../../../src/core/task-store/index.js";
 import { createWorkerStore } from "../../../src/core/daemon/worker-store.js";
 import {
@@ -2046,7 +2047,7 @@ describe("buildRetryHandler OCR retry", () => {
     }
   });
 
-  it("retries an OCR run from the selected tracker date", async () => {
+  it("retries a prior-day OCR run from its durable prepare input", async () => {
     const pdfPath = join(tmp, "upload.pdf");
     writeFileSync(pdfPath, "%PDF-1.4\n% test\n%%EOF\n");
     const rosterDir = join(tmp, "rosters");
@@ -2092,6 +2093,18 @@ describe("buildRetryHandler OCR retry", () => {
       "2026-05-11",
       tmp,
     );
+    persistOcrPrepareInput(openControlDb({ trackerDir: tmp }), {
+      sessionId: "ocr-session-from-yesterday",
+      runId: "ocr-run-from-yesterday",
+      input: {
+        pdfPath,
+        pdfOriginalName: "oath.pdf",
+        formType: "oath",
+        rosterMode: "existing",
+        rosterPath,
+        sessionId: "ocr-session-from-yesterday",
+      },
+    });
 
     const originalLog = console.log;
     const originalError = console.error;

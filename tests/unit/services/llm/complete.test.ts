@@ -25,7 +25,7 @@ function fakeKey(
     keyIndex,
     rotationKey: `key-${id}`,
     priority: keyIndex,
-    models: models.map((m) => ({ id: m, limit: LIMIT })),
+    models: models.map((m) => ({ id: m, limit: LIMIT, tier: 2, trust: "unbenchmarked" })),
     callText: call,
   };
 }

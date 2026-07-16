@@ -451,7 +451,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   }
 
   // Step 2: pre-emit (dashboard pending rows visible immediately).
-  if (onPreEmitPending) {
+  if (onPreEmitPending && opts.existingTaskPolicy !== 'idempotent') {
     for (let i = 0; i < inputs.length; i++) {
       try {
         onPreEmitPending(inputs[i], runIds[i], parentRunId, ids[i])
@@ -469,7 +469,7 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
   // can mark the pending rows as failed (no task row exists yet).
   const handleSpawnFailure = (err: unknown): never => {
     const message = err instanceof Error ? err.message : String(err)
-    if (onPreEmitFailed) {
+    if (onPreEmitFailed && opts.existingTaskPolicy !== 'idempotent') {
       for (let i = 0; i < inputs.length; i++) {
         try {
           onPreEmitFailed(inputs[i], runIds[i], message, ids[i])
@@ -514,9 +514,42 @@ export async function ensureDaemonsAndEnqueue<TData, TSteps extends readonly str
       opts.existingTaskPolicy,
     )
 
+    // Idempotent approval recovery must discover whether each stable run id
+    // already exists before emitting. Emit only genuinely new tasks; reused
+    // terminal tasks retain their terminal projection and original audit.
+    if (onPreEmitPending && opts.existingTaskPolicy === 'idempotent') {
+      for (let i = 0; i < enqueued.length; i++) {
+        if (enqueued[i].reused) continue
+        try {
+          onPreEmitPending(inputs[i], runIds[i], parentRunId, ids[i])
+        } catch (err) {
+          // The SQLite task commit above is authoritative. A projection
+          // callback must never turn committed work into a reported enqueue
+          // failure (OCR approval recovery would otherwise durably fail after
+          // its stable child task already exists).
+          log.warn(
+            `ensureDaemonsAndEnqueue: post-commit onPreEmitPending threw for '${ids[i]}': ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        }
+      }
+    }
+
     // Step 6: wake daemons AFTER task rows are committed so an idle daemon's
     // claim loop finds claimable work on its first re-poll (ISS-001 fix).
-    await wakeDaemons(daemons)
+    try {
+      await wakeDaemons(daemons)
+    } catch (err) {
+      // Wake is a latency optimization after the durable enqueue commit. The
+      // daemon poll loop will still discover the task, so preserve and return
+      // the committed enqueue result.
+      log.warn(
+        `ensureDaemonsAndEnqueue: post-commit daemon wake failed for '${wf.config.name}': ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
 
     if (!quiet) {
       for (const { id, position } of enqueued) {

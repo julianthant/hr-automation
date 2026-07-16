@@ -20,41 +20,14 @@ import { runRegistry, type RunHandle } from "../../../core/run-registry.js";
 import { openControlDb } from "../../../core/control-db.js";
 import { getRegisteredFile } from "../../files/files.js";
 import { findPriorRunsForHash } from "../../../workflows/oath-upload/duplicate-check.js";
+import { persistOcrPrepareInput } from "../../state/ocr-prepare-input-store.js";
+import { OcrPrepareInputSchema, type PrepareInput } from "./prepare-contract.js";
 
 const WORKFLOW = "ocr";
 
 // ─── POST /api/ocr/prepare + /reupload ───────────────────────
 
-export interface PrepareInput {
-  pdfPath: string;
-  pdfOriginalName: string;
-  pdfFileId?: string;
-  formType: string;
-  // "wait" joins the newest queued/running SharePoint job instead of starting a
-  // fresh download; the Zod schema + orchestrator already handle it (the run
-  // modal offers it only while a SharePoint job is current/queued).
-  rosterMode: "existing" | "download" | "wait";
-  rosterPath?: string;
-  sessionId?: string;
-  previousRunId?: string;
-  isReupload?: boolean;
-  dryRun?: boolean;
-  /**
-   * The dashboard workflow the operator clicked Run on. PDF runs for
-   * oath-signature / emergency-contact get an `operation` coordinator row first;
-   * the OCR run is then delegated under it. Both oath-signature PDF runs and
-   * oath-upload full mode arrive with `formType="oath"`, so this field is what
-   * distinguishes them. Absent → standalone OCR-hub upload (current behavior).
-   */
-  targetWorkflow?: string;
-  /**
-   * Operator-chosen Automation-workers setting. Threaded into the OCR
-   * orchestrator (which stamps it on every OCR row + raises the lookup fan-out
-   * daemon target) and stamped on the operation / oath-upload coordinator rows
-   * for display. Absent → Auto. See `src/domain/run-options.ts`.
-   */
-  runOptions?: RunOptions;
-}
+export type { PrepareInput } from "./prepare-contract.js";
 
 export interface PrepareResponse {
   status: 202 | 400 | 409 | 500;
@@ -126,7 +99,15 @@ export function buildOcrPrepareHandler(
   const trackerDir = opts.trackerDir;
   const runOrch = opts.runOrchestrator ?? runOcrOrchestrator;
 
-  return async (input) => {
+  return async (rawInput) => {
+    const parsedInput = OcrPrepareInputSchema.safeParse(rawInput);
+    if (!parsedInput.success) {
+      return {
+        status: 400,
+        body: { ok: false, error: `Invalid OCR prepare input: ${parsedInput.error.message}` },
+      };
+    }
+    const input = parsedInput.data;
     const spec = getFormSpec(input.formType);
     if (!spec) {
       return { status: 400, body: { ok: false, error: `Unknown formType "${input.formType}"` } };
@@ -199,6 +180,25 @@ export function buildOcrPrepareHandler(
     acquireSessionLock(sessionId);
 
     const runId = randomUUID();
+    try {
+      // `/api/ocr/prepare` is in-process and therefore has no task row with an
+      // authoritative `original_input_json`. Persist the complete validated
+      // request before any background work starts or the 202 is returned.
+      persistOcrPrepareInput(openControlDb({ trackerDir }), {
+        sessionId,
+        runId,
+        input: { ...input, sessionId },
+      });
+    } catch (error) {
+      releaseSessionLock(sessionId);
+      return {
+        status: 500,
+        body: {
+          ok: false,
+          error: `OCR prepare input could not be persisted; no run was launched: ${errorMessage(error)}`,
+        },
+      };
+    }
 
     // ─── Target-workflow operation coordinator row ──────────────────────────
     // For an oath-signature / emergency-contact PDF run, create the operation

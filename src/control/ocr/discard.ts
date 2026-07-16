@@ -14,6 +14,7 @@ import { isTerminalTaskState } from "../../core/task-store/types.js";
 import { openTaskStore, cancelQueuedChildTasksForParentRun } from "../../tracker/tasks/store.js";
 import { readFormType, readParentRunId, readOperationWorkflow } from "../../tracker/dashboard/ocr/shared.js";
 import { emitDiscarded } from "../../services/ocr/approval-signal.js";
+import { discardOcrApproval } from "../../tracker/state/ocr-approval-store.js";
 
 const WORKFLOW = "ocr";
 
@@ -29,7 +30,7 @@ export interface DiscardInput {
   formType?: string;
 }
 export interface DiscardResponse {
-  status: 200 | 400;
+  status: 200 | 400 | 409;
   body: { ok: boolean; error?: string };
 }
 export interface DiscardHandlerOpts {
@@ -95,6 +96,23 @@ export function buildOcrDiscardHandler(opts: DiscardHandlerOpts = {}) {
           },
         };
       }
+    }
+    const discardResult = discardOcrApproval(stores.taskStore.control, {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      error: input.reason ? input.reason : "operator discarded OCR prep",
+    });
+    if (discardResult === "already-approved") {
+      return {
+        status: 409,
+        body: { ok: false, error: "OCR approval is already complete and cannot be discarded" },
+      };
+    }
+    if (discardResult === "already-failed") {
+      return {
+        status: 409,
+        body: { ok: false, error: "OCR approval is already terminal and cannot be discarded again" },
+      };
     }
     requestOcrPrepareAbort(input.sessionId, input.runId);
     // Wake any kernel-path handler suspended in `subscribeToApproval`.

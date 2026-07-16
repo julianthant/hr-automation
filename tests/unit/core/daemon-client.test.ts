@@ -503,7 +503,7 @@ test('ensureDaemonsAndEnqueue: calls onPreparedItems with stable ids and runIds 
       {
         trackerDir: dir,
         quiet: true,
-        deriveItemId: (item) => `id-${(item as { label: string }).label}`,
+        deriveItemId: (item) => `id-${item.label}`,
         onPreparedItems: (items) => {
           preparedCalls.push(items.map((item) => ({ itemId: item.itemId, runId: item.runId })))
         },
@@ -523,6 +523,65 @@ test('ensureDaemonsAndEnqueue: calls onPreparedItems with stable ids and runIds 
 
     await new Promise<void>((resolve) => server.close(() => resolve()))
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('ensureDaemonsAndEnqueue: post-commit idempotent projection failure preserves the committed task result', async () => {
+  clear()
+  const dir = mkdtempSync(join(tmpdir(), 'daemon-client-post-commit-'))
+  const { createServer } = await import('node:http')
+  const server = createServer((req, res) => {
+    if (req.url === '/whoami' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ workflow: 'post-commit-wf', instanceId: 'post-01', pid: process.pid, version: 1 }))
+      return
+    }
+    if (req.url === '/wake' && req.method === 'POST') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"ok":true}')
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  try {
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const addr = server.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+    const { writeLockfile, lockfilePath, ensureDaemonsDir } = await import('../../../src/core/daemon/registry.js')
+    ensureDaemonsDir(dir)
+    writeLockfile(
+      { workflow: 'post-commit-wf', instanceId: 'post-01', pid: process.pid, port, startedAt: new Date().toISOString(), hostname: 'host', version: 1 },
+      lockfilePath('post-commit-wf', 'post-01', dir),
+    )
+    const wf = defineWorkflow({
+      name: 'post-commit-wf',
+      schema: z.object({ id: z.string() }),
+      steps: ['a'],
+      systems: [],
+      authSteps: false,
+      handler: async () => {},
+    })
+
+    const result = await ensureDaemonsAndEnqueue(wf, [{ id: 'committed-item' }], {}, {
+      trackerDir: dir,
+      quiet: true,
+      existingTaskPolicy: 'idempotent',
+      deriveItemId: (input) => input.id,
+      onPreEmitPending: () => {
+        throw new Error('projection disk unavailable')
+      },
+    })
+
+    assert.equal(result.enqueued.length, 1)
+    assert.equal(result.enqueued[0].id, 'committed-item')
+    const task = openControlDb({ trackerDir: dir }).db.prepare(`
+      SELECT control_state FROM tasks WHERE workflow = 'post-commit-wf' AND item_id = 'committed-item'
+    `).get() as { control_state: string }
+    assert.equal(task.control_state, 'queued')
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
     rmSync(dir, { recursive: true, force: true })
   }
 })

@@ -76,7 +76,7 @@ function seedOathOcrRow(
       id: sessionId,
       runId,
       ...(extra.parentRunId ? { parentRunId: extra.parentRunId } : {}),
-      status: "done",
+      status: "running",
       step: "awaiting-approval",
       data: {
         archetype: "preview",

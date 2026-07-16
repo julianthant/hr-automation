@@ -3,7 +3,7 @@ export interface Migration {
   sql: string;
 }
 
-export const LATEST_SCHEMA_VERSION = 17;
+export const LATEST_SCHEMA_VERSION = 19;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -770,6 +770,45 @@ CREATE TABLE IF NOT EXISTS ocr_approvals (
 
 CREATE INDEX IF NOT EXISTS ocr_approvals_state_lease_idx
   ON ocr_approvals(state, lease_expires_at_ms);
+    `,
+  },
+  {
+    // Migration 18: exact replay input for in-process OCR prepare runs.
+    // Unlike daemon work, `/api/ocr/prepare` has no task row whose
+    // `original_input_json` can be authoritative. Persist the complete,
+    // validated launch input under the exact session/run identity so retry
+    // never reconstructs a plausible-but-different standalone run from
+    // tracker display data.
+    version: 18,
+    sql: String.raw`
+CREATE TABLE IF NOT EXISTS ocr_prepare_inputs (
+  session_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+  input_hash TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, run_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ocr_prepare_inputs_hash_idx
+  ON ocr_prepare_inputs(session_id, run_id, input_hash);
+    `,
+  },
+  {
+    // Migration 19: durable projection checkpoint for OCR approvals. Recovery
+    // repairs only approved manifests whose terminal JSONL projection did not
+    // finish after the authoritative SQLite commit.
+    version: 19,
+    sql: String.raw`
+ALTER TABLE ocr_approvals ADD COLUMN presented_at TEXT;
+
+UPDATE ocr_approvals
+SET presented_at = completed_at
+WHERE state = 'approved' AND presented_at IS NULL AND completed_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ocr_approvals_unpresented_idx
+  ON ocr_approvals(state, presented_at);
     `,
   },
 ];
