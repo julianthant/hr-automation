@@ -31,7 +31,7 @@ Dashboard controls mutate SQLite control state first and let workers observe com
 
 The SSE/API server is Hono under `src/tracker/dashboard/hono/`, created by `src/tracker/dashboard/server.ts`. Vite dev runs on `:5173` and proxies `/api/*` + `/events/*` to `:3838`; prod serves the built dashboard from the Hono server.
 
-The operator server binds to loopback by default. Its access middleware validates Host/Origin, issues one per-process token from `/api/operator/session`, and requires that token on every mutation; `src/dashboard/lib/operator-auth.ts` installs the single fetch wrapper that supplies it. Phone Capture is a separate Hono listener on `port + 1` and exposes only token-scoped phone routes. Non-loopback binding requires `HRAUTO_DASHBOARD_ALLOW_LAN=1`, a 16+ character `HRAUTO_DASHBOARD_LAN_PASSWORD`, and the LAN UI origin in `HRAUTO_DASHBOARD_ALLOWED_ORIGINS`; LAN access uses HTTP Basic user `operator` before the ephemeral operator token is issued. Never add wildcard CORS or register dashboard routes on the public Capture app.
+The operator server binds to loopback by default. Its access middleware validates Host/Origin, issues one per-process token from `/api/operator/session`, and requires that token on every mutation; `src/dashboard/lib/operator-auth.ts` installs the single fetch wrapper that supplies it AND exports `getOperatorSession()` for mutation paths that can't use `fetch` (RunModal's XHR upload progress). Phone Capture is a separate Hono listener on `port + 1` and exposes only token-scoped phone routes — **PDF / OCR uploads must NOT post there**; they go same-origin to `/api/ocr/prepare` (Vite proxies `/api` in dev). Non-loopback binding requires `HRAUTO_DASHBOARD_ALLOW_LAN=1`, a 16+ character `HRAUTO_DASHBOARD_LAN_PASSWORD`, and the LAN UI origin in `HRAUTO_DASHBOARD_ALLOWED_ORIGINS`; LAN access uses HTTP Basic user `operator` before the ephemeral operator token is issued. Never add wildcard CORS or register dashboard routes on the public Capture app.
 
 Full API and event reference: `docs/engineering/dashboard-api-reference.md`.
 
@@ -55,6 +55,8 @@ npm run dashboard:prod
 ```
 
 ## Lessons Learned
+
+- **2026-07-16: RunModal PDF uploads must post same-origin with the operator session header — never to `port + 1`.** After the 2026-07-15 Capture split, `port + 1` is phone-only; posting `/api/ocr/prepare` there returns 403 without CORS and the XHR surfaces a bare **"Network error"** (Run I-9 Check / every OCR upload). Fix: relative `submitUrl` (Vite proxies `/api` in dev) + `getOperatorSession()` on the XHR (the `fetch` wrapper does not cover XMLHttpRequest). Deleted `lib/upload-url.ts` (`resolveUploadBaseUrl` → `:3839`).
 
 - **2026-07-15: A forwarded Capture URL must terminate on a different route graph, not a host-header filter over the dashboard app.** A shared listener still made every PII read and control route reachable if forwarding signals were absent or spoofed, and wildcard CORS amplified the exposure. The dashboard now binds loopback, validates Host/Origin, authenticates mutations with a per-process token, and sends ngrok to a dedicated phone-only listener. Keep Capture session tokens and operator tokens out of request logs; audit only redacted paths and statuses.
 
