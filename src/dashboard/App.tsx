@@ -62,6 +62,7 @@ import {
 import { ShortcutsGuide } from "./components/navigation/ShortcutsGuide";
 import { OverviewPanel } from "./components/overview/OverviewPanel";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { ConfigurationFaultBanner } from "./components/settings/ConfigurationFaultBanner";
 import { WorkflowEditorScreen } from "./components/workflow-modifier/WorkflowEditorScreen";
 import {
   fireDesktopNotification,
@@ -837,6 +838,7 @@ export function App() {
           </div>
         }
       />
+      <ConfigurationFaultBanner onOpenSettings={handleShowSettings} />
       <OcrReviewPrepProvider
         active={Boolean(
           selectedEntry &&

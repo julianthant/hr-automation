@@ -39,6 +39,8 @@ export const ROSTERS_SUBDIR = "rosters";
 export const E2E_GATES_SUBDIR = "e2e-gates";
 export const CAPTURES_SUBDIR = "captures";
 export const UPLOADS_SUBDIR = "uploads";
+export const DELETIONS_SUBDIR = "deletions";
+export const BLOBS_SUBDIR = "blobs";
 
 export function rowsDir(dir: string): string {
   return join(dir, ROWS_SUBDIR);
@@ -54,6 +56,15 @@ export function sessionsDir(dir: string): string {
 
 export function runtimeDir(dir: string): string {
   return join(dir, RUNTIME_SUBDIR);
+}
+
+/** `<dir>/blobs/<prefix>/<sha256>` — immutable content-addressed file bytes. */
+export function blobsDir(dir: string): string {
+  return join(dir, BLOBS_SUBDIR);
+}
+
+export function blobFilePath(dir: string, sha256: string): string {
+  return join(blobsDir(dir), sha256.slice(0, 2), sha256);
 }
 
 /** `<dir>/screenshots` — operator audit screenshots (surfaced as `PATHS.screenshotDir`). */
@@ -86,6 +97,44 @@ export function uploadsDir(dir: string): string {
   return join(dir, UPLOADS_SUBDIR);
 }
 
+/** `<dir>/deletions` — append-only operator deletion manifests. */
+export function deletionsDir(dir: string): string {
+  return join(dir, DELETIONS_SUBDIR);
+}
+
+/** `<dir>/deletions/<date>.jsonl` — deletion manifests created on one local date. */
+export function deletionFilePath(date: string, dir: string): string {
+  return join(deletionsDir(dir), `${date}.jsonl`);
+}
+
+/** `<dir>/runtime/compaction` — crash-recovery journal + pending files. */
+export function compactionRuntimeDir(dir: string): string {
+  return join(runtimeDir(dir), "compaction");
+}
+
+export function compactionJournalFile(dir: string): string {
+  return join(compactionRuntimeDir(dir), "journal.json");
+}
+
+export function compactionPendingFile(dir: string): string {
+  return join(compactionRuntimeDir(dir), "pending.jsonl");
+}
+
+/** Tracker-wide exclusive lock: only one offline compactor may run at once. */
+export function compactionLockFile(dir: string): string {
+  return join(compactionRuntimeDir(dir), "compaction.lock");
+}
+
+/** Archived pre-compaction source; preserves recoverable audit history. */
+export function compactionArchiveFile(
+  dir: string,
+  generation: number,
+  kind: "rows" | "logs" | "sessions",
+  filename: string,
+): string {
+  return join(dir, "archive", `generation-${generation}`, kind, filename);
+}
+
 /**
  * Operator settings override file (`config/settings.json`). Repo-rooted, NOT
  * under `.tracker/`. Gitignored operator-machine state (like `.env`) — read by
@@ -93,6 +142,11 @@ export function uploadsDir(dir: string): string {
  */
 export function operatorSettingsFile(repoRoot: string): string {
   return join(repoRoot, "config", "settings.json");
+}
+
+/** Last explicitly valid operator settings, retained for manual recovery only. */
+export function operatorSettingsBackupFile(repoRoot: string): string {
+  return join(repoRoot, "config", "settings.json.bak");
 }
 
 /** Git-tracked workflow presentation override store dir. Repo-rooted, NOT under `.tracker/`. */

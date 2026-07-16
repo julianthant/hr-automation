@@ -372,6 +372,7 @@ test("Hono /api/files routes stream registered local files and cached pages", as
     writeFileSync(pdfPath, Buffer.from("%PDF-1.4\n% sample\n%%EOF\n"));
     writeFileSync(pagePath, Buffer.from("page image bytes"));
     const file = registerLocalFile(db, {
+      trackerDir: dir,
       kind: "pdf",
       mimeType: "application/pdf",
       path: pdfPath,

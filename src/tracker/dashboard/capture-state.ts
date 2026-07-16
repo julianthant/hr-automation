@@ -149,6 +149,7 @@ function registerCapturePdf(
   try {
     const stateDb = openStateDb(trackerDir);
     const registered = registerLocalFile(stateDb, {
+      trackerDir,
       kind: "pdf",
       mimeType: "application/pdf",
       path: pdfPath,

@@ -8,10 +8,18 @@ import {
 
 interface SettingsResponse {
   ok: boolean;
-  settings: OperatorSettings;
+  settings: OperatorSettings | null;
   override: OperatorSettingsOverride | null;
   credentials: CredentialStatus;
+  configuration: SettingsConfigurationState;
 }
+
+export type SettingsConfigurationState =
+  | { state: "missing" }
+  | { state: "valid"; override: OperatorSettingsOverride }
+  | { state: "fault"; error: string; backupAvailable: boolean };
+
+const SETTINGS_CHANGED_EVENT = "hrauto:settings-changed";
 
 export interface UseSettings {
   /** Fully-merged settings (defaults + override), or null while loading. */
@@ -21,10 +29,13 @@ export interface UseSettings {
   loading: boolean;
   saving: boolean;
   error: string | null;
+  configuration: SettingsConfigurationState | null;
   /** Persist a sparse override; returns true on success. */
   save: (override: OperatorSettingsOverride) => Promise<boolean>;
   /** Revert to all defaults (DELETE the override file). */
   reset: () => Promise<boolean>;
+  /** Explicitly restore the last schema-valid backup. */
+  recover: () => Promise<boolean>;
   /** Re-fetch from the server. */
   reload: () => void;
 }
@@ -42,6 +53,7 @@ export function useSettings(): UseSettings {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [configuration, setConfiguration] = useState<SettingsConfigurationState | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
@@ -53,6 +65,7 @@ export function useSettings(): UseSettings {
         if (cancelled) return;
         setSettings(body.settings);
         setCredentials(body.credentials);
+        setConfiguration(body.configuration);
         setError(null);
       })
       .catch((err: unknown) => {
@@ -66,6 +79,12 @@ export function useSettings(): UseSettings {
     };
   }, [reloadTick]);
 
+  useEffect(() => {
+    const reload = (): void => setReloadTick((tick) => tick + 1);
+    window.addEventListener(SETTINGS_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, reload);
+  }, []);
+
   const save = useCallback(async (override: OperatorSettingsOverride): Promise<boolean> => {
     setSaving(true);
     try {
@@ -77,7 +96,9 @@ export function useSettings(): UseSettings {
       const body = (await res.json()) as { ok?: boolean; settings?: OperatorSettings; error?: unknown };
       if (res.ok && body.ok && body.settings) {
         setSettings(body.settings);
+        setConfiguration({ state: "valid", override });
         setError(null);
+        window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
         return true;
       }
       setError(typeof body.error === "string" ? body.error : "Save failed");
@@ -97,7 +118,9 @@ export function useSettings(): UseSettings {
       const body = (await res.json()) as { ok?: boolean; settings?: OperatorSettings; error?: unknown };
       if (res.ok && body.ok && body.settings) {
         setSettings(body.settings);
+        setConfiguration({ state: "missing" });
         setError(null);
+        window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
         return true;
       }
       setError(typeof body.error === "string" ? body.error : "Reset failed");
@@ -110,7 +133,34 @@ export function useSettings(): UseSettings {
     }
   }, []);
 
+  const recover = useCallback(async (): Promise<boolean> => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings/recover", { method: "POST" });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        settings?: OperatorSettings;
+        override?: OperatorSettingsOverride;
+        error?: unknown;
+      };
+      if (res.ok && body.ok && body.settings && body.override) {
+        setSettings(body.settings);
+        setConfiguration({ state: "valid", override: body.override });
+        setError(null);
+        window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
+        return true;
+      }
+      setError(typeof body.error === "string" ? body.error : "Recovery failed");
+      return false;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   const reload = useCallback(() => setReloadTick((t) => t + 1), []);
 
-  return { settings, credentials, loading, saving, error, save, reset, reload };
+  return { settings, credentials, loading, saving, error, configuration, save, reset, recover, reload };
 }

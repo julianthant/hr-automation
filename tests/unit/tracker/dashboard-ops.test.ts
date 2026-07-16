@@ -14,6 +14,10 @@ import type { AddressInfo } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 import { dateLocal, readLogEntries, trackEvent, trackEventForDate } from "../../../src/tracker/jsonl.js";
+import {
+  isDeletedRun,
+  readVisibleEntriesForDate,
+} from "../../../src/tracker/deletions/visible.js";
 import { rowFilePath, rowsDir, logFilePath, logsDir, sessionFilePath, sessionsDir } from "../../../src/tracker/paths.js";
 import { emitTrackerRow } from "../../../src/tracker/jsonl-io.js";
 import { openControlDb } from "../../../src/core/control-db.js";
@@ -520,17 +524,15 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const ocrLines = readFileSync(rowFilePath("ocr", "2026-05-09", tmp), "utf8").trim();
-    assert.equal(ocrLines, "");
-    const eidLines = readFileSync(rowFilePath("eid-lookup", "2026-05-09", tmp), "utf8")
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
-    assert.deepEqual(eidLines.map((line) => line.id), ["unrelated"]);
+    assert.equal(readFileSync(rowFilePath("ocr", "2026-05-09", tmp), "utf8").trim().length > 0, true);
+    assert.deepEqual(readVisibleEntriesForDate("ocr", "2026-05-09", tmp), []);
+    assert.deepEqual(
+      readVisibleEntriesForDate("eid-lookup", "2026-05-09", tmp).map((line) => line.id),
+      ["unrelated"],
+    );
 
     const db = openStateDb(tmp);
-    const remainingRuns = db.prepare("SELECT workflow, item_id, run_id FROM runs ORDER BY workflow, item_id").all() as Array<{
+    const remainingRuns = db.prepare("SELECT workflow, item_id, run_id FROM runs WHERE deleted_at IS NULL ORDER BY workflow, item_id").all() as Array<{
       workflow: string;
       item_id: string;
       run_id: string;
@@ -539,8 +541,8 @@ describe("buildDeleteEntryHandler", () => {
       remainingRuns.map((row) => ({ ...row })),
       [{ workflow: "eid-lookup", item_id: "unrelated", run_id: "eid-run-2" }],
     );
-    assert.equal(store.getTask(parent.taskId), null);
-    assert.equal(store.getTask(child.taskId), null);
+    assert.equal(store.getTask(parent.taskId)?.state, "done");
+    assert.equal(store.getTask(child.taskId)?.state, "done");
   });
 
   it("deletes screenshots for the deleted item", () => {
@@ -565,7 +567,7 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    assert.equal(existsSync(deletedShot), false, "deleted item's screenshot removed");
+    assert.equal(existsSync(deletedShot), true, "deleted item's screenshot remains as audit evidence");
     assert.equal(existsSync(keptShot), true, "other item's screenshot kept");
   });
 
@@ -622,7 +624,7 @@ describe("buildDeleteEntryHandler", () => {
 
     assert.equal(result.ok, true);
     assert.equal(existsSync(run1Shot), true, "other run screenshot kept");
-    assert.equal(existsSync(run2Shot), false, "deleted run screenshot removed");
+    assert.equal(existsSync(run2Shot), true, "deleted run screenshot remains as audit evidence");
   });
 
   it("deletes a scoped tracker run via explicit legacy-shaped runId", () => {
@@ -657,8 +659,10 @@ describe("buildDeleteEntryHandler", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.deepEqual(trackerLines.map((line) => line.id), ["other"]);
-    assert.deepEqual(logLines.map((line) => line.itemId), ["other"]);
+    assert.deepEqual(trackerLines.map((line) => line.id), ["3930", "other"]);
+    assert.deepEqual(logLines.map((line) => line.itemId), ["3930", "other"]);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "3930", runId: "3930#1" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "other", runId: "run-2" }), false);
   });
 
   it("deletes all runs for an item when runId is omitted", () => {
@@ -694,8 +698,11 @@ describe("buildDeleteEntryHandler", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.deepEqual(trackerLines.map((line) => line.id), ["other"]);
-    assert.deepEqual(logLines.map((line) => line.itemId), ["other"]);
+    assert.deepEqual(trackerLines.map((line) => line.id), ["3930", "3930", "other"]);
+    assert.deepEqual(logLines.map((line) => line.itemId), ["3930", "3930", "other"]);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "3930", runId: "run-1" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "3930", runId: "run-2" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "other", runId: "run-3" }), false);
   });
 
   it("deletes only the requested run and promotes the previous run in SQLite", () => {
@@ -816,9 +823,9 @@ describe("buildDeleteEntryHandler", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.deepEqual(trackerLines.map((line) => line.runId), ["run-1"]);
-    assert.deepEqual(logLines.map((line) => line.runId), ["run-1"]);
-    const remainingRuns = db.prepare("SELECT run_id FROM runs ORDER BY run_ordinal").all() as Array<{ run_id: string }>;
+    assert.deepEqual(trackerLines.map((line) => line.runId), ["run-1", "run-2"]);
+    assert.deepEqual(logLines.map((line) => line.runId), ["run-1", "run-2"]);
+    const remainingRuns = db.prepare("SELECT run_id FROM runs WHERE deleted_at IS NULL ORDER BY run_ordinal").all() as Array<{ run_id: string }>;
     assert.deepEqual(remainingRuns.map((row) => row.run_id), ["run-1"]);
     const item = db.prepare("SELECT latest_run_id, latest_status FROM items").get() as {
       latest_run_id: string;
@@ -872,7 +879,7 @@ describe("buildDeleteEntryHandler", () => {
     });
 
     assert.equal(result.ok, true);
-    const remainingRuns = db.prepare("SELECT run_id, run_ordinal FROM runs ORDER BY run_ordinal").all() as Array<{
+    const remainingRuns = db.prepare("SELECT run_id, run_ordinal FROM runs WHERE deleted_at IS NULL ORDER BY run_ordinal").all() as Array<{
       run_id: string;
       run_ordinal: number;
     }>;
@@ -910,7 +917,10 @@ describe("buildDeleteBulkHandler", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.deepEqual(trackerLines.map((line) => line.id), ["c"]);
+    assert.deepEqual(trackerLines.map((line) => line.id), ["a", "b", "c"]);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "a", runId: "a#1" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "b", runId: "b#1" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "c", runId: "c#1" }), false);
   });
 
   it("can delete only scoped runs for repeated item ids", () => {
@@ -939,7 +949,10 @@ describe("buildDeleteBulkHandler", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.deepEqual(trackerLines.map((line) => `${line.id}:${line.runId}`), ["a:run-old"]);
+    assert.deepEqual(trackerLines.map((line) => `${line.id}:${line.runId}`), ["a:run-old", "a:run-batch", "b:run-batch-b"]);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "a", runId: "run-batch" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "b", runId: "run-batch-b" }), true);
+    assert.equal(isDeletedRun(tmp, { workflow: "separations", trackerDate: "2026-05-09", itemId: "a", runId: "run-old" }), false);
   });
 
   it("returns ok false when workflow or date is missing (direct factory use)", () => {

@@ -23,6 +23,7 @@ export function registerDownloadedFile(input: RegisterDownloadedFileInput): void
   const trackerDir = input.trackerDir ?? ".tracker";
   if (!isStateDbReady(trackerDir)) return;
   registerLocalFile(openStateDb(trackerDir), {
+    trackerDir,
     kind: "pdf",
     mimeType: "application/pdf",
     path: input.path,

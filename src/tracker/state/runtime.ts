@@ -1,10 +1,12 @@
-import type { TrackerEntry, LogEntry } from "../jsonl-io.js";
-import type { SessionEvent, ScreenshotSessionEvent } from "../session-events.js";
-import { log } from "../../utils/log.js";
+import type { TrackerEntry, LogEntry } from "../jsonl-core.js";
+import type { SessionEvent, ScreenshotSessionEvent } from "../session-event-types.js";
+import { trackerError } from "../log-sink.js";
 import { isStateDbReady, openStateDb } from "./db.js";
 import { applyTrackerEntry, applyLogEntry, applySessionEvent } from "./apply.js";
 import { rebuildProjectionForDate } from "./rebuild.js";
 import type { ProjectionSourceRef } from "./types.js";
+import { canonicalSourcePath } from "./source-path.js";
+import { logFilePath, rowFilePath } from "../paths.js";
 
 function getReadyDb(dir: string) {
   if (!isStateDbReady(dir)) return null;
@@ -51,7 +53,7 @@ function noteApplyFailure(dir: string, date: string, kind: string, err: unknown)
   const count = (consecutiveFailures.get(key) ?? 0) + 1;
   consecutiveFailures.set(key, count);
   const message = err instanceof Error ? err.message : String(err);
-  log.error(
+  trackerError(
     `SQLite projection failed to apply ${kind} (dir=${dir} date=${date}, ` +
       `consecutive failure ${count}): ${message}`,
   );
@@ -73,7 +75,7 @@ function scheduleProjectionRebuild(dir: string, date: string): void {
     try {
       if (!isStateDbReady(dir)) return;
       const db = openStateDb(dir);
-      log.error(
+      trackerError(
         `SQLite projection drift detected (dir=${dir} date=${date}) — ` +
           `rebuilding from JSONL after ${REBUILD_FAILURE_THRESHOLD} consecutive apply failures`,
       );
@@ -83,7 +85,7 @@ function scheduleProjectionRebuild(dir: string, date: string): void {
       consecutiveFailures.delete(key);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`SQLite projection rebuild failed (dir=${dir} date=${date}): ${message}`);
+      trackerError(`SQLite projection rebuild failed (dir=${dir} date=${date}): ${message}`);
     } finally {
       rebuildsInFlight.delete(key);
     }
@@ -158,20 +160,20 @@ export function applySigintTerminalToProjection(
   try {
     if (!isStateDbReady(dir)) return;
     const db = openStateDb(dir);
-    applyTrackerEntry(db, trackEntry, {
-      sourceKind: "tracker",
-      workflow: trackEntry.workflow,
-      trackerDate: source.trackerDate,
-      path: source.trackerPath,
-      offset: 0,
-    });
-    applyLogEntry(db, logEntry, {
-      sourceKind: "log",
-      workflow: logEntry.workflow,
-      trackerDate: source.trackerDate,
-      path: source.logPath,
-      offset: 0,
-    });
+    const expectedTrackerPath = canonicalSourcePath(
+      rowFilePath(trackEntry.workflow, source.trackerDate, dir),
+    );
+    const expectedLogPath = canonicalSourcePath(
+      logFilePath(logEntry.workflow, source.trackerDate, dir),
+    );
+    if (
+      canonicalSourcePath(source.trackerPath) !== expectedTrackerPath ||
+      canonicalSourcePath(source.logPath) !== expectedLogPath
+    ) return;
+    // Rebuild discovers the terminal lines' real byte offsets. A synthetic
+    // offset (historically 0) can either collide with the run's first row or
+    // create a second identity when the caller supplied a relative path.
+    rebuildProjectionForDate(db, { dir, date: source.trackerDate });
   } catch {
     // Best-effort. A DB error here must not block process exit; the startup
     // rebuild reconciles the projection on the next dashboard launch.

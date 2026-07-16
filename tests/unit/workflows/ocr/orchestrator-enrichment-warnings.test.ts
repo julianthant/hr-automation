@@ -34,6 +34,7 @@ test("disambiguation-LLM failure is surfaced ON THE RECORD as a warning — not 
   await writeOnePagePdf(pdfPath);
   const db = openStateDb(dir);
   const { fileId: pdfFileId } = registerLocalFile(db, {
+    trackerDir: dir,
     kind: "pdf",
     mimeType: "application/pdf",
     path: pdfPath,

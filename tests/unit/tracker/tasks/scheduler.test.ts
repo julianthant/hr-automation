@@ -9,7 +9,30 @@ import {
   getTaskByTrackerIdentity,
   openTaskStoreForTests,
 } from "../../../../src/tracker/tasks/store.js";
-import { runDependencySchedulerTick } from "../../../../src/tracker/tasks/scheduler.js";
+import {
+  runDependencySchedulerTick,
+  startDependencyScheduler,
+} from "../../../../src/tracker/tasks/scheduler.js";
+
+test("background scheduler does not touch tracker state when its mutation gate is closed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "task-scheduler-gated-"));
+  try {
+    const invalidTrackerRoot = join(dir, "not-a-directory");
+    await import("node:fs").then(({ writeFileSync }) => writeFileSync(invalidTrackerRoot, "file"));
+    const errors: unknown[] = [];
+    const handle = startDependencyScheduler({
+      trackerDir: invalidTrackerRoot,
+      intervalMs: 5,
+      canRun: () => false,
+      onError: (error) => errors.push(error),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    handle.stop();
+    assert.deepEqual(errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("scheduler marks child dependency satisfied from projected child run", async () => {
   const dir = mkdtempSync(join(tmpdir(), "task-scheduler-"));

@@ -1,4 +1,5 @@
-import { readEntries, readEntriesForDate, type TrackerEntry } from "../tracker/jsonl.js";
+import type { TrackerEntry } from "../tracker/jsonl.js";
+import { readVisibleEntries, readVisibleEntriesForDate } from "../tracker/deletions/visible.js";
 import { createTaskStore } from "./task-store/index.js";
 import { openControlDb } from "./control-db.js";
 
@@ -15,7 +16,7 @@ export function readEntriesForRetryItem(
   dir: string,
   date?: string,
 ): { allForId: TrackerEntry[]; scoped: TrackerEntry[] } {
-  const source = date ? readEntriesForDate(workflow, date, dir) : readEntries(workflow, dir);
+  const source = date ? readVisibleEntriesForDate(workflow, date, dir) : readVisibleEntries(workflow, dir);
   const allForId = source.filter((e) => e.id === id);
   const scoped = runId ? allForId.filter((e) => e.runId === runId) : allForId;
   return { allForId, scoped };

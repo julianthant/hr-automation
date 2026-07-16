@@ -221,6 +221,7 @@ test("dashboard server Hono-only listener serves representative routes", async (
   const originalPath = join(dir, "sample.pdf");
   writeFileSync(originalPath, Buffer.from("%PDF-1.4\n% route smoke\n%%EOF\n"));
   const file = registerLocalFile(db, {
+    trackerDir: dir,
     kind: "pdf",
     mimeType: "application/pdf",
     path: originalPath,

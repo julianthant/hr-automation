@@ -1,12 +1,13 @@
 import ExcelJS from "exceljs";
-import { readEntries, type TrackerEntry } from "../jsonl.js";
+import type { TrackerEntry } from "../jsonl.js";
+import { readVisibleEntries } from "../deletions/visible.js";
 import { log } from "../../utils/log.js";
 
 export async function exportToExcel(
   workflow: string,
   outputPath?: string,
 ): Promise<string> {
-  const entries = readEntries(workflow);
+  const entries = readVisibleEntries(workflow, ".tracker");
   if (entries.length === 0) {
     log.error(`No entries found for workflow "${workflow}"`);
     return "";

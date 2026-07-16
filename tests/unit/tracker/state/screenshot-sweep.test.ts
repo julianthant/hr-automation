@@ -78,6 +78,7 @@ describe("sweepStaleRunScreenshots", () => {
     seedRun(db, { workflow: "work-study", runId: sharedRunId, itemId: "10873698", status: "running", ts });
     const activePng = writePng(screenshotsDir, "work-study-10873698-step-sys-9000.png");
     registerLocalFile(db, {
+      trackerDir,
       kind: "screenshot",
       mimeType: "image/png",
       path: activePng,
@@ -100,6 +101,7 @@ describe("sweepStaleRunScreenshots", () => {
     seedRun(db, { runId: "old-run", itemId: "i1", status: "done", ts });
     const pngPath = writePng(screenshotsDir, "x-i1-step-sys-1000.png");
     registerLocalFile(db, {
+      trackerDir,
       kind: "screenshot",
       mimeType: "image/png",
       path: pngPath,
@@ -124,6 +126,7 @@ describe("sweepStaleRunScreenshots", () => {
     seedRun(db, { runId: "fresh-run", itemId: "i2", status: "done", ts: isoDaysAgo(5) });
     const pngPath = writePng(screenshotsDir, "x-i2-step-sys-2000.png");
     registerLocalFile(db, {
+      trackerDir,
       kind: "screenshot",
       mimeType: "image/png",
       path: pngPath,
@@ -145,6 +148,7 @@ describe("sweepStaleRunScreenshots", () => {
     seedRun(db, { runId: "stuck-run", itemId: "i3", status: "running", ts: isoDaysAgo(45) });
     const pngPath = writePng(screenshotsDir, "x-i3-step-sys-3000.png");
     registerLocalFile(db, {
+      trackerDir,
       kind: "screenshot",
       mimeType: "image/png",
       path: pngPath,
@@ -182,6 +186,7 @@ describe("sweepStaleRunScreenshots", () => {
     seedRun(db, { runId: "run-X", itemId: "iX", status: "running", ts: isoDaysAgo(45) });
     const png = writePng(screenshotsDir, `wf-iX-step-sys-${msDaysAgo(45)}.png`);
     registerLocalFile(db, {
+      trackerDir,
       kind: "screenshot",
       mimeType: "image/png",
       path: png,

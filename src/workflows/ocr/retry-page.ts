@@ -28,6 +28,7 @@ import { countVerified } from "../../services/ocr/records-stats.js";
 import { getFormSpec } from "../../services/ocr/forms/registry.js";
 import type { AnyOcrFormSpec, RosterRow as OcrRosterRow } from "./types.js";
 import { extractOcrRecordEid, extractOcrRecordName } from "./record-helpers.js";
+import { isFileAttachmentId } from "../../tracker/files/file-id.js";
 
 const WORKFLOW = "ocr";
 
@@ -106,6 +107,9 @@ export async function runOcrRetryPage(
   const pdfFileId = row.data?.pdfFileId;
   if (!pdfFileId) {
     throw new RetryPageError("image-missing", `OCR retry requires pdfFileId (legacy page-images path removed)`);
+  }
+  if (!isFileAttachmentId(pdfFileId)) {
+    throw new RetryPageError("image-missing", `OCR retry has invalid pdfFileId: ${pdfFileId}`);
   }
   const pageImagePath =
     join(trackerDir ?? ".tracker", "pdf-cache", pdfFileId, `page-${String(input.pageNum).padStart(3, "0")}.png`);

@@ -30,6 +30,7 @@
     "setup": "tsx --env-file=.env src/scripts/ops/setup.ts",
     "duo:webauthn:enroll": "tsx --env-file=.env src/scripts/ops/duo-webauthn-enroll.ts",
     "clean:tracker": "tsx src/scripts/ops/clean-tracker.ts",
+    "compact:tracker": "tsx src/scripts/ops/compact-tracker.ts",
     "schemas:export": "tsx --env-file=.env src/scripts/codegen/export-schemas.ts",
     "selectors:catalog": "tsx src/scripts/selectors/catalog.ts",
     "data-bank:build": "tsx src/scripts/workflow-design/build-data-bank.ts",

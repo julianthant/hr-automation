@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { runOcrRetryPage, RetryPageError } from "../../../../src/workflows/ocr/retry-page.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/jsonl.js";
 
+const PDF_FILE_ID = "22222222-2222-4222-8222-222222222222";
+
 function setup(): { dir: string } {
   const dir = join(tmpdir(), `ocr-retry-gate-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
@@ -33,7 +35,7 @@ function writeRow(
         formType: "oath",
         pdfPath: "/tmp/x.pdf",
         pdfOriginalName: "x.pdf",
-        pdfFileId: "pf-gate-1",
+        pdfFileId: PDF_FILE_ID,
         sessionId,
         records: JSON.stringify([]),
         failedPages: JSON.stringify([
@@ -45,7 +47,7 @@ function writeRow(
     "utf-8",
   );
   // Create pdf-cache page image so image-missing guard doesn't fire.
-  const pageDir = join(dir, "pdf-cache", "pf-gate-1");
+  const pageDir = join(dir, "pdf-cache", PDF_FILE_ID);
   mkdirSync(pageDir, { recursive: true });
   writeFileSync(join(pageDir, "page-001.png"), "");
 }

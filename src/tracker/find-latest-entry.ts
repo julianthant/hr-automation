@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Database } from "../infra/sqlite/index.js";
-import { log } from "../utils/log.js";
-import { dateLocal, isTrackerEntry, isTrackerEntryStatus, type TrackerEntry } from "./jsonl-io.js";
+import { trackerWarn } from "./log-sink.js";
+import { dateLocal, isTrackerEntry, isTrackerEntryStatus, type TrackerEntry } from "./jsonl-core.js";
 import { rowFilePath } from "./paths.js";
+import { isDeletedRun } from "./deletions/visible.js";
 
 export interface FindLatestEntryForPredicateOpts {
   workflow: string;
@@ -36,7 +37,7 @@ function parseDataJson(raw: string | null | undefined): Record<string, string> {
     // archetype/__traceId/display metadata — the ISS-006 lineage-sever class.
     // Reads must not throw, but the corruption must be visible (matches the
     // sibling rowStatusOrUndefined, which also logs).
-    log.warn(
+    trackerWarn(
       `[find-latest-entry] parseDataJson: unparseable latest_data_json (${err instanceof Error ? err.message : String(err)}) ` +
         `— prior-row reconstruction will be missing archetype/traceId/metadata; raw=${raw.slice(0, 200)}`,
     );
@@ -49,7 +50,7 @@ function rowStatusOrUndefined(
   ctx: { source: string; workflow: string; itemId: string; runId?: string | null },
 ): TrackerEntry["status"] | undefined {
   if (isTrackerEntryStatus(value)) return value;
-  log.warn(
+  trackerWarn(
     `[find-latest-entry] skipping SQLite ${ctx.source} row with invalid latest_status workflow=${ctx.workflow} item=${ctx.itemId}` +
       `${ctx.runId ? ` runId=${ctx.runId}` : ""} status=${String(value)}`,
   );
@@ -99,7 +100,7 @@ export function findLatestEntryForPredicate(
           SELECT item_id, run_id, parent_run_id, latest_tracker_ts, latest_status, latest_step,
                  latest_data_json, latest_error
           FROM runs
-          WHERE workflow = @workflow AND run_id = @runId
+          WHERE workflow = @workflow AND run_id = @runId AND deleted_at IS NULL
           ORDER BY latest_tracker_ts DESC LIMIT 1
         `).get({ workflow: opts.workflow, runId: opts.runId }) as {
           item_id: string;
@@ -146,6 +147,12 @@ export function findLatestEntryForPredicate(
                     ORDER BY r.latest_tracker_ts DESC LIMIT 1) AS parent_run_id
           FROM items
           WHERE workflow = @workflow AND item_id = @itemId
+            AND EXISTS (
+              SELECT 1 FROM runs r
+              WHERE r.workflow = items.workflow AND r.tracker_date = items.tracker_date
+                AND r.item_id = items.item_id AND r.run_id = items.latest_run_id
+                AND r.deleted_at IS NULL
+            )
           ORDER BY latest_ts DESC LIMIT 1
         `).get({ workflow: opts.workflow, itemId: opts.itemId }) as {
           item_id: string;
@@ -199,12 +206,18 @@ export function findLatestEntryForPredicate(
         const parsed = JSON.parse(lines[j]) as unknown;
         const entry = coerceJsonlTrackerEntry(parsed, opts.workflow);
         if (!entry) {
-          log.warn(`[find-latest-entry] skipping invalid tracker JSONL line ${j + 1} in ${file}`);
+          trackerWarn(`[find-latest-entry] skipping invalid tracker JSONL line ${j + 1} in ${file}`);
           continue;
         }
+        if (isDeletedRun(dir, {
+          workflow: entry.workflow,
+          trackerDate: dateLocal(d),
+          itemId: entry.id,
+          runId: entry.runId ?? `${entry.id}#1`,
+        })) continue;
         if (opts.predicate(entry)) return entry;
       } catch (err) {
-        log.warn(`[find-latest-entry] skipping malformed JSONL line ${j + 1} in ${file}: ${(err as Error).message}`);
+        trackerWarn(`[find-latest-entry] skipping malformed JSONL line ${j + 1} in ${file}: ${(err as Error).message}`);
       }
     }
   }

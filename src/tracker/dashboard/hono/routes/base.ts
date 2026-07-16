@@ -5,14 +5,16 @@ import {
   cleanOldTrackerFiles,
   listDatesForWorkflow,
   listWorkflows,
-  readEntries,
-  readEntriesForDate,
-  readLogEntries,
-  readLogEntriesForDate,
-  readRunsForId,
   getRunIdOr,
   type TrackerEntry,
 } from "../../../jsonl.js";
+import {
+  readVisibleEntries,
+  readVisibleEntriesForDate,
+  readVisibleLogEntries,
+  readVisibleLogEntriesForDate,
+  readVisibleRunsForId,
+} from "../../../deletions/visible.js";
 import { queryRunsForItem } from "../../../state/queries.js";
 import { listRosters, resolveRosterDirs } from "../../../../services/matching/roster-loader.js";
 import { log } from "../../../../utils/log.js";
@@ -56,7 +58,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
 
   app.get("/api/entries", (c) => {
     const workflow = c.req.query("workflow") ?? getDefaultWorkflow(deps);
-    return jsonResponse(readEntries(workflow, deps.dir));
+    return jsonResponse(readVisibleEntries(workflow, deps.dir));
   });
 
   app.get("/api/entry-data", (c) => {
@@ -67,7 +69,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     if (!workflow || !id) {
       return jsonResponse({ ok: false, error: "workflow and id are required" }, 400);
     }
-    const entries = (date ? readEntriesForDate(workflow, date, deps.dir) : readEntries(workflow, deps.dir))
+    const entries = (date ? readVisibleEntriesForDate(workflow, date, deps.dir) : readVisibleEntries(workflow, deps.dir))
       .filter((entry) => entry.id === id);
     const richness = (entry: TrackerEntry): number =>
       Object.values(entry.data ?? {}).filter((value) => value != null && String(value).trim() !== "").length;
@@ -92,7 +94,7 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
     const workflow = c.req.query("workflow") ?? getDefaultWorkflow(deps);
     const id = c.req.query("id") ?? "";
     const runId = c.req.query("runId") ?? "";
-    let logs = readLogEntries(workflow, id || undefined, deps.dir);
+    let logs = readVisibleLogEntries(workflow, id || undefined, deps.dir);
     if (runId) logs = logs.filter((entry) => entry.runId ? entry.runId === runId : runId.endsWith("#1"));
     return jsonResponse(logs);
   });
@@ -110,10 +112,10 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
       }
     }
 
-    const runs = readRunsForId(workflow, id, date, deps.dir);
+    const runs = readVisibleRunsForId(workflow, id, date, deps.dir);
     const allForItem = date
-      ? readEntriesForDate(workflow, date, deps.dir).filter((entry) => entry.id === id)
-      : readEntries(workflow, deps.dir).filter((entry) => entry.id === id);
+      ? readVisibleEntriesForDate(workflow, date, deps.dir).filter((entry) => entry.id === id)
+      : readVisibleEntries(workflow, deps.dir).filter((entry) => entry.id === id);
     const historyByRun = new Map<string, StepDurationEntry[]>();
     for (const entry of allForItem) {
       const runId = getRunIdOr(entry);
@@ -125,8 +127,8 @@ export function registerBaseRoutes(app: Hono, deps: DashboardHonoDeps): void {
 
     const timelines = buildRunTimelines(allForItem);
     const allLogs = date
-      ? readLogEntriesForDate(workflow, id, date, deps.dir)
-      : readLogEntries(workflow, id, deps.dir);
+      ? readVisibleLogEntriesForDate(workflow, id, date, deps.dir)
+      : readVisibleLogEntries(workflow, id, deps.dir);
     const logFirst = new Map<string, string>();
     const logLast = new Map<string, string>();
     for (const entry of allLogs) {

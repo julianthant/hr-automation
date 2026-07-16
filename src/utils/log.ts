@@ -1,5 +1,10 @@
 import { styleText } from "node:util";
-import { appendLogEntry, type LogEntry } from "../tracker/jsonl.js";
+// Import from `jsonl-io.js` directly, NEVER the `jsonl.js` barrel: the barrel
+// re-exports `jsonl-cleanup.ts`, which imports `config.ts` → settings store —
+// a runtime module cycle back into this logger (broken 2026-07-16; ratcheted
+// by tests/unit/architecture/import-cycles.test.ts).
+import { appendLogEntry, type LogEntry } from "../tracker/jsonl-io.js";
+import { setTrackerLogSink } from "../tracker/log-sink.js";
 import { getLogContext } from "./log-context.js";
 import { emitDaemonLog } from "../tracker/session-events.js";
 import type { StructuredLogEvent } from "../domain/log-events.js";
@@ -103,3 +108,11 @@ export const log = {
   e2e: (category: string, payload: string | Record<string, unknown>): void =>
     emitE2e(category, payload),
 };
+
+// Persistence diagnostics must stay console-only. Routing them through
+// `log.warn`/`log.error` would call appendFromContext and re-enter the failing
+// tracker writer that produced the diagnostic.
+setTrackerLogSink({
+  warn: (message) => console.log(styleText("yellow", "!") + " " + message),
+  error: (message) => console.error(styleText("red", "✗") + " " + message),
+});

@@ -1,7 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -16,6 +16,7 @@ import { rowFilePath, logFilePath, rowsDir, logsDir } from "../../../src/tracker
 import type { TrackerEntry, LogEntry } from "../../../src/tracker/jsonl.js";
 import type { ProjectionSourceRef } from "../../../src/tracker/state/types.js";
 import { openDatabase } from "../../../src/infra/sqlite/index.js";
+import { rebuildProjectionForDate } from "../../../src/tracker/state/rebuild.js";
 
 function tmpTracker(): string {
   return mkdtempSync(join(tmpdir(), "state-runtime-"));
@@ -170,10 +171,11 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
   const dir = tmpTracker();
   __resetProjectionFailureStateForTests();
   try {
-    openStateDb(dir);
+    const relativeDir = relative(process.cwd(), dir);
+    openStateDb(relativeDir);
     const date = "2026-05-21";
     // Simulate the run already being "running" in the projection.
-    trackEvent(trackerEntry(date, "running"), dir);
+    trackEvent(trackerEntry(date, "running"), relativeDir);
 
     const trackEntry: TrackerEntry = {
       workflow: "onboarding",
@@ -194,16 +196,22 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
       ts: `${date}T20:05:00.000Z`,
     };
 
+    const trackerPath = rowFilePath("onboarding", date, relativeDir);
+    const logPath = logFilePath("onboarding", date, relativeDir);
+    mkdirSync(logsDir(relativeDir), { recursive: true });
+    appendFileSync(trackerPath, `${JSON.stringify(trackEntry)}\n`);
+    appendFileSync(logPath, `${JSON.stringify(logEntry)}\n`);
     applySigintTerminalToProjection(
       trackEntry,
       logEntry,
       {
-        trackerPath: rowFilePath("onboarding", date, dir),
-        logPath: logFilePath("onboarding", date, dir),
+        trackerPath,
+        logPath,
         trackerDate: date,
       },
-      dir,
+      relativeDir,
     );
+    rebuildProjectionForDate(openStateDb(relativeDir), { dir: relativeDir, date });
 
     const verifyDb = openDatabase(stateDbPath(dir));
     try {
@@ -222,6 +230,10 @@ test("applySigintTerminalToProjection writes failed status to the projection", (
         level: "error",
         message: "Process terminated (SIGINT)",
       });
+      const eventCount = verifyDb.prepare(
+        "SELECT COUNT(*) AS n FROM run_events WHERE run_id = 'run-1'",
+      ).get() as { n: number };
+      assert.equal(eventCount.n, 2, "signal row must not replay under a second path identity");
     } finally {
       verifyDb.close();
     }

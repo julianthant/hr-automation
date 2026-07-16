@@ -1,9 +1,9 @@
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 
 import { openDatabase, transaction, type Database } from "../../infra/sqlite/index.js";
 
-import { DEFAULT_DIR } from "../jsonl-io.js";
+import { DEFAULT_DIR } from "../jsonl-core.js";
 import { LATEST_SCHEMA_VERSION, MIGRATIONS } from "./schema.js";
 
 interface OpenDbEntry {
@@ -41,7 +41,7 @@ interface ReadyCacheEntry {
 let readyCache: ReadyCacheEntry | null = null;
 
 export function stateDbPath(dir: string = DEFAULT_DIR): string {
-  return join(dir, "state.db");
+  return resolve(dir, "state.db");
 }
 
 function fingerprintOf(path: string): DbFingerprint | null {
@@ -79,7 +79,12 @@ export function openStateDb(dir: string = DEFAULT_DIR): Database {
   }
 
   const db = openDatabase(path);
-  runMigrations(db);
+  try {
+    runMigrations(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   const fingerprint = fingerprintOf(path);
   readyCache = fingerprint ? { path, fingerprint } : null;
   openDbs.set(path, { db, fingerprint });
@@ -146,7 +151,7 @@ export function runMigrations(db: Database): void {
   }
 }
 
-export function closeStateDbForTests(dir: string = DEFAULT_DIR): void {
+export function closeStateDb(dir: string = DEFAULT_DIR): void {
   const path = stateDbPath(dir);
   const entry = openDbs.get(path);
   if (readyCache?.path === path) readyCache = null;
@@ -154,3 +159,5 @@ export function closeStateDbForTests(dir: string = DEFAULT_DIR): void {
   entry.db.close();
   openDbs.delete(path);
 }
+
+export const closeStateDbForTests = closeStateDb;

@@ -1,12 +1,15 @@
 import { readSessionEvents, type SessionEvent } from "../../../tracker/session-events.js";
 import {
   dateLocal,
-  readLogEntries,
-  readLogEntriesForDate,
-  readEntries,
-  readEntriesForDate,
   type TrackerEntry,
 } from "../../../tracker/jsonl.js";
+import {
+  readVisibleEntries,
+  readVisibleEntriesForDate,
+  readVisibleLogEntries,
+  readVisibleLogEntriesForDate,
+  isDeletedRun,
+} from "../../../tracker/deletions/visible.js";
 import {
   mapLogRowToWire,
   mapRunEventRowToWire,
@@ -289,8 +292,8 @@ export const logsTopic: TopicEmitter<{
       }
     }
     let entries = date && date !== today
-      ? readLogEntriesForDate(workflow, itemId || undefined, date, deps.dir)
-      : readLogEntries(workflow, itemId || undefined, deps.dir);
+      ? readVisibleLogEntriesForDate(workflow, itemId || undefined, date, deps.dir)
+      : readVisibleLogEntries(workflow, itemId || undefined, deps.dir);
     if (runId) {
       entries = entries.filter((entry) =>
         entry.runId ? entry.runId === runId : runId.endsWith("#1"),
@@ -311,8 +314,8 @@ function readTrackerEntriesForRunEvents(
   dir: string,
 ): TrackerEntry[] {
   return date && date !== today
-    ? readEntriesForDate(workflow, date, dir)
-    : readEntries(workflow, dir);
+    ? readVisibleEntriesForDate(workflow, date, dir)
+    : readVisibleEntries(workflow, dir);
 }
 
 /**
@@ -338,6 +341,13 @@ export const runEventsTopic: TopicEmitter<{
   const today = dateLocal();
 
   return makeDeltaTopic(async () => {
+    const trackerDate = date || today;
+    if (requestedRunId && itemId && isDeletedRun(deps.dir, {
+      workflow,
+      trackerDate,
+      itemId,
+      runId: requestedRunId,
+    })) return [];
     let trackerEntries: TrackerEntry[] = [];
     let usedTrackerSqlite = deps.projectionReady && deps.stateDb !== undefined;
     if (deps.projectionReady && deps.stateDb) {
@@ -410,6 +420,9 @@ export const runEventsTopic: TopicEmitter<{
       try {
         const sqliteEvents = querySessionEventsForRun(deps.stateDb, {
           runId: requestedRunId,
+          workflow,
+          itemId,
+          trackerDate,
           ...(wfInstance ? { workflowInstance: wfInstance } : {}),
           ...(memberRunIds.length > 0 ? { memberRunIds } : {}),
         });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   ArrowUpRight,
   Bell,
   BookOpen,
@@ -183,6 +184,63 @@ function Card({
 }
 
 const FIELD_GRID = "grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2";
+
+function ConfigurationFaultPanel({
+  error,
+  backupAvailable,
+  saving,
+  actionError,
+  onRecover,
+  onReset,
+}: {
+  error: string;
+  backupAvailable: boolean;
+  saving: boolean;
+  actionError: string | null;
+  onRecover: () => void;
+  onReset: () => void;
+}): JSX.Element {
+  return (
+    <section role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-5">
+      <div className="flex items-start gap-3">
+        <AlertTriangle aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-foreground">Configuration fault</h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            The existing settings file is corrupt or invalid. Workflow launches and queue
+            mutations are blocked; defaults have not been substituted.
+          </p>
+          <p className="mt-3 break-words rounded-md border border-border bg-background/70 p-3 font-mono text-xs text-foreground">
+            {error}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {backupAvailable ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={onRecover}
+                className="rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              >
+                Restore last valid backup
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onReset}
+              className="rounded-md border border-destructive/40 bg-background px-3.5 py-2 text-sm font-medium text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            >
+              Reset to defaults
+            </button>
+          </div>
+          {actionError ? (
+            <p className="mt-3 text-xs text-destructive" aria-live="polite">{actionError}</p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 // ── Credential display rows ───────────────────────────────────────────────────
 
@@ -997,7 +1055,7 @@ export function SettingsDialog({
   onNotifySettingsChange,
   onLaunchEditor,
 }: SettingsDialogProps): JSX.Element {
-  const { settings, credentials, loading, saving, error, save, reset } = useSettings();
+  const { settings, credentials, loading, saving, error, configuration, save, reset, recover } = useSettings();
   const { confirm, confirmDialog } = useConfirm();
   const [activeSection, setActiveSection] = useState<SectionId>("general");
   const [draft, setDraft] = useState<OperatorSettings>(DEFAULT_OPERATOR_SETTINGS);
@@ -1071,6 +1129,17 @@ export function SettingsDialog({
     } else {
       toast.error("Reset failed");
       setSaveStatus("Reset failed");
+    }
+  };
+
+  const handleRecover = async () => {
+    const success = await recover();
+    if (success) {
+      toast.success("Settings backup restored");
+      setSaveStatus("Backup restored");
+    } else {
+      toast.error("Recovery failed");
+      setSaveStatus("Recovery failed");
     }
   };
 
@@ -1149,6 +1218,17 @@ export function SettingsDialog({
                 <div className="flex h-full items-center justify-center" aria-live="polite">
                   <Loader2 aria-hidden className="h-5 w-5 text-muted-foreground motion-safe:animate-spin" />
                 </div>
+              ) : configuration?.state === "fault" ? (
+                <div className="mx-auto max-w-2xl">
+                  <ConfigurationFaultPanel
+                    error={configuration.error}
+                    backupAvailable={configuration.backupAvailable}
+                    saving={saving}
+                    actionError={error}
+                    onRecover={() => { void handleRecover(); }}
+                    onReset={() => { void handleReset(); }}
+                  />
+                </div>
               ) : (
                 <div className="mx-auto max-w-2xl">
                   {activeSection === "notifications" ? (
@@ -1184,7 +1264,7 @@ export function SettingsDialog({
             </div>
 
             {/* Footer — Save/Revert for settings-backed sections */}
-            {showFooter && !loading && (
+            {showFooter && !loading && configuration?.state !== "fault" && (
               <div className="shrink-0 border-t border-border bg-card/60 px-7 py-3">
                 <div className="flex items-center gap-3">
                   <button

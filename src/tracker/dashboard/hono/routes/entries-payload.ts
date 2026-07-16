@@ -14,13 +14,15 @@ import {
 } from "node:fs";
 import {
   listWorkflows,
-  readEntries,
-  readEntriesForDate,
-  readLogEntries,
-  readLogEntriesForDate,
   getRunIdOr,
   type TrackerEntry,
 } from "../../../jsonl.js";
+import {
+  readVisibleEntries,
+  readVisibleEntriesForDate,
+  readVisibleLogEntries,
+  readVisibleLogEntriesForDate,
+} from "../../../deletions/visible.js";
 import {
   buildRunTimelines,
   computeStepDurations,
@@ -79,7 +81,7 @@ const getCrossWorkflowCounts = ttlMemoize(
     const wfQueuedCounts: Record<string, number> = {};
     const failureCounts: Record<string, number> = {};
     for (const wf of workflows) {
-      const all = readEntriesForDate(wf, targetDate, dir);
+      const all = readVisibleEntriesForDate(wf, targetDate, dir);
       wfCounts[wf] = countSidebarRowsFromTrackerHistory(all);
       wfQueuedCounts[wf] = countSidebarQueuedRowsFromTrackerHistory(all);
       const failures = computeFailureCounts(all);
@@ -107,8 +109,8 @@ function readTrackerEntriesForStream(
   dir: string,
 ): TrackerEntry[] {
   return date && date !== today
-    ? readEntriesForDate(workflow, date, dir)
-    : readEntries(workflow, dir);
+    ? readVisibleEntriesForDate(workflow, date, dir)
+    : readVisibleEntries(workflow, dir);
 }
 
 function trackerEntryKey(entry: TrackerEntry): string {
@@ -174,6 +176,7 @@ function countScreenshotsForItems(
       FROM runs
       WHERE workflow = ?
         AND tracker_date = ?
+        AND deleted_at IS NULL
         AND item_id IN (${[...itemIds].map(() => "?").join(",")})
       GROUP BY item_id
     `).all(workflow, trackerDate, ...itemIds) as Array<{ item_id: string; n: number | null }>;
@@ -221,8 +224,8 @@ export function buildJsonlEventsPayload(
     readTrackerEntriesForStream(workflow, date, today, dir),
   );
   const logs = date && date !== today
-    ? readLogEntriesForDate(workflow, undefined, date, dir)
-    : readLogEntries(workflow, undefined, dir);
+    ? readVisibleLogEntriesForDate(workflow, undefined, date, dir)
+    : readVisibleLogEntries(workflow, undefined, dir);
 
   const logFirst = new Map<string, string>();
   const logLast = new Map<string, string>();

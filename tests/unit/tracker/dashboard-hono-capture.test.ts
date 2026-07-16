@@ -201,7 +201,7 @@ test("makeCaptureFinalize does not prepare when no formType can be resolved", as
 // it (legacy page-images path removed) and throws "OCR: pdfFileId is required",
 // which onFinalize's catch swallowed — so a capture finalize produced NO
 // operation/OCR-prep row at all. The RunModal upload route registers the PDF
-// (registerLocalFile → content-hash fileId) and passes pdfFileId; capture never
+// (registerLocalFile → UUID attachment id) and passes pdfFileId; capture never
 // did. Fix: register the bundled PDF in makeCaptureFinalize and pass pdfFileId.
 test("makeCaptureFinalize registers the bundled PDF and passes a non-empty pdfFileId (ISS-009)", async () => {
   // A real (tiny) PDF on disk so the production registerLocalFile path runs —
@@ -222,6 +222,7 @@ test("makeCaptureFinalize registers the bundled PDF and passes a non-empty pdfFi
     typeof seen.pdfFileId === "string" && seen.pdfFileId.length > 0,
     `prepare input must carry a non-empty pdfFileId, got ${JSON.stringify(seen.pdfFileId)}`,
   );
-  // registerLocalFile derives the fileId as the first 32 hex chars of the SHA-256.
-  assert.match(seen.pdfFileId!, /^[a-f0-9]{32}$/);
+  // registerLocalFile returns an attachment UUID; the content hash lives in the
+  // separate file_blobs projection.
+  assert.match(seen.pdfFileId!, /^[a-f0-9-]{36}$/);
 });

@@ -1,10 +1,11 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import { transaction, type Database } from "../../infra/sqlite/index.js";
 
 import { renderPdfPagesToPngs } from "../../services/ocr/render-pages.js";
+import { isFileAttachmentId } from "./file-id.js";
 
 const PDF_PAGE_RENDER_VERSION = 2;
 
@@ -26,7 +27,13 @@ export interface CachedPage {
 }
 
 function cacheDir(trackerDir: string, fileId: string): string {
-  return join(trackerDir, "pdf-cache", fileId);
+  if (!isFileAttachmentId(fileId)) throw new Error(`invalid file attachment id: ${fileId}`);
+  const root = resolve(trackerDir, "pdf-cache");
+  const candidate = resolve(root, fileId);
+  if (!candidate.startsWith(`${root}${sep}`)) {
+    throw new Error(`PDF cache path escaped tracker root: ${fileId}`);
+  }
+  return candidate;
 }
 
 const inFlightRenders = new Map<string, Promise<CachedPage[]>>();
@@ -42,6 +49,9 @@ export async function ensurePdfPageCache(
   db: Database,
   opts: EnsurePdfPageCacheOpts,
 ): Promise<CachedPage[]> {
+  if (!isFileAttachmentId(opts.fileId)) {
+    throw new Error(`invalid file attachment id: ${opts.fileId}`);
+  }
   const key = `${opts.trackerDir}\0${opts.fileId}\0${opts.pdfPath}`;
   const inFlight = inFlightRenders.get(key);
   if (inFlight) return inFlight;
@@ -142,7 +152,7 @@ export function getCachedPage(
   fileId: string,
   page: number,
 ): CachedPage | null {
-  if (!/^[a-f0-9]{32,64}$/.test(fileId)) return null;
+  if (!isFileAttachmentId(fileId)) return null;
   if (!Number.isInteger(page) || page < 1 || page > 9999) return null;
   const row = db.prepare(`
     SELECT file_id, page, status, image_path, mime_type, bytes, error

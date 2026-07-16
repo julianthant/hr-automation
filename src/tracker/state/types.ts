@@ -7,6 +7,7 @@ export interface ProjectionSourceRef {
   path: string;
   line?: number;
   offset: number;
+  generation?: number;
 }
 
 export interface ProjectionHealth {

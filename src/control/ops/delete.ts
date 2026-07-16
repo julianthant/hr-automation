@@ -6,16 +6,12 @@
  * routes here. `deleteDelegatedChildrenForRun` stays exported for the OCR
  * discard path.
  */
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
-import { basename, resolve, sep } from "path";
-import { PATHS } from "../../config.js";
-import { readSessionEvents } from "../../tracker/session-events.js";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { openStateDb } from "../../tracker/state/db.js";
 import { transaction } from "../../infra/sqlite/index.js";
 import { listTaskTreeByRunIds } from "../../core/task-store/queries.js";
-import { rewriteJsonlFile } from "../../tracker/jsonl-rewrite.js";
+import { persistDeletionManifest } from "../../tracker/deletions/store.js";
 import {
-  logFilePath,
   rowFilePath,
   rowsDir,
   parseWorkflowDateFilename,
@@ -48,22 +44,17 @@ export interface DeleteEntryOptions {
 }
 
 /**
- * Hard-delete JSONL rows and SQLite records for a tracker entry.
- *
- * Without `runId`, this removes the entire queue item. With `runId`, this
- * removes only that run while preserving other attempts for the same item.
- * The parse cache in jsonl.ts invalidates on next read because the file's
- * mtime changes after the rewrite.
+ * Durably hide tracker runs through one append-only deletion manifest.
+ * Source JSONL and terminal execution/audit records remain intact.
  */
 function applyDeleteTargets(
   db: ReturnType<typeof openStateDb>,
   dir: string,
   targets: DeleteTarget[],
-  screenshotsDir: string,
 ): DeleteEntryResult {
-  const screenshotPaths = collectScreenshotPathsForTargets(db, dir, targets, screenshotsDir);
   const dbResult = transaction(db, () => {
-    const taskIds = collectTaskSubtreeIds(db, targets);
+    const exactTargets = normalizeDeleteTargets(db, dir, targets);
+    const taskIds = collectTaskSubtreeIds(db, exactTargets);
     const active = findActiveTaskForDelete(db, taskIds);
     if (active) {
       return {
@@ -72,32 +63,24 @@ function applyDeleteTargets(
         error: `cannot delete active task ${active.workflow}/${active.itemId} in state ${active.state}`,
       };
     }
-    deleteTaskSubtrees(db, taskIds);
-    for (const target of targets) {
-      deleteProjectedEntry(db, target);
-    }
+    persistDeletionManifest(
+      db,
+      dir,
+      exactTargets.map((target) => ({
+        workflow: target.workflow,
+        trackerDate: target.date,
+        itemId: target.id,
+        runId: target.runId,
+      })),
+      "operator-delete",
+    );
     return { ok: true as const };
   });
-  if (!dbResult.ok) return dbResult;
-
-  const byFile = groupDeleteTargetsByFile(targets);
-  for (const [fileKey, fileTargets] of byFile) {
-    const [targetWorkflow, targetDate] = fileKey.split("\0") as [string, string];
-    rewriteJsonlFile(rowFilePath(targetWorkflow, targetDate, dir), (row) => {
-      return !matchesAnyDeleteTarget(asString(row.id), asString(row.runId), fileTargets);
-    });
-
-    rewriteJsonlFile(logFilePath(targetWorkflow, targetDate, dir), (row) => {
-      return !matchesAnyDeleteTarget(asString(row.itemId), asString(row.runId), fileTargets);
-    });
-  }
-
-  deleteScreenshotPaths(screenshotPaths, screenshotsDir);
-  return { ok: true };
+  return dbResult;
 }
 
 export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = {}) {
-  const screenshotsDir = opts.screenshotsDir ?? PATHS.screenshotDir;
+  void opts;
   return function deleteEntry(req: DeleteEntryRequest): DeleteEntryResult {
     const { workflow, id, date } = req;
     if (!workflow || !id || !date) {
@@ -105,7 +88,7 @@ export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = 
     }
     const db = openStateDb(dir);
     const targets = collectDeleteTargets(db, dir, req);
-    return applyDeleteTargets(db, dir, targets, screenshotsDir);
+    return applyDeleteTargets(db, dir, targets);
   };
 }
 
@@ -114,7 +97,7 @@ export function buildDeleteEntryHandler(dir: string, opts: DeleteEntryOptions = 
  * `performWorkflowAction`; this factory remains for unit tests.
  */
 export function buildDeleteBulkHandler(dir: string, opts: DeleteEntryOptions = {}) {
-  const screenshotsDir = opts.screenshotsDir ?? PATHS.screenshotDir;
+  void opts;
   return (req: DeleteBulkRequest): DeleteBulkResult => {
     const errors: Array<{ id: string; error: string }> = [];
     const items: Array<{ id: string; runId?: string }> = req.items && req.items.length > 0
@@ -153,7 +136,7 @@ export function buildDeleteBulkHandler(dir: string, opts: DeleteEntryOptions = {
     }
 
     const allTargets = collectDeleteTargetsBulk(db, dir, requests);
-    const applied = applyDeleteTargets(db, dir, allTargets, screenshotsDir);
+    const applied = applyDeleteTargets(db, dir, allTargets);
     if (!applied.ok) {
       return { ok: false, count: 0, errors: requests.map((request) => ({ id: request.id, error: applied.error })) };
     }
@@ -170,15 +153,13 @@ export function deleteDelegatedChildrenForRun(
   const db = openStateDb(dir);
   const targets = collectDescendantDeleteTargets(db, dir, [parentRunId]);
   if (targets.length === 0) return;
-  const result = applyDeleteTargets(db, dir, targets, opts.screenshotsDir ?? PATHS.screenshotDir);
+  void opts;
+  const result = applyDeleteTargets(db, dir, targets);
   if (!result.ok) throw new Error(result.error);
 }
 
 type DeleteTarget = DeleteEntryRequest;
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
+type ExactDeleteTarget = DeleteTarget & { runId: string };
 
 function collectDeleteTargetsBulk(
   db: ReturnType<typeof openStateDb>,
@@ -210,6 +191,23 @@ function collectDeleteTargets(
     add(target);
   }
   return [...targets.values()];
+}
+
+/** Expand an item-scoped request to the exact runs that exist now. */
+function normalizeDeleteTargets(
+  db: ReturnType<typeof openStateDb>,
+  dir: string,
+  targets: DeleteTarget[],
+): ExactDeleteTarget[] {
+  const exact = new Map<string, ExactDeleteTarget>();
+  for (const target of targets) {
+    const runIds = target.runId ? [target.runId] : collectRootRunIds(db, dir, target);
+    for (const runId of runIds) {
+      const normalized = { ...target, runId };
+      exact.set(deleteTargetKey(normalized), normalized);
+    }
+  }
+  return [...exact.values()];
 }
 
 function collectDescendantDeleteTargets(
@@ -264,14 +262,17 @@ function collectRootRunIds(db: ReturnType<typeof openStateDb>, dir: string, req:
     ORDER BY run_ordinal ASC
   `).all(req) as Array<{ run_id: string }>;
   const runIds = new Set(rows.map((row) => row.run_id));
+  const taskRows = db.prepare(`
+    SELECT run_id
+    FROM tasks
+    WHERE workflow = @workflow AND item_id = @id AND run_id IS NOT NULL
+  `).all(req) as Array<{ run_id: string }>;
+  taskRows.forEach((row) => runIds.add(row.run_id));
   const path = rowFilePath(req.workflow, req.date, dir);
   if (existsSync(path)) {
-    for (const line of readFileSync(path, "utf-8").split("\n").filter(Boolean)) {
-      try {
-        const row = JSON.parse(line) as { id?: string; runId?: string };
-        if (row.id === req.id && row.runId) runIds.add(row.runId);
-      } catch {
-        // Ignore malformed audit lines; deletion should still proceed.
+    for (const row of readCompleteJsonlObjects(path)) {
+      if (row.id === req.id) {
+        runIds.add(typeof row.runId === "string" ? row.runId : `${req.id}#1`);
       }
     }
   }
@@ -284,61 +285,53 @@ function readJsonlChildrenForParent(dir: string, parentRunId: string): DeleteTar
   let names: string[];
   try {
     names = readdirSync(rows);
-  } catch {
-    return targets;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return targets;
+    throw error;
   }
   for (const name of names) {
     const parsed = parseWorkflowDateFilename(name);
     if (!parsed) continue;
     const { workflow, date } = parsed;
     const path = rowFilePath(workflow, date, dir);
-    for (const line of readFileSync(path, "utf-8").split("\n").filter(Boolean)) {
-      try {
-        const row = JSON.parse(line) as { id?: string; runId?: string; parentRunId?: string };
-        if (!row.id || row.parentRunId !== parentRunId) continue;
-        if (!row.runId) continue;
-        targets.push({
-          workflow,
-          date,
-          id: row.id,
-          runId: row.runId,
-        });
-      } catch {
-        // Ignore malformed audit lines; deletion should still proceed.
-      }
+    for (const row of readCompleteJsonlObjects(path)) {
+      if (typeof row.id !== "string" || row.parentRunId !== parentRunId) continue;
+      if (typeof row.runId !== "string") continue;
+      targets.push({
+        workflow,
+        date,
+        id: row.id,
+        runId: row.runId,
+      });
     }
   }
   return targets;
 }
 
+function readCompleteJsonlObjects(path: string): Array<Record<string, unknown>> {
+  const raw = readFileSync(path, "utf8");
+  const lines = raw.split("\n");
+  const newlineTerminated = raw.endsWith("\n");
+  const out: Array<Record<string, unknown>> = [];
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("JSONL row is not an object");
+      }
+      out.push(value as Record<string, unknown>);
+    } catch (error) {
+      const incompleteFinalTail = !newlineTerminated && index === lines.length - 1;
+      if (incompleteFinalTail) break;
+      throw new Error(`Malformed tracker JSONL at ${path}:${index + 1}`, { cause: error });
+    }
+  }
+  return out;
+}
+
 function deleteTargetKey(target: DeleteTarget): string {
   return `${target.workflow}\0${target.date}\0${target.id}\0${target.runId ?? ""}`;
-}
-
-function groupDeleteTargetsByFile(targets: DeleteTarget[]): Map<string, DeleteTarget[]> {
-  const grouped = new Map<string, DeleteTarget[]>();
-  for (const target of targets) {
-    const key = `${target.workflow}\0${target.date}`;
-    const list = grouped.get(key) ?? [];
-    list.push(target);
-    grouped.set(key, list);
-  }
-  return grouped;
-}
-
-function matchesAnyDeleteTarget(
-  itemId: string | undefined,
-  runId: string | undefined,
-  targets: DeleteTarget[],
-): boolean {
-  if (!itemId) return false;
-  return targets.some((target) => {
-    if (itemId !== target.id) return false;
-    if (target.runId) {
-      return runId !== undefined && runId === target.runId;
-    }
-    return true;
-  });
 }
 
 function collectTaskSubtreeIds(db: ReturnType<typeof openStateDb>, targets: DeleteTarget[]): string[] {
@@ -407,138 +400,4 @@ function findActiveTaskForDelete(
         state: row.control_state === null ? "invalid-null" : row.control_state,
       }
     : null;
-}
-
-function deleteTaskSubtrees(db: ReturnType<typeof openStateDb>, ids: string[]): void {
-  if (ids.length === 0) return;
-  const placeholders = ids.map(() => "?").join(",");
-  db.prepare(`
-    DELETE FROM task_dependencies
-    WHERE parent_task_id IN (${placeholders})
-       OR child_task_id IN (${placeholders})
-  `).run(...ids, ...ids);
-  db.prepare(`DELETE FROM task_attempts WHERE task_id IN (${placeholders})`).run(...ids);
-  db.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).run(...ids);
-}
-
-function deleteProjectedEntry(db: ReturnType<typeof openStateDb>, req: DeleteTarget): void {
-  const params = { workflow: req.workflow, date: req.date, id: req.id, runId: req.runId ?? "" };
-  const runClause = req.runId ? " AND run_id = @runId" : "";
-  db.prepare(
-    `DELETE FROM run_events WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id${runClause}`,
-  ).run(params);
-  db.prepare(
-    `DELETE FROM logs WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id${runClause}`,
-  ).run(params);
-  db.prepare(
-    `DELETE FROM runs WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id${runClause}`,
-  ).run(params);
-  db.prepare(
-    `DELETE FROM files WHERE kind = 'screenshot' AND workflow = @workflow AND item_id = @id${runClause}`,
-  ).run(params);
-  if (!req.runId) {
-    db.prepare("DELETE FROM items WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id").run(params);
-    return;
-  }
-
-  const latestRun = db.prepare(`
-    SELECT run_id, latest_status, latest_step, latest_tracker_ts, latest_data_json, latest_error
-    FROM runs
-    WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id
-    ORDER BY run_ordinal DESC
-    LIMIT 1
-  `).get(params) as {
-    run_id: string;
-    latest_status: string;
-    latest_step: string | null;
-    latest_tracker_ts: string;
-    latest_data_json: string | null;
-    latest_error: string | null;
-  } | undefined;
-
-  if (!latestRun) {
-    db.prepare("DELETE FROM items WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id").run(params);
-    return;
-  }
-
-  db.prepare(`
-    UPDATE items
-    SET latest_run_id = @latestRunId,
-        latest_status = @latestStatus,
-        latest_step = @latestStep,
-        latest_ts = @latestTs,
-        latest_data_json = @latestDataJson,
-        latest_error = @latestError,
-        updated_at = @updatedAt
-    WHERE workflow = @workflow AND tracker_date = @date AND item_id = @id
-  `).run({
-    ...params,
-    latestRunId: latestRun.run_id,
-    latestStatus: latestRun.latest_status,
-    latestStep: latestRun.latest_step,
-    latestTs: latestRun.latest_tracker_ts,
-    latestDataJson: latestRun.latest_data_json,
-    latestError: latestRun.latest_error,
-    updatedAt: new Date().toISOString(),
-  });
-}
-
-function collectScreenshotPathsForTargets(
-  db: ReturnType<typeof openStateDb>,
-  dir: string,
-  targets: DeleteTarget[],
-  screenshotsDir: string,
-): string[] {
-  const names = new Set<string>();
-  for (const target of targets) {
-    for (const name of collectScreenshotNamesForEntry(db, dir, target, screenshotsDir)) names.add(name);
-  }
-  return [...names];
-}
-
-function collectScreenshotNamesForEntry(
-  db: ReturnType<typeof openStateDb>,
-  dir: string,
-  req: DeleteEntryRequest,
-  screenshotsDir: string,
-): string[] {
-  const prefix = `${req.workflow}-${req.id}-`;
-  const filenames = new Set<string>();
-
-  if (req.runId) {
-    for (const ev of readSessionEvents(dir)) {
-      if (ev.type !== "screenshot" || ev.runId !== req.runId) continue;
-      for (const file of (ev as { files?: Array<{ path?: string }> }).files ?? []) {
-        const name = basename(file.path ?? "");
-        if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
-      }
-    }
-
-    const rows = db.prepare(
-      "SELECT storage_path FROM files WHERE kind = 'screenshot' AND workflow = @workflow AND item_id = @id AND run_id = @runId",
-    ).all({ workflow: req.workflow, id: req.id, runId: req.runId }) as Array<{ storage_path: string }>;
-    for (const row of rows) {
-      const name = basename(row.storage_path);
-      if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
-    }
-  } else if (existsSync(screenshotsDir)) {
-    for (const name of readdirSync(screenshotsDir)) {
-      if (name.startsWith(prefix) && name.endsWith(".png")) filenames.add(name);
-    }
-  }
-
-  return [...filenames];
-}
-
-function deleteScreenshotPaths(filenames: string[], screenshotsDir: string): void {
-  const rootAbs = resolve(screenshotsDir);
-  for (const name of filenames) {
-    const full = resolve(screenshotsDir, name);
-    if (!full.startsWith(rootAbs + sep) && full !== rootAbs) continue;
-    try {
-      unlinkSync(full);
-    } catch {
-      // Best-effort: deleting a run must not fail because a screenshot is gone.
-    }
-  }
 }

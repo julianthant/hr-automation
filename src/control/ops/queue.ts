@@ -5,11 +5,10 @@ import {
   emitTrackerRow,
   emitTrackerRowForDate,
   listDatesForWorkflow,
-  readEntries,
-  readEntriesForDate,
   type StampedData,
   type TrackerEntry,
 } from "../../tracker/jsonl.js";
+import { readVisibleEntries, readVisibleEntriesForDate } from "../../tracker/deletions/visible.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import {
   daemonsDir,
@@ -96,8 +95,8 @@ export function buildSaveDataHandler(dir: string) {
       return { ok: false, error: "workflow, id, and data are required" };
     }
     const entries = (req.date
-      ? readEntriesForDate(req.workflow, req.date, dir)
-      : readEntries(req.workflow, dir)).filter((e) => e.id === req.id);
+      ? readVisibleEntriesForDate(req.workflow, req.date, dir)
+      : readVisibleEntries(req.workflow, dir)).filter((e) => e.id === req.id);
     if (entries.length === 0) {
       return { ok: false, error: `no tracker entry found for id=${req.id}` };
     }
@@ -253,7 +252,7 @@ export function findPriorEntriesByKey(
   const latestById = new Map<string, { entry: TrackerEntry; date: string }>();
 
   for (const date of recentDates) {
-    const entries = readEntriesForDate(workflow, date, dir);
+    const entries = readVisibleEntriesForDate(workflow, date, dir);
     for (const e of entries) {
       const value = e.data?.[keyField];
       if (!value || String(value).trim() !== wantedValue) continue;
