@@ -22,6 +22,7 @@ import {
   formatTimecardDate,
   runTimecardCheck,
   didPeriodLabelSwitch,
+  type TimecardDateRange,
   type TimecardDriver,
 } from "../../services/timecard/index.js";
 
@@ -553,10 +554,13 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
       // of letting the caller read the grid believing the switch landed.
       const afterLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
       if (!didPeriodLabelSwitch(beforeLabel, afterLabel, /current pay period/i)) {
+        const detail = beforeLabel.trim()
+          ? `the pay-period trigger button did not switch (before="${beforeLabel}", after="${afterLabel}")`
+          : `the pre-switch pay-period label could not be read (before is blank, after="${afterLabel}") — ` +
+            `with no baseline the switch cannot be verified`;
         throw new Error(
-          `[New Kronos] Previous Pay Period option closed but the pay-period trigger button did not switch ` +
-          `(before="${beforeLabel}", after="${afterLabel}") — refusing to read the grid as though the ` +
-          `previous period is displayed`,
+          `[New Kronos] Previous Pay Period option closed but ${detail} — refusing to read the grid ` +
+          `as though the previous period is displayed`,
         );
       }
 
@@ -572,8 +576,13 @@ export async function switchToPreviousPayPeriod(page: Page): Promise<boolean> {
 /**
  * Check if the current timecard view has any time entries.
  * Returns the latest date with time, or null if no time found.
+ * The year is resolved against `range` (the window the displayed pay period
+ * must fall inside; see `formatTimecardDate`).
  */
-export async function getTimecardLastDate(page: Page): Promise<string | null> {
+export async function getTimecardLastDate(
+  page: Page,
+  range: TimecardDateRange,
+): Promise<string | null> {
   log.step("[New Kronos] Checking timecard for time entries...");
 
   // New Kronos (WFD) uses a split grid:
@@ -620,7 +629,7 @@ export async function getTimecardLastDate(page: Page): Promise<string | null> {
   });
 
   if (result) {
-    const formatted = formatTimecardDate(result.month, result.day);
+    const formatted = formatTimecardDate(result.month, result.day, range);
     log.step(`[New Kronos] Latest timecard date with In/Out: ${formatted}`);
     return formatted;
   } else {
@@ -698,7 +707,7 @@ export async function checkTimecardDates(page: Page, eid: string): Promise<strin
     afterSwitch: async (p) => {
       await debugScreenshot(p, "new-kronos-timecard-02-previous");
     },
-    readLastDate: (p) => getTimecardLastDate(p),
+    readLastDate: (p, range) => getTimecardLastDate(p, range),
   };
   return runTimecardCheck(page, driver);
 }
@@ -714,6 +723,36 @@ export interface SeparationTimecardData {
   sickDates: string[];
   /** MM/DD/YYYY[], chronological — days with a Holiday pay code (e.g. "Holiday - Hourly"). */
   holidayDates: string[];
+}
+
+/** Raw month/day pairs parsed from the WFD timecard grid, year still unresolved. */
+export interface RawSeparationTimecardDates {
+  /** Latest day with an In/Out punch, or null when no punch row parsed. */
+  lastPunch: { mon: number; day: number } | null;
+  /** Days with a Sick pay code, chronological. */
+  sick: { mon: number; day: number }[];
+  /** Days with a Holiday pay code, chronological. */
+  holiday: { mon: number; day: number }[];
+}
+
+/**
+ * Resolve the grid-parsed month/day pairs to MM/DD/YYYY against the date
+ * range the timecard view was set to (`setDateRange`). Pure — exported so the
+ * Dec→Jan year matrix is unit-testable without a page. Throws (via
+ * `formatTimecardDate`) when a parsed day cannot fall inside the requested
+ * range, instead of stamping a guessed year.
+ */
+export function resolveSeparationTimecardDates(
+  raw: RawSeparationTimecardDates,
+  range: TimecardDateRange,
+): SeparationTimecardData {
+  return {
+    lastPunchDate: raw.lastPunch
+      ? formatTimecardDate(raw.lastPunch.mon, raw.lastPunch.day, range)
+      : null,
+    sickDates: raw.sick.map((d) => formatTimecardDate(d.mon, d.day, range)),
+    holidayDates: raw.holiday.map((d) => formatTimecardDate(d.mon, d.day, range)),
+  };
 }
 
 /**
@@ -732,10 +771,15 @@ export interface SeparationTimecardData {
  * Multiple data rows can share one date; the date column shows the date once,
  * so the last-seen date is carried forward across rows.
  *
+ * `range` is the inclusive window the caller set the timecard view to (the
+ * same start/end passed to `setDateRange`) — each parsed month/day resolves
+ * its year against it (see `formatTimecardDate`).
+ *
  * NOTE: keep `getTimecardLastDate` as-is — it is still used by `checkTimecardDates`.
  */
 export async function getSeparationTimecardData(
   page: Page,
+  range: TimecardDateRange,
 ): Promise<SeparationTimecardData> {
   log.step("[New Kronos] Parsing timecard for separation data (last punch, sick, holiday)...");
 
@@ -768,17 +812,13 @@ export async function getSeparationTimecardData(
     return { lastPunch, sick, holiday };
   });
 
-  const lastPunchDate = raw.lastPunch
-    ? formatTimecardDate(raw.lastPunch.mon, raw.lastPunch.day)
-    : null;
-  const sickDates = raw.sick.map((d) => formatTimecardDate(d.mon, d.day));
-  const holidayDates = raw.holiday.map((d) => formatTimecardDate(d.mon, d.day));
+  const resolved = resolveSeparationTimecardDates(raw, range);
 
   log.step(
-    `[New Kronos] Timecard parse: lastPunch=${lastPunchDate ?? "none"}, sick=${sickDates.length}, holiday=${holidayDates.length}`,
+    `[New Kronos] Timecard parse: lastPunch=${resolved.lastPunchDate ?? "none"}, sick=${resolved.sickDates.length}, holiday=${resolved.holidayDates.length}`,
   );
 
-  return { lastPunchDate, sickDates, holidayDates };
+  return resolved;
 }
 
 const MONTH_NAMES_FULL = [
@@ -818,6 +858,17 @@ export function parseMmddyyyy(dateStr: string): ParsedDate {
 export function toIsoDate(dateStr: string): string {
   const { year, monthIndex, day } = parseMmddyyyy(dateStr);
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * `M/D/YYYY` → local-midnight `Date`. Throws on a malformed string (via
+ * `parseMmddyyyy`). Used to build the `TimecardDateRange` that
+ * `getSeparationTimecardData` resolves grid dates against from the same
+ * `kronosStart`/`kronosEnd` strings passed to `setDateRange`.
+ */
+export function mmddyyyyToDate(dateStr: string): Date {
+  const { year, monthIndex, day } = parseMmddyyyy(dateStr);
+  return new Date(year, monthIndex, day);
 }
 
 /**
@@ -1054,9 +1105,12 @@ export async function setDateRange(
   // requested range is active.
   const afterLabel = (await timecard.payPeriodTriggerButton(page).textContent().catch(() => null))?.trim() ?? "";
   if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
+    const detail = beforeLabel.trim()
+      ? `did not update the displayed period (before="${beforeLabel}", after="${afterLabel}")`
+      : `cannot be verified — the pre-Apply period label could not be read ` +
+        `(before is blank, after="${afterLabel}")`;
     throw new Error(
-      `[New Kronos] Date range Apply did not update the displayed period ` +
-      `(before="${beforeLabel}", after="${afterLabel}") for ${startDate}–${endDate} — ` +
+      `[New Kronos] Date range Apply ${detail} for ${startDate}–${endDate} — ` +
       `refusing to read the timecard grid as though the new range is active`,
     );
   }

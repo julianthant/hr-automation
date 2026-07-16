@@ -18,6 +18,7 @@ import {
   formatTimecardDate,
   runTimecardCheck,
   didPeriodLabelSwitch,
+  type TimecardDateRange,
   type TimecardDriver,
 } from "../../services/timecard/index.js";
 
@@ -458,9 +459,12 @@ export async function switchToPreviousPayPeriod(
       // TODO(live-verify): see `timecard.periodSelectorInput` JSDoc.
       const afterLabel = await timecard.periodSelectorInput(f).inputValue().catch(() => "");
       if (!didPeriodLabelSwitch(beforeLabel, afterLabel)) {
+        const detail = beforeLabel.trim()
+          ? `the displayed period did not change (before="${beforeLabel}", after="${afterLabel}")`
+          : `the pre-switch period label could not be read (before is blank, after="${afterLabel}") — ` +
+            `with no baseline the switch cannot be verified`;
         throw new UKGError(
-          `Previous Pay Period link closed but the displayed period did not change ` +
-          `(before="${beforeLabel}", after="${afterLabel}") — refusing to read the grid ` +
+          `Previous Pay Period link closed but ${detail} — refusing to read the grid ` +
           `as though the switch to Previous Pay Period landed`,
           "switchToPreviousPayPeriod",
         );
@@ -478,10 +482,12 @@ export async function switchToPreviousPayPeriod(
 /**
  * Check if the current timecard view has any time entries (non-zero hours).
  * Returns the latest date with time, or null if no time found.
- * Date format: MM/DD/YYYY
+ * Date format: MM/DD/YYYY — the year is resolved against `range` (the window
+ * the displayed pay period must fall inside; see `formatTimecardDate`).
  */
 export async function getTimecardLastDate(
   page: Page,
+  range: TimecardDateRange,
 ): Promise<string | null> {
   log.step("[Old Kronos] Checking timecard for time entries...");
 
@@ -520,7 +526,7 @@ export async function getTimecardLastDate(
       .catch(() => null);
 
     if (result) {
-      const formatted = formatTimecardDate(result.month, result.day);
+      const formatted = formatTimecardDate(result.month, result.day, range);
       log.step(
         `[Old Kronos] Latest timecard date with In/Out: ${formatted} (frame: ${f.name()})`,
       );
@@ -612,7 +618,7 @@ export async function checkTimecardDates(
       await dismissModal(p, iframe);
       await debugScreenshot(p, "ukg-timecard-02-previous");
     },
-    readLastDate: (p) => getTimecardLastDate(p),
+    readLastDate: (p, range) => getTimecardLastDate(p, range),
   };
   return runTimecardCheck(page, driver);
 }
