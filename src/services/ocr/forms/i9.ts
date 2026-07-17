@@ -4,38 +4,34 @@
  * generically.
  *
  * Like `verify`, `i9` is a READ-AND-FIND-OUT tool: it reads each I-9's
- * Section 1 (employee name, date of birth, SSN), then checks whether UCPath
- * already knows that person by fanning out one **person-match** child per
- * record — the same UCPath HR-Tasks person search onboarding uses to
- * discriminate new hires from rehires (`searchPerson`,
- * `src/systems/ucpath/navigate.ts`). The per-record answer (found /
- * not found, plus the matched EID when found) renders as a completeness
- * report in the OCR preview. It does NOT write to UCPath and has NO approve
- * fan-out.
+ * Section 1 (employee name, date of birth, SSN) and Section 2 (employer
+ * certification: name line, List C document number, First Day of Employment),
+ * pairs each person's two pages by name (`corroborateI9Records`), and matches
+ * the Action History roster BY NAME. It does NOT write to UCPath and has NO
+ * approve fan-out.
  *
- * Enrichment is owned by this spec's `enrichRecords` hook (the orchestrator's
- * eid-lookup fan-out is suppressed by `needsLookup` always returning null).
- * `enrichRecords` mirrors `verify.ts`'s person fan-out: build inputs →
- * `fanOutAndWatch` → patch records from outcomes.
+ * The live UCPath person search does NOT run during OCR (rev. 2026-07-16 — it
+ * used to fan out one person-match child per record here). When this run
+ * completes, `/api/ocr/prepare` enqueues one REAL separations `i9-check`
+ * member task per person (`enqueueI9CheckMemberTasks`), which searches
+ * UCPath, re-matches the roster by the resolved EID, and appends the master
+ * retention-tracker row. Enrichment here owns only what the packet itself can
+ * answer (the orchestrator's eid-lookup fan-out is suppressed by
+ * `needsLookup` always returning null).
  */
 import { z } from "zod/v4";
 import { log } from "../../../utils/log.js";
-import { normalizePersonNameForCompare } from "../../../domain/identity/person-name.js";
-import { runOptionsToDaemonFlags } from "../../../domain/run-options.js";
-import { buildTraceId } from "../../../domain/queue-trace-id.js";
-import { isChildWatchError, type ChildOutcome } from "../../../tracker/delegation/watch-child-runs.js";
 import {
-  isOcrPrepareAbortRequested,
-  isOperatorDiscardAbortError,
-} from "../../../tracker/ocr-prepare-abort.js";
-import { fanOutAndWatch, type FanOutResult } from "../fan-out.js";
+  displayPersonName,
+  normalizePersonNameForCompare,
+} from "../../../domain/identity/person-name.js";
+import { levenshteinDistance } from "../../matching/levenshtein.js";
 import type { OcrFormSpec, LookupKind } from "../../../workflows/ocr/types.js";
 import { VerifyCheckSchema, type VerifyCheck } from "./verify.js";
 import {
   DocumentTypeSchema,
   MatchStateSchema,
   isForceResearchFlagRecord,
-  ocrChildItemIdPrefix,
 } from "./shared.js";
 
 // ─── OCR-pass record (one page of the scanned PDF) ──────────
@@ -102,6 +98,13 @@ export const I9OcrRecordSchema = z.object({
    * check available and it was sitting unused in the same PDF.
    */
   section2DocNumber: z.string().nullable().optional(),
+  /**
+   * SECTION 2 pages only: "First Day of Employment (mm/dd/yyyy)" — the hire
+   * date the employer writes. Copied onto the paired Section 1 record by
+   * `corroborateI9Records` as `hireDate`. Null when absent / illegible / not a
+   * Section 2 sheet.
+   */
+  section2HireDate: z.string().nullable().optional(),
   notes: z.array(z.string()).default([]),
 });
 export type I9OcrRecord = z.infer<typeof I9OcrRecordSchema>;
@@ -114,12 +117,36 @@ export type I9OcrOutput = z.infer<typeof I9OcrOutputSchema>;
 export const I9PreviewRecordSchema = I9OcrRecordSchema.extend({
   /** Display name ("Last, First M") assembled from the Section 1 name fields. */
   name: z.string().default(""),
-  /** UCPath person-search outcome: person exists ("true") or not ("false"). */
+  /**
+   * @deprecated No longer stamped (2026-07-16): the UCPath person search moved
+   * out of OCR enrichment into the separations i9-check member tasks, whose
+   * verdicts live on the member rows. Kept so historical records still parse.
+   */
   ucpathFound: z.boolean().optional(),
-  /** Empl ID of the first UCPath results-grid match, when found. */
+  /** @deprecated See `ucpathFound` — historical rows only. */
   matchedEmplId: z.string().optional(),
-  /** Name of the first UCPath results-grid match, when found. */
+  /** @deprecated See `ucpathFound` — historical rows only. */
   matchedName: z.string().optional(),
+  /**
+   * Hire date from Section 2 "First Day of Employment", stamped by
+   * `corroborateI9Records` onto the paired Section 1 record.
+   */
+  hireDate: z.string().optional(),
+  /**
+   * Page of the Section 2 sheet paired to this Section 1, when one was found.
+   * Presence of this field IS "Section 2 present" — the operator needs to know
+   * whether a verdict rests on one page or two corroborating ones, and which
+   * page to open when it doesn't.
+   */
+  section2Page: z.number().optional(),
+  /** PPS EID from the Employee Action History cross-ref roster (display: zeros stripped). */
+  ppsEid: z.string().optional(),
+  /** Roster PPS ID verbatim, leading zeros preserved — the spreadsheet form. */
+  ppsEidPadded: z.string().optional(),
+  /** UCPath Empl ID from the Action History roster (when live match missed). */
+  rosterEmplId: z.string().optional(),
+  /** Separation / Job End Date from the Action History TER row. */
+  i9SeparationDate: z.string().optional(),
   /**
    * The pool cell (`<provider>-<keyIndex>:<model>`) that produced this read —
    * stamped by the orchestrator. Without it an extraction cannot be attributed
@@ -141,9 +168,9 @@ export const I9PreviewRecordSchema = I9OcrRecordSchema.extend({
   disputedFields: z.array(z.string()).default([]),
   /** A Section 2 sheet whose person has no Section 1 page anywhere in the packet. */
   orphanSection2: z.boolean().default(false),
-  /** State of the person-match child that enriched this record. */
+  /** @deprecated No person-match children run during OCR anymore — historical rows only. */
   personMatchStatus: z.enum(["pending", "running", "completed", "failed"]).optional(),
-  /** Trace id of the person-match child that enriched this record. */
+  /** @deprecated See `personMatchStatus` — historical rows only. */
   personMatchTraceId: z.string().optional(),
   matchState: MatchStateSchema,
   selected: z.boolean(),
@@ -167,8 +194,8 @@ OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
 \`\`\`json
 [
-  { "formKind": "i9", "sourcePage": 1, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": "04/01/1998", "ssn": "123-45-6789", "documentType": "expected", "originallyMissing": [], "illegible": [], "section2Name": null, "section2DocNumber": null, "notes": [] },
-  { "formKind": "unknown", "sourcePage": 2, "lastName": null, "firstName": null, "middleInitial": null, "dateOfBirth": null, "ssn": null, "documentType": "unknown", "originallyMissing": [], "illegible": [], "section2Name": "Doe, Jane A", "section2DocNumber": "123-45-6789", "notes": [] }
+  { "formKind": "i9", "sourcePage": 1, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": "04/01/1998", "ssn": "123-45-6789", "documentType": "expected", "originallyMissing": [], "illegible": [], "section2Name": null, "section2DocNumber": null, "section2HireDate": null, "notes": [] },
+  { "formKind": "unknown", "sourcePage": 2, "lastName": null, "firstName": null, "middleInitial": null, "dateOfBirth": null, "ssn": null, "documentType": "unknown", "originallyMissing": [], "illegible": [], "section2Name": "Doe, Jane A", "section2DocNumber": "123-45-6789", "section2HireDate": "04/17/2018", "notes": [] }
 ]
 \`\`\`
 
@@ -208,7 +235,8 @@ SECTION 2 PAGES (formKind "unknown" — the employer's "Section 2. Employer Revi
 These pages independently repeat the SAME employee's identity, so they are our cross-check. On such a page ALSO fill:
 - section2Name: the employee name written at the TOP of Section 2 ("Employee Info from Section 1" / Last Name, First Name, M.I.). Null if not present.
 - section2DocNumber: the "Document Number" under LIST C **only when the List C document is a Social Security card** (its title mentions "Social Security"). That number IS the employee's SSN as written by the employer — transcribe its digits exactly, subject to the ACCURACY RULE. Null when the List C document is anything else (birth certificate, etc.), when it is blank, or when the digits are not confidently legible.
-Leave section2Name / section2DocNumber null on every page that is NOT a Section 2 sheet.
+- section2HireDate: the Section 2 "First Day of Employment (mm/dd/yyyy)" value, exactly as printed. Subject to the ACCURACY RULE (same digit discipline as dateOfBirth). Null when blank, illegible, or not a Section 2 sheet.
+Leave section2Name / section2DocNumber / section2HireDate null on every page that is NOT a Section 2 sheet.
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
 
@@ -253,7 +281,14 @@ export function normalizeI9Dob(v: unknown): string | null {
   return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${String(year)}`;
 }
 
-/** Display name ("Last, First M") from the Section 1 name fields. */
+/**
+ * Display name ("Last, First M") from the Section 1 name fields, normalized to
+ * the standard title-cased display convention via `displayPersonName` — I-9s
+ * are frequently hand-printed ALL-CAPS ("QIAO, WANHUI" → "Qiao, Wanhui"), and
+ * this name rides everywhere: the review pane, the member row title, and the
+ * retention-tracker spreadsheet. Comparison paths are unaffected (they all
+ * lowercase via `normalizePersonNameForCompare` / `nameTokens`).
+ */
 export function buildI9DisplayName(rec: {
   lastName?: string | null;
   firstName?: string | null;
@@ -264,7 +299,7 @@ export function buildI9DisplayName(rec: {
   const middle = nonEmpty(rec.middleInitial);
   if (!last && !first) return "";
   const given = [first, middle].filter(Boolean).join(" ");
-  return last && given ? `${last}, ${given}` : (last ?? given ?? "");
+  return displayPersonName(last && given ? `${last}, ${given}` : (last ?? given ?? ""));
 }
 
 // ─── Section 2 corroboration ─────────────────────────────────
@@ -287,6 +322,88 @@ export function i9NamesShareToken(a: string, b: string): boolean {
   if (ta.size === 0) return false;
   for (const t of nameTokens(b)) if (ta.has(t)) return true;
   return false;
+}
+
+/** Below this, two tokens are unrelated and contribute nothing to a pair score. */
+const TOKEN_MATCH_FLOOR = 0.6;
+/** Below this, a Section 1 / Section 2 pairing is not credible. */
+const MIN_PAIR_SCORE = 0.45;
+
+/** 0..1 similarity of two name tokens, tolerant of a misread character or two. */
+function tokenSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const max = Math.max(a.length, b.length);
+  if (max === 0) return 0;
+  return 1 - levenshteinDistance(a, b) / max;
+}
+
+/**
+ * 0..1 similarity between a Section 1 name and a Section 2 name line.
+ *
+ * Every employee has BOTH a Section 1 and a Section 2 page, but they are not
+ * adjacent in a scanned packet and BOTH names are independently misread — so
+ * pairing must tolerate character-level damage ("Miralik"/"Mihalik") while
+ * still separating two DIFFERENT people who happen to share a token.
+ *
+ * That last part is why a boolean "share any token" test is not enough:
+ * `Tsai, Nien Chen` and `Weng, Nien-Chen` both contain "nien", so the first
+ * one scanned would claim the other's sheet (live 2026-07-16 — Weng's Section 1
+ * was paired to Tsai's sheet, producing a phantom last-name dispute, while
+ * Weng's real sheet on page 50 was reported as an orphan). A SCORE lets the
+ * pairing compare alternatives and give each sheet to its best claimant.
+ */
+export function i9NamePairScore(a: string, b: string): number {
+  const ta = [...nameTokens(a)];
+  const tb = [...nameTokens(b)];
+  if (ta.length === 0 || tb.length === 0) return 0;
+  let total = 0;
+  for (const t of ta) {
+    let best = 0;
+    for (const u of tb) best = Math.max(best, tokenSimilarity(t, u));
+    if (best >= TOKEN_MATCH_FLOOR) total += best;
+  }
+  // Normalize by the LONGER token list so extra tokens on either side dilute
+  // the score rather than inflate it.
+  return total / Math.max(ta.length, tb.length);
+}
+
+/**
+ * Assign each Section 2 sheet to the Section 1 record it best matches.
+ *
+ * Best-first over ALL candidate pairs (not first-fit in page order), so an
+ * exact match always outranks a coincidental token collision, and each sheet
+ * and record is claimed at most once.
+ */
+export function pairI9Section2Sheets(
+  section1s: I9PreviewRecord[],
+  sheets: I9PreviewRecord[],
+): Map<I9PreviewRecord, I9PreviewRecord> {
+  const scored: Array<{ rec: I9PreviewRecord; sheet: I9PreviewRecord; score: number }> = [];
+  for (const rec of section1s) {
+    const ourName = nonEmpty(rec.name) ?? buildI9DisplayName(rec);
+    if (!ourName) continue;
+    for (const sheet of sheets) {
+      const score = i9NamePairScore(ourName, sheet.section2Name ?? "");
+      if (score >= MIN_PAIR_SCORE) scored.push({ rec, sheet, score });
+    }
+  }
+  // Highest score first; ties broken by page proximity, which for a scanned
+  // packet is a genuine (if weak) signal that two pages belong together.
+  scored.sort(
+    (x, y) =>
+      y.score - x.score
+      || Math.abs(x.rec.sourcePage - x.sheet.sourcePage)
+        - Math.abs(y.rec.sourcePage - y.sheet.sourcePage),
+  );
+
+  const paired = new Map<I9PreviewRecord, I9PreviewRecord>();
+  const claimedSheets = new Set<I9PreviewRecord>();
+  for (const { rec, sheet, score: _score } of scored) {
+    if (paired.has(rec) || claimedSheets.has(sheet)) continue;
+    paired.set(rec, sheet);
+    claimedSheets.add(sheet);
+  }
+  return paired;
 }
 
 /** Bare digits of an SSN-ish string, or "" when it isn't 9 digits. */
@@ -326,20 +443,21 @@ export function corroborateI9Records(records: I9PreviewRecord[]): I9PreviewRecor
   const sheets = records.filter(
     (r) => r.formKind !== "i9" && nonEmpty(r.section2Name) !== null,
   );
-  const claimed = new Set<I9PreviewRecord>();
+  // Every employee has BOTH pages somewhere in the packet — pair them globally,
+  // best match first, rather than first-fit in page order.
+  const section1s = records.filter((r) => r.formKind === "i9");
+  const pairs = pairI9Section2Sheets(section1s, sheets);
+  const claimed = new Set<I9PreviewRecord>(pairs.values());
 
   for (const rec of records) {
     if (rec.formKind !== "i9") continue;
-    const ourName = nonEmpty(rec.name) ?? buildI9DisplayName(rec);
-    const sheet = ourName
-      ? sheets.find((s) => !claimed.has(s) && i9NamesShareToken(ourName, s.section2Name ?? ""))
-      : undefined;
+    const sheet = pairs.get(rec);
     if (!sheet) {
       rec.corroboration = "unavailable";
       rec.disputedFields = [];
       continue;
     }
-    claimed.add(sheet);
+    rec.section2Page = sheet.sourcePage;
 
     const disputed: string[] = [];
 
@@ -368,6 +486,14 @@ export function corroborateI9Records(records: I9PreviewRecord[]): I9PreviewRecor
 
     rec.disputedFields = disputed;
     rec.corroboration = disputed.length > 0 ? "disputed" : "confirmed";
+
+    // Hire date rides Section 2 only — copy onto the Section 1 record so the
+    // completeness report / Action History grid can show "Hire Date (from I-9)".
+    const hire = nonEmpty(sheet.section2HireDate);
+    if (hire) {
+      const normalized = normalizeI9Dob(hire) ?? hire;
+      rec.hireDate = normalized;
+    }
   }
 
   // A Section 2 sheet nobody claimed = an employee in the packet with no
@@ -506,6 +632,12 @@ export function buildI9Checks(rec: I9PreviewRecord): VerifyCheck[] {
   const paperName = nonEmpty(rec.name) ?? (buildI9DisplayName(rec) || null);
   const paperDob = nonEmpty(rec.dateOfBirth);
   const paperSsn = nonEmpty(rec.ssn);
+  const hireDate = nonEmpty(rec.hireDate);
+  const ppsEid = nonEmpty(rec.ppsEid);
+  // Roster-sourced only: the live UCPath EID belongs to the separations
+  // member row now (`matchedEmplId` is a deprecated pre-2026-07-16 stamp).
+  const ucpathId = nonEmpty(rec.rosterEmplId);
+  const sepDate = nonEmpty(rec.i9SeparationDate);
 
   const mkPaper = (key: string, label: string, paperValue: string | null): VerifyCheck => ({
     key,
@@ -517,38 +649,87 @@ export function buildI9Checks(rec: I9PreviewRecord): VerifyCheck[] {
     status: paperValue !== null ? "present" : "missing",
   });
 
-  const foundValue =
-    rec.ucpathFound === true
-      ? [
-          rec.matchedEmplId ? `EID ${rec.matchedEmplId}` : null,
-          rec.matchedName ?? null,
-        ]
-          .filter(Boolean)
-          .join(" — ") || "Found"
-      : null;
-
-  const ucpathCheck: VerifyCheck = {
-    key: "ucpathPerson",
-    label: "UCPath Person",
+  const mkRoster = (key: string, label: string, value: string | null): VerifyCheck => ({
+    key,
+    label,
     onPaper: false,
     paperValue: null,
-    foundValue,
-    source: "ucpath",
-    status: rec.ucpathFound === true ? "found" : "missing",
+    foundValue: value,
+    source: "roster",
+    status: value !== null ? "found" : "missing",
+    ...(value === null ? { missingLabel: "Not on Action History" } : {}),
+  });
+
+  // The UCPath verdict itself lives on the separations MEMBER row (the
+  // post-completion i9-check task), not on this preview — what the preview can
+  // answer is whether the roster already knows this person BY NAME.
+  const rosterMatched = ppsEid !== null || nonEmpty(rec.rosterEmplId) !== null || sepDate !== null;
+  const rosterNameCheck: VerifyCheck = {
+    key: "rosterNameMatch",
+    label: "On Action History roster (by name)?",
+    onPaper: false,
+    paperValue: null,
+    foundValue: rosterMatched ? "Yes" : null,
+    source: "roster",
+    status: rosterMatched ? "found" : "missing",
+    ...(rosterMatched ? {} : { missingLabel: "No name match — UCPath check runs next" }),
   };
-  if (rec.ucpathFound === undefined) {
-    ucpathCheck.missingLabel =
-      rec.personMatchStatus === "failed"
-        ? "Search failed — result unknown"
-        : "Not checked";
-  }
+
+  // Which of the person's TWO pages we actually have. Every employee should
+  // have both; a verdict resting on one page is weaker than one corroborated
+  // by two, and the operator needs to know which — and where to look.
+  const section1Check: VerifyCheck = {
+    key: "section1Present",
+    label: "Section 1 present",
+    onPaper: true,
+    paperValue: rec.orphanSection2 ? null : `Yes — page ${rec.sourcePage}`,
+    foundValue: null,
+    source: "paper",
+    status: rec.orphanSection2 ? "missing" : "present",
+    ...(rec.orphanSection2
+      ? { missingLabel: "MISSING — this person was never checked against UCPath" }
+      : {}),
+  };
+  const section2Check: VerifyCheck = {
+    key: "section2Present",
+    label: "Section 2 present",
+    onPaper: true,
+    paperValue: rec.section2Page !== undefined ? `Yes — page ${rec.section2Page}` : null,
+    foundValue: null,
+    source: "paper",
+    status: rec.section2Page !== undefined ? "present" : "missing",
+    ...(rec.section2Page === undefined
+      ? { missingLabel: "Not found — this read could not be cross-checked" }
+      : {}),
+  };
 
   return [
-    mkPaper("name", "Name", paperName),
+    mkPaper("name", "Employee Name", paperName),
+    mkRoster("ppsEid", "PPS EID", ppsEid),
+    mkRoster("ucpathEmplId", "UCPATH Employee ID", ucpathId),
+    mkPaper("hireDate", "Hire Date (from I-9)", hireDate),
+    mkRoster("i9SeparationDate", "Separation Date", sepDate),
+    rosterNameCheck,
+    // Keep the raw paper identifiers below the Action History grid columns
+    // so the operator can still verify what was searched.
     mkPaper("dob", "Date of Birth", paperDob),
     mkPaper("ssn", "SSN", paperSsn),
-    ucpathCheck,
+    // Document provenance — which pages back this row, and what the employer
+    // recorded on the Section 2 sheet.
+    section1Check,
+    section2Check,
+    mkPaper("section2Name", "Section 2 name (employer's copy)", nonEmpty(rec.section2Name)),
+    mkPaper("corroboration", "Cross-check vs Section 2", corroborationLabel(rec)),
   ];
+}
+
+/** Plain-language summary of the Section 1 vs Section 2 comparison. */
+function corroborationLabel(rec: I9PreviewRecord): string | null {
+  if (rec.corroboration === "confirmed") return "Confirmed — both pages agree";
+  if (rec.corroboration === "disputed") {
+    return `DISPUTED on ${rec.disputedFields.join(", ")} — not used to search`;
+  }
+  return null;
 }
 
 // ─── Spec implementation ────────────────────────────────────
@@ -557,7 +738,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
   formType: "i9",
   label: "I-9 (UCPath check)",
   description:
-    "Scanned Form I-9 packets. Reads each Section 1 (name, DOB, SSN), then runs the UCPath person search to check whether the person exists. Read-only — no UCPath writes.",
+    "Scanned Form I-9 packets. Reads each person's Section 1 + Section 2 pages, matches the Action History roster by name, then fans out one separations i9-check task per person to search UCPath and fill the retention tracker. Read-only — no UCPath writes.",
 
   prompt: I9_OCR_PROMPT,
   ocrRecordSchema: I9OcrRecordSchema,
@@ -614,10 +795,10 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
 
   // No approve fan-out — i9 is read-only. No approveTo / approveDocumentTo.
   // A delegated run (under the separations operation coordinator) completes
-  // `done` right after the person-match enrichment instead of parking at
-  // awaiting-approval: there is nothing to approve, and the prepare route's
-  // result fan-back emits the per-person member rows into the separations
-  // panel as soon as the run finishes.
+  // `done` right after enrichment instead of parking at awaiting-approval:
+  // there is nothing to approve, and the prepare route then enqueues the
+  // per-person separations i9-check member tasks (the UCPath searches) as
+  // soon as the run finishes.
   completeDelegatedRun: true,
 
   rosterMode: "optional",
@@ -651,6 +832,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
       ssn: null,
       section2Name: null,
       section2DocNumber: null,
+      section2HireDate: null,
       illegible: [],
       corroboration: "unavailable",
       disputedFields: [],
@@ -660,32 +842,23 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
     };
   },
 
-  // ─── UCPath person-match enrichment (mirrors verify's person fan-out) ──
+  // ─── Enrichment: Section 2 corroboration + roster NAME match ──
+  //
+  // The UCPath person search no longer runs here (it used to fan out one
+  // person-match child per record). It now runs AFTER this run completes, as
+  // REAL separations member tasks enqueued by `enqueueI9CheckMemberTasks`
+  // (`src/tracker/dashboard/ocr/i9-check-results.ts`) — one retry-safe task
+  // per person, which re-matches the roster BY the UCPath-resolved EID. This
+  // phase owns what the packet alone can answer: pairing each person's two
+  // pages and matching the Action History roster BY NAME.
   async enrichRecords(input): Promise<I9PreviewRecord[]> {
-    const {
-      records,
-      runId,
-      sessionId,
-      trackerDir,
-      date,
-      parentSubject,
-      rootTracePrefix,
-      runOptions,
-    } = input;
-
-    // Operator's Automation-workers setting → daemon flags for the fan-out.
-    const enrichDaemonFlags = runOptionsToDaemonFlags(runOptions);
-
-    // Operator-cancel bridge — `fanOutAndWatch` polls this and cascade-cancels
-    // still-queued person-match children on a discard/cancel (fail-loud; the
-    // cascade lives inside fanOutAndWatch, so there is no outer catch here).
-    const shouldAbort = (): boolean => isOcrPrepareAbortRequested(sessionId, runId);
+    const { records } = input;
 
     // Cross-check every Section 1 against the employer's Section 2 sheet BEFORE
     // any of it reaches UCPath. A field the two sources disagree on is dropped
-    // from the search (`buildI9PersonMatchInput`), because searching with a
-    // known-suspect SSN manufactures a false "not found" — the exact failure
-    // this whole path exists to avoid.
+    // from the eventual search (`buildI9PersonMatchInput`), because searching
+    // with a known-suspect SSN manufactures a false "not found" — the exact
+    // failure this whole path exists to avoid.
     corroborateI9Records(records);
     const corroborated = records.filter((r) => r.corroboration === "confirmed").length;
     const disputed = records.filter((r) => r.corroboration === "disputed");
@@ -710,162 +883,83 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
     }
     input.emitProgress(records);
 
-    // Dynamic import avoids an import cycle (mirrors verify.ts / force-research.ts).
-    const { personMatchWorkflow } = await import("../../../workflows/person-match/index.js");
-
-    const pmInputs: I9PersonMatchInput[] = [];
-    const pmItemIds: string[] = [];
-    const pmItemIdToIdx = new Map<string, number>();
-
-    for (let idx = 0; idx < records.length; idx++) {
-      const rec = records[idx];
-      if (rec.formKind !== "i9" && !nonEmpty(rec.lastName) && !nonEmpty(rec.firstName)) {
-        // A non-I-9 page with no identity fields — nothing to check, and not an
-        // error (Section 2 / list pages are expected in a scanned packet).
-        continue;
-      }
-      const chosen = buildI9PersonMatchInput(rec, {
-        ...(parentSubject ? { parentSubject } : {}),
-      });
-      if (!chosen) {
-        rec.matchState = "unresolved";
-        rec.warnings.push(
-          "Cannot search UCPath: the I-9 needs a legible name plus a full SSN or a mm/dd/yyyy date of birth",
-        );
-        rec.checks = buildI9Checks(rec);
-        continue;
-      }
-      const itemId = `${ocrChildItemIdPrefix("i9")}-${runId}-r${idx}`;
-      pmItemIds.push(itemId);
-      pmItemIdToIdx.set(itemId, idx);
-      pmInputs.push(chosen);
-    }
-
-    if (pmInputs.length === 0) {
-      input.emitProgress(records);
-      return records;
-    }
-
-    const processedItemIds = new Set<string>();
-    const applyOutcome = (outcome: ChildOutcome): void => {
-      const idx = pmItemIdToIdx.get(outcome.itemId);
-      if (idx === undefined) return;
-      processedItemIds.add(outcome.itemId);
-      applyPersonMatchToI9Record(records[idx], outcome.data);
-      records[idx].personMatchStatus = outcome.status === "done" ? "completed" : "failed";
-      const traceId = nonEmpty(outcome.terminalEntry?.data?.__traceId);
-      if (traceId) records[idx].personMatchTraceId = traceId;
-      records[idx].checks = buildI9Checks(records[idx]);
-      log.step({
-        message: `[i9/person-match] record ${idx} status=${records[idx].personMatchStatus ?? "unknown"} childStatus=${outcome.status} found=${records[idx].ucpathFound === undefined ? "" : String(records[idx].ucpathFound)} itemId=${outcome.itemId} traceId=${records[idx].personMatchTraceId ?? ""}`,
-        category: "ocr",
-        occasion: outcome.status === "done" ? "completed" : "failed",
-        childWorkflow: "person-match",
-        subject: `record:${idx}`,
-      });
-      input.emitProgress(records);
-    };
-
-    // Shared dispatch→watch→cascade-cancel pipeline (BM-1). `onDispatched`
-    // stamps each record `pending` + its child trace id before the watch
-    // begins; `onProgress` patches each record as its child terminates.
-    //
-    // A watch TIMEOUT is not an operator abort — degrade gracefully to a
-    // partial report (records that settled are already stamped; the rest are
-    // marked failed below). Operator-abort errors are NOT caught here — they
-    // propagate so the prep unwinds as cancelled (same as verify).
-    const watchResult = await fanOutAndWatch<I9PersonMatchInput>({
-      sessionId,
-      runId,
-      parentRunId: runId,
-      trackerDir,
-      date,
-      child: personMatchWorkflow as never,
-      watchWorkflow: "person-match",
-      children: pmInputs.map((inp, i) => ({ input: inp, itemId: pmItemIds[i] ?? "" })),
-      timeoutMs:
-        typeof process !== "undefined" && process.env["OCR_I9_WATCH_TIMEOUT_MS"]
-          ? Number(process.env["OCR_I9_WATCH_TIMEOUT_MS"])
-          : 30 * 60_000,
-      ...(rootTracePrefix ? { rootTracePrefix } : {}),
-      ...(enrichDaemonFlags.parallel ? { daemonFlags: enrichDaemonFlags } : {}),
-      shouldAbort,
-      onDispatched: (results) => {
-        for (const result of results) {
-          const idx = pmItemIdToIdx.get(result.itemId);
-          if (idx === undefined) continue;
-          records[idx].personMatchStatus = "pending";
-          records[idx].personMatchTraceId = buildTraceId({
-            code: "pm",
-            runId: result.runId,
-            at: new Date(),
-            rootPrefix: rootTracePrefix,
-          });
-          log.step({
-            message: `[i9/person-match] record ${idx} status=pending itemId=${result.itemId} traceId=${records[idx].personMatchTraceId ?? ""}`,
-            category: "ocr",
-            occasion: "started",
-            childWorkflow: "person-match",
-            subject: `record:${idx}`,
-          });
-        }
-        input.emitProgress(records);
-      },
-      onProgress: (outcome) => applyOutcome(outcome),
-    }).catch((err: unknown): FanOutResult => {
-      if (isOperatorDiscardAbortError(err)) throw err; // operator cancel — rethrow
-      if (!isChildWatchError(err) || err.kind !== "timeout") throw err;
-      // Timeout (or other non-abort watch failure): mark all unprocessed
-      // children as failed and degrade to a partial report.
-      const timedOut = pmItemIds.filter((id) => !processedItemIds.has(id));
-      log.warn({
-        message: `[i9/person-match] watch timed out — ${timedOut.length} of ${pmItemIds.length} matches did not settle: ${timedOut.join(", ")}`,
-        category: "ocr",
-        occasion: "failed",
-        childWorkflow: "person-match",
-        subject: "i9-enrichment",
-      });
-      return { outcomes: [], byItemId: new Map(), missingItemIds: timedOut };
+    // Action History cross-ref BY NAME (no live Empl ID exists at this stage —
+    // the UCPath search runs later in the separations member tasks, which
+    // re-match by the resolved EID). Fail loud if the roster file is
+    // missing/unreadable.
+    const { loadEmployeeActionHistory, crossRefI9Record, applyActionHistoryToI9Record } =
+      await import("../../../services/matching/employee-action-history.js");
+    const actionHistory = await loadEmployeeActionHistory();
+    log.step({
+      message: `[i9/action-history] loaded ${actionHistory.byEmplId.size} Empl ID(s) from ${actionHistory.sourcePath}`,
+      category: "ocr",
     });
-    const { outcomes, missingItemIds } = watchResult;
 
-    for (const outcome of outcomes) {
-      if (processedItemIds.has(outcome.itemId)) continue;
-      applyOutcome(outcome);
+    let xrefHits = 0;
+    let xrefMisses = 0;
+    for (let idx = 0; idx < records.length; idx++) {
+      const rec = records[idx];
+      const xref = crossRefI9Record(rec, actionHistory);
+      applyActionHistoryToI9Record(rec, xref);
+      if (rec.formKind === "i9") {
+        if (xref.ppsEid || xref.rosterEmplId) xrefHits += 1;
+        else xrefMisses += 1;
+
+        // Finalize match state: "resolved" = the separations member task CAN
+        // search UCPath for this person — a full identifier search (SSN/DOB)
+        // or a name-only lookup. Only a record with no legible name at all is
+        // unsearchable.
+        const searchable =
+          buildI9PersonMatchInput(rec, {}) !== null
+          || (nonEmpty(rec.name) ?? buildI9DisplayName(rec)) !== "";
+        if (!searchable) {
+          rec.matchState = "unresolved";
+          rec.warnings.push(
+            "Cannot check against UCPath: no legible name on this I-9 — verify the scan",
+          );
+        } else {
+          if (buildI9PersonMatchInput(rec, {}) === null) {
+            rec.warnings.push(
+              "No usable SSN or mm/dd/yyyy date of birth — UCPath will be searched by name only",
+            );
+          }
+          rec.matchState = "resolved";
+        }
+      }
+      rec.checks = buildI9Checks(rec);
     }
 
-    for (const itemId of missingItemIds) {
-      const idx = pmItemIdToIdx.get(itemId);
-      if (idx === undefined) continue;
-      records[idx].personMatchStatus = "failed";
-      records[idx].warnings.push("UCPath person match timed out without a result");
-      records[idx].checks = buildI9Checks(records[idx]);
+    // Report the MATCH RATE, not just "the file loaded". A cross-ref that
+    // matches nobody is the signature of a roster scoped to a different
+    // population (the Action History export is filterable by department /
+    // employee class / job action), and it leaves PPS EID + Separation Date
+    // blank on every row. "loaded N Empl ID(s)" alone reads as success while
+    // silently reporting nothing — so say out loud how many records it
+    // actually resolved, and warn when the answer is none.
+    const xrefTotal = xrefHits + xrefMisses;
+    if (xrefTotal > 0 && xrefHits === 0) {
       log.warn({
-        message: `[i9/person-match] record ${idx} status=failed reason=timeout itemId=${itemId} traceId=${records[idx].personMatchTraceId ?? ""}`,
+        message:
+          `[i9/action-history] cross-ref matched 0 of ${xrefTotal} I-9 record(s) against `
+          + `${actionHistory.sourcePath} — PPS EID and Separation Date will be BLANK on every row. `
+          + `This roster contains none of the scanned people; check that the Action History export `
+          + `covers their department / employee class / job action, not a narrower slice.`,
         category: "ocr",
-        occasion: "failed",
-        childWorkflow: "person-match",
-        subject: `record:${idx}`,
+      });
+    } else {
+      log.step({
+        message: `[i9/action-history] cross-ref matched ${xrefHits} of ${xrefTotal} I-9 record(s)`,
+        category: "ocr",
       });
     }
 
-    // Recompute checks + finalize match state for every record. "Resolved"
-    // means the UCPath question was ANSWERED (found true OR false) — a failed
-    // / skipped / timed-out record stays unresolved.
-    for (let idx = 0; idx < records.length; idx++) {
-      const rec = records[idx];
-      rec.checks = buildI9Checks(rec);
-      if (rec.matchState !== "unresolved" || rec.personMatchStatus) {
-        rec.matchState = rec.ucpathFound === undefined ? "unresolved" : "resolved";
-      }
-    }
-
-    const completed = records.filter((rec) => rec.personMatchStatus === "completed").length;
-    const failed = records.filter((rec) => rec.personMatchStatus === "failed").length;
-    const found = records.filter((rec) => rec.ucpathFound === true).length;
-    const notFound = records.filter((rec) => rec.ucpathFound === false).length;
+    const searchableCount = records.filter(
+      (rec) => rec.formKind === "i9" && rec.matchState === "resolved",
+    ).length;
     log.success({
-      message: `[i9/enrich] complete records=${records.length} completed=${completed} failed=${failed} found=${found} notFound=${notFound}`,
+      message:
+        `[i9/enrich] complete records=${records.length} rosterNameMatches=${xrefHits} `
+        + `searchable=${searchableCount} — UCPath person searches run next as separations member tasks`,
       category: "ocr",
       occasion: "completed",
       subject: "i9-enrichment",
