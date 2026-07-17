@@ -27,6 +27,17 @@ import { rebuildProjectionForDate } from "../../../src/tracker/state/rebuild.js"
 const DATE = "2026-07-16";
 let dir: string;
 
+/**
+ * Tombstone manifests are partitioned by DELETION time (deletedAt = now),
+ * not by the deleted row's tracker date — so the file to assert on is
+ * today's partition, whatever day the suite runs.
+ */
+function todayDeletionPartition(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 function emit(runId: string, timestamp: string): void {
   emitTrackerRowForDate({
     workflow: "work-study",
@@ -69,7 +80,7 @@ describe("append-only deletion tombstones", () => {
     })).toEqual({ latest_run_id: "run-1", latest_empl_id: "10000001" });
     expect((db.prepare("SELECT COUNT(*) AS n FROM run_events").get() as { n: number }).n).toBe(2);
     expect((db.prepare("SELECT COUNT(*) AS n FROM runs").get() as { n: number }).n).toBe(2);
-    expect(readFileSync(deletionFilePath(DATE, dir), "utf8").trim().split("\n")).toHaveLength(1);
+    expect(readFileSync(deletionFilePath(todayDeletionPartition(), dir), "utf8").trim().split("\n")).toHaveLength(1);
   });
 
   it("replays a durable manifest after an interrupted SQLite application and stays idempotent", () => {
@@ -98,7 +109,7 @@ describe("append-only deletion tombstones", () => {
     buildDeleteEntryHandler(dir)({
       workflow: "work-study", id: "item-1", runId: "run-1", date: DATE,
     });
-    const manifestPath = deletionFilePath(DATE, dir);
+    const manifestPath = deletionFilePath(todayDeletionPartition(), dir);
 
     expect(readDeletedRunKeys(dir)).toHaveLength(1);
     chmodSync(manifestPath, 0o000);
