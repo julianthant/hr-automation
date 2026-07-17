@@ -215,26 +215,30 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
       description: file.name,
     }),
   },
-  // Separations "I-9 mode": upload a scanned I-9 packet; OCR reads each
-  // Section 1 (name / DOB / SSN) and a person-match child runs the UCPath
-  // person search (the onboarding new-hire-vs-rehire search) to report whether
-  // each person exists in UCPath. Read-only — a STANDALONE OCR prep (no
-  // `targetWorkflow`, so no coordinator row); the report lands in the OCR
-  // panel and completes `done` after the person-match enrichment.
-  separations: {
+  // "Run I-9 Check": upload a scanned I-9 packet; OCR reads each person's
+  // Section 1 (name / DOB / SSN) + Section 2 pages and matches the Action
+  // History roster by name. Read-only — but NOT standalone: each PDF gets an
+  // `i9-check` operation coordinator row, the OCR run is delegated under it,
+  // and when the run completes (no approval — the i9 spec sets
+  // `completeDelegatedRun`) prepare's fan-out enqueues one REAL i9-check task
+  // per person (name + EID, done/failed, found/not-found tag) under that
+  // coordinator. The i9-check daemon opens ONE UCPath browser.
+  "i9-check": {
     title: () => "Run I-9 Check",
     srDescription: () =>
-      "Upload a scanned I-9 PDF. OCR extracts each Section 1 (name, date of birth, SSN), then the UCPath person search checks whether each person can be found. Read-only — review the found/not-found report in the OCR panel.",
+      "Upload a scanned I-9 PDF. OCR reads each person's Section 1 + Section 2 pages and matches the Action History roster by name; when it completes, one I-9 Check task per person searches UCPath (one browser per daemon — expect Duo) and appends a row to the master I-9 retention tracker. Re-running the same packet appends again — dedupe the sheet manually. Read-only against UCPath.",
     submitUrl: ({ reuploadFor }) =>
       reuploadFor ? "/api/ocr/reupload" : "/api/ocr/prepare",
-    // No roster (person-match resolves identity via UCPath person search), no
-    // dry-run (nothing is written), workers parallelize the match fan-out.
+    targetWorkflow: () => "i9-check",
+    // No roster section (the Action History path is configured, not uploaded),
+    // no dry-run (nothing is written to UCPath). Workers parallelize the
+    // i9-check daemons (one UCPath browser each).
     sections: { workers: true },
     lockedFormType: "i9",
     allowMultipleFiles: true,
     buildSuccessToast: (_resp, file) => ({
       title: "I-9 check started",
-      description: `${file.name} — review the found/not-found report in the OCR panel`,
+      description: `${file.name} — UCPath check tasks will queue in I-9 Check and fill the retention tracker`,
     }),
   },
   onbase: {

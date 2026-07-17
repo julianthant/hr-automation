@@ -395,6 +395,7 @@ const STALE_START_THRESHOLD_MS = 60_000;
 export const INSTANCE_LABELS: Record<string, string> = {
   onboarding: "Onboarding",
   separations: "Separation",
+  "i9-check": "I-9 Check",
   "person-lookup": "Person Lookup",
   "kronos-reports": "Kronos",
   "work-study": "Work Study",

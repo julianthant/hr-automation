@@ -12,10 +12,11 @@ const SESSION_LOOKBACK_DAYS = 7;
  * this set: it is a real daemon task born at upload as a `single` row, not a
  * display coordinator. `onbase` IS a coordinator: the combined-PDF upload row
  * tracks the whole document, with per-person imports fanned out as
- * operation-members. `separations` is the "Run I-9 Check" coordinator: one row
+ * operation-members. `i9-check` is the "Run I-9 Check" coordinator: one row
  * per uploaded I-9 packet, with per-person found/not-found member rows fanned
  * back by prepare's result fan-back when the (approve-less) i9 OCR run
- * completes. A standalone OCR run (no targetWorkflow) gets none.
+ * completes (the coordinator lived on `separations` before the 2026-07-17
+ * i9-check workflow split). A standalone OCR run (no targetWorkflow) gets none.
  *
  * The single source of truth for "does this OCR run have a coordinator row?" —
  * shared by `prepare` (creates the row) and `approve` (mirrors `approved` onto
@@ -25,7 +26,7 @@ export const OPERATION_COORDINATOR_WORKFLOWS = new Set([
   "oath-signature",
   "emergency-contact",
   "onbase",
-  "separations",
+  "i9-check",
 ]);
 
 export function isOperationCoordinatorWorkflow(workflow: string | undefined): boolean {

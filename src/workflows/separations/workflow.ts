@@ -92,10 +92,22 @@ import { runKualiFinalize } from "./steps/kuali-finalize.js";
  * silently dropped and a REAL termination would fire. See the dry-run terminal
  * in the handler below and `CLAUDE.md` → "Dry-run boundary".
  */
-const SeparationInputSchema = z.object({
+const SeparationTerminationInputSchema = z.object({
   docId: z.string().min(1),
   dryRun: z.boolean().optional(),
 });
+export type SeparationTerminationInput = z.infer<typeof SeparationTerminationInputSchema>;
+
+/**
+ * Separations is the pure Kuali TERMINATION workflow since 2026-07-17: the
+ * former `mode: "i9-check"` input variant (the disjoint union member that made
+ * an i9-check retry structurally unable to become a termination) moved to its
+ * own `i9-check` workflow (`src/workflows/i9-check/`). A legacy queued i9-check
+ * payload replayed against this schema now FAILS LOUD at parse (`docId` is
+ * required and `mode` is unknown-key-stripped into an invalid object) — re-run
+ * the I-9 upload instead.
+ */
+const SeparationInputSchema = SeparationTerminationInputSchema;
 export type SeparationInput = z.infer<typeof SeparationInputSchema>;
 
 const separationsSteps = [

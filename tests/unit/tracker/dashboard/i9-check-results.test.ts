@@ -1,10 +1,10 @@
 /**
- * The separations "Run I-9 Check" result fan-back — the per-person
- * `operation-member` rows emitted back into the separations queue when the
- * (approve-less) delegated i9 OCR run completes.
+ * The "Run I-9 Check" member fan-out — REAL i9-check daemon tasks enqueued
+ * when the (approve-less) delegated i9 OCR run completes, plus display-only
+ * failed rows for never-searchable pages.
  *
- * Covers the pure projection (`buildI9CheckMembers`), the emit path
- * (`emitI9CheckResultRows`), and the prepare-route wiring that fires it.
+ * Covers the pure planner (`buildI9CheckMemberPlan`), the enqueue path
+ * (`enqueueI9CheckMemberTasks`, override seam), and the prepare-route wiring.
  */
 import { test } from "vitest";
 import assert from "node:assert/strict";
@@ -12,17 +12,19 @@ import { mkdtempSync, mkdirSync, rmSync, appendFileSync, readFileSync, existsSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildI9CheckMembers,
-  emitI9CheckResultRows,
+  buildI9CheckMemberPlan,
+  enqueueI9CheckMemberTasks,
+  type EnqueueI9CheckMemberTasksArgs,
 } from "../../../../src/tracker/dashboard/ocr/i9-check-results.js";
 import {
   buildOcrPrepareHandler,
   _resetSessionLockForTests,
 } from "../../../../src/tracker/dashboard/ocr/index.js";
-import { i9CheckResultTag } from "../../../../src/domain/separations-status.js";
+import { i9CheckResultTag } from "../../../../src/domain/i9-check-status.js";
 import { buildWorkflowRunProjection } from "../../../../src/domain/workflow-runtime/projection.js";
 import { rowFilePath, rowsDir } from "../../../../src/tracker/paths.js";
 import type { I9PreviewRecord } from "../../../../src/services/ocr/forms/i9.js";
+import type { I9CheckMemberInput } from "../../../../src/workflows/i9-check/schema.js";
 
 function todayLocal(): string {
   const d = new Date();
@@ -37,6 +39,7 @@ interface Row {
   status: string;
   step?: string;
   error?: string;
+  input?: Record<string, unknown>;
   data?: Record<string, string>;
 }
 
@@ -75,67 +78,160 @@ function rec(over: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
   } as I9PreviewRecord;
 }
 
-// ─── buildI9CheckMembers (pure) ──────────────────────────────
+const CTX = { sessionId: "sess-i9", ocrRunId: "ocr-run-1" };
 
-test("buildI9CheckMembers: a found record is done + carries the matched EID", () => {
-  const members = buildI9CheckMembers([
-    rec({ ucpathFound: true, matchedEmplId: "10366615", matchedName: "Jane Doe", personMatchStatus: "completed" }),
-  ]);
-  assert.equal(members.length, 1);
-  const { logs, ...fields } = members[0];
-  assert.deepEqual(fields, {
-    index: 0,
-    name: "Doe, Jane",
-    status: "done",
-    ucpathFound: "true",
-    emplId: "10366615",
-    matchedName: "Jane Doe",
+// ─── buildI9CheckMemberPlan (pure) ───────────────────────────
+
+test("plan: a searchable Section 1 becomes a REAL member task with normalized SSN + DOB", () => {
+  const plan = buildI9CheckMemberPlan([rec({ hireDate: "04/25/2016", section2Page: 9 })], CTX);
+  assert.equal(plan.displayFailures.length, 0);
+  assert.equal(plan.tasks.length, 1);
+  const task = plan.tasks[0];
+  assert.equal(task.itemId, "i9-check-sess-i9-r0");
+  assert.deepEqual(task.input, {
+    mode: "i9-check",
+    person: {
+      name: "Doe, Jane",
+      lastName: "Doe",
+      firstName: "Jane",
+      ssn: "123456789",
+      dob: "04/01/1998",
+      hireDate: "04/25/2016",
+      sourcePage: 1,
+      section2Page: 9,
+    },
+    ocrSessionId: "sess-i9",
+    ocrRunId: "ocr-run-1",
+    recordIndex: 0,
   });
-  assert.ok(logs.length > 0, "a member row must carry its own log lines");
+  assert.equal(task.seedData.i9Check, "true");
+  assert.equal(task.seedData.name, "Doe, Jane");
+  assert.equal(task.seedData.section1Present, "Yes — page 1");
+  assert.equal(task.seedData.section2Present, "Yes — page 9");
 });
 
-test("buildI9CheckMembers: a definitive not-found record is done, NOT failed", () => {
-  const members = buildI9CheckMembers([rec({ ucpathFound: false, personMatchStatus: "completed" })]);
-  assert.equal(members[0].status, "done");
-  assert.equal(members[0].ucpathFound, "false");
-  assert.equal(members[0].emplId, undefined);
+test("plan: a DISPUTED SSN is dropped from the search input (never coin-flipped)", () => {
+  const plan = buildI9CheckMemberPlan(
+    [rec({ corroboration: "disputed", disputedFields: ["ssn"] })],
+    CTX,
+  );
+  assert.equal(plan.tasks[0].input.person.ssn, undefined, "disputed SSN must not be searched with");
+  assert.equal(plan.tasks[0].input.person.dob, "04/01/1998", "the undisputed DOB still searches");
 });
 
-test("buildI9CheckMembers: an UNANSWERED check is failed with a legible error — never a silent not-found", () => {
-  const members = buildI9CheckMembers([
-    rec({ personMatchStatus: "failed", warnings: ["UCPath person match timed out without a result"] }),
-  ]);
-  assert.equal(members[0].status, "failed");
-  assert.equal(members[0].ucpathFound, undefined, "an unanswered check carries NO found/not-found verdict");
-  assert.equal(members[0].error, "UCPath person match timed out without a result");
+test("plan: a name with NO usable identifiers still becomes a task (name-only lookup)", () => {
+  const plan = buildI9CheckMemberPlan([rec({ ssn: null, dateOfBirth: null })], CTX);
+  assert.equal(plan.tasks.length, 1);
+  assert.equal(plan.tasks[0].input.person.ssn, undefined);
+  assert.equal(plan.tasks[0].input.person.dob, undefined);
+  assert.equal(plan.tasks[0].input.person.name, "Doe, Jane");
 });
 
-test("buildI9CheckMembers: an unsearchable record (no SSN + no DOB) still yields a failed row", () => {
-  const members = buildI9CheckMembers([
-    rec({
-      ssn: null,
-      dateOfBirth: null,
-      matchState: "unresolved",
-      warnings: ["Cannot search UCPath: the I-9 needs a legible name plus a full SSN or a mm/dd/yyyy date of birth"],
-    }),
-  ]);
-  assert.equal(members.length, 1);
-  assert.equal(members[0].status, "failed");
-  assert.match(members[0].error ?? "", /Cannot search UCPath/);
+test("plan: the roster NAME-match seed rides the task input for the daemon + spreadsheet", () => {
+  const plan = buildI9CheckMemberPlan(
+    [
+      rec({
+        ppsEid: "39549",
+        ppsEidPadded: "000039549",
+        rosterEmplId: "10458971",
+        i9SeparationDate: "8/6/2021",
+        hireDate: "4/17/2018",
+      }),
+    ],
+    CTX,
+  );
+  assert.deepEqual(plan.tasks[0].input.roster, {
+    ppsEid: "39549",
+    ppsEidPadded: "000039549",
+    emplId: "10458971",
+    separationDate: "8/6/2021",
+  });
+  assert.equal(plan.tasks[0].seedData.ppsEid, "39549");
+  assert.equal(plan.tasks[0].seedData.separationDate, "8/6/2021");
+  assert.equal(plan.tasks[0].seedData.i9HireDate, "4/17/2018");
 });
 
-test("buildI9CheckMembers: filler pages are skipped, but an unreadable I-9 page still reports", () => {
-  const members = buildI9CheckMembers([
-    rec({ ucpathFound: false, personMatchStatus: "completed" }),
-    // A Section 2 / list-of-documents page — expected filler, not a person.
-    rec({ formKind: "unknown", lastName: null, firstName: null, name: "", ssn: null, dateOfBirth: null }),
-    // An I-9-classified page whose Section 1 was unreadable — MUST still surface.
-    rec({ formKind: "i9", sourcePage: 3, lastName: null, firstName: null, name: "", ssn: null, dateOfBirth: null }),
-  ]);
-  assert.equal(members.length, 2, "the filler page is skipped; the unreadable I-9 page is not");
-  assert.deepEqual(members.map((m) => m.index), [0, 2]);
-  assert.equal(members[1].status, "failed");
-  assert.equal(members[1].name, "Page 3 — unreadable Section 1");
+test("plan: an unreadable Section 1 (no name at all) is a DISPLAY failure — never silently dropped", () => {
+  const plan = buildI9CheckMemberPlan(
+    [rec({ sourcePage: 3, lastName: null, firstName: null, name: "", ssn: null, dateOfBirth: null })],
+    CTX,
+  );
+  assert.equal(plan.tasks.length, 0);
+  assert.equal(plan.displayFailures.length, 1);
+  assert.equal(plan.displayFailures[0].name, "Page 3 — unreadable Section 1");
+  assert.match(plan.displayFailures[0].error, /cannot be checked/);
+});
+
+test("plan: an orphan Section 2 with a readable name gets a REAL name-only task", () => {
+  const plan = buildI9CheckMemberPlan(
+    [
+      rec({
+        formKind: "unknown",
+        lastName: null,
+        firstName: null,
+        name: "",
+        sourcePage: 24,
+        section2Name: "Singh, Aryaman P",
+        section2HireDate: "4/18/2016",
+        orphanSection2: true,
+      }),
+    ],
+    CTX,
+  );
+  assert.equal(plan.displayFailures.length, 0);
+  assert.equal(plan.tasks.length, 1);
+  const { person } = plan.tasks[0].input;
+  assert.equal(person.name, "Singh, Aryaman P");
+  assert.equal(person.orphanSection2, true);
+  assert.equal(person.hireDate, "04/18/2016");
+  assert.equal(person.section2Page, 24);
+  assert.equal(plan.tasks[0].seedData.section1Present, "Missing");
+  const blob = plan.tasks[0].logs.map((l) => l.message).join(" | ");
+  assert.match(blob, /Section 1 page for this person is MISSING/);
+});
+
+test("plan: an orphan Section 2 with an UNREADABLE name is a display failure", () => {
+  const plan = buildI9CheckMemberPlan(
+    [
+      rec({
+        formKind: "unknown",
+        lastName: null,
+        firstName: null,
+        name: "",
+        sourcePage: 24,
+        section2Name: null,
+        orphanSection2: true,
+      }),
+    ],
+    CTX,
+  );
+  assert.equal(plan.tasks.length, 0);
+  assert.match(plan.displayFailures[0].error, /name line could not be read/);
+});
+
+test("plan: filler pages are skipped; indexes stay source-record-based", () => {
+  const plan = buildI9CheckMemberPlan(
+    [
+      rec({}),
+      rec({ formKind: "unknown", lastName: null, firstName: null, name: "", ssn: null, dateOfBirth: null }),
+      rec({ name: "Roe, Rick", lastName: "Roe", firstName: "Rick", sourcePage: 3 }),
+    ],
+    CTX,
+  );
+  assert.equal(plan.tasks.length, 2);
+  assert.deepEqual(plan.tasks.map((t) => t.input.recordIndex), [0, 2]);
+  assert.deepEqual(plan.tasks.map((t) => t.itemId), ["i9-check-sess-i9-r0", "i9-check-sess-i9-r2"]);
+});
+
+test("plan: the SSN NEVER appears in seedData or log lines", () => {
+  const plan = buildI9CheckMemberPlan([rec({})], CTX);
+  const seedBlob = JSON.stringify(plan.tasks[0].seedData);
+  const logBlob = plan.tasks[0].logs.map((l) => l.message).join(" | ");
+  for (const blob of [seedBlob, logBlob]) {
+    assert.ok(!blob.includes("123-45-6789") && !blob.includes("123456789"), "no SSN anywhere");
+  }
+  assert.ok(logBlob.includes("SSN supplied"), "the log says an SSN will be searched with");
+  assert.ok(logBlob.includes("04/01/1998"), "and states the DOB");
 });
 
 // ─── the found / not-found queue tag ─────────────────────────
@@ -147,7 +243,7 @@ test("i9CheckResultTag: found → success chip, not-found → warning chip, unan
   assert.equal(i9CheckResultTag({ data: { ucpathFound: "" } }), null);
 });
 
-// ─── emitI9CheckResultRows ───────────────────────────────────
+// ─── enqueueI9CheckMemberTasks ───────────────────────────────
 
 function seedCompletedI9OcrRow(dir: string, sessionId: string, runId: string, records: I9PreviewRecord[]): void {
   mkdirSync(rowsDir(dir), { recursive: true });
@@ -159,7 +255,7 @@ function seedCompletedI9OcrRow(dir: string, sessionId: string, runId: string, re
       id: sessionId,
       runId,
       status: "done",
-      step: "person-lookup",
+      step: "ocr",
       data: {
         archetype: "preview",
         mode: "prepare",
@@ -170,99 +266,193 @@ function seedCompletedI9OcrRow(dir: string, sessionId: string, runId: string, re
   );
 }
 
-test("emitI9CheckResultRows: emits one operation-member row per person under the coordinator", () => {
-  const dir = mkdtempSync(join(tmpdir(), "i9-fanback-"));
-  try {
-    seedCompletedI9OcrRow(dir, "sess-i9", "ocr-run-1", [
-      rec({ ucpathFound: true, matchedEmplId: "10366615", matchedName: "Jane Doe", personMatchStatus: "completed" }),
-      rec({ lastName: "Roe", firstName: "Rick", name: "Roe, Rick", ucpathFound: false, personMatchStatus: "completed" }),
-      rec({ lastName: "Poe", firstName: "Pat", name: "Poe, Pat", personMatchStatus: "failed", warnings: ["search failed"] }),
-    ]);
+interface CapturedEnqueue {
+  inputs: unknown[];
+  flags: Record<string, unknown>;
+  opts: Record<string, unknown>;
+}
 
-    const summary = emitI9CheckResultRows({
-      sessionId: "sess-i9",
-      ocrRunId: "ocr-run-1",
-      operation: { workflow: "separations", runId: "op-run-1", traceId: "se-143012-aaaa" },
-      trackerDir: dir,
-    });
+function buildEnqueueArgs(
+  dir: string,
+  captured: CapturedEnqueue[],
+): EnqueueI9CheckMemberTasksArgs {
+  return {
+    sessionId: "sess-i9",
+    ocrRunId: "ocr-run-1",
+    operation: { workflow: "i9-check", runId: "op-run-1", traceId: "ic-143012-aaaa" },
+    trackerDir: dir,
+    ensureDaemonsAndEnqueueOverride: async (_wf, inputs, flags, opts) => {
+      captured.push({ inputs, flags: flags as never, opts });
+      // Mirror the real enqueue: fire onPreEmitPending once per input with the
+      // pre-assigned runId + resolved itemId.
+      const runIds = opts.runIds as string[];
+      const deriveItemId = opts.deriveItemId as (input: unknown) => string;
+      const onPreEmitPending = opts.onPreEmitPending as (
+        item: unknown,
+        runId: string,
+        parentRunId: string | undefined,
+        itemId: string,
+      ) => void;
+      inputs.forEach((input, i) => {
+        // The real idFn strips __runtimeOptions before deriveItemId.
+        const { __runtimeOptions: _r, ...cleaned } = input as Record<string, unknown>;
+        const itemId = deriveItemId(cleaned);
+        onPreEmitPending(input, runIds[i], opts.parentRunId as string, itemId);
+      });
+      return { enqueued: inputs.length };
+    },
+  };
+}
 
-    assert.deepEqual(summary, { emitted: 3, found: 1, notFound: 1, failed: 1 });
+test("enqueue: one REAL member task per person — retryable rows, no displayOnly, no input block, no SSN", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "i9-fanout-"));
+  t.onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  const prevTimekeeper = process.env.TIMEKEEPER_NAME;
+  process.env.TIMEKEEPER_NAME = "Julian";
+  t.onTestFinished(() => {
+    if (prevTimekeeper === undefined) delete process.env.TIMEKEEPER_NAME;
+    else process.env.TIMEKEEPER_NAME = prevTimekeeper;
+  });
 
-    const rows = readRows(dir, "separations");
-    assert.equal(rows.length, 3);
-    for (const row of rows) {
-      assert.equal(row.parentRunId, "op-run-1", "members nest under the coordinator");
-      assert.equal(row.data?.archetype, "operation-member");
-      assert.equal(row.data?.queueRowKind, "person");
-      assert.equal(row.data?.displayOnly, "true", "no daemon task backs a result row");
-      assert.equal(row.step, "i9-check");
-      assert.match(row.data?.__traceId ?? "", /^se-143012-/, "members compose the coordinator's trace prefix");
-    }
+  seedCompletedI9OcrRow(dir, "sess-i9", "ocr-run-1", [
+    rec({}),
+    rec({ lastName: "Roe", firstName: "Rick", name: "Roe, Rick", sourcePage: 2 }),
+  ]);
+  const captured: CapturedEnqueue[] = [];
 
-    const found = rows.find((r) => r.data?.name === "Doe, Jane")!;
-    assert.equal(found.status, "done");
-    assert.equal(found.data?.ucpathFound, "true");
-    assert.equal(found.data?.emplId, "10366615");
+  const summary = await enqueueI9CheckMemberTasks(buildEnqueueArgs(dir, captured));
+  assert.deepEqual(summary, { enqueued: 2, displayFailed: 0 });
 
-    const notFound = rows.find((r) => r.data?.name === "Roe, Rick")!;
-    assert.equal(notFound.status, "done");
-    assert.equal(notFound.data?.ucpathFound, "false");
-    assert.equal(notFound.data?.emplId, undefined);
+  // The enqueue call: wrapped inputs carry the runtime options channel.
+  assert.equal(captured.length, 1);
+  const wrapped = captured[0].inputs as Array<Record<string, unknown>>;
+  assert.equal(wrapped.length, 2);
+  for (const input of wrapped) {
+    const runtime = input.__runtimeOptions as Record<string, unknown>;
+    assert.equal(runtime.rowShape, "operation-member");
+    assert.equal(runtime.rootTracePrefix, "ic-143012");
+    assert.equal((input as { mode?: string }).mode, "i9-check");
+  }
+  assert.equal(captured[0].opts.existingTaskPolicy, "idempotent");
+  assert.equal(captured[0].opts.parentRunId, "op-run-1");
 
-    const failed = rows.find((r) => r.data?.name === "Poe, Pat")!;
-    assert.equal(failed.status, "failed");
-    assert.equal(failed.data?.ucpathFound, undefined);
-    assert.equal(failed.error, "search failed");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  // The pre-emitted pending rows.
+  const rows = readRows(dir, "i9-check");
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.status, "pending");
+    assert.equal(row.parentRunId, "op-run-1");
+    assert.equal(row.data?.archetype, "operation-member");
+    assert.equal(row.data?.queueRowKind, "person");
+    assert.equal(row.data?.i9Check, "true");
+    assert.equal(row.data?.displayOnly, undefined, "a REAL task row is never display-only");
+    assert.equal(row.input, undefined, "no input block — SQLite original_input_json is the replay authority");
+    assert.match(row.data?.__traceId ?? "", /^ic-143012-/, "members compose the coordinator's trace prefix");
+    const blob = JSON.stringify(row);
+    assert.ok(!blob.includes("123-45-6789") && !blob.includes("123456789"), "no SSN on the JSONL row");
+  }
+
+  // Each pending member row carries its OCR-provenance logs under its own runId.
+  const logPath = join(dir, "logs", `i9-check-${todayLocal()}.jsonl`);
+  assert.ok(existsSync(logPath));
+  const logs = readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l) as { itemId: string; runId: string; message: string });
+  for (const row of rows) {
+    const mine = logs.filter((l) => l.itemId === row.id && l.runId === row.runId);
+    assert.ok(mine.length > 0, `member ${row.data?.name} must log under its own runId`);
+    assert.ok(
+      mine.some((l) => l.message.includes("UCPath search criteria")),
+      "the criteria the verdict will rest on are stated up front",
+    );
   }
 });
 
-test("emitI9CheckResultRows: THROWS when the completed run's records are missing (never a silent empty operation)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "i9-fanback-miss-"));
-  try {
-    assert.throws(
-      () =>
-        emitI9CheckResultRows({
-          sessionId: "sess-gone",
-          ocrRunId: "ocr-run-gone",
-          operation: { workflow: "separations", runId: "op-run-1", traceId: "se-143012-aaaa" },
-          trackerDir: dir,
-        }),
-      /no records row found/,
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+test("enqueue: unsearchable pages become display-only FAILED rows beside the real tasks", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "i9-fanout-mixed-"));
+  t.onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  const prevTimekeeper = process.env.TIMEKEEPER_NAME;
+  process.env.TIMEKEEPER_NAME = "Julian";
+  t.onTestFinished(() => {
+    if (prevTimekeeper === undefined) delete process.env.TIMEKEEPER_NAME;
+    else process.env.TIMEKEEPER_NAME = prevTimekeeper;
+  });
+
+  seedCompletedI9OcrRow(dir, "sess-i9", "ocr-run-1", [
+    rec({}),
+    rec({ sourcePage: 5, lastName: null, firstName: null, name: "", ssn: null, dateOfBirth: null }),
+  ]);
+  const captured: CapturedEnqueue[] = [];
+  const summary = await enqueueI9CheckMemberTasks(buildEnqueueArgs(dir, captured));
+  assert.deepEqual(summary, { enqueued: 1, displayFailed: 1 });
+
+  const rows = readRows(dir, "i9-check");
+  const failedRow = rows.find((r) => r.status === "failed")!;
+  assert.equal(failedRow.data?.displayOnly, "true");
+  assert.equal(failedRow.step, "i9-check");
+  assert.match(failedRow.error ?? "", /cannot be checked/);
+});
+
+test("enqueue: THROWS when the completed run's records are missing (never a silent empty operation)", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "i9-fanout-miss-"));
+  t.onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  await assert.rejects(
+    () =>
+      enqueueI9CheckMemberTasks({
+        sessionId: "sess-gone",
+        ocrRunId: "ocr-run-gone",
+        operation: { workflow: "i9-check", runId: "op-run-1", traceId: "ic-143012-aaaa" },
+        trackerDir: dir,
+      }),
+    /no records row found/,
+  );
+});
+
+test("enqueue: a missing TIMEKEEPER_NAME fails the fan-out loudly BEFORE any enqueue", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "i9-fanout-tk-"));
+  t.onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  const prevTimekeeper = process.env.TIMEKEEPER_NAME;
+  delete process.env.TIMEKEEPER_NAME;
+  t.onTestFinished(() => {
+    if (prevTimekeeper !== undefined) process.env.TIMEKEEPER_NAME = prevTimekeeper;
+  });
+
+  seedCompletedI9OcrRow(dir, "sess-i9", "ocr-run-1", [rec({})]);
+  const captured: CapturedEnqueue[] = [];
+  await assert.rejects(
+    () => enqueueI9CheckMemberTasks(buildEnqueueArgs(dir, captured)),
+    /TIMEKEEPER_NAME/,
+  );
+  assert.equal(captured.length, 0, "nothing may be enqueued without the reviewer identity");
 });
 
 // ─── display-only rows are not retryable ─────────────────────
 
-test("a display-only result row offers delete but NOT retry/cancel/bump", () => {
+test("a display-only failure row offers delete but NOT retry/cancel/bump", () => {
   const entry = {
-    workflow: "separations",
+    workflow: "i9-check",
     timestamp: new Date().toISOString(),
     id: "i9-check-sess-r0",
     runId: "member-run-1",
     parentRunId: "op-run-1",
-    status: "done",
+    status: "failed",
     step: "i9-check",
     data: {
       archetype: "operation-member",
       queueRowKind: "person",
       displayOnly: "true",
-      name: "Doe, Jane",
-      ucpathFound: "false",
+      name: "Page 5 — unreadable Section 1",
     },
   };
   const projection = buildWorkflowRunProjection(entry as never, {});
   const kinds = projection.actions.filter((a) => a.enabled).map((a) => a.kind);
-  assert.deepEqual(kinds, ["delete"], "retry on a task-less row would enqueue a REAL separations run");
+  assert.deepEqual(kinds, ["delete"], "retry on a task-less row would enqueue a run that never existed");
 });
 
 // ─── prepare-route wiring ────────────────────────────────────
 
-test("prepare: a completed delegated i9 run fans results back onto the separations coordinator", async () => {
+test("prepare: a completed delegated i9 run enqueues member tasks; the coordinator stays RUNNING for the rollup", async () => {
   const dir = mkdtempSync(join(tmpdir(), "i9-prepare-"));
   _resetSessionLockForTests();
   try {
@@ -270,47 +460,51 @@ test("prepare: a completed delegated i9 run fans results back onto the separatio
     const handler = buildOcrPrepareHandler({
       trackerDir: dir,
       runOrchestrator: async () => {},
-      emitI9CheckResults: (args) => {
+      enqueueI9CheckMemberTasks: async (args) => {
         calls.push(args as unknown as Record<string, unknown>);
-        return { emitted: 2, found: 1, notFound: 1, failed: 0 };
+        return { enqueued: 2, displayFailed: 0 };
       },
     });
     const resp = await handler({
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "i9-packet.pdf",
       formType: "i9",
-      targetWorkflow: "separations",
+      targetWorkflow: "i9-check",
       rosterMode: "existing",
       sessionId: "sess-i9-prep",
     });
     assert.equal(resp.status, 202);
     const body = resp.body as { ok: true; runId: string; parentRunId?: string };
-    assert.ok(body.parentRunId, "the i9 check gets a separations operation coordinator");
+    assert.ok(body.parentRunId, "the i9 check gets an i9-check operation coordinator");
 
     await new Promise((r) => setTimeout(r, 0));
 
-    assert.equal(calls.length, 1, "the fan-back fires once the approve-less run completes");
+    assert.equal(calls.length, 1, "the fan-out fires once the approve-less run completes");
     assert.equal(calls[0].sessionId, "sess-i9-prep");
     assert.equal(calls[0].ocrRunId, body.runId);
-    assert.deepEqual((calls[0].operation as Record<string, string>).workflow, "separations");
+    assert.deepEqual((calls[0].operation as Record<string, string>).workflow, "i9-check");
 
-    const coordinator = readRows(dir, "separations").at(-1)!;
-    assert.equal(coordinator.status, "done", "the coordinator settles when the check completes");
+    const coordinator = readRows(dir, "i9-check").at(-1)!;
+    assert.equal(
+      coordinator.status,
+      "running",
+      "the coordinator must NOT settle at enqueue — the members-terminal rollup completes it",
+    );
     assert.equal(coordinator.data?.archetype, "operation");
-    assert.equal(coordinator.data?.ocrStatus, "complete");
+    assert.equal(coordinator.data?.ocrStatus, "members-queued");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("prepare: a FAILED fan-back drives the coordinator failed — never a silently empty operation", async () => {
+test("prepare: a FAILED fan-out drives the coordinator failed — never a silently empty operation", async () => {
   const dir = mkdtempSync(join(tmpdir(), "i9-prepare-fail-"));
   _resetSessionLockForTests();
   try {
     const handler = buildOcrPrepareHandler({
       trackerDir: dir,
       runOrchestrator: async () => {},
-      emitI9CheckResults: () => {
+      enqueueI9CheckMemberTasks: async () => {
         throw new Error("records missing");
       },
     });
@@ -318,14 +512,14 @@ test("prepare: a FAILED fan-back drives the coordinator failed — never a silen
       pdfPath: "/tmp/fake.pdf",
       pdfOriginalName: "i9-packet.pdf",
       formType: "i9",
-      targetWorkflow: "separations",
+      targetWorkflow: "i9-check",
       rosterMode: "existing",
       sessionId: "sess-i9-fail",
     });
     assert.equal(resp.status, 202);
     await new Promise((r) => setTimeout(r, 0));
 
-    const coordinator = readRows(dir, "separations").at(-1)!;
+    const coordinator = readRows(dir, "i9-check").at(-1)!;
     assert.equal(coordinator.status, "failed");
     assert.equal(coordinator.data?.ocrStatus, "failed");
   } finally {
@@ -333,144 +527,16 @@ test("prepare: a FAILED fan-back drives the coordinator failed — never a silen
   }
 });
 
-// ─── Member rows carry their OWN logs (regression: empty log panel) ──────────
+// ─── input round-trip sanity ─────────────────────────────────
 
-test("emitI9CheckResultRows: each member row gets log lines under its OWN (workflow,itemId,runId)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "i9-fanback-logs-"));
-  try {
-    seedCompletedI9OcrRow(dir, "sess-i9", "ocr-run-1", [
-      rec({
-        ucpathFound: true,
-        matchedEmplId: "10414728",
-        matchedName: "Trent Werker",
-        personMatchStatus: "completed",
-        personMatchTraceId: "pm-143012-bbbb",
-      }),
-      rec({ lastName: "Roe", firstName: "Rick", name: "Roe, Rick", ucpathFound: false, personMatchStatus: "completed" }),
-    ]);
-
-    emitI9CheckResultRows({
-      sessionId: "sess-i9",
-      ocrRunId: "ocr-run-1",
-      operation: { workflow: "separations", runId: "op-run-1", traceId: "se-143012-aaaa" },
-      trackerDir: dir,
-    });
-
-    const logPath = join(dir, "logs", `separations-${todayLocal()}.jsonl`);
-    assert.ok(existsSync(logPath), "the fan-out must write a separations log file");
-    const logs = readFileSync(logPath, "utf8")
-      .trim()
-      .split("\n")
-      .map((l) => JSON.parse(l) as { itemId: string; runId: string; level: string; message: string });
-
-    const rows = readRows(dir, "separations");
-    for (const row of rows) {
-      // The log panel reads by (workflow, tracker_date, item_id, run_id) — the
-      // member's OWN runId. This is the key that matched nothing before.
-      const mine = logs.filter((l) => l.itemId === row.id && l.runId === row.runId);
-      assert.ok(mine.length > 0, `member row ${row.data?.name} must have logs under its own runId`);
-      // The criteria the verdict rests on must be stated, not just the answer.
-      assert.ok(
-        mine.some((l) => l.message.includes("person search criteria")),
-        "every member log states the criteria the verdict rests on",
-      );
-    }
-
-    const found = rows.find((r) => r.data?.name === "Doe, Jane")!;
-    const foundLogs = logs.filter((l) => l.runId === found.runId);
-    assert.ok(foundLogs.some((l) => l.level === "success" && l.message.includes("10414728")));
-    assert.equal(found.data?.personMatchTraceId, "pm-143012-bbbb", "row links back to the person-match child");
-
-    const notFound = rows.find((r) => r.data?.name === "Roe, Rick")!;
-    const nfLogs = logs.filter((l) => l.runId === notFound.runId);
-    assert.ok(
-      nfLogs.some((l) => l.level === "warn" && /NOT found in UCPath/.test(l.message)),
-      "a not-found verdict is a WARNING, and says to confirm the extracted fields against the scan",
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("buildI9CheckMembers: the SSN is NEVER written to a log line", () => {
-  const members = buildI9CheckMembers([
-    rec({ ssn: "123-45-6789", dateOfBirth: "04/01/1998", ucpathFound: false, personMatchStatus: "completed" }),
-  ]);
-  const blob = members[0].logs.map((l) => l.message).join(" | ");
-  assert.ok(!blob.includes("123-45-6789") && !blob.includes("123456789"), "no SSN in logs");
-  assert.ok(blob.includes("SSN supplied"), "but the log does say an SSN was searched with");
-  assert.ok(blob.includes("04/01/1998"), "and states the DOB that was searched");
-});
-
-// ─── A "not found" is only as good as the data behind it ────────────────────
-
-test("buildI9CheckMembers: a NOT-FOUND on a DISPUTED field is a loud failure, not a confident 'Not in UCPath'", () => {
-  // The real 2026-07-13 failure mode: UCPath truthfully returns "no results"
-  // for a misread SSN, and we reported that as "this person is not in UCPath".
-  const members = buildI9CheckMembers([
-    rec({
-      ucpathFound: false,
-      personMatchStatus: "completed",
-      corroboration: "disputed",
-      disputedFields: ["ssn"],
-      sourcePage: 55,
-    }),
-  ]);
-  assert.equal(members[0].status, "failed", "an untrustworthy no-match must not read as an answer");
-  assert.equal(members[0].ucpathFound, undefined, "and must carry NO found/not-found chip");
-  assert.match(members[0].error ?? "", /could not be trusted/);
-  assert.match(members[0].error ?? "", /page 55/);
-});
-
-test("buildI9CheckMembers: a NOT-FOUND on an ILLEGIBLE field is also a failure", () => {
-  const members = buildI9CheckMembers([
-    rec({ ucpathFound: false, personMatchStatus: "completed", illegible: ["ssn", "dateOfBirth"] }),
-  ]);
-  assert.equal(members[0].status, "failed");
-  assert.equal(members[0].ucpathFound, undefined);
-  assert.match(members[0].error ?? "", /not legible on the scan/);
-});
-
-test("buildI9CheckMembers: a FOUND is self-validating — a dispute does NOT downgrade it", () => {
-  // UCPath matched a real person; that is proof regardless of a field dispute.
-  const members = buildI9CheckMembers([
-    rec({
-      ucpathFound: true,
-      matchedEmplId: "10414728",
-      personMatchStatus: "completed",
-      corroboration: "disputed",
-      disputedFields: ["ssn"],
-    }),
-  ]);
-  assert.equal(members[0].status, "done");
-  assert.equal(members[0].ucpathFound, "true");
-  assert.equal(members[0].emplId, "10414728");
-});
-
-test("buildI9CheckMembers: a CONFIRMED not-found stays a confident, actionable 'Not in UCPath'", () => {
-  const members = buildI9CheckMembers([
-    rec({ ucpathFound: false, personMatchStatus: "completed", corroboration: "confirmed" }),
-  ]);
-  assert.equal(members[0].status, "done");
-  assert.equal(members[0].ucpathFound, "false");
-  const blob = members[0].logs.map((l) => l.message).join(" | ");
-  assert.match(blob, /the two readings agree/);
-});
-
-test("buildI9CheckMembers: an orphan Section 2 surfaces the MISSING Section 1 page", () => {
-  const members = buildI9CheckMembers([
-    rec({
-      formKind: "unknown",
-      lastName: null,
-      firstName: null,
-      name: "",
-      sourcePage: 24,
-      section2Name: "Singh, Aryaman P",
-      orphanSection2: true,
-    }),
-  ]);
-  assert.equal(members.length, 1, "an un-checkable person must not be silently dropped");
-  assert.equal(members[0].name, "Singh, Aryaman P");
-  assert.equal(members[0].status, "failed");
-  assert.match(members[0].error ?? "", /Section 1 page is NOT/);
+test("plan inputs parse through the i9-check workflow schema — and NEVER through separations", async () => {
+  const { i9CheckWorkflow } = await import("../../../../src/workflows/i9-check/workflow.js");
+  const { separationsWorkflow } = await import("../../../../src/workflows/separations/workflow.js");
+  const plan = buildI9CheckMemberPlan([rec({})], CTX);
+  const parsed = i9CheckWorkflow.config.schema.parse(plan.tasks[0].input) as I9CheckMemberInput;
+  assert.equal(parsed.mode, "i9-check");
+  assert.equal(parsed.person.name, "Doe, Jane");
+  // Post-split safety: the separations (termination) schema must REJECT an
+  // i9-check payload outright — a replay can never become a termination.
+  assert.throws(() => separationsWorkflow.config.schema.parse(plan.tasks[0].input));
 });

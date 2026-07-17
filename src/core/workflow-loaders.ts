@@ -16,6 +16,13 @@ export const WORKFLOW_LOADERS: Record<string, () => Promise<AnyRegisteredWorkflo
     const mod = await import("../workflows/separations/index.js");
     return mod.separationsWorkflow as unknown as AnyRegisteredWorkflow;
   },
+  // I-9 Check — the search-only sibling of separations (category
+  // "Separations"): one UCPath browser, fanned out per person by the
+  // "Run I-9 Check" upload's OCR completion.
+  "i9-check": async () => {
+    const mod = await import("../workflows/i9-check/index.js");
+    return mod.i9CheckWorkflow as unknown as AnyRegisteredWorkflow;
+  },
   "work-study": async () => {
     const mod = await import("../workflows/work-study/index.js");
     return mod.workStudyWorkflow as unknown as AnyRegisteredWorkflow;

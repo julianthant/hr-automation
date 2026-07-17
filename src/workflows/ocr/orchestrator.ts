@@ -634,7 +634,24 @@ export async function runOcrOrchestrator(
       })(),
     );
     const knownPageCount = preRenderedPages.length;
-    log.success(`[ocr] rendered ${knownPageCount} page(s) — Preview tab now shows blank inputs ready to fill in`);
+    // NEVER report a total render failure as a success. Zero ready pages means
+    // the PDF could not be read AT ALL — the pipeline's own render throws
+    // "PDF page render failed" moments later — but this line used to say
+    // "rendered 0 page(s) — Preview tab now shows blank inputs ready to fill
+    // in" at SUCCESS level, so the operator got a green "ready" line
+    // immediately before an unexplained failure. The pipeline still owns the
+    // hard stop (it re-renders authoritatively); this log just has to stop
+    // lying about what happened.
+    if (knownPageCount === 0) {
+      log.warn(
+        `[ocr] rendered 0 page(s) from ${basename(input.pdfPath)} — the PDF could not be read `
+        + `(corrupt, empty, or not a PDF). The Preview tab will be empty and OCR is expected to fail next.`,
+      );
+    } else {
+      log.success(
+        `[ocr] rendered ${knownPageCount} page(s) — Preview tab now shows blank inputs ready to fill in`,
+      );
+    }
 
     // Snapshot helper: emits an awaiting-approval-shape entry with the
     // current `records` array. Called at every phase transition so the
@@ -841,6 +858,9 @@ export async function runOcrOrchestrator(
         runOcrSecondOpinionPage({
           pageImagesDir,
           pageFilename: `page-${String(args.pageNum).padStart(3, "0")}.png`,
+          // Carry the REAL page number: a one-page request would otherwise
+          // report itself as "page 1" in every outcome and failure log.
+          pageNum: args.pageNum,
           recordSchema: spec.ocrRecordSchema,
           prompt: spec.prompt,
           excludeModels: args.excludeModels,
@@ -1538,7 +1558,10 @@ export function operationTraceCode(operationWorkflow: string | undefined): strin
     case "oath-upload": return "ou";
     case "emergency-contact": return "ec";
     case "onbase": return "ob";
-    case "separations": return "se";
+    // The "Run I-9 Check" coordinator (targetWorkflow "i9-check" since the
+    // 2026-07-17 split; it was "separations" → "se" before). "ic" = the
+    // i9-check workflow's own code, shared with the i9 form spec's traceCode.
+    case "i9-check": return "ic";
     default: return undefined;
   }
 }
