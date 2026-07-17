@@ -357,7 +357,7 @@ test("Hono /api/cancel-running requires workflow, id, and runId", async () => {
   assert.equal(res.status, 400);
   assert.deepEqual(await res.json(), {
     ok: false,
-    error: "workflow, id, runId are required",
+    error: "runId: required",
   });
 });
 
@@ -389,7 +389,7 @@ test("Hono /api/queue/bump moves a queued SQLite task ahead and validates input"
   }
 });
 
-test("Hono bulk routes ignore unsupported source and scope values", async () => {
+test("Hono bulk routes 400 unknown source/scope values and default them only when absent", async () => {
   const taskStore = createTaskStore(openControlDb({ trackerDir: dir }));
   try {
     const [task] = taskStore.enqueueTasks({
@@ -409,10 +409,24 @@ test("Hono bulk routes ignore unsupported source and scope values", async () => 
       input: { docId: "visible" },
     }, dateLocal(), dir);
 
-    const retry = await app().request("/api/retry-bulk", jsonRequest({
+    // A present-but-unknown enum is a malformed request — fail loud, don't
+    // silently rewrite it to the default (retired 2026-07-17 with the strict
+    // Zod route schemas).
+    const rejected = await app().request("/api/retry-bulk", jsonRequest({
       workflow: "separations",
       source: "daemon",
       scope: "daemon",
+      items: [{ workflowId: "separations", id: "visible", runId: "visible-run" }],
+    }));
+    assert.equal(rejected.status, 400);
+    const rejectedBody = await rejected.json() as { ok: boolean; error: string };
+    assert.equal(rejectedBody.ok, false);
+    assert.match(rejectedBody.error, /source/);
+    assert.equal(taskStore.listAttemptsForTask(task.taskId).length, 1);
+
+    // Absent source/scope still default (queue-panel / group).
+    const retry = await app().request("/api/retry-bulk", jsonRequest({
+      workflow: "separations",
       items: [{ workflowId: "separations", id: "visible", runId: "visible-run" }],
     }));
 
@@ -432,8 +446,6 @@ test("Hono bulk routes ignore unsupported source and scope values", async () => 
     const deleted = await app().request("/api/delete-bulk", jsonRequest({
       workflow: "separations",
       date: deletionDate,
-      source: "daemon",
-      scope: "daemon",
       items: [{ workflowId: "separations", id: "visible", runId: "visible-run" }],
     }));
 
