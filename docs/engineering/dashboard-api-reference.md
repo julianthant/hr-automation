@@ -2,6 +2,21 @@
 
 Full reference companion to `src/dashboard/CLAUDE.md`. Contains the primary API surface (not exhaustive), data types, JSONL format, frontend processing rules, workflow configuration, component hooks, icon/toast/styling conventions, and the frontend file tree.
 
+## Request contract (2026-07-17)
+
+Every JSON mutation body parses through a route-specific Zod schema
+(`src/tracker/dashboard/hono/request-schemas.ts`). A malformed request gets a
+`400` whose `error` names each offending field (`"workflow: required; date:
+must be YYYY-MM-DD"`); requests are never coerced — an object where a string
+belongs is rejected instead of stringifying to `"[object Object]"`, missing
+required fields never blank-default, and a present-but-unknown enum value is a
+400 (defaults apply only when the field is absent).
+
+SSE (`/events/hub`) snapshot topics (`entries`, `sessions`) send a full payload
+on subscribe and then ONLY when the payload changes; a `:ka` comment ping fires
+every 30s, and a client that stops reading is disconnected once 512 messages
+buffer (EventSource auto-reconnects into a fresh first-tick payload).
+
 ## Endpoints
 
 | Endpoint | Method | Returns | Frontend Consumer |
