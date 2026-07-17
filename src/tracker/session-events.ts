@@ -394,7 +394,7 @@ const STALE_START_THRESHOLD_MS = 60_000;
 /** Maps kebab-case workflow name → human-readable instance label prefix. */
 export const INSTANCE_LABELS: Record<string, string> = {
   onboarding: "Onboarding",
-  separations: "Separation",
+  separations: "Kuali",
   "i9-check": "I-9 Check",
   "person-lookup": "Person Lookup",
   "kronos-reports": "Kronos",
@@ -412,7 +412,20 @@ export const INSTANCE_LABELS: Record<string, string> = {
 };
 
 /**
- * Reverse of `INSTANCE_LABELS`. Given an instance name like "Separation 1",
+ * RENAMED instance labels: old label → workflow name. Session JSONL on disk
+ * stores the instance name a daemon was BORN with, so after a label rename the
+ * reverse lookup must still resolve historical (and same-day pre-restart)
+ * instances or their session cards render unlabeled. Add an entry here whenever
+ * an `INSTANCE_LABELS` value changes; never reuse an old label for a different
+ * workflow.
+ */
+const LEGACY_INSTANCE_LABELS: Record<string, string> = {
+  // 2026-07-17: separations relabeled "Separation" → "Kuali" (i9-check split).
+  Separation: "separations",
+};
+
+/**
+ * Reverse of `INSTANCE_LABELS`. Given an instance name like "Kuali 1",
  * strip the trailing number and resolve back to the kebab-case workflow
  * name ("separations"). Returns null when the label is unrecognised.
  */
@@ -424,7 +437,8 @@ export function workflowNameFromInstance(instance: string): string | null {
   for (const [wf, label] of Object.entries(INSTANCE_LABELS)) {
     if (label === stripped) return wf;
   }
-  return null;
+  const legacy = LEGACY_INSTANCE_LABELS[stripped];
+  return legacy ?? null;
 }
 
 /**
