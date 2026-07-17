@@ -291,7 +291,7 @@ function useOcrReviewPrepApi(
   const isDelegation = Boolean(prepActive && entry && entry.parentRunId);
   const data = useMemo(
     () => (cfg && entry ? cfg.parseRow(entry.data) ?? null : null),
-    [entry?.data, cfg, entry],
+    [cfg, entry],
   );
   const baseRecords = useMemo(() => data?.records ?? [], [data]);
   const storageKey = cfg ? cfg.editsKey({ sessionId, runId }) : "";

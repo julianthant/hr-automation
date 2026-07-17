@@ -731,9 +731,9 @@ export async function runOcrOrchestrator(
     (ocrResult.data as Array<Record<string, unknown>>).forEach((rec, i) => {
       const name = readOcrRecordName(rec) || "(empty)";
       const eid = readOcrRecordEidForLog(rec) || "(none)";
-      const date = String(rec.dateSigned ?? "").trim() || "(none)";
+      const date = (typeof rec.dateSigned === "string" ? rec.dateSigned : "").trim() || "(none)";
       const signed = rec.employeeSigned === true ? "✓" : rec.employeeSigned === false ? "✗" : "?";
-      const docType = String(rec.documentType ?? "expected");
+      const docType = typeof rec.documentType === "string" ? rec.documentType : "expected";
       const missing = Array.isArray(rec.originallyMissing) && rec.originallyMissing.length > 0
         ? ` missing=[${(rec.originallyMissing as string[]).join(",")}]`
         : "";
@@ -1001,7 +1001,7 @@ export async function runOcrOrchestrator(
       const concurrencyEnv = Number.parseInt(process.env.OCR_DISAMBIG_CONCURRENCY ?? "", 10);
       const concurrency = Number.isFinite(concurrencyEnv) && concurrencyEnv > 0 ? concurrencyEnv : 4;
 
-      const results: Array<{ eid: string | null; confidence: number }> = new Array(disambigTargets.length);
+      const results: Array<{ eid: string | null; confidence: number }> = new Array<{ eid: string | null; confidence: number }>(disambigTargets.length);
       let nextIdx = 0;
       const workers = Array.from({ length: Math.min(concurrency, disambigTargets.length) }, async () => {
         while (true) {
@@ -1834,6 +1834,7 @@ function readPreviousRecords(
     // source instead of the operator losing their edits unknowingly.
     throw new Error(
       `[ocr] carry-forward: previous run (sessionId=${sessionId} previousRunId=${previousRunId}) has unparseable data.records — refusing to silently drop prior human corrections: ${errorMessage(err)}`,
+      { cause: err },
     );
   }
   if (!Array.isArray(parsed)) {

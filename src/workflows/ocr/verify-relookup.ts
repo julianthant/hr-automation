@@ -91,9 +91,9 @@ export async function runVerifyRelookup(
     throw new Error(`verify-relookup only applies to verify rows (got formType "${String(formType)}")`);
   }
 
-  const records: VerifyPreviewRecord[] = JSON.parse(
+  const records = JSON.parse(
     (latest.data?.records as unknown as string) ?? "[]",
-  );
+  ) as VerifyPreviewRecord[];
   const recs = records as unknown[];
   const idx = input.recordIndex;
   const rec = records[idx];

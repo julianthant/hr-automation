@@ -112,9 +112,9 @@ export interface ControlTaskStore {
   getAttempt(attemptId: string): AttemptRow | null
   getTaskByRunId(runId: string): TaskRow | null
   findTaskByIdentity(request: { workflow: string; itemId: string; runId?: string }): TaskRow | null
-  findInputForRunId(runId: string): unknown | null
+  findInputForRunId(runId: string): unknown
   /** Contract 2 (Uniform Retry): pristine first-enqueue input; `null` for legacy rows. */
-  findOriginalInputForRunId(runId: string): unknown | null
+  findOriginalInputForRunId(runId: string): unknown
   /** Non-terminal root (non-delegated) tasks for one item — backs enqueue supersede. */
   listActiveRootTasksForItem(request: { workflow: string; itemId: string }): ActiveTaskRef[]
   listTasksForWorkflow(workflow: string): TaskRow[]

@@ -277,7 +277,7 @@ export const emergencyContactWorkflow = defineWorkflow({
         const detail = err instanceof Error ? err.message : String(err);
         throw new Error(
           `Emergency contact save for ${effectiveRecord.employee.name} (EID ${effectiveRecord.employee.employeeId}) failed — ${detail}`,
-          { cause: err instanceof Error ? err : undefined },
+          { cause: err },
         );
       }
       await ctx.screenshot({ kind: "form", label: "emergency-contact-saved" });

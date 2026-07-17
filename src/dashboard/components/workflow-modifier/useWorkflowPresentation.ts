@@ -91,7 +91,7 @@ export function useWorkflowPresentation(): {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(ov),
         });
-        const b: PreviewResult | { ok?: false } = await r.json();
+        const b = await r.json() as PreviewResult | { ok?: false };
         setPreviewResult(b.ok ? (b) : null);
       } catch {
         setPreviewResult(null);
@@ -110,7 +110,7 @@ export function useWorkflowPresentation(): {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(ov),
         });
-        const b: { ok?: boolean } = await r.json();
+        const b = await r.json() as { ok?: boolean };
         if (b.ok) {
           load(selected);
           refreshList();

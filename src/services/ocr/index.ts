@@ -3,6 +3,7 @@ import { GeminiProvider } from "./providers/gemini.js";
 import { readGeminiKeys } from "./env-keys.js";
 import { classifyOcrError } from "./error-classification.js";
 import { numEnv } from "../../utils/env.js";
+import { errorMessage } from "../../utils/errors.js";
 import {
   OcrAllKeysExhaustedError,
   OcrProviderError,
@@ -159,7 +160,7 @@ export async function ocrDocument<T>(req: OcrRequest<T>): Promise<OcrResult<T>> 
   }
 
   rotation.flush();
-  if (lastError) throw lastError;
+  if (lastError) throw lastError instanceof Error ? lastError : new Error(errorMessage(lastError));
   throw new OcrAllKeysExhaustedError(provider.id, keys.length);
 }
 

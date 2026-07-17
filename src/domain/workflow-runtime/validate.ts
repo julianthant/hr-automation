@@ -52,13 +52,13 @@ export function validateWorkflowActionPolicy(
 ): string[] {
   const errors: string[] = [];
   if (!isValidWorkflowActionKind(action.kind)) {
-    errors.push(`${label}: invalid kind "${action.kind}"`);
+    errors.push(`${label}: invalid kind "${String(action.kind)}"`);
   }
   if (!isValidWorkflowActionScope(action.scope)) {
-    errors.push(`${label}: invalid scope "${action.scope}"`);
+    errors.push(`${label}: invalid scope "${String(action.scope)}"`);
   }
   if (!isValidWorkflowActionSource(action.source)) {
-    errors.push(`${label}: invalid source "${action.source}"`);
+    errors.push(`${label}: invalid source "${String(action.source)}"`);
   }
   if (typeof action.enabled !== "boolean") {
     errors.push(`${label}: enabled must be boolean`);

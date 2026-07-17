@@ -68,7 +68,7 @@ export function classifyError(err: unknown, opts?: ClassifyErrorOpts): string {
     const match = raw.match(pattern);
     if (match) {
       // Support $1, $2 backreferences in replacement
-      const base = replacement.replace(/\$(\d)/g, (_, i) => match[parseInt(i)] || "");
+      const base = replacement.replace(/\$(\d)/g, (_, i: string) => match[parseInt(i)] || "");
       return appendSystemId(base, opts?.systemId)
     }
   }
@@ -102,7 +102,7 @@ export interface ClassifiedError {
  * 2000-char error strings everywhere.
  */
 export function classifyPlaywrightError(err: unknown): ClassifiedError {
-  const msg = err instanceof Error ? err.message : String(err ?? "");
+  const msg = err == null ? "" : errorMessage(err);
   const lower = msg.toLowerCase();
 
   if (lower.includes("processsingleton")) {

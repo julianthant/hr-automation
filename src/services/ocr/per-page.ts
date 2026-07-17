@@ -118,14 +118,19 @@ function buildCandidates(pool: PoolKey[]): Candidate[] {
   );
 }
 
+const sleepAbortError = (signal?: AbortSignal): Error => {
+  const reason: unknown = signal?.reason;
+  return reason instanceof Error ? reason : new DOMException("OCR pacing aborted", "AbortError");
+};
+
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
   if (signal?.aborted) {
-    reject(signal?.reason ?? new DOMException("OCR pacing aborted", "AbortError"));
+    reject(sleepAbortError(signal));
     return;
   }
   const onAbort = (): void => {
     clearTimeout(timer);
-    reject(signal?.reason ?? new DOMException("OCR pacing aborted", "AbortError"));
+    reject(sleepAbortError(signal));
   };
   const timer = setTimeout(() => {
     signal?.removeEventListener("abort", onAbort);

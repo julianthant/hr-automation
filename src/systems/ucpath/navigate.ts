@@ -417,6 +417,7 @@ export async function searchPerson(
     throw new Error(
       `UCPath person search: results grid rendered for "${firstName} ${lastName}" but the match could not be read `
       + `(${errorMessage(err)}). The person IS in UCPath — re-run to get the Empl ID.`,
+      { cause: err },
     );
   }
   const validRows = rows.filter((r) => /^\d{5,}$/.test(r.emplId));

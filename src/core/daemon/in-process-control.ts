@@ -1,6 +1,7 @@
 import { hostname } from 'node:os'
 import type { RegisteredWorkflow } from '../kernel/types.js'
 import { Session } from '../kernel/session.js'
+import { errorMessage } from '../../utils/errors.js'
 import { log } from '../../utils/log.js'
 import { openControlDb } from '../control-db.js'
 import { createTaskStore } from '../task-store/index.js'
@@ -107,7 +108,7 @@ export function markInProcessControlTerminal(
       control.taskStore.markTaskFailed({
         taskId: control.taskId,
         attemptId: control.attemptId,
-        error: error instanceof Error ? error.message : String(error ?? 'in-process run failed'),
+        error: error == null ? 'in-process run failed' : errorMessage(error),
       })
     }
   }, undefined)

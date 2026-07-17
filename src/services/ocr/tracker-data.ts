@@ -5,7 +5,7 @@ export function flattenForData(d: Record<string, unknown>): Record<string, strin
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
       out[k] = String(v);
     } else {
-      try { out[k] = JSON.stringify(v); } catch { out[k] = String(v); }
+      try { out[k] = JSON.stringify(v); } catch { out[k] = "[unserializable value]"; }
     }
   }
   return out;

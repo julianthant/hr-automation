@@ -86,12 +86,15 @@ function classifyGemini(status: number, bodyText: string): RateLimitInfo {
         error?: { details?: Array<Record<string, unknown>>; message?: string };
       };
       const details = parsed.error?.details ?? [];
+      // Google error-detail fields are strings when present; anything else
+      // reads as absent rather than stringifying an object.
+      const str = (v: unknown): string => (typeof v === "string" ? v : "");
       for (const d of details) {
-        const type = String(d["@type"] ?? "");
-        if (type.endsWith("RetryInfo")) retryAfterMs = parseGoDuration(String(d.retryDelay ?? ""));
+        const type = str(d["@type"]);
+        if (type.endsWith("RetryInfo")) retryAfterMs = parseGoDuration(str(d.retryDelay));
         const meta = (d.metadata ?? {}) as Record<string, unknown>;
-        const metric = String(meta.quota_metric ?? "");
-        const reason = String(d.reason ?? "");
+        const metric = str(meta.quota_metric);
+        const reason = str(d.reason);
         if (/daily/i.test(metric) || reason === "QUOTA_EXHAUSTED") daily = true;
       }
       if (parsed.error?.message && /reset after|per day|daily/i.test(parsed.error.message)) {

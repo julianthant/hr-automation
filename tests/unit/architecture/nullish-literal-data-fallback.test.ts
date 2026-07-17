@@ -79,10 +79,6 @@ const ALLOWLIST: Record<string, { count: number; reason: string }> = {
     count: 1,
     reason: "`row.n ?? 0` — a SQL aggregate count from a LEFT JOIN with no matching rows; 0 is the semantically correct count, not a fabricated value.",
   },
-  "src/tracker/dashboard/hono/routes/ops.ts": {
-    count: 1,
-    reason: "`item.id ?? \"\"` stringifies an id for a response payload; an absent id becomes an empty string that fails any subsequent id-format check.",
-  },
   "src/tracker/dashboard/oath-upload/http.ts": {
     count: 4,
     reason: "`input.hash ?? \"\"` / `input.pdfHash ?? \"\"` are immediately regex-validated as a 64-char hex hash and rejected (400) when empty; `input.mode ?? \"upload-only\"` is a declared API default; `opts.trackerDir ?? \".tracker\"` is the standard app-level default.",
@@ -172,8 +168,8 @@ const ALLOWLIST: Record<string, { count: number; reason: string }> = {
     reason: "`data.dob ?? \"<none>\"` appears only inside a log message template, not decision logic.",
   },
   "src/workflows/person-lookup/workflow.ts": {
-    count: 6,
-    reason: "`ctx.data.resolvedName ?? ctx.data.searchName ?? \"\"` / `ctx.data.emplId ?? \"\"` / `record.department ?? \"\"`: every one is immediately validated (regex EID format check, `if (!name)` early-return/skip) or is a display field (department) — none is trusted as a real value without a check.",
+    count: 1,
+    reason: "`record.department ?? \"\"` is a display field. The former `ctx.data.* ?? \"\"` reads route through the typed `dataString` helper (2026-07-17 lint burn-down), which already treats non-strings as absent.",
   },
   "src/workflows/separations/steps/transaction-check.ts": {
     count: 1,

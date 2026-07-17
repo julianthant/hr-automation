@@ -218,9 +218,10 @@ async function waitForDuoTurn(
 }
 
 function duoQueueAbortReason(signal: AbortSignal): Error {
-  const reason = signal.reason;
+  const reason: unknown = signal.reason;
   if (reason instanceof Error) return reason;
-  return new Error(reason ? String(reason) : "Duo queue wait aborted");
+  if (typeof reason === "string" && reason) return new Error(reason);
+  return new Error("Duo queue wait aborted");
 }
 
 function throwIfDuoQueueAborted(signal?: AbortSignal): void {

@@ -218,6 +218,15 @@ function cellToString(value: unknown): string {
     if (typeof v.result === "string" || typeof v.result === "number") {
       return String(v.result);
     }
+    // An unrecognized cell-object shape must never collapse to
+    // "[object Object]" — serialize it legibly so the bad column is
+    // diagnosable at the source.
+    try {
+      return JSON.stringify(value) ?? "";
+    } catch {
+      return "[unserializable cell]";
+    }
   }
-  return String(value);
+  // exceljs never emits symbol/function cells; nothing readable remains.
+  return "";
 }

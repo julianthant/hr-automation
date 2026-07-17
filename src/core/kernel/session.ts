@@ -2379,9 +2379,10 @@ export async function defaultLaunchOne(
 const AUTH_MAX_ATTEMPTS = 3;
 
 function abortReason(signal: AbortSignal): Error {
-  const reason = signal.reason
+  const reason: unknown = signal.reason
   if (reason instanceof Error) return reason
-  return new Error(reason ? String(reason) : 'operation aborted')
+  if (typeof reason === 'string' && reason) return new Error(reason)
+  return new Error('operation aborted')
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -2410,7 +2411,9 @@ function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
       },
       (err) => {
         cleanup()
-        reject(err)
+        // Pass-through: the inner rejection must propagate unwrapped
+        // (downstream instanceof checks, e.g. CancelledError).
+        reject(err as Error)
       },
     )
   })

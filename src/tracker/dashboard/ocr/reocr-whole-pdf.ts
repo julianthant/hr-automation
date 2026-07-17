@@ -75,7 +75,7 @@ export function buildOcrReocrWholePdfHandler(opts: ReocrWholePdfHandlerOpts = {}
       let capturedRosterPath: string | undefined;
       for (const line of lines) {
         try {
-          const e: TrackerEntry = JSON.parse(line);
+          const e = JSON.parse(line) as TrackerEntry;
           if (e.id === input.sessionId && e.runId === input.runId) {
             row = e;
             const p = e.data?.pdfPath;

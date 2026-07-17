@@ -1428,6 +1428,7 @@ export async function expandTimekeeperSection(page: Page): Promise<void> {
   } catch (err) {
     throw new Error(
       `[New Kronos] Timekeeper section did not load on People page: ${String(err)}`,
+      { cause: err },
     );
   }
 }

@@ -425,8 +425,8 @@ export const separationsWorkflow = defineWorkflow({
       ctx.skipStep("kuali-extraction");
       log.step(
         `[Step: kuali-extraction] SKIPPED — using manual input from edit-data ` +
-        `(name='${ctx.data.name}' eid='${ctx.data.eid}' ` +
-        `lastDayWorked='${ctx.data.lastDayWorked}' separationDate='${ctx.data.separationDate}'` +
+        `(name='${String(ctx.data.name)}' eid='${String(ctx.data.eid)}' ` +
+        `lastDayWorked='${String(ctx.data.lastDayWorked)}' separationDate='${String(ctx.data.separationDate)}'` +
         (txnNumberPrefilled ? `; txn # prefilled — rawTerminationType not required)` : `)`),
       );
       kualiData = {
@@ -822,7 +822,7 @@ export const separationsWorkflow = defineWorkflow({
       log.step(
         lastDayWorkedPrefilled
           ? `[Step: kronos-search] SKIPPED — using manual input from edit-data ` +
-            `(lastDayWorked='${ctx.data.lastDayWorked}' — Kronos verification not needed)`
+            `(lastDayWorked='${String(ctx.data.lastDayWorked)}' — Kronos verification not needed)`
           : presetSkippedKronos
             ? `[Step: kronos-search] SKIPPED — run mode 'Transactions only' ` +
               `(operator asserts Kuali dates are correct — using kualiData.lastDayWorked='${kualiData.lastDayWorked}')`

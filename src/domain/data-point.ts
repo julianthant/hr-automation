@@ -98,9 +98,9 @@ export function coerceDataValue(value: unknown): string {
     return value.length ? value.map((v) => coerceDataValue(v)).join(", ") : "<none>";
   }
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? "[unserializable value]";
   } catch {
-    return String(value);
+    return "[unserializable value]";
   }
 }
 

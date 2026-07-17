@@ -112,7 +112,7 @@ export function buildSelectorWarningsHandler(
         if (!line) continue;
         let entry: { workflow?: string; level?: string; message?: string; ts?: string };
         try {
-          entry = JSON.parse(line);
+          entry = JSON.parse(line) as { workflow?: string; level?: string; message?: string; ts?: string };
         } catch {
           continue;
         }

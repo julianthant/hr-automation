@@ -8,6 +8,7 @@ import {
   type StampedData,
   type TrackerEntry,
 } from "../../tracker/jsonl.js";
+import { serializeValue } from "../../tracker/jsonl-core.js";
 import { readVisibleEntries, readVisibleEntriesForDate } from "../../tracker/deletions/visible.js";
 import { resolveRowArchetype } from "../../domain/row-archetype.js";
 import {
@@ -113,8 +114,7 @@ export function buildSaveDataHandler(dir: string) {
     // empty string means the operator intentionally cleared the value.
     const merged: Record<string, string> = { ...(latest.data ?? {}) };
     for (const [k, v] of Object.entries(req.data)) {
-      const next = typeof v === "string" ? v : v == null ? "" : String(v);
-      merged[k] = next;
+      merged[k] = serializeValue(v, k);
     }
     // Inherit archetype from the prior row — save-data is a no-status-change
     // overlay so the row type must not change.

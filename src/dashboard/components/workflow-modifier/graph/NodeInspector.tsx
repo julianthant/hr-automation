@@ -99,7 +99,7 @@ const INSPECTOR_TITLES: Record<string, string> = {
 export function NodeInspector({
   node,
   data,
-  workflowName,
+  workflowName: _workflowName,
   draft,
   onChange,
   onClose,

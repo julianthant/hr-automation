@@ -206,6 +206,7 @@ async function clearLeftoverQueuedDocuments(page: Page): Promise<void> {
     // document as a duplicate. Fail loud instead.
     throw new Error(
       `OnBase: could not read the Document Queue to check for leftover documents — refusing to attach (duplicate-import risk): ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
   if (leftover === 0) return;

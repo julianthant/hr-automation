@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Camera, FileText, Loader2, UploadCloud, X } from "lucide-react";
 import { toast } from "@/lib/notify";
 import {
@@ -163,7 +163,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [error, setError] = useState<string | null>(null);
   const [formType, setFormType] = useState<string | null>(effectiveLockedFormType ?? null);
   const formOptionsCache = useFormTypes();
-  const formOptions: FormTypeOption[] = formOptionsCache ?? [];
+  const formOptions = useMemo<FormTypeOption[]>(() => formOptionsCache ?? [], [formOptionsCache]);
   // Per-file duplicate-check results. Each entry is a picked file whose hash
   // matched at least one prior run; `fileName` lets the banner say WHICH file is
   // a duplicate in a multi-file upload. Single-file uploads still produce a
@@ -324,6 +324,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     // `filesSignature` captures the selection identity; the `files` array read
     // inside is referentially unstable across renders, so the signature is the
     // real dependency that gates a re-check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: filesSignature IS the files identity
   }, [filesSignature, showDuplicateCheck]);
 
   // Refresh form-types cache each time the modal opens so a backend update

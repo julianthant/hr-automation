@@ -381,7 +381,7 @@ function parseRecordsField(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return [];
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -394,9 +394,9 @@ function parseStringArrayField(value: unknown): string[] | undefined {
   }
   if (typeof value !== "string") return undefined;
   try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) && parsed.every((v) => typeof v === "string")
-      ? (parsed)
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((v): v is string => typeof v === "string")
+      ? parsed
       : undefined;
   } catch {
     return undefined;

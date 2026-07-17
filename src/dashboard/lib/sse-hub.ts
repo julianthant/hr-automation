@@ -87,7 +87,7 @@ export class SseHub {
     es.onmessage = (ev) => {
       let parsed: unknown;
       try {
-        parsed = JSON.parse(ev.data) as unknown;
+        parsed = JSON.parse(ev.data as string) as unknown;
       } catch {
         // malformed envelope — ignore
         console.warn("SseHub: malformed envelope (could not parse JSON), ignoring.");

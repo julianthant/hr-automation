@@ -71,8 +71,6 @@ const authLabel: Record<AuthState, string> = {
 // Health is orthogonal to auth and OVERRIDES the tile look when non-healthy
 // (a failed browser reads red regardless of its auth state). `healthy` is no
 // override — the auth maps drive the tile.
-const NON_HEALTHY: ReadonlyArray<BrowserHealth> = ["unhealthy", "refreshing", "failed"];
-
 const healthTone: Record<Exclude<BrowserHealth, "healthy">, string> = {
   refreshing: "bg-info/10 border-info/40",
   unhealthy: "bg-warning/10 border-warning/40",

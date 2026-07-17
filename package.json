@@ -39,7 +39,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:dashboard": "tsc -p src/dashboard/tsconfig.json --noEmit",
     "typecheck:all": "tsc --noEmit && tsc -p src/dashboard/tsconfig.json --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",
     "lint:tests": "eslint tests",
     "test": "vitest run --reporter=dot",

@@ -82,7 +82,7 @@ export async function loginToI9(
   } catch (err) {
     if (abortSignal?.aborted) throw err;
     log.error(
-      `I-9 SSO field fill/submit failed: ${err instanceof Error ? err.message : err}`,
+      `I-9 SSO field fill/submit failed: ${errorMessage(err)}`,
     );
     return false;
   }

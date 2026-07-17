@@ -146,7 +146,7 @@ function readAbortRequestedCached(
   for (const line of tailIncremental(abortFile, tailState)) {
     let entry: TrackerEntry;
     try {
-      entry = JSON.parse(line);
+      entry = JSON.parse(line) as TrackerEntry;
     } catch {
       continue;
     }
@@ -447,7 +447,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
         if (!line) continue;
         let entry: TrackerEntry;
         try {
-          entry = JSON.parse(line);
+          entry = JSON.parse(line) as TrackerEntry;
         } catch {
           continue;
         }
@@ -477,7 +477,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
         rejectIfDiscardRequested(opts);
       } catch (err) {
         cleanup();
-        reject(err);
+        reject(err instanceof Error ? err : new Error(String(err)));
         return;
       }
       if (!existsSync(file)) return;
@@ -495,7 +495,7 @@ export async function watchChildRuns(opts: WatchChildRunsOpts): Promise<ChildOut
         rejectIfDiscardRequested(opts);
       } catch (err) {
         cleanup();
-        reject(err);
+        reject(err instanceof Error ? err : new Error(String(err)));
         return;
       }
       const sentinel = opts.abortIfRowState;
