@@ -130,11 +130,19 @@ async function handlePrepare(
     );
   }
   // Strict roster-mode check — an unrecognized value must not masquerade as a
-  // valid mode via a type-assertion.
+  // valid mode via a type-assertion. Must mirror the prepare contract's enum
+  // (`prepare-contract.ts`): "none" is the run-modal's "No roster" pick (every
+  // person resolves via UCPath person lookup) — this route once rejected it
+  // while the contract accepted it, 400-ing the OnBase "No roster" upload.
   const rosterModeRaw = fields.rosterMode?.trim() || "existing";
-  if (rosterModeRaw !== "existing" && rosterModeRaw !== "download" && rosterModeRaw !== "wait") {
+  if (
+    rosterModeRaw !== "existing"
+    && rosterModeRaw !== "download"
+    && rosterModeRaw !== "wait"
+    && rosterModeRaw !== "none"
+  ) {
     return jsonResponse(
-      { ok: false, error: `rosterMode: "${rosterModeRaw}" is not one of existing | download | wait` },
+      { ok: false, error: `rosterMode: "${rosterModeRaw}" is not one of existing | download | wait | none` },
       400,
     );
   }
