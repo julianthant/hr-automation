@@ -83,7 +83,16 @@ export function makeDeltaTopic<T>(
   const sentKeys = new Set<string>();
 
   const tick = async () => {
-    const events = await fetcher();
+    // Contained: a fetcher throw/reject must not become an unhandled
+    // rejection (which would take the whole process down) — it skips this
+    // tick and the next interval retries.
+    let events: T[];
+    try {
+      events = await fetcher();
+    } catch (err) {
+      log.warn(`SSE delta tick failed: ${err instanceof Error ? err.message : String(err)} — retrying next tick`);
+      return;
+    }
     if (keyOf) {
       const fresh: T[] = [];
       for (const e of events) {
@@ -113,6 +122,42 @@ export function makeDeltaTopic<T>(
 
   void tick();
   const interval = setInterval(() => void tick(), intervalMs);
+  interval.unref?.();
+  return () => clearInterval(interval);
+}
+
+/**
+ * Polls `fetcher` and sends the snapshot ONLY when its serialized form changed
+ * since the last send. The 1 Hz snapshot topics (entries, sessions) used to
+ * re-send the full payload every tick even when nothing changed — for an idle
+ * dashboard that is the entire queue projection each second per client, and it
+ * grows with the day's row count. The client's semantics are replace-on-message,
+ * so suppressing identical payloads is invisible to it (state persists between
+ * messages; `sseResponse`'s keep-alive comment covers proxy idle timeouts).
+ *
+ * A fetcher throw is contained to the tick (logged + retried next interval) so
+ * one bad projection read can never kill the interval or the process.
+ */
+export function makeSnapshotTopic(
+  fetcher: () => unknown,
+  send: (data: unknown) => void,
+  intervalMs: number,
+  label: string,
+): () => void {
+  let lastSerialized: string | undefined;
+  const tick = () => {
+    try {
+      const data = fetcher();
+      const serialized = JSON.stringify(data);
+      if (serialized === lastSerialized) return;
+      lastSerialized = serialized;
+      send(data);
+    } catch (err) {
+      log.warn(`${label} SSE tick failed: ${err instanceof Error ? err.message : String(err)} — retrying next tick`);
+    }
+  };
+  tick();
+  const interval = setInterval(tick, intervalMs);
   interval.unref?.();
   return () => clearInterval(interval);
 }
@@ -208,25 +253,19 @@ export const entriesTopic: TopicEmitter<{ workflow?: string; date?: string }> = 
   const date = params.date ?? "";
   const today = dateLocal();
 
-  const tick = () => {
+  return makeSnapshotTopic(() => {
     const stateDb = getProjectionDb(deps);
     if (stateDb) {
       try {
-        send(getCachedEntriesPayload(stateDb, deps.dir, workflow, date || today));
-        return;
+        return getCachedEntriesPayload(stateDb, deps.dir, workflow, date || today);
       } catch (err) {
         log.warn(
           `SQLite /events fallback to JSONL: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
-    send(buildJsonlEventsPayload(workflow, date, today, deps.dir));
-  };
-
-  tick();
-  const interval = setInterval(tick, 1_000);
-  interval.unref?.();
-  return () => clearInterval(interval);
+    return buildJsonlEventsPayload(workflow, date, today, deps.dir);
+  }, send, 1_000, "entries");
 };
 
 registerTopic("entries", entriesTopic);
@@ -243,12 +282,12 @@ export const sessionsTopic: TopicEmitter<Record<string, never>> = (
   send,
   deps,
 ) => {
-  const tick = () => send(filterLiveSessionState(getCachedSessionState(deps.dir)));
-
-  tick();
-  const interval = setInterval(tick, 1_000);
-  interval.unref?.();
-  return () => clearInterval(interval);
+  return makeSnapshotTopic(
+    () => filterLiveSessionState(getCachedSessionState(deps.dir)),
+    send,
+    1_000,
+    "sessions",
+  );
 };
 
 registerTopic("sessions", sessionsTopic);

@@ -16,6 +16,7 @@ import { emitSessionEvent, type SessionEvent } from "../../../../../src/tracker/
 import {
   logsTopic,
   makeDeltaTopic,
+  makeSnapshotTopic,
   runEventsTopic,
 } from "../../../../../src/tracker/dashboard/hono/topics-emitters.js";
 import { closeStateDbForTests, openStateDb } from "../../../../../src/tracker/state/db.js";
@@ -174,6 +175,103 @@ test("makeDeltaTopic positional fallback (no keyOf) preserves slice-by-count beh
       current = [{ id: "a" }, { id: "x" }, { id: "b" }, { id: "c" }];
       await vi.advanceTimersByTimeAsync(500);
       assert.deepEqual(sends[1], [{ id: "c" }], "positional delta sends only the trailing slice");
+    } finally {
+      stop();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("makeSnapshotTopic suppresses identical payloads and re-sends on change", async () => {
+  vi.useFakeTimers();
+  try {
+    let snapshot: Record<string, unknown> = { entries: [{ id: "a" }], counts: { a: 1 } };
+    const sends: unknown[] = [];
+    const stop = makeSnapshotTopic(
+      () => snapshot,
+      (data) => sends.push(data),
+      1_000,
+      "test-snapshot",
+    );
+    try {
+      assert.equal(sends.length, 1, "first tick sends the full snapshot");
+
+      // Identical payload (new object, same serialized form) → suppressed.
+      snapshot = { entries: [{ id: "a" }], counts: { a: 1 } };
+      await vi.advanceTimersByTimeAsync(3_000);
+      assert.equal(sends.length, 1, "unchanged snapshots are not re-sent");
+
+      snapshot = { entries: [{ id: "a" }, { id: "b" }], counts: { a: 2 } };
+      await vi.advanceTimersByTimeAsync(1_000);
+      assert.equal(sends.length, 2, "a changed snapshot is sent");
+      assert.deepEqual(sends[1], snapshot);
+    } finally {
+      stop();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("makeSnapshotTopic contains a fetcher throw to the tick and recovers", async () => {
+  vi.useFakeTimers();
+  try {
+    let shouldThrow = false;
+    let value = 1;
+    const sends: unknown[] = [];
+    const stop = makeSnapshotTopic(
+      () => {
+        if (shouldThrow) throw new Error("projection read failed");
+        return { value };
+      },
+      (data) => sends.push(data),
+      1_000,
+      "test-snapshot",
+    );
+    try {
+      assert.equal(sends.length, 1);
+
+      shouldThrow = true;
+      await vi.advanceTimersByTimeAsync(1_000); // must not blow up the interval
+      assert.equal(sends.length, 1);
+
+      shouldThrow = false;
+      value = 2;
+      await vi.advanceTimersByTimeAsync(1_000);
+      assert.deepEqual(sends[1], { value: 2 }, "the interval survives the throw and recovers");
+    } finally {
+      stop();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("makeDeltaTopic contains a fetcher rejection to the tick and recovers", async () => {
+  vi.useFakeTimers();
+  try {
+    let shouldReject = false;
+    let items: Array<{ id: string }> = [{ id: "a" }];
+    const sends: Array<Array<{ id: string }>> = [];
+    const stop = makeDeltaTopic<{ id: string }>(
+      () => (shouldReject ? Promise.reject(new Error("read failed")) : Promise.resolve(items)),
+      (data) => sends.push(data),
+      500,
+      (e) => e.id,
+    );
+    try {
+      await flushMicrotasks();
+      assert.equal(sends.length, 1);
+
+      shouldReject = true;
+      await vi.advanceTimersByTimeAsync(500); // an unhandled rejection here would fail the test run
+      assert.equal(sends.length, 1);
+
+      shouldReject = false;
+      items = [{ id: "a" }, { id: "b" }];
+      await vi.advanceTimersByTimeAsync(500);
+      assert.deepEqual(sends[1], [{ id: "b" }], "delta stream resumes after the failed tick");
     } finally {
       stop();
     }
