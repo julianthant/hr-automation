@@ -4,31 +4,15 @@ Multi-system employee termination: extracts data from Kuali Build, reads the New
 
 **Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The public start path is dashboard input run (`InputRunPanel` → `/api/enqueue`), which enqueues one or more `{docId}` items to any alive separation daemon (or spawns one). `runSeparation` and `runSeparationBatch` are preserved for in-process use (tests, scripts).
 
-## I-9 mode (upload run — rev. 2026-07-13, READ THIS)
+## I-9 Check is its OWN workflow now (2026-07-17)
 
-The separations panel ALSO has an upload run — **"Run I-9 Check"** — that is **not** a separation run at all. It uploads a scanned I-9 packet; the `i9` form spec (`src/services/ocr/forms/i9.ts`) reads each I-9's Section 1 (name, DOB, SSN), fans out one **person-match** child per record (`src/workflows/person-match/`, delegated-only, wrapping the pluggable `searchPerson` UCPath HR-Tasks search that onboarding uses), and reports **found / not found in UCPath** per person. Read-only — no UCPath writes, no separation daemon, no approve gate.
+The "Run I-9 Check" upload run is **no longer part of separations**. It lives in the dedicated **`i9-check` workflow** (`src/workflows/i9-check/`, same "Separations" rail category, code `ic`) — one UCPath-only browser per daemon, its own upload modal, its own operation coordinator, and the full retention-check contract documented in `src/workflows/i9-check/CLAUDE.md`.
 
-**The results come BACK to the separations queue** (2026-07-13 — it previously ran standalone with the report stranded in the OCR panel). The shape:
+What that means for THIS workflow:
 
-- Each uploaded PDF gets a **`separations` operation coordinator row** (`RUN_MODAL_REGISTRY.separations` declares `targetWorkflow: "separations"`; `separations` is in `OPERATION_COORDINATOR_WORKFLOWS`), titled by the PDF filename. The OCR run is delegated **under it** (`parentRunId`), so the OCR panel still holds exactly one review row.
-- The i9 spec sets **`completeDelegatedRun: true`** (`OcrFormSpec`) — a read-only form with no approve target completes terminal `done` right after enrichment **even when delegated**, instead of parking at `awaiting-approval`. There is nothing to approve; the finished report IS the outcome.
-- On that completion, `/api/ocr/prepare` calls **`emitI9CheckResultRows`** (`src/tracker/dashboard/ocr/i9-check-results.ts`), which reads the completed run's records and emits **one `operation-member` row per checked person** under the coordinator: title = the I-9 name, subtitle = the matched EID (found) else the trace id, status `done` when UCPath definitively answered and `failed` when the search never answered, plus a **found/not-found chip** ("In UCPath" / "Not in UCPath") from `separationsStatusExtensions.secondaryTag` (`src/domain/separations-status.ts`, keyed on `data.ucpathFound`).
-
-**Fail-loud invariants (do not soften):** an **unanswered** check (person-match failed / timed out / the record had no searchable SSN+DOB) is `failed` with **NO chip** — it must never render as a definitive "Not in UCPath". A fan-back that can't read the completed run's records **throws**, and the coordinator goes `failed`, rather than settling as an empty operation that reads as "checked, nobody found".
-
-**A "not found" is only as good as the OCR behind it (2026-07-13 — the lesson that cost a whole batch).** UCPath's person search answers *"Search Criteria did not return any results"* for a **single misread SSN digit** exactly as it does for a person who genuinely does not work here. The two are indistinguishable from the outside, so a bad extraction does not look like an error — **it looks like an answer.** In the 2026-07-13 run, 17 of 29 Section 1s were misread and every one was reported as a confident "Not in UCPath". Three invariants now stand between a misread and a lie, and they must hold together:
-
-1. **The OCR does not guess** an SSN or DOB. An illegible digit is `null` + named in `record.illegible[]` (never a plausible value). See the `i9` prompt's ACCURACY RULE.
-2. **Section 2 is the oracle.** `corroborateI9Records` (`forms/i9.ts`) cross-checks each Section 1 against the employer's Section 2 sheet — which independently re-writes the name and, under List C, the SSN. A **disputed** field is dropped from the search rather than arbitrated (we do not coin-flip between two transcriptions of real HR data); the search proceeds on what still holds.
-3. **An untrusted no-match is a FAILURE, not a verdict.** `buildI9CheckMembers` gives a `ucpathFound === false` record with any disputed/illegible field **no chip at all** — it fails with the fields to verify and the page number to verify them on. A **found** is left alone: UCPath matching a real person is self-validating.
-
-An **orphan Section 2** (the employer verified someone whose Section 1 page is missing from the packet) becomes its own `failed` row — that person was never checked, and silently dropping them is the same class of lie.
-
-**Member rows carry their own logs.** They have no daemon task, so nothing used to log against their `runId` and the log panel opened EMPTY (the real search log lives under `person-match`). `emitI9CheckResultRows` now writes each row's log against its own `(workflow, itemId, runId)` — the page, the extracting model (`data.extractedBy`), the corroboration result, **the criteria the verdict rests on**, and the verdict — plus `data.personMatchTraceId` linking back to the child run. Never log an SSN; log only whether one was supplied.
-
-**These member rows are DISPLAY-ONLY** (`data.displayOnly === "true"`): the person-match children that produced them ran under the OCR run, so no daemon task backs them. `isDisplayOnlyRow` (`src/domain/workflow-runtime/projection.ts`) strips retry/cancel/bump from their footer, leaving only delete. **This is load-bearing safety**, not polish: with no SQLite task to re-queue, a retry falls back to reconstructing an input from the row's tracker data and enqueuing it — which on *separations* would start a **REAL termination run** for that person.
-
-See `src/workflows/person-match/CLAUDE.md` and `src/services/ocr/CLAUDE.md` (the `i9` form-spec entry).
+- **Separations is termination-only.** `SeparationInputSchema` is the plain `docId` object (the old `mode: "i9-check"` disjoint-union variant, `assertNotI9CheckShaped`, `steps/i9-check.ts`, and the trailing `i9-check` step are all gone). A legacy queued separations i9-check payload now FAILS LOUD at schema parse — re-run the I-9 upload.
+- **Legacy rows still render.** Pre-split separations member rows on disk keep their found/not-found chip (`separations-status.ts` re-exports `i9CheckResultTag` from `src/domain/i9-check-status.ts`), and `control/ops/retry.ts` still refuses JSONL reconstruction for a separations row with `data.i9Check === "true"` (reconstruction would build a docId-shaped input, i.e. a REAL termination).
+- The 3-browser daemon no longer spins for I-9 checks, and termination runs no longer render a skipped `i9-check` step.
 
 ## What this workflow does
 
