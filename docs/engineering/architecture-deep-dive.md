@@ -434,7 +434,7 @@ An in-memory `Map<name, WorkflowMetadata>` populated at module-load time when `d
 interface WorkflowMetadata {
   name: string;        // "onboarding"
   label: string;       // "Onboarding"
-  archetype: WorkflowArchetype;  // row shape: "single" | "batch" | "preview" | "operation"
+  archetype: WorkflowArchetype;  // row shape: "single" | "preview" | "operation" (legacy "batch" normalizes to "operation" on read)
   code: string;        // 2-char provenance prefix for trace ids (e.g. "ob")
   category?: string;   // rail grouping label; absent → "Other"
   iconName?: string;   // lucide-react icon name
