@@ -42,9 +42,9 @@
     "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --fix",
     "lint:tests": "eslint tests",
-    "test": "vitest run --reporter=dot",
+    "test": "vitest run --project unit --reporter=dot && vitest run --project serial --reporter=dot",
     "test:live": "vitest run --config vitest.live.config.ts",
-    "test:stderr-audit": "vitest run --reporter=dot",
+    "test:stderr-audit": "vitest run --project unit --reporter=dot && vitest run --project serial --reporter=dot",
     "test:verbose": "vitest run --reporter=verbose",
     "test:watch": "vitest",
     "test:architecture": "vitest run tests/unit/architecture --reporter=dot"
