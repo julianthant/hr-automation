@@ -26,17 +26,23 @@ import {
 } from "../../capture-state.js";
 import type { DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
-import { jsonResponse, readJsonRequest } from "../responses.js";
+import {
+  captureDeletePhotoBody,
+  captureDiscardBody,
+  captureReorderBody,
+  captureStartBody,
+  captureTokenBody,
+  captureValidateBody,
+  readValidatedJson,
+} from "../request-schemas.js";
+import { jsonResponse } from "../responses.js";
 
 export function registerCaptureRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/capture/start", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const parsed = await readValidatedJson(c.req.raw, captureStartBody);
+    if (!parsed.ok) return parsed.response;
     const result = await handleStart(
-      {
-        workflow: String(parsed.body.workflow ?? ""),
-        contextHint: parsed.body.contextHint ? String(parsed.body.contextHint) : undefined,
-      },
+      parsed.body,
       {
         store: captureStore,
         publicUrl: process.env.CAPTURE_PUBLIC_URL || undefined,
@@ -83,33 +89,30 @@ export function registerCaptureRoutes(app: Hono, deps: DashboardHonoDeps): void 
   });
 
   app.post("/api/capture/delete-photo", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const parsed = await readValidatedJson(c.req.raw, captureDeletePhotoBody);
+    if (!parsed.ok) return parsed.response;
     const result = await handleDeletePhoto(
-      { token: String(parsed.body.token ?? ""), index: Number(parsed.body.index) },
+      parsed.body,
       { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR },
     );
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/capture/finalize", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const parsed = await readValidatedJson(c.req.raw, captureTokenBody);
+    if (!parsed.ok) return parsed.response;
     const result = await handleFinalize(
-      { token: String(parsed.body.token ?? "") },
+      parsed.body,
       { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR, uploadsDir: CAPTURE_UPLOADS_DIR },
     );
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/capture/discard", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
+    const parsed = await readValidatedJson(c.req.raw, captureDiscardBody);
+    if (!parsed.ok) return parsed.response;
     const result = handleDiscard(
-      {
-        sessionId: String(parsed.body.sessionId ?? ""),
-        reason: parsed.body.reason ? String(parsed.body.reason) : undefined,
-      },
+      parsed.body,
       { store: captureStore, photosDir: CAPTURE_PHOTOS_DIR },
     );
     return jsonResponse(result.body, result.status);
@@ -173,26 +176,16 @@ export function registerCaptureRoutes(app: Hono, deps: DashboardHonoDeps): void 
   });
 
   app.post("/api/capture/reorder", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = handleReorder(
-      {
-        token: String(parsed.body.token ?? ""),
-        fromIndex: Number(parsed.body.fromIndex),
-        toIndex: Number(parsed.body.toIndex),
-      },
-      { store: captureStore },
-    );
+    const parsed = await readValidatedJson(c.req.raw, captureReorderBody);
+    if (!parsed.ok) return parsed.response;
+    const result = handleReorder(parsed.body, { store: captureStore });
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/capture/validate", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = handleValidate(
-      { sessionId: String(parsed.body.sessionId ?? "") },
-      { store: captureStore },
-    );
+    const parsed = await readValidatedJson(c.req.raw, captureValidateBody);
+    if (!parsed.ok) return parsed.response;
+    const result = handleValidate(parsed.body, { store: captureStore });
     return jsonResponse(result.body, result.status);
   });
 

@@ -26,18 +26,34 @@ import {
 } from "../../../../control/ops/index.js";
 import { performWorkflowAction } from "../../../../control/actions/perform-workflow-action.js";
 import type {
-  WorkflowActionRequest,
   WorkflowActionResult,
-  WorkflowActionScope,
-  WorkflowActionSource,
 } from "../../../../control/actions/types.js";
 import { errorMessage } from "../../../../utils/errors.js";
 import { log } from "../../../../utils/log.js";
 import type { DashboardHonoDeps } from "../context.js";
-import { PARENT_RUN_ID_VALIDATION_HINT, parseOptionalParentRunId } from "../parent-run-id.js";
 import { postJson } from "../post-helper.js";
+import {
+  autoRecoveryBody,
+  browserKillBody,
+  browserTargetBody,
+  cancelActiveBulkBody,
+  cancelRunningBody,
+  daemonsSpawnBody,
+  daemonsStopBody,
+  deleteBulkBody,
+  deleteEntryBody,
+  eidApproveBody,
+  eidDismissBody,
+  queueBumpBody,
+  retryBody,
+  retryBulkBody,
+  rowCancelBody,
+  runWithDataBody,
+  saveDataBody,
+  workerBody,
+  zodParse,
+} from "../request-schemas.js";
 import { jsonResponse } from "../responses.js";
-import type { CancelActiveBulkItem } from "../../../../control/ops/cancel.js";
 
 type Compact<T extends Record<string, unknown>> = {
   [K in keyof T]?: Exclude<T[K], undefined>;
@@ -57,59 +73,6 @@ function bulkMutationHttpStatus(succeededCount: number, errorCount: number): num
   if (errorCount === 0) return 200;
   if (succeededCount === 0) return 422;
   return 207;
-}
-
-function parseParentRunIdFromBody(body: Record<string, unknown>):
-  | { ok: true; parentRunId?: string }
-  | { ok: false; error: string } {
-  const parentRunId = parseOptionalParentRunId(body.parentRunId);
-  if (body.parentRunId !== undefined && body.parentRunId !== null && !parentRunId) {
-    return { ok: false, error: PARENT_RUN_ID_VALIDATION_HINT };
-  }
-  return parentRunId ? { ok: true, parentRunId } : { ok: true };
-}
-
-function parseRowCancelScope(value: unknown): WorkflowActionScope {
-  return value === "tree" ? "tree" : "row";
-}
-
-function parseTreeExcludeRoots(value: unknown): boolean | undefined {
-  return value === true ? true : undefined;
-}
-
-function parseBulkActionSource(value: unknown): Extract<WorkflowActionSource, "queue-panel" | "operation-view"> {
-  return value === "operation-view" ? "operation-view" : "queue-panel";
-}
-
-function parseBulkActionScope(value: unknown): Extract<WorkflowActionScope, "group" | "visible-view"> {
-  return value === "visible-view" ? "visible-view" : "group";
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function parseOcrCancelContext(
-  body: Record<string, unknown>,
-): Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason"> {
-  return compact({
-    ocrSessionId: optionalString(body.ocrSessionId),
-    parentWorkflow: optionalString(body.parentWorkflow),
-    parentRunId: optionalString(body.parentRunId),
-    parentItemId: optionalString(body.parentItemId),
-    formType: optionalString(body.formType),
-    reason: optionalString(body.reason),
-  });
-}
-
-function parseItemsFromBody<T>(
-  raw: unknown,
-  parseRow: (row: Record<string, unknown>) => T | null,
-): T[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((row) => row && typeof row === "object" ? parseRow(row as Record<string, unknown>) : null)
-    .filter((item): item is T => item !== null);
 }
 
 /**
@@ -140,33 +103,8 @@ function toBulkActionResult(
   return { ok: true, count: result.count, errors: result.errors };
 }
 
-type RowCancelRequest = {
-  workflow: string;
-  id: string;
-  runId?: string;
-  status?: "pending" | "running";
-  scope: WorkflowActionScope;
-  treeExcludeRoots?: boolean;
-} & Pick<WorkflowActionRequest, "ocrSessionId" | "parentWorkflow" | "parentRunId" | "parentItemId" | "formType" | "reason">;
-
-function parseRowCancelStatus(value: unknown): "pending" | "running" | undefined {
-  return value === "running" || value === "pending" ? value : undefined;
-}
-
-function parseRowCancelRequest(body: Record<string, unknown>): RowCancelRequest {
-  return {
-    workflow: String(body.workflow ?? ""),
-    id: String(body.id ?? ""),
-    ...compact({ runId: body.runId ? String(body.runId) : undefined }),
-    ...compact({ status: parseRowCancelStatus(body.status) }),
-    scope: parseRowCancelScope(body.scope),
-    ...compact({ treeExcludeRoots: parseTreeExcludeRoots(body.treeExcludeRoots) }),
-    ...parseOcrCancelContext(body),
-  };
-}
-
 function buildCancelRoute(deps: DashboardHonoDeps): (c: Context) => Promise<Response> {
-  return async (c) => postJson(c, parseRowCancelRequest, async (req) => {
+  return async (c) => postJson(c, zodParse(rowCancelBody), async (req) => {
     // Contract 5 — one cancel mechanism. The single `/api/cancel-queued`
     // route handles both queued AND running rows: the caller forwards the
     // row's current `status` so `cancelTarget` routes to the right
@@ -201,23 +139,7 @@ function buildCancelRoute(deps: DashboardHonoDeps): (c: Context) => Promise<Resp
 
 export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/retry", async (c) => {
-    return postJson(c, (body) => {
-      const parent = parseParentRunIdFromBody(body);
-      if (!parent.ok) return parent;
-      return {
-        workflow: String(body.workflow ?? ""),
-        id: String(body.id ?? ""),
-        runId: body.runId ? String(body.runId) : undefined,
-        date: body.date ? String(body.date) : undefined,
-        ...compact({ parentRunId: parent.parentRunId }),
-      };
-    }, async (req: {
-      workflow: string;
-      id: string;
-      runId?: string;
-      date?: string;
-      parentRunId?: string;
-    }) => {
+    return postJson(c, zodParse(retryBody), async (req) => {
       const result = await performWorkflowAction({
         action: "retry",
         scope: "row",
@@ -235,43 +157,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/retry-bulk", async (c) => {
-    return postJson(c, (body) => {
-      const parent = parseParentRunIdFromBody(body);
-      if (!parent.ok) return parent;
-      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-      const items = Array.isArray(body.items)
-        ? body.items
-            .filter((item): item is Record<string, unknown> =>
-              Boolean(item) && typeof item === "object" && !Array.isArray(item),
-            )
-            .map((item) => ({
-              id: String(item.id ?? ""),
-              ...compact({
-                workflowId: item.workflowId ? String(item.workflowId) : undefined,
-                runId: item.runId ? String(item.runId) : undefined,
-                date: item.date ? String(item.date) : undefined,
-              }),
-            }))
-            .filter((item) => item.id)
-        : undefined;
-      return {
-        workflow: String(body.workflow ?? ""),
-        ids,
-        ...compact({ items }),
-        date: body.date ? String(body.date) : undefined,
-        ...compact({ parentRunId: parent.parentRunId }),
-        source: parseBulkActionSource(body.source),
-        scope: parseBulkActionScope(body.scope),
-      };
-    }, async (req: {
-      workflow: string;
-      ids: string[];
-      items?: Array<{ workflowId?: string; id: string; runId?: string; date?: string }>;
-      date?: string;
-      parentRunId?: string;
-      source: Extract<WorkflowActionSource, "queue-panel" | "operation-view">;
-      scope: Extract<WorkflowActionScope, "group" | "visible-view">;
-    }) => {
+    return postJson(c, zodParse(retryBulkBody), async (req) => {
       const items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }> = req.items && req.items.length > 0
         ? req.items
         : req.ids.map((id) => ({ id }));
@@ -292,21 +178,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/run-with-data", async (c) => {
-    return postJson(c, (body) => {
-      const parent = parseParentRunIdFromBody(body);
-      if (!parent.ok) return parent;
-      const data = body.data && typeof body.data === "object"
-        ? body.data as Record<string, unknown>
-        : {};
-      return {
-        workflow: String(body.workflow ?? ""),
-        id: String(body.id ?? ""),
-        runId: body.runId ? String(body.runId) : undefined,
-        date: body.date ? String(body.date) : undefined,
-        data,
-        ...compact({ parentRunId: parent.parentRunId }),
-      };
-    }, buildEntryReEnqueueHandler(deps.dir, { withData: true }), 202);
+    return postJson(c, zodParse(runWithDataBody), buildEntryReEnqueueHandler(deps.dir, { withData: true }), 202);
   });
 
   // Identity-approval review (workflow-agnostic) — approve a chosen EID (re-queue
@@ -315,36 +187,15 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   // handler rejects any workflow not in EID_APPROVAL_WORKFLOWS. Adopted by
   // separations + onboarding.
   app.post("/api/eid-approval/approve", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      id: String(body.id ?? ""),
-      runId: body.runId ? String(body.runId) : undefined,
-      eid: String(body.eid ?? ""),
-      date: body.date ? String(body.date) : undefined,
-    }), buildApproveEidHandler(deps.dir), 202);
+    return postJson(c, zodParse(eidApproveBody), buildApproveEidHandler(deps.dir), 202);
   });
 
   app.post("/api/eid-approval/dismiss", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      id: String(body.id ?? ""),
-      runId: body.runId ? String(body.runId) : undefined,
-      date: body.date ? String(body.date) : undefined,
-    }), buildDismissEidHandler(deps.dir));
+    return postJson(c, zodParse(eidDismissBody), buildDismissEidHandler(deps.dir));
   });
 
   app.post("/api/save-data", async (c) => {
-    return postJson(c, (body) => {
-      const data = body.data && typeof body.data === "object"
-        ? body.data as Record<string, unknown>
-        : {};
-      return {
-        workflow: String(body.workflow ?? ""),
-        id: String(body.id ?? ""),
-        date: body.date ? String(body.date) : undefined,
-        data,
-      };
-    }, buildSaveDataHandler(deps.dir));
+    return postJson(c, zodParse(saveDataBody), buildSaveDataHandler(deps.dir));
   });
 
   app.get("/api/find-prior-by-key", (c) => {
@@ -362,33 +213,11 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/cancel-queued", buildCancelRoute(deps));
 
   app.post("/api/cancel-running", async (c) => {
-    return postJson(c, (body) => {
-      const workflow = String(body.workflow ?? "");
-      const id = String(body.id ?? "");
-      const runId = String(body.runId ?? "");
-      if (!workflow || !id || !runId) {
-        return { ok: false, error: "workflow, id, runId are required" };
-      }
-      return { workflow, id, runId };
-    }, buildCancelRunningHandler(deps.dir));
+    return postJson(c, zodParse(cancelRunningBody), buildCancelRunningHandler(deps.dir));
   });
 
   app.post("/api/cancel-active-bulk", async (c) => {
-    return postJson(c, (body) => {
-      const workflow = String(body.workflow ?? "").trim();
-      if (!workflow) return { ok: false, error: "workflow is required" };
-      const items = parseItemsFromBody<CancelActiveBulkItem>(body.items, (o) => {
-        const id = typeof o.id === "string" ? o.id : "";
-        const status = o.status === "pending" || o.status === "running" ? o.status : null;
-        if (!id || !status) return null;
-        const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
-        return { id, status, ...compact({ runId }) };
-      });
-      if (items.length === 0) {
-        return { ok: false, error: "items must be a non-empty array of { id, status }" };
-      }
-      return { workflow, items };
-    }, async (req: { workflow: string; items: CancelActiveBulkItem[] }) => {
+    return postJson(c, zodParse(cancelActiveBulkBody), async (req) => {
       const result = await performWorkflowAction({
         action: "cancel",
         scope: "visible-view",
@@ -406,10 +235,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/browser/kill", async (c) => {
-    return postJson(c, (body) => ({
-      browserProcessId: body.browserProcessId ? String(body.browserProcessId) : undefined,
-      pid: typeof body.pid === "number" ? body.pid : undefined,
-    }), buildKillBrowserHandler(deps.dir), 202);
+    return postJson(c, zodParse(browserKillBody), buildKillBrowserHandler(deps.dir), 202);
   });
 
   // Per-browser session-panel controls: reload one system's page on a running
@@ -417,36 +243,20 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   // Chromium window to front ("which browser is this?"). Both target the live
   // browser by (workflow, instance, systemId).
   app.post("/api/browser/refresh", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      instance: String(body.instance ?? ""),
-      systemId: String(body.systemId ?? ""),
-    }), buildRefreshBrowserHandler(deps.dir), 202);
+    return postJson(c, zodParse(browserTargetBody), buildRefreshBrowserHandler(deps.dir), 202);
   });
 
   app.post("/api/browser/focus", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      instance: String(body.instance ?? ""),
-      systemId: String(body.systemId ?? ""),
-    }), buildFocusBrowserHandler(deps.dir), 202);
+    return postJson(c, zodParse(browserTargetBody), buildFocusBrowserHandler(deps.dir), 202);
   });
 
   // Reopen escalation (fresh tab, same auth) + on-demand health check.
   app.post("/api/browser/reopen", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      instance: String(body.instance ?? ""),
-      systemId: String(body.systemId ?? ""),
-    }), buildReopenBrowserHandler(deps.dir), 202);
+    return postJson(c, zodParse(browserTargetBody), buildReopenBrowserHandler(deps.dir), 202);
   });
 
   app.post("/api/browser/check", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      instance: String(body.instance ?? ""),
-      systemId: String(body.systemId ?? ""),
-    }), buildHealthCheckBrowserHandler(deps.dir), 202);
+    return postJson(c, zodParse(browserTargetBody), buildHealthCheckBrowserHandler(deps.dir), 202);
   });
 
   // Live "peek" — proxy a synchronous viewport screenshot from the owning
@@ -476,32 +286,19 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
 
   // Pause/resume auto-recovery for one browser (so the operator can inspect it).
   app.post("/api/browser/auto-recovery", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      instance: String(body.instance ?? ""),
-      systemId: String(body.systemId ?? ""),
-      paused: body.paused === true || body.paused === "true",
-    }), buildSetAutoRecoveryHandler(deps.dir), 202);
+    return postJson(c, zodParse(autoRecoveryBody), buildSetAutoRecoveryHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/drain", async (c) => {
-    return postJson(c, (body) => ({
-      workerId: String(body.workerId ?? ""),
-    }), buildDrainWorkerHandler(deps.dir), 202);
+    return postJson(c, zodParse(workerBody), buildDrainWorkerHandler(deps.dir), 202);
   });
 
   app.post("/api/worker/stop", async (c) => {
-    return postJson(c, (body) => ({
-      workerId: String(body.workerId ?? ""),
-    }), buildStopWorkerHandler(deps.dir), 202);
+    return postJson(c, zodParse(workerBody), buildStopWorkerHandler(deps.dir), 202);
   });
 
   app.post("/api/queue/bump", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      id: String(body.id ?? ""),
-      runId: body.runId ? String(body.runId) : undefined,
-    }), buildQueueBumpHandler(deps.dir));
+    return postJson(c, zodParse(queueBumpBody), buildQueueBumpHandler(deps.dir));
   });
 
   app.get("/api/daemons", async (c) => {
@@ -510,10 +307,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/daemons/spawn", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      count: typeof body.count === "number" ? body.count : 1,
-    }), (body) => {
+    return postJson(c, zodParse(daemonsSpawnBody), (body) => {
       const handler = buildDaemonsSpawnHandler(deps.dir);
       void handler(body).catch((err) => {
         log.error(`[POST /api/daemons/spawn] background spawn failed: ${errorMessage(err)}`);
@@ -523,10 +317,7 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/daemons/stop", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: body.workflow ? String(body.workflow) : undefined,
-      force: body.force === true,
-    }), buildDaemonsStopHandler(deps.dir));
+    return postJson(c, zodParse(daemonsStopBody), buildDaemonsStopHandler(deps.dir));
   });
 
   app.get("/api/queue-depth", () => {
@@ -539,52 +330,11 @@ export function registerOpsRoutes(app: Hono, deps: DashboardHonoDeps): void {
   });
 
   app.post("/api/delete-entry", async (c) => {
-    return postJson(c, (body) => ({
-      workflow: String(body.workflow ?? ""),
-      id: String(body.id ?? ""),
-      date: String(body.date ?? ""),
-      runId: body.runId ? String(body.runId) : undefined,
-    }), buildDeleteEntryHandler(deps.dir, { screenshotsDir: deps.screenshotsDir }));
+    return postJson(c, zodParse(deleteEntryBody), buildDeleteEntryHandler(deps.dir, { screenshotsDir: deps.screenshotsDir }));
   });
 
   app.post("/api/delete-bulk", async (c) => {
-    return postJson(c, (body) => {
-      const workflow = String(body.workflow ?? "").trim();
-      const date = String(body.date ?? "").trim();
-      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-      const items = parseItemsFromBody<{ workflowId?: string; id: string; runId?: string; date?: string }>(body.items, (o) => {
-        const id = typeof o.id === "string" ? o.id : "";
-        if (!id) return null;
-        const runId = typeof o.runId === "string" && o.runId.length > 0 ? o.runId : undefined;
-        const workflowId = typeof o.workflowId === "string" && o.workflowId.length > 0 ? o.workflowId : undefined;
-        const itemDate = typeof o.date === "string" && o.date.length > 0 ? o.date : undefined;
-        return {
-          id,
-          ...compact({ workflowId, runId, date: itemDate }),
-        };
-      });
-      if (!workflow || !date) {
-        return { ok: false, error: "workflow and date are required" };
-      }
-      if (items.length === 0 && ids.length === 0) {
-        return { ok: false, error: "ids or items must be non-empty — provide at least one entry to delete" };
-      }
-      return {
-        workflow,
-        date,
-        ids,
-        items,
-        source: parseBulkActionSource(body.source),
-        scope: parseBulkActionScope(body.scope),
-      };
-    }, async (req: {
-      workflow: string;
-      date: string;
-      ids: string[];
-      items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }>;
-      source: Extract<WorkflowActionSource, "queue-panel" | "operation-view">;
-      scope: Extract<WorkflowActionScope, "group" | "visible-view">;
-    }) => {
+    return postJson(c, zodParse(deleteBulkBody), async (req) => {
       const items: Array<{ workflowId?: string; id: string; runId?: string; date?: string }> = req.items.length > 0
         ? req.items
         : req.ids.map((id) => ({ id }));

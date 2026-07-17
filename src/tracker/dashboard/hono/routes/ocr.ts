@@ -17,8 +17,16 @@ import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
-import { jsonResponse, readJsonRequest } from "../responses.js";
-import { log } from "../../../../utils/log.js";
+import {
+  ocrApproveBatchBody,
+  ocrDiscardBody,
+  ocrForceResearchBody,
+  ocrRetryPageBody,
+  ocrSessionBody,
+  ocrVerifyRelookupBody,
+  readValidatedJson,
+} from "../request-schemas.js";
+import { jsonResponse } from "../responses.js";
 import { getOcrKeyStatuses } from "../../../../services/ocr/key-status.js";
 import { runtimeDir } from "../../../paths.js";
 import { normalizeRunOptions } from "../../../../domain/run-options.js";
@@ -41,83 +49,44 @@ export function registerOcrRoutes(app: Hono, deps: DashboardHonoDeps): void {
   app.post("/api/ocr/reupload", (c) => handlePrepare(c.req.raw, deps, handlers.prepare, true));
 
   app.post("/api/ocr/approve-batch", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 1024 * 1024);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await handlers.approve({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: String(parsed.body.runId ?? ""),
-      records: (() => {
-        const raw = Array.isArray(parsed.body.records) ? parsed.body.records : [];
-        const filtered = raw.filter(
-          (r): r is Record<string, unknown> => r !== null && typeof r === "object" && !Array.isArray(r),
-        );
-        const dropped = raw.length - filtered.length;
-        if (dropped > 0) log.warn(`[ocr-http] approve-batch: dropped ${dropped} non-object element(s) from records`);
-        return filtered;
-      })(),
-    });
+    const parsed = await readValidatedJson(c.req.raw, ocrApproveBatchBody, 1024 * 1024);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.approve(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/ocr/discard-prepare", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await handlers.discard({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: String(parsed.body.runId ?? ""),
-      reason: parsed.body.reason ? String(parsed.body.reason) : undefined,
-      parentWorkflow: parsed.body.parentWorkflow ? String(parsed.body.parentWorkflow) : undefined,
-      parentRunId: parsed.body.parentRunId ? String(parsed.body.parentRunId) : undefined,
-      parentItemId: parsed.body.parentItemId ? String(parsed.body.parentItemId) : undefined,
-      formType: parsed.body.formType ? String(parsed.body.formType) : undefined,
-    });
+    const parsed = await readValidatedJson(c.req.raw, ocrDiscardBody);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.discard(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/ocr/force-research", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await handlers.forceResearch({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: String(parsed.body.runId ?? ""),
-      recordIndices: Array.isArray(parsed.body.recordIndices)
-        ? parsed.body.recordIndices.map(Number)
-        : [],
-    });
+    const parsed = await readValidatedJson(c.req.raw, ocrForceResearchBody);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.forceResearch(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/ocr/verify-relookup", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const lookup = String(parsed.body.lookup ?? "");
-    const result = await handlers.verifyRelookup({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: String(parsed.body.runId ?? ""),
-      recordIndex: Number(parsed.body.recordIndex ?? -1),
-      lookup: lookup === "i9" ? "i9" : "person",
-    });
+    const parsed = await readValidatedJson(c.req.raw, ocrVerifyRelookupBody);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.verifyRelookup(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/ocr/retry-page", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await handlers.retryPage({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: String(parsed.body.runId ?? ""),
-      pageNum: Number(parsed.body.pageNum ?? 0),
-    });
+    const parsed = await readValidatedJson(c.req.raw, ocrRetryPageBody);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.retryPage(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 
   app.post("/api/ocr/reocr-whole-pdf", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await handlers.reocrWholePdf({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: String(parsed.body.runId ?? ""),
-    });
+    const parsed = await readValidatedJson(c.req.raw, ocrSessionBody);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.reocrWholePdf(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 
@@ -160,7 +129,16 @@ async function handlePrepare(
       400,
     );
   }
-  const rosterMode = (fields.rosterMode?.trim() ?? "existing") as "existing" | "download" | "wait";
+  // Strict roster-mode check — an unrecognized value must not masquerade as a
+  // valid mode via a type-assertion.
+  const rosterModeRaw = fields.rosterMode?.trim() || "existing";
+  if (rosterModeRaw !== "existing" && rosterModeRaw !== "download" && rosterModeRaw !== "wait") {
+    return jsonResponse(
+      { ok: false, error: `rosterMode: "${rosterModeRaw}" is not one of existing | download | wait` },
+      400,
+    );
+  }
+  const rosterMode = rosterModeRaw;
   const rosterPath = fields.rosterPath?.trim() || undefined;
   const sessionId = requestedSessionId ?? (isReupload ? undefined : randomUUID());
   const previousRunId = fields.previousRunId?.trim() || undefined;

@@ -42,14 +42,17 @@ test("Hono /api/ocr/prepare missing pdf returns 400", async () => {
   assert.deepEqual(await res.json(), { ok: false, error: "missing 'pdf' file part" });
 });
 
-test("Hono /api/ocr/approve-batch forwards validation errors", async () => {
+test("Hono /api/ocr/approve-batch 400s a malformed body with the offending fields named", async () => {
   const res = await app().request("/api/ocr/approve-batch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sessionId: "", runId: "", records: [] }),
   });
   assert.equal(res.status, 400);
-  assert.deepEqual(await res.json(), { ok: false, error: "Missing sessionId/runId/records" });
+  assert.deepEqual(await res.json(), {
+    ok: false,
+    error: "sessionId: must be a non-empty string; runId: must be a non-empty string",
+  });
 });
 
 test("Hono /api/ocr/approve-batch forwards body without preview fields", async () => {
