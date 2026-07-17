@@ -45,9 +45,11 @@ export function registerHubRoute(app: Hono, deps: DashboardHonoDeps): void {
         stops.push(stop);
       }
 
-      // Cleanup: stop all topic emitters when the client disconnects.
+      // Cleanup: stop all topic emitters when the client disconnects. Each
+      // stop runs in its own settled promise so one throwing emitter cannot
+      // skip its siblings' cleanup.
       return async () => {
-        await Promise.allSettled(stops.map((s) => s()));
+        await Promise.allSettled(stops.map(async (s) => s()));
       };
     }, c.req.raw);
   });

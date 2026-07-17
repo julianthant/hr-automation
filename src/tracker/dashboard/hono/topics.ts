@@ -89,7 +89,7 @@ export function parseSubsQuery(
   const seenIds = new Set<string>();
 
   for (let i = 0; i < parsed.length; i++) {
-    const item = parsed[i];
+    const item: unknown = parsed[i];
     if (item === null || typeof item !== "object") {
       return { error: `subs[${i}] must be an object` };
     }

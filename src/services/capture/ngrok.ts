@@ -52,11 +52,11 @@ export function extractNgrokError(text: string): string | undefined {
   return latest;
 }
 
-function parseNgrokJsonLine(raw: string): unknown | null {
+function parseNgrokJsonLine(raw: string): unknown {
   const line = raw.trim();
   if (!line) return null;
   try {
-    const parsed = JSON.parse(line);
+    const parsed: unknown = JSON.parse(line);
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;

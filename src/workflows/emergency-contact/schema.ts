@@ -92,7 +92,7 @@ export function loadBatch(yamlPath: string): EmergencyContactBatch {
     throw new Error(`Batch file not found: ${yamlPath}`);
   }
   const raw = fs.readFileSync(yamlPath, "utf-8");
-  const parsed = parseYaml(raw);
+  const parsed: unknown = parseYaml(raw);
   const result = BatchSchema.safeParse(parsed);
   if (!result.success) {
     const issues = result.error.issues

@@ -19,15 +19,20 @@ const unusedImportsRules = {
 
 // Type-aware rule tiering for this codebase. The `recommendedTypeChecked`
 // preset stays ON (dozens of clean rules enforce as errors and guard new code);
-// this object adjusts the rules that currently HAVE findings so `npm run lint`
-// gives real signal instead of a wall of red. Two tiers:
+// this object adjusts the rest. Two tiers:
 //
-//   (1) ENFORCED (error), just configured smarter — real bug classes we keep.
-//   (2) TYPING DEBT (warn) — visible, greppable, burn down over time. These
-//       either need author-aware type work at untyped JSON/library boundaries
-//       (`no-unsafe-*`, `no-base-to-string`) or touch the kernel's deliberate
-//       error/promise handling (`only-throw-error`, `prefer-promise-reject-errors`),
-//       so a rushed mass edit would risk real behavior — not a blanket silence.
+//   (1) ENFORCED (error) — real bug classes, configured smarter where the
+//       default fights a deliberate idiom. The former "typing debt" warns
+//       (`no-unsafe-*`, `no-base-to-string`, throw/reject hygiene) were burned
+//       to zero 2026-07-17 and promoted to errors — new findings fail the lint
+//       gate immediately.
+//   (2) OFF with cause — rules that contradict a documented house idiom, not
+//       debt: `require-await` (handlers keep a uniform async signature even
+//       when a given implementation happens to be sync) and the dashboard's
+//       `react-refresh/only-export-components` (hooks/registries are
+//       deliberately co-located with their components; a full HMR reload for
+//       those files is acceptable, and there is no component test harness the
+//       boundary would protect).
 const typeAwareTuning = {
   // (1) ENFORCED. `no-floating-promises` stays a hard error (default) — real
   // fire-and-forget bugs, marked explicitly with `void`. `no-misused-promises`
@@ -41,28 +46,31 @@ const typeAwareTuning = {
     { checksVoidReturn: false },
   ],
 
-  // (2) TYPING DEBT — warn, burn down later.
-  "@typescript-eslint/no-base-to-string": "warn",
-  "@typescript-eslint/no-unsafe-assignment": "warn",
-  "@typescript-eslint/no-unsafe-member-access": "warn",
-  "@typescript-eslint/no-unsafe-call": "warn",
-  "@typescript-eslint/no-unsafe-argument": "warn",
-  "@typescript-eslint/no-unsafe-return": "warn",
-  "@typescript-eslint/no-redundant-type-constituents": "warn",
-  "@typescript-eslint/only-throw-error": "warn",
-  "@typescript-eslint/prefer-promise-reject-errors": "warn",
-  "@typescript-eslint/await-thenable": "warn",
-  // `async` kept for signature/interface consistency (uniform handler shape).
-  "@typescript-eslint/require-await": "warn",
-  // Fires on every `${value}` where `value` is a union/number/boolean — mostly
-  // benign interpolation in log/trace strings.
+  // Unsafe-boundary + stringification rules: zero findings as of 2026-07-17,
+  // enforced so they stay zero. `String(unknownValue)` at a persistence or
+  // API boundary is exactly how "[object Object]" reaches a tracker row.
+  "@typescript-eslint/no-base-to-string": "error",
+  "@typescript-eslint/no-unsafe-assignment": "error",
+  "@typescript-eslint/no-unsafe-member-access": "error",
+  "@typescript-eslint/no-unsafe-call": "error",
+  "@typescript-eslint/no-unsafe-argument": "error",
+  "@typescript-eslint/no-unsafe-return": "error",
+  "@typescript-eslint/no-redundant-type-constituents": "error",
+  "@typescript-eslint/only-throw-error": "error",
+  "@typescript-eslint/prefer-promise-reject-errors": "error",
+  "@typescript-eslint/await-thenable": "error",
+  // OFF: handlers keep a uniform async signature even when one implementation
+  // happens to be sync today (daemon queue ops, route handlers) — the rule
+  // would force signature churn on every such edit.
+  "@typescript-eslint/require-await": "off",
+  // `${value}` where value is number/boolean/nullish is benign log
+  // interpolation; anything else (objects, unions with objects) errors.
   "@typescript-eslint/restrict-template-expressions": [
-    "warn",
+    "error",
     { allowNumber: true, allowBoolean: true, allowNullish: true },
   ],
   // Core rule (not typescript-eslint): losing the original error in a re-throw.
-  // One finding, in active parallel work — surface as a warning.
-  "preserve-caught-error": "warn",
+  "preserve-caught-error": "error",
 };
 
 export default ts.config(
@@ -107,8 +115,12 @@ export default ts.config(
       ...unusedImportsRules,
       ...typeAwareTuning,
       "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-hooks/exhaustive-deps": "error",
+      // OFF: hooks, contexts and node/edge registries are deliberately
+      // co-located with their components (see workflows-context.tsx,
+      // edge-registry.tsx); Vite falls back to a full reload for those
+      // modules, which this dashboard accepts.
+      "react-refresh/only-export-components": "off",
     },
   },
 

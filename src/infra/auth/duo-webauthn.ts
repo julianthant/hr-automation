@@ -180,8 +180,10 @@ function numericEnv(name: string, fallback: number): number {
 }
 
 function duoWebAuthnAbortReason(signal: AbortSignal): Error {
-  const reason = signal.reason;
-  return reason instanceof Error ? reason : new Error(reason ? String(reason) : "Duo WebAuthn lock wait aborted");
+  const reason: unknown = signal.reason;
+  if (reason instanceof Error) return reason;
+  if (typeof reason === "string" && reason) return new Error(reason);
+  return new Error("Duo WebAuthn lock wait aborted");
 }
 
 async function waitForDuoWebAuthnLock(ms: number, abortSignal?: AbortSignal): Promise<void> {
@@ -500,9 +502,6 @@ export interface DuoWebAuthnHandle {
   finish(opts: { approved: boolean }): Promise<void>;
 }
 
-interface AddAuthenticatorResult {
-  authenticatorId: string;
-}
 interface GetCredentialsResult {
   credentials: Array<{ credentialId: string; signCount: number }>;
 }

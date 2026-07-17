@@ -11,7 +11,8 @@ import { registerLocalFile } from "../../../files/files.js";
 import { ensurePdfPageCache } from "../../../files/pdf-cache.js";
 import { getProjectionDb, type DashboardHonoDeps } from "../context.js";
 import { readMultipartRequest } from "../multipart.js";
-import { jsonResponse, readJsonRequest } from "../responses.js";
+import { oathUploadCancelBody, readValidatedJson } from "../request-schemas.js";
+import { jsonResponse } from "../responses.js";
 
 export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): void {
   const handlers = {
@@ -30,13 +31,9 @@ export function registerOathUploadRoutes(app: Hono, deps: DashboardHonoDeps): vo
   });
 
   app.post("/api/oath-upload/cancel", async (c) => {
-    const parsed = await readJsonRequest(c.req.raw, 4096);
-    if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, 400);
-    const result = await handlers.cancel({
-      sessionId: String(parsed.body.sessionId ?? ""),
-      runId: parsed.body.runId ? String(parsed.body.runId) : undefined,
-      reason: parsed.body.reason ? String(parsed.body.reason) : undefined,
-    });
+    const parsed = await readValidatedJson(c.req.raw, oathUploadCancelBody);
+    if (!parsed.ok) return parsed.response;
+    const result = await handlers.cancel(parsed.body);
     return jsonResponse(result.body, result.status);
   });
 

@@ -164,7 +164,7 @@ export async function assertDisplayedIdentity(
       throw new Error(
         `${context}: could not read the displayed identity to confirm it matches "${expected}" — ` +
           `refusing to proceed so no action is taken on the wrong person (cause: ${errorMessage(err)})`,
-        { cause: err instanceof Error ? err : undefined },
+        { cause: err },
       );
     }
     const check = checkDisplayedIdentity(expected, displayed, matchOpts);

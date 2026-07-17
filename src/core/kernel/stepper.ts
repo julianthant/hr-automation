@@ -261,7 +261,7 @@ export class Stepper {
         try {
           this.throwCancelled(stepName)
         } catch (err) {
-          reject(err)
+          reject(err instanceof Error ? err : new Error(String(err)))
         }
       }
       if (signal.aborted) {
@@ -277,7 +277,8 @@ export class Stepper {
         },
         (err) => {
           signal.removeEventListener('abort', onAbort)
-          reject(err)
+          // Pass-through: the inner rejection must propagate unwrapped.
+          reject(err as Error)
         },
       )
     })

@@ -113,8 +113,8 @@ const STATEMENT_CATCH_ALLOWLIST: Record<string, { count: number; reason: string 
     reason: "Cosmetic relative-time-ago string formatting for a search result row.",
   },
   "src/dashboard/components/ocr/types.ts": {
-    count: 4,
-    reason: "Malformed `records` JSON on an OCR preview row -> null (the whole preview row fails to render); it is a read-side preview projection, not the authoritative tracker record. (4th: the i9 parser mirrors the EC/oath/verify parsers.)",
+    count: 1,
+    reason: "Malformed `records` JSON on an OCR preview row -> null (the whole preview row fails to render); it is a read-side preview projection, not the authoritative tracker record. The four per-form parsers now share one parseRecordsField helper (2026-07-17 lint burn-down), so the shape occurs once.",
   },
   "src/dashboard/components/ui/calendar.tsx": {
     count: 1,

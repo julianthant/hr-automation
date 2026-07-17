@@ -60,7 +60,7 @@ export function persistOcrPrepareInput(
 export function readOcrPrepareInput(
   store: OcrPrepareInputStore,
   args: { sessionId: string; runId: string },
-): unknown | undefined {
+): unknown {
   const row = store.db.prepare(`
     SELECT schema_version, input_hash, input_json
     FROM ocr_prepare_inputs

@@ -342,6 +342,14 @@ export const captureReorderBody = z.object({
 
 export const captureValidateBody = z.object({ sessionId: requiredString });
 
+// ── Route body schemas (oath-upload.ts) ───────────────────────────────────────
+
+export const oathUploadCancelBody = z.object({
+  sessionId: requiredString,
+  runId: optionalString,
+  reason: optionalString,
+});
+
 // ── postJson adapter ──────────────────────────────────────────────────────────
 
 type ParseFailure = { ok: false; error: string; status?: number };

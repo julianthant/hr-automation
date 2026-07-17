@@ -284,8 +284,9 @@ export async function selectReasonCode(
     // Fallback: use PeopleSoft submitAction if sidebar overlay blocks click
     log.step("Regular click blocked — using JS submitAction...");
     await frame.locator("body").evaluate(() => { // allow-inline-selector -- root for JS-eval-only path (no click/fill)
-      // @ts-expect-error PeopleSoft global
-      submitAction_win0(document.win0, "HR_TBH_WRK_TBH_NEXT");
+      const w = window as unknown as { submitAction_win0: (form: unknown, name: string) => void };
+      const d = document as unknown as { win0?: unknown };
+      w.submitAction_win0(d.win0, "HR_TBH_WRK_TBH_NEXT");
     });
   }
 
@@ -890,7 +891,7 @@ export async function clickSaveAndSubmit(
       log.step("Transaction number not found — will need manual entry");
     }
   } catch (e) {
-    log.step(`Transaction number extraction failed: ${e instanceof Error ? e.message : e}`);
+    log.step(`Transaction number extraction failed: ${errorMessage(e)}`);
   }
 
   return { success: true, transactionNumber };

@@ -238,39 +238,65 @@ export function isDiscardedPrepRow(e: {
  * JSON string in `data.records` (see `flattenForData` in
  * src/workflows/emergency-contact/prepare.ts), so we re-hydrate it here.
  */
+// ── Row-data JSON field parsers (the single any→unknown seam) ────────────────
+// The four prep-row parsers below re-hydrate the same serialized fields; these
+// helpers keep the JSON.parse boundary typed as `unknown` + narrowed once.
+
+/** Serialized record array. `null` = corrupt JSON (caller drops the row); non-array JSON = `[]`. */
+function parseRecordsField<T>(raw: string | undefined): T[] | null {
+  try {
+    const parsed: unknown = JSON.parse(raw ?? "[]");
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return null;
+  }
+}
+
+function parseFailedPagesField(raw: string | undefined): FailedPage[] | undefined {
+  if (typeof raw !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as FailedPage[]) : undefined;
+  } catch {
+    return undefined; // tolerate
+  }
+}
+
+function parsePageStatusSummaryField(raw: string | undefined): PageStatusSummary | undefined {
+  if (typeof raw !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof (parsed as { total?: unknown }).total === "number") {
+      return parsed as PageStatusSummary;
+    }
+    return undefined;
+  } catch {
+    return undefined; // tolerate
+  }
+}
+
+function parseEmptyPagesField(raw: string | undefined): number[] | undefined {
+  if (typeof raw !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((n): n is number => typeof n === "number")
+      : undefined;
+  } catch {
+    return undefined; // tolerate — pre-feature row
+  }
+}
+
 export function parsePrepareRowData(
   rawData: Record<string, string> | undefined,
 ): PrepareRowData | null {
   if (!rawData) return null;
   if (rawData.mode !== "prepare") return null;
-  let records: PreviewRecord[] = [];
-  try {
-    const parsed = JSON.parse(rawData.records ?? "[]");
-    if (Array.isArray(parsed)) records = parsed as PreviewRecord[];
-  } catch {
-    return null;
-  }
-  let failedPages: FailedPage[] | undefined;
-  try {
-    if (typeof rawData.failedPages === "string") {
-      const parsed = JSON.parse(rawData.failedPages);
-      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
-    }
-  } catch { /* tolerate */ }
-  let pageStatusSummary: PageStatusSummary | undefined;
-  try {
-    if (typeof rawData.pageStatusSummary === "string") {
-      const parsed = JSON.parse(rawData.pageStatusSummary);
-      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
-    }
-  } catch { /* tolerate */ }
-  let emptyPages: number[] | undefined;
-  try {
-    if (typeof rawData.emptyPages === "string") {
-      const parsed = JSON.parse(rawData.emptyPages);
-      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
-    }
-  } catch { /* tolerate — pre-feature row */ }
+  const records = parseRecordsField<PreviewRecord>(rawData.records);
+  if (records === null) return null;
+  const failedPages = parseFailedPagesField(rawData.failedPages);
+  const pageStatusSummary = parsePageStatusSummaryField(rawData.pageStatusSummary);
+  const emptyPages = parseEmptyPagesField(rawData.emptyPages);
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -441,34 +467,11 @@ export function parseVerifyPrepareRowData(
 ): VerifyPrepareRowData | null {
   if (!rawData) return null;
   if (rawData.mode !== "prepare") return null;
-  let records: VerifyPreviewRecord[] = [];
-  try {
-    const parsed = JSON.parse(rawData.records ?? "[]");
-    if (Array.isArray(parsed)) records = parsed as VerifyPreviewRecord[];
-  } catch {
-    return null;
-  }
-  let failedPages: FailedPage[] | undefined;
-  try {
-    if (typeof rawData.failedPages === "string") {
-      const parsed = JSON.parse(rawData.failedPages);
-      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
-    }
-  } catch { /* tolerate */ }
-  let pageStatusSummary: PageStatusSummary | undefined;
-  try {
-    if (typeof rawData.pageStatusSummary === "string") {
-      const parsed = JSON.parse(rawData.pageStatusSummary);
-      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
-    }
-  } catch { /* tolerate */ }
-  let emptyPages: number[] | undefined;
-  try {
-    if (typeof rawData.emptyPages === "string") {
-      const parsed = JSON.parse(rawData.emptyPages);
-      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
-    }
-  } catch { /* tolerate — pre-feature row */ }
+  const records = parseRecordsField<VerifyPreviewRecord>(rawData.records);
+  if (records === null) return null;
+  const failedPages = parseFailedPagesField(rawData.failedPages);
+  const pageStatusSummary = parsePageStatusSummaryField(rawData.pageStatusSummary);
+  const emptyPages = parseEmptyPagesField(rawData.emptyPages);
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -547,34 +550,11 @@ export function parseI9PrepareRowData(
 ): I9PrepareRowData | null {
   if (!rawData) return null;
   if (rawData.mode !== "prepare") return null;
-  let records: I9PreviewRecord[] = [];
-  try {
-    const parsed = JSON.parse(rawData.records ?? "[]");
-    if (Array.isArray(parsed)) records = parsed as I9PreviewRecord[];
-  } catch {
-    return null;
-  }
-  let failedPages: FailedPage[] | undefined;
-  try {
-    if (typeof rawData.failedPages === "string") {
-      const parsed = JSON.parse(rawData.failedPages);
-      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
-    }
-  } catch { /* tolerate */ }
-  let pageStatusSummary: PageStatusSummary | undefined;
-  try {
-    if (typeof rawData.pageStatusSummary === "string") {
-      const parsed = JSON.parse(rawData.pageStatusSummary);
-      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
-    }
-  } catch { /* tolerate */ }
-  let emptyPages: number[] | undefined;
-  try {
-    if (typeof rawData.emptyPages === "string") {
-      const parsed = JSON.parse(rawData.emptyPages);
-      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
-    }
-  } catch { /* tolerate — pre-feature row */ }
+  const records = parseRecordsField<I9PreviewRecord>(rawData.records);
+  if (records === null) return null;
+  const failedPages = parseFailedPagesField(rawData.failedPages);
+  const pageStatusSummary = parsePageStatusSummaryField(rawData.pageStatusSummary);
+  const emptyPages = parseEmptyPagesField(rawData.emptyPages);
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",
@@ -649,34 +629,11 @@ export function parseOathPrepareRowData(
 ): OathPrepareRowData | null {
   if (!rawData) return null;
   if (rawData.mode !== "prepare") return null;
-  let records: OathPreviewRecord[] = [];
-  try {
-    const parsed = JSON.parse(rawData.records ?? "[]");
-    if (Array.isArray(parsed)) records = parsed as OathPreviewRecord[];
-  } catch {
-    return null;
-  }
-  let failedPages: FailedPage[] | undefined;
-  try {
-    if (typeof rawData.failedPages === "string") {
-      const parsed = JSON.parse(rawData.failedPages);
-      if (Array.isArray(parsed)) failedPages = parsed as FailedPage[];
-    }
-  } catch { /* tolerate */ }
-  let pageStatusSummary: PageStatusSummary | undefined;
-  try {
-    if (typeof rawData.pageStatusSummary === "string") {
-      const parsed = JSON.parse(rawData.pageStatusSummary);
-      if (parsed && typeof parsed.total === "number") pageStatusSummary = parsed as PageStatusSummary;
-    }
-  } catch { /* tolerate */ }
-  let emptyPages: number[] | undefined;
-  try {
-    if (typeof rawData.emptyPages === "string") {
-      const parsed = JSON.parse(rawData.emptyPages);
-      if (Array.isArray(parsed)) emptyPages = parsed.filter((n) => typeof n === "number");
-    }
-  } catch { /* tolerate — pre-feature row */ }
+  const records = parseRecordsField<OathPreviewRecord>(rawData.records);
+  if (records === null) return null;
+  const failedPages = parseFailedPagesField(rawData.failedPages);
+  const pageStatusSummary = parsePageStatusSummaryField(rawData.pageStatusSummary);
+  const emptyPages = parseEmptyPagesField(rawData.emptyPages);
   return {
     mode: "prepare",
     pdfPath: rawData.pdfPath ?? "",

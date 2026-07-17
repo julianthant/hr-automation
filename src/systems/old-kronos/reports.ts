@@ -277,7 +277,7 @@ async function downloadReportRow(
   const downloadHandler = async (dl: { suggestedFilename: () => string; saveAs: (path: string) => Promise<void> }) => {
     log.step(`[${employeeId}] Download event! ${dl.suggestedFilename()}`);
     await dl.saveAs(dest);
-    await registerDownloadedReportPdf(dest, filename, employeeId);
+    registerDownloadedReportPdf(dest, filename, employeeId);
     log.step(`[${employeeId}] SAVED: ${dest}`);
     downloadCaptured = true;
   };

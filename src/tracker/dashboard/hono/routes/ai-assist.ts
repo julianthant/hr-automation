@@ -94,8 +94,15 @@ function flatten(obj: Record<string, unknown>, prefix = ""): CheckableRecord {
     const key = prefix ? `${prefix}.${k}` : k;
     if (v != null && typeof v === "object" && !Array.isArray(v)) {
       Object.assign(out, flatten(v as Record<string, unknown>, key));
-    } else if (v == null || typeof v !== "object") {
-      out[key] = v == null ? null : String(v);
+    } else if (v == null) {
+      out[key] = null;
+    } else if (typeof v === "string") {
+      out[key] = v;
+    } else if (
+      typeof v === "number" || typeof v === "boolean" ||
+      typeof v === "bigint" || typeof v === "symbol"
+    ) {
+      out[key] = String(v);
     }
   }
   return out;

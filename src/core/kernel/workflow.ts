@@ -65,7 +65,10 @@ function validateAndNormalizePresets<TSteps extends readonly string[]>(
     if (!p.label || typeof p.label !== 'string') {
       throw new Error(`defineWorkflow('${workflowName}'): presets[${i}].label must be a non-empty string`)
     }
-    if (!Array.isArray(p.skipSteps) || p.skipSteps.length === 0) {
+    // Guard on a separate `unknown` binding so Array.isArray's `any[]`
+    // narrowing can't degrade `p.skipSteps`' declared readonly tuple type.
+    const skipStepsRuntime: unknown = p.skipSteps
+    if (!Array.isArray(skipStepsRuntime) || skipStepsRuntime.length === 0) {
       throw new Error(
         `defineWorkflow('${workflowName}'): presets[${i}] ('${p.id}').skipSteps must be a non-empty array`,
       )

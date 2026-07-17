@@ -56,7 +56,7 @@ export function findTaskByIdentity(
   return row ? mapTaskRow(row) : null
 }
 
-export function findInputForRunId(db: Database, runId: string): unknown | null {
+export function findInputForRunId(db: Database, runId: string): unknown {
   const row = db.prepare(`
     SELECT t.input_json
     FROM task_attempts a
@@ -77,7 +77,7 @@ export function findInputForRunId(db: Database, runId: string): unknown | null {
  * nullable on purpose. The control layer falls back to JSONL reconstruction
  * for those rows.
  */
-export function findOriginalInputForRunId(db: Database, runId: string): unknown | null {
+export function findOriginalInputForRunId(db: Database, runId: string): unknown {
   const row = db.prepare(`
     SELECT t.original_input_json
     FROM task_attempts a

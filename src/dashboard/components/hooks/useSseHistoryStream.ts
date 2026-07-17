@@ -60,14 +60,22 @@ export function useSseHistoryStream<T>(
     setLoading(true);
     const myGen = streamGeneration.current;
 
+    // Rebuild the identity object from the dep-listed fields so the effect
+    // never closes over the (referentially unstable) `params` object itself.
     const currentBuildParams = buildParamsRef.current;
+    const streamIdentity: StreamParams = {
+      workflow: params.workflow,
+      itemId: params.itemId,
+      runId: params.runId,
+      date: params.date,
+    };
     const hubParams = currentBuildParams
-      ? currentBuildParams(params)
+      ? currentBuildParams(streamIdentity)
       : compact({
-          workflow: params.workflow,
-          id: params.itemId,
-          runId: params.runId,
-          date: params.date,
+          workflow: streamIdentity.workflow,
+          id: streamIdentity.itemId,
+          runId: streamIdentity.runId,
+          date: streamIdentity.date,
         });
 
     let gotSseData = false;

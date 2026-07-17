@@ -586,7 +586,7 @@ export const onboardingWorkflow = defineWorkflow({
           throw new Error(errMsg, { cause: error });
         }
       } finally {
-        const exitStr = failedAtStep ? `<failed at step: ${failedAtStep}>` : txnExit;
+        const exitStr = failedAtStep ? `<failed at step: ${String(failedAtStep)}>` : txnExit;
         log.step(
           `[Step: transaction] END took=${Date.now() - t0}ms `
           + `txnNumber='${exitStr}'`,

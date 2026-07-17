@@ -1,6 +1,7 @@
 import type { RegisteredWorkflow } from './types.js'
 import { normalizeDetailField } from './registry.js'
 import type { WithTrackedWorkflowOpts } from '../../tracker/jsonl.js'
+import { serializeValue } from '../../tracker/jsonl-core.js'
 import { operatorSubjectData } from '../../domain/operator-subject.js'
 import { queueTitleData } from '../../domain/queue-title.js'
 import { isMemberRowShape, type MemberRowShape } from '../../domain/row-archetype.js'
@@ -126,7 +127,7 @@ export function buildInitialTrackerData<TData, TSteps extends readonly string[]>
   const initial: Record<string, string> = {}
   if (wf.config.initialData) {
     for (const [key, value] of Object.entries(wf.config.initialData(input))) {
-      initial[key] = value == null ? '' : String(value)
+      initial[key] = serializeValue(value, key)
     }
   }
   const subject = wf.config.operatorSubject ? operatorSubjectData(wf.config.operatorSubject(input)) : {}

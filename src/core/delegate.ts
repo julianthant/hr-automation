@@ -449,7 +449,7 @@ async function runInProcessPool<TChildData, TChildSteps extends readonly string[
   rootCode?: string
   rootTracePrefix?: string
 }): Promise<ChildRunResult<TChildData>[]> {
-  const results: ChildRunResult<TChildData>[] = new Array(args.inputs.length)
+  const results: ChildRunResult<TChildData>[] = new Array<ChildRunResult<TChildData>>(args.inputs.length)
   const concurrency = Math.max(1, args.concurrency ?? args.inputs.length)
   let nextIdx = 0
   const workers = Array.from({ length: Math.min(concurrency, args.inputs.length) }, async () => {

@@ -132,14 +132,14 @@ function serializeInputForTracker(input: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
     if (value === undefined || value === null) continue;
-    if (typeof value === "object") {
-      try {
-        out[key] = JSON.stringify(value);
-      } catch {
-        out[key] = String(value);
-      }
-    } else {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
       out[key] = String(value);
+    } else {
+      try {
+        out[key] = JSON.stringify(value) ?? "[unserializable value]";
+      } catch {
+        out[key] = "[unserializable value]";
+      }
     }
   }
   return out;

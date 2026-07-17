@@ -226,7 +226,7 @@ export function overrideToGraph(
  */
 export function graphToOverride(
   model: GraphModel,
-  workflowName: string,
+  _workflowName: string,
   baseSteps: string[],
 ): WorkflowOverride {
   const naming: NamingConfig = {};

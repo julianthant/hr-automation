@@ -55,7 +55,7 @@ export function useWorkflowDesign(workflowName: string | null): {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(next),
         });
-        const b: { ok?: boolean; jsonPath?: string; mdPath?: string } = await r.json();
+        const b = await r.json() as { ok?: boolean; jsonPath?: string; mdPath?: string };
         if (b.ok && b.jsonPath && b.mdPath) {
           setSpec(next);
           return { jsonPath: b.jsonPath, mdPath: b.mdPath };

@@ -1,5 +1,6 @@
 import type { RegisteredWorkflow } from './types.js'
 import { CancelledError } from './types.js'
+import { errorMessage } from '../../utils/errors.js'
 import type { Session } from './session.js'
 import type { Stepper } from './stepper.js'
 import { makeCtx, tryScreenshot } from './ctx.js'
@@ -29,7 +30,7 @@ export interface RunWorkflowHandlerOpts<TData, TSteps extends readonly string[]>
   emitScreenshotEvent: (event: ScreenshotEvent) => void
   preHandler?: () => Promise<void>
   onPreHandlerError?: (err: unknown) => void
-  mapEscapedHandlerError?: (err: unknown) => unknown | void
+  mapEscapedHandlerError?: (err: unknown) => unknown
   skipCancelledScreenshot?: boolean
   /** Per-run AbortSignal — surfaced as `ctx.signal` and auto-injected
    *  into Playwright calls via the Page proxy. */
@@ -77,7 +78,7 @@ export async function runWorkflowHandler<TData, TSteps extends readonly string[]
   } catch (err) {
     if (opts.skipCancelledScreenshot && err instanceof CancelledError) throw err
     const mapped = opts.mapEscapedHandlerError?.(err)
-    if (mapped) throw mapped
+    if (mapped) throw mapped instanceof Error ? mapped : new Error(errorMessage(mapped))
     await tryScreenshot(ctx, 'handler-throw')
     throw err
   }

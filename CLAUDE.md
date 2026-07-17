@@ -33,8 +33,9 @@ npm run setup                                      # First-use environment valid
 npm run schemas:export                             # Write each workflow's Zod input schema as JSON Schema
 npm run selectors:catalog                          # Regenerate per-system SELECTORS.md from selectors.ts
 npm run selector:search "<intent>"                 # Fuzzy search across SELECTORS.md + LESSONS.md
-npm run typecheck                                  # Type-check src/
-npm run typecheck:all                              # Type-check src/ + tests
+npm run typecheck                                  # Type-check backend src/ + tests
+npm run typecheck:dashboard                        # Type-check the dashboard project (src/dashboard/tsconfig.json)
+npm run typecheck:all                              # Both of the above — the full type gate
 npm run test                                       # Unit tests (dot reporter — live progress)
 npm run test:verbose                               # Per-test lines (scoped debugging)
 npm run test:watch                                 # Vitest in watch mode for iterative dev

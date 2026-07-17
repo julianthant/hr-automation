@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { pollDuoApproval } from "./duo-poll.js";
 import { requestDuoApproval } from "../../tracker/sessions/duo-queue.js";
@@ -899,7 +900,7 @@ async function loginToServiceNowFlow(
   } catch (err) {
     if (abortSignal?.aborted) throw err;
     log.warn(
-      `[Auth: servicenow] SSO field fill failed: ${err instanceof Error ? err.message : err}`,
+      `[Auth: servicenow] SSO field fill failed: ${errorMessage(err)}`,
     );
     return false;
   }

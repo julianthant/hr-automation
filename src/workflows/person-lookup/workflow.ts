@@ -65,6 +65,19 @@ export interface LookupResult {
 
 const steps = ["searching", "cross-verification", "active-status", "crm-dates"] as const;
 
+/**
+ * Read tracker `ctx.data` fields as strings. Values ride the tracker as
+ * strings; a non-string here is a stamping bug and reads as absent rather
+ * than stringifying to "[object Object]".
+ */
+function dataString(...values: unknown[]): string {
+  for (const v of values) {
+    if (v === null || v === undefined) continue;
+    return typeof v === "string" ? v : "";
+  }
+  return "";
+}
+
 /** Direct input runs use normal utility defaults; OCR fan-out children title by person/EID. */
 export const PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY: WorkflowRuntimePolicy = {
   ...DEFAULT_WORKFLOW_RUNTIME_POLICY,
@@ -335,7 +348,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   // EID inputs: search CRM by EID or name purely to source the Start Date.
   if (isEidInput(input)) {
     const { lastName, firstName } = resolveCrmSearchNameParts(
-      String(ctx.data.resolvedName ?? ctx.data.searchName ?? ""),
+      dataString(ctx.data.resolvedName, ctx.data.searchName),
     );
     let crmRecords: CrmRecord[] = [];
     try {
@@ -355,7 +368,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     return;
   }
 
-  const searchName = String(ctx.data.searchName ?? input.name).trim();
+  const searchName = dataString(ctx.data.searchName, input.name).trim();
   let parsed: ReturnType<typeof parseNameInput>;
   try {
     parsed = parseNameInput(searchName);
@@ -432,7 +445,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
   await stampCrmStartDateAndScreenshot(
     ctx,
     crmRecords,
-    crmMatchedEmplId ?? String(ctx.data.emplId ?? ""),
+    crmMatchedEmplId ?? dataString(ctx.data.emplId),
   );
 }
 
@@ -512,7 +525,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
 
   if (!isEidInput(input) && crmMatch === "crm-only") {
     const page = await ctx.page("ucpath");
-    const eid = String(ctx.data.emplId ?? "").trim();
+    const eid = dataString(ctx.data.emplId).trim();
     if (!/^10\d{6}$/.test(eid)) {
       const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, []);
       stampActiveCheckFields(ctx, outcome);
@@ -550,7 +563,7 @@ async function activeStatusStep<TSteps extends readonly string[]>(
 async function crmDatesStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
 ): Promise<void> {
-  const name = String(ctx.data.resolvedName ?? ctx.data.searchName ?? "").trim();
+  const name = dataString(ctx.data.resolvedName, ctx.data.searchName).trim();
   if (!name) {
     log.step("CRM dates: no resolved name available — skipping");
     return;
@@ -579,7 +592,7 @@ async function crmDatesStep<TSteps extends readonly string[]>(
     return;
   }
 
-  const resolvedEid = String(ctx.data.emplId ?? "").trim();
+  const resolvedEid = dataString(ctx.data.emplId).trim();
   const primary = resolvedEid
     ? crmRecords.find((r) => r.ucpathEmployeeId === resolvedEid)
     : (crmRecords.length === 1 ? crmRecords[0] : undefined);

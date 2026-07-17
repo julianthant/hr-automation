@@ -75,7 +75,7 @@ export function DataBankPalette({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const { recentIds, pushRecent } = useRecentOpIds();
 
-  const systems = bank?.systems ?? [];
+  const systems = useMemo(() => bank?.systems ?? [], [bank]);
   const groups = useMemo(() => buildPaletteGroups(systems, { view, query, kinds }), [systems, view, query, kinds]);
   const kindChips = useMemo(() => availableKinds(systems), [systems]);
   const total = paletteOpCount(bank);

@@ -529,6 +529,7 @@ export async function fillTimekeeperComments(
   } catch (err) {
     throw new Error(
       `[Kuali] Failed to read existing Timekeeper/Approver Comments before appending — refusing to write and risk blanking prior comments: ${(err as Error).message}`,
+      { cause: err },
     );
   }
   const combined = existing ? `${existing}\n${comments}` : comments;

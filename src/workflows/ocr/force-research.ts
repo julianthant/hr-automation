@@ -71,7 +71,7 @@ export async function runForceResearch(input: ForceResearchInput, trackerDirOrOp
   const spec = getFormSpec(formType);
   if (!spec) throw new Error(`Unknown formType "${formType}"`);
 
-  const records: unknown[] = JSON.parse((latest.data?.records as unknown as string) ?? "[]");
+  const records = JSON.parse((latest.data?.records as unknown as string) ?? "[]") as unknown[];
   const itemIds: string[] = [];
   const enqueueInputs: Array<{ name: string }> = [];
   // Map itemId → index into records[] for outcome patching.

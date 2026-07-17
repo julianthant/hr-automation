@@ -419,16 +419,18 @@ function parseRecords(data: Record<string, string> | undefined): unknown[] {
 function parseFailedPages(data: Record<string, string> | undefined): FailedPageEntry[] {
   if (!data?.failedPages) return [];
   try {
-    const parsed = JSON.parse(data.failedPages);
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed: unknown = JSON.parse(data.failedPages);
+    return Array.isArray(parsed) ? (parsed as FailedPageEntry[]) : [];
   } catch { return []; }
 }
 
 function parsePageSummary(data: Record<string, string> | undefined): { total: number; succeeded: number; failed: number } | null {
   if (!data?.pageStatusSummary) return null;
   try {
-    const p = JSON.parse(data.pageStatusSummary);
-    if (typeof p?.total === "number") return p;
+    const p: unknown = JSON.parse(data.pageStatusSummary);
+    if (p && typeof p === "object" && typeof (p as { total?: unknown }).total === "number") {
+      return p as { total: number; succeeded: number; failed: number };
+    }
     return null;
   } catch { return null; }
 }

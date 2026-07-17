@@ -41,7 +41,7 @@ export function buildTaskDependenciesHandler(opts: {
     try {
       const summary = opts.getSummaryByParentRunId
         ? await opts.getSummaryByParentRunId(parentRunId)
-        : await getDependencySummaryByParentRunId(openTaskStore(opts.trackerDir), parentRunId);
+        : getDependencySummaryByParentRunId(openTaskStore(opts.trackerDir), parentRunId);
       return { status: 200, body: { ok: true, ...summary } };
     } catch (err) {
       return {

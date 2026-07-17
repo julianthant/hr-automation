@@ -363,13 +363,15 @@ export function listPendingDependencies(
     kind: row.dependency_kind as TaskDependencyKind,
     status: row.dependency_status as TaskDependencyStatus,
     failurePolicy: row.failure_policy as TaskDependencyFailurePolicy,
-    metadata: parseJsonObject(row.metadata_json, `dependency ${row.dependency_id} metadata_json`),
-    result: parseJsonObject(row.result_json, `dependency ${row.dependency_id} result_json`),
+    metadata: parseJsonObject(row.metadata_json, `dependency ${String(row.dependency_id)} metadata_json`),
+    result: parseJsonObject(row.result_json, `dependency ${String(row.dependency_id)} result_json`),
     parent: mapTaskRow(prefixedTaskRow(row, "parent")),
     child: mapTaskRow(prefixedTaskRow(row, "child")),
     createdAt: String(row.dependency_created_at),
     updatedAt: String(row.dependency_updated_at),
-    ...(row.dependency_terminal_at ? { terminalAt: String(row.dependency_terminal_at) } : {}),
+    ...(typeof row.dependency_terminal_at === "string" && row.dependency_terminal_at
+      ? { terminalAt: row.dependency_terminal_at }
+      : {}),
   }));
 }
 
@@ -792,7 +794,7 @@ function prefixedTaskRow(row: Record<string, unknown>, prefix: "parent" | "child
     item_id: String(row[`${prefix}_item_id`]),
     run_id: row[`${prefix}_run_id`] ? String(row[`${prefix}_run_id`]) : null,
     task_kind: row[`${prefix}_task_kind`] as TaskKind,
-    control_state: csRaw != null ? String(csRaw) : null,
+    control_state: typeof csRaw === "string" ? csRaw : null,
     parent_task_id: row[`${prefix}_parent_task_id`] ? String(row[`${prefix}_parent_task_id`]) : null,
     data_json: row[`${prefix}_data_json`] ? String(row[`${prefix}_data_json`]) : "{}",
     created_at: String(row[`${prefix}_created_at`]),

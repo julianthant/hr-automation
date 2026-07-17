@@ -71,7 +71,7 @@ export function countRecords(e: TrackerEntry): number | undefined {
   const raw = e.data?.records;
   if (!raw) return undefined;
   try {
-    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
     return Array.isArray(parsed) ? parsed.length : undefined;
   } catch {
     return undefined;

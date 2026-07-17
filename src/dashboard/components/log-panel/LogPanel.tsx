@@ -122,8 +122,8 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   // both show aggregated member screenshots, hide the (meaningless) person
   // detail grid, and report member-rollup status. See `isOperationCoordinatorRow`.
   const isOperationCoordinator = Boolean(entry && isOperationCoordinatorRow(entry));
-  const registeredSteps = registered?.steps ?? [];
-  const detailFields = registered?.detailFields ?? [];
+  const registeredSteps = useMemo(() => registered?.steps ?? [], [registered]);
+  const detailFields = useMemo(() => registered?.detailFields ?? [], [registered]);
 
   // Runs for this entry + siblings, pooled with backend-stable run ordinals.
   // Keyed on (id, runId) tuples — NOT on status/step — so status updates

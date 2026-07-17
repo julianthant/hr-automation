@@ -182,7 +182,7 @@ export function toTypedValue(v: unknown): TypedValue {
   try {
     return { type: "string", value: JSON.stringify(v) };
   } catch {
-    return { type: "string", value: String(v) };
+    return { type: "string", value: "[unserializable value]" };
   }
 }
 
@@ -308,7 +308,8 @@ function getTrackerJsonlPath(workflow: string, dir: string): string {
   return rowFilePath(workflow, dateLocal(), dir);
 }
 
-const SSN_KEYS: ReadonlySet<string> = new Set(["ssn"]);
+// SSN-like string fields pass through the ordinary string branch unchanged;
+// DOB-like Date values keep the date-only form below.
 const DOB_KEYS: ReadonlySet<string> = new Set(["dob", "dateOfBirth", "birthdate"]);
 
 /**
@@ -323,21 +324,18 @@ const DOB_KEYS: ReadonlySet<string> = new Set(["dob", "dateOfBirth", "birthdate"
  */
 export function serializeValue(v: unknown, key?: string): string {
   if (v === null || v === undefined) return "";
-  if (key && SSN_KEYS.has(key)) {
-    return v instanceof Date ? v.toISOString() : String(v ?? "");
+  if (v instanceof Date) {
+    // DOB-like fields keep the date-only form; everything else full ISO.
+    return key && DOB_KEYS.has(key) ? v.toISOString().slice(0, 10) : v.toISOString();
   }
-  if (key && DOB_KEYS.has(key)) {
-    return v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? "");
-  }
-  if (v instanceof Date) return v.toISOString();
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") {
     return String(v);
   }
   try {
-    return JSON.stringify(v);
+    return JSON.stringify(v) ?? "[unserializable value]";
   } catch {
-    return String(v);
+    return "[unserializable value]";
   }
 }
 

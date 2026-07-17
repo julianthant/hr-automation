@@ -3,7 +3,19 @@ import { readFile, stat, unlink } from "fs/promises";
 import { log } from "../../utils/log.js";
 
 const require = createRequire(import.meta.url);
-const { PDFParse } = require("pdf-parse");
+
+// pdf-parse is CJS-required (its ESM entry misbehaves under tsx); the module
+// has no usable types through createRequire, so declare the two calls we use.
+interface PdfParseTextResult {
+  pages?: Array<{ text?: string }>;
+}
+interface PdfParseInstance {
+  load(): Promise<void>;
+  getText(): Promise<PdfParseTextResult>;
+}
+const { PDFParse } = require("pdf-parse") as {
+  PDFParse: new (opts: { url: string }) => PdfParseInstance;
+};
 
 /**
  * Validate a downloaded PDF report.
