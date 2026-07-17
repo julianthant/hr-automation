@@ -4,6 +4,8 @@ Multi-system employee termination: extracts data from Kuali Build, reads the New
 
 **Kernel-based.** Declared via `defineWorkflow` in `workflow.ts` and executed through `src/core/runWorkflow` (single-doc) or `src/core/runWorkflowBatch` (multi-doc sequential mode). The kernel owns browser launch, auth-chain orchestration, per-doc tracker entries, SIGINT cleanup, and screenshot-on-failure. The public start path is dashboard input run (`InputRunPanel` → `/api/enqueue`), which enqueues one or more `{docId}` items to any alive separation daemon (or spawns one). `runSeparation` and `runSeparationBatch` are preserved for in-process use (tests, scripts).
 
+**Display label is "Kuali" (2026-07-17):** the rail's "Separations" category holds two workflows — **Kuali** (this one) and **I-9 Check**. The internal workflow name stays `separations` (tracker partitions, SQLite tasks, loaders, routes); the session-card instance label is "Kuali N" (legacy "Separation N" instances still resolve via `LEGACY_INSTANCE_LABELS` in `src/tracker/session-events.ts`).
+
 ## I-9 Check is its OWN workflow now (2026-07-17)
 
 The "Run I-9 Check" upload run is **no longer part of separations**. It lives in the dedicated **`i9-check` workflow** (`src/workflows/i9-check/`, same "Separations" rail category, code `ic`) — one UCPath-only browser per daemon, its own upload modal, its own operation coordinator, and the full retention-check contract documented in `src/workflows/i9-check/CLAUDE.md`.

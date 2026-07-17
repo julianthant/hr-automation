@@ -270,7 +270,11 @@ export async function resolveSeparationEid(
 
 export const separationsWorkflow = defineWorkflow({
   name: "separations",
-  label: "Separations",
+  // Display label "Kuali" (2026-07-17, with the i9-check split): the rail's
+  // "Separations" CATEGORY now holds two workflows — Kuali (this one, the
+  // termination flow) and I-9 Check. The internal name stays "separations"
+  // (it keys tracker JSONL partitions, SQLite tasks, loaders, and routes).
+  label: "Kuali",
   archetype: "single",
   inputSubject: "kualiId",
   code: "se",
