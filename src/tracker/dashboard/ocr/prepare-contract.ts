@@ -15,7 +15,7 @@ export const OcrPrepareInputSchema = z.object({
   pdfOriginalName: z.string().min(1),
   pdfFileId: z.string().min(1).optional(),
   formType: z.string().min(1),
-  rosterMode: z.enum(["existing", "download", "wait"]),
+  rosterMode: z.enum(["existing", "download", "wait", "none"]),
   rosterPath: z.string().min(1).optional(),
   sessionId: z.string().min(1).optional(),
   previousRunId: z.string().min(1).optional(),
