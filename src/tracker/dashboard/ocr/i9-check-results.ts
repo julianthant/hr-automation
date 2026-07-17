@@ -1,17 +1,19 @@
 /**
- * I-9 check member fan-out — the separations half of the "Run I-9 Check"
- * operation flow (rev. 2026-07-16: REAL member tasks, not display rows).
+ * I-9 check member fan-out — the daemon half of the "Run I-9 Check" operation
+ * flow (rev. 2026-07-16: REAL member tasks, not display rows; rev. 2026-07-17:
+ * the tasks run in the dedicated `i9-check` workflow, split out of the
+ * separations daemon).
  *
- * An i9 OCR run launched from the separations panel is delegated under a
- * `separations` operation coordinator row (one per uploaded PDF). The i9 form
+ * An i9 OCR run launched from the I-9 Check panel is delegated under an
+ * `i9-check` operation coordinator row (one per uploaded PDF). The i9 form
  * spec has NO approve flow (`completeDelegatedRun`), so when the run completes
  * — right after Section 2 corroboration + the roster NAME match — the prepare
- * route calls `enqueueI9CheckMemberTasks` to enqueue one REAL separations
- * daemon task per person (`mode: "i9-check"`, see
- * `src/workflows/separations/i9-check-schema.ts`). Each task searches UCPath,
- * re-matches the Action History roster by the resolved EID, stamps the
- * found/not-found verdict on its own member row, and appends one row to the
- * master retention tracker (`src/tracker/exports/i9-check-tracker.ts`).
+ * route calls `enqueueI9CheckMemberTasks` to enqueue one REAL i9-check daemon
+ * task per person (see `src/workflows/i9-check/schema.ts`). Each task searches
+ * UCPath (one UCPath browser per daemon), re-matches the Action History roster
+ * by the resolved EID, stamps the found/not-found verdict on its own member
+ * row, and appends one row to the master retention tracker
+ * (`src/tracker/exports/i9-check-tracker.ts`).
  *
  * Pages that can never be searched (no legible name anywhere) still become
  * DISPLAY-ONLY failed rows (`data.displayOnly === "true"`) — a person the
@@ -39,7 +41,7 @@ import {
   normalizeI9Dob,
   type I9PreviewRecord,
 } from "../../../services/ocr/forms/i9.js";
-import type { I9CheckMemberInput } from "../../../workflows/separations/i9-check-schema.js";
+import type { I9CheckMemberInput } from "../../../workflows/i9-check/schema.js";
 import { buildFanOutItemIdResolver } from "./approve.js";
 import {
   composeFanOutMemberTraceId,
@@ -64,7 +66,7 @@ export interface I9CheckDisplayFailure {
   logs: I9CheckMemberLog[];
 }
 
-/** One REAL separations member task planned from an i9 preview record. */
+/** One REAL i9-check member task planned from an i9 preview record. */
 export interface I9CheckMemberTaskPlan {
   input: I9CheckMemberInput;
   itemId: string;
@@ -143,7 +145,7 @@ function buildProvenanceLogs(
         + `DOB ${searchCriteria.dob ?? "(not used)"}, `
         + `SSN ${searchCriteria.ssn ? "supplied" : "(not used)"} `
         + `— a wrong digit in ANY of these returns "no results", which reads the same as a real absence. `
-        + `The search runs as this row's separations i9-check task.`,
+        + `The search runs as this row's i9-check task.`,
     });
   }
   for (const note of rec.notes) logs.push({ level: "step", message: `OCR note: ${note}` });
@@ -326,7 +328,7 @@ export interface EnqueueI9CheckMemberTasksArgs {
   sessionId: string;
   /** The completed OCR run's id. */
   ocrRunId: string;
-  /** The separations operation coordinator the members nest under. */
+  /** The i9-check operation coordinator the members nest under. */
   operation: {
     workflow: string;
     runId: string;
@@ -351,7 +353,7 @@ export interface I9CheckFanOutSummary {
 }
 
 /**
- * Read the completed i9 OCR run's records and enqueue one REAL separations
+ * Read the completed i9 OCR run's records and enqueue one REAL i9-check
  * i9-check member task per person under the coordinator (plus display-only
  * failed rows for the never-searchable pages).
  *
@@ -373,7 +375,7 @@ export async function enqueueI9CheckMemberTasks(
   });
   if (!row) {
     throw new Error(
-      `I-9 check fan-out: no records row found for completed OCR run ${ocrRunId} (session ${sessionId}) — cannot enqueue separations member tasks`,
+      `I-9 check fan-out: no records row found for completed OCR run ${ocrRunId} (session ${sessionId}) — cannot enqueue i9-check member tasks`,
     );
   }
   const parsed = I9RecordsSchema.safeParse(JSON.parse(row.data!.records));
@@ -416,7 +418,7 @@ export async function enqueueI9CheckMemberTasks(
     const deriveItemId = buildFanOutItemIdResolver(
       logicalInputs,
       plan.tasks.map((t) => t.itemId),
-      "separations",
+      "i9-check",
     );
     const planByItemId = new Map(plan.tasks.map((t) => [t.itemId, t]));
     const daemonFlags = runOptionsToDaemonFlags(args.runOptions);
@@ -477,24 +479,24 @@ export async function enqueueI9CheckMemberTasks(
     };
     if (args.ensureDaemonsAndEnqueueOverride) {
       await args.ensureDaemonsAndEnqueueOverride(
-        { name: "separations" },
+        { name: "i9-check" },
         wrappedInputs,
         daemonFlags,
         enqueueOpts,
       );
     } else {
       const { loadWorkflow } = await import("../../../core/workflow-loaders.js");
-      const sepWf = await loadWorkflow("separations");
-      if (!sepWf) {
-        throw new Error("I-9 check fan-out: separations workflow could not be loaded");
+      const i9Wf = await loadWorkflow("i9-check");
+      if (!i9Wf) {
+        throw new Error("I-9 check fan-out: i9-check workflow could not be loaded");
       }
       const { ensureDaemonsAndEnqueue } = await import("../../../core/daemon/client.js");
-      await ensureDaemonsAndEnqueue(sepWf, wrappedInputs as never, daemonFlags, enqueueOpts as never);
+      await ensureDaemonsAndEnqueue(i9Wf, wrappedInputs as never, daemonFlags, enqueueOpts as never);
     }
   }
 
   log.success(
-    `[i9-check] fan-out complete — ${plan.tasks.length} member task(s) enqueued to separations, `
+    `[i9-check] fan-out complete — ${plan.tasks.length} member task(s) enqueued to i9-check, `
       + `${plan.displayFailures.length} unsearchable page(s) surfaced as failed rows (session ${sessionId}). `
       + `Each member appends one row to the master I-9 retention tracker; a re-run appends again.`,
   );
@@ -527,7 +529,7 @@ function emitDisplayFailureRow(
         queueRowKind: "person",
         i9Check: "true",
         // No daemon task backs this row — nothing is searchable. Suppresses
-        // retry/cancel/bump in the queue footer (a reconstructed separations
+        // retry/cancel/bump in the queue footer (a reconstructed
         // retry would start a REAL termination run — see `isDisplayOnlyRow`);
         // delete stays available.
         displayOnly: "true",

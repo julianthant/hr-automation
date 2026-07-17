@@ -11,9 +11,9 @@ import { errorMessage } from "../../../utils/errors.js";
 import { hasSessionLock, acquireSessionLock, releaseSessionLock } from "./lock.js";
 import { OPERATION_COORDINATOR_WORKFLOWS } from "./shared.js";
 import {
-  emitI9CheckResultRows,
-  type EmitI9CheckResultRowsArgs,
-  type I9CheckFanBackSummary,
+  enqueueI9CheckMemberTasks,
+  type EnqueueI9CheckMemberTasksArgs,
+  type I9CheckFanOutSummary,
 } from "./i9-check-results.js";
 import { clearOcrPrepareAbort, isOperatorDiscardAbortError } from "../../ocr-prepare-abort.js";
 import { runRegistry, type RunHandle } from "../../../core/run-registry.js";
@@ -75,12 +75,15 @@ export interface PrepareHandlerOpts {
     args: { pdfFileId?: string; trackerDir?: string },
   ) => PriorOathUploadTicket | undefined;
   /**
-   * Test seam for the approve-less delegated-run result fan-back (the i9 check's
-   * per-person `operation-member` rows into the separations panel). The real
-   * implementation reads the completed OCR run's records and emits one row per
-   * checked person; tests stub it to capture the call.
+   * Test seam for the approve-less delegated-run member fan-out (the i9
+   * check's per-person i9-check tasks). The real implementation
+   * reads the completed OCR run's records, enqueues one REAL daemon task per
+   * person, and emits display-only failed rows for unsearchable pages; tests
+   * stub it to capture the call.
    */
-  emitI9CheckResults?: (args: EmitI9CheckResultRowsArgs) => I9CheckFanBackSummary;
+  enqueueI9CheckMemberTasks?: (
+    args: EnqueueI9CheckMemberTasksArgs,
+  ) => Promise<I9CheckFanOutSummary>;
 }
 
 export interface OathUploadPrepareEnqueueArgs {
@@ -453,18 +456,21 @@ export function buildOcrPrepareHandler(
           );
         }, trackerDir);
 
-        // ─── Result fan-back for an approve-less delegated run (i9 check) ─────
+        // ─── Member fan-out for an approve-less delegated run (i9 check) ─────
         // A `completeDelegatedRun` spec has no approval gate — the OCR run just
-        // COMPLETED with its report. Fan the per-person results back into the
-        // coordinator's own panel as `operation-member` rows (separations'
-        // "Run I-9 Check": name + EID, done/failed, found/not-found tag), then
-        // drive the coordinator terminal. A fan-back failure is LOUD: the
-        // coordinator goes `failed` rather than sitting on an empty operation
-        // that reads as "checked, nobody found".
+        // COMPLETED with its report. Enqueue one REAL i9-check
+        // member task per person under the coordinator (UCPath search + roster
+        // EID re-match + retention-tracker append run in the daemon), plus
+        // display-only failed rows for never-searchable pages. The coordinator
+        // stays RUNNING — the members-terminal rollup (`rollupOperationStatus`)
+        // completes it once every member finishes; stamping `done` here would
+        // let the parent's terminal status win while members still run. A
+        // fan-out failure is LOUD: the coordinator goes `failed` rather than
+        // sitting on an empty operation that reads as "checked, nobody found".
         if (spec.completeDelegatedRun && operationRef) {
-          const fanBack = opts.emitI9CheckResults ?? emitI9CheckResultRows;
+          const fanOut = opts.enqueueI9CheckMemberTasks ?? enqueueI9CheckMemberTasks;
           try {
-            const summary = fanBack({
+            const summary = await fanOut({
               sessionId,
               ocrRunId: runId,
               operation: {
@@ -472,16 +478,21 @@ export function buildOcrPrepareHandler(
                 runId: operationRef.runId,
                 traceId: operationRef.baseData.__traceId,
               },
+              ...(input.runOptions ? { runOptions: input.runOptions } : {}),
               trackerDir,
             });
-            emitOperationRow("complete", "results", "done", "i9-check");
+            emitOperationRow("members-queued", "i9-check", "running", "i9-check");
             logOnCoordinator(
-              `I-9 check complete — ${summary.emitted} person(s): ${summary.found} found in UCPath, ${summary.notFound} not found, ${summary.failed} unresolved`,
+              `I-9 check fan-out — ${summary.enqueued} UCPath search task(s) queued to i9-check`
+                + (summary.displayFailed > 0
+                  ? `, ${summary.displayFailed} unsearchable page(s) failed loud`
+                  : "")
+                + `. Each person appends one row to the master retention tracker (re-runs append again).`,
               "operation:ocr-status",
             );
-          } catch (fanBackErr) {
+          } catch (fanOutErr) {
             log.error(
-              `[ocr-http] i9 result fan-back failed for session ${sessionId}: ${errorMessage(fanBackErr)}`,
+              `[ocr-http] i9 member fan-out failed for session ${sessionId}: ${errorMessage(fanOutErr)}`,
             );
             emitOperationRow("failed", "results-failed", "failed", "i9-check-failed");
           }

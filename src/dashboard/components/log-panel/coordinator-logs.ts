@@ -22,7 +22,15 @@ export { isTerminalMemberStatus };
  * live client-safe in domain/tracker leaf modules. Keep in lockstep with the
  * canonical set.
  */
-const OPERATION_COORDINATOR_WORKFLOWS = new Set(["oath-signature", "emergency-contact", "onbase"]);
+const OPERATION_COORDINATOR_WORKFLOWS = new Set([
+  "oath-signature",
+  "emergency-contact",
+  "onbase",
+  // The "Run I-9 Check" upload: one coordinator per I-9 packet, with the
+  // per-person found/not-found results fanned back as member rows (target
+  // workflow "i9-check" since the 2026-07-17 split out of separations).
+  "i9-check",
+]);
 
 export function isOperationCoordinatorWorkflow(workflow: string | undefined): boolean {
   return workflow !== undefined && OPERATION_COORDINATOR_WORKFLOWS.has(workflow);
@@ -31,7 +39,7 @@ export function isOperationCoordinatorWorkflow(workflow: string | undefined): bo
 /**
  * True for ANY top-level operation coordinator row, identified by the stamped
  * `operation` archetype. This covers BOTH the OCR-backed coordinators
- * (oath-signature / emergency-contact / onbase — see
+ * (oath-signature / emergency-contact / onbase / separations' I-9 check — see
  * {@link isOperationCoordinatorWorkflow}) AND input-run operation shells (e.g.
  * separations multi-person runs), which are not in the OCR workflow set but
  * still fan out to member rows and own the consolidated event-tracker detail

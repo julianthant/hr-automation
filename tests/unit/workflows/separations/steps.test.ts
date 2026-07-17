@@ -28,6 +28,8 @@ test('separations effective step list is auth:<systems> + work steps', () => {
     'kronos-search',
     'ucpath-transaction',
     'kuali-finalization',
+    // The trailing search-only 'i9-check' step is GONE (2026-07-17): the I-9
+    // check is its own workflow now (src/workflows/i9-check/).
   ])
 })
 

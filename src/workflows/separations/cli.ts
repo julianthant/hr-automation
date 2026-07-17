@@ -51,8 +51,8 @@ export async function runSeparationBatch(
       deriveItemId: (item) => (item as SeparationInput).docId,
       onPreEmitPending: buildBatchPreEmitPending({
         workflow: separationsWorkflow,
-        buildPendingData: (item) => ({ docId: (item).docId }),
-        deriveId: (item) => (item).docId,
+        buildPendingData: (item) => ({ docId: item.docId }),
+        deriveId: (item) => item.docId,
       }),
     });
     return { total: result.total, succeeded: result.succeeded, failed: result.failed };

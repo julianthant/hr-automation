@@ -14,6 +14,7 @@
     "onboarding:stop": "tsx --env-file=.env src/cli.ts daemon-stop onboarding",
     "crm-doc-download:stop": "tsx --env-file=.env src/cli.ts daemon-stop crm-doc-download",
     "separation:stop": "tsx --env-file=.env src/cli.ts daemon-stop separations",
+    "i9-check:stop": "tsx --env-file=.env src/cli.ts daemon-stop i9-check",
     "work-study:stop": "tsx --env-file=.env src/cli.ts daemon-stop work-study",
     "kronos-pay-rule:stop": "tsx --env-file=.env src/cli.ts daemon-stop kronos-pay-rule",
     "oath-signature:stop": "tsx --env-file=.env src/cli.ts daemon-stop oath-signature",

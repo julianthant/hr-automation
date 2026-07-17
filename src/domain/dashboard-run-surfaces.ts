@@ -15,10 +15,11 @@ export const DASHBOARD_UPLOAD_RUN_WORKFLOWS = [
   "oath-upload",
   "oath-signature",
   "onbase",
-  // Separations' upload run is the "I-9 mode": upload a scanned I-9 packet,
-  // OCR reads each Section 1 (name/DOB/SSN), and a person-match child checks
-  // whether UCPath knows the person. Standalone OCR prep (no coordinator row).
-  "separations",
+  // "Run I-9 Check": upload a scanned I-9 packet; OCR reads each person's
+  // Section 1 + Section 2 pages, then one i9-check task per person searches
+  // UCPath and fills the retention tracker. The upload lived on `separations`
+  // before the 2026-07-17 i9-check workflow split.
+  "i9-check",
 ] as const;
 
 export const RETIRED_DASHBOARD_WORKFLOWS = [

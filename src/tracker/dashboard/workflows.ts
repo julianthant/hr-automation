@@ -14,6 +14,7 @@ import "../../workflows/onboarding/index.js";
 import "../../workflows/ocr/index.js";
 import "../../workflows/person-lookup/index.js";
 import "../../workflows/separations/index.js";
+import "../../workflows/i9-check/index.js";
 import "../../workflows/sharepoint-download/index.js";
 import "../../workflows/work-study/index.js";
 import "../../workflows/kronos-pay-rule/index.js";

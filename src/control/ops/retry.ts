@@ -507,6 +507,36 @@ async function reEnqueueEntry(
     return { ok: false, error: lookup.error };
   }
 
+  // SAFETY GUARD: an I-9 CHECK row must never be reconstructed from tracker
+  // data.
+  //
+  // LEGACY separations rows (pre-2026-07-17, before the i9-check workflow
+  // split): the reconstructed input for a separations row is docId-shaped, so
+  // re-enqueuing it would start a REAL termination run for a person who was
+  // only being retention-checked. Covers both the real i9-check member tasks
+  // (whose SQLite row was pruned) and the legacy display-only rows (which
+  // never had a task).
+  //
+  // Current `i9-check` workflow rows: a reconstruction can never become a
+  // termination (the workflow only searches), but the flat merged-strings
+  // rebuild cannot produce the nested person/roster input either — refuse
+  // legibly here instead of failing schema-parse deep in the daemon. Display-
+  // only failed pages have no task and are also caught here.
+  if (
+    (wf === "separations" || wf === "i9-check") &&
+    lookup.mergedEntryStrings.i9Check === "true"
+  ) {
+    return {
+      ok: false,
+      error:
+        `retry: i9-check rows cannot be reconstructed from tracker data — re-run the ` +
+        `I-9 upload instead (workflow=${wf} id=${id}${resolvedRunId ? ` runId=${resolvedRunId}` : ""}).` +
+        (wf === "separations"
+          ? ` Reconstructing would enqueue a REAL termination for this person.`
+          : ` The flat tracker data cannot rebuild the person/roster search input.`),
+    };
+  }
+
   if (!prefilledData) {
     log.warn(
       `[retry] SQLite task row missing, falling back to JSONL reconstruction — was the tracker pruned? workflow=${wf} id=${id}${resolvedRunId ? ` runId=${resolvedRunId}` : ""}`,
