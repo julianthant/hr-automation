@@ -64,3 +64,29 @@ test("sseResponse preserves event-stream headers and sends JSON data blocks", as
   await reader.cancel();
   assert.equal(new TextDecoder().decode(value), "data: {\"ok\":true}\n\n");
 });
+
+test("sseResponse disconnects a slow client instead of buffering without bound", async () => {
+  let cleanupRan = false;
+  let sendRef: ((data: unknown) => void) | undefined;
+  const response = sseResponse((send) => {
+    sendRef = send;
+    return () => {
+      cleanupRan = true;
+    };
+  });
+  assert.ok(sendRef);
+  // Let the async start() finish registering the cleanup before flooding.
+  await Promise.resolve();
+
+  // Never read from the stream — every send buffers. The writer must kick the
+  // consumer once the buffered-message bound is crossed, running cleanup so the
+  // topic intervals stop, rather than growing the buffer forever.
+  for (let i = 0; i < 600 && !cleanupRan; i++) {
+    sendRef!({ tick: i, payload: "x".repeat(64) });
+  }
+  assert.ok(cleanupRan, "cleanup must run once the slow client crosses the buffer bound");
+
+  // Post-kick sends are no-ops (no throw, no further buffering).
+  sendRef!({ afterKick: true });
+  await response.body!.cancel();
+});
