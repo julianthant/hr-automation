@@ -4,6 +4,7 @@
 // Strokes are token vars (no raw color — architecture-guarded). Like nodeTypes,
 // edgeTypes MUST be a stable module-scope reference.
 
+import type { JSX } from "react";
 import { memo } from "react";
 import {
   BaseEdge,

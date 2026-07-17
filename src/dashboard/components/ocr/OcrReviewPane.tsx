@@ -42,6 +42,8 @@ import { usePrepCursor } from "@/components/hooks/usePrepCursor";
 import { useTaskDependencies } from "@/components/hooks/useTaskDependencies";
 import { derivePreviewApprovalGate, type PreviewPageStatus } from "./preview-gate";
 import {
+  isEcPreviewRecord,
+  isOathPreviewRecord,
   resolveOcrConfigForEntry,
   setOcrDownstreamRenderer,
   type AnyOcrPreviewRecord,
@@ -134,7 +136,7 @@ function loadPrepStorage(rawKey: string): { edits: Record<number, AnyPreviewReco
 }
 
 function mergePrepRecordRows(
-  baseRecords: AnyPreviewRecord[],
+  baseRecords: ReadonlyArray<AnyPreviewRecord>,
   edits: Record<number, AnyPreviewRecord>,
   removed: ReadonlySet<number>,
 ): MergedPrepRecordRow[] {
@@ -172,7 +174,7 @@ function mergePrepRecordRows(
 // the per-variant registrations are picked when the OCR row has a known
 // downstream workflow.
 setOcrDownstreamRenderer("ocr", ({ record, onChange, onForceResearch, isResearching }) => {
-  if (record.formKind === "oath") {
+  if (record.formKind === "oath" && isOathPreviewRecord(record)) {
     return (
       <OathRecordView
         record={record}
@@ -181,6 +183,13 @@ setOcrDownstreamRenderer("ocr", ({ record, onChange, onForceResearch, isResearch
         isResearching={isResearching}
       />
     );
+  }
+  if (!isEcPreviewRecord(record)) {
+    console.error(
+      "[OcrReviewPane] ocr renderer received a record shaped for neither oath nor EC",
+      { formKind: record.formKind },
+    );
+    return null;
   }
   return (
     <EcRecordView
@@ -192,7 +201,7 @@ setOcrDownstreamRenderer("ocr", ({ record, onChange, onForceResearch, isResearch
   );
 });
 setOcrDownstreamRenderer("emergency-contact", ({ record, onChange, onForceResearch, isResearching }) => {
-  if (record.formKind !== "emergency-contact") {
+  if (record.formKind !== "emergency-contact" || !isEcPreviewRecord(record)) {
     console.error(
       "[OcrReviewPane] emergency-contact renderer received non-EC record",
       { formKind: record.formKind },
@@ -209,7 +218,7 @@ setOcrDownstreamRenderer("emergency-contact", ({ record, onChange, onForceResear
   );
 });
 setOcrDownstreamRenderer("oath-signature", ({ record, onChange, onForceResearch, isResearching }) => {
-  if (record.formKind !== "oath") {
+  if (record.formKind !== "oath" || !isOathPreviewRecord(record)) {
     console.error(
       "[OcrReviewPane] oath-signature renderer received non-oath record",
       { formKind: record.formKind },
@@ -881,7 +890,10 @@ function useOcrReviewPrepApi(
                 </section>
               );
             }
-            const { page, group, ordinals } = renderEntry;
+            const { page, group, ordinals } = renderEntry as Extract<
+              PageRenderWithOrdinals,
+              { kind: "records"; ordinals: number[] }
+            >;
             if (group.length === 1) {
               const { record, originalIndex } = group[0];
               const rowOrdinal = ordinals[0];
@@ -1079,7 +1091,7 @@ function isApprovable(record: AnyPreviewRecord): boolean {
   // `lookup-failed` (Person Org Summary returned nothing) and absent-yet
   // states fall through as approvable. An EID resolved by eid-lookup is enough
   // signal to dispatch — verification is auxiliary.
-  const v = record.verification?.state;
+  const v = "verification" in record ? record.verification?.state : undefined;
   const verifyOk = v !== "inactive";
   // Tighten: when selected, require a non-empty 5+ digit EID. Blocks
   // approving a manually-added row before the operator types an EID.
@@ -1416,6 +1428,8 @@ function renderOathSignatureBanner(
 ): ReactNode {
   if (!hasSignature) return undefined;
   if (r.formKind !== "oath") return null;
+  // Verify + oath records both carry the signature pair; EC/i9 shapes don't.
+  if (!("employeeSigned" in r)) return undefined;
   const oath = r;
   if (oath.employeeSigned === false) {
     return <span>Signature missing — employee did not sign.</span>;

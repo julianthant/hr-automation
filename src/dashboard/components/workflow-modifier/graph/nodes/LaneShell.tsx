@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { ReactNode } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { LucideIcon } from "lucide-react";

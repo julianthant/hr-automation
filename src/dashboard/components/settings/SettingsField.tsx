@@ -3,6 +3,7 @@
  * `components/settings/` — not promoted to `shared/` because they are
  * tightly coupled to the Settings page's layout contract.
  */
+import type { JSX } from "react";
 import { cn } from "@/lib/utils";
 
 // ── Text / number inputs ──────────────────────────────────────────────────────

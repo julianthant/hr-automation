@@ -13,31 +13,36 @@ interface DeleteAllButtonProps {
   onDeleted: (ids: string[]) => void;
 }
 
+interface DeleteBulkBody {
+  ok?: boolean;
+  count?: number;
+  errors?: Array<{ id: string; error: string }>;
+  error?: string;
+}
+
 export function DeleteAllButton({ workflow, date, entries, onDeleted }: DeleteAllButtonProps) {
   const n = entries.length;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const entryIds = entries.map((entry) => entry.id);
   const deleteToasts = useMemo(() => ({
     loading: `Deleting ${n} ${n === 1 ? "entry" : "entries"}...`,
-    success: (body: { count?: number }) => ({
+    success: (body: DeleteBulkBody) => ({
       message: `Deleted ${body.count} ${body.count === 1 ? "entry" : "entries"}`,
     }),
-    partial: (body: { count?: number; errors: Array<{ error: string }> }) => ({
+    partial: (body: DeleteBulkBody) => ({
       message: "Some deletes failed",
-      description: `${body.count} removed · ${body.errors.length} failed (${body.errors[0]?.error})`,
+      description: `${body.count} removed · ${body.errors?.length ?? 0} failed (${body.errors?.[0]?.error})`,
     }),
     error: (msg: string, status?: number) => ({
       message: status === 422 ? "Couldn't delete any entries" : "Couldn't delete entries",
       description: msg,
     }),
-    isPartial: (body: { errors?: unknown[] }) => Boolean(body.errors?.length),
+    isPartial: (body: DeleteBulkBody) => Boolean(body.errors?.length),
   }), [n]);
-  const { pending, run: postDeleteAll } = usePostAction<{
-    ok?: boolean;
-    count?: number;
-    errors?: Array<{ id: string; error: string }>;
-    error?: string;
-  }>("/api/delete-bulk", deleteToasts);
+  const { pending, run: postDeleteAll } = usePostAction<DeleteBulkBody>(
+    "/api/delete-bulk",
+    deleteToasts,
+  );
 
   function openConfirm() {
     if (pending) return;
