@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { memo } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { CircleDot, FileScan, GitFork, Users } from "lucide-react";

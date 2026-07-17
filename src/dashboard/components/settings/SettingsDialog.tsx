@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -133,10 +134,15 @@ function groupChanged(a: Record<string, unknown>, b: Record<string, unknown>): b
   return Object.keys(a).some((k) => a[k] !== b[k]);
 }
 
+/** Settings sections are flat scalar bags; view one generically for field diffing. */
+function asRecord(section: unknown): Record<string, unknown> {
+  return section as Record<string, unknown>;
+}
+
 function settingsEqual(a: OperatorSettings, b: OperatorSettings): boolean {
   return (Object.keys(a) as (keyof OperatorSettings)[]).every(
     (section) =>
-      !groupChanged(a[section] as Record<string, unknown>, b[section] as Record<string, unknown>),
+      !groupChanged(asRecord(a[section]), asRecord(b[section])),
   );
 }
 
@@ -145,7 +151,7 @@ function sectionDirty(id: SectionId, draft: OperatorSettings, settings: Operator
   const keys = SECTION_KEYS[id];
   if (!keys) return false;
   return keys.some((k) =>
-    groupChanged(draft[k] as Record<string, unknown>, settings[k] as Record<string, unknown>),
+    groupChanged(asRecord(draft[k]), asRecord(settings[k])),
   );
 }
 
@@ -424,7 +430,7 @@ function SettingsSectionContent({
     field: keyof OperatorSettings[K],
     rawValue: string,
   ) {
-    const current = (draft[sectionKey] as Record<string, unknown>)[field as string];
+    const current = asRecord(draft[sectionKey])[field as string];
     const parsed = Number(rawValue);
     const newValue: unknown =
       typeof current === "number"
@@ -441,8 +447,8 @@ function SettingsSectionContent({
   function chg<K extends keyof OperatorSettings>(sectionKey: K, field: keyof OperatorSettings[K]): boolean {
     if (!settings) return false;
     return (
-      (draft[sectionKey] as Record<string, unknown>)[field as string] !==
-      (settings[sectionKey] as Record<string, unknown>)[field as string]
+      asRecord(draft[sectionKey])[field as string] !==
+      asRecord(settings[sectionKey])[field as string]
     );
   }
   const meta = SECTIONS.find((s) => s.id === section)!;

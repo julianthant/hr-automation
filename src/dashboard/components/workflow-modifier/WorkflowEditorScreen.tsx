@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { ChevronLeft } from "lucide-react";
 import { WorkflowModifierPage } from "./WorkflowModifierPage.js";
 

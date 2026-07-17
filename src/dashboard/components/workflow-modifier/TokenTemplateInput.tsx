@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useRef } from "react";
 import { Hash } from "lucide-react";
 import { cn } from "@/lib/utils";

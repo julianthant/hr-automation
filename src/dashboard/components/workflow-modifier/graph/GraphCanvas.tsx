@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ReactFlow,
@@ -178,7 +179,7 @@ function usePrefersReducedMotion(): boolean {
 }
 
 interface GraphCanvasInnerProps extends GraphCanvasProps {
-  wrapperRef: RefObject<HTMLDivElement>;
+  wrapperRef: RefObject<HTMLDivElement | null>;
 }
 
 function GraphCanvasInner({

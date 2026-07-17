@@ -583,7 +583,7 @@ export function App() {
         setShortcutsOpen((v) => !v);
       } else if (e.key === "/") {
         e.preventDefault();
-        (document.querySelector('input[aria-label="Search history"]'))?.focus();
+        document.querySelector<HTMLInputElement>('input[aria-label="Search history"]')?.focus();
       } else if (e.key === "[" || e.key === "]") {
         if (workflows.length === 0) return;
         const idx = workflows.indexOf(workflow);

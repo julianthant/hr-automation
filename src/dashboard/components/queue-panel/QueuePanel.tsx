@@ -372,7 +372,13 @@ export function QueuePanel({
     }
 
     const sorted = sortQueueRenderItems(sortItems, queueSortMode, displayNames);
-    return sorted.map(({ kind, row, sortKey }) => ({ kind, row, sortKey }));
+    // Re-narrow per arm: destructuring the intersection would decouple `kind`
+    // from `row` and widen to an invalid cross-product type.
+    return sorted.map((item): UnifiedQueueRow =>
+      item.kind === "group"
+        ? { kind: "group", row: item.row, sortKey: item.sortKey }
+        : { kind: "flat", row: item.row, sortKey: item.sortKey },
+    );
   }, [
     visiblePreviewSurfaces,
     visibleOperationSurfaces,

@@ -15,29 +15,34 @@ interface StopAllButtonProps {
   items: StopAllItem[];
 }
 
+interface StopBulkBody {
+  ok?: boolean;
+  count?: number;
+  errors?: Array<{ id: string; error: string }>;
+  error?: string;
+}
+
 export function StopAllButton({ workflow, items }: StopAllButtonProps) {
   const n = items.length;
   const stopToasts = useMemo(() => ({
     loading: `Stopping ${n} ${n === 1 ? "entry" : "entries"}...`,
-    success: (body: { count?: number }) => ({
+    success: (body: StopBulkBody) => ({
       message: `Stopped ${body.count} ${body.count === 1 ? "entry" : "entries"}`,
     }),
-    partial: (body: { count?: number; errors: Array<{ error: string }> }) => ({
+    partial: (body: StopBulkBody) => ({
       message: "Some stops failed",
-      description: `${body.count} stopped · ${body.errors.length} failed (${body.errors[0]?.error})`,
+      description: `${body.count} stopped · ${body.errors?.length ?? 0} failed (${body.errors?.[0]?.error})`,
     }),
     error: (msg: string, status?: number) => ({
       message: status === 422 ? "Couldn't stop any entries" : "Couldn't stop entries",
       description: msg,
     }),
-    isPartial: (body: { errors?: unknown[] }) => Boolean(body.errors?.length),
+    isPartial: (body: StopBulkBody) => Boolean(body.errors?.length),
   }), [n]);
-  const { pending, run: postStopAll } = usePostAction<{
-    ok?: boolean;
-    count?: number;
-    errors?: Array<{ id: string; error: string }>;
-    error?: string;
-  }>("/api/cancel-active-bulk", stopToasts);
+  const { pending, run: postStopAll } = usePostAction<StopBulkBody>(
+    "/api/cancel-active-bulk",
+    stopToasts,
+  );
 
   async function stopAll() {
     if (pending) return;

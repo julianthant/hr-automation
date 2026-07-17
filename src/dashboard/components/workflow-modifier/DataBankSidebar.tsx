@@ -1,5 +1,6 @@
+import type { JSX } from "react";
 import { useCallback, useRef, useState } from "react";
-import type { DataBank, DataBankOperation } from "../../../../domain/workflow-design/data-bank.js";
+import type { DataBank, DataBankOperation } from "../../../domain/workflow-design/data-bank.js";
 import { DataBankPalette, type AnnotateKind } from "./graph/DataBankPalette.js";
 import { DataBankOpDialog } from "./graph/DataBankOpDialog.js";
 

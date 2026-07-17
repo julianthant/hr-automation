@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, CircleDot, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";

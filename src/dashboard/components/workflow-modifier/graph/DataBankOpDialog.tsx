@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";

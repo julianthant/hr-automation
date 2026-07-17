@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/lib/notify";
 import { Loader2, Wand2 } from "lucide-react";

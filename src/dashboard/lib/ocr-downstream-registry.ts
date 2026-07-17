@@ -6,8 +6,10 @@ import {
   parseOathPrepareRowData,
   parsePrepareRowData,
   parseVerifyPrepareRowData,
+  type FailedPage,
   type I9PreviewRecord,
   type OathPreviewRecord,
+  type PageStatusSummary,
   type PreviewRecord,
   type VerifyLookupKind,
   type VerifyPreviewRecord,
@@ -19,10 +21,26 @@ export type AnyOcrPreviewRecord =
   | VerifyPreviewRecord
   | I9PreviewRecord;
 
+// Structural guards — `formKind` is NOT a discriminant (every non-i9 variant
+// admits "oath" | "emergency-contact" | "unknown" so a mis-classified page
+// keeps its scanned kind), so narrowing keys on fields unique to each shape.
+export function isOathPreviewRecord(record: AnyOcrPreviewRecord): record is OathPreviewRecord {
+  return "rowIndex" in record;
+}
+
+export function isEcPreviewRecord(record: AnyOcrPreviewRecord): record is PreviewRecord {
+  return "emergencyContact" in record;
+}
+
 export interface ParsedOcrPrepareRow {
   records: ReadonlyArray<AnyOcrPreviewRecord>;
   pdfOriginalName?: string;
   pdfFileId?: string;
+  /** Pages whose OCR pass failed (operator sees a retry card). */
+  failedPages?: FailedPage[];
+  /** Pages where OCR succeeded but produced zero records. */
+  emptyPages?: number[];
+  pageStatusSummary?: PageStatusSummary;
 }
 
 /**

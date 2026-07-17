@@ -9,6 +9,7 @@
  * protected against the real domain unions) plus the live `/api/workflow-
  * definitions` registry via `useWorkflows()` for the workflow index.
  */
+import type { JSX } from "react";
 import type { ComponentType } from "react";
 import { BookOpen, Keyboard, Layers, Network } from "lucide-react";
 

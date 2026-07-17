@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Frame, Sparkles, StickyNote } from "lucide-react";
