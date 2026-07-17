@@ -1,4 +1,4 @@
-import { defineConfig, configDefaults } from "vitest/config";
+import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
 import { recordConsoleLog } from "./tests/log-audit-core.js";
 
@@ -12,22 +12,36 @@ export default defineConfig({
     },
   },
   test: {
-    // Mirror the previous `tsx --test` discovery: only `*.test.ts` under tests/.
-    // `tests/delegation/**` is the Tier-1 delegation pool (deterministic, CI-able —
-    // real daemon + temp tracker root, no live browser); it is picked up by this
-    // glob and runs in `npm test` automatically — no separate pool required.
-    include: ["tests/**/*.test.ts"],
-    // `tests/live/**` is the opt-in live pool (real browsers + live UCSD SSO);
-    // it runs only via `npm run test:live` (vitest.live.config.ts), never here.
-    exclude: [...configDefaults.exclude, "tests/live/**"],
-    // The previous `tsx --test` runner ran files sequentially in one process.
-    // Several tests rely on that: they mutate process.env, write to real
-    // paths under PATHS.*, and depend on module-level dashboard caches that
-    // tests/setup.ts resets between tests. Keep the same shape until we
-    // explicitly audit each test for parallel-safety.
+    // Each test file runs in its own isolated fork, so process.env mutations
+    // and module-level caches are per-file no matter the scheduling. The
+    // remaining serial constraint is real-time/load sensitivity, split by
+    // project (2026-07-17): `unit` runs files in parallel; `serial`
+    // (delegation daemons + mocked integration) keeps one-at-a-time ordering —
+    // those drive real daemon processes whose timing flakes under CPU
+    // contention. File selection lives ONLY on the projects: `extends: true`
+    // CONCATENATES array options, so a root-level `include` would union into
+    // every project and erase the split. `tests/live/**` stays excluded here —
+    // it runs only via `npm run test:live` (vitest.live.config.ts).
     pool: "forks",
     isolate: true,
-    fileParallelism: false,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: ["tests/unit/**/*.test.ts"],
+          fileParallelism: true,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "serial",
+          include: ["tests/delegation/**/*.test.ts", "tests/integration/**/*.test.ts"],
+          fileParallelism: false,
+        },
+      },
+    ],
     // setupFiles run before each test file's imports.
     // - env-bootstrap stamps TIMEKEEPER_NAME so src/config.ts loads.
     // - setup.ts registers a beforeEach that resets dashboard caches.
