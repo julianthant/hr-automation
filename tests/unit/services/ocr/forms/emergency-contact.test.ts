@@ -439,6 +439,31 @@ describe("emergencyContactOcrFormSpec.approveTo.canFanOut", () => {
       "a sub-5-digit EID is not a valid UCPath nav key",
     );
   });
+
+  it("returns false for an inactive employee even with a valid EID + selected", () => {
+    assert.equal(
+      canFanOut({
+        formKind: "emergency-contact",
+        sourcePage: 6,
+        employee: { name: "Alex Johnson", employeeId: "10123456" },
+        emergencyContact: { name: "Pat Johnson", relationship: "Spouse", primary: true, sameAddressAsEmployee: true, address: null },
+        notes: [],
+        documentType: "expected",
+        originallyMissing: [],
+        matchState: "matched",
+        selected: true,
+        warnings: [],
+        verification: {
+          state: "inactive",
+          hrStatus: "Terminated",
+          screenshotFilename: "x.png",
+          checkedAt: "2026-07-17T00:00:00.000Z",
+        },
+      }),
+      false,
+      "inactive employees are hard-blocked from EC fan-out",
+    );
+  });
 });
 
 describe("emergencyContactOcrFormSpec.matchRecord auto-accept floor", () => {

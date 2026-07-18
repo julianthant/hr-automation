@@ -187,6 +187,17 @@ export function computeOcrVerification(d: {
     if (activeSummary === "inactive") {
       return { state: "inactive", hrStatus: d.hrStatus, department: d.department, screenshotFilename, checkedAt };
     }
+    // CRM-only (UCPath miss): identity may be filled, but Active/HDH is unknowable.
+    if (activeSummary === "n/a") {
+      return {
+        state: "lookup-failed",
+        error: "n/a — CRM only (no UCPath active status)",
+        hrStatus: d.hrStatus,
+        department: d.department,
+        checkedAt,
+        screenshotFilename,
+      };
+    }
     return {
       state: "lookup-failed",
       error: d.activeStatus?.trim() || activeSummary,

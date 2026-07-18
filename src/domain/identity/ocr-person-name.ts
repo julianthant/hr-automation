@@ -53,6 +53,10 @@ export function resolveOcrPersonDisplayName(parts: {
   if (firstName && lastName) {
     return displayPersonName(`${lastName}, ${firstName}`);
   }
+  // Partial edits: prefer the part the operator typed over a stale fullName
+  // (OCR often parks an EID in `name` — falling back would resurrect it).
+  if (firstName) return displayPersonName(firstName) || firstName;
+  if (lastName) return displayPersonName(lastName) || lastName;
   return displayPersonName(parts.fullName) || "";
 }
 
@@ -94,37 +98,49 @@ export function mergeOcrPersonNameParts(
   return {
     firstName,
     lastName,
-    name: resolveOcrPersonDisplayName({
-      firstName,
-      lastName,
-      fullName: current.fullName,
-    }),
+    // Operator edits own the composed name — do NOT pass `current.fullName`.
+    // Clearing First Name when OCR put the EID in `name` used to snap the EID
+    // right back into the input (felt uneditable).
+    name: resolveOcrPersonDisplayName({ firstName, lastName }),
   };
+}
+
+/** True when a "name" is really an employee id (digits only, ≥5). */
+function looksLikeEmployeeId(value: string): boolean {
+  return /^\d{5,}$/.test(value.trim());
 }
 
 /**
  * Stamp first/last (+ legacy full name) from a person-lookup outcome onto an
  * OCR record. `printedName` is the PAPER side of the verify name check, so a
  * present value is never overwritten — only a blank/missing one is filled.
- * Returns the raw resolved name (resolvedName ?? searchName) so callers can
- * reuse it (e.g. to stamp the found-side `name`) instead of recomputing.
+ * Returns the raw name source used (`resolvedName`, else a non-EID
+ * `searchName`) so callers can reuse it (e.g. to stamp the found-side `name`)
+ * instead of recomputing.
  */
 export function applyPersonLookupNameToOcrRecord(
   rec: Record<string, unknown>,
   data: Record<string, string> | undefined,
 ): string | undefined {
-  const resolvedName = nonEmpty(data?.resolvedName) ?? nonEmpty(data?.searchName);
-  if (!resolvedName) return undefined;
+  // Prefer a real resolved name. Falling back to searchName is fine for a
+  // name-keyed lookup, but an EID-keyed verify passes the EID as searchName —
+  // stamping that into first/last/name is what put "10778080" in First Name.
+  const resolvedName = nonEmpty(data?.resolvedName);
+  const searchName = nonEmpty(data?.searchName);
+  const nameSource =
+    resolvedName ??
+    (searchName && !looksLikeEmployeeId(searchName) ? searchName : undefined);
+  if (!nameSource) return undefined;
 
-  const { firstName, lastName, display } = splitOcrPersonName(resolvedName);
-  if (!display) return resolvedName;
+  const { firstName, lastName, display } = splitOcrPersonName(nameSource);
+  if (!display) return nameSource;
 
   if ("employee" in rec && rec.employee && typeof rec.employee === "object") {
     const employee = rec.employee as Record<string, unknown>;
     employee.firstName = firstName;
     employee.lastName = lastName;
     employee.name = display;
-    return resolvedName;
+    return nameSource;
   }
 
   if ("printedName" in rec || !("employee" in rec)) {
@@ -134,5 +150,5 @@ export function applyPersonLookupNameToOcrRecord(
       rec.printedName = display;
     }
   }
-  return resolvedName;
+  return nameSource;
 }

@@ -73,6 +73,20 @@ describe("applyPersonLookupNameToOcrRecord", () => {
     );
     assert.equal(applyPersonLookupNameToOcrRecord(rec, undefined), undefined);
   });
+
+  it("does not stamp an EID searchName into first/last/name when resolvedName is missing", () => {
+    const rec: Record<string, unknown> = {
+      employee: { firstName: "Alondra", lastName: "Magana", name: "Magana, Alondra", employeeId: "10778080" },
+    };
+    assert.equal(
+      applyPersonLookupNameToOcrRecord(rec, { searchName: "10778080" }),
+      undefined,
+    );
+    const employee = rec.employee as Record<string, string>;
+    assert.equal(employee.firstName, "Alondra");
+    assert.equal(employee.lastName, "Magana");
+    assert.equal(employee.name, "Magana, Alondra");
+  });
 });
 
 describe("mergeOcrPersonNameParts", () => {
@@ -97,6 +111,33 @@ describe("mergeOcrPersonNameParts", () => {
       firstName: "Gema",
       lastName: "Garcia",
       name: "Garcia, Gema",
+    });
+  });
+
+  // OCR sometimes puts the EID in firstName/name. Clearing First Name must
+  // NOT resurrect that stale fullName — otherwise the field looks uneditable
+  // (select-all + Delete snaps the EID right back into the input).
+  it("clearing firstName when fullName is the EID does not snap the EID back", () => {
+    const merged = mergeOcrPersonNameParts(
+      { firstName: "10778080", lastName: "", fullName: "10778080" },
+      { firstName: "" },
+    );
+    assert.deepEqual(merged, {
+      firstName: "",
+      lastName: "",
+      name: "",
+    });
+  });
+
+  it("typing a first name alone does not keep a stale EID fullName as the display name", () => {
+    const merged = mergeOcrPersonNameParts(
+      { firstName: "10778080", lastName: "", fullName: "10778080" },
+      { firstName: "Alondra" },
+    );
+    assert.deepEqual(merged, {
+      firstName: "Alondra",
+      lastName: "",
+      name: "Alondra",
     });
   });
 });

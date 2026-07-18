@@ -103,6 +103,11 @@ export async function runOcrSecondOpinionPage<T>(input: {
   pageImagesDir: string;
   /** PNG filename of the page inside `pageImagesDir`. */
   pageFilename: string;
+  /**
+   * The page's REAL number in the document. Without it the single-page re-read
+   * reports itself as "page 1" (its index in this one-element request).
+   */
+  pageNum?: number;
   recordSchema: ZodType<T>;
   prompt: string;
   excludeModels: string[];
@@ -118,6 +123,7 @@ export async function runOcrSecondOpinionPage<T>(input: {
     const perPage = await runOcrPerPage({
       pageImagesDir: input.pageImagesDir,
       pagesAsImages: [input.pageFilename],
+      ...(input.pageNum !== undefined ? { pageNumbers: [input.pageNum] } : {}),
       prompt: input.prompt,
       schema: input.recordSchema,
       pool,

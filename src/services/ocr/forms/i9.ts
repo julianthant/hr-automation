@@ -36,7 +36,8 @@ import {
 
 // ─── OCR-pass record (one page of the scanned PDF) ──────────
 
-const I9_FORM_KINDS = ["i9", "unknown"] as const;
+const I9_FORM_KINDS = ["i9 section 1", "i9 section 2", "i9 ssn", "unknown"] as const;
+export type I9FormKind = (typeof I9_FORM_KINDS)[number];
 
 /**
  * `formKind` tolerant coercion — mirrors verify's `VerifyFormKindSchema`
@@ -45,10 +46,13 @@ const I9_FORM_KINDS = ["i9", "unknown"] as const;
  * (root CLAUDE.md "fail loud — no unverified silent fallbacks": losing the
  * record is worse than one wrong-looking label on it). Coerce any unrecognized
  * value to "unknown" and `log.warn` it; `undefined`/missing is the ordinary
- * "model omitted the field" case and does not warn.
+ * "model omitted the field" case and does not warn. The legacy 2-way vocabulary
+ * (pre-2026-07-17: `"i9"` = a Section 1 page, Section 2 sheets rode "unknown"
+ * with `section2Name`) normalizes on read: `"i9"` → `"i9 section 1"`.
  */
 const I9FormKindSchema = z.preprocess((v) => {
   if (typeof v === "string" && (I9_FORM_KINDS as readonly string[]).includes(v)) return v;
+  if (v === "i9") return "i9 section 1"; // legacy rows / model shorthand
   if (v !== undefined) {
     log.warn(
       `[i9] unrecognized formKind ${JSON.stringify(v)} — coercing to "unknown" so the record still surfaces for review`,
@@ -57,23 +61,47 @@ const I9FormKindSchema = z.preprocess((v) => {
   return "unknown";
 }, z.enum(I9_FORM_KINDS));
 
+/** Is this record a Section 1 (employee attestation) page? */
+export function isI9Section1(rec: { formKind?: string | null }): boolean {
+  return rec.formKind === "i9 section 1";
+}
+
 export const I9OcrRecordSchema = z.object({
   formKind: I9FormKindSchema,
   sourcePage: z.number().int().positive(),
-  /** Section 1 employee last name (family name). */
+  /**
+   * Employee last name (family name) — UNIFORM across page kinds: the Section 1
+   * name fields on a `"i9 section 1"` page, the employer-written "Employee Last
+   * Name, First Name and Middle Initial from Section 1" line on a
+   * `"i9 section 2"` sheet, the employee-name line on an `"i9 ssn"` sheet.
+   */
   lastName: z.string().nullable().optional(),
-  /** Section 1 employee first name (given name). */
+  /** Employee first name (given name) — same per-kind sourcing as lastName. */
   firstName: z.string().nullable().optional(),
-  /** Section 1 middle initial. */
+  /** Middle initial — same per-kind sourcing as lastName. */
   middleInitial: z.string().nullable().optional(),
-  /** Section 1 date of birth, as printed (mm/dd/yyyy). */
+  /** Section 1 date of birth, as printed (mm/dd/yyyy). Null on other kinds. */
   dateOfBirth: z.string().nullable().optional(),
-  /** Section 1 U.S. Social Security Number, as printed. */
+  /**
+   * The SSN this page carries, as printed — UNIFORM across page kinds:
+   * Section 1 → the employee-written "U.S. Social Security Number"; Section 2 →
+   * the List C document number ONLY when the List C document is a Social
+   * Security card (the employer's independent transcription — on 4 of the 5
+   * audited pages where it appeared it CONFIRMED the paper and CONTRADICTED our
+   * Section 1 OCR); `"i9 ssn"` sheet → the sheet's Social Security Number field.
+   */
   ssn: z.string().nullable().optional(),
+  /**
+   * The employment-start date this page carries, as printed: Section 2 →
+   * "First Day of Employment (mm/dd/yyyy)"; `"i9 ssn"` sheet → its "Date of
+   * Hire". Null on Section 1 pages (`corroborateI9Records` copies it onto the
+   * paired Section 1 record from the sheet).
+   */
+  hireDate: z.string().nullable().optional(),
   documentType: DocumentTypeSchema,
   originallyMissing: z.array(z.string()).default([]),
   /**
-   * Section 1 fields that ARE written on the paper but could NOT be read with
+   * Fields that ARE written on the paper but could NOT be read with
    * confidence. Distinct from `originallyMissing` (genuinely blank).
    *
    * This is the field that stops a fabricated value: a scan too degraded to
@@ -83,28 +111,6 @@ export const I9OcrRecordSchema = z.object({
    * found". Now the value comes back null and the field is named here.
    */
   illegible: z.array(z.string()).default([]),
-  /**
-   * SECTION 2 pages only (`formKind: "unknown"`): the employee name the
-   * EMPLOYER re-writes at the top of Section 2. An independent second reading
-   * of the same person, in the same packet.
-   */
-  section2Name: z.string().nullable().optional(),
-  /**
-   * SECTION 2 pages only: the List C document number when the List C document
-   * is a Social Security card — i.e. the SSN, written by the employer.
-   *
-   * On 4 of the 5 audited pages where it appears, this value CONFIRMED the
-   * paper and CONTRADICTED our Section 1 OCR. It is the cheapest independent
-   * check available and it was sitting unused in the same PDF.
-   */
-  section2DocNumber: z.string().nullable().optional(),
-  /**
-   * SECTION 2 pages only: "First Day of Employment (mm/dd/yyyy)" — the hire
-   * date the employer writes. Copied onto the paired Section 1 record by
-   * `corroborateI9Records` as `hireDate`. Null when absent / illegible / not a
-   * Section 2 sheet.
-   */
-  section2HireDate: z.string().nullable().optional(),
   notes: z.array(z.string()).default([]),
 });
 export type I9OcrRecord = z.infer<typeof I9OcrRecordSchema>;
@@ -128,10 +134,22 @@ export const I9PreviewRecordSchema = I9OcrRecordSchema.extend({
   /** @deprecated See `ucpathFound` — historical rows only. */
   matchedName: z.string().optional(),
   /**
-   * Hire date from Section 2 "First Day of Employment", stamped by
-   * `corroborateI9Records` onto the paired Section 1 record.
+   * @deprecated Pre-2026-07-17 sheet fields. Section 2 / SSN-sheet data now
+   * rides the UNIFORM record fields (`lastName`/`firstName`/`ssn`/`hireDate`)
+   * on the sheet's own record; these remain only so historical JSONL rows
+   * still parse. Never written by the current prompt or enrichment.
    */
-  hireDate: z.string().optional(),
+  section2Name: z.string().nullable().optional(),
+  /** @deprecated See `section2Name` — historical rows only. */
+  section2DocNumber: z.string().nullable().optional(),
+  /** @deprecated See `section2Name` — historical rows only. */
+  section2HireDate: z.string().nullable().optional(),
+  /**
+   * Page of the Section 1 record this SHEET (`"i9 section 2"` / `"i9 ssn"`)
+   * was paired to — the reverse link of `section2Page`/`ssnPage`, stamped by
+   * `corroborateI9Records`. Absent on Section 1 records and orphan sheets.
+   */
+  section1Page: z.number().optional(),
   /**
    * Page of the Section 2 sheet paired to this Section 1, when one was found.
    * Presence of this field IS "Section 2 present" — the operator needs to know
@@ -139,6 +157,11 @@ export const I9PreviewRecordSchema = I9OcrRecordSchema.extend({
    * page to open when it doesn't.
    */
   section2Page: z.number().optional(),
+  /**
+   * Page of the SSN-bearing supplemental sheet (`"i9 ssn"`, e.g. a UCRS 419
+   * statement) paired to this Section 1, when one exists in the packet.
+   */
+  ssnPage: z.number().optional(),
   /** PPS EID from the Employee Action History cross-ref roster (display: zeros stripped). */
   ppsEid: z.string().optional(),
   /** Roster PPS ID verbatim, leading zeros preserved — the spreadsheet form. */
@@ -184,18 +207,21 @@ export type I9PreviewRecord = z.infer<typeof I9PreviewRecordSchema>;
 
 const I9_OCR_PROMPT = `You are an OCR system. Extract structured data from the attached PDF.
 
-The PDF is a stack of scanned USCIS Form I-9 (Employment Eligibility Verification) documents. Each page is either:
-- "i9" — a Form I-9 page whose SECTION 1 (Employee Information and Attestation) is visible: it carries the employee's last name, first name, middle initial, date of birth, and U.S. Social Security Number.
-- "unknown" — any other page: Section 2/3-only pages, Lists of Acceptable Documents, supplements, instructions, blank or irrelevant pages.
+The PDF is a stack of scanned USCIS Form I-9 (Employment Eligibility Verification) documents. Classify each page as exactly one of:
+- "i9 section 1" — a Form I-9 page whose SECTION 1 (Employee Information and Attestation) is visible: it carries the employee's last name, first name, middle initial, date of birth, and U.S. Social Security Number.
+- "i9 section 2" — the employer's "Section 2. Employer or Authorized Representative Review and Verification" sheet: it re-writes the employee's name at the top, lists the documents examined (Lists A/B/C), and carries "The employee's first day of employment".
+- "i9 ssn" — an SSN-bearing SUPPLEMENTAL sheet about one employee that is not an I-9 page itself, e.g. a UCRS 419 "Statement Concerning Your Employment in a University Position Not Covered by Social Security": it carries the employee's name, Social Security Number, and a date of hire.
+- "unknown" — anything else: Lists of Acceptable Documents, instructions, blank or irrelevant pages.
 
-For each page produce exactly one record.
+For each page produce exactly one record. Every record has the SAME fields; which ones are filled depends on the page kind.
 
 OUTPUT SHAPE (CRITICAL — must be a FLAT JSON ARRAY at the top level):
 
 \`\`\`json
 [
-  { "formKind": "i9", "sourcePage": 1, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": "04/01/1998", "ssn": "123-45-6789", "documentType": "expected", "originallyMissing": [], "illegible": [], "section2Name": null, "section2DocNumber": null, "section2HireDate": null, "notes": [] },
-  { "formKind": "unknown", "sourcePage": 2, "lastName": null, "firstName": null, "middleInitial": null, "dateOfBirth": null, "ssn": null, "documentType": "unknown", "originallyMissing": [], "illegible": [], "section2Name": "Doe, Jane A", "section2DocNumber": "123-45-6789", "section2HireDate": "04/17/2018", "notes": [] }
+  { "formKind": "i9 section 1", "sourcePage": 1, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": "04/01/1998", "ssn": "123-45-6789", "hireDate": null, "documentType": "expected", "originallyMissing": [], "illegible": [], "notes": [] },
+  { "formKind": "i9 section 2", "sourcePage": 2, "lastName": "Doe", "firstName": "Jane", "middleInitial": "A", "dateOfBirth": null, "ssn": "123-45-6789", "hireDate": "04/17/2018", "documentType": "expected", "originallyMissing": [], "illegible": [], "notes": [] },
+  { "formKind": "unknown", "sourcePage": 3, "lastName": null, "firstName": null, "middleInitial": null, "dateOfBirth": null, "ssn": null, "hireDate": null, "documentType": "unknown", "originallyMissing": [], "illegible": [], "notes": [] }
 ]
 \`\`\`
 
@@ -221,22 +247,16 @@ It is CORRECT and EXPECTED to return null here. A null costs the operator one
 manual check. A wrong digit silently reports a real employee as a stranger.
 
 For EVERY record:
-- formKind: "i9" when the page shows Section 1 employee fields; "unknown" otherwise.
+- formKind: one of "i9 section 1", "i9 section 2", "i9 ssn", "unknown" per the classification above.
 - sourcePage: the 1-indexed page number.
-- lastName / firstName / middleInitial: the SECTION 1 employee name fields ONLY (labeled "Last Name (Family Name)", "First Name (Given Name)", "Middle Initial"). Do NOT copy names from Section 2 (the employer/authorized representative) or from document titles in the Lists of Acceptable Documents. Attempt a best-guess transcription of handwritten NAMES — speak the name out loud as you read it — but transcribe the WHOLE name: do not drop a trailing letter ("Kimi" is not "Kim") and do not drop a compound surname ("Torres Perez" is not "Perez"). If the name is genuinely unreadable, null it and add "lastName"/"firstName" to "illegible". Only set null WITHOUT listing it in "illegible" when the field is genuinely BLANK.
-- dateOfBirth: the Section 1 "Date of Birth (mm/dd/yyyy)" value, exactly as printed. Subject to the ACCURACY RULE above. Do NOT confuse it with the employee's signature date or the employment start date.
-- ssn: the Section 1 "U.S. Social Security Number" value. Subject to the ACCURACY RULE above. Null when blank, masked, or not confidently legible.
-- documentType: "expected" for an I-9 Section 1 page; "unknown" for anything else.
+- lastName / firstName / middleInitial: the EMPLOYEE's name as THIS PAGE writes it. On "i9 section 1": the Section 1 name fields ONLY (labeled "Last Name (Family Name)", "First Name (Given Name)", "Middle Initial"). On "i9 section 2": the "Employee Last Name, First Name and Middle Initial from Section 1" line at the TOP of the sheet — NEVER the employer/authorized representative's own name from the Certification block. On "i9 ssn": the sheet's employee-name field. Attempt a best-guess transcription of handwritten NAMES — speak the name out loud as you read it — but transcribe the WHOLE name: do not drop a trailing letter ("Kimi" is not "Kim") and do not drop a compound surname ("Torres Perez" is not "Perez"). If the name is genuinely unreadable, null it and add "lastName"/"firstName" to "illegible". Only set null WITHOUT listing it in "illegible" when the field is genuinely BLANK. All three are null on "unknown" pages.
+- dateOfBirth: the Section 1 "Date of Birth (mm/dd/yyyy)" value, exactly as printed. Subject to the ACCURACY RULE above. Do NOT confuse it with the employee's signature date or the employment start date. Null on every other page kind.
+- ssn: the SSN THIS PAGE carries, subject to the ACCURACY RULE above; null when blank, masked, or not confidently legible. On "i9 section 1": the "U.S. Social Security Number" value. On "i9 section 2": the "Document Number" under LIST C **only when the List C document is a Social Security card** (its title mentions "Social Security" / "SS") — that number IS the employee's SSN as written by the employer; null when List C is anything else (birth certificate, etc.). On "i9 ssn": the sheet's Social Security Number field.
+- hireDate: the employment-start date THIS PAGE carries, exactly as printed, subject to the ACCURACY RULE (same digit discipline as dateOfBirth). On "i9 section 2": "The employee's first day of employment (mm/dd/yyyy)" from the Certification block. On "i9 ssn": the sheet's "Date of Hire". Null on "i9 section 1" and "unknown" pages, and when blank or illegible.
+- documentType: "expected" for any real I-9 / SSN-sheet page ("i9 section 1", "i9 section 2", "i9 ssn"); "unknown" for anything else.
 - originallyMissing: expected field names that were genuinely BLANK on the paper. Use [] when nothing was missing.
-- illegible: field names that ARE written on the paper but you could NOT read confidently ("ssn", "dateOfBirth", "lastName", "firstName"). Use [] when everything was legible. NEVER put a field in both "originallyMissing" and "illegible".
+- illegible: field names that ARE written on the paper but you could NOT read confidently ("ssn", "dateOfBirth", "lastName", "firstName", "hireDate"). Use [] when everything was legible. NEVER put a field in both "originallyMissing" and "illegible".
 - notes: free-form observations, or [].
-
-SECTION 2 PAGES (formKind "unknown" — the employer's "Section 2. Employer Review and Verification" sheet).
-These pages independently repeat the SAME employee's identity, so they are our cross-check. On such a page ALSO fill:
-- section2Name: the employee name written at the TOP of Section 2 ("Employee Info from Section 1" / Last Name, First Name, M.I.). Null if not present.
-- section2DocNumber: the "Document Number" under LIST C **only when the List C document is a Social Security card** (its title mentions "Social Security"). That number IS the employee's SSN as written by the employer — transcribe its digits exactly, subject to the ACCURACY RULE. Null when the List C document is anything else (birth certificate, etc.), when it is blank, or when the digits are not confidently legible.
-- section2HireDate: the Section 2 "First Day of Employment (mm/dd/yyyy)" value, exactly as printed. Subject to the ACCURACY RULE (same digit discipline as dateOfBirth). Null when blank, illegible, or not a Section 2 sheet.
-Leave section2Name / section2DocNumber / section2HireDate null on every page that is NOT a Section 2 sheet.
 
 Output ONLY the valid JSON array. No commentary, no markdown fences, no wrapper object.`;
 
@@ -367,8 +387,13 @@ export function i9NamePairScore(a: string, b: string): number {
   return total / Math.max(ta.length, tb.length);
 }
 
+/** The employee name a SHEET record carries (its own uniform name fields). */
+export function i9SheetName(sheet: I9PreviewRecord): string {
+  return nonEmpty(sheet.name) ?? buildI9DisplayName(sheet);
+}
+
 /**
- * Assign each Section 2 sheet to the Section 1 record it best matches.
+ * Assign each Section 2 / SSN sheet to the Section 1 record it best matches.
  *
  * Best-first over ALL candidate pairs (not first-fit in page order), so an
  * exact match always outranks a coincidental token collision, and each sheet
@@ -383,7 +408,7 @@ export function pairI9Section2Sheets(
     const ourName = nonEmpty(rec.name) ?? buildI9DisplayName(rec);
     if (!ourName) continue;
     for (const sheet of sheets) {
-      const score = i9NamePairScore(ourName, sheet.section2Name ?? "");
+      const score = i9NamePairScore(ourName, i9SheetName(sheet));
       if (score >= MIN_PAIR_SCORE) scored.push({ rec, sheet, score });
     }
   }
@@ -441,59 +466,79 @@ function ssnDigits(v: unknown): string {
  */
 export function corroborateI9Records(records: I9PreviewRecord[]): I9PreviewRecord[] {
   const sheets = records.filter(
-    (r) => r.formKind !== "i9" && nonEmpty(r.section2Name) !== null,
+    (r) => r.formKind === "i9 section 2" && i9SheetName(r) !== "",
+  );
+  const ssnSheets = records.filter(
+    (r) => r.formKind === "i9 ssn" && i9SheetName(r) !== "",
   );
   // Every employee has BOTH pages somewhere in the packet — pair them globally,
   // best match first, rather than first-fit in page order.
-  const section1s = records.filter((r) => r.formKind === "i9");
+  const section1s = records.filter((r) => isI9Section1(r));
   const pairs = pairI9Section2Sheets(section1s, sheets);
+  const ssnPairs = pairI9Section2Sheets(section1s, ssnSheets);
   const claimed = new Set<I9PreviewRecord>(pairs.values());
+  const claimedSsn = new Set<I9PreviewRecord>(ssnPairs.values());
 
   for (const rec of records) {
-    if (rec.formKind !== "i9") continue;
+    if (!isI9Section1(rec)) continue;
     const sheet = pairs.get(rec);
-    if (!sheet) {
+    const ssnSheet = ssnPairs.get(rec);
+    if (!sheet && !ssnSheet) {
       rec.corroboration = "unavailable";
       rec.disputedFields = [];
       continue;
     }
-    rec.section2Page = sheet.sourcePage;
 
     const disputed: string[] = [];
+    // Compare against every sheet this person has — the Section 2 sheet and
+    // (rarely) an SSN supplemental sheet are each an independent transcription.
+    for (const [kindLabel, s] of [
+      ["Section 2", sheet],
+      ["SSN sheet", ssnSheet],
+    ] as const) {
+      if (!s) continue;
+      if (kindLabel === "Section 2") {
+        rec.section2Page = s.sourcePage;
+      } else {
+        rec.ssnPage = s.sourcePage;
+      }
+      s.section1Page = rec.sourcePage;
 
-    // SSN: the employer's List C number is an independent transcription.
-    const ours = ssnDigits(rec.ssn);
-    const theirs = ssnDigits(sheet.section2DocNumber);
-    if (ours && theirs && ours !== theirs) {
-      disputed.push("ssn");
-      rec.warnings.push(
-        `SSN disagrees with the employer's Section 2 (page ${sheet.sourcePage}): Section 1 reads ${maskSsn(ours)}, `
-        + `Section 2 List C reads ${maskSsn(theirs)}. The SSN was NOT used to search UCPath — verify it against the scan.`,
-      );
-    }
+      // SSN: the sheet's number (Section 2 List C / the SSN sheet's own field)
+      // is an independent transcription of the same identity.
+      const ours = ssnDigits(rec.ssn);
+      const theirs = ssnDigits(s.ssn);
+      if (ours && theirs && ours !== theirs && !disputed.includes("ssn")) {
+        disputed.push("ssn");
+        rec.warnings.push(
+          `SSN disagrees with the employer's ${kindLabel} (page ${s.sourcePage}): Section 1 reads ${maskSsn(ours)}, `
+          + `the ${kindLabel} reads ${maskSsn(theirs)}. The SSN was NOT used to search UCPath — verify it against the scan.`,
+        );
+      }
 
-    // Name: a partial misread ("Kim" for "Kimi") still shares a token, so the
-    // pairing holds while the surname/given-name mismatch is surfaced.
-    const s2 = sheet.section2Name ?? "";
-    const ourLast = nonEmpty(rec.lastName);
-    if (ourLast && s2 && !nameTokens(s2).has(ourLast.toLowerCase())) {
-      disputed.push("lastName");
-      rec.warnings.push(
-        `Last name disagrees with the employer's Section 2 (page ${sheet.sourcePage}): `
-        + `Section 1 reads "${ourLast}", Section 2 reads "${s2}". Verify against the scan.`,
-      );
+      // Name: a partial misread ("Kim" for "Kimi") still shares a token, so the
+      // pairing holds while the surname/given-name mismatch is surfaced.
+      const sheetName = i9SheetName(s);
+      const ourLast = nonEmpty(rec.lastName);
+      if (ourLast && sheetName && !nameTokens(sheetName).has(ourLast.toLowerCase()) && !disputed.includes("lastName")) {
+        disputed.push("lastName");
+        rec.warnings.push(
+          `Last name disagrees with the employer's ${kindLabel} (page ${s.sourcePage}): `
+          + `Section 1 reads "${ourLast}", the ${kindLabel} reads "${sheetName}". Verify against the scan.`,
+        );
+      }
+
+      // Hire date rides the sheets only — copy onto the Section 1 record so the
+      // completeness report / Action History grid can show "Hire Date (from I-9)".
+      // Section 2's "first day of employment" wins over an SSN sheet's date of hire.
+      const hire = nonEmpty(s.hireDate);
+      if (hire && (kindLabel === "Section 2" || !nonEmpty(rec.hireDate))) {
+        rec.hireDate = normalizeI9Dob(hire) ?? hire;
+      }
     }
 
     rec.disputedFields = disputed;
     rec.corroboration = disputed.length > 0 ? "disputed" : "confirmed";
-
-    // Hire date rides Section 2 only — copy onto the Section 1 record so the
-    // completeness report / Action History grid can show "Hire Date (from I-9)".
-    const hire = nonEmpty(sheet.section2HireDate);
-    if (hire) {
-      const normalized = normalizeI9Dob(hire) ?? hire;
-      rec.hireDate = normalized;
-    }
   }
 
   // A Section 2 sheet nobody claimed = an employee in the packet with no
@@ -502,8 +547,16 @@ export function corroborateI9Records(records: I9PreviewRecord[]): I9PreviewRecor
     if (claimed.has(sheet)) continue;
     sheet.orphanSection2 = true;
     sheet.warnings.push(
-      `Section 2 for "${sheet.section2Name}" is in the packet but its Section 1 page is NOT — `
+      `Section 2 for "${i9SheetName(sheet)}" is in the packet but its Section 1 page is NOT — `
       + `this person could not be checked against UCPath. Locate the missing Section 1 page.`,
+    );
+  }
+  // An unclaimed SSN sheet is softer — the person may simply have no I-9 pages
+  // in this packet — but still worth a legible flag, never a silent drop.
+  for (const s of ssnSheets) {
+    if (claimedSsn.has(s)) continue;
+    s.warnings.push(
+      `SSN sheet for "${i9SheetName(s)}" matched no Section 1 page in this packet — verify whose record it belongs to.`,
     );
   }
   return records;
@@ -594,7 +647,7 @@ export function i9SecondOpinionRank(
  * which is exactly the gate the orchestrator adopts a re-read on.
  */
 export function isI9SecondOpinionSuspect(rec: I9PreviewRecord): boolean {
-  if (rec.formKind !== "i9") return false;
+  if (!isI9Section1(rec)) return false;
   return i9SecondOpinionRank(rec) === 1 || (rec.illegible ?? []).length > 0;
 }
 
@@ -705,7 +758,7 @@ export function buildI9Checks(rec: I9PreviewRecord): VerifyCheck[] {
 
   return [
     mkPaper("name", "Employee Name", paperName),
-    mkRoster("ppsEid", "PPS EID", ppsEid),
+    mkRoster("ppsEid", "PPS ID", ppsEid),
     mkRoster("ucpathEmplId", "UCPATH Employee ID", ucpathId),
     mkPaper("hireDate", "Hire Date (from I-9)", hireDate),
     mkRoster("i9SeparationDate", "Separation Date", sepDate),
@@ -718,7 +771,6 @@ export function buildI9Checks(rec: I9PreviewRecord): VerifyCheck[] {
     // recorded on the Section 2 sheet.
     section1Check,
     section2Check,
-    mkPaper("section2Name", "Section 2 name (employer's copy)", nonEmpty(rec.section2Name)),
     mkPaper("corroboration", "Cross-check vs Section 2", corroborationLabel(rec)),
   ];
 }
@@ -830,9 +882,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
       middleInitial: null,
       dateOfBirth: null,
       ssn: null,
-      section2Name: null,
-      section2DocNumber: null,
-      section2HireDate: null,
+      hireDate: null,
       illegible: [],
       corroboration: "unavailable",
       disputedFields: [],
@@ -878,7 +928,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
     }
     for (const rec of orphans) {
       log.warn(
-        `[i9/corroborate] page ${rec.sourcePage}: Section 2 for "${rec.section2Name}" has no Section 1 page in this packet — that person cannot be checked`,
+        `[i9/corroborate] page ${rec.sourcePage}: Section 2 for "${i9SheetName(rec)}" has no Section 1 page in this packet — that person cannot be checked`,
       );
     }
     input.emitProgress(records);
@@ -901,7 +951,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
       const rec = records[idx];
       const xref = crossRefI9Record(rec, actionHistory);
       applyActionHistoryToI9Record(rec, xref);
-      if (rec.formKind === "i9") {
+      if (isI9Section1(rec)) {
         if (xref.ppsEid || xref.rosterEmplId) xrefHits += 1;
         else xrefMisses += 1;
 
@@ -954,7 +1004,7 @@ export const i9OcrFormSpec: OcrFormSpec<I9OcrRecord, I9PreviewRecord> = {
     }
 
     const searchableCount = records.filter(
-      (rec) => rec.formKind === "i9" && rec.matchState === "resolved",
+      (rec) => isI9Section1(rec) && rec.matchState === "resolved",
     ).length;
     log.success({
       message:

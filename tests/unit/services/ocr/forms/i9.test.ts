@@ -8,8 +8,10 @@ import {
   buildI9DisplayName,
   buildI9PersonMatchInput,
   corroborateI9Records,
+  i9NamePairScore,
   i9NamesShareToken,
   i9OcrFormSpec,
+  pairI9Section2Sheets,
   i9SecondOpinionRank,
   isI9SecondOpinionSuspect,
   normalizeI9Dob,
@@ -19,7 +21,7 @@ import {
 
 function makeRecord(overrides: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
   return {
-    formKind: "i9",
+    formKind: "i9 section 1",
     sourcePage: 1,
     lastName: "Doe",
     firstName: "Jane",
@@ -45,7 +47,7 @@ function makeRecord(overrides: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
 describe("I9OcrRecordSchema", () => {
   it("parses a full Section 1 record", () => {
     const parsed = I9OcrRecordSchema.parse({
-      formKind: "i9",
+      formKind: "i9 section 1",
       sourcePage: 1,
       lastName: "Doe",
       firstName: "Jane",
@@ -54,8 +56,29 @@ describe("I9OcrRecordSchema", () => {
       ssn: "123-45-6789",
       documentType: "expected",
     });
-    assert.equal(parsed.formKind, "i9");
+    assert.equal(parsed.formKind, "i9 section 1");
     assert.equal(parsed.ssn, "123-45-6789");
+  });
+
+  it("parses a Section 2 sheet with the UNIFORM fields (name/ssn/hireDate on the sheet itself)", () => {
+    const parsed = I9OcrRecordSchema.parse({
+      formKind: "i9 section 2",
+      sourcePage: 2,
+      lastName: "Doe",
+      firstName: "Jane",
+      middleInitial: "A",
+      dateOfBirth: null,
+      ssn: "123-45-6789",
+      hireDate: "04/17/2018",
+      documentType: "expected",
+    });
+    assert.equal(parsed.formKind, "i9 section 2");
+    assert.equal(parsed.hireDate, "04/17/2018");
+  });
+
+  it("coerces the LEGACY 2-way kind: \"i9\" normalizes to \"i9 section 1\"", () => {
+    const parsed = I9OcrRecordSchema.parse({ formKind: "i9", sourcePage: 1 });
+    assert.equal(parsed.formKind, "i9 section 1");
   });
 
   it("tolerates explicit nulls on a non-Section-1 page (record must not drop)", () => {
@@ -200,60 +223,70 @@ describe("applyPersonMatchToI9Record", () => {
 });
 
 describe("buildI9Checks", () => {
-  it("marks paper fields present and the UCPath check found with EID + name", () => {
+  it("marks paper + roster fields and the roster name-match as Yes when matched", () => {
     const rec = makeRecord({
-      ucpathFound: true,
-      matchedEmplId: "10874100",
-      matchedName: "Jane Doe",
-      personMatchStatus: "completed",
+      ppsEid: "39549",
+      rosterEmplId: "10874100",
+      hireDate: "4/17/2018",
+      i9SeparationDate: "8/6/2021",
     });
     const checks = buildI9Checks(rec);
     assert.deepEqual(
       checks.map((c) => [c.key, c.status]),
       [
         ["name", "present"],
+        ["ppsEid", "found"],
+        ["ucpathEmplId", "found"],
+        ["hireDate", "present"],
+        ["i9SeparationDate", "found"],
+        ["rosterNameMatch", "found"],
         ["dob", "present"],
         ["ssn", "present"],
-        ["ucpathPerson", "found"],
+        // Document provenance: which of the person's two pages backed this row.
+        ["section1Present", "present"],
+        ["section2Present", "missing"],
+        ["corroboration", "missing"],
       ],
     );
-    const ucpath = checks[3]!;
-    assert.equal(ucpath.foundValue, "EID 10874100 — Jane Doe");
-    assert.equal(ucpath.source, "ucpath");
+    const roster = checks.find((c) => c.key === "rosterNameMatch")!;
+    assert.equal(roster.foundValue, "Yes");
+    assert.equal(roster.label, "On Action History roster (by name)?");
+    assert.equal(roster.source, "roster");
+    assert.equal(checks.find((c) => c.key === "ppsEid")!.foundValue, "39549");
+    assert.equal(checks.find((c) => c.key === "hireDate")!.paperValue, "4/17/2018");
   });
 
-  it("a definitive not-found keeps the default missing rendering (no missingLabel)", () => {
-    const checks = buildI9Checks(
-      makeRecord({ ucpathFound: false, personMatchStatus: "completed" }),
-    );
-    const ucpath = checks[3]!;
-    assert.equal(ucpath.status, "missing");
-    assert.equal(ucpath.missingLabel, undefined);
-  });
-
-  it("a FAILED match never reads as not-found — explicit unknown label", () => {
-    const checks = buildI9Checks(makeRecord({ personMatchStatus: "failed" }));
-    assert.equal(checks[3]!.missingLabel, "Search failed — result unknown");
-  });
-
-  it("an unanswered record reads Not checked (mid-prep / re-OCR'd page)", () => {
+  it("no roster name-match reads 'UCPath check runs next' — never a UCPath verdict", () => {
     const checks = buildI9Checks(makeRecord());
-    assert.equal(checks[3]!.missingLabel, "Not checked");
+    const roster = checks.find((c) => c.key === "rosterNameMatch")!;
+    assert.equal(roster.status, "missing");
+    assert.equal(roster.missingLabel, "No name match — UCPath check runs next");
+    // The UCPath verdict itself belongs to the separations member row now —
+    // no check in the OCR preview may claim a found/not-found answer.
+    assert.equal(checks.find((c) => c.key === "ucpathPerson"), undefined);
   });
 
-  it("blank paper fields are missing", () => {
+  it("ucpathEmplId reads the ROSTER EID only (live matchedEmplId is deprecated)", () => {
+    const withDeprecatedStamp = buildI9Checks(
+      makeRecord({ matchedEmplId: "10999999" }),
+    );
+    assert.equal(
+      withDeprecatedStamp.find((c) => c.key === "ucpathEmplId")!.status,
+      "missing",
+      "a historical matchedEmplId stamp must not surface as a roster EID",
+    );
+    const withRoster = buildI9Checks(makeRecord({ rosterEmplId: "10874100" }));
+    assert.equal(withRoster.find((c) => c.key === "ucpathEmplId")!.foundValue, "10874100");
+  });
+
+  it("blank paper fields are missing; roster gaps say Not on Action History", () => {
     const checks = buildI9Checks(
       makeRecord({ name: "", lastName: null, firstName: null, dateOfBirth: null, ssn: null }),
     );
-    assert.deepEqual(
-      checks.map((c) => [c.key, c.status]),
-      [
-        ["name", "missing"],
-        ["dob", "missing"],
-        ["ssn", "missing"],
-        ["ucpathPerson", "missing"],
-      ],
-    );
+    assert.equal(checks.find((c) => c.key === "name")!.status, "missing");
+    assert.equal(checks.find((c) => c.key === "ppsEid")!.missingLabel, "Not on Action History");
+    assert.equal(checks.find((c) => c.key === "dob")!.status, "missing");
+    assert.equal(checks.find((c) => c.key === "ssn")!.status, "missing");
   });
 });
 
@@ -281,7 +314,9 @@ describe("i9OcrFormSpec", () => {
     assert.equal(rec.name, "Doe, Jane A");
     assert.equal(rec.selected, true);
     assert.equal(rec.matchState, "extracted");
-    assert.equal(rec.checks.length, 4);
+    // name/ppsEid/ucpathEmplId/hireDate/i9SeparationDate/rosterNameMatch/dob/ssn
+    // + section1Present/section2Present/corroboration.
+    assert.equal(rec.checks.length, 11);
   });
 
   it("carry-forward keeps the FRESH read (enrichment re-runs the search)", () => {
@@ -356,33 +391,37 @@ describe("i9SecondOpinionRank / isI9SecondOpinionSuspect", () => {
 // reported to the operator as a confident UCPath "not found".
 
 describe("corroborateI9Records", () => {
-  const sheet = (over: Partial<I9PreviewRecord>): I9PreviewRecord =>
+  // A Section 2 sheet record in the CURRENT contract: its own uniform
+  // name/ssn/hireDate fields (the old section2* side-fields are retired).
+  const sheet = (over: { sourcePage: number; name: string; ssn?: string | null; hireDate?: string | null; formKind?: I9PreviewRecord["formKind"] }): I9PreviewRecord =>
     makeRecord({
-      formKind: "unknown",
+      formKind: over.formKind ?? "i9 section 2",
+      sourcePage: over.sourcePage,
       lastName: null,
       firstName: null,
       middleInitial: null,
       dateOfBirth: null,
-      ssn: null,
-      name: "",
-      documentType: "unknown",
-      ...over,
+      ssn: over.ssn ?? null,
+      hireDate: over.hireDate ?? null,
+      name: over.name,
+      documentType: "expected",
     });
 
   it("a Section 1 the employer's Section 2 agrees with is CONFIRMED", () => {
     const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: "Werker, Trent D", ssn: "602-94-9554" });
-    const s2 = sheet({ sourcePage: 3, section2Name: "Werker, Trent D", section2DocNumber: "602-94-9554" });
+    const s2 = sheet({ sourcePage: 3, name: "Werker, Trent D", ssn: "602-94-9554", hireDate: "03/10/2019" });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.corroboration, "confirmed");
     assert.deepEqual(s1.disputedFields, []);
     assert.equal(s1.warnings.length, 0);
+    assert.equal(s1.hireDate, "03/10/2019", "Section 2 First Day of Employment copies onto Section 1");
   });
 
   it("REAL CASE (Werker, p55): a one-digit SSN misread is caught by Section 2 and never searched", () => {
     // OCR read 602-44-9554; the employer's List C says 602-94-9554. UCPath
     // answers "no results" for the wrong digit — a false "not in UCPath".
     const s1 = makeRecord({ sourcePage: 55, lastName: "Werker", firstName: "Trent", name: "Werker, Trent D", ssn: "602-44-9554" });
-    const s2 = sheet({ sourcePage: 54, section2Name: "Werker, Trent D", section2DocNumber: "602-94-9554" });
+    const s2 = sheet({ sourcePage: 54, name: "Werker, Trent D", ssn: "602-94-9554" });
     corroborateI9Records([s2, s1]);
 
     assert.equal(s1.corroboration, "disputed");
@@ -400,7 +439,7 @@ describe("corroborateI9Records", () => {
     // OCR read "Kim"; the paper says "Kimi". The names still share "walters",
     // so the sheet is paired and the SSN cross-check still runs.
     const s1 = makeRecord({ sourcePage: 53, lastName: "Walters", firstName: "Kim", name: "Walters, Kim J", ssn: "211-85-2141" });
-    const s2 = sheet({ sourcePage: 52, section2Name: "Walters, Kimi J.", section2DocNumber: "218-51-2141" });
+    const s2 = sheet({ sourcePage: 52, name: "Walters, Kimi J.", ssn: "218-51-2141" });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.corroboration, "disputed");
     assert.deepEqual(s1.disputedFields, ["ssn"]);
@@ -408,7 +447,7 @@ describe("corroborateI9Records", () => {
 
   it("REAL CASE (Mihalik, p4): a misread SURNAME is caught even though the given name matches", () => {
     const s1 = makeRecord({ sourcePage: 4, lastName: "Miralik", firstName: "Joshua", name: "Miralik, Joshua A", ssn: "635-54-2434" });
-    const s2 = sheet({ sourcePage: 3, section2Name: "Mihalik, Joshua A", section2DocNumber: "635-54-2434" });
+    const s2 = sheet({ sourcePage: 3, name: "Mihalik, Joshua A", ssn: "635-54-2434" });
     corroborateI9Records([s2, s1]);
     assert.equal(s1.corroboration, "disputed");
     assert.deepEqual(s1.disputedFields, ["lastName"]);
@@ -424,17 +463,46 @@ describe("corroborateI9Records", () => {
 
   it("REAL CASE (Singh, p24): a Section 2 with NO Section 1 page is flagged as an orphan", () => {
     const s1 = makeRecord({ sourcePage: 4, lastName: "Werker", firstName: "Trent", name: "Werker, Trent D" });
-    const orphan = sheet({ sourcePage: 24, section2Name: "Singh, Aryaman P" });
+    const orphan = sheet({ sourcePage: 24, name: "Singh, Aryaman P" });
     corroborateI9Records([s1, orphan]);
     assert.equal(orphan.orphanSection2, true);
     assert.match(orphan.warnings[0], /Section 1 page is NOT/);
     assert.equal(s1.orphanSection2, false);
   });
 
+  it("stamps the REVERSE link: the claimed sheet points back at its Section 1 page", () => {
+    const s1 = makeRecord({ sourcePage: 9, lastName: "Sanchez", firstName: "Gabriel", name: "Sanchez, Gabriel", ssn: "558-93-7070" });
+    const s2 = sheet({ sourcePage: 1, name: "Sanchez, Gabriel", ssn: "558-93-7070", hireDate: "04/25/2016" });
+    corroborateI9Records([s2, s1]);
+    assert.equal(s1.section2Page, 1);
+    assert.equal(s2.section1Page, 9, "the sheet records which Section 1 claimed it");
+  });
+
+  it("an \"i9 ssn\" supplemental sheet pairs by name, stamps ssnPage, and supplies the hire date", () => {
+    // The UCRS 419 case: Suh has NO Section 2 anywhere — the SSN statement is
+    // his only corroborating document.
+    const s1 = makeRecord({ sourcePage: 37, lastName: "Suh", firstName: "Seung", name: "Suh, Seung B", ssn: "889-17-4974", hireDate: null });
+    const ssnSheet = sheet({ formKind: "i9 ssn", sourcePage: 36, name: "Suh, Seung B", ssn: "889-17-4974", hireDate: "02/25/2016" });
+    corroborateI9Records([ssnSheet, s1]);
+    assert.equal(s1.ssnPage, 36);
+    assert.equal(ssnSheet.section1Page, 37);
+    assert.equal(s1.corroboration, "confirmed");
+    assert.equal(s1.hireDate, "02/25/2016", "the SSN sheet's date of hire fills a missing hire date");
+  });
+
+  it("an \"i9 ssn\" sheet contradicting the Section 1 SSN disputes it (independent oracle)", () => {
+    const s1 = makeRecord({ sourcePage: 37, lastName: "Suh", firstName: "Seung", name: "Suh, Seung B", ssn: "889-17-4944" });
+    const ssnSheet = sheet({ formKind: "i9 ssn", sourcePage: 36, name: "Suh, Seung B", ssn: "889-17-4974" });
+    corroborateI9Records([ssnSheet, s1]);
+    assert.equal(s1.corroboration, "disputed");
+    assert.deepEqual(s1.disputedFields, ["ssn"]);
+    assert.equal(buildI9PersonMatchInput(s1, {})?.ssn, undefined, "the contradicted SSN never searches UCPath");
+  });
+
   it("one Section 2 sheet is claimed by only ONE Section 1 (no double-pairing)", () => {
     const a = makeRecord({ sourcePage: 2, lastName: "Tan", firstName: "Jiayi", name: "Tan, Jiayi", ssn: "089-35-6758" });
     const b = makeRecord({ sourcePage: 4, lastName: "Tan", firstName: "Jiayi", name: "Tan, Jiayi", ssn: "089-35-6758" });
-    const s2 = sheet({ sourcePage: 1, section2Name: "Tan, Jiayi", section2DocNumber: "089-35-6758" });
+    const s2 = sheet({ sourcePage: 1, name: "Tan, Jiayi", ssn: "089-35-6758" });
     corroborateI9Records([s2, a, b]);
     assert.equal(a.corroboration, "confirmed", "the first Section 1 claims the sheet");
     assert.equal(b.corroboration, "unavailable", "the second cannot re-use it");
@@ -481,5 +549,89 @@ describe("buildI9PersonMatchInput: a disputed field is never searched with", () 
     const rec = makeRecord({ dateOfBirth: null, disputedFields: ["ssn"] });
     assert.equal(buildI9PersonMatchInput(rec, {}), null);
     assert.equal(i9SecondOpinionRank(rec), 1);
+  });
+});
+
+/**
+ * Every employee has BOTH a Section 1 and a Section 2 page, filed apart in a
+ * scanned packet. Pairing used to be first-fit on ANY shared name token, in
+ * page order, so a coincidental token collision stole the sheet an exact match
+ * needed. Live 2026-07-16: `Tsai, Nien Chen` and `Weng, Nien-Chen` both contain
+ * "nien" — Weng's Section 1 was paired to Tsai's sheet (phantom last-name
+ * dispute) while Weng's real sheet on page 50 was reported an orphan.
+ */
+describe("pairI9Section2Sheets — global best-first pairing", () => {
+  // Keep the name PARTS consistent with the display name — the last-name
+  // dispute check reads `lastName`, not the assembled `name`.
+  const s1 = (name: string, page: number): I9PreviewRecord => {
+    const [last, rest] = name.split(",");
+    const [first, middle] = rest.trim().split(" ");
+    return makeRecord({
+      name,
+      lastName: last.trim(),
+      firstName: first ?? null,
+      middleInitial: middle ?? null,
+      sourcePage: page,
+      formKind: "i9 section 1",
+    });
+  };
+  const s2 = (sheetName: string, page: number): I9PreviewRecord =>
+    makeRecord({
+      formKind: "i9 section 2",
+      sourcePage: page,
+      name: sheetName,
+      lastName: null,
+      firstName: null,
+      middleInitial: null,
+      dateOfBirth: null,
+      ssn: null,
+    });
+
+  it("gives each sheet to its BEST claimant, not the first token collision", () => {
+    const tsai = s1("Tsai, Nien Chen", 45);
+    const weng = s1("Weng, Nien-Chen", 51);
+    const tsaiSheet = s2("Tsai, Nien Chen", 44);
+    const wengSheet = s2("Weng, Nien-Chen", 50);
+
+    const paired = pairI9Section2Sheets([tsai, weng], [tsaiSheet, wengSheet]);
+    assert.equal(paired.get(tsai)?.sourcePage, 44, "Tsai keeps its own sheet");
+    assert.equal(paired.get(weng)?.sourcePage, 50, "Weng gets its own sheet, not Tsai's");
+  });
+
+  it("still pairs through a real OCR misread on BOTH pages", () => {
+    // "Shung, Marin Chianq" (sheet) vs "Shang, Martin C" (Section 1) — same person.
+    const shung = s1("Shang, Martin C", 11);
+    const sheet = s2("Shung, Marin Chianq", 10);
+    const paired = pairI9Section2Sheets([shung], [sheet]);
+    assert.equal(paired.get(shung)?.sourcePage, 10);
+  });
+
+  it("does NOT pair two genuinely different people", () => {
+    const a = s1("Tan, Jiayi", 3);
+    const sheet = s2("Singh, Aryaman P", 4);
+    assert.equal(pairI9Section2Sheets([a], [sheet]).size, 0);
+  });
+
+  it("scores an exact name above a shared-token coincidence", () => {
+    const exact = i9NamePairScore("Weng, Nien-Chen", "Weng, Nien-Chen");
+    const coincidence = i9NamePairScore("Weng, Nien-Chen", "Tsai, Nien Chen");
+    assert.equal(exact, 1);
+    assert.ok(coincidence < exact, `coincidence ${coincidence} must rank below exact ${exact}`);
+  });
+
+  it("corroborate: the mispairing no longer invents a last-name dispute", () => {
+    const tsai = s1("Tsai, Nien Chen", 45);
+    const weng = s1("Weng, Nien-Chen", 51);
+    const out = corroborateI9Records([
+      tsai,
+      weng,
+      s2("Tsai, Nien Chen", 44),
+      s2("Weng, Nien-Chen", 50),
+    ]);
+    const wengOut = out.find((r) => r.name === "Weng, Nien-Chen")!;
+    assert.equal(wengOut.corroboration, "confirmed");
+    assert.deepEqual(wengOut.disputedFields, []);
+    assert.equal(wengOut.section2Page, 50, "records which page corroborated it");
+    assert.ok(!out.some((r) => r.orphanSection2), "no phantom orphans");
   });
 });

@@ -13,7 +13,7 @@ import {
 import { EMERGENCY_CONTACT_WORKFLOW_RUNTIME_POLICY } from "../../src/workflows/emergency-contact/workflow.js";
 
 const REAL_TRACKER_DIR = ".tracker";
-const FIXTURE_PDF = "tests/data/emergency-contacts.pdf";
+const FIXTURE_PDF = "data/documents/emergency-contacts.pdf";
 
 function snapshotRealTracker(): string[] | null {
   if (!existsSync(REAL_TRACKER_DIR)) return null;

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, FileScan, Loader2, RotateCw, UploadCloud } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, FileScan, ListX, Loader2, RotateCw, UploadCloud } from "lucide-react";
 import { toast } from "@/lib/notify";
 import {
   Dialog,
@@ -19,6 +19,13 @@ import { type OathPreviewRecord } from "./types";
 import { FailedPageCard } from "./FailedPageCard";
 import { PrepReviewPair } from "./PrepReviewPair";
 import { PrepReviewMultiPair } from "./PrepReviewMultiPair";
+import { PrepReviewPersonSection } from "./PrepReviewPersonSection";
+import { buildI9RenderList, i9SectionPages, type I9RenderEntry } from "./i9-person-groups";
+import {
+  isApprovable,
+  isApprovalSelectionBlocked,
+  scrubHardBlockedSelection,
+} from "./approval-selection";
 import {
   PrepReviewFormCard,
   PrepReviewRecordNav,
@@ -153,12 +160,15 @@ function mergePrepRecordRows(
     if (removed.has(originalIndex)) continue;
     const baseRow = baseRecords[originalIndex];
     const edited = edits[originalIndex];
-    const record =
+    const merged =
       edited !== undefined
         ? overlayServerOwnedPrepFields(baseRow, edited)
         : baseRow;
-    if (record === undefined) continue;
-    out.push({ originalIndex, record });
+    if (merged === undefined) continue;
+    // Inactive / unknown must never stay selected — Select all and stale
+    // localStorage used to leave them checked while Approve N ignored them
+    // (count looked frozen when the operator "selected everything").
+    out.push({ originalIndex, record: scrubHardBlockedSelection(merged) });
   }
   return out;
 }
@@ -389,10 +399,8 @@ function useOcrReviewPrepApi(
   );
 
   // Derive the per-record lookup tracker ONCE per record. The pane re-renders on
-  // every SSE event during enrichment, and the tracker was being computed twice
-  // per record per render (renderFormCard + renderFormCardNav, the hottest path).
-  // Keyed on the records + dependency children + parent status/step — the only
-  // inputs `deriveOcrRecordLookupTracker` reads.
+  // every SSE event during enrichment; keying on records + dependency children +
+  // parent status/step keeps the hottest path from recomputing the tracker twice.
   const entryStatusForLookup = entry?.status ?? "";
   const entryStepForLookup = entry?.step;
   const lookupTrackerByIndex = useMemo(() => {
@@ -473,20 +481,30 @@ function useOcrReviewPrepApi(
     return () => observer.disconnect();
   }, [containerRef, onPairVisible, recordRows.length]);
 
-  // Group records by sourcePage, interleaved with failed pages, sorted by page number.
-  type PageRender =
-    | { kind: "records"; page: number; group: Array<{ record: AnyPreviewRecord; originalIndex: number }> }
-    | { kind: "failed"; page: number; failedPage: FailedPage }
-    | { kind: "empty"; page: number };
+  // Group records for rendering. Generic forms group by sourcePage
+  // (one section per page); an i9 run groups by PERSON instead — one section
+  // holding BOTH of a person's pages (Section 2 + Section 1, often
+  // non-adjacent in the scan) beside a single record card. Failed/empty pages
+  // interleave either way, sorted by page number.
+  type PageRender = I9RenderEntry<AnyPreviewRecord, FailedPage>;
 
-  const failedPages = data?.failedPages ?? [];
-  const emptyPages = data?.emptyPages ?? [];
+  const failedPages = useMemo(() => data?.failedPages ?? [], [data]);
+  const emptyPages = useMemo(() => data?.emptyPages ?? [], [data]);
 
   type PageRenderWithOrdinals =
     | { kind: "records"; page: number; group: Array<{ record: AnyPreviewRecord; originalIndex: number }>; ordinals: number[] }
-    | PageRender;
+    | (Extract<PageRender, { kind: "i9-person" }> & { ordinal: number })
+    | Extract<PageRender, { kind: "failed" | "empty" }>;
 
   const renderList = useMemo<PageRender[]>(() => {
+    if (cfg?.formKind === "i9") {
+      return buildI9RenderList<AnyPreviewRecord, FailedPage>({
+        recordRows,
+        failedPages,
+        emptyPages,
+        markedBlankPages,
+      });
+    }
     const recordsByPage = new Map<number, Array<{ record: AnyPreviewRecord; originalIndex: number }>>();
     recordRows.forEach(({ record: r, originalIndex }) => {
       const page = (r as { sourcePage: number }).sourcePage;
@@ -503,13 +521,17 @@ function useOcrReviewPrepApi(
       if (markedBlankPages.has(p)) continue;
       list.push({ kind: "empty", page: p });
     }
-    list.sort((a, b) => a.page - b.page);
+    list.sort(
+      (a, b) =>
+        (a.kind === "i9-person" ? a.sortPage : a.page) - (b.kind === "i9-person" ? b.sortPage : b.page),
+    );
     return list;
-  }, [recordRows, failedPages, emptyPages, markedBlankPages]);
+  }, [cfg?.formKind, recordRows, failedPages, emptyPages, markedBlankPages]);
 
   const renderListWithOrdinals = useMemo<PageRenderWithOrdinals[]>(() => {
     let n = 0;
     return renderList.map((item): PageRenderWithOrdinals => {
+      if (item.kind === "i9-person") return { ...item, ordinal: ++n };
       if (item.kind !== "records") return item;
       const ordinals = item.group.map(() => ++n);
       return { ...item, ordinals };
@@ -525,14 +547,28 @@ function useOcrReviewPrepApi(
     () => approvableRecords.filter((r) => r.selected).length,
     [approvableRecords],
   );
+  const anySelected = useMemo(
+    () => records.some((r) => r.selected),
+    [records],
+  );
+  // Selectable = same as the per-row checkbox (unknown + inactive disabled).
+  // Select All covers every checkbox-enabled row — not only isApprovable
+  // (matched/resolved) — so form-EID / still-verifying records aren't skipped.
+  // Inactive is hard-blocked (same as Approve N), so selecting it never bumps
+  // the count and must not be offered as a fake "Select all" win.
+  const unselectedSelectableCount = useMemo(
+    () =>
+      recordRows.filter(
+        ({ record }) => !record.selected && !isApprovalSelectionBlocked(record),
+      ).length,
+    [recordRows],
+  );
   const hasPendingDependencies = (dependencySummary?.pending ?? 0) > 0;
 
-  // Pages that render a source-page preview and therefore gate approval (both
-  // single-record PrepReviewPair and multi-record PrepReviewMultiPair pages).
-  const requiredPreviewPages = useMemo(
-    () => renderList.filter((item) => item.kind === "records").map((item) => item.page),
-    [renderList],
-  );
+  // Pages that render a source-page preview and therefore gate approval —
+  // per-page sections AND every page inside an i9 person section (a Section 2
+  // page must render before its person can be trusted, not just Section 1).
+  const requiredPreviewPages = useMemo(() => i9SectionPages(renderList), [renderList]);
   const previewApprovalGate = useMemo(
     () => derivePreviewApprovalGate({
       requiredPages: requiredPreviewPages,
@@ -682,6 +718,33 @@ function useOcrReviewPrepApi(
     setLocalEdits((prev) => ({ ...prev, [nextIndex]: blank }));
   }
 
+  function selectAllSelectable(): void {
+    setLocalEdits((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const { record, originalIndex } of recordRows) {
+        if (record.selected) continue;
+        if (isApprovalSelectionBlocked(record)) continue;
+        next[originalIndex] = { ...record, selected: true };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }
+
+  function unselectAll(): void {
+    setLocalEdits((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const { record, originalIndex } of recordRows) {
+        if (!record.selected) continue;
+        next[originalIndex] = { ...record, selected: false };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }
+
   async function handleApprove() {
     if (submitting || !cfg) return;
     // Fail loud: one coherent gate. approveBlockedReason is set whenever a
@@ -778,39 +841,82 @@ function useOcrReviewPrepApi(
                 }}
               />
             )}
-            {/* Variant B — "connected segmented group": one cohesive pill binds
-                the secondary Reupload control to a hairline-divided, filled-primary
-                Approve segment, so the cluster reads as a single deliberate control.
-                Read-only (standalone OCR) shows just Reupload; delegated adds the
-                divider + Approve. No standalone record-count chip. */}
+            {/* Variant B — one connected pill: Select all | Unselect all | Reupload | Approve.
+                Selection segments only on delegated approve runs. */}
             {(onReupload || isDelegation) && (
               <div className="inline-flex h-8 shrink-0 items-center rounded-lg border border-border bg-secondary/40 p-0.5">
+                {isDelegation && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        selectAllSelectable();
+                      }}
+                      disabled={submitting || unselectedSelectableCount <= 0}
+                      aria-label="Select all records"
+                      title="Select every record that can be approved (skips inactive / unknown)"
+                      className={cn(
+                        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground",
+                        "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
+                        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      )}
+                    >
+                      <CheckCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Select all
+                    </button>
+                    <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        unselectAll();
+                      }}
+                      disabled={submitting || !anySelected}
+                      aria-label="Unselect all records"
+                      title="Clear every selected record"
+                      className={cn(
+                        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground",
+                        "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
+                        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      )}
+                    >
+                      <ListX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Unselect all
+                    </button>
+                  </>
+                )}
                 {onReupload && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
-                    }
-                    disabled={submitting}
-                    aria-label="Reupload corrected PDF"
-                    title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
-                    className={cn(
-                      "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground",
-                      "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
-                      "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  <>
+                    {isDelegation && (
+                      <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
                     )}
-                  >
-                    <UploadCloud className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Reupload
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onReupload({ sessionId: entry.id, previousRunId: entry.runId ?? entry.id })
+                      }
+                      disabled={submitting}
+                      aria-label="Reupload corrected PDF"
+                      title="Re-upload corrected PDF — carries forward resolved EIDs from this run"
+                      className={cn(
+                        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium leading-none text-muted-foreground",
+                        "transition-colors duration-150 hover:bg-secondary hover:text-foreground",
+                        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                      )}
+                    >
+                      <UploadCloud className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Reupload
+                    </button>
+                  </>
                 )}
 
                 {isDelegation && (
                   <>
-                    {onReupload && (
-                      <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
-                    )}
+                    <span className="mx-0.5 h-4 w-px shrink-0 bg-border" aria-hidden />
                     <button
                       type="button"
                       onClick={handleApprove}
@@ -821,8 +927,6 @@ function useOcrReviewPrepApi(
                         "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold leading-none text-primary-foreground",
                         "transition-[background-color,transform] duration-150 ease-out",
                         "hover:bg-primary/90 active:translate-y-[0.5px]",
-                        // Disabled (no selection / pending deps) → dim. Submitting keeps full
-                        // saturation so the spinner reads as "working" not "dead".
                         "disabled:cursor-not-allowed",
                         !submitting && "disabled:opacity-50 disabled:active:translate-y-0",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -833,7 +937,9 @@ function useOcrReviewPrepApi(
                       ) : (
                         <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       )}
-                      <span className="tabular-nums">Approve {selectedCount}</span>
+                      <span className="tabular-nums" aria-live="polite">
+                        Approve {selectedCount}
+                      </span>
                     </button>
                   </>
                 )}
@@ -886,6 +992,42 @@ function useOcrReviewPrepApi(
                         marked={markedBlankPages.has(renderEntry.page)}
                       />
                     </div>
+                  </div>
+                </section>
+              );
+            }
+            if (renderEntry.kind === "i9-person") {
+              const { record, originalIndex, pages, ordinal: rowOrdinal } = renderEntry;
+              return (
+                <section
+                  key={`person-${originalIndex}`}
+                  className="border-b border-border pb-5 last:border-b-0 last:pb-0"
+                >
+                  <div data-pair-index={originalIndex}>
+                    <PrepReviewPersonSection
+                      workflow={entry.workflow}
+                      parentRunId={sessionId}
+                      pages={pages}
+                      fileId={data.pdfFileId}
+                      onPreviewStatusChange={handlePreviewStatusChange}
+                      formCard={renderFormCard({
+                        record,
+                        cfg,
+                        totalPages,
+                        originalIndex,
+                        rowOrdinal,
+                        ocrRunId: runId,
+                        lookupTracker: lookupTrackerByIndex.get(originalIndex)!,
+                        researchingIndices,
+                        onRelookup: handleRelookup,
+                        relookupPendingKeys: relookupPending,
+                        onRemoveRecord: removeRecord,
+                        removeBusy: submitting,
+                        readOnly: !isDelegation,
+                        omitScreenshotStrip: true,
+                        onChange: (next) => setRecord(originalIndex, next),
+                      })}
+                    />
                   </div>
                 </section>
               );
@@ -1083,27 +1225,6 @@ function ReocrWholePdfButton({ sessionId, runId, storageKey, onSuccess }: { sess
   );
 }
 
-function isApprovable(record: AnyPreviewRecord): boolean {
-  const matchOk = record.matchState === "matched" || record.matchState === "resolved";
-  const notUnknown = record.documentType !== "unknown";
-  // Verification gate: only HARD-block inactive employees. Non-HDH is still
-  // HR-active, so the operator can approve when the EID and form data are right.
-  // `lookup-failed` (Person Org Summary returned nothing) and absent-yet
-  // states fall through as approvable. An EID resolved by eid-lookup is enough
-  // signal to dispatch — verification is auxiliary.
-  const v = "verification" in record ? record.verification?.state : undefined;
-  const verifyOk = v !== "inactive";
-  // Tighten: when selected, require a non-empty 5+ digit EID. Blocks
-  // approving a manually-added row before the operator types an EID.
-  const eid = String(
-    (record as { employeeId?: string; employee?: { employeeId?: string } }).employeeId
-      ?? (record as { employee?: { employeeId?: string } }).employee?.employeeId
-      ?? "",
-  ).trim();
-  const eidOk = !record.selected || /^\d{5,}$/.test(eid);
-  return matchOk && notUnknown && verifyOk && eidOk;
-}
-
 /**
  * Returns the subset of `["person", "i9"]` lookup kinds that are currently
  * pending for `idx` inside the global `${idx}:${kind}` pending set.
@@ -1283,7 +1404,7 @@ function renderFormCard(args: {
       removeFromPileBanner={removeFromPileBanner}
       signatureBanner={signatureBanner}
       selected={r.selected}
-      selectedDisabled={isUnknown}
+      selectedDisabled={isApprovalSelectionBlocked(r) || args.readOnly}
       hideHeader={args.hideHeader}
       onSelectedChange={(next) =>
         args.onChange({ ...r, selected: next })
@@ -1351,7 +1472,7 @@ function renderFormCardNav(args: {
         ) : undefined
       }
       selected={args.record.selected}
-      selectedDisabled={isUnknown}
+      selectedDisabled={isApprovalSelectionBlocked(args.record)}
       onSelectedChange={args.onOperationSelectedChange}
     />
   );
@@ -1386,16 +1507,8 @@ function renderLookupTrackerBadge(tracker: OcrRecordLookupTracker): ReactNode {
 }
 
 /**
- * Document-kind chip (Oath / Emergency Contact) rendered at the head of the row
- * title in place of the `#ordinal` badge. Returns undefined for an `unknown`
- * page so the nav falls back to the ordinal — the destructive "unknown"
- * `documentTypeBadge` already flags those pages, so a second "Unknown" chip
- * would be redundant.
- *
- * (The former `renderSignatureBadge` header chip — "employee unsigned" /
- * "officer unsigned" — was removed: the same state is conveyed by the body's
- * signature banner (`renderOathSignatureBanner`) and the read-only checklist's
- * "Employee Signed / Officer Signed" rows, so the header chip was redundant.)
+ * Doc-kind chip for the prep-review row title (replaces the old `#ordinal`).
+ * Falls back to undefined for unknown so the ordinal badge remains.
  */
 function renderDocumentKindChip(formKind: string): ReactNode {
   if (formKind === "oath") {

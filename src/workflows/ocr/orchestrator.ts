@@ -604,9 +604,16 @@ export async function runOcrOrchestrator(
 
     // Forms that declare `rosterMode: "optional"` (e.g. `verify`, which does no
     // roster matching — it resolves identities via person-lookup in
-    // `enrichRecords`) may run with no roster at all. Roster-`required` forms
-    // (oath / emergency-contact) still throw if no path resolved.
-    if (!resolvedRosterPath && spec.rosterMode !== "optional") {
+    // `enrichRecords`) may run with no roster at all, and the operator can
+    // EXPLICITLY opt any form out via `rosterMode: "none"` (the run-modal "No
+    // roster" choice) — every record then falls through matching as
+    // `lookup-pending` and resolves via person-lookup. Roster-`required` forms
+    // still throw when a path was expected but never resolved.
+    if (input.rosterMode === "none") {
+      // Ignore any stray rosterPath — "none" must mean none, not a silent load.
+      resolvedRosterPath = undefined;
+      log.step("[ocr] rosterMode=none — operator chose to run without a roster; records resolve via person-lookup");
+    } else if (!resolvedRosterPath && spec.rosterMode !== "optional") {
       throw new Error("OCR: no roster path resolved");
     }
     const roster = resolvedRosterPath
@@ -800,7 +807,7 @@ export async function runOcrOrchestrator(
 
     // 3. Match
     log.step(`[ocr] matching ${(ocrResult.data).length} OCR record(s) against roster`);
-    log.step(`[ocr] roster has ${roster.length} row(s)${resolvedRosterPath ? ` loaded from ${resolvedRosterPath.split("/").pop()}` : " (no roster — rosterMode optional)"}`);
+    log.step(`[ocr] roster has ${roster.length} row(s)${resolvedRosterPath ? ` loaded from ${resolvedRosterPath.split("/").pop()}` : input.rosterMode === "none" ? " (no roster — operator chose rosterMode none)" : " (no roster — rosterMode optional)"}`);
     let records = await raceOcrPrepWithDiscard(
       id,
       runId,

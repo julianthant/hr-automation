@@ -184,6 +184,73 @@ test("standalone oath orchestrator emits pending → loading-roster → ocr → 
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("rosterMode 'none' runs a roster-REQUIRED form rosterless: no roster load, records resolve via person-lookup", async () => {
+  // The run modal's explicit "No roster" opt-out. The oath spec declares
+  // rosterMode:"required", but the operator's `none` bypasses the "no roster
+  // path resolved" throw AND must never touch the loader — matching sees
+  // roster=[] so every record goes lookup-pending → person-lookup.
+  const { dir, pdfPath, pdfFileId } = await setup();
+  const writtenEntries: object[] = [];
+
+  await runOcrOrchestrator(
+    {
+      pdfPath,
+      pdfOriginalName: "fake.pdf",
+      pdfFileId,
+      formType: "oath",
+      sessionId: "session-none",
+      rosterMode: "none",
+    },
+    {
+      runId: "run-none",
+      trackerDir: dir,
+      _emitOverride: (entry: any) => writtenEntries.push(entry),
+      _ocrPipelineOverride: async () => ({
+        data: [{
+          sourcePage: 1, rowIndex: 0,
+          printedName: "Liam Kustenbauder",
+          employeeSigned: true, officerSigned: true, dateSigned: "05/01/2026",
+          notes: [], documentType: "expected", originallyMissing: [],
+        }],
+        provider: "stub",
+        attempts: 1,
+        cached: false,
+      }),
+      _loadRosterOverride: async () => {
+        throw new Error("rosterMode 'none' must never load a roster");
+      },
+      _enqueueEidLookupOverride: async () => { /* no-op */ },
+      _watchChildRunsOverride: async () => [
+        {
+          workflow: "person-lookup",
+          itemId: "ocr-oath-run-none-r0",
+          runId: "lookup-1",
+          status: "done" as const,
+          data: { hrStatus: "Active", department: "HDH", personOrgScreenshot: "x.png", emplId: "10000001" },
+        },
+      ],
+    },
+  );
+
+  const steps = (writtenEntries as Array<{ status: string; step?: string }>).map(
+    (e) => `${e.status}/${e.step ?? ""}`,
+  );
+  assert.ok(
+    steps.some((s) => s === "done/person-lookup"),
+    `rosterless standalone oath must still complete done/person-lookup; steps: ${steps.join(", ")}`,
+  );
+  assert.ok(!steps.some((s) => s.startsWith("failed")), `no failed rows; steps: ${steps.join(", ")}`);
+
+  // The record resolved through the lookup, not a roster.
+  const terminalRow = (writtenEntries as Array<{ status: string; step?: string; data?: Record<string, string> }>)
+    .find((e) => e.status === "done" && e.step === "person-lookup");
+  const records = JSON.parse(terminalRow!.data!.records) as Array<Record<string, unknown>>;
+  assert.equal(records.length, 1);
+  assert.equal(records[0].employeeId, "10000001", "EID comes from person-lookup, not a roster");
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("EC run seeds EC-shaped placeholders; no emission carries top-level oath identity keys (E2E-004)", async () => {
   // E2E-004 root cause: the shared placeholder skeleton was oath-shaped for
   // EVERY form type, so an EC run's record shape flipped mid-run (placeholder

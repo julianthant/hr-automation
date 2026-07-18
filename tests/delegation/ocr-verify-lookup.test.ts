@@ -17,7 +17,7 @@ import { PERSON_LOOKUP_WORKFLOW_RUNTIME_POLICY } from "../../src/workflows/perso
 import type { RegisteredWorkflow } from "../../src/core/kernel/types.js";
 
 const REAL_TRACKER_DIR = ".tracker";
-const FIXTURE_PDF = "tests/data/detect-test.pdf";
+const FIXTURE_PDF = "data/documents/detect-test.pdf";
 
 function snapshotRealTracker(): string[] | null {
   if (!existsSync(REAL_TRACKER_DIR)) return null;

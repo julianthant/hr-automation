@@ -2,12 +2,21 @@ import path from "node:path";
 import type { ZodType } from "zod/v4";
 import { log } from "../../utils/log.js";
 import { buildVisionPool, summarizePool, type PoolKey } from "./per-page-pool.js";
-import { errorToRateLimitInfo } from "./rate-limit-headers.js";
+import { errorToRateLimitInfo, type RateLimitKind } from "./rate-limit-headers.js";
 import { type Candidate, getUsageTracker, type UsageTracker } from "./usage-tracker.js";
 
 export interface PerPageOcrRequest<T> {
   /** PNG filenames inside `pageImagesDir`, 1-indexed by page (e.g. page-01.png). */
   pagesAsImages: string[];
+  /**
+   * Real document page number per entry of `pagesAsImages`. Defaults to
+   * `index + 1`, which is only correct when the WHOLE document is passed.
+   *
+   * A caller re-reading a SUBSET (the second-opinion re-read passes exactly one
+   * page) must supply the true page numbers — otherwise every outcome and log
+   * line reports "page 1" regardless of which page actually ran.
+   */
+  pageNumbers?: number[];
   pageImagesDir: string;
   /** Workflow-specific OCR prompt. */
   prompt: string;
@@ -183,18 +192,22 @@ export async function runOcrPerPage<T>(req: PerPageOcrRequest<T>): Promise<PerPa
   );
   const poolByKey = new Map(pool.map((k) => [`${k.providerId}-${k.keyIndex}`, k]));
 
+  // `slot` (the position in this request) and `pageNum` (the page's identity in
+  // the document) are DIFFERENT axes — conflating them made a subset re-read
+  // both mis-report its page and index the results array by page number.
   const tasks = req.pagesAsImages.map((filename, idx) => ({
-    pageNum: idx + 1,
+    slot: idx,
+    pageNum: req.pageNumbers?.[idx] ?? idx + 1,
     imagePath: path.join(req.pageImagesDir, filename),
   }));
-  const results: PageOutcome[] = new Array(tasks.length);
+  const results: PageOutcome[] = new Array<PageOutcome>(tasks.length);
 
   const limit = makeLimiter(concurrency);
   try {
     await Promise.all(
       tasks.map((t) =>
         limit(async () => {
-          results[t.pageNum - 1] = tracker
+          results[t.slot] = tracker
             ? await ocrPageViaPool(t.pageNum, t.imagePath, req.prompt, candidates, poolByKey, tracker, req.signal)
             : await ocrPageViaTestFn(t.pageNum, t.imagePath, req.prompt, pool, req.signal);
         }),
@@ -244,6 +257,19 @@ async function ocrPageViaTestFn(
   }
 }
 
+/**
+ * Operator-readable reason a cell fell through, for the NEXT attempt's log
+ * line. Keyed on the whole `RateLimitKind` union so a new kind fails the build
+ * here rather than silently logging `undefined`.
+ */
+const RETRY_REASON_LABEL: Record<RateLimitKind, string> = {
+  "rate-limit": "rate-limited",
+  "quota-exhausted": "quota exhausted",
+  auth: "auth failed",
+  transient: "transient error",
+  permanent: "permanent error",
+};
+
 /** Real path: tracker-driven (key, model) selection with backoff + pacing. */
 async function ocrPageViaPool(
   pageNum: number,
@@ -260,6 +286,10 @@ async function ocrPageViaPool(
   let waited = 0;
   let lastError: unknown;
   let lastPoolKeyId: string | undefined;
+  // Why the PREVIOUS attempt fell through (e.g. `gemini-1 rate-limited`), so
+  // the next attempt's log line explains itself instead of looking like a
+  // duplicate of the same page on a different model.
+  let retryReason: string | undefined;
   const budget = maxWaitMs();
   const patience = tier1PatienceMs();
 
@@ -288,6 +318,9 @@ async function ocrPageViaPool(
     const { token } = res;
     const combo = comboId(token.provider, token.keyIndex, token.model);
     tried.add(combo);
+    // Grab the candidate BEFORE it is filtered out — the reserved token carries
+    // no tier, and tier is what tells the operator whether to trust the read.
+    const cand = remaining.find((c) => comboId(c.provider, c.keyIndex, c.model) === combo);
     remaining = remaining.filter((c) => comboId(c.provider, c.keyIndex, c.model) !== combo);
     const key = poolByKey.get(`${token.provider}-${token.keyIndex}`);
     if (!key) continue;
@@ -297,7 +330,13 @@ async function ocrPageViaPool(
       ? AbortSignal.any([signal, AbortSignal.timeout(providerAttemptTimeoutMs())])
       : AbortSignal.timeout(providerAttemptTimeoutMs());
     try {
-      const outcome = await key.callOcr(imagePath, prompt, token.model, attemptSignal);
+      const outcome = await key.callOcr(imagePath, prompt, token.model, attemptSignal, {
+        page: pageNum,
+        keyId: key.id,
+        tier: cand?.tier ?? 1,
+        attempt: attempts,
+        retryReason,
+      });
       tracker.commit(token, outcome.promptTokens);
       const arr = Array.isArray(outcome.json) ? (outcome.json as unknown[]) : [outcome.json];
       return {
@@ -311,12 +350,11 @@ async function ocrPageViaPool(
     } catch (err) {
       throwIfAborted(signal);
       lastError = err;
-      tracker.penalize(
-        token,
-        attemptSignal.aborted
-          ? { kind: "transient", retryAfterMs: 0 }
-          : errorToRateLimitInfo(token.provider, err),
-      );
+      const info = attemptSignal.aborted
+        ? ({ kind: "transient", retryAfterMs: 0 } as const)
+        : errorToRateLimitInfo(token.provider, err);
+      retryReason = `${key.id} ${attemptSignal.aborted ? "timed out" : RETRY_REASON_LABEL[info.kind]}`;
+      tracker.penalize(token, info);
     }
   }
 

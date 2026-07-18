@@ -464,3 +464,51 @@ test("runOcrPerPage bounds a hung provider attempt with its per-attempt timeout"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A subset re-read (the second-opinion path passes exactly ONE page) must
+// report the page's REAL document number. `pageNum` used to be derived from the
+// index within the request AND used as the results-array index, so every
+// single-page re-read reported itself as "page 1" — live 2026-07-16 logged
+// `runOcrPerPage page 1 failed` for pages 24, 26, 44 and 51.
+test("runOcrPerPage reports the REAL page number for a single-page subset re-read", async () => {
+  const seen: number[] = [];
+  __setPerPageCallForTests(async ({ pageNum }) => {
+    seen.push(pageNum);
+    return { json: [{ name: `page-${pageNum}-record` }], poolKeyId: "test-1" };
+  });
+  try {
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-024.png"],
+      pageNumbers: [24],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: RecordSchema,
+    });
+    assert.deepEqual(seen, [24], "the pool call receives the real page number");
+    assert.equal(out.pages.length, 1, "one outcome for the one requested page");
+    assert.equal(out.pages[0].page, 24, "outcome reports page 24, not page 1");
+    assert.equal(out.records.length, 1);
+    assert.equal(out.records[0].sourcePage, 24, "record is attributed to page 24");
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});
+
+test("runOcrPerPage still defaults page numbers to index+1 for a whole document", async () => {
+  __setPerPageCallForTests(async ({ pageNum }) => ({
+    json: [{ name: `page-${pageNum}-record` }],
+    poolKeyId: "test-1",
+  }));
+  try {
+    const out = await runOcrPerPage({
+      pagesAsImages: ["page-01.png", "page-02.png"],
+      pageImagesDir: "/tmp/ignored",
+      prompt: "test",
+      schema: RecordSchema,
+    });
+    assert.deepEqual(out.pages.map((p) => p.page), [1, 2]);
+    assert.deepEqual(out.records.map((r) => r.sourcePage), [1, 2]);
+  } finally {
+    __setPerPageCallForTests(undefined);
+  }
+});

@@ -13,7 +13,7 @@ import {
 import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../src/workflows/oath-signature/workflow.js";
 
 const REAL_TRACKER_DIR = ".tracker";
-const FIXTURE_PDF = "tests/data/multiple-oath.pdf";
+const FIXTURE_PDF = "data/documents/multiple-oath.pdf";
 
 function snapshotRealTracker(): string[] | null {
   if (!existsSync(REAL_TRACKER_DIR)) return null;
