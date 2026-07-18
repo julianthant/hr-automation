@@ -312,7 +312,7 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
 `state.db` has **two classes of table with different authority**:
 
 - **System-of-record (NOT rebuildable, NOT deletable):** the task/claim store (tasks, leases,
-  dependencies, commands — doc 02 §3.7's checkpoint payloads, §4.4's `ocr_approvals` manifests, and
+  dependencies, commands — doc 02 §5.7's checkpoint payloads, §4.4's `ocr_approvals` manifests, and
   **doc 09's `write_intents` crash-fence table**). The `write_intents` addition **amends D14** — the
   system-of-record set is now "claims + checkpoint payloads **+ the write-intent fence**," because a
   lost in-flight fence would re-open the exactly-once crash window (doc 09 §3/§4). Live queue truth.
@@ -645,11 +645,14 @@ surfaces only**:
    (`HRAUTO_E2E_STUBS`) runs against the new dashboard.
 3. **Flip:** `npm run dashboard` boots the new server + new SPA **for the four surfaces**.
    Everything else — **Capture, the Workflow Modifier, Settings, the AI-assist endpoints** (and
-   the rest of the ~103-endpoint long tail: exports, screenshot/blob serving, OCR review
-   mutation routes…) — is **proxied/re-mounted onto the old route handlers** inside the new
-   server, each with its own later migration milestone. The old dashboard stays runnable as
-   `dashboard:legacy` for **one week of real operation** (D13 resolves old open question 5),
-   then dies.
+   the rest of the ~103-endpoint long tail: exports, screenshot/blob serving…) — is
+   **proxied/re-mounted onto the old route handlers** inside the new server, each with its own
+   later migration milestone. **Exception — OCR's review/approve mutation routes are NOT in the
+   proxied long tail:** they are part of the OCR workflow's own scoped-flip surface set and
+   migrate *with* the OCR workflow at master-plan order 3–4 (§5.3 / Phase 2+ per-workflow
+   migration), exercising the native completion union + approval gates — not left proxied to the
+   old `/api/ocr/approve-batch`. The old dashboard stays runnable as `dashboard:legacy` for **one
+   week of real operation** (D13 resolves old open question 5), then dies.
 4. **Phase 2+ (per-workflow migration):** each migrated workflow sets `migratedAt`; its emissions
    switch to native spans; the lift covers everyone else. The dashboard cannot tell the
    difference — that is the definition of the seam holding.

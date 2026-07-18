@@ -171,3 +171,7 @@ earlier D8/D14).
   route its transaction click through the `stores/common/mutation.ts` fence primitive (no raw
   `page.click` submit). Port fix: the "outcome unknown, refusing success" throw is in
   `clickSaveAndSubmit` (`transaction.ts:855-859`), not `waitForTransactionOutcome`.
+  Doc 01 amendment (so the attachment isn't orphaned inside doc 09): doc 01 §2.2's
+  `MutateTaskContract` carries the **reference-stub field** `writeSafety?: WriteSafety<In, Out>`
+  (guard-required on every mutate contract) whose *shape* resolves to doc 09 §2.1 — doc 01
+  references it, doc 09 owns it. Doc 01's header records this D22 amendment.

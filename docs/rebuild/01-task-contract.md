@@ -1,7 +1,7 @@
 # 01 — The Task Contract & Per-System Task Stores
 
 Status: **Phase 0 design — for operator review.** Conforms to `00-charter.md` and to the binding
-reconciliation memo `04-reconciliation.md` (D2–D8, D15, D16 applied).
+reconciliation memo `04-reconciliation.md` (D2–D8, D15, D16 applied; D22 write-safety attachment amendment applied — see doc 09 §2.1).
 
 ## Ownership (D1 — this doc owns / this doc references)
 
@@ -19,6 +19,7 @@ reconciliation memo `04-reconciliation.md` (D2–D8, D15, D16 applied).
 |---|
 | Workflow builder API (the single API), descriptor shape, RunEnvelope, run-state machine incl. **gates/parks**, checkpoint/resume + the freshness enforcement walk → **doc 02** |
 | Span/event wire schema, notes stream, completion (fan-out/approval) union, storage + SSE → **doc 03** |
+| `WriteSafety<In, Out>` shape attached to `MutateTaskContract` (receipt/verify + idempotency probe + key, D22) → **doc 09** |
 
 Grounding (read, not imagined): `src/core/kernel/types.ts` (WorkflowConfig/Ctx/SystemConfig),
 `src/workflows/person-lookup/workflow.ts` (the `dataString()` untyped-blob hacks, screenshot
@@ -180,6 +181,10 @@ export interface MutateTaskContract<Id extends TaskId, In extends z.ZodType,
    * "done" (charter: fail loud).
    */
   dryRun: "simulate" | "unsupported";
+  /** Write-safety attachment (receipt/verify + idempotency probe + key). REQUIRED
+   *  on a mutate contract (guard-enforced, doc 09 §8); the *shape* `WriteSafety<In, Out>`
+   *  is owned by doc 09 §2.1 (D22) — referenced here, never redefined. */
+  writeSafety?: WriteSafety<In, Out>;
 }
 
 /** `const Codes` (TS5) keeps errorCodes as a literal tuple — without it the

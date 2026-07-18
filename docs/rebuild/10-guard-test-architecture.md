@@ -10,7 +10,7 @@ guard-of-guards manifest, the TDD topology, and the stub/live lanes on the new k
 | | |
 |---|---|
 | **This doc OWNS** | The **test/guard architecture suite** for `temp_src`: the ratchet inventory + how each ports/extends/retires, the four NEW safety guards, the descriptor-coverage crosswalk, the guard-of-guards manifest, the TDD tier topology, and the stub + live lanes on the new kernel. |
-| **Imports (never redefines)** | Task contract / `effect` / `example` / `fakeCtx` / mutation primitive / dry-run overloads — **doc 01**. Descriptor shape + `descriptor-coverage.test.ts` §1.4 + run-state/checkpoint — **doc 02**. Span/event schema + completion union + lift adapter + dashboard flip — **doc 03**. Pool/lease/sleep-budget guards — **doc 05**. Receipt/idempotency/fence contract — **doc 09** (this doc *hosts* its guards in `tests/unit/architecture/`, doc 09 owns the contract they check). Clock/config single-source — gap-audit `08` §4. |
+| **Imports (never redefines)** | Task contract / `effect` / `example` / `fakeCtx` / mutation primitive / dry-run overloads — **doc 01**. Descriptor shape + `descriptor-coverage.test.ts` §1.4 + run-state/checkpoint — **doc 02**. Span/event schema + completion union + lift adapter + dashboard flip — **doc 03**. Pool/lease/sleep-budget guards — **doc 05**. Receipt/idempotency/fence contract — **doc 09** (this doc *hosts* its guards in `tests/unit/architecture/`, doc 09 owns the contract they check). Clock/config/secrets single-source — **doc 11**. |
 | **Charter bindings** | "Same quality umbrella from day one" (every ratchet covers `temp_src` from the first line); "fail loud"; §1a fill/submit split is the dry-run safety model this doc makes a static invariant; §5 descriptor SSOT retires the parity guards. |
 
 **One-sentence thesis.** The umbrella is only real if ONE place owns *how* every doc's per-§ guard
@@ -80,7 +80,7 @@ code** and shrink-only entries for verbatim-ported leaves.
 | `instance-labels-coverage` + `INSTANCE_LABELS` | **RETIRE → descriptor** | label = `descriptor.sessionLabel ?? label` (doc 02 §1.3). |
 | `queue-row-kind-coverage` + `SUBJECT_TO_KIND` | **RETIRE → descriptor** | kind derived from `descriptor.inputSubject` inside descriptor-coverage. |
 | `gate-coverage` (meta) | **KEEP + EXTEND** | becomes the guard-of-guards manifest (§5): also asserts `test:architecture` still globs `temp_src`, and every named guard file exists + is registered. |
-| — | **NEW** | `descriptor-coverage` (§4), `dry-run-composition-submit-free`, `fill-submit-pairing`, `write-safety-contract` (completion-UNION, §3.3), `mutate-routes-through-mutation` (§3.6), `no-positional-identity` (§3), `clock-single-source` (hosted here, owned by gap-3). |
+| — | **NEW** | `descriptor-coverage` (§4), `dry-run-composition-submit-free`, `fill-submit-pairing`, `write-safety-contract` (completion-UNION, §3.3), `mutate-routes-through-mutation` (§3.6), `no-positional-identity` (§3), `clock-single-source` (hosted here, owned by doc 11). |
 
 ---
 
@@ -329,7 +329,7 @@ a synthetic tracker dir → boot the real new-server dashboard → drive + asser
 | 5 | **A new parity/hand-list registry reappears** | descriptor-coverage's ≥3-workflow-id-keys ratchet (§4) fails it with a pointed message. |
 | 6 | **The composition/pairing guard false-positives on prose** and gets weakened | Both key off closed unions (contract `effect`, sealed mutation-primitive registry, descriptor nodes) — no text heuristic to weaken; a genuinely-atomic write uses the `{ reason }` escape, not a guard edit. |
 | 7 | **This doc becomes a stale prose index** | §5's manifest is the SSOT, not this doc; they can disagree and CI still enforces the manifest. |
-| 8 | **Meta-risk: three new safety docs (09/10/clock) drift** | Each is a D1-owned contract doc the master plan (07) *references*, never redefines; this doc imports their contracts and only hosts their guards. |
+| 8 | **Meta-risk: three new safety docs (09/10/11) drift** | Each is a D1-owned contract doc the master plan (07) *references*, never redefines; this doc imports their contracts and only hosts their guards. |
 | 9 | **The write-safety guard regresses to demanding a flat `receipt`** (would wrongly reject Kuali/OnBase) | §3.3 walks doc 09's `completion` UNION (`receipt\|save-verify\|upload-verify`, D22): save-verify/upload-verify pass with a `ProbeVerdict` read-back and NO confirmation number; a type-level test pins that demanding `receipt` of a save-verify contract is itself a guard bug. The `unverifiableByPage` allowlist (§3.5) and the mutation-primitive fence-routing ratchet (§3.6) each fail-both-ways, so the verify escape hatch and the fence bypass can't quietly re-open. |
 
 ---

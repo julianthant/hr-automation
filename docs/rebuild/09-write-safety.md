@@ -27,7 +27,7 @@ transaction (a UCPath termination, a ServiceNow ticket, a Kuali save, an OnBase 
 | `MutateTaskContract`, `effect:"mutate"`, dry-run mechanics (`ctx.dryRun`, simulate/unsupported), the mutation-primitive choke `stores/common/mutation.ts`, error taxonomy, `freshness`, contract/impl split, service vs browser stores → **doc 01** |
 | Run-state machine incl. gates + `PARKED(needs-operator)`, checkpoint store + `captured_at`, resume/`startAt`, the freshness bind-graph walk, `RunEnvelope` (`dryRun`, `instance`) → **doc 02** |
 | Span/note wire schema, `.tracker/` storage layout, SQLite system-of-record vs projection split (D14), completion fan-out union → **doc 03** |
-| The injectable Clock (all timestamps), per-run test/prod instance selection → **gap-audit `08` §4 (clock/config domain)** |
+| The injectable Clock (all timestamps), per-run test/prod instance selection, the config/secrets domain → **doc 11 (clock/config/secrets)** |
 | The fill↔submit pairing guard + dry-run composition guard → **doc 10 (guard-architecture)** |
 
 Amendments at sibling seams (each is a one-owner-per-concept addition, not a redefinition):
@@ -213,7 +213,7 @@ CREATE TABLE write_intents (
   system          TEXT NOT NULL,   -- SystemId
   idempotency_key TEXT NOT NULL,   -- idempotency.key(input) — the natural key + the D18 mutex column
   status          TEXT NOT NULL,   -- 'attempting' | 'committed'
-  fenced_at       TEXT NOT NULL,   -- clock.now() (gap-3) — before the click
+  fenced_at       TEXT NOT NULL,   -- clock.now() (doc 11) — before the click
   committed_at    TEXT,            -- null until ⑤
   receipt_json    TEXT,            -- captured receipt/verify proof (null until ⑤)
   PRIMARY KEY (workflow, item_id, step_id, attempt)
@@ -317,10 +317,10 @@ export interface LedgerEntry {
   receipt: unknown;               // the confirmation/ticket number, or the verify proof (Kuali/OnBase)
   completionKind: "receipt" | "save-verify" | "upload-verify";
   runId: string; traceId: string; attempt: number;
-  operator: string;               // from the config/secrets domain (gap-3), never fabricated
-  instance: "prod" | "test";      // RunEnvelope.instance (gap-3) — a test read can never look like a prod file
+  operator: string;               // from the config/secrets domain (doc 11), never fabricated
+  instance: "prod" | "test";      // RunEnvelope.instance (doc 11) — a test read can never look like a prod file
   dryRun: false;                  // real writes only; a dry run composes no submit, so writes NO ledger entry
-  filedAt: string;                // clock.now() (gap-3) — the single source of time
+  filedAt: string;                // clock.now() (doc 11) — the single source of time
 }
 ```
 
@@ -424,9 +424,10 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   doc 03 OWNS and adds the `ledger/` dir (never-pruned retention floor) and the `write_intents`
   SQLite **system-of-record** table (added to the D14 set) in its storage layout — this doc
   references them, it does not place them in the `.tracker/` tree.
-- **Gap-3 (clock/instance).** Every timestamp (`fenced_at`, `committed_at`, `filedAt`) comes from the
+- **Clock/instance (doc 11).** Every timestamp (`fenced_at`, `committed_at`, `filedAt`) comes from the
   injectable Clock; `operator` and `instance` (prod/test) come from the config/secrets domain and
-  RunEnvelope — so the ledger never fabricates a time or lets a test read look like a prod filing.
+  RunEnvelope — all owned by **doc 11** — so the ledger never fabricates a time or lets a test read
+  look like a prod filing.
 
 ---
 
