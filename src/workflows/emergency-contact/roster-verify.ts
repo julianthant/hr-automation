@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { log } from "../../utils/log.js";
+import { parseCsv } from "../../utils/csv.js";
 import { loadRoster, normalizeEid } from "../../services/matching/index.js";
 import { normalizePersonNameForCompare } from "../../domain/identity/person-name.js";
 import type { EmergencyContactBatch } from "./schema.js";
@@ -90,40 +91,8 @@ function readNameFromCells(cells: string[], res: HeaderResolution): string {
 }
 
 // ── CSV parsing ─────────────────────────────────────────────
-
-/**
- * Minimal CSV parser supporting quoted fields (including embedded commas and
- * escaped quotes `""` inside quoted fields). No external dependency.
- */
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-  let i = 0;
-  // Strip UTF-8 BOM if present
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  while (i < text.length) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { cell += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      }
-      cell += c; i++; continue;
-    }
-    if (c === '"') { inQuotes = true; i++; continue; }
-    if (c === ",") { row.push(cell); cell = ""; i++; continue; }
-    if (c === "\r") { i++; continue; }
-    if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
-    cell += c; i++;
-  }
-  if (cell.length > 0 || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-  return rows;
-}
+// (shared `parseCsv` — promoted to `utils/csv.ts` when the roster loader
+// gained CSV support, 2026-07-17)
 
 function loadCsvRoster(csvPath: string): {
   resolution: HeaderResolution;
