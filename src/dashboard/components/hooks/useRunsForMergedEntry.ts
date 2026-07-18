@@ -137,6 +137,7 @@ export function useRunsForMergedEntry({
         return priorByItemId.get(fetchItems[i].id) ?? [];
       });
 
+      const priorRuns = runsRef.current;
       const pooled = perMember.flat();
       runsRef.current = pooled;
       setRunsError(anyFailed);
@@ -159,23 +160,34 @@ export function useRunsForMergedEntry({
       });
 
       setActiveRunId((prev) => {
-        if (!prev)
-          return pooled.length > 0
-            ? pooled[pooled.length - 1].runId
-            : entry.runId || null;
+        // Prefer the merge-primary's own run (entry.runId). For person-lookup,
+        // that may be an EID-keyed search whose Search field is the original
+        // query — auto-jumping to the overall newest sibling (often a later
+        // name search) would overwrite Search with the resolved person name.
+        const preferred =
+          entry.runId && pooled.some((r) => r.runId === entry.runId)
+            ? entry.runId
+            : pooled.length > 0
+              ? pooled[pooled.length - 1].runId
+              : entry.runId || null;
+
+        if (!prev) return preferred;
+
         const latestRunId =
           pooled.length > 0 ? pooled[pooled.length - 1].runId : null;
+        const priorIds = new Set(priorRuns.map((r) => r.runId));
+        // Auto-advance only when a brand-new run appears mid-session — not on
+        // the initial hydrate of an already-complete merged EID+name group.
         if (
           latestRunId &&
           latestRunId !== prev &&
-          !pooled.slice(0, -1).some((r) => r.runId === latestRunId)
+          priorRuns.length > 0 &&
+          !priorIds.has(latestRunId)
         ) {
           return latestRunId;
         }
         if (pooled.some((r) => r.runId === prev)) return prev;
-        return pooled.length > 0
-          ? pooled[pooled.length - 1].runId
-          : entry.runId || null;
+        return preferred;
       });
     });
 

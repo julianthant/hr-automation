@@ -42,6 +42,7 @@ interface Group {
  */
 const PREFERRED_CATEGORY_ORDER: readonly string[] = [
   "Onboarding",
+  "OnBase",
   "Separations",
   "Work Study",
   "Payroll",

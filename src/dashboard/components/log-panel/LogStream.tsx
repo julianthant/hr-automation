@@ -241,9 +241,14 @@ export function LogStream({
   const initialFilter = useMemo(() => parseInitialTab(initialTab), [initialTab]);
   const [surface, setSurface] = useState<Surface>(initialFilter.surface);
   const [category, setCategory] = useState<Category>(initialFilter.category);
-  // When parent flips initialTab (e.g. opening review from a queue-row click),
-  // adopt the new surface/category. Operator can still switch away after.
+  // When parent flips initialTab to an EXPLICIT deep-link (e.g. opening OCR
+  // review → "preview"), adopt that surface. Clearing the deep-link
+  // (`undefined`) must NOT yank the operator back to Logs — that was firing
+  // when reviewingPrepId briefly cleared during Preview actions (Select all /
+  // Unselect all re-selecting the same queue row) and felt like the buttons
+  // themselves switched tabs.
   useEffect(() => {
+    if (initialTab == null || initialTab === "") return;
     const next = parseInitialTab(initialTab);
     setSurface(next.surface);
     setCategory(next.category);
