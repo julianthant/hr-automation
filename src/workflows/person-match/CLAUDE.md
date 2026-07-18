@@ -5,6 +5,15 @@ answer — via the HR-Tasks person search that onboarding uses to discriminate
 new hires from rehires. This is a **delegated-only** subworkflow wrapping the
 pluggable `searchPerson` module (`src/systems/ucpath/navigate.ts`).
 
+> **NO DELEGATED CALLER (2026-07-16 / still true 2026-07-17).** The i9 OCR
+> form spec no longer fans out person-match children. I-9 Check members
+> (`src/workflows/i9-check/check.ts`) reuse the underlying **`searchPerson`**
+> primitive in-process at the `person-match` step — they do **not**
+> `ctx.delegateTo` this workflow. The workflow stays registered (historical
+> rows still resolve, and it remains the ready-made delegated wrapper if a
+> future parent needs an in-flight person check), but do not build new
+> delegated features on it without a real caller.
+
 ## What it does
 
 1. Accepts a person identified by legal name plus at least one hard
@@ -43,11 +52,10 @@ person-lookup's rule).
 
 ## Start surface
 
-**None.** No dashboard input-run or upload-run entry. Invoked only by parent
-workflows via `ctx.delegateTo` / `ctx.delegateToAll` — today the **`i9` OCR
-form spec** (`src/services/ocr/forms/i9.ts`) fans out one person-match per
-extracted I-9 record (itemId `ocr-i9-<ocrRunId>-r<index>`), launched from the
-separations panel's "Run I-9 Check" upload modal.
+**None.** No dashboard input-run or upload-run entry. Designed for parent
+workflows via `ctx.delegateTo` / `ctx.delegateToAll`, but **no current
+delegated caller**. I-9 Check calls `searchPerson` in-process instead (see
+above).
 
 ## Wiring
 
@@ -70,4 +78,4 @@ one verified implementation.
 
 ## Lessons Learned
 
-None yet.
+- **2026-07-13: The UCPath results-grid selector was DEAD, so a found person could never be reported — only "not found" ever worked.** `searchPerson` decides found-vs-not-found by racing the results grid against the "no matching person" dialog. The grid arm (`personSearch.resultRows`, `[id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr`) matched **0 elements** on the real PERSON_RESULTS page — its grid is `table#l0PERSON$0` with `span#EMPLID$<n>` cells — so a genuine match sat unseen until the 15s race window expired and the run threw the fail-loud "neither signal appeared" ambiguity error. In the 2026-07-10 I-9 batch that was **25 of 104 person-match runs failed**, and every one of the 79 "successes" was a not-found (the only outcome the code could physically detect). Fixed by `personSearch.resultEmplIdCells` + per-row-id field extraction (`EMPLID$<n>`/`HTML2$<n>`/`HTML4$<n>` — the grid nests tables, so positional `td`-walking double-reads cells). **The transferable lesson:** when a fail-loud guard keeps firing on one branch of a race, suspect the branch that *never* fires — a dead selector in a race produces a timeout, not an error naming the selector. Full write-up + live probe: `src/systems/ucpath/LESSONS.md` (2026-07-13).

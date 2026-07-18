@@ -1,6 +1,7 @@
 /**
- * The `i9-check` step — the whole of the I-9 Check workflow. One task = one
- * person from a scanned I-9 packet: resolve them in UCPath, re-match the
+ * The `i9-check` member handler — three kernel steps: person-match →
+ * optional person-lookup (hire-date corroborated) → roster-match. One task =
+ * one person from a scanned I-9 packet: resolve them in UCPath, re-match the
  * Action History roster by the resolved EID, stamp the verdict on the row,
  * and append one row to the master I-9 retention tracker.
  *
@@ -18,7 +19,9 @@ import {
   crossRefFromRow,
   loadEmployeeActionHistory,
   lookupActionHistoryRowByEmplId,
+  lookupActionHistoryRowByPpsId,
   type ActionHistoryIndex,
+  type ActionHistoryRow,
 } from "../../services/matching/employee-action-history.js";
 import {
   appendI9CheckTrackerRow,
@@ -26,18 +29,26 @@ import {
   type I9CheckTrackerRow,
 } from "../../tracker/exports/i9-check-tracker.js";
 import type { I9CheckMemberInput } from "./schema.js";
+import {
+  selectPersonLookupByHireDate,
+  type HireDateLookupOutcome,
+} from "./select-by-hire-date.js";
 
-/** What the UCPath search concluded for one person. */
+/** What UCPath resolution concluded for one person (after match + optional lookup). */
 export interface I9CheckSearchOutcome {
   status: "found" | "not-found" | "ambiguous";
   emplId: string;
   matchedName: string;
   candidateCount: number;
+  /** Why the outcome is ambiguous — drives the retention review note. */
+  ambiguousReason?: "multiple-candidates" | "missing-hire-date" | "multiple-hire-date-matches";
 }
 
+const I9_CHECK_STEPS = ["person-match", "person-lookup", "roster-match"] as const;
+
 type I9CheckCtx = Pick<
-  Ctx<readonly string[], Record<string, unknown>>,
-  "page" | "step" | "updateData" | "screenshot"
+  Ctx<typeof I9_CHECK_STEPS, Record<string, unknown>>,
+  "page" | "step" | "updateData" | "screenshot" | "skipStep"
 >;
 
 export interface I9CheckDeps {
@@ -63,10 +74,13 @@ export async function runI9CheckMember(
     name: person.name,
     i9Check: "true",
     i9HireDate: person.hireDate ?? "",
+    // Slot both ID columns from the first emit so the grid never drops EID
+    // while person-match is still running (PPS may already be OCR-seeded).
+    eid: "",
+    ppsEid: input.roster?.ppsEid ?? "",
+    separationDate: input.roster?.separationDate ?? "",
     section1Present: person.sourcePage ? `Yes — page ${person.sourcePage}` : "Missing",
     section2Present: person.section2Page ? `Yes — page ${person.section2Page}` : "Missing",
-    ...(input.roster?.ppsEid ? { ppsEid: input.roster.ppsEid } : {}),
-    ...(input.roster?.separationDate ? { separationDate: input.roster.separationDate } : {}),
   });
 
   // Resolve the reviewer name BEFORE the browser work — the spreadsheet row
@@ -74,59 +88,130 @@ export async function runI9CheckMember(
   // Duo-authenticated search.
   const reviewerName = deps.reviewerName ?? getTimekeeperName();
 
-  await ctx.step("i9-check", async () => {
-    const page = await ctx.page("ucpath");
+  let outcome: I9CheckSearchOutcome = {
+    status: "not-found",
+    emplId: "",
+    matchedName: "",
+    candidateCount: 0,
+  };
 
-    // ── UCPath person search ──
-    const outcome = await searchUcpathForPerson(page, input, deps);
+  // ── 1. Person match (mandatory) ──
+  await ctx.step("person-match", async () => {
+    const page = await ctx.page("ucpath");
+    outcome = await runPersonMatch(page, input, deps);
+    ctx.updateData({
+      personMatchFound: outcome.status === "found" ? "true" : "false",
+      ...(outcome.emplId ? { personMatchEmplId: outcome.emplId } : {}),
+    });
     log.step(
-      `[i9-check] UCPath search for "${person.name}" (record ${input.recordIndex}): ` +
+      `[i9-check] person-match for "${person.name}" (record ${input.recordIndex}): ` +
       `${outcome.status}${outcome.emplId ? ` EID ${outcome.emplId}` : ""}` +
       `${outcome.status === "ambiguous" ? ` (${outcome.candidateCount} candidates)` : ""}`,
     );
     await ctx.screenshot({
       kind: "form",
-      label: "i9-check-search-result",
+      label: "i9-check-person-match",
       systems: ["ucpath"],
     });
+  });
 
-    // ── Roster re-match BY EID (never by name here — the OCR stage already
-    // did the name match; the daemon must not silently contradict it) ──
+  // ── 2. Person lookup (optional — only when match did not resolve an EID) ──
+  if (outcome.status === "found" && outcome.emplId) {
+    ctx.skipStep("person-lookup");
+  } else {
+    await ctx.step("person-lookup", async () => {
+      const page = await ctx.page("ucpath");
+      outcome = await runPersonLookup(page, input, deps);
+      ctx.updateData({
+        personLookupStatus: outcome.status,
+        ...(outcome.emplId ? { personLookupEmplId: outcome.emplId } : {}),
+      });
+      log.step(
+        `[i9-check] person-lookup for "${person.name}" (record ${input.recordIndex}): ` +
+        `${outcome.status}${outcome.emplId ? ` EID ${outcome.emplId}` : ""}` +
+        `${outcome.ambiguousReason ? ` (${outcome.ambiguousReason})` : ""}` +
+        `${outcome.status === "ambiguous" ? ` · ${outcome.candidateCount} candidates` : ""}`,
+      );
+      await ctx.screenshot({
+        kind: "form",
+        label: "i9-check-person-lookup",
+        systems: ["ucpath"],
+      });
+    });
+  }
+
+  // ── 3. Roster rematch + retention tracker (mandatory) ──
+  await ctx.step("roster-match", async () => {
     const found = outcome.status === "found";
-    let rosterRow;
+    const seed = input.roster;
+    let rosterRow: ActionHistoryRow | undefined;
+    let rematchHow: "empl-id" | "pps" | undefined;
     if (found && outcome.emplId) {
       const loadRoster = deps.loadRosterImpl ?? (() => loadEmployeeActionHistory());
       const index = await loadRoster();
       rosterRow = lookupActionHistoryRowByEmplId(outcome.emplId, index);
       if (rosterRow) {
+        rematchHow = "empl-id";
+      } else {
+        // Empl ID miss → try the OCR-seeded PPS (often 5 digits after zero-strip
+        // from "Employee PPS ID Current"). Name fallback stays forbidden here.
+        const ppsSeed = seed?.ppsEid ?? seed?.ppsEidPadded;
+        if (ppsSeed) {
+          rosterRow = lookupActionHistoryRowByPpsId(ppsSeed, index);
+          if (rosterRow) rematchHow = "pps";
+        }
+      }
+      if (rosterRow) {
         const xref = crossRefFromRow(rosterRow);
-        ctx.updateData({
-          ...(xref.ppsEid ? { ppsEid: xref.ppsEid } : {}),
-          ...(xref.i9SeparationDate ? { separationDate: xref.i9SeparationDate } : {}),
-        });
         log.step(
-          `[i9-check] Roster re-match by EID ${outcome.emplId}: PPS ${xref.ppsEid ?? "—"}, ` +
-          `separation ${xref.i9SeparationDate ?? "—"}`,
+          rematchHow === "pps"
+            ? `[i9-check] Roster re-match by OCR PPS ${seed?.ppsEid ?? seed?.ppsEidPadded} ` +
+              `(EID ${outcome.emplId} not on roster): PPS ${xref.ppsEid ?? "—"}, ` +
+              `separation ${xref.i9SeparationDate ?? "—"}`
+            : `[i9-check] Roster re-match by EID ${outcome.emplId}: PPS ${xref.ppsEid ?? "—"}, ` +
+              `separation ${xref.i9SeparationDate ?? "—"}`,
         );
       } else {
         log.warn(
           `[i9-check] EID ${outcome.emplId} ("${person.name}") is not on the Action History roster — ` +
-          `no separation date available`,
+          `no separation date available` +
+          (seed?.ppsEid ? ` (OCR PPS seed ${seed.ppsEid} also missed)` : ""),
         );
       }
     }
 
-    // ── Retention decision + verdict stamp ──
     const rosterXref = rosterRow ? crossRefFromRow(rosterRow) : undefined;
+    // Prefer the EID/PPS rematch; else keep the OCR name-match seed (5-digit
+    // PPS + sep date). Always stamp both keys so the detail grid shows them.
+    const ppsDisplay = rosterXref?.ppsEid ?? seed?.ppsEid ?? "";
+    const sepDisplay = rosterXref?.i9SeparationDate ?? seed?.separationDate ?? "";
+
     const decision = decideI9RetentionAction({
       found,
       ambiguous: outcome.status === "ambiguous",
       ambiguousCandidateCount: outcome.candidateCount,
-      separationDate: rosterXref?.i9SeparationDate,
-      hasRosterRow: !!rosterRow,
+      separationDate: rosterXref?.i9SeparationDate ?? seed?.separationDate,
+      // A real rematch OR an OCR name-match seed that already carried a sep
+      // date — either lets retention run. A PPS-only seed without a date
+      // still shows on the grid but does not pretend we have a roster row.
+      hasRosterRow: !!rosterRow || Boolean(seed?.separationDate),
       emplId: outcome.emplId || undefined,
       today: deps.today ?? new Date(),
     });
+
+    // Override the generic ambiguous note when the hire-date gate is why we
+    // refused to accept a Person Org name hit.
+    let note = decision.note;
+    if (outcome.status === "ambiguous" && outcome.ambiguousReason === "missing-hire-date") {
+      note =
+        "Person Org name match cannot be corroborated — I-9 hire date missing; review manually.";
+    } else if (
+      outcome.status === "ambiguous" &&
+      outcome.ambiguousReason === "multiple-hire-date-matches"
+    ) {
+      note =
+        "Multiple Person Org candidates match the I-9 hire date (±7 days) — review manually.";
+    }
 
     ctx.updateData({
       // The chip (`i9CheckStatusExtensions.secondaryTag`) keys on
@@ -136,31 +221,33 @@ export async function runI9CheckMember(
         ? { ucpathFound: found ? "true" : "false" }
         : {}),
       ucpathFoundLabel: decision.foundLabel,
-      ...(outcome.emplId ? { eid: outcome.emplId } : {}),
+      // Always stamp both IDs so the detail grid shows EID + PPS ID side by side.
+      eid: outcome.emplId || "",
       ...(outcome.matchedName ? { matchedName: outcome.matchedName } : {}),
+      ppsEid: ppsDisplay,
+      separationDate: sepDisplay,
       i9RetentionAction: decision.action,
-      ...(decision.note ? { i9RetentionNote: decision.note } : {}),
+      ...(note ? { i9RetentionNote: note } : {}),
     });
 
-    // ── Master tracker append ──
-    // A found person's PPS/separation come from the EID re-match; a not-found
-    // person keeps the OCR stage's name-match seed (mirrors the operator's
-    // manual sheet, where not-found people still carry a roster PPS EID).
-    const seed = input.roster;
+    // Spreadsheet PPS/separation: rematch wins; otherwise the OCR seed
+    // (mirrors the operator's manual sheet for not-found AND for found-but-
+    // not-on-roster-by-EID people who still have a name-match PPS).
     const row: I9CheckTrackerRow = {
       employeeName: person.name,
-      ppsEid: found
-        ? (rosterXref?.ppsEidPadded ?? rosterXref?.ppsEid ?? "")
-        : (seed?.ppsEidPadded ?? seed?.ppsEid ?? ""),
+      ppsEid:
+        rosterXref?.ppsEidPadded
+        ?? rosterXref?.ppsEid
+        ?? seed?.ppsEidPadded
+        ?? seed?.ppsEid
+        ?? "",
       ucpathEmplId: found ? outcome.emplId : "",
       hireDate: person.hireDate ?? "",
-      separationDate: found
-        ? (rosterXref?.i9SeparationDate ?? "")
-        : (seed?.separationDate ?? ""),
+      separationDate: rosterXref?.i9SeparationDate ?? seed?.separationDate ?? "",
       foundInUcpath: decision.foundLabel,
       action: decision.action,
       reviewerName,
-      notes: decision.note,
+      notes: note,
     };
     const trackerPath = deps.trackerPath ?? PATHS.i9CheckTrackerPath;
     const appendRow = deps.appendRowImpl ?? appendI9CheckTrackerRow;
@@ -173,13 +260,10 @@ export async function runI9CheckMember(
 }
 
 /**
- * Run the right UCPath search for what the packet gave us: SSN/DOB present →
- * the HR-Tasks person search (`searchPerson`, the duplicate-person gate
- * onboarding uses); name only (orphan Section 2 / unreadable identifiers) →
- * the Person Org Summary name lookup. Never guesses between multiple
- * candidates — ambiguity is returned, not resolved.
+ * HR-Tasks person search (person-match). Requires SSN or DOB + first/last —
+ * without identifiers the outcome is not-found so the optional lookup path runs.
  */
-async function searchUcpathForPerson(
+async function runPersonMatch(
   page: Awaited<ReturnType<I9CheckCtx["page"]>>,
   input: I9CheckMemberInput,
   deps: I9CheckDeps,
@@ -187,46 +271,82 @@ async function searchUcpathForPerson(
   const { person } = input;
   const hasIdentifier = Boolean(person.ssn || person.dob);
 
-  if (hasIdentifier && person.firstName && person.lastName) {
-    const search = deps.searchImpl ?? searchPerson;
-    const result = await search(
-      page,
-      person.ssn ?? "",
-      person.firstName,
-      person.lastName,
-      person.dob ?? "",
+  if (!hasIdentifier || !person.firstName || !person.lastName) {
+    const missing = [
+      !hasIdentifier ? "SSN/DOB" : null,
+      !person.firstName ? "firstName" : null,
+      !person.lastName ? "lastName" : null,
+    ].filter(Boolean);
+    log.step(
+      `[i9-check] person-match skipped for "${person.name}" — missing ${missing.join(", ")}; ` +
+      `treating as not-found so person-lookup can run`,
     );
-    const match = result.matches?.[0];
-    return {
-      status: result.found ? "found" : "not-found",
-      emplId: match?.emplId ?? "",
-      matchedName: match
-        ? [match.firstName, match.lastName].filter(Boolean).join(" ")
-        : "",
-      candidateCount: result.matches?.length ?? 0,
-    };
+    return { status: "not-found", emplId: "", matchedName: "", candidateCount: 0 };
   }
 
-  // Name-only lookup. keepNonHdh — retention applies to every department, so
-  // the HDH filter must not hide a real match.
+  const search = deps.searchImpl ?? searchPerson;
+  const result = await search(
+    page,
+    person.ssn ?? "",
+    person.firstName,
+    person.lastName,
+    person.dob ?? "",
+  );
+  const match = result.matches?.[0];
+  return {
+    status: result.found ? "found" : "not-found",
+    emplId: match?.emplId ?? "",
+    matchedName: match
+      ? [match.firstName, match.lastName].filter(Boolean).join(" ")
+      : "",
+    candidateCount: result.matches?.length ?? 0,
+  };
+}
+
+/**
+ * Person Org name lookup + I-9 hire-date corroboration (±7 days vs Last Hire).
+ */
+async function runPersonLookup(
+  page: Awaited<ReturnType<I9CheckCtx["page"]>>,
+  input: I9CheckMemberInput,
+  deps: I9CheckDeps,
+): Promise<I9CheckSearchOutcome> {
+  const { person } = input;
   const lookup = deps.lookupImpl ?? lookupPersonInUcpath;
-  const result = await lookup(page, { kind: "by-name", name: person.name }, { keepNonHdh: true });
-  const { selection } = result;
-  if (selection.status === "ambiguous") {
-    return {
-      status: "ambiguous",
-      emplId: "",
-      matchedName: "",
-      candidateCount: selection.candidateEids.length,
-    };
-  }
-  if (selection.status === "resolved" && selection.selected) {
+  // keepNonHdh — retention applies to every department, so the HDH filter
+  // must not hide a real match.
+  const result = await lookup(
+    page,
+    { kind: "by-name", name: person.name },
+    { keepNonHdh: true },
+  );
+
+  const hireOutcome: HireDateLookupOutcome = selectPersonLookupByHireDate(
+    person.hireDate,
+    result.results,
+  );
+
+  if (hireOutcome.status === "found") {
     return {
       status: "found",
-      emplId: selection.selected.emplId,
-      matchedName: selection.selected.name,
+      emplId: hireOutcome.emplId,
+      matchedName: hireOutcome.matchedName,
       candidateCount: 1,
     };
   }
-  return { status: "not-found", emplId: "", matchedName: "", candidateCount: 0 };
+  if (hireOutcome.status === "not-found") {
+    return {
+      status: "not-found",
+      emplId: "",
+      matchedName: "",
+      candidateCount: hireOutcome.candidateCount,
+    };
+  }
+  return {
+    status: "ambiguous",
+    emplId: "",
+    matchedName: "",
+    candidateCount: hireOutcome.candidateCount,
+    ambiguousReason: hireOutcome.reason,
+  };
 }

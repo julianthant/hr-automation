@@ -38,7 +38,7 @@ const baseAt = new Date();
 
 function makeRecord(overrides: Partial<I9PreviewRecord>): I9PreviewRecord {
   const rec: I9PreviewRecord = {
-    formKind: "i9",
+    formKind: "i9 section 1",
     sourcePage: 1,
     lastName: "Doe",
     firstName: "Jane",

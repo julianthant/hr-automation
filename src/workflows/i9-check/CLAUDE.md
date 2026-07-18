@@ -9,9 +9,10 @@ daemon, spinning 3 browsers and rendering the 7 termination steps as skipped on
 every member row).
 
 **1 browser — UCPath only.** `code: "ic"`, `inputSubject: "name"`, archetype
-`single`, one handler step (`i9-check`), sequential batch with a reset to
-`UCPATH_SMART_HR_URL` between items. This workflow mutates NOTHING: no Kuali,
-no Kronos, no UCPath transaction modules — pinned structurally by
+`single`, three handler steps (`person-match` → `person-lookup` →
+`roster-match`), sequential batch with a reset to `UCPATH_SMART_HR_URL`
+between items. This workflow mutates NOTHING: no Kuali, no Kronos, no UCPath
+transaction modules — pinned structurally by
 `tests/unit/architecture/i9-check-import-guard.test.ts` (sweeps every module in
 this directory for banned imports).
 
@@ -42,32 +43,43 @@ completion `/api/ocr/prepare` calls **`enqueueI9CheckMemberTasks`**
 (`src/tracker/dashboard/ocr/i9-check-results.ts`): one i9-check task per
 person, nested under the coordinator (`rowShape: "operation-member"`). The
 coordinator stays **running** at fan-out — the members-terminal rollup
-completes it. Each task runs `check.ts` (`runI9CheckMember`):
+completes it. Each task runs `check.ts` (`runI9CheckMember`) as **three
+kernel steps** (in-process primitives — not `ctx.delegateTo`):
 
-- **UCPath person search** — `searchPerson` by SSN/DOB when Section 1 supplied
-  them; `lookupPersonInUcpath` name-only for orphan-Section-2 people and
-  identifier-less reads (`keepNonHdh` — retention applies to every
-  department). Ambiguity is returned, never resolved by guessing.
-- **Roster re-match BY the resolved EID only** (`lookupActionHistoryRowByEmplId`
-  — no name fallback; the daemon must not silently contradict the OCR-stage
-  name match) → stamps `ucpathFound`/`eid`/`ppsEid`/`separationDate` on the
-  member row. The found/not-found chip (`i9CheckStatusExtensions`,
-  `src/domain/i9-check-status.ts`) keys on `data.ucpathFound`; an AMBIGUOUS
-  outcome stamps NO chip.
-- **Master retention-tracker append** — one row per person to
-  `PATHS.i9CheckTrackerPath` (`src/tracker/exports/i9-check-tracker.ts`;
-  default `data/reports/i9-check-tracker.xlsx`, single "I-9 Check" sheet,
-  columns = Employee Name | PPS EID (zero-padded, text format) | UCPATH
-  Employee ID | Hire Date (from I-9) | Separation Date | Found in UCPath? |
-  Action | Reviewer Name | Notes). Action rule (`decideI9RetentionAction`,
-  operator-confirmed): not found → Shred; found + separation more than **5
-  years** past → Shred; within 5 years → Keep + "Shred on <sep + 5y + 1d>"
-  note; ambiguous / no roster row / no separation date → blank Action +
-  review-manually note (never guess). Reviewer Name = `getTimekeeperName()`
-  (validated loudly at fan-out, before any enqueue). A not-found person's
-  spreadsheet PPS/separation fall back to the OCR-stage roster NAME-match seed
-  (`input.roster`), mirroring the operator's manual sheet. **Re-runs always
-  APPEND** — dedupe the sheet manually.
+1. **`person-match` (mandatory)** — `searchPerson` (HR-Tasks) when Section 1
+   supplied SSN and/or DOB plus first+last. Missing identifiers → treat as
+   **not-found** (skip the search) so the optional lookup can run. Ambiguous
+   UI races still throw (never guess).
+2. **`person-lookup` (optional)** — skipped via `ctx.skipStep` when
+   person-match already resolved a unique Empl ID. Otherwise
+   `lookupPersonInUcpath` by name (`keepNonHdh` — retention applies to every
+   department), then **hire-date corroboration**
+   (`selectPersonLookupByHireDate`): accept a Person Org candidate only when
+   I-9 Hire Date (from I-9) is within **±7 days** of UCPath Last Hire
+   (`startDate`, EFFDT fallback). No hire date → ambiguous / review (never
+   accept a name-only hit). Zero ±7d hits → not-found; two+ → ambiguous.
+3. **`roster-match` (mandatory)** — re-match Action History **BY the resolved
+   EID** (`lookupActionHistoryRowByEmplId`); if that misses but OCR seeded a
+   PPS (often a 5-digit zero-stripped "Employee PPS ID Current"), rematch **BY
+   PPS** (`lookupActionHistoryRowByPpsId` — still no name fallback). Stamps
+   `ucpathFound`/`eid`/`ppsEid`/`separationDate` on the member row — PPS ID and
+   Separation Date are always on the detail grid (blank when neither rematch
+   nor the OCR seed had them). Rematch wins; else the OCR name-match seed is
+   kept for both the grid and the spreadsheet. The found/not-found chip
+   (`i9CheckStatusExtensions`, `src/domain/i9-check-status.ts`) keys on
+   `data.ucpathFound`; an AMBIGUOUS outcome stamps NO chip. Then **master
+   retention-tracker append** — one row per person to `PATHS.i9CheckTrackerPath`
+   (`src/tracker/exports/i9-check-tracker.ts`; default
+   `data/reports/i9-check-tracker.xlsx`, single "I-9 Check" sheet, columns =
+   Employee Name | PPS EID (zero-padded, text format) | UCPATH Employee ID |
+   Hire Date (from I-9) | Separation Date | Found in UCPath? | Action |
+   Reviewer Name | Notes). Action rule (`decideI9RetentionAction`,
+   operator-confirmed): not found → Shred; found + separation more than **5
+   years** past → Shred; within 5 years → Keep + "Shred on <sep + 5y + 1d>"
+   note; ambiguous / no roster row / no separation date → blank Action +
+   review-manually note (never guess). Reviewer Name = `getTimekeeperName()`
+   (validated loudly at fan-out, before any enqueue). **Re-runs always
+   APPEND** — dedupe the sheet manually.
 
 ## Retry safety
 

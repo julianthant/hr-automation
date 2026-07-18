@@ -5,11 +5,10 @@
  * One task = one person from a scanned I-9 packet, fanned out by the
  * "Run I-9 Check" upload's OCR run (`enqueueI9CheckMemberTasks`). The daemon
  * runs ONE UCPath browser (no Kuali, no Kronos — this workflow's whole job is
- * a read-only person search): UCPath person search (SSN/DOB via the HR-Tasks
- * search when Section 1 supplied them; name-only Person Org lookup otherwise)
- * → Action History roster re-match BY the resolved EID → found/not-found
- * verdict on the row → one appended row in the master I-9 retention tracker
- * (`PATHS.i9CheckTrackerPath`).
+ * a read-only person search):
+ *   person-match (SSN/DOB HR-Tasks search) →
+ *   person-lookup (optional; name + I-9 hire-date ±7d vs Last Hire) →
+ *   roster-match (Action History by Empl ID + retention tracker append).
  *
  * Split out of the separations workflow 2026-07-17: it previously ran as a
  * `mode: "i9-check"` input variant inside the separations daemon, which spun
@@ -28,7 +27,7 @@ import { UCPATH_SMART_HR_URL } from "../../config.js";
 import { I9CheckMemberInputSchema, type I9CheckMemberInput } from "./schema.js";
 import { runI9CheckMember } from "./check.js";
 
-const i9CheckSteps = ["i9-check"] as const;
+const i9CheckSteps = ["person-match", "person-lookup", "roster-match"] as const;
 
 export const i9CheckWorkflow = defineWorkflow({
   name: "i9-check",
@@ -57,10 +56,12 @@ export const i9CheckWorkflow = defineWorkflow({
   },
   detailFields: [
     { key: "name",              label: "Employee" },
-    { key: "eid",               label: "EID",                  conditional: true, inputKind: "id" },
-    { key: "ppsEid",            label: "PPS EID",              conditional: true, inputKind: "id" },
+    // Always shown beside PPS ID — blank "—" when UCPath did not resolve an Empl ID.
+    { key: "eid",               label: "EID",                  inputKind: "id" },
+    // Always shown: Action History "Employee PPS ID Current" (or OCR 5-digit seed).
+    { key: "ppsEid",            label: "PPS ID",               inputKind: "id" },
     { key: "i9HireDate",        label: "Hire Date (from I-9)", inputKind: "date" },
-    { key: "separationDate",    label: "Separation Date",      conditional: true, inputKind: "date" },
+    { key: "separationDate",    label: "Separation Date",      inputKind: "date" },
     { key: "ucpathFoundLabel",  label: "Found in UCPath?" },
     // Each employee has BOTH an I-9 Section 1 and a Section 2, filed apart in
     // the packet. Say which pages actually backed this row: a "not found" from

@@ -55,7 +55,7 @@ function readRows(dir: string, workflow: string): Row[] {
 
 function rec(over: Partial<I9PreviewRecord> = {}): I9PreviewRecord {
   return {
-    formKind: "i9",
+    formKind: "i9 section 1",
     sourcePage: 1,
     lastName: "Doe",
     firstName: "Jane",
@@ -166,13 +166,12 @@ test("plan: an orphan Section 2 with a readable name gets a REAL name-only task"
   const plan = buildI9CheckMemberPlan(
     [
       rec({
-        formKind: "unknown",
+        formKind: "i9 section 2",
         lastName: null,
         firstName: null,
-        name: "",
+        name: "Singh, Aryaman P",
         sourcePage: 24,
-        section2Name: "Singh, Aryaman P",
-        section2HireDate: "4/18/2016",
+        hireDate: "4/18/2016",
         orphanSection2: true,
       }),
     ],
@@ -194,12 +193,11 @@ test("plan: an orphan Section 2 with an UNREADABLE name is a display failure", (
   const plan = buildI9CheckMemberPlan(
     [
       rec({
-        formKind: "unknown",
+        formKind: "i9 section 2",
         lastName: null,
         firstName: null,
         name: "",
         sourcePage: 24,
-        section2Name: null,
         orphanSection2: true,
       }),
     ],

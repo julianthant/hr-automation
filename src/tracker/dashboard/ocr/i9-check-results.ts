@@ -40,6 +40,8 @@ import {
   buildI9PersonMatchInput,
   normalizeI9Dob,
   type I9PreviewRecord,
+  isI9Section1,
+  i9SheetName,
 } from "../../../services/ocr/forms/i9.js";
 import type { I9CheckMemberInput } from "../../../workflows/i9-check/schema.js";
 import { buildFanOutItemIdResolver } from "./approve.js";
@@ -122,7 +124,7 @@ function buildProvenanceLogs(
         `DISPUTED by the employer's Section 2 sheet on: ${rec.disputedFields.join(", ")}. `
         + `The disputed field(s) will NOT be used to search UCPath.`,
     });
-  } else if (rec.formKind === "i9") {
+  } else if (isI9Section1(rec)) {
     logs.push({
       level: "step",
       message: "No Section 2 sheet found for this person — the read could not be cross-checked.",
@@ -195,8 +197,8 @@ export function buildI9CheckMemberPlan(
     if (rec.orphanSection2) {
       // Normalize the employer's hand-printed name line to the standard
       // "Last, First" title-cased display convention (matches buildI9DisplayName).
-      const rawSection2Name = nonEmpty(rec.section2Name);
-      const name = rawSection2Name ? displayPersonName(rawSection2Name) : null;
+      const rawSheetName = i9SheetName(rec) || nonEmpty(rec.section2Name);
+      const name = rawSheetName ? displayPersonName(rawSheetName) : null;
       if (!name) {
         const failure: I9CheckDisplayFailure = {
           index,
@@ -210,7 +212,7 @@ export function buildI9CheckMemberPlan(
         displayFailures.push(failure);
         continue;
       }
-      const hire = nonEmpty(rec.section2HireDate);
+      const hire = nonEmpty(rec.hireDate) ?? nonEmpty(rec.section2HireDate);
       tasks.push({
         itemId,
         input: {
@@ -241,7 +243,7 @@ export function buildI9CheckMemberPlan(
       continue;
     }
 
-    if (rec.formKind !== "i9") {
+    if (!isI9Section1(rec)) {
       // Expected filler page (claimed Section 2 sheets, Lists of Acceptable
       // Documents, blanks) — not a person, not an error.
       continue;
