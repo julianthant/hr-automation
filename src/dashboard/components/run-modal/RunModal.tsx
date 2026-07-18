@@ -34,7 +34,7 @@ import { getOperatorSession } from "@/lib/operator-auth";
 import { MODAL_FOOTER_CONTROL_HEIGHT, WorkerStepper } from "@/components/shared/WorkerStepper";
 import { useSharePointStatus } from "@/components/hooks/useSharePointStatus";
 
-type RosterMode = "download" | "existing" | "wait";
+type RosterMode = "download" | "existing" | "wait" | "none";
 
 async function sha256OfFile(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
@@ -146,7 +146,14 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
   const [files, setFiles] = useState<File[]>([]);
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [rosterMode, setRosterMode] = useState<RosterMode>("existing");
-  // Whether the current rosterMode was picked by the OPERATOR (radio click)
+  // Which local roster file to use when rosterMode is "existing". `null` means
+  // "the latest" (the resolved pick tracks the top of the list as new rosters
+  // land); a path pins a specific file. Resolution to a concrete listing is
+  // `selectedRoster` below — a pinned path that vanished from the confirmed
+  // list falls back to the latest, and the file dropdown always displays the
+  // resolved file, so what's shown is always what's submitted.
+  const [selectedRosterPath, setSelectedRosterPath] = useState<string | null>(null);
+  // Whether the current rosterMode was picked by the OPERATOR (dropdown pick)
   // or auto-applied by the flip effect below. Only an auto-applied
   // download/wait may be flipped back to "existing" when rosters load —
   // overriding an operator's deliberate choice would be its own bug.
@@ -365,6 +372,7 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     setError(null);
     setDuplicateGroups([]);
     setRosterMode("existing");
+    setSelectedRosterPath(null);
     setDryRun(false);
     setOathUploadMode("full");
     setWorkerChoice(AUTO_WORKERS);
@@ -456,10 +464,10 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     if ((showFormType || showOnbaseDocType) && !formType) return;
     // Fail loud: never submit "use the existing roster" without a confirmed
     // local roster to point at. A stuck default rosterMode of "existing" with
-    // no `latestRoster` means /api/rosters never confirmed one way or the
+    // no `selectedRoster` means /api/rosters never confirmed one way or the
     // other (e.g. the fetch failed — see `rostersError`) — silently sending
     // rosterMode=existing with no rosterPath would leave the backend to guess.
-    if (effectiveShowRoster && rosterMode === "existing" && !latestRoster) {
+    if (effectiveShowRoster && rosterMode === "existing" && !selectedRoster) {
       setError(
         rostersError
           ? "Couldn't confirm a local roster (the roster check failed) — retry, or choose Download fresh from SharePoint."
@@ -517,8 +525,8 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
           if (showOathUploadMode) fd.append("mode", oathUploadMode);
           if (effectiveShowRoster) {
             fd.append("rosterMode", rosterMode);
-            if (rosterMode === "existing" && latestRoster) {
-              fd.append("rosterPath", latestRoster.path);
+            if (rosterMode === "existing" && selectedRoster) {
+              fd.append("rosterPath", selectedRoster.path);
             }
           }
           if ((showFormType || showOnbaseDocType) && formType) fd.append("formType", formType);
@@ -599,8 +607,14 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
     }
   }
 
-  const latestRoster = rosters?.[0];
   const hasRoster = (rosters?.length ?? 0) > 0;
+  // The roster file a rosterMode="existing" run will actually use: the pinned
+  // pick when it's still on disk, else the latest listing. The file dropdown
+  // renders `selectedRoster.path` as its value, so the visible pick and the
+  // submitted `rosterPath` can never diverge.
+  const selectedRoster =
+    (selectedRosterPath ? rosters?.find((r) => r.path === selectedRosterPath) : undefined) ??
+    rosters?.[0];
   const sharePointQueueHint = sharePointStatus?.queued.length
     ? `${sharePointStatus.queued.length} download${sharePointStatus.queued.length === 1 ? "" : "s"} queued. This run will use the newest queued result.`
     : sharePointStatus?.current
@@ -857,58 +871,68 @@ export function RunModal({ open, onOpenChange, workflow, reuploadFor }: RunModal
 
           {effectiveShowRoster && (
             <section>
-              <div className="text-[9.5px] uppercase tracking-[0.10em] font-medium mb-1 text-muted-foreground">
+              <label
+                htmlFor="roster-source"
+                className="block text-[9.5px] uppercase tracking-[0.10em] font-medium mb-2 text-muted-foreground"
+              >
                 Roster
-              </div>
-              <div>
-                <RosterRow
-                  checked={rosterMode === "existing"}
-                  disabled={!hasRoster || submitting}
-                  onSelect={() => {
+              </label>
+              <div className="grid gap-2">
+                <select
+                  id="roster-source"
+                  value={rosterMode}
+                  onChange={(e) => {
                     rosterModeSource.current = "user";
-                    setRosterMode("existing");
+                    setRosterMode(e.target.value as RosterMode);
                   }}
-                  label="Use latest roster"
-                  hint={
-                    hasRoster && latestRoster
-                      ? `Latest: ${latestRoster.filename} · ${formatBytes(latestRoster.bytes)}`
+                  disabled={submitting}
+                  className="w-full h-9 rounded-md border border-border bg-secondary/40 px-2.5 text-[13px] text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="existing" disabled={!hasRoster}>
+                    Use a local roster file{hasRoster ? "" : " (none on disk)"}
+                  </option>
+                  {sharePointWaitAvailable ? (
+                    <option value="wait">Wait for queued SharePoint download</option>
+                  ) : null}
+                  <option value="download">Download fresh from SharePoint</option>
+                  <option value="none">No roster</option>
+                </select>
+                {rosterMode === "existing" && hasRoster && rosters ? (
+                  <select
+                    aria-label="Roster file"
+                    value={selectedRoster?.path ?? ""}
+                    onChange={(e) => setSelectedRosterPath(e.target.value)}
+                    disabled={submitting}
+                    className="w-full h-9 rounded-md border border-border bg-secondary/40 px-2.5 text-[13px] text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {rosters.map((roster, index) => (
+                      <option key={roster.path} value={roster.path}>
+                        {roster.filename} · {formatBytes(roster.bytes)}
+                        {index === 0 ? " · latest" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <p className="text-[10.5px] text-muted-foreground/70 font-mono">
+                  {rosterMode === "existing"
+                    ? hasRoster && selectedRoster
+                      ? `Modified ${formatRosterDate(selectedRoster.modifiedAt)}`
                       : rosters !== null
                         // A confirmed (possibly stale) fetch says the dir is
                         // genuinely empty — trust it even if a LATER refresh
                         // attempt has since failed (rostersError).
-                        ? "No roster on disk — pick the other option to fetch one."
+                        ? "No roster on disk — pick a SharePoint option to fetch one."
                         : rostersError
-                          ? "Couldn't check for a local roster — the /api/rosters request failed. Retrying, or pick the other option."
+                          ? "Couldn't check for a local roster — the /api/rosters request failed. Retrying, or pick a SharePoint option."
                           : "Loading rosters…"
-                  }
-                />
-                {sharePointWaitAvailable ? (
-                  <RosterRow
-                    checked={rosterMode === "wait"}
-                    disabled={submitting}
-                    onSelect={() => {
-                      rosterModeSource.current = "user";
-                      setRosterMode("wait");
-                    }}
-                    label="Wait for queued SharePoint"
-                    hint={sharePointQueueHint}
-                  />
-                ) : null}
-                <RosterRow
-                  checked={rosterMode === "download"}
-                  disabled={submitting}
-                  onSelect={() => {
-                    rosterModeSource.current = "user";
-                    setRosterMode("download");
-                  }}
-                  label="Download fresh from SharePoint"
-                  hint={
-                    sharePointWaitAvailable
-                      ? "Queues a new SharePoint download after the current queue."
-                      : "The OCR orchestrator will handle the download automatically."
-                  }
-                  last
-                />
+                    : rosterMode === "wait"
+                      ? sharePointQueueHint
+                      : rosterMode === "none"
+                        ? "No roster matching — every person resolves via UCPath person lookup."
+                        : sharePointWaitAvailable
+                          ? "Queues a new SharePoint download after the current queue."
+                          : "The OCR orchestrator will handle the download automatically."}
+                </p>
               </div>
             </section>
           )}
@@ -1292,60 +1316,16 @@ function UploadProgress({
   );
 }
 
-function RosterRow({
-  checked,
-  disabled,
-  onSelect,
-  label,
-  hint,
-  last,
-}: {
-  checked: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-  label: string;
-  hint: string;
-  last?: boolean;
-}) {
-  return (
-    <label
-      className={cn(
-        "flex items-start gap-3.5 px-3.5 py-3 cursor-pointer transition-colors",
-        !last && "border-b border-border/60",
-        checked ? "bg-muted/40" : "hover:bg-muted/20",
-        disabled && "opacity-50 cursor-not-allowed",
-      )}
-    >
-      <span
-        className="mt-1 inline-flex items-center justify-center shrink-0 relative"
-        style={{
-          width: 14,
-          height: 14,
-          borderRadius: "50%",
-          border: "1px solid var(--border)",
-        }}
-        aria-hidden
-      >
-        {checked && (
-          <span
-            className="block rounded-full"
-            style={{ width: 6, height: 6, backgroundColor: "var(--foreground)" }}
-          />
-        )}
-      </span>
-      <input
-        type="radio"
-        className="sr-only"
-        checked={checked}
-        disabled={disabled}
-        onChange={() => !disabled && onSelect()}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="text-[12.5px] text-foreground">{label}</div>
-        <div className="text-[10.5px] text-muted-foreground/70 font-mono mt-0.5 truncate">{hint}</div>
-      </div>
-    </label>
-  );
+/** Compact roster-file timestamp for the hint line, e.g. "Jul 8, 2:41 PM". */
+function formatRosterDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function formatBytes(bytes: number): string {

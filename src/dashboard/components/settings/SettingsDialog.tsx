@@ -674,6 +674,17 @@ function SettingsSectionContent({
               hint="Per-page OCR wait budget before a page fails."
             />
             <InputField
+              id="ocr-tier1-patience"
+              label="Tier-1 patience (ms)"
+              type="number"
+              value={draft.ocr.tier1PatienceMs}
+              changed={chg("ocr", "tier1PatienceMs")}
+              onChange={(v) => patch("ocr", "tier1PatienceMs", v)}
+              min={0}
+              step={1000}
+              hint="How long a page waits for a trusted (tier-1) model before overflowing to a weaker one. 0 = off. Keeps batch quality from degrading over a long run."
+            />
+            <InputField
               id="ocr-disambig-concurrency"
               label="Disambiguation concurrency"
               type="number"
@@ -1021,7 +1032,7 @@ function SettingsSectionContent({
         <SectionHead
           icon={meta.icon}
           title="Paths"
-          subtitle="Output directories for workflow downloads. Leave blank to use the default."
+          subtitle="Output directories for workflow downloads. Leave blank to use data/<subdir> under the repo."
         />
         <Card title="Directories">
           <div className="flex flex-col gap-4">
@@ -1031,8 +1042,17 @@ function SettingsSectionContent({
               value={draft.paths.reportsDir}
               changed={chg("paths", "reportsDir")}
               onChange={(v) => patch("paths", "reportsDir", v)}
-              placeholder="Default: ~/Downloads/reports"
+              placeholder="Default: data/reports"
               hint="Kronos and separations PDF report downloads."
+            />
+            <InputField
+              id="paths-downloads-dir"
+              label="Downloads directory"
+              value={draft.paths.downloadsDir}
+              changed={chg("paths", "downloadsDir")}
+              onChange={(v) => patch("paths", "downloadsDir", v)}
+              placeholder="Default: data/downloads"
+              hint="Browser download fallback (e.g. Old Kronos filesystem-diff)."
             />
             <InputField
               id="paths-onboarding-docs-dir"
@@ -1040,8 +1060,17 @@ function SettingsSectionContent({
               value={draft.paths.onboardingDocsDir}
               changed={chg("paths", "onboardingDocsDir")}
               onChange={(v) => patch("paths", "onboardingDocsDir", v)}
-              placeholder="Default: ~/Documents/onboarding"
+              placeholder="Default: data/onboarding"
               hint="CRM onboarding-document downloads."
+            />
+            <InputField
+              id="paths-i9-check-tracker"
+              label="I-9 check tracker spreadsheet"
+              value={draft.paths.i9CheckTrackerPath}
+              changed={chg("paths", "i9CheckTrackerPath")}
+              onChange={(v) => patch("paths", "i9CheckTrackerPath", v)}
+              placeholder="Default: <reports dir>/i9-check-tracker.xlsx"
+              hint="Master xlsx that Run I-9 Check appends one row per checked person to."
             />
           </div>
         </Card>

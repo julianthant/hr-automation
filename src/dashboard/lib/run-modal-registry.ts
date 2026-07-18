@@ -242,7 +242,7 @@ export const RUN_MODAL_REGISTRY: Record<DashboardUploadRunWorkflow, RunModalConf
     }),
   },
   onbase: {
-    title: () => "Run OnBase Import",
+    title: () => "Run Import",
     srDescription: () =>
       "Pick the OnBase document type, upload one or more PDFs (combined into one document, one page per person), choose roster source, optionally enable dry run, then submit to start OCR preparation. On approve, OCR fans out one OnBase import per person.",
     submitUrl: ({ reuploadFor }) =>

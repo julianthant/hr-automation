@@ -632,10 +632,17 @@ export function App() {
   // identity on every App render and defeat the React.memo on EntryItem.
   // All setters from useState are stable references (React guarantee), so
   // empty deps are correct.
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   const handleSelectEntry = useCallback((id: string) => {
-    // Selecting another queue entry exits review mode (preserving
-    // localStorage edits per spec — only Approve / Discard wipe).
-    setReviewingPrepId(null);
+    // Selecting a DIFFERENT queue entry exits OCR review mode (preserving
+    // localStorage edits per spec — only Approve / Discard wipe). Re-clicking
+    // the already-selected prep row must NOT clear reviewingPrepId: that deep
+    // link keeps defaultTab="preview", and clearing it used to yank LogStream
+    // back to Logs (Select all / Unselect all could re-select the same row).
+    if (selectedIdRef.current !== id) {
+      setReviewingPrepId(null);
+    }
     setSelectedId(id);
   }, []);
   // Keep the ref fresh so a notification click (fired from the status-transition

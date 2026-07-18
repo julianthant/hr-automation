@@ -86,8 +86,10 @@ export function AddWorkerButton({ workerCounts, queuedCounts }: AddWorkerButtonP
         });
         return;
       }
-      toast.success(`Adding a ${label} worker — approve Duo in the new browser window`, {
+      toast.success(`Adding a ${label} worker — it joins the shared queue after UCPath auth`, {
         id: toastId,
+        description:
+          "One Duo at a time: if another worker is already authenticating, this one waits its turn. Prefer one healthy worker over stacking authenticating cards.",
       });
       setOpen(false);
     } catch (err) {

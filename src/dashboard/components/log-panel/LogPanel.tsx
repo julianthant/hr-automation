@@ -312,6 +312,16 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
   const renderDetailValue = (key: string): string =>
     detailEntry ? formatTrackerValue(detailEntry, key) : "";
 
+  /**
+   * A detail value carrying no information. `formatTrackerValue` substitutes
+   * the em-dash placeholder for a missing/null field, so a `conditional` field
+   * must treat that placeholder as blank — otherwise it renders forever.
+   */
+  const isBlankDetailValue = (value: string): boolean => {
+    const trimmed = value.trim();
+    return trimmed === "" || trimmed === "—";
+  };
+
   const Skeleton = ({ className }: { className?: string }) => (
     <div className={cn("rounded bg-muted motion-safe:animate-pulse", className)} />
   );
@@ -377,6 +387,14 @@ export function LogPanel({ entry, workflow, date, allEntries, displayNames, sibl
         <div className="grid grid-cols-4 shrink-0">
           {allDetailFields.map((f) => {
             const value = renderDetailValue(f.key);
+            // Conditional fields hide when empty so ordinary separation rows
+            // don't grow blank I-9 Action History cells.
+            //
+            // `formatTrackerValue` renders a MISSING value as an em-dash
+            // placeholder, never "" — so the original `!value.trim()` check was
+            // always false and `conditional` silently hid nothing. Test for the
+            // placeholder, not just whitespace.
+            if (f.conditional && isBlankDetailValue(value)) return null;
             const mono = isMonospaceKey(f.key);
             return (
               <div

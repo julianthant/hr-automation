@@ -146,3 +146,39 @@ test("collapseEntriesForStatStrip: a genuine member failure still rolls up to Fa
   assert.equal(counts.failed, 1);
   assert.equal(counts.cancelled ?? 0, 0);
 });
+
+/**
+ * A PARTIAL member failure must roll up to Done, matching the coordinator card
+ * (`rollupOperationStatus`), which refuses to let a failed member promote the
+ * operation to failed (E2E-106). The strip previously used "any failed →
+ * failed", so a real 30-person I-9 batch with 25 done / 5 failed showed a green
+ * "Done" card sitting directly under a red "FAILED 2 / DONE 0" strip.
+ */
+test("collapseEntriesForStatStrip: a PARTIAL member failure rolls up to Done, not Failed", () => {
+  const pid = "op-partial";
+  const input = [
+    row("d1", "done", { parentRunId: pid }),
+    row("d2", "done", { parentRunId: pid }),
+    row("f1", "failed", { parentRunId: pid }),
+  ];
+
+  const out = collapseEntriesForStatStrip(input);
+  assert.equal(out.length, 1);
+  const counts = countEntriesByQueueStatus(out);
+  assert.equal(counts.done, 1);
+  assert.equal(counts.failed ?? 0, 0);
+});
+
+test("collapseEntriesForStatStrip: a WHOLESALE member failure (nothing succeeded) still rolls up to Failed", () => {
+  const pid = "op-total";
+  const input = [
+    row("f1", "failed", { parentRunId: pid }),
+    row("f2", "failed", { parentRunId: pid }),
+  ];
+
+  const out = collapseEntriesForStatStrip(input);
+  assert.equal(out.length, 1);
+  const counts = countEntriesByQueueStatus(out);
+  assert.equal(counts.failed, 1);
+  assert.equal(counts.done ?? 0, 0);
+});
