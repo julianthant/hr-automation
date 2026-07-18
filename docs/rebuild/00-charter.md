@@ -88,6 +88,25 @@ it becomes binding.
    parked for later resume, the data the workflow currently holds (its checkpoint state) is ALWAYS
    live-visible in the Edit Data tab and editable there — schema-validated on save — before the
    operator resumes. Editing checkpoint data is the supported way to correct a run's data mid-way.
+13. **Write-safety — exactly-once for real mutations (gap audit `08` + operator answers 2026-07-18;
+   full design: doc `09`).** Every mutation gets completion-verification and double-submit
+   protection appropriate to its system, and completion is checked **FAIL-CLOSED**: an unknown or
+   unverifiable result is NEVER treated as done (operator: *"you have to be very sure they were
+   completed"*). Per system:
+   - **UCPath / CRM / ServiceNow** — the irreversible submits. The submit task captures a
+     **verifiable receipt** (e.g. a confirmation number) as its typed output; the kernel runs a
+     probe → fence → submit → capture → commit sequence, and crash-recovery re-runs the probe.
+     UCPath is where the real incidents happened (a duplicate person; a wrong-person termination,
+     `T002173685`) — this layer exists to make those structurally impossible, not merely rarer.
+   - **Kuali** — **SAVE-only, not a submit** (operator 2026-07-18): a write, but not an irreversible
+     filing. No confirmation-number receipt needed; the automation must still verify the save
+     completed, fail-closed.
+   - **OnBase** — the operator **tracks completion manually** (operator 2026-07-18). The automation
+     must be *very sure* the upload completed before it reports done — fail-closed, never fail-open.
+   - An **immutable receipt / transaction ledger** records what was actually filed and is **never
+     pruned** (it survives the span/notes cleanup).
+   - The per-submit **double-submit probe policy is decided per-workflow at migration time**
+     (operator deferred it), via the §b migration questionnaire.
 
 ## Non-negotiables
 
@@ -122,6 +141,13 @@ The foundation's documentation is part of the foundation.
   each workflow needs. Every workflow gets its own migration plan doc answering: which store tasks
   it reuses, which new tasks it needs, how each new task is designed as a reusable base + what the
   workflow-specific customization is, and how deep reuse goes beyond the surface.
+  - **§b — Each migration includes an operator decision checkpoint (operator directive
+    2026-07-18).** Before a workflow is built on the new base, the orchestrator asks the operator
+    the workflow-specific questions so nothing is missed for that workflow: which actions are real
+    submits, the receipt source + completion check per submit, the double-submit probe policy, the
+    dry-run boundary (which submit tasks to split), and any workflow-specific data/gate quirks. The
+    operator explicitly wants these questions asked at migration time — "cover everything for each
+    workflow as we migrate." This questionnaire is part of every workflow's migration plan doc.
 
 ## Process
 

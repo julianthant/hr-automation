@@ -127,3 +127,47 @@ Step label = descriptor `step.label`, defaulting to the contract's `title`. The 
 is the operator presentation override (serve-time, visible in settings). Precedence stated once, in
 doc 02. The worked example task (`ucpath/search-person-org`) is defined once, in doc 01 §9; doc 02
 imports it verbatim.
+
+---
+
+## Reconciliation round 2 (2026-07-18) — write-safety skeptic (`reviews/09-review.md`)
+
+The adversarial review of docs 09/10/11 found two blockers in write-safety and several cross-doc
+seams. These decisions are binding and override anything contradicting them in 09/10 (and amend the
+earlier D8/D14).
+
+- **D17 — Crash recovery is PROBE-THEN-PARK, not always-park (amends D8 + doc 02).** On a crash
+  during a real submit, recovery re-runs the idempotency probe FIRST: `present` → backfill +
+  ledger + done (no second submit); `absent` → clear the intent, safe to retry;
+  `ambiguous`/`unknown`/throw → PARK `needs-operator`. Rationale: always-park does NOT prevent a
+  double-file, it only defers everything to manual; probe-then-park prevents the double-file AND
+  auto-resolves the confident cases, while the fail-closed `unknown → park` still honors "be very
+  sure." D8's "crash-mid-write still parks needs-operator" clause and doc 02 §5.5 / §5.6#2 / OQ2 /
+  the line-364 statement are amended to this. Doc 02's mutate step node gains a **required
+  `probePolicy`** (`"always" | "retries-and-recovery-only"`, no default — the §b migration
+  question); the recovery probe is always-on regardless.
+- **D18 — Same-key concurrency fence (BLOCKER fix).** `idempotency_key` gets a **partial UNIQUE /
+  mutex among un-committed `write_intents`**, and beat ① MUST consult `write_intents` for an
+  in-flight `attempting` row on the same key BEFORE the live-page probe. Two runs deriving the same
+  key (or one after a lost lease) can no longer both fence-and-click. This is load-bearing for the
+  parallel kernel (doc 05) — without it, exactly-once is false under concurrency.
+- **D19 — Recovery backfill is schema-validated (BLOCKER fix).** The recovery `present`-backfill
+  MUST run `completion.schema.parse` on the probe-returned receipt; a parse failure → PARK. There
+  is NO path to `done` with an unvalidated receipt, recovery included.
+- **D20 — Honest scope (amends doc 09 §12).** The double-**file** class is closed by the fence +
+  key-mutex. The duplicate-**person** (too-early racy read) class is NOT structurally closed — it
+  is mitigated by porting the race-classifiers + live verification + the (conditional, create-path)
+  pending-termination sweep, and disclosed as a residual, not claimed "structurally impossible."
+- **D21 — Storage owner is doc 03 (D1).** Doc 03 §2.1/§2.3 must actually add: the `ledger/` dir
+  (hash-chained append-only JSONL, per-system+day, never pruned) and the `write_intents` SQLite
+  table (added to the system-of-record set, amending D14's "claims + checkpoint payloads"). Doc 03
+  must also DECIDE the base spans/notes retention (today an open question) so 09's "never-pruned"
+  floor sits above a settled number rather than a guessed "30 days."
+- **D22 — Contract-shape + guards owner split.** Doc 09 owns the mutate contract's `writeSafety`
+  shape: `completion` is a UNION (`receipt | save-verify | upload-verify`) + `idempotency`. Doc 10's
+  `write-safety-contract` guard must walk that union — it must NOT demand a flat `receipt` schema
+  from Kuali/OnBase (which use save-verify/upload-verify per charter §13). Doc 10 adds ratchets:
+  `unverifiableByPage` requires an allowlist+reason entry, and every `effect:"mutate"` impl must
+  route its transaction click through the `stores/common/mutation.ts` fence primitive (no raw
+  `page.click` submit). Port fix: the "outcome unknown, refusing success" throw is in
+  `clickSaveAndSubmit` (`transaction.ts:855-859`), not `waitForTransactionOutcome`.

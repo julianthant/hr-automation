@@ -82,6 +82,10 @@ export interface TaskStepNode<TCtx, C extends AnyTaskContract> {
   when?: (input: unknown) => boolean;
   /** Resume policy — REQUIRED, no default (§5.3). */
   replay: "checkpoint" | "always-rerun";
+  /** Pre-write idempotency-probe policy — REQUIRED on a mutate step, NO default (D17 / the §b
+   *  migration question). Illegal on a read/derive step. Semantics owned by doc 09 §5; the
+   *  *recovery* probe (§5.6 #2) is always-on regardless of this knob. */
+  probePolicy?: "always" | "retries-and-recovery-only";
   // NOTE: no `write` flag (D7) — write gating derives from the contract's effect:"mutate".
   // NOTE: no `system` field — the system is the contract id's `<system>/` prefix.
 }
@@ -292,6 +296,10 @@ interface FlowBuilder<WIn, S extends Record<string, StepEntry<AnyTaskContract>>>
       bind: (scope: FlowScope<WIn, S>) => z.input<C["input"]>;  // compile-time coupling (doc 01/D15)
       when?: (input: WIn) => boolean;
       replay: "checkpoint" | "always-rerun";                 // REQUIRED
+      probePolicy?: "always" | "retries-and-recovery-only";  // REQUIRED on a mutate contract (D17,
+                                                             //   §b migration question); compile
+                                                             //   error if omitted there, illegal on
+                                                             //   a read/derive step. Doc 09 §5.
     },
   ): FlowBuilder<WIn, S & { [K in Id]: StepEntry<C> }>;
 
@@ -361,7 +369,7 @@ queued → claimed → validating → running(node i) ────────�
   │  gate resolved     │            ├─ gate node reached → PARKED(gate)
   ├────────────────────┼────────────┘
   │                    └─ entry validation fails → failed (§5.4 — before any browser)
-  └─ requeue (bump / reassign / recovery)          crash-mid-write → PARKED(needs-operator) (§5.6)
+  └─ requeue (bump / reassign / recovery)          crash-mid-write → recovery probe → done|retry|PARK (§5.6)
 ```
 
 **Park semantics.** Reaching a gate node, the engine:
@@ -423,8 +431,9 @@ Every task step declares `replay` explicitly — **no default**:
 
 **Write gating derives from the contract, never a step flag (D7).** `TaskStep.write` does not
 exist. A step whose contract has `effect: "mutate"` gets, automatically: refuse-to-re-execute when
-its receipt checkpoint exists, no auto-resume *into* it (operator confirmation required), the
-crash-park of §5.6 #2, and status as a freshness *sink* in §5.5. Doc 01's per-effect `defineTask`
+its receipt checkpoint exists, no *blind* auto-resume into it (recovery runs the idempotency probe
+FIRST — §5.6 #2 / D17), the REQUIRED `probePolicy` knob (above), and status as a freshness *sink* in
+§5.5. Doc 01's per-effect `defineTask`
 overloads make a mis-declared effect fail to compile where possible, with the factory's runtime
 check as backstop — compile-time where possible, runtime-enforced always.
 
@@ -480,7 +489,9 @@ Fix: re-run "ucpath-job-summary" (start there, or mark it always-rerun for this 
   consuming write step) and requires explicit confirmation per stale checkpoint. The override
   rides `RunEnvelope.freshnessOverride` (§2), is scoped to that single resume attempt (never
   persisted onto the item), and is recorded in the span stream as an audited note — provenance,
-  not a default. Crash-mid-write still parks `needs-operator` (§5.6 #2) regardless of overrides.
+  not a default. Crash-mid-write runs the recovery idempotency probe first (§5.6 #2 / D17, mechanism
+  in doc 09) regardless of overrides — it parks `needs-operator` only when that probe is
+  indeterminate (`ambiguous`/`unknown`/throw), never blindly.
 
 ### 5.6 The four scenarios
 
@@ -489,14 +500,20 @@ Fix: re-run "ucpath-job-summary" (start there, or mark it always-rerun for this 
    `always-rerun` steps in the prefix re-execute (engine computes the rerun set); k re-runs.
    Input is the pristine stored input. Retrying *into* a mutate-contract step whose receipt
    exists ⇒ refuse with the receipt named.
-2. **Resume after crash.** Recovery (lease-expiry path) finds the last checkpointed step;
-   `startAt` = the first step without a checkpoint. If that step's contract is `effect:"mutate"`,
-   do **not** auto-resume — park the run `needs-operator` ("write may have landed; verify in
-   <system> then retry or mark done"), because the crash window can't distinguish
-   landed-but-unrecorded from never-sent. Non-mutate steps auto-resume (worst case: a repeated
-   read). Ordering invariant: checkpoint write commits (SQLite) **before** the task-end span is
-   emitted; a "span says done, no checkpoint" state is impossible by construction and treated as
-   corruption (loud) if ever observed.
+2. **Resume after crash (probe-then-park, D17 — NOT always-park).** Recovery (lease-expiry path)
+   finds the last checkpointed step; `startAt` = the first step without a checkpoint. If that step's
+   contract is `effect:"mutate"`, the kernel does **not** auto-resume into the submit; instead it
+   runs the mutate contract's **recovery idempotency probe FIRST** (doc 09's mechanism, referenced
+   not redefined) and routes on the verdict: `present` → backfill the receipt (schema-validated, doc
+   09 D19) + complete `done`, **no second submit**; `absent` → clear the intent, the write is safe to
+   re-run from the probe; `ambiguous`/`unknown`/throw → park `needs-operator` ("write may have
+   landed; verify in <system> then retry or mark done"). Always-park is **retired**: it never
+   prevented a double-file, it only deferred everything to manual — probe-then-park prevents the
+   double-file AND auto-resolves the confident cases, while the fail-closed `unknown → park` still
+   honors "be very sure." Non-mutate steps auto-resume (worst case: a repeated read). Ordering
+   invariant: checkpoint write commits (SQLite) **before** the task-end span is emitted; a "span says
+   done, no checkpoint" state is impossible by construction and treated as corruption (loud) if ever
+   observed.
 3. **Operator-forced start-at-N with hand-supplied data.** The Edit Data successor: pick a start
    step, supply substitute outputs for missing upstream steps. `injected` rides the RunEnvelope
    as `{ [stepId]: unknown }`; each value is parsed with the **full output schema of the
@@ -600,6 +617,7 @@ storage, SSE. This section keeps only the engine-side semantics that doc 02 owns
 | Write gating re-declared per step (the deleted `write` flag returns) | `TaskStep` has no such field to set; mutate-effect contracts are enumerated in the coverage guard's snapshot so adding/removing one is a visible review diff; effect misdeclaration guards are doc 01 §8's |
 | A gate becomes a fake polling task again (browser held for days) | gates are the only descriptor vocabulary for waits; emit-time validation (doc 03) rejects undeclared gate ids; a task exceeding its bounded duration fails loud instead of parking |
 | `replay` mis-set to make resume "convenient" | REQUIRED field (compile error if omitted); `always-rerun` vs `checkpoint` choices are visible in the descriptor diff, not buried in handlers |
+| Crash-mid-write auto-resumes straight into a duplicate submit | recovery runs the mutate contract's idempotency probe FIRST (§5.6 #2 / D17) — `present`→backfill (schema-validated, doc 09 D19), `absent`→retry, else park; there is no auto-resume path directly into a submit, and `probePolicy` is a REQUIRED mutate-step field (compile error if omitted) so the §b decision can't be skipped |
 | Actions bypass the wrapped helpers (attribution goes dark) | inline-selector + raw-page-API ban extended to `temp_src/` (`page.` members allowlisted only inside `stores/*/`) |
 | Span step-id typos | engine accepts only the descriptor-derived step-id union (compile-time); emit-time assert for dynamic paths |
 | Stub lane quietly narrows to happy-path only | derived stubs cover exactly the `example` path; the hand-scripted failure/cancel/parallel scenarios live in the e2e stub lane with their own coverage list (D3) — deleting one fails the lane's scenario manifest check |
@@ -690,9 +708,13 @@ Nothing launched, no Duo spent, no partial run row.
 1. **Checkpoint retention** — prune with the tracker's 7-day JSONL policy, or keep until the
    logical item is deleted? (Resume across days argues for item-lifetime; freshness (§5.5) makes
    old checkpoints safe-but-refusable rather than dangerous.)
-2. **Write-task crash disambiguation** — D8/D9 fix the default (park `needs-operator`); should
-   mutate contracts optionally ship a paired read `probe` task the engine auto-runs on crash
-   recovery to disambiguate landed-vs-never-sent before parking?
+2. **Write-task crash disambiguation — RESOLVED (D17), no longer open.** Every mutate contract ships
+   a paired idempotency `probe` (doc 09's `writeSafety.idempotency.probe`), and crash recovery runs
+   it FIRST (§5.6 #2): `present`→backfill+`done`, `absent`→retry-safe, `ambiguous`/`unknown`/throw→
+   park. The earlier "always park `needs-operator`" default is retired — probe-then-park prevents the
+   double-file AND auto-resolves the confident cases. The remaining §b migration decision is the
+   per-workflow *pre-write* `probePolicy` knob (doc 09 §5, on the mutate step node), not this
+   question.
 3. **Injected-data surface scope** — full "start at any step with substitute outputs" UI from day
    one, or engine support first with Edit-Data-shaped UI layered later?
 4. **Descriptor `version` field** — add a per-workflow schema version now (stamped into

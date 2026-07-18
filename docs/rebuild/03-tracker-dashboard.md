@@ -221,12 +221,15 @@ Derived statuses stop being per-workflow code where a universal mechanism exists
 
 ```
 .tracker/
-├── spans/  <workflow>-<date>.jsonl    span events (low volume — the queue/timeline truth)
-├── notes/  <workflow>-<date>.jsonl    notes (high volume — logs, actions, screenshots, data points)
+├── spans/   <workflow>-<date>.jsonl   span events (low volume — the queue/timeline truth)
+├── notes/   <workflow>-<date>.jsonl   notes (high volume — logs, actions, screenshots, data points)
+├── ledger/  <system>-<date>.jsonl     immutable write receipts (D21; shape owned by doc 09 §6) —
+│                                      hash-chained (seq + prevHash), append-only, per-SYSTEM+day,
+│                                      NEVER pruned (the audit floor)
 ├── rows/ logs/ sessions/ …            LEGACY dirs — untouched, still written by old src,
 │                                      read via the lift adapter (§5) until deleted
-└── state.db                           SQLite — split role per D14 (§2.3): claim/checkpoint tables
-                                       are system-of-record; projection tables are rebuildable
+└── state.db                           SQLite — split role per D14 (§2.3): claim/checkpoint/fence
+                                       tables are system-of-record; projection tables are rebuildable
 ```
 
 Rationale against alternatives:
@@ -238,6 +241,17 @@ Rationale against alternatives:
   alone no longer contains log-line text the way `rows/`+`logs/` greps did.
 - **Why split spans/notes?** Queue projection reads spans only (§1.1 volume note); notes load
   lazily per selected run. Mirrors today's proven rows/logs split.
+- **Why a separate `ledger/` (D21 — owner = this doc)?** Doc 09's write-safety layer files one
+  immutable receipt per real HR mutation. It is partitioned per-**system**+day so
+  `grep 10694136 .tracker/ledger/ucpath-*.jsonl` answers "what did we file for this person, across
+  time," hash-chained (`seq` + `prevHash`) for tamper-evidence, and **never pruned**. Doc 09 owns
+  the entry *shape* (`LedgerEntry`, §6 there); this doc owns that the dir lives in the layout and is
+  exempt from `clean-tracker`.
+- **Base retention — DECIDED (D21):** `notes/` prune at **7 days** (the high-volume stream, matching
+  today's `clean:tracker` default) and `spans/` at **30 days** (the audit skeleton, kept longer).
+  `ledger/` is exempt from both — its never-pruned floor now sits **above a settled number, not a
+  guess** (this is what doc 09 §6 references). `rows/`/`logs/`/`sessions/` keep their legacy policy
+  until deletion.
 - **Why per-workflow files?** Small greppable files; partition key matches the SSE topic scope.
   Worker spans write to their workflow's file (a daemon serves one workflow).
 - **Write discipline (ported verbatim):** append-at-now partitioning; cross-midnight solved at the
@@ -298,8 +312,11 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
 `state.db` has **two classes of table with different authority**:
 
 - **System-of-record (NOT rebuildable, NOT deletable):** the task/claim store (tasks, leases,
-  dependencies, commands — doc 02 §3.7's checkpoint payloads, and §4.4's `ocr_approvals`
-  manifests). Live queue truth. Losing these loses claims and checkpoints — they have no JSONL
+  dependencies, commands — doc 02 §3.7's checkpoint payloads, §4.4's `ocr_approvals` manifests, and
+  **doc 09's `write_intents` crash-fence table**). The `write_intents` addition **amends D14** — the
+  system-of-record set is now "claims + checkpoint payloads **+ the write-intent fence**," because a
+  lost in-flight fence would re-open the exactly-once crash window (doc 09 §3/§4). Live queue truth.
+  Losing any of these loses claims, checkpoints, or in-flight write fences — they have no JSONL
   double.
 - **Projection tables (rebuildable):** span-shaped read models (`spans`, `gates`, `notes`,
   `runs_view`) fed by one projector consuming both native spans and lifted legacy events (§5).
@@ -666,6 +683,7 @@ its own milestones with no parity deadline coupling.
 | 11 | Quarantine becomes a silent bit-bucket (rows rot there unnoticed) | Quarantine is a VISIBLE queue card + SSE `quarantine` count + notification; the real-day replay fixture asserts **zero** quarantines on known-good days, so any new legacy shape fails CI when its day joins the corpus |
 | 12 | Resolved member trees creep back onto the wire (the 5-8k-field re-serialization) | `QueueSurfaceWire` has `memberRunIds: string[]` only — no recursive member field exists to populate; a type-level test pins that the wire type is non-recursive; the SSE tick test asserts a 100-member operation patch serializes one surface |
 | 13 | Attempt discipline erodes (a re-pend reuses attempt 1 and re-opens closed spans) | The replay fixture asserts open/close-once per `(runId, attempt, spanPath)` across days containing real reassign/bump traffic; `run.requeued.nextAttempt` is emit-validated as monotonic |
+| 14 | The `ledger/` dir gets pruned, or `write_intents` treated as a rebuildable projection (D21) | `ledger/` is exempt from `clean-tracker` (a retention-floor ratchet — owned by doc 09 §8 — fails if any prune path reaches it); `write_intents` is enumerated in §2.3's system-of-record set (amends D14), so the "rebuildable ⇒ projection tables only" rule (§2.3) keeps it undeletable. Base retention (`notes/` 7d, `spans/` 30d) is a fixed §2.1 decision, so the never-pruned floor sits above a settled number, not a guess |
 
 ---
 
@@ -741,9 +759,12 @@ returns its log/action detail (§2.1 — two greps, by design).
 
 ## 8. Open questions for the operator / orchestrator
 
-1. **Notes retention & volume** — with per-action records now in `notes/` (D10), notes will
-   modestly exceed today's log volume; is 7-day pruning (today's default) acceptable for
-   `notes/`, with `spans/` kept longer (30d) since they are the audit skeleton?
+1. **Notes retention & volume — RESOLVED (D21), no longer open.** Base retention is **decided**
+   (§2.1): `notes/` prune at **7 days** (today's `clean:tracker` default — the high-volume stream
+   that now also carries per-action records, D10), `spans/` at **30 days** (the audit skeleton). The
+   `ledger/` dir is **never pruned** and sits above both floors (doc 09 §6 depends on this settled
+   number). Only the *volume* question — whether 7-day notes strain disk in practice — remains a
+   monitor-and-revisit, not an open design decision.
 2. **Worker-span ownership of multi-workflow daemons** — the i9-check single-UCPath-browser daemon
    and future shared daemons: one worker span per workflow (current design) or per process with
    workflow links? Current design assumes daemon:workflow is 1:1, as today.
