@@ -1,7 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { PATHS } from "../../../../src/config.js";
 import {
   buildCrmDocumentDownloadPath,
   buildCrmDocumentFolderName,
@@ -12,8 +12,6 @@ import {
   DEFAULT_CRM_DOC_INDICES,
   defaultCrmDocumentName,
 } from "../../../../src/systems/crm/idocs-download.js";
-
-const ONBOARDING_DIR = join(homedir(), "Documents", "onboarding");
 
 test("DEFAULT_CRM_DOC_INDICES downloads Doc 1 and Doc 3", () => {
   assert.deepEqual(DEFAULT_CRM_DOC_INDICES, [0, 2]);
@@ -39,11 +37,12 @@ test("defaultCrmDocumentName feeds parse/sanitize as a clean fallback", () => {
   );
 });
 
-test("buildCrmDocumentDownloadPath lands under ~/Documents/onboarding", () => {
+test("buildCrmDocumentDownloadPath lands under data/onboarding by default", () => {
   assert.equal(
     buildCrmDocumentDownloadPath({ firstName: "Jane", lastName: "Doe", middleName: "A" }),
-    join(ONBOARDING_DIR, "Doe, Jane A EID"),
+    join(PATHS.onboardingDocsDir, "Doe, Jane A EID"),
   );
+  assert.match(PATHS.onboardingDocsDir, /data[/\\]onboarding$/);
 });
 
 test("buildCrmDocumentFolderName: Last, First Middle EID (no lived name)", () => {

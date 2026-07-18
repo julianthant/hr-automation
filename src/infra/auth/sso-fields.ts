@@ -50,9 +50,17 @@ export async function clickSsoSubmit(page: Page, opts: { abortSignal?: AbortSign
   // blocks the page. Idempotent + best-effort; failure degrades to manual Duo.
   if (isDuoWebAuthnEnabled()) {
     try {
-      await armDuoWebAuthn(page, { abortSignal: opts.abortSignal });
+      const armed = await armDuoWebAuthn(page, { abortSignal: opts.abortSignal });
+      if (!armed) {
+        log.warn(
+          "Duo WebAuthn arm returned false at SSO submit — falling back to manual Duo (check credential file / prior arm logs)",
+        );
+      }
     } catch (err) {
       if (opts.abortSignal?.aborted) throw err;
+      log.warn(
+        `Duo WebAuthn arm threw at SSO submit (${err instanceof Error ? err.message : String(err)}) — falling back to manual Duo`,
+      );
     }
   }
   opts.abortSignal?.throwIfAborted();

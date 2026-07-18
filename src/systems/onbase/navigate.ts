@@ -333,6 +333,14 @@ async function closeKeysetDialog(page: Page, dismissNoMatch: boolean): Promise<v
 export type KeysetLookupResult = "selected" | "no-match";
 
 /**
+ * How many times to click "Select Employee" before declaring the selection
+ * postback dead. A click can be swallowed while the results grid's async
+ * postback is still re-rendering (live 2026-07-17); each attempt waits 4s for
+ * the dialog to close before re-clicking.
+ */
+const SELECT_EMPLOYEE_CLICK_ATTEMPTS = 3;
+
+/**
  * Run the OnBase **Employee Lookup keyset** for one UCPath ID via its MODAL.
  *
  * There is NO inline autofill on Tab (the old `enterUcpathIdAndTab` assumption
@@ -389,11 +397,40 @@ export async function lookupEmployeeViaKeyset(
       return "no-match";
     }
     if (await selectBtn.isEnabled({ timeout: 400 }).catch(() => false)) {
-      await safeClick(selectBtn, {
-        label: "onbase.keysetLookup.selectEmployeeButton",
-        timeout: 10_000,
-      });
-      // Dialog closes and keywords populate — confirm Last Name lands. The
+      // The Select Employee click can land while the results grid's async
+      // postback is still re-rendering, and OnBase swallows it — the dialog
+      // stays open with the row still highlighted and no keyword ever
+      // populates (captured live 2026-07-17: failure screenshot showed the
+      // dialog open 8s+ after the click was logged). The dialog CLOSING is the
+      // observable proof the selection postback fired, so click → confirm the
+      // dialog closed → re-click the SAME button (bounded) while it hasn't.
+      const dialog = onbaseSelectors.keysetLookup.dialog(page);
+      let dialogClosed = false;
+      for (let attempt = 1; attempt <= SELECT_EMPLOYEE_CLICK_ATTEMPTS; attempt++) {
+        await safeClick(selectBtn, {
+          label: "onbase.keysetLookup.selectEmployeeButton",
+          timeout: 10_000,
+        });
+        dialogClosed = await dialog
+          .waitFor({ state: "hidden", timeout: 4_000 })
+          .then(
+            () => true,
+            () => false, // still visible after the wait — checked right below
+          );
+        if (dialogClosed) break;
+        log.warn(
+          `OnBase: Select Employee click did not close the Employee Lookup dialog for UCPath ID ${ucpathId} (attempt ${attempt}/${SELECT_EMPLOYEE_CLICK_ATTEMPTS}) — re-clicking`,
+        );
+      }
+      if (!dialogClosed) {
+        // Leave a clean page for the retry replay, then fail loud — the
+        // selection postback never fired, so nothing was autofilled.
+        await closeKeysetDialog(page, false);
+        throw new Error(
+          `OnBase: Select Employee for UCPath ID ${ucpathId} never closed the Employee Lookup dialog after ${SELECT_EMPLOYEE_CLICK_ATTEMPTS} clicks — selection postback did not fire`,
+        );
+      }
+      // Dialog closed and keywords populate — confirm Last Name lands. The
       // settle window is capped by the caller's overall budget.
       const settle = Date.now() + Math.min(8_000, timeoutMs);
       while (Date.now() < settle) {

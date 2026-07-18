@@ -3,6 +3,40 @@
 Structured lessons for OnBase selector + navigation failures. Search here
 before mapping a new selector; merge stale entries rather than duplicating.
 
+## 2026-07-17 — The Select Employee click in the Employee Lookup modal can be SWALLOWED mid-postback — confirm the dialog actually closes, re-click while it doesn't
+
+**Tried:** Treating the "Select Employee" click as fire-and-forget in
+`lookupEmployeeViaKeyset`: poll `selectEmployeeButton.isEnabled()` → `safeClick`
+→ immediately poll the import form's `Last Name` for the keyset autofill, never
+looking at the dialog again.
+**Failed because:** The click can land while the results grid's async postback
+is still re-rendering (the button enables ~1.3s after Find), and OnBase's
+WebForms page swallows it — the click is dispatched successfully (logged
+`clicked in 17ms`) but the selection postback never fires. Captured live
+2026-07-17 (UCPath ID 10848084): the kernel's step-failure screenshot showed the
+Employee Lookup dialog STILL OPEN 8s+ after the click was logged, result row
+found and highlighted, keywords blank — so the 8s `Last Name` settle window
+expired and the run terminal-failed with "keywords did not populate" even though
+the employee existed and was matched. The dialog also stayed open across the
+throw, polluting the page the operator's Retry replays onto.
+**Fix:** The dialog CLOSING is the observable proof the selection postback
+fired. `lookupEmployeeViaKeyset` now clicks Select Employee, waits up to 4s for
+`keysetLookup.dialog` to reach `state:"hidden"`, and re-clicks the same button
+(bounded, `SELECT_EMPLOYEE_CLICK_ATTEMPTS = 3` — retrying the SAME operation on
+a transient, not a fallback) while the dialog is still open. If it never closes,
+close it (`closeKeysetDialog`) for a clean retry surface and throw loud
+("selection postback did not fire"). Only after the dialog is confirmed closed
+does the existing `Last Name` settle poll run. Pinned by
+`tests/unit/systems/onbase/keyset-lookup.test.ts` (swallowed-click re-click +
+never-closes throw); the race itself is a server-timing event that can't be
+summoned live on demand.
+**Selector:** `keysetLookup.dialog`, `keysetLookup.selectEmployeeButton`
+**References:** the 2026-07-02 keyset-modal entry below (same modal, mechanism
+discovery); `.tracker/screenshots/onbase-…-error-fill-keywords-…1784302787491.png`
+(the live capture)
+**Tags:** onbase, import, keyset, employee-lookup, modal, dialog,
+select-employee, swallowed-click, postback, re-render, race, retry, fill-keywords
+
 ## 2026-07-02 — The Document Queue (frmViewer iframe): leftover rows duplicate imports, leaving with queued docs fires a native beforeunload confirm, and the Import button enables on attach alone
 
 **Tried:** (1) `chooseFile` = fire-and-forget `setInputFiles` + a log line.

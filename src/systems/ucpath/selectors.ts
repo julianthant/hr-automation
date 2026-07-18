@@ -452,13 +452,18 @@ export const personSearch = {
     f.locator("#DERIVED_HCR_SM_SM_SEARCH_BTN"),
 
   /**
-   * Results grid — rows containing a 5+ digit employee ID. verified 2026-04-01
-   * @tags results, grid, rows, person, search
+   * Results grid — one Empl ID cell (`span#EMPLID$<row>`) per matched person on
+   * the PERSON_RESULTS grid (`table#l0PERSON$0`). The real results page carries
+   * NO `SEARCH_RESULT` id and no `.PSLEVEL1GRID` class — the previous anchors
+   * matched 0 elements on a live found page, so every genuine match timed out
+   * as an ambiguous outcome (live-verified 2026-07-10, 25/104 person-match runs
+   * failed that way). Companion per-row name cells: `HTML2$<row>` (legal first
+   * name) / `HTML4$<row>` (legal last name) — read by `searchPerson`'s match
+   * extraction. verified 2026-07-10
+   * @tags results, grid, rows, person, search, emplid
    */
-  resultRows: (f: FrameLocator): Locator =>
-    f
-      .locator('[id*="SEARCH_RESULT"] tr, .PSLEVEL1GRID tr')
-      .filter({ hasText: /\d{5,}/ }),
+  resultEmplIdCells: (f: FrameLocator): Locator =>
+    f.locator('table[id^="l0PERSON$"] span[id^="EMPLID$"]'),
 };
 
 // ─── Job Summary page (sidebar-less direct URL + iframe cases) ─────────────

@@ -34,7 +34,9 @@ interface KeysetState {
   lastName: string;
   okClicked: boolean;
   closeClicked: boolean;
-  selectClicked: boolean;
+  selectClicks: number;
+  /** The Employee Lookup dialog is open; a TAKEN Select Employee click closes it. */
+  dialogOpen: boolean;
 }
 
 let state: KeysetState;
@@ -83,20 +85,31 @@ beforeEach(() => {
     lastName: "",
     okClicked: false,
     closeClicked: false,
-    selectClicked: false,
+    selectClicks: 0,
+    dialogOpen: true,
   };
   // safeClick keys behavior off the label so the fake advances state.
   mocks.safeClick.mockImplementation(async (_loc: unknown, opts?: { label?: string }) => {
     if (opts?.label === "onbase.keysetLookup.selectEmployeeButton") {
-      state.selectClicked = true;
-      state.lastName = "Smith"; // Select Employee populates the form
+      state.selectClicks += 1;
+      state.dialogOpen = false; // the click TAKES: dialog closes…
+      state.lastName = "Smith"; // …and Select Employee populates the form
     }
   });
   mocks.safeFill.mockResolvedValue(undefined);
   mocks.keywordInput.mockImplementation((_frame: unknown, label: string) => ({
     inputValue: async () => (label === "Last Name" ? state.lastName : ""),
   }));
-  mocks.ksDialog.mockReturnValue({ waitFor: async () => undefined });
+  // waitFor visible resolves while the dialog is open; waitFor hidden resolves
+  // once a taken Select Employee click has closed it (rejects like Playwright's
+  // timeout when the click was swallowed and the dialog stayed open).
+  mocks.ksDialog.mockReturnValue({
+    waitFor: async (opts?: { state?: string }) => {
+      if (opts?.state === "hidden" && state.dialogOpen) {
+        throw new Error("locator.waitFor: timeout exceeded (dialog still visible)");
+      }
+    },
+  });
   mocks.ksSelectBtn.mockReturnValue({ isEnabled: async () => state.selectEnabled });
   mocks.ksNoMatch.mockReturnValue({ isVisible: async () => state.noMatch });
   mocks.ksNoMatchOk.mockReturnValue({ click: async () => { state.okClicked = true; } });
@@ -109,7 +122,7 @@ describe("lookupEmployeeViaKeyset", () => {
     const lookup = await loadLookup();
     const result = await lookup(fakePage(), "10408871", 2_000);
     expect(result).toBe("selected");
-    expect(state.selectClicked).toBe(true);
+    expect(state.selectClicks).toBe(1);
     expect(state.lastName).toBe("Smith");
   });
 
@@ -118,7 +131,7 @@ describe("lookupEmployeeViaKeyset", () => {
     const lookup = await loadLookup();
     const result = await lookup(fakePage(), "10883906", 2_000);
     expect(result).toBe("no-match");
-    expect(state.selectClicked).toBe(false);
+    expect(state.selectClicks).toBe(0);
     expect(state.okClicked).toBe(true); // dismissed the no-match alert
     expect(state.closeClicked).toBe(true); // closed the Employee Lookup dialog
   });
@@ -129,22 +142,64 @@ describe("lookupEmployeeViaKeyset", () => {
     // kernel retries the item on a fresh form.
     const lookup = await loadLookup();
     await expect(lookup(fakePage(), "10408871", 150)).rejects.toThrow(/keyset postback stalled/);
-    expect(state.selectClicked).toBe(false);
+    expect(state.selectClicks).toBe(0);
     expect(state.closeClicked).toBe(true); // dialog still closed before throwing
   });
 
   it("throws (kernel-retryable) when an employee is selected but keywords never populate", async () => {
     state.selectEnabled = true;
-    // Select Employee clicks, but the import form never receives the keywords.
+    // Select Employee clicks and the dialog closes, but the import form never
+    // receives the keywords.
     mocks.safeClick.mockImplementation(async (_loc: unknown, opts?: { label?: string }) => {
       if (opts?.label === "onbase.keysetLookup.selectEmployeeButton") {
-        state.selectClicked = true; // lastName stays empty
+        state.selectClicks += 1;
+        state.dialogOpen = false; // lastName stays empty
       }
     });
     const lookup = await loadLookup();
     await expect(lookup(fakePage(), "10408871", 2_000)).rejects.toThrow(
       /keywords did not populate/,
     );
-    expect(state.selectClicked).toBe(true);
+    expect(state.selectClicks).toBe(1);
+  });
+
+  it("re-clicks Select Employee when the click is swallowed mid-postback (dialog stays open)", async () => {
+    // Live 2026-07-17: the Select Employee click can land while the results
+    // grid's async postback is still re-rendering — OnBase swallows it, the
+    // dialog stays open with the row still highlighted, and no keyword ever
+    // populates. The dialog CLOSING is the proof the selection postback fired,
+    // so a still-open dialog gets the same click again.
+    state.selectEnabled = true;
+    mocks.safeClick.mockImplementation(async (_loc: unknown, opts?: { label?: string }) => {
+      if (opts?.label === "onbase.keysetLookup.selectEmployeeButton") {
+        state.selectClicks += 1;
+        if (state.selectClicks >= 2) {
+          state.dialogOpen = false; // the second click takes
+          state.lastName = "Smith";
+        }
+      }
+    });
+    const lookup = await loadLookup();
+    const result = await lookup(fakePage(), "10848084", 2_000);
+    expect(result).toBe("selected");
+    expect(state.selectClicks).toBe(2);
+    expect(state.lastName).toBe("Smith");
+  });
+
+  it("throws (kernel-retryable) and closes the dialog when Select Employee never takes", async () => {
+    // Every click is swallowed — the dialog never closes. Fail loud (the
+    // selection postback never fired) and leave a clean page for the retry.
+    state.selectEnabled = true;
+    mocks.safeClick.mockImplementation(async (_loc: unknown, opts?: { label?: string }) => {
+      if (opts?.label === "onbase.keysetLookup.selectEmployeeButton") {
+        state.selectClicks += 1; // dialogOpen stays true
+      }
+    });
+    const lookup = await loadLookup();
+    await expect(lookup(fakePage(), "10848084", 2_000)).rejects.toThrow(
+      /never closed the Employee Lookup dialog/,
+    );
+    expect(state.selectClicks).toBeGreaterThan(1); // it did re-click before giving up
+    expect(state.closeClicked).toBe(true); // clean page for the retry replay
   });
 });
