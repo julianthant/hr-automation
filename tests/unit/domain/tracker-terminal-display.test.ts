@@ -27,6 +27,17 @@ describe("tracker-terminal-display", () => {
     );
   });
 
+  it("does not treat CRM-only n/a as terminal not-found", () => {
+    assert.equal(
+      isTerminalNotFoundEntry({
+        workflow: "person-lookup",
+        status: "done",
+        data: { activeStatus: "n/a", crmFound: "Found", ucpathFound: "Not found" },
+      }),
+      false,
+    );
+  });
+
   it("does not fire on other workflows or non-done status", () => {
     assert.equal(isTerminalNotFoundEntry({ workflow: "onboarding", status: "done", data: {} }), false);
     assert.equal(

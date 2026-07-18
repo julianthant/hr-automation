@@ -37,12 +37,35 @@ function isPreviewAnchor(entry: TrackerEntry): boolean {
   return entry.data?.archetype === "batch" && entry.workflow === "ocr" && entry.data?.mode === "prepare";
 }
 
+/**
+ * Any operator-resolvable OCR prep anchor — a `preview` anchor OR an `operation`
+ * prep coordinator stamped at `/api/ocr/prepare` (separations' "Run I-9 Check",
+ * oath-signature, emergency-contact, onbase). Mirrors `isPrepRow` in
+ * `src/domain/workflow-runtime/projection.ts` and the dashboard's mode-keyed
+ * `isDiscardedPrepRow` (`src/dashboard/components/ocr/types.ts`).
+ *
+ * Deliberately SEPARATE from {@link isPreviewAnchor}, which drives anchor
+ * classification: an `operation` prep coordinator is already an operation
+ * anchor, so widening `isPreviewAnchor` would file it as BOTH a preview group
+ * and an operation group and double-count it.
+ */
+function isPrepAnchor(entry: TrackerEntry): boolean {
+  if (isPreviewAnchor(entry)) return true;
+  return classifyTrackerRow(entry).shape === "operation" && entry.data?.mode === "prepare";
+}
+
 function entryKey(entry: Pick<TrackerEntry, "workflow" | "id" | "runId">): string {
   return `${entry.workflow}\0${entry.id}\0${entry.runId ?? ""}`;
 }
 
+/**
+ * A discarded prep anchor is retired: the dashboard drops it before rendering,
+ * so it must not reach `wfCounts` either or the rail badge over-counts the
+ * queue by one row per discard. Gated on {@link isPrepAnchor}, NOT
+ * `isPreviewAnchor` — an `operation` prep coordinator is discardable too.
+ */
 function isDiscardedPreviewRow(e: TrackerEntry): boolean {
-  if (!isPreviewAnchor(e)) return false;
+  if (!isPrepAnchor(e)) return false;
   return e.status === "failed" && e.step === "discarded";
 }
 

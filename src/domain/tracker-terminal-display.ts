@@ -1,9 +1,10 @@
 /**
  * Dashboard queue / search surfaces use raw tracker `status` ("done", …).
- * Person Lookup stamps a business outcome in `data` when no Person Org row is
- * found; those runs still emit `status: "done"` because the
- * automation succeeded. Operators should see "Not found" instead of "Done"
- * in the queue and related UI.
+ * Person Lookup stamps a business outcome in `data` when BOTH UCPath and CRM
+ * miss; those runs still emit `status: "done"` because the automation
+ * succeeded. Operators should see "Not found" instead of "Done" in the queue
+ * and related UI. A CRM-only hit uses `activeStatus: "n/a"` and is not treated
+ * as terminal not-found.
  */
 
 export const TERMINAL_NOT_FOUND_LABEL = "Not found";
