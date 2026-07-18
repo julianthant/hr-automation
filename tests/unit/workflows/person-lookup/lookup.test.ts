@@ -75,6 +75,8 @@ describe("person-lookup workflow helper", () => {
         ["emplId", "EID"],
         ["department", "Dept"],
         ["hrStatus", "HR Status"],
+        ["ucpathFound", "UCPath"],
+        ["crmFound", "CRM"],
         ["startDate", "Start Date"],
         ["terminationDate", "End Date"],
         ["terminationReason", "Term Reason"],

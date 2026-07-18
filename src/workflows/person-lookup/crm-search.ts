@@ -162,7 +162,7 @@ export async function searchCrmByEidOrName(
  * none was supplied and multiple records leave the choice ambiguous, or
  * there are no records at all.
  */
-function pickCrmRecord(records: CrmRecord[], emplId?: string): CrmRecord | undefined {
+export function pickCrmRecord(records: CrmRecord[], emplId?: string): CrmRecord | undefined {
   if (records.length === 0) return undefined;
   const eid = emplId?.trim();
   if (eid) return records.find((r) => r.ucpathEmployeeId.trim() === eid);

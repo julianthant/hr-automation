@@ -1,8 +1,22 @@
 import { isAcceptedHdhDepartment } from "../../domain/hdh/departments.js";
 import { displayPersonName, toLastFirstName } from "../../domain/identity/person-name.js";
 
-export type ActiveCheckStatus = "active" | "inactive" | "not-found" | "non-hdh" | "ambiguous";
+export type ActiveCheckStatus =
+  | "active"
+  | "inactive"
+  | "not-found"
+  | "non-hdh"
+  | "ambiguous"
+  /** CRM matched but UCPath Person Org did not — no Active/Inactive claim. */
+  | "n/a";
 export type PersonLookupStatus = "resolved" | "not-found" | "ambiguous";
+
+/** Operator-facing system presence in the Person Lookup detail grid. */
+export type SystemPresence = "Found" | "Not found";
+
+export function systemPresence(found: boolean): SystemPresence {
+  return found ? "Found" : "Not found";
+}
 
 export interface PersonLookupResult {
   emplId: string;
@@ -205,6 +219,34 @@ export function deriveActiveCheckOutcome(
     terminationReason: terminationDate ? (result.terminationReason ?? "").trim() : "",
     expectedJobEndDate,
     candidateEids: selection.candidateEids.length > 0 ? selection.candidateEids : [result.emplId],
+  };
+}
+
+/**
+ * CRM-only disposition: UCPath Person Org missed, but CRM matched a person.
+ * Active/HDH status is unknowable without UCPath — stamp N/A and carry CRM
+ * identity so the row is still "found" (not the terminal Not-found badge).
+ */
+export function deriveCrmOnlyCheckOutcome(
+  input: PersonLookupInput,
+  crm: { name: string; department: string; emplId: string },
+): ActiveCheckOutcome {
+  const eid = crm.emplId.trim() || (input.kind === "by-eid" ? input.emplId : "");
+  return {
+    activeStatus: "n/a",
+    isActive: false,
+    isHdhAccepted: false,
+    searchName: outcomeSearchName(input),
+    emplId: eid,
+    name: crm.name.trim(),
+    department: crm.department.trim(),
+    hrStatus: "N/A",
+    startDate: "",
+    effdt: "",
+    terminationDate: "",
+    terminationReason: "",
+    expectedJobEndDate: "",
+    candidateEids: eid ? [eid] : [],
   };
 }
 

@@ -1,8 +1,10 @@
 // Outcome / status derivation (shared domain logic).
 export {
   deriveActiveCheckOutcome,
+  deriveCrmOnlyCheckOutcome,
   derivePersonLookupSelection,
   resolvePersonLookupForEidLookup,
+  systemPresence,
 } from "./outcome.js";
 export type {
   ActiveCheckOutcome,
@@ -10,6 +12,7 @@ export type {
   PersonLookupInput,
   PersonLookupResult,
   PersonLookupSelection,
+  SystemPresence,
 } from "./outcome.js";
 
 // UCPath Person Org lookup primitive.
