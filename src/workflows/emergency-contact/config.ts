@@ -1,6 +1,5 @@
 import path from "node:path";
-import { UCPATH_SMART_HR_URL } from "../../config.js";
-import { rostersDir } from "../../tracker/paths.js";
+import { PATHS, UCPATH_SMART_HR_URL } from "../../config.js";
 
 /** UCPath HR Tasks landing — same URL used by other UCPath workflows. */
 export const HR_TASKS_URL = UCPATH_SMART_HR_URL;
@@ -88,4 +87,4 @@ export function mapRelationship(raw: string): string {
 
 /** Default directory for batch YAMLs, source PNG crops, and rosters. */
 export const TRACKER_DIR = path.join(".tracker", "emergency-contact");
-export const ROSTERS_DIR = rostersDir(".tracker");
+export const ROSTERS_DIR = PATHS.dataRostersDir;

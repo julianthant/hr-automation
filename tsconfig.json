@@ -17,6 +17,11 @@
       "@/*": ["./src/dashboard/*"]
     }
   },
-  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "vitest.config.ts",
+    "data/documents/make-e2e-roster.mjs"
+  ],
   "exclude": ["src/dashboard/**/*"]
 }

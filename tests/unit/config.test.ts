@@ -76,3 +76,16 @@ describe("ANNUAL_DATES", () => {
     assert.equal(mod.ANNUAL_DATES.kronosDefaultStartDate, "1/1/2022");
   });
 });
+
+describe("PATHS data/ defaults", () => {
+  it("downloads, reports, onboarding, and rosters resolve under data/", async () => {
+    vi.resetModules();
+    const { PATHS } = await import("../../src/config.js");
+    assert.match(PATHS.downloadsDir, /data[/\\]downloads$/);
+    assert.match(PATHS.reportsDir, /data[/\\]reports$/);
+    assert.match(PATHS.onboardingDocsDir, /data[/\\]onboarding$/);
+    assert.match(PATHS.dataRostersDir, /data[/\\]rosters$/);
+    assert.match(PATHS.dataDocumentsDir, /data[/\\]documents$/);
+    assert.match(PATHS.i9ActionHistoryPath, /data[/\\]rosters[/\\]Employee Action History/);
+  });
+});

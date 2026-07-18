@@ -52,7 +52,9 @@ export const OperatorSettingsOverrideSchema = z
     paths: z
       .strictObject({
         reportsDir: z.string().trim().max(1024),
+        downloadsDir: z.string().trim().max(1024),
         onboardingDocsDir: z.string().trim().max(1024),
+        i9CheckTrackerPath: z.string().trim().max(1024),
       })
       .partial(),
     urls: z
@@ -88,6 +90,8 @@ export const OperatorSettingsOverrideSchema = z
       .strictObject({
         secondOpinionMax: nonNegInt.max(100),
         pageMaxWaitMs: z.number().int().min(1_000).max(600_000),
+        // 0 = off (take the best free cell immediately, old drift behavior).
+        tier1PatienceMs: nonNegInt.max(600_000),
         // 0 = Auto (let the pipeline use the vision-pool size).
         pageConcurrency: nonNegInt.max(64),
         disambigConcurrency: posInt.max(64),

@@ -2,7 +2,8 @@
 // Shared URLs and constants used across all workflows.
 
 import { homedir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 import { screenshotsDir } from "./tracker/paths.js";
 import {
@@ -21,25 +22,53 @@ applyOperatorSettingsToEnv();
 const SETTINGS = loadMergedOperatorSettings();
 
 const HOME = homedir();
+/** Repo root — `src/config.ts` → `..`. Independent of `process.cwd()`. */
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Tracker root. `HRAUTO_TRACKER_DIR` is set by the daemon spawner
 // (`src/core/daemon/registry.ts`) on the spawned subprocess's env so a daemon
 // running at an isolated tracker root has `PATHS.screenshotDir`/`PATHS.trackerDir`
 // follow that root. Unset (the normal case) → `.tracker`. Backward-compatible.
 const TRACKER_DIR = process.env.HRAUTO_TRACKER_DIR ?? ".tracker";
 
-// ─── Paths (user-agnostic via homedir()) ─────────────────────
-// `.tracker/` subdir layout is owned by `src/tracker/paths.ts` — derive
-// subdir paths from its helpers, never re-spell them as literals here.
+// ─── Paths ───────────────────────────────────────────────────
+// Operator downloads / fixtures live under `<repo>/data/`. `.tracker/` subdir
+// layout (screenshots, rows, …) is owned by `src/tracker/paths.ts` — derive
+// those from its helpers, never re-spell them as literals here.
 
 export const PATHS = {
-  // An operator-set path wins; an empty setting falls back to the homedir default.
-  reportsDir: SETTINGS.paths.reportsDir || join(HOME, "Downloads", "reports"),
-  downloadsDir: join(HOME, "Downloads"),
-  // CRM onboarding-document output lives under ~/Documents/onboarding (moved
-  // off ~/Downloads on 2026-06-18). crm-doc-download zips each run's per-person
-  // folder(s) into this dir; onboarding's in-process iDocs download also lands
-  // its per-person folders here via buildCrmDocumentDownloadPath.
-  onboardingDocsDir: SETTINGS.paths.onboardingDocsDir || join(HOME, "Documents", "onboarding"),
+  // An operator-set path wins; an empty setting falls back to data/<subdir>.
+  reportsDir: SETTINGS.paths.reportsDir || join(REPO_ROOT, "data", "reports"),
+  downloadsDir: SETTINGS.paths.downloadsDir || join(REPO_ROOT, "data", "downloads"),
+  // CRM onboarding-document zips + in-process iDocs folders
+  // (`buildCrmDocumentDownloadPath`).
+  onboardingDocsDir: SETTINGS.paths.onboardingDocsDir || join(REPO_ROOT, "data", "onboarding"),
+  /** Operator-facing roster root (SharePoint downloads + Action History). */
+  dataRostersDir: join(REPO_ROOT, "data", "rosters"),
+  /** Test / e2e PDF fixtures. */
+  dataDocumentsDir: join(REPO_ROOT, "data", "documents"),
+  /**
+   * Default I-9 check cross-ref roster (Employee Action History Report).
+   * Fail-loud when missing during an I-9 enrich — see
+   * `src/services/matching/employee-action-history.ts`.
+   */
+  i9ActionHistoryPath: join(
+    REPO_ROOT,
+    "data",
+    "rosters",
+    "Employee Action History Report  7-8-26.xlsx",
+  ),
+  /**
+   * Master I-9 retention tracker spreadsheet. Every completed i9-check member
+   * appends one row (see `src/tracker/exports/i9-check-tracker.ts`). Re-runs
+   * append again — dedupe is manual, by design.
+   */
+  i9CheckTrackerPath:
+    process.env.I9_CHECK_TRACKER_PATH ||
+    SETTINGS.paths.i9CheckTrackerPath ||
+    join(
+      SETTINGS.paths.reportsDir || join(REPO_ROOT, "data", "reports"),
+      "i9-check-tracker.xlsx",
+    ),
   ukgSessionBase: join(HOME, "ukg_session"),
   ukgSessionSep: join(HOME, "ukg_session_sep"),
   screenshotDir: screenshotsDir(TRACKER_DIR),

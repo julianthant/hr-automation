@@ -96,7 +96,14 @@ Thumbs.db
 /duo.yaml
 .worktrees/
 
-# Local oath/OCR PDF fixtures at repo root — operator test artifacts, may contain PII.
-tests/data/*.pdf
-# e2e roster identities sidecar (PII — real names+EIDs for make-e2e-roster.mjs)
-tests/data/e2e-roster-identities.json
+# Operator data tree — fixtures + download outputs (may contain PII).
+data/documents/*.pdf
+data/documents/e2e-roster-identities.json
+data/documents/e2e-fixture-roster.xlsx
+data/downloads/
+data/reports/
+data/onboarding/
+data/i9/
+# Rosters (Action History, SharePoint downloads) — keep directory, ignore contents.
+data/rosters/*
+!data/rosters/.gitkeep
