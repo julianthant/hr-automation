@@ -42,7 +42,7 @@ workflows, ocr: { formType } })`):
    row per record is derived via the form-agnostic `rawRecordEid`/`rawRecordName`
    extractors (EID short-circuit → `matched`). Call BEFORE `enqueueOcr`.
 2. **`rt.enqueueOcr({ fixturePath, originalName? })`** — register a renderable
-   PDF (prefers the real fixture e.g. `tests/data/multiple-oath.pdf`; falls back
+   PDF (prefers the real fixture e.g. `data/documents/multiple-oath.pdf`; falls back
    to a synthetic one-pager if it can't render headlessly — records come from the
    override regardless) and enqueue the OCR run. Returns `{ sessionId, runId,
    usedFixture }`. The approve-fan-out tests pass `parentRunId` (approve REQUIRES

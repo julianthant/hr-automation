@@ -92,7 +92,7 @@ phone, no QR scan. Do both target workflows (oath-signature and EC) so both
 NOT use roster **download** — that delegates to the REAL sharepoint-download.
 `makeCaptureFinalize` picks `rosterMode:"existing"` when an `.xlsx` is present in
 the roster dirs and falls back to `"download"` when none is — so before
-finalizing, ensure the fixture roster is on disk (`tests/data/make-e2e-roster.mjs`
+finalizing, ensure the fixture roster is on disk (`data/documents/make-e2e-roster.mjs`
 → `.xlsx` placed in the e2e tracker's roster dir) or run the roster-less
 oath path; never let an absent roster trigger the download fallback.
 
@@ -108,7 +108,7 @@ oath path; never let an absent roster trigger the download fallback.
    - `POST /api/capture/upload?token=<token>` with a multipart body whose file
      part is named `file` — a small **fixture image** that pdf-lib can decode:
      a real **JPEG or PNG** (e.g. an existing screenshot PNG, or render one from
-     `tests/data/`), **NOT HEIC** (pdf-lib cannot decode HEIC). Returns
+     `data/documents/`), **NOT HEIC** (pdf-lib cannot decode HEIC). Returns
      `{ ok, photoIndex, totalPhotos, blurScore?, blurFlagged? }`. Upload at least
      one photo; a second optional upload exercises multi-page bundling.
    - `POST /api/capture/finalize` with body `{ "token": "<token>" }` → bundles

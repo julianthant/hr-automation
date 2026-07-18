@@ -105,12 +105,12 @@ browsers are visible.
 release. oath-upload additionally parks naturally at `wait-approval` /
 `wait-signatures`.
 
-**Fixtures**: `tests/data/multiple-oath.pdf` (3 signers), `single-oath.pdf`,
+**Fixtures**: `data/documents/multiple-oath.pdf` (3 signers), `single-oath.pdf`,
 `emergency-contacts.pdf` (all gitignored — "may contain PII"). If the OCR oath/EC
 flow demands a roster, build the matching fixture roster with
-`node tests/data/make-e2e-roster.mjs` — it reads the gitignored local sidecar
-`tests/data/e2e-roster-identities.json` (real names+EIDs, also kept out of git)
-and writes `tests/data/e2e-fixture-roster.xlsx`. **Never download** in the stub
+`node data/documents/make-e2e-roster.mjs` — it reads the gitignored local sidecar
+`data/documents/e2e-roster-identities.json` (real names+EIDs, also kept out of git)
+and writes `data/documents/e2e-fixture-roster.xlsx`. **Never download** in the stub
 lane. If the sidecar is absent, bootstrap it once: run one OCR prep, read the
 extracted names from the preview, write them into the sidecar, then run the
 generator. The generator is committed (PII-free); the sidecar + .xlsx are local.
