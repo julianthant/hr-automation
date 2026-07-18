@@ -4,7 +4,7 @@
  * Usage:
  *   tsx --env-file=.env src/workflows/emergency-contact/scripts/download-roster.ts "<sharepoint-url>"
  *
- * Saves to .tracker/rosters/<timestamp>-<filename>.xlsx.
+ * Saves to data/rosters/<timestamp>-<filename>.xlsx.
  * For workflow integration, import downloadSharePointFile from
  * src/workflows/sharepoint-download (this is the canonical location).
  */

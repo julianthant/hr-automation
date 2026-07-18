@@ -50,12 +50,16 @@ export interface DisplaySettings {
   screenHeight: number;
 }
 
-/** Output directories. Empty string = use the built-in homedir default. */
+/** Output directories. Empty string = use the built-in `data/<subdir>` default. */
 export interface PathSettings {
-  /** Kronos / separations PDF report downloads. Empty = `~/Downloads/reports`. */
+  /** Kronos / separations PDF report downloads. Empty = `<repo>/data/reports`. */
   reportsDir: string;
-  /** CRM onboarding-document downloads. Empty = `~/Documents/onboarding`. */
+  /** Browser download fallback dir (Old Kronos filesystem-diff). Empty = `<repo>/data/downloads`. */
+  downloadsDir: string;
+  /** CRM onboarding-document downloads. Empty = `<repo>/data/onboarding`. */
   onboardingDocsDir: string;
+  /** Master I-9 retention tracker xlsx. Empty = `<reportsDir>/i9-check-tracker.xlsx`. */
+  i9CheckTrackerPath: string;
 }
 
 /** Navigation timeouts (ms). */
@@ -160,6 +164,14 @@ export interface OcrSettings {
   /** Per-page OCR wait budget in ms before a page fails (env `OCR_PAGE_MAX_WAIT_MS`). */
   pageMaxWaitMs: number;
   /**
+   * How long a page may wait for a trusted (tier-1) vision model to free up
+   * before overflowing to a weaker tier-2 model (env `OCR_TIER1_PATIENCE_MS`).
+   * Stops extraction quality from degrading over a long batch as the tier-1
+   * per-minute windows saturate. `0` disables (take the best free cell
+   * immediately). Always capped by `pageMaxWaitMs`, so it never fails a page.
+   */
+  tier1PatienceMs: number;
+  /**
    * Max concurrent OCR page extractions (env `OCR_PAGE_CONCURRENCY`). `0` means
    * "Auto" — let the pipeline use the vision-pool size (its dynamic default), so
    * an unset value is never forced to a fixed number.
@@ -222,7 +234,7 @@ export const DEFAULT_OPERATOR_SETTINGS: OperatorSettings = {
     kronosDefaultStartDate: "1/1/2017",
   },
   display: { screenWidth: 2560, screenHeight: 1440 },
-  paths: { reportsDir: "", onboardingDocsDir: "" },
+  paths: { reportsDir: "", downloadsDir: "", onboardingDocsDir: "", i9CheckTrackerPath: "" },
   urls: {
     kualiSpace: "",
     newKronos: "",
@@ -245,6 +257,7 @@ export const DEFAULT_OPERATOR_SETTINGS: OperatorSettings = {
   ocr: {
     secondOpinionMax: 5,
     pageMaxWaitMs: 120_000,
+    tier1PatienceMs: 90_000,
     pageConcurrency: 0,
     disambigConcurrency: 4,
     suggestConcurrency: 4,

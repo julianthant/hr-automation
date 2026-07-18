@@ -1,14 +1,14 @@
-// Builds the AI-e2e fixture roster (`tests/data/e2e-fixture-roster.xlsx`) so the
+// Builds the AI-e2e fixture roster (`data/documents/e2e-fixture-roster.xlsx`) so the
 // e2e Phase 0 can regenerate it deterministically WITHOUT re-running OCR to
 // re-derive the names each time.
 //
-//   node tests/data/make-e2e-roster.mjs            # reads the identities sidecar
-//   node tests/data/make-e2e-roster.mjs out.xlsx   # custom output path
+//   node data/documents/make-e2e-roster.mjs            # reads the identities sidecar
+//   node data/documents/make-e2e-roster.mjs out.xlsx   # custom output path
 //
 // PII POLICY: the fixture PDFs in this dir are gitignored as "may contain PII"
 // (see .gitignore), so the roster of the SAME names + EIDs is PII too. This
 // script therefore bakes in NO names — it reads them from a gitignored local
-// sidecar `tests/data/e2e-roster-identities.json` (also kept out of git). Both
+// sidecar `data/documents/e2e-roster-identities.json` (also kept out of git). Both
 // the sidecar and the produced .xlsx stay LOCAL; only this generator is
 // committed. Sidecar shape:
 //

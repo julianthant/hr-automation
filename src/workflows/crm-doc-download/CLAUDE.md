@@ -6,7 +6,7 @@ Downloads **ACT CRM iDocs PDFs** for an onboarding record, then **packages each 
 
 ## Output (zip, names, location)
 
-- **Location:** `PATHS.onboardingDocsDir` = `~/Documents/onboarding/` (moved off `~/Downloads/` 2026-06-18; centralized in `src/config.ts`).
+- **Location:** `PATHS.onboardingDocsDir` = `data/onboarding/` by default (Settings → Paths overridable; moved under repo `data/` 2026-07-16).
 - **Folder name:** `Last, First (LivedName) Middle EID` (`buildCrmDocumentFolderName` in `src/systems/crm/idocs-download.ts`). The lived-name parenthetical and middle name are each included only when present; **"EID" is a literal trailing token**, not the numeric employee id.
 - **Name source:** the dashboard run supplies only email/EID, so the name is extracted from the **CRM UCPath Entry Sheet** (`extractCrmPersonName` → First/Last/Middle verified labels + best-effort lived-name labels). A nav/extract failure logs a warning and falls back to a `<query> EID` folder — it never fails the run. **Lived-name labels are unverified against the live DOM** — confirm on a real record (see Lessons).
 - **Per-document filenames:** each saved PDF is `Doc<N>-<name>.pdf` where `<name>` is the CRM Content-Disposition filename, or — when the iDocs server sends none (the usual case) — a **position-based default** from `CRM_DOC_DEFAULT_NAMES` / `defaultCrmDocumentName` (`src/systems/crm/idocs-download.ts`): doc 1 (index 0) → `Signed Offer Letter`, doc 3 (index 2) → `EE Data Gathering Form`; other indices fall back to `document-N`. The `Doc<N>-` prefix is kept (the already-downloaded skip check matches `^Doc<N>-.+\.pdf$`).

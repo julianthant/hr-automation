@@ -31,7 +31,7 @@ import {
 } from "../../core/index.js";
 import { log } from "../../utils/log.js";
 import { errorMessage } from "../../utils/errors.js";
-import { sharepointDir } from "../../tracker/paths.js";
+import { PATHS } from "../../config.js";
 import { buildOperatorSubject } from "../../domain/operator-subject.js";
 import { DEFAULT_WORKFLOW_RUNTIME_POLICY } from "../../domain/workflow-runtime/default-policy.js";
 import type { WorkflowRuntimePolicy } from "../../domain/workflow-runtime/types.js";
@@ -171,11 +171,10 @@ export const sharepointDownloadWorkflow: RegisteredWorkflow<
     // download — File → Create a Copy (hover) → Download a Copy, capture
     // the Download event, saveAs into outDir.
     await ctx.step("download", async () => {
-      // Fallback for callers that don't thread an explicit outDir: honor the
-      // isolated tracker root (HRAUTO_TRACKER_DIR) instead of hardcoding the real
-      // `.tracker/`. The dashboard handler sets input.outDir; this covers direct
-      // callers (OCR rosterMode=download, CLI) — see handler.ts's effectiveTrackerDir.
-      const outDir = input.outDir ?? sharepointDir(process.env.HRAUTO_TRACKER_DIR ?? ".tracker");
+      // Fallback for callers that don't thread an explicit outDir: data/rosters.
+      // The dashboard handler sets input.outDir; this covers direct callers
+      // (OCR rosterMode=download, CLI).
+      const outDir = input.outDir ?? PATHS.dataRostersDir;
       const { path: saved, filename } = await captureExcelDownload(page, outDir, {
         filenameBase: input.filenameBase,
       });

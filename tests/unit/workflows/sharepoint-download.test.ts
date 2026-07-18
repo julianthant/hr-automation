@@ -2,7 +2,7 @@ import { test, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 test("sharepoint-download: registers as kernel workflow on import", async () => {
   // vi.resetModules() gives the workflow file a fresh registry to register
@@ -74,24 +74,11 @@ test("buildSharePointRosterDownloadHandler: fires kernel runWorkflow and returns
   assert.equal(input.url, "https://example.com/file.xlsx");
 });
 
-test("buildSharePointRosterDownloadHandler: default outDir honors the isolated tracker root, not real .tracker (isolation-leak regression)", async (t) => {
-  const isolated = mkdtempSync(join(tmpdir(), "sp-isolated-"));
-  t.onTestFinished(() => rmSync(isolated, { recursive: true, force: true }));
-
+test("buildSharePointRosterDownloadHandler: default outDir is data/rosters (PATHS.dataRostersDir)", async () => {
   const { buildSharePointRosterDownloadHandler, _resetInFlightForTests } =
     await import("../../../src/workflows/sharepoint-download/handler.js");
-  const { sharepointDir } = await import("../../../src/tracker/paths.js");
+  const { PATHS } = await import("../../../src/config.js");
   _resetInFlightForTests();
-
-  // The observed leak: an isolated dashboard sets HRAUTO_TRACKER_DIR in its env,
-  // but the handler hardcoded `.tracker` for the default outDir — so downloads
-  // landed in the REAL .tracker/sharepoint/. Save/restore the env (single-fork runner).
-  const prevEnv = process.env.HRAUTO_TRACKER_DIR;
-  process.env.HRAUTO_TRACKER_DIR = isolated;
-  t.onTestFinished(() => {
-    if (prevEnv === undefined) delete process.env.HRAUTO_TRACKER_DIR;
-    else process.env.HRAUTO_TRACKER_DIR = prevEnv;
-  });
 
   const captured: Array<{ outDir: string }> = [];
   const handler = buildSharePointRosterDownloadHandler({
@@ -106,26 +93,24 @@ test("buildSharePointRosterDownloadHandler: default outDir honors the isolated t
   assert.equal(res.status, 202);
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(captured.length, 1, "runWorkflow called once");
-  const expected = resolve(process.cwd(), sharepointDir(isolated));
   assert.equal(
     captured[0].outDir,
-    expected,
-    "download outDir must land under the isolated tracker root, not the real .tracker/sharepoint",
+    PATHS.dataRostersDir,
+    "download outDir must land under data/rosters, not .tracker/sharepoint",
   );
 });
 
-test("buildSharePointRosterDownloadHandler: options.trackerDir takes precedence over env for the default outDir", async (t) => {
-  const threaded = mkdtempSync(join(tmpdir(), "sp-threaded-"));
-  t.onTestFinished(() => rmSync(threaded, { recursive: true, force: true }));
+test("buildSharePointRosterDownloadHandler: options.outDir overrides the data/rosters default", async (t) => {
+  const custom = mkdtempSync(join(tmpdir(), "sp-custom-"));
+  t.onTestFinished(() => rmSync(custom, { recursive: true, force: true }));
 
   const { buildSharePointRosterDownloadHandler, _resetInFlightForTests } =
     await import("../../../src/workflows/sharepoint-download/handler.js");
-  const { sharepointDir } = await import("../../../src/tracker/paths.js");
   _resetInFlightForTests();
 
   const captured: Array<{ outDir: string }> = [];
   const handler = buildSharePointRosterDownloadHandler({
-    trackerDir: threaded, // explicit threading wins over env / hardcoded default
+    outDir: custom,
     getEnv: (name) => (name === "ONBOARDING_ROSTER_URL" ? "https://example.com/file.xlsx" : undefined),
     runWorkflowFn: (async (_wf, input) => {
       captured.push(input as { outDir: string });
@@ -136,7 +121,7 @@ test("buildSharePointRosterDownloadHandler: options.trackerDir takes precedence 
   assert.equal(res.status, 202);
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(captured.length, 1);
-  assert.equal(captured[0].outDir, resolve(process.cwd(), sharepointDir(threaded)));
+  assert.equal(captured[0].outDir, custom);
 });
 
 test("buildSharePointRosterDownloadHandler: 400 when env var unset", async () => {

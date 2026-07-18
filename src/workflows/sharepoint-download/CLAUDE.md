@@ -2,9 +2,9 @@
 
 Kernel workflow for pulling a shared SharePoint / Excel Online file to a local `.xlsx`. Used by:
 
-- The **dashboard queue-header download dropdown** — always visible regardless of which workflow is selected. Each menu item is one row from `registry.ts`. Selecting an option hits `POST /api/sharepoint-download/run { id }` via `buildSharePointRosterDownloadHandler()`; the dropdown itself is populated by `GET /api/sharepoint-download/list` via `buildSharePointListHandler()`. Downloads land in `.tracker/sharepoint/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx` (overridable per-spec via `spec.outDir`).
-- **emergency-contact roster download** — `scripts/download-roster.ts` calls `downloadSharePointFile()` directly with a positional SharePoint URL arg, saving into `.tracker/rosters/`. Does NOT go through the kernel — no dashboard context, no tracker row.
-- **`tsx src/workflows/emergency-contact/scripts/download-roster.ts <url>`** — standalone CLI wrapper for ad-hoc downloads into `.tracker/rosters/`. Also bypasses the kernel (no dashboard context).
+- The **dashboard queue-header download dropdown** — always visible regardless of which workflow is selected. Each menu item is one row from `registry.ts`. Selecting an option hits `POST /api/sharepoint-download/run { id }` via `buildSharePointRosterDownloadHandler()`; the dropdown itself is populated by `GET /api/sharepoint-download/list` via `buildSharePointListHandler()`. Downloads land in `data/rosters/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx` (overridable per-spec via `spec.outDir`, or handler `options.outDir`).
+- **emergency-contact roster download** — `scripts/download-roster.ts` calls `downloadSharePointFile()` directly with a positional SharePoint URL arg, saving into `data/rosters/`. Does NOT go through the kernel — no dashboard context, no tracker row.
+- **`tsx src/workflows/emergency-contact/scripts/download-roster.ts <url>`** — standalone CLI wrapper for ad-hoc downloads into `data/rosters/`. Also bypasses the kernel (no dashboard context).
 
 ## Kernel registration (2026-04-22 promotion)
 
@@ -34,7 +34,7 @@ All auth logic is shared with every other system. Do NOT re-implement:
 
 ## Download location
 
-The dashboard path saves to `.tracker/sharepoint/<YYYY-MM-DDTHH-MM-SS>-<suggested>.xlsx`; the emergency-contact standalone CLI saves to `.tracker/rosters/`. All use `Playwright download.saveAs(outPath)` rooted inside the project tree — nothing ever lands in `~/Downloads`. If you see an xlsx in `.playwright-cli/`, it's a selector-mapping artifact from the interactive `playwright-cli` tool, not a production download; delete it.
+The dashboard path and the emergency-contact standalone CLI both save under `data/rosters/` (`PATHS.dataRostersDir`). Roster *reads* still fall back to legacy `.tracker/rosters` + `.tracker/sharepoint` via `resolveRosterDirs`. All use `Playwright download.saveAs(outPath)` rooted inside the project tree — nothing ever lands in `~/Downloads`. If you see an xlsx in `.playwright-cli/`, it's a selector-mapping artifact from the interactive `playwright-cli` tool, not a production download; delete it.
 
 ## HTTP behavior — fire-and-forget
 

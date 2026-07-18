@@ -16,7 +16,7 @@
  * download" or "queue a fresh download after it".
  */
 import { resolve } from "node:path";
-import { sharepointDir } from "../../tracker/paths.js";
+import { PATHS } from "../../config.js";
 import { errorMessage } from "../../utils/errors.js";
 import { log } from "../../utils/log.js";
 import { runWorkflow } from "../../core/index.js";
@@ -49,7 +49,7 @@ export interface RosterDownloadResponse {
 }
 
 export interface RosterDownloadHandlerOptions {
-  /** Default root directory for downloads, overridable per-spec via `spec.outDir`. Default: `<cwd>/.tracker/sharepoint`. */
+  /** Default root directory for downloads, overridable per-spec via `spec.outDir`. Default: `<repo>/data/rosters`. */
   outDir?: string;
   /**
    * Injected for tests — fires the kernel workflow. Defaults to the real
@@ -312,12 +312,9 @@ function queueSharePointDownloadJob(
     throw new Error(`${spec.envVar} env var not set. Add it to .env (see .env.example) and restart the dashboard.`);
   }
 
-  // Honor the isolated tracker root so a dashboard booted at an isolated dir
-  // (HRAUTO_TRACKER_DIR) doesn't leak roster downloads into the real `.tracker/`.
-  // Prefer an explicitly-threaded trackerDir; fall back to the process env — this
-  // handler runs in-process in the dashboard, matching config.ts's TRACKER_DIR.
-  const effectiveTrackerDir = options.trackerDir ?? process.env.HRAUTO_TRACKER_DIR ?? ".tracker";
-  const defaultOutDir = options.outDir ?? resolve(process.cwd(), sharepointDir(effectiveTrackerDir));
+  // Rosters land under `data/rosters` (operator-facing). Prefer an explicit
+  // outDir override; otherwise PATHS.dataRostersDir.
+  const defaultOutDir = options.outDir ?? PATHS.dataRostersDir;
   let resolveJob!: (result: SharePointDownloadResult) => void;
   let rejectJob!: (error: unknown) => void;
   const promise = new Promise<SharePointDownloadResult>((resolveJobPromise, rejectJobPromise) => {

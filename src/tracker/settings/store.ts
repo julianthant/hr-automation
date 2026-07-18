@@ -219,6 +219,7 @@ export function applyOperatorSettingsEnv(
   if (ocr) {
     setIfUnset("OCR_SECOND_OPINION_MAX", numStr(ocr.secondOpinionMax));
     setIfUnset("OCR_PAGE_MAX_WAIT_MS", numStr(ocr.pageMaxWaitMs));
+    setIfUnset("OCR_TIER1_PATIENCE_MS", numStr(ocr.tier1PatienceMs));
     // 0 = Auto → leave OCR_PAGE_CONCURRENCY unset so the pool-size default holds.
     if (ocr.pageConcurrency !== undefined && ocr.pageConcurrency > 0) {
       setIfUnset("OCR_PAGE_CONCURRENCY", numStr(ocr.pageConcurrency));
