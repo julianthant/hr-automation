@@ -177,7 +177,7 @@ test('runWorkflowDaemon: /whoami handshake + graceful /stop removes lockfile', a
   }
 })
 
-test('runWorkflowDaemon: /stop during launch/auth aborts session launch and fails queued work', async () => {
+test('runWorkflowDaemon: /stop during launch/auth aborts session launch and leaves queued work queued', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-during-auth-'))
   try {
@@ -232,9 +232,12 @@ test('runWorkflowDaemon: /stop during launch/auth aborts session launch and fail
       new Promise((_, reject) => setTimeout(() => reject(new Error('daemon did not stop during auth')), 1_500)),
     ])
     assert.equal(abortObserved, true)
+    // Auth never completed → leave the queue intact so a newly spawned worker
+    // can finish Duo and claim (mass-failing here is the "Add a worker" cascade).
     const state = await readQueueStateIncludingTerminals('dint-stop-auth', dir)
-    assert.equal(state.failed.length, 1)
-    assert.equal(state.failed[0].id, 'held')
+    assert.equal(state.failed.length, 0)
+    assert.equal(state.queued.length, 1)
+    assert.equal(state.queued[0].id, 'held')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -282,7 +285,7 @@ test('runWorkflowDaemon: auth readyPromise rejection closes the returned session
   }
 })
 
-test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row archetype', async () => {
+test('runWorkflowDaemon: /stop during auth leaves queued child display fields for a later worker (no mass-fail row)', async () => {
   clear()
   const dir = mkdtempSync(join(tmpdir(), 'daemon-int-stop-queued-display-'))
   try {
@@ -346,18 +349,27 @@ test('runWorkflowDaemon: queued shutdown-cancel rows preserve title and row arch
     })
     await runPromise
 
+    // Mid-auth stop must NOT emit a failed tracker row — the task stays queued
+    // with its original pending display fields for the next worker.
+    const state = await readQueueStateIncludingTerminals('dint-stop-queued-display', dir)
+    assert.equal(state.failed.length, 0)
+    assert.equal(state.queued.length, 1)
+    assert.equal(state.queued[0].id, '10424984')
+    assert.equal(state.queued[0].parentRunId, parentRunId)
+
     const date = dateLocal()
     const jsonlPath = rowFilePath('dint-stop-queued-display', date, dir)
-    const rows = readFileSync(jsonlPath, 'utf-8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as { id?: string; status?: string; parentRunId?: string; data?: Record<string, unknown> })
-    const cancelled = rows.find((row) => row.id === '10424984' && row.status === 'failed')
-    assert.ok(cancelled, 'expected cancelled tracker row')
-    assert.equal(cancelled.parentRunId, parentRunId)
-    assert.equal(cancelled.data?.__name, '10424984')
-    assert.equal(cancelled.data?.__queueTitle, '10424984')
-    assert.equal(cancelled.data?.archetype, 'single')
+    if (existsSync(jsonlPath)) {
+      const rows = readFileSync(jsonlPath, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { id?: string; status?: string })
+      assert.equal(
+        rows.some((row) => row.id === '10424984' && row.status === 'failed'),
+        false,
+        'must not mass-fail queued work when auth never completed',
+      )
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -21,6 +21,15 @@ import { log } from "./utils/log.js";
 import { loadWorkflow, listWorkflowNames } from "./core/workflow-loaders.js";
 
 async function main(): Promise<void> {
+  // Mirror `cli.ts dashboard`: daemons default to hands-off Duo. Spawn inherits
+  // the dashboard's env, but a direct/manual `tsx src/cli-daemon.ts <wf>` (or a
+  // parent that never set the flag) must still arm WebAuthn — otherwise the
+  // first worker falls through to a ~180s manual Duo wait, blocks the Duo
+  // queue, and "Add a worker" peers sit authenticating forever behind it.
+  if (process.env.HR_AUTOMATION_DUO_WEBAUTHN === undefined) {
+    process.env.HR_AUTOMATION_DUO_WEBAUTHN = "1";
+  }
+
   const workflowName = process.argv[2];
   if (!workflowName) {
     log.error("cli-daemon: missing workflow name argument");

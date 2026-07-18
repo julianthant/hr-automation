@@ -153,12 +153,11 @@ function stubEidForName(name: string): string {
 
 /**
  * Deterministic fake resolved name for an EID-keyed stub lookup. The REAL
- * person-lookup handler resolves the UCPath name and stamps it onto
- * `searchName` (the searching step) — so an EID-only row titles on a person
- * name, not the bare EID. The stub must do the same: an EID-only input has no
- * caller-supplied name, so synthesize a stable one from the EID. Without this,
- * the searching step left `searchName` = the bare EID and `name` unset, and the
- * person-kind title resolver titled the finished row "10514074" (ISS-008).
+ * person-lookup handler keeps `searchName` as the operator's original query
+ * (typed name or EID) and stamps the UCPath-resolved name onto `resolvedName`
+ * — so an EID-only row still titles on a person name via the queue-row
+ * presentation resolver (ISS-008). The stub mirrors that: an EID-only input
+ * has no caller-supplied name, so synthesize a stable one from the EID.
  */
 function stubNameForEid(emplId: string): string {
   return `E2E Person ${emplId}`;
@@ -168,9 +167,7 @@ function stubNameForEid(emplId: string): string {
 const personLookupScript: StepDataFn = (input) => {
   const r = rec(input);
   const emplId = str(r.emplId) ?? stubEidForName(str(r.name) ?? "unknown");
-  // Echo a resolved name back onto the row. Name inputs keep the typed name;
-  // EID-only inputs synthesize one from the EID (mirrors the real handler
-  // stamping the UCPath-resolved name onto `searchName`).
+  // Search = original query; Name = UCPath-resolved (synthesized for EID-only).
   const searchName = str(r.name) ?? emplId;
   const resolvedName = str(r.name) ?? stubNameForEid(emplId);
   return {
@@ -185,11 +182,13 @@ const personLookupScript: StepDataFn = (input) => {
     "active-status": {
       hrStatus: "Active",
       // Canonical person-lookup ActiveCheckStatus value ("active"|"inactive"|
-      // "non-hdh"|...), NOT the dashboard A/IA display-chip label. computeOcrVerification
+      // "non-hdh"|"n/a"|...), NOT the dashboard A/IA display-chip label. computeOcrVerification
       // lower-cases and matches this exactly; "A" fell through to lookup-failed, so OCR
       // records never verified and the review pane deselected every signed record (VP-001).
       activeStatus: "active",
       isActive: "true",
+      ucpathFound: "Found",
+      crmFound: "Found",
     },
     "crm-dates": compact(
       r.includeCrmDates === true
