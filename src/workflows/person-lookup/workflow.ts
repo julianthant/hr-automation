@@ -27,7 +27,9 @@ import { rootQueueTitleData } from "../../domain/queue-title.js";
 import { personLookupStatusExtensions } from "../../domain/person-lookup-status.js";
 import {
   deriveActiveCheckOutcome,
+  deriveCrmOnlyCheckOutcome,
   resolvePersonLookupForEidLookup,
+  systemPresence,
   type ActiveCheckOutcome,
 } from "./outcome.js";
 import { lookupPersonInUcpath } from "./lookup.js";
@@ -39,6 +41,7 @@ import {
   searchCrmByName,
   searchCrmByEidOrName,
   pickCrmStartDate,
+  pickCrmRecord,
   datesWithinDays,
   type CrmRecord,
 } from "./crm-search.js";
@@ -46,6 +49,7 @@ import {
   normalizeName,
   parseLastFirstName,
   toLastFirstName,
+  displayPersonName,
 } from "../../domain/identity/person-name.js";
 import { prepareNames } from "../../domain/identity/person-name-batch.js";
 import {
@@ -134,7 +138,11 @@ async function searchingStep<TSteps extends readonly string[]>(
     const result = lookup.selection.selected;
     if (!result) {
       log.step(`No detail page for EID ${input.emplId}`);
-      ctx.updateData({ emplId: input.emplId, hrStatus: "Not found" });
+      ctx.updateData({
+        emplId: input.emplId,
+        hrStatus: "Not found",
+        ucpathFound: systemPresence(false),
+      });
       // Capture the UCPath search-results grid so the operator has evidence of
       // what the lookup saw (empty / ambiguous results).
       await ctx.captureAndStampScreenshot(
@@ -153,6 +161,7 @@ async function searchingStep<TSteps extends readonly string[]>(
       department: result.department ?? "",
       hrStatus: result.hrStatus,
       jobTitle: result.jobCodeDescription ?? "",
+      ucpathFound: systemPresence(true),
     });
     await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
       systems: ["ucpath"],
@@ -187,10 +196,9 @@ async function searchingStep<TSteps extends readonly string[]>(
   if (lookup.results.length === 0) {
     log.step(`No SDCMP results for "${input.name}"`);
     // No EID resolved — leave `emplId` unset so the subtitle falls through to the
-    // trace id. The not-found state is structured via `activeStatus: "not-found"`
-    // (stamped by the active-status step) which drives the `notFound` badge;
-    // `hrStatus` carries the operator-facing detail label.
-    ctx.updateData({ hrStatus: "Not found" });
+    // trace id. Terminal "Not found" only applies when CRM also misses (see
+    // active-status); `ucpathFound` records this system's outcome alone.
+    ctx.updateData({ hrStatus: "Not found", ucpathFound: systemPresence(false) });
     await ctx.captureAndStampScreenshot(
       "person-org-summary-search-results",
       "personOrgSearchScreenshot",
@@ -208,6 +216,7 @@ async function searchingStep<TSteps extends readonly string[]>(
     department: first.department ?? "",
     hrStatus: first.hrStatus,
     jobTitle: first.jobCodeDescription ?? "",
+    ucpathFound: systemPresence(true),
   });
   await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
     systems: ["ucpath"],
@@ -301,6 +310,10 @@ export function matchCrmEid(
  * Stamp the operator-facing Start Date from CRM (First Day of Service) and, if
  * any CRM record was found, capture the CRM record page (not the search grid).
  * Start Date is CRM-only: it stays blank when CRM has no record or no date.
+ *
+ * Also stamps `crmFound` and, when UCPath left identity blank, fills Name/Dept
+ * (and EID when present) from a confidently chosen CRM record so a CRM-only
+ * hit still populates the detail grid.
  */
 async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
@@ -308,7 +321,23 @@ async function stampCrmStartDateAndScreenshot<TSteps extends readonly string[]>(
   resolvedEid?: string,
 ): Promise<void> {
   const startDate = pickCrmStartDate(crmRecords, resolvedEid);
-  ctx.updateData({ startDate });
+  const identityRecord =
+    pickCrmRecord(crmRecords, resolvedEid) ??
+    (crmRecords.length === 1 ? crmRecords[0] : undefined);
+  const patch: Record<string, string> = {
+    startDate,
+    crmFound: systemPresence(crmRecords.length > 0),
+  };
+  if (identityRecord && !dataString(ctx.data.resolvedName).trim()) {
+    patch.resolvedName = displayPersonName(identityRecord.name);
+    if (identityRecord.department?.trim()) {
+      patch.department = identityRecord.department.trim();
+    }
+    if (identityRecord.ucpathEmployeeId?.trim() && !dataString(ctx.data.emplId).trim()) {
+      patch.emplId = identityRecord.ucpathEmployeeId.trim();
+    }
+  }
+  ctx.updateData(patch);
   if (crmRecords.length === 0) {
     log.step("CRM start date: no CRM record — Start Date left blank");
     // Capture the empty CRM search result so the operator has evidence of what the lookup saw.
@@ -359,6 +388,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
       });
     } catch (err) {
       log.error(`CRM start date: search failed for EID ${input.emplId} — ${errorMessage(err)}`);
+      ctx.updateData({ crmFound: systemPresence(false) });
       // Capture whatever the CRM page shows after the failure so the operator has evidence.
       await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
         systems: ["crm"],
@@ -374,7 +404,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     parsed = parseNameInput(searchName);
   } catch (err) {
     log.error(`CRM cross-verify: invalid name "${searchName}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "", startDate: "" });
+    ctx.updateData({ crmMatch: "", startDate: "", crmFound: systemPresence(false) });
     return;
   }
 
@@ -383,7 +413,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
     crmRecords = await searchCrmByName(crmPage, parsed.lastName, parsed.first);
   } catch (err) {
     log.error(`CRM cross-verify: search failed for "${searchName}" — ${errorMessage(err)}`);
-    ctx.updateData({ crmMatch: "", startDate: "" });
+    ctx.updateData({ crmMatch: "", startDate: "", crmFound: systemPresence(false) });
     // Capture whatever the CRM page shows after the failure so the operator has evidence.
     await ctx.captureAndStampScreenshot("CRM search failed", "crmSearchScreenshot", {
       systems: ["crm"],
@@ -393,7 +423,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
 
   if (crmRecords.length === 0) {
     log.step(`CRM: no records for "${searchName}"`);
-    ctx.updateData({ crmMatch: "", startDate: "" });
+    ctx.updateData({ crmMatch: "", startDate: "", crmFound: systemPresence(false) });
     // Capture the empty CRM search result so the operator has evidence of what the lookup saw.
     await ctx.captureAndStampScreenshot("no CRM record", "crmSearchScreenshot", {
       systems: ["crm"],
@@ -414,7 +444,7 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
       log.step(
         `CRM-only: ${distinctEids.size} distinct EIDs found, no UCPath cross-check — ambiguous, not resolving`,
       );
-      ctx.updateData({ crmMatch: "ambiguous" });
+      ctx.updateData({ crmMatch: "ambiguous", crmFound: systemPresence(true) });
       await stampCrmStartDateAndScreenshot(ctx, crmRecords);
       return;
     }
@@ -424,7 +454,9 @@ async function crossVerificationStep<TSteps extends readonly string[]>(
       ctx.updateData({
         emplId: record.ucpathEmployeeId,
         department: record.department ?? "",
+        resolvedName: displayPersonName(record.name),
         crmMatch: "crm-only",
+        crmFound: systemPresence(true),
       });
       await stampCrmStartDateAndScreenshot(ctx, crmRecords, record.ucpathEmployeeId);
       return;
@@ -461,6 +493,7 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
   // "Ambiguous" status — a well-formed but unverified EID is worse than none
   // (root CLAUDE.md "Fail loud"). Force-clear identity fields instead.
   const isAmbiguous = outcome.activeStatus === "ambiguous";
+  const isCrmOnly = outcome.activeStatus === "n/a";
   ctx.updateData({
     activeStatus: outcome.activeStatus,
     hrStatus: outcome.hrStatus,
@@ -483,6 +516,8 @@ function stampActiveCheckFields<TSteps extends readonly string[]>(
     isActive: String(outcome.isActive),
     isHdhAccepted: String(outcome.isHdhAccepted),
     candidateEids: outcome.candidateEids.join(", "),
+    // CRM-only: UCPath stayed Not found; both-miss keeps ucpathFound from searching.
+    ...(isCrmOnly ? { ucpathFound: systemPresence(false), crmFound: systemPresence(true) } : {}),
   });
   if (outcome.activeStatus === "active") {
     log.success(`Person Lookup active status: ${outcome.emplId} is active (HDH)`);
@@ -514,7 +549,8 @@ export function resolveActiveStatusResultsForPersonLookup(args: {
 /**
  * UCPath Person Org active / HDH disposition. Uses search results from
  * `searching`, except CRM-only matches where UCPath had no row — then loads
- * detail by CRM EID via the lookup primitive.
+ * detail by CRM EID via the lookup primitive. When that still misses, the
+ * run stays found with `activeStatus: "n/a"` and CRM-filled identity.
  */
 async function activeStatusStep<TSteps extends readonly string[]>(
   ctx: Ctx<TSteps, PersonLookupItem>,
@@ -522,13 +558,25 @@ async function activeStatusStep<TSteps extends readonly string[]>(
   sdcmpFromSearch: EidResult[],
 ): Promise<void> {
   const crmMatch = ctx.data.crmMatch as string | undefined;
+  const crmFound = dataString(ctx.data.crmFound) === "Found";
 
   if (!isEidInput(input) && crmMatch === "crm-only") {
     const page = await ctx.page("ucpath");
     const eid = dataString(ctx.data.emplId).trim();
     if (!/^10\d{6}$/.test(eid)) {
-      const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, []);
-      stampActiveCheckFields(ctx, outcome);
+      stampActiveCheckFields(
+        ctx,
+        crmFound
+          ? deriveCrmOnlyCheckOutcome(
+              { kind: "by-eid", emplId: eid },
+              {
+                name: dataString(ctx.data.resolvedName),
+                department: dataString(ctx.data.department),
+                emplId: eid,
+              },
+            )
+          : deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, []),
+      );
       return;
     }
     const lookup = await lookupPersonInUcpath(page, { kind: "by-eid", emplId: eid });
@@ -536,8 +584,22 @@ async function activeStatusStep<TSteps extends readonly string[]>(
     await ctx.captureAndStampScreenshot("person-org-summary", "personOrgScreenshot", {
       systems: ["ucpath"],
     });
-    const outcome = deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results);
-    stampActiveCheckFields(ctx, outcome);
+    if (results.length > 0) {
+      ctx.updateData({ ucpathFound: systemPresence(true) });
+      stampActiveCheckFields(ctx, deriveActiveCheckOutcome({ kind: "by-eid", emplId: eid }, results));
+      return;
+    }
+    stampActiveCheckFields(
+      ctx,
+      deriveCrmOnlyCheckOutcome(
+        { kind: "by-eid", emplId: eid },
+        {
+          name: dataString(ctx.data.resolvedName),
+          department: dataString(ctx.data.department),
+          emplId: eid,
+        },
+      ),
+    );
     return;
   }
 
@@ -550,6 +612,17 @@ async function activeStatusStep<TSteps extends readonly string[]>(
       typeof ctx.data.crmMatchedEmplId === "string" ? ctx.data.crmMatchedEmplId : undefined,
   });
   const outcome = deriveActiveCheckOutcome(deriveInput, results);
+  if (outcome.activeStatus === "not-found" && crmFound) {
+    stampActiveCheckFields(
+      ctx,
+      deriveCrmOnlyCheckOutcome(deriveInput, {
+        name: dataString(ctx.data.resolvedName),
+        department: dataString(ctx.data.department),
+        emplId: dataString(ctx.data.emplId) || (deriveInput.kind === "by-eid" ? deriveInput.emplId : ""),
+      }),
+    );
+    return;
+  }
   stampActiveCheckFields(ctx, outcome);
 }
 
@@ -656,6 +729,8 @@ export const personLookupWorkflow = defineWorkflow({
     { key: "emplId", label: "EID" },
     { key: "department", label: "Dept" },
     { key: "hrStatus", label: "HR Status" },
+    { key: "ucpathFound", label: "UCPath" },
+    { key: "crmFound", label: "CRM" },
     { key: "startDate", label: "Start Date" },
     { key: "terminationDate", label: "End Date", conditional: true },
     { key: "terminationReason", label: "Term Reason", conditional: true },

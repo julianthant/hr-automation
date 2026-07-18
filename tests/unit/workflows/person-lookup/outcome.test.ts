@@ -1,7 +1,10 @@
 import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import type { PersonLookupResult } from "../../../../src/workflows/person-lookup/outcome.js";
-import { deriveActiveCheckOutcome } from "../../../../src/workflows/person-lookup/outcome.js";
+import {
+  deriveActiveCheckOutcome,
+  deriveCrmOnlyCheckOutcome,
+} from "../../../../src/workflows/person-lookup/outcome.js";
 
 function eidResult(patch: Partial<PersonLookupResult> = {}): PersonLookupResult {
   return {
@@ -104,6 +107,24 @@ describe("deriveActiveCheckOutcome", () => {
     assert.equal(outcome.activeStatus, "not-found");
     assert.equal(outcome.isActive, false);
     assert.equal(outcome.emplId, "10706431");
+  });
+
+  it("marks CRM-only hits as n/a with CRM identity filled", () => {
+    const outcome = deriveCrmOnlyCheckOutcome(
+      { kind: "by-eid", emplId: "10778080" },
+      {
+        name: "Magana, Alondra",
+        department: "HOUSING/DINING/HOSPITALITY (000412)",
+        emplId: "10778080",
+      },
+    );
+
+    assert.equal(outcome.activeStatus, "n/a");
+    assert.equal(outcome.hrStatus, "N/A");
+    assert.equal(outcome.isActive, false);
+    assert.equal(outcome.name, "Magana, Alondra");
+    assert.equal(outcome.department, "HOUSING/DINING/HOSPITALITY (000412)");
+    assert.equal(outcome.emplId, "10778080");
   });
 
   it("marks name searches with multiple candidates ambiguous", () => {

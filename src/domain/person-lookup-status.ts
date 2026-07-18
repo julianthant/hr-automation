@@ -4,14 +4,16 @@
  * Owns two person-lookup-specific status rules that used to be hardcoded in the
  * generic `EntryItem` dashboard component:
  *
- *   - **notFound** — UCPath had no matching Person Org row. The automation
- *     succeeded, so the tracker status is still `done`; the queue should read
- *     "Not found" instead. Delegates to {@link isTerminalNotFoundEntry}, the
- *     same predicate the search/sort/snapshot surfaces use.
+ *   - **notFound** — BOTH UCPath and CRM missed. The automation succeeded, so
+ *     the tracker status is still `done`; the queue should read "Not found"
+ *     instead. A CRM-only hit stamps `activeStatus: "n/a"` and is NOT notFound.
+ *     Delegates to {@link isTerminalNotFoundEntry}, the same predicate the
+ *     search/sort/snapshot surfaces use.
  *
  *   - **A / IA secondary tag** — Active / Inactive / "Active (non-HDH dept)"
  *     chip derived from `data.activeStatus` (`active` | `inactive` | `non-hdh`)
  *     with a legacy `isActive === "true"` fallback on terminal `done` rows.
+ *     `n/a` (CRM-only) intentionally shows no chip.
  *
  * Lives in the domain layer (not `src/workflows/person-lookup/`) so the
  * dashboard can resolve it without importing a `src/workflows/*` module — the
