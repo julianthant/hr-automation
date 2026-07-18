@@ -105,9 +105,10 @@ value the workflow input schema then rejects — the schema is literally the sam
 regex), which is what keeps this true.
 
 > **Reconciliation flag (open, §9):** today's `work-study`/`separations` accept a *looser* EID
-> (`/^\d{5,}$/`) than canonical `/^10\d{6}$/`. That divergence is real and must be resolved at
-> migration (adopt the canonical field, or declare a distinct `legacyEid` field with its own
-> schema) — **not** papered over by widening the canonical field, which would weaken every consumer.
+> (`/^\d{5,}$/`, verified live) than canonical `/^10\d{6}$/`. That divergence is real and is resolved
+> as an **explicit decision at work-study's order-6 migration** (master-plan §3.3): adopt the
+> canonical field, or declare a distinct `legacyEid` field with its own schema — **not** papered over
+> by widening the canonical field, which would weaken every consumer.
 
 ---
 
@@ -157,7 +158,7 @@ A recurring layout (the same weekly work-study export) should not be re-mapped e
 keyed by a **header fingerprint**:
 
 ```
-fingerprint = sha256( detectedHeaders.map(normalize).sort().join(" ") )
+fingerprint = sha256( detectedHeaders.map(normalize).sort().join(" ") )
 normalize(h) = h.trim().toLowerCase().replace(/\s+/g, " ")
 ```
 

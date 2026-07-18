@@ -125,7 +125,7 @@ export interface WorkflowDescriptor<TInput> {
   /** Verdict mappings — doc 03's statusExtensions replacement. Plain data, bundle-safe. */
   verdicts?: Record<string, { label: string; tone: "info"|"success"|"warning"|"destructive"; tag?: boolean }>;
   /** Completion (fan-out/approval) contract — SHAPE OWNED BY DOC 03 §4; referenced here only. */
-  completion?: CompletionContract;
+  completion?: CompletionProgram;
   capabilities?: WorkflowCapabilities;  // doc 03 §3 (review/editData/delegation display rules)
   migratedAt?: string;                  // doc 03 §5 — source-authority cutover
 }
@@ -705,9 +705,13 @@ Nothing launched, no Duo spent, no partial run row.
 
 ## 9. Open questions for the operator / orchestrator
 
-1. **Checkpoint retention** — prune with the tracker's 7-day JSONL policy, or keep until the
-   logical item is deleted? (Resume across days argues for item-lifetime; freshness (§5.5) makes
-   old checkpoints safe-but-refusable rather than dangerous.)
+1. **Checkpoint retention — RESOLVED (D14), consistent with the SQLite role.** Checkpoints are
+   pruned **only on logical-item deletion, never on the 7-day JSONL clock**: D14 makes checkpoint
+   payloads system-of-record (NOT rebuildable/deletable), so the tracker's 7-day JSONL policy — which
+   governs the display/audit spans+notes — must not reach them. Resume across days needs
+   item-lifetime retention, and freshness (§5.5) makes an old checkpoint safe-but-refusable rather
+   than dangerous, so nothing forces an earlier prune. (Logged to the master-plan deferred-OQ list
+   for the operator's confirmation.)
 2. **Write-task crash disambiguation — RESOLVED (D17), no longer open.** Every mutate contract ships
    a paired idempotency `probe` (doc 09's `writeSafety.idempotency.probe`), and crash recovery runs
    it FIRST (§5.6 #2): `present`→backfill+`done`, `absent`→retry-safe, `ambiguous`/`unknown`/throw→
