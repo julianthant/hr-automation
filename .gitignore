@@ -57,6 +57,8 @@ docs/*
 !docs/workflow/**
 !docs/engineering/
 !docs/engineering/**
+!docs/rebuild/
+!docs/rebuild/**
 
 # Tracker data (local runtime)
 .tracker/
