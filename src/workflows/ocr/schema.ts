@@ -9,7 +9,12 @@ export const OcrInputSchema = z.object({
   formType:         z.string(),
   sessionId:        z.string(),
   rosterPath:       z.string().optional(),
-  rosterMode:       z.enum(["existing", "download", "wait"]).default("existing"),
+  /**
+   * `none` is an explicit operator opt-out: run rosterless even for a
+   * roster-`required` form spec — every record then resolves via person-lookup
+   * (the same degradation path an unmatched record already takes).
+   */
+  rosterMode:       z.enum(["existing", "download", "wait", "none"]).default("existing"),
   parentRunId:      z.string().optional(),
   parentSubject:    z.string().optional(),
   /**

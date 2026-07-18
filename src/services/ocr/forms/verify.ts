@@ -106,7 +106,7 @@ export const VerifyCheckSchema = z.object({
   paperValue: z.string().nullable(),
   /** Looked-up value (CRM / UCPath / i9). */
   foundValue: z.string().nullable(),
-  source: z.enum(["paper", "crm", "ucpath", "i9"]).nullable(),
+  source: z.enum(["paper", "crm", "ucpath", "i9", "roster"]).nullable(),
   /** present=on paper; found=blank but looked up; missing=blank+not found. */
   status: z.enum(["present", "found", "missing"]),
   /**

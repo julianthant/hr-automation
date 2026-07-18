@@ -125,6 +125,17 @@ test("patchOcrRecordUnresolved marks lookup-pending record unresolved", () => {
   assert.deepEqual(rec.warnings, ["eid-lookup did not return within timeout"]);
 });
 
+test("computeOcrVerification treats CRM-only n/a as lookup-failed with a clear error", () => {
+  const result = computeOcrVerification({
+    activeStatus: "n/a",
+    hrStatus: "N/A",
+    department: "HOUSING/DINING/HOSPITALITY",
+    personOrgScreenshot: "",
+  });
+  assert.equal(result.state, "lookup-failed");
+  assert.match(result.error ?? "", /CRM only/i);
+});
+
 test("computeOcrVerification classifies Active HDH as verified", () => {
   assert.equal(
     computeOcrVerification({ hrStatus: "Active", department: "Housing Dining Hospitality", personOrgScreenshot: "x.png" }).state,

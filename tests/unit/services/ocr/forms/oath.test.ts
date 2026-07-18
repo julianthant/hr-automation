@@ -184,4 +184,16 @@ describe("oathOcrFormSpec.approveTo.canFanOut", () => {
     const rec = makeApprovedOathRecord({ employeeId: "" });
     assert.equal(canFanOut(rec), false);
   });
+
+  it("returns false for an inactive employee even with a valid EID + selected", () => {
+    const rec = makeApprovedOathRecord({
+      verification: {
+        state: "inactive",
+        hrStatus: "Terminated",
+        screenshotFilename: "x.png",
+        checkedAt: "2026-07-17T00:00:00.000Z",
+      },
+    });
+    assert.equal(canFanOut(rec), false, "inactive employees are hard-blocked from oath fan-out");
+  });
 });

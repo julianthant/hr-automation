@@ -276,6 +276,7 @@ export function buildOcrPrepareHandler(
       ocrStep: string,
       rowStatus: "running" | "failed" | "done" = "running",
       rowStep = "ocr-prep",
+      error?: string,
     ): void => {
       if (!operationRef) return;
       emitTrackerRow(
@@ -287,6 +288,11 @@ export function buildOcrPrepareHandler(
           status: rowStatus,
           step: rowStep,
           data: { ...operationRef.baseData, archetype: "operation", ocrStatus, ocrStep },
+          // Carry the delegated OCR run's failure message onto the coordinator
+          // row so its toast/log reads the real cause instead of "Unknown
+          // error" — the operation row is the one selected/toasted, and the
+          // error lives on the OCR run, not here, unless we mirror it.
+          ...(error ? { error } : {}),
         },
         trackerDir,
       );
@@ -520,8 +526,9 @@ export function buildOcrPrepareHandler(
         } else {
           // Non-discard failure: orchestrator already emitted the OCR-side `failed`
           // row before rethrow. Drive the operation row terminal too, so it
-          // doesn't sit "running" forever after the OCR run failed.
-          emitOperationRow("failed", "failed", "failed", "ocr-failed");
+          // doesn't sit "running" forever after the OCR run failed — and mirror
+          // the OCR error message so the coordinator's toast names the real cause.
+          emitOperationRow("failed", "failed", "failed", "ocr-failed", errorMessage(err));
         }
       } finally {
         runRegistry.unregister(runId);

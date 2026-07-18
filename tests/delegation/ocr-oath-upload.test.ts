@@ -14,7 +14,7 @@ import { OATH_SIGNATURE_WORKFLOW_RUNTIME_POLICY } from "../../src/workflows/oath
 import { OATH_UPLOAD_WORKFLOW_RUNTIME_POLICY } from "../../src/workflows/oath-upload/workflow.js";
 
 const REAL_TRACKER_DIR = ".tracker";
-const FIXTURE_PDF = "tests/data/single-oath.pdf";
+const FIXTURE_PDF = "data/documents/single-oath.pdf";
 const PDF_NAME = "single-oath.pdf";
 
 function snapshotRealTracker(): string[] | null {

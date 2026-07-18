@@ -43,9 +43,11 @@ function SourceBadge({ source }: { source: VerifyCheck["source"] }) {
         ? "UCPath"
         : source === "i9"
           ? "I-9"
-          : source === "paper"
-            ? "Paper"
-            : source;
+          : source === "roster"
+            ? "Roster"
+            : source === "paper"
+              ? "Paper"
+              : source;
   return (
     <span className="shrink-0 rounded border border-border bg-muted px-1 py-px font-mono text-[10px] uppercase text-muted-foreground">
       {label}
@@ -237,11 +239,9 @@ function CheckRow({
 export function VerifyRecordView({ record, onRelookup, relookupPending, lookupTracker }: VerifyRecordViewProps) {
   const checks = record.checks ?? [];
 
-  // The record's document-type chip + name + EID are rendered by the card's
-  // shared nav header (`PrepReviewRecordNav`) — the name in the title, the
-  // document-type chip in place of the old ordinal, the EID in the "Employee
-  // ID" completeness check below. So this body renders only the confidence
-  // badge + warning line + the completeness report (no duplicated header).
+  // Name / EID live in the form fields and completeness checks — no
+  // duplicated card header. This body renders only the confidence badge +
+  // warning line + the completeness report.
   // `matchConfidence` is only populated for a standalone oath/EC record
   // projected read-only via `readonly-record.ts` (a native `verify` run has
   // no LLM-disambiguation confidence of its own) — so a post-hoc audit of an

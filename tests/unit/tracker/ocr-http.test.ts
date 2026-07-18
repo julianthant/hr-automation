@@ -123,6 +123,26 @@ test("POST /api/ocr/prepare still 400s a roster-REQUIRED form with no rosterPath
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("POST /api/ocr/prepare accepts a roster-REQUIRED form with rosterMode 'none' (explicit operator opt-out)", async () => {
+  // The run modal's "No roster" choice: rosterless even for oath/EC — every
+  // record resolves via person-lookup. Only `existing` without a path 400s.
+  const dir = setup();
+  _resetSessionLockForTests();
+  const handler = buildOcrPrepareHandler({
+    trackerDir: dir,
+    runOrchestrator: async () => {/* fire-and-forget stub */},
+  });
+  const resp = await handler({
+    pdfPath: "/tmp/fake.pdf",
+    pdfOriginalName: "fake.pdf",
+    formType: "oath",
+    rosterMode: "none",
+  });
+  assert.equal(resp.status, 202);
+  assert.equal(resp.body.ok, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("POST /api/ocr/prepare passes dryRun to the orchestrator input", async () => {
   const dir = setup();
   _resetSessionLockForTests();

@@ -24,7 +24,7 @@ export function matchConfidenceTier(confidence: number): MatchConfidenceTier {
   return "low";
 }
 
-/** Tone classes matching the existing badge pattern (`PrepRecordWorkflowStatusBadge`). */
+/** Tone classes matching the existing workflow-phase badge pattern. */
 const TIER_BADGE_CLASS: Record<MatchConfidenceTier, string> = {
   high: "border-success/40 bg-success/10 text-success",
   medium: "border-warning/40 bg-warning/10 text-warning",

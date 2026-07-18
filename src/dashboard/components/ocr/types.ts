@@ -352,7 +352,7 @@ export interface VerifyCheck {
   paperValue: string | null;
   /** Looked-up value (CRM / UCPath / i9). */
   foundValue: string | null;
-  source: "paper" | "crm" | "ucpath" | "i9" | null;
+  source: "paper" | "crm" | "ucpath" | "i9" | "roster" | null;
   /** present=on paper; found=blank but looked up; missing=blank+not found. */
   status: "present" | "found" | "missing";
   /**
@@ -500,7 +500,8 @@ export function parseVerifyPrepareRowData(
  * `warnings` fields the completeness report reads.
  */
 export interface I9PreviewRecord {
-  formKind: "i9" | "unknown";
+  /** `"i9"` = legacy pre-2026-07-17 rows (Section 1 pages). */
+  formKind: "i9 section 1" | "i9 section 2" | "i9 ssn" | "i9" | "unknown";
   sourcePage: number;
   lastName?: string | null;
   firstName?: string | null;

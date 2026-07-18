@@ -7,7 +7,7 @@ import {
 
 /**
  * Confidence badge for an auto-matched record — same visual language as
- * `PrepRecordWorkflowStatusBadge` (`PrepReviewFormCard.tsx`): a small
+ * `PrepRecordWorkflowPhase` badge tones (`PrepReviewFormCard.tsx`): a small
  * rounded/bordered chip toned by tier (success/warning/destructive).
  */
 export function MatchConfidenceBadge({ confidence }: { confidence: number }) {
@@ -54,7 +54,10 @@ export function MatchWarnings({ matchState, warnings, matchConfidence }: MatchWa
         <div className="text-xs text-muted-foreground/80">
           {matchState === "unresolved" && <span className="mr-2">Could not resolve employee.</span>}
           {warnings?.map((w, i) => (
-            <span key={i}>{w}</span>
+            <span key={i}>
+              {i > 0 ? " · " : ""}
+              {w}
+            </span>
           ))}
         </div>
       )}

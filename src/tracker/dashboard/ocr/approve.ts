@@ -10,7 +10,12 @@ import { buildHttpPendingData } from "../../../core/daemon/enqueue-dispatch.js";
 import { splitPrefilled } from "../../../core/kernel/workflow.js";
 import { rootQueueTitleData } from "../../../domain/queue-title.js";
 import { findLatestEntryForPredicate, findFrozenTraceId } from "../../find-latest-entry.js";
-import { tracePrefix, runIdFragment } from "../../../domain/queue-trace-id.js";
+import { tracePrefix } from "../../../domain/queue-trace-id.js";
+import {
+  composeFanOutMemberTraceId,
+  withMemberShapeRuntimeOption,
+  withRootTracePrefixRuntimeOption,
+} from "./fan-out-runtime-options.js";
 import { deriveRowArchetype, resolveArchetype } from "../../../domain/row-archetype.js";
 import {
   readFormType,
@@ -1286,15 +1291,6 @@ function readLatestOcrReviewData(
 }
 
 /**
- * Merge the OCR root's trace PREFIX onto an enqueued child's `__runtimeOptions`
- * channel (root trace-id propagation, trace/span model). The daemon worker reads
- * `runtimeOptions.rootTracePrefix` in `run-one-item.ts` and COMPOSES
- * `<prefix>-<ownRunId4>` as the child's `data.__traceId`, so every fan-out
- * descendant shares the OCR root's operation prefix while keeping its own
- * greppable tail/runId/itemId. No-op when the prefix is absent (the OCR row had
- * no trace id) or the input isn't a plain object.
- */
-/**
  * Build the `deriveItemId` resolver for the approve per-record fan-out.
  *
  * Keyed by the JSON of each LOGICAL (pre-`__runtimeOptions`) input:
@@ -1335,25 +1331,6 @@ export function buildFanOutItemIdResolver(
   };
 }
 
-/**
- * Compose a fan-out member's frozen trace id AT PRE-EMIT (ISS-004). The approve
- * fan-out stamps `rootTracePrefix` on the child INPUT, so the daemon worker
- * composes the member `__traceId` only at CLAIM (`run-one-item` →
- * `buildTraceId({ rootPrefix })`). A member that is never claimed (queued then
- * cancelled-while-queued) therefore carried no trace id. This composes the SAME
- * value the daemon would — byte-identical to `buildTraceId`'s rootPrefix branch
- * (`<rootPrefix>-<runIdFragment(runId)>`, using the shared tail helper) — so
- * `findFrozenTraceId` reuses this at claim (frozen-once) with no drift. Returns
- * undefined when there is no root prefix (the daemon then composes its own
- * standalone id at claim, as before). Display/lineage only.
- */
-function composeFanOutMemberTraceId(
-  rootTracePrefix: string | undefined,
-  childRunId: string,
-): string | undefined {
-  return rootTracePrefix ? `${rootTracePrefix}-${runIdFragment(childRunId)}` : undefined;
-}
-
 function readRootTracePrefixFromInput(input: unknown): string | undefined {
   if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
   const runtime = (input as Record<string, unknown>).__runtimeOptions;
@@ -1373,58 +1350,22 @@ function readManifestParallelWorkers(manifest: OcrApprovalManifest): number | un
   }
 }
 
-function withRootTracePrefixRuntimeOption<TInput>(input: TInput, rootTracePrefix: string | undefined): TInput {
-  if (!rootTracePrefix || !input || typeof input !== "object" || Array.isArray(input)) {
-    return input;
-  }
-  const current = (input as Record<string, unknown>).__runtimeOptions;
-  return {
-    ...(input as Record<string, unknown>),
-    __runtimeOptions: {
-      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
-      rootTracePrefix,
-    },
-  } as TInput;
-}
 
-/**
- * Merge a member `rowShape` onto a fan-out child's `__runtimeOptions` so the
- * stamped archetype survives the SQLite task store to the daemon worker's
- * `run-one-item` re-emit (mirrors `rowShape: "operation-member"` for delegated
- * batches; `normalizeRuntimeOptions` carries it through). No-op when the shape
- * is absent (standalone OCR / oath-upload) or the input isn't a plain object.
- */
-function withMemberShapeRuntimeOption<TInput>(
-  input: TInput,
-  rowShape: "operation-member" | undefined,
-): TInput {
-  if (!rowShape || !input || typeof input !== "object" || Array.isArray(input)) {
-    return input;
-  }
-  const current = (input as Record<string, unknown>).__runtimeOptions;
-  return {
-    ...(input as Record<string, unknown>),
-    __runtimeOptions: {
-      ...(current && typeof current === "object" && !Array.isArray(current) ? current : {}),
-      rowShape,
-    },
-  } as TInput;
-}
 
 function buildFallbackPendingData(input: unknown): Record<string, string> {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   const data: Record<string, string> = {};
   for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
     if (value === undefined || value === null) continue;
-    if (typeof value === "object") {
-      try {
-        data[key] = JSON.stringify(value);
-      } catch {
-        data[key] = String(value);
-      }
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+      data[key] = String(value);
       continue;
     }
-    data[key] = String(value);
+    try {
+      data[key] = JSON.stringify(value) ?? "[unserializable value]";
+    } catch {
+      data[key] = "[unserializable value]";
+    }
   }
   return data;
 }
