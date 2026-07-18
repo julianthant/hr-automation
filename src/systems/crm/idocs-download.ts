@@ -75,7 +75,7 @@ export function buildCrmDocumentFolderName(subject: CrmDocumentDownloadSubject):
 
 /**
  * Absolute path to the per-person onboarding folder under
- * `PATHS.onboardingDocsDir` (~/Documents/onboarding).
+ * `PATHS.onboardingDocsDir` (`data/onboarding` by default).
  */
 export function buildCrmDocumentDownloadPath(subject: CrmDocumentDownloadSubject): string {
   return join(PATHS.onboardingDocsDir, buildCrmDocumentFolderName(subject));

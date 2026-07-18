@@ -981,6 +981,12 @@ export async function finishDuoWebAuthn(page: Page): Promise<void> {
   armedByPage.delete(page);
   const { cdp, authByTransport, setups, lock } = armed;
 
+  // Release the cross-process lock FIRST. CDP teardown can hang when the
+  // browser is mid-kill (daemon stop while authenticating); if we wait on
+  // CDP before releasing, the lock is orphaned until the dead-PID stale
+  // check (and a concurrent arm can block on a live-but-dying holder).
+  lock.release();
+
   const observed = new Map<string, number>();
   for (const { cred, authenticatorId } of setups) {
     try {
@@ -1001,8 +1007,6 @@ export async function finishDuoWebAuthn(page: Page): Promise<void> {
     await cdp.detach().catch(() => {});
   } catch {
     /* best-effort */
-  } finally {
-    lock.release();
   }
 }
 

@@ -430,13 +430,13 @@ Search submit button.
 
 **Source:** [`src/systems/ucpath/selectors.ts:451`](./selectors.ts#L451)
 
-## `personSearch.resultRows()` — verified 2026-04-01
+## `personSearch.resultEmplIdCells()` — verified 2026-07-10
 
-Results grid — rows containing a 5+ digit employee ID.
+Results grid — one Empl ID cell (`span#EMPLID$<row>`) per matched person on the PERSON_RESULTS grid (`table#l0PERSON$0`). The real results page carries NO `SEARCH_RESULT` id and no `.PSLEVEL1GRID` class — the previous anchors matched 0 elements on a live found page, so every genuine match timed out as an ambiguous outcome (live-
 
-**Tags:** results, grid, rows, person, search
+**Tags:** results, grid, rows, person, search, emplid
 
-**Source:** [`src/systems/ucpath/selectors.ts:458`](./selectors.ts#L458)
+**Source:** [`src/systems/ucpath/selectors.ts:465`](./selectors.ts#L465)
 
 ## `jobSummary.campusDiscoveryUcsdLink()` — verified 2026-04-01
 
@@ -444,7 +444,7 @@ Campus discovery page — UCSD link.
 
 **Tags:** campus, discovery, ucsd, link, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:471`](./selectors.ts#L471)
+**Source:** [`src/systems/ucpath/selectors.ts:476`](./selectors.ts#L476)
 
 ## `jobSummary.emplIdInput()` — verified 2026-04-01
 
@@ -452,7 +452,7 @@ Empl ID textbox. `root` is either `page.locator("body")` (direct URL) or `page.f
 
 **Tags:** empl, id, employee, textbox, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:480`](./selectors.ts#L480)
+**Source:** [`src/systems/ucpath/selectors.ts:485`](./selectors.ts#L485)
 
 ## `jobSummary.searchButton()` — verified 2026-04-01
 
@@ -460,7 +460,7 @@ Search button (exact: true).
 
 **Tags:** search, button, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:487`](./selectors.ts#L487)
+**Source:** [`src/systems/ucpath/selectors.ts:492`](./selectors.ts#L492)
 
 ## `jobSummary.workLocationTab()` — verified 2026-04-01
 
@@ -468,7 +468,7 @@ Work Location tab. PeopleSoft renders these Job-Information sub-tabs as anchor L
 
 **Tags:** work, location, tab, link, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:499`](./selectors.ts#L499)
+**Source:** [`src/systems/ucpath/selectors.ts:504`](./selectors.ts#L504)
 
 ## `jobSummary.jobInformationTab()` — verified 2026-04-01
 
@@ -476,7 +476,7 @@ Job Information tab. Same link-vs-tab caveat as `workLocationTab` — anchor lin
 
 **Tags:** job, information, tab, link, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:512`](./selectors.ts#L512)
+**Source:** [`src/systems/ucpath/selectors.ts:517`](./selectors.ts#L517)
 
 ## `jobSummary.personName()` — verified 2026-06-18
 
@@ -484,7 +484,7 @@ Employee display name on the Workforce Job Summary detail page. PeopleSoft rende
 
 **Tags:** employee, name, display, header, detail, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:529`](./selectors.ts#L529)
+**Source:** [`src/systems/ucpath/selectors.ts:534`](./selectors.ts#L534)
 
 ## `jobSummary.mainTargetIframeProbe()` — verified 2026-04-01
 
@@ -492,7 +492,7 @@ Iframe presence probe — when count > 0 we're in iframe mode.
 
 **Tags:** iframe, probe, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:539`](./selectors.ts#L539)
+**Source:** [`src/systems/ucpath/selectors.ts:544`](./selectors.ts#L544)
 
 ## `jobSummary.searchResultsGrid()` — verified 2026-06-24
 
@@ -500,7 +500,7 @@ Multi-row search-results grid container on the modern PeopleSoft Fluid "Find an 
 
 **Tags:** multi-row, grid, search, results, fluid, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:552`](./selectors.ts#L552)
+**Source:** [`src/systems/ucpath/selectors.ts:557`](./selectors.ts#L557)
 
 ## `jobSummary.searchResultRows()` — verified 2026-06-24
 
@@ -508,7 +508,7 @@ Data rows inside the multi-row search-results grid. On the live Fluid "Find an E
 
 **Tags:** multi-row, rows, grid, search, results, fluid, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:570`](./selectors.ts#L570)
+**Source:** [`src/systems/ucpath/selectors.ts:575`](./selectors.ts#L575)
 
 ## `jobSummary.rowHrStatusCell()` — verified 2026-06-24
 
@@ -516,7 +516,7 @@ Payroll Status cell inside a single result row — the signal the caller tests (
 
 **Tags:** multi-row, hr-status, payroll-status, terminated, active, cell, fluid, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:586`](./selectors.ts#L586)
+**Source:** [`src/systems/ucpath/selectors.ts:591`](./selectors.ts#L591)
 
 ## `jobSummary.rowDrillInLink()` — verified 2026-06-24
 
@@ -524,7 +524,7 @@ Drill-in target that navigates from the grid to the detail page for the matching
 
 **Tags:** multi-row, drill-in, select, row, fluid, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:603`](./selectors.ts#L603)
+**Source:** [`src/systems/ucpath/selectors.ts:608`](./selectors.ts#L608)
 
 ## `jobSummary.resultDrillLinks()` — verified 2026-06-24
 
@@ -532,7 +532,7 @@ GRID-INDEPENDENT drill-in targets for the Workforce Job Summary results page, a 
 
 **Tags:** multi-row, drill-in, row, emplid, root, fallback, fluid, job-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:619`](./selectors.ts#L619)
+**Source:** [`src/systems/ucpath/selectors.ts:624`](./selectors.ts#L624)
 
 ## `hrTasks.tile()` — verified 2026-03-16
 
@@ -540,7 +540,7 @@ HR Tasks tile / link.
 
 **Tags:** hr-tasks, tile, link, navigation
 
-**Source:** [`src/systems/ucpath/selectors.ts:644`](./selectors.ts#L644)
+**Source:** [`src/systems/ucpath/selectors.ts:649`](./selectors.ts#L649)
 
 ## `hrTasks.itemList()` — verified 2026-04-24
 
@@ -548,7 +548,7 @@ Sidebar `<navigation>` region containing all HR Tasks nav items. Useful as a sco
 
 **Tags:** sidebar, navigation, region, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:652`](./selectors.ts#L652)
+**Source:** [`src/systems/ucpath/selectors.ts:657`](./selectors.ts#L657)
 
 ## `hrTasks.searchPersonLink()` — verified 2026-04-24
 
@@ -556,7 +556,7 @@ Sidebar top-level: Search Person (Search/Match form). Top-level links have dupli
 
 **Tags:** sidebar, search, person, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:661`](./selectors.ts#L661)
+**Source:** [`src/systems/ucpath/selectors.ts:666`](./selectors.ts#L666)
 
 ## `hrTasks.personOrgSummaryLink()` — verified 2026-04-24
 
@@ -564,7 +564,7 @@ Sidebar top-level: Person Organizational Summary.
 
 **Tags:** sidebar, person-org-summary, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:668`](./selectors.ts#L668)
+**Source:** [`src/systems/ucpath/selectors.ts:673`](./selectors.ts#L673)
 
 ## `hrTasks.contractPayLink()` — verified 2026-04-24
 
@@ -572,7 +572,7 @@ Sidebar category toggle: Contract Pay (expand/collapse). The "(select to expand 
 
 **Tags:** sidebar, contract-pay, category, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:677`](./selectors.ts#L677)
+**Source:** [`src/systems/ucpath/selectors.ts:682`](./selectors.ts#L682)
 
 ## `hrTasks.contractPaymentDetailsLink()` — verified 2026-04-24
 
@@ -580,7 +580,7 @@ Sidebar leaf under Contract Pay: Contract Payment Details.
 
 **Tags:** sidebar, contract-pay, payment-details, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:686`](./selectors.ts#L686)
+**Source:** [`src/systems/ucpath/selectors.ts:691`](./selectors.ts#L691)
 
 ## `hrTasks.updateContractPayNaLink()` — verified 2026-04-24
 
@@ -588,7 +588,7 @@ Sidebar leaf under Contract Pay: Update Contract Pay NA.
 
 **Tags:** sidebar, contract-pay, update, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:693`](./selectors.ts#L693)
+**Source:** [`src/systems/ucpath/selectors.ts:698`](./selectors.ts#L698)
 
 ## `hrTasks.payPathLink()` — verified 2026-04-24
 
@@ -596,7 +596,7 @@ Sidebar category toggle: PayPath/Additional Pay.
 
 **Tags:** sidebar, paypath, additional-pay, category, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:700`](./selectors.ts#L700)
+**Source:** [`src/systems/ucpath/selectors.ts:705`](./selectors.ts#L705)
 
 ## `hrTasks.createAdditionalPayLink()` — verified 2026-04-24
 
@@ -604,7 +604,7 @@ Sidebar leaf under PayPath: Create Additional Pay.
 
 **Tags:** sidebar, paypath, additional-pay, create, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:709`](./selectors.ts#L709)
+**Source:** [`src/systems/ucpath/selectors.ts:714`](./selectors.ts#L714)
 
 ## `hrTasks.selfServiceAdditionalPayLink()` — verified 2026-04-24
 
@@ -612,7 +612,7 @@ Sidebar leaf under PayPath: Self Service Additional Pay.
 
 **Tags:** sidebar, paypath, self-service, additional-pay, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:716`](./selectors.ts#L716)
+**Source:** [`src/systems/ucpath/selectors.ts:721`](./selectors.ts#L721)
 
 ## `hrTasks.payPathActionsLink()` — verified 2026-04-24
 
@@ -620,7 +620,7 @@ Sidebar leaf under PayPath: PayPath Actions (combined staff+academic entry).
 
 **Tags:** sidebar, paypath, actions, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:727`](./selectors.ts#L727)
+**Source:** [`src/systems/ucpath/selectors.ts:732`](./selectors.ts#L732)
 
 ## `hrTasks.payPathActionsAcadLink()` — verified 2026-04-24
 
@@ -628,7 +628,7 @@ Sidebar leaf under PayPath: PayPath Actions ACAD.
 
 **Tags:** sidebar, paypath, actions, academic, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:734`](./selectors.ts#L734)
+**Source:** [`src/systems/ucpath/selectors.ts:739`](./selectors.ts#L739)
 
 ## `hrTasks.payPathActionsStaffLink()` — verified 2026-04-24
 
@@ -636,7 +636,7 @@ Sidebar leaf under PayPath: PayPath Actions STAFF.
 
 **Tags:** sidebar, paypath, actions, staff, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:741`](./selectors.ts#L741)
+**Source:** [`src/systems/ucpath/selectors.ts:746`](./selectors.ts#L746)
 
 ## `hrTasks.jobDataRelatedLink()` — verified 2026-04-24
 
@@ -644,7 +644,7 @@ Sidebar category toggle: Job Data Related.
 
 **Tags:** sidebar, job-data, category, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:748`](./selectors.ts#L748)
+**Source:** [`src/systems/ucpath/selectors.ts:753`](./selectors.ts#L753)
 
 ## `hrTasks.jobDataLink()` — verified 2026-04-24
 
@@ -652,7 +652,7 @@ Sidebar leaf under Job Data Related: Job Data.
 
 **Tags:** sidebar, job-data, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:757`](./selectors.ts#L757)
+**Source:** [`src/systems/ucpath/selectors.ts:762`](./selectors.ts#L762)
 
 ## `hrTasks.ucEmployeeReviewLink()` — verified 2026-04-24
 
@@ -660,7 +660,7 @@ Sidebar leaf under Job Data Related: UC Employee Review.
 
 **Tags:** sidebar, job-data, uc-employee-review, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:764`](./selectors.ts#L764)
+**Source:** [`src/systems/ucpath/selectors.ts:769`](./selectors.ts#L769)
 
 ## `hrTasks.workforceJobSummaryLink()` — verified 2026-04-24
 
@@ -668,7 +668,7 @@ Sidebar leaf under Job Data Related: Workforce Job Summary (separations + emerge
 
 **Tags:** sidebar, job-data, workforce, job-summary, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:772`](./selectors.ts#L772)
+**Source:** [`src/systems/ucpath/selectors.ts:777`](./selectors.ts#L777)
 
 ## `hrTasks.personalDataRelatedLink()` — verified 2026-04-24
 
@@ -676,7 +676,7 @@ Sidebar category toggle: Personal Data Related.
 
 **Tags:** sidebar, personal-data, category, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:779`](./selectors.ts#L779)
+**Source:** [`src/systems/ucpath/selectors.ts:784`](./selectors.ts#L784)
 
 ## `hrTasks.activitiesLink()` — verified 2026-04-24
 
@@ -684,7 +684,7 @@ Sidebar leaf under Personal Data Related: Activities.
 
 **Tags:** sidebar, personal-data, activities, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:788`](./selectors.ts#L788)
+**Source:** [`src/systems/ucpath/selectors.ts:793`](./selectors.ts#L793)
 
 ## `hrTasks.emergencyContactLink()` — verified 2026-04-24
 
@@ -692,7 +692,7 @@ Sidebar leaf under Personal Data Related: Emergency Contact.
 
 **Tags:** sidebar, personal-data, emergency-contact, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:795`](./selectors.ts#L795)
+**Source:** [`src/systems/ucpath/selectors.ts:800`](./selectors.ts#L800)
 
 ## `hrTasks.identificationDataLink()` — verified 2026-04-24
 
@@ -700,7 +700,7 @@ Sidebar leaf under Personal Data Related: Identification Data.
 
 **Tags:** sidebar, personal-data, identification, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:802`](./selectors.ts#L802)
+**Source:** [`src/systems/ucpath/selectors.ts:807`](./selectors.ts#L807)
 
 ## `hrTasks.modifyAPersonLink()` — verified 2026-04-24
 
@@ -708,7 +708,7 @@ Sidebar leaf under Personal Data Related: Modify a Person.
 
 **Tags:** sidebar, personal-data, modify, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:809`](./selectors.ts#L809)
+**Source:** [`src/systems/ucpath/selectors.ts:814`](./selectors.ts#L814)
 
 ## `hrTasks.personChecklistLink()` — verified 2026-04-24
 
@@ -716,7 +716,7 @@ Sidebar leaf under Personal Data Related: Person Checklist.
 
 **Tags:** sidebar, personal-data, checklist, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:816`](./selectors.ts#L816)
+**Source:** [`src/systems/ucpath/selectors.ts:821`](./selectors.ts#L821)
 
 ## `hrTasks.personProfilesLink()` — verified 2026-04-24
 
@@ -724,7 +724,7 @@ Sidebar leaf under Personal Data Related: Person Profiles (oath-signature entry 
 
 **Tags:** sidebar, personal-data, person-profiles, oath, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:824`](./selectors.ts#L824)
+**Source:** [`src/systems/ucpath/selectors.ts:829`](./selectors.ts#L829)
 
 ## `hrTasks.securityClearanceLink()` — verified 2026-04-24
 
@@ -732,7 +732,7 @@ Sidebar leaf under Personal Data Related: Security Clearance.
 
 **Tags:** sidebar, personal-data, security-clearance, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:831`](./selectors.ts#L831)
+**Source:** [`src/systems/ucpath/selectors.ts:836`](./selectors.ts#L836)
 
 ## `hrTasks.ucExternalSystemIdsLink()` — verified 2026-04-24
 
@@ -740,7 +740,7 @@ Sidebar leaf under Personal Data Related: UC External System IDs.
 
 **Tags:** sidebar, personal-data, external-system-ids, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:839`](./selectors.ts#L839)
+**Source:** [`src/systems/ucpath/selectors.ts:844`](./selectors.ts#L844)
 
 ## `hrTasks.smartHRTemplatesLink()` — verified 2026-04-24
 
@@ -748,7 +748,7 @@ Sidebar category toggle: Smart HR Templates. The legacy `getByText` variant from
 
 **Tags:** sidebar, smart-hr, templates, category, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:849`](./selectors.ts#L849)
+**Source:** [`src/systems/ucpath/selectors.ts:854`](./selectors.ts#L854)
 
 ## `hrTasks.smartHRTransactionsLink()` — verified 2026-05-27
 
@@ -756,7 +756,7 @@ Sidebar leaf under Smart HR Templates: Smart HR Transactions; exact link role av
 
 **Tags:** sidebar, smart-hr, transactions, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:856`](./selectors.ts#L856)
+**Source:** [`src/systems/ucpath/selectors.ts:861`](./selectors.ts#L861)
 
 ## `hrTasks.ssSmartHRTransactionsLink()` — verified 2026-04-24
 
@@ -764,7 +764,7 @@ Sidebar leaf under Smart HR Templates: SS Smart HR Transactions (self-service va
 
 **Tags:** sidebar, smart-hr, self-service, transactions, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:864`](./selectors.ts#L864)
+**Source:** [`src/systems/ucpath/selectors.ts:869`](./selectors.ts#L869)
 
 ## `hrTasks.smartHRTransactionStatusLink()` — verified 2026-04-24
 
@@ -772,7 +772,7 @@ Sidebar leaf under Smart HR Templates: Smart HR Transaction Status.
 
 **Tags:** sidebar, smart-hr, status, transactions, link, hr-tasks
 
-**Source:** [`src/systems/ucpath/selectors.ts:872`](./selectors.ts#L872)
+**Source:** [`src/systems/ucpath/selectors.ts:877`](./selectors.ts#L877)
 
 ## `personOrgSummary.emplIdInput()` — verified 2026-04-24
 
@@ -780,7 +780,7 @@ Empl ID textbox. Exact: true avoids matching label-shaped probes elsewhere on th
 
 **Tags:** empl, id, employee, textbox, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:892`](./selectors.ts#L892)
+**Source:** [`src/systems/ucpath/selectors.ts:897`](./selectors.ts#L897)
 
 ## `personOrgSummary.lastNameInput()` — verified 2026-04-24
 
@@ -788,7 +788,7 @@ Last Name textbox.
 
 **Tags:** last-name, name, textbox, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:899`](./selectors.ts#L899)
+**Source:** [`src/systems/ucpath/selectors.ts:904`](./selectors.ts#L904)
 
 ## `personOrgSummary.nameInput()` — verified 2026-04-24
 
@@ -796,7 +796,7 @@ Name (first/middle) textbox. Exact: true is required because "Last Name" also co
 
 **Tags:** name, first-name, middle-name, textbox, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:907`](./selectors.ts#L907)
+**Source:** [`src/systems/ucpath/selectors.ts:912`](./selectors.ts#L912)
 
 ## `personOrgSummary.caseSensitiveCheckbox()` — verified 2026-04-24
 
@@ -804,7 +804,7 @@ Case Sensitive checkbox — toggles case-aware name matching.
 
 **Tags:** case, sensitive, checkbox, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:914`](./selectors.ts#L914)
+**Source:** [`src/systems/ucpath/selectors.ts:919`](./selectors.ts#L919)
 
 ## `personOrgSummary.searchButton()` — verified 2026-04-24
 
@@ -812,7 +812,7 @@ Search submit button. The `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` ID is the stable People
 
 **Tags:** search, submit, button, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:923`](./selectors.ts#L923)
+**Source:** [`src/systems/ucpath/selectors.ts:928`](./selectors.ts#L928)
 
 ## `personOrgSummary.clearButton()` — verified 2026-04-24
 
@@ -820,7 +820,7 @@ Clear search criteria button. Used between iterations of name-strategy fallbacks
 
 **Tags:** clear, button, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:932`](./selectors.ts#L932)
+**Source:** [`src/systems/ucpath/selectors.ts:937`](./selectors.ts#L937)
 
 ## `personOrgSummary.personIdValue()` — verified 2026-07-08
 
@@ -828,7 +828,7 @@ Person ID value on the single-result detail page. PeopleSoft renders the header 
 
 **Tags:** person-id, emplid, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:943`](./selectors.ts#L943)
+**Source:** [`src/systems/ucpath/selectors.ts:948`](./selectors.ts#L948)
 
 ## `personOrgSummary.personNameValue()` — verified 2026-07-08
 
@@ -836,7 +836,7 @@ Employee display name on the detail page header. Primary anchor is `#PERSON_NAME
 
 **Tags:** name, display, header, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:961`](./selectors.ts#L961)
+**Source:** [`src/systems/ucpath/selectors.ts:966`](./selectors.ts#L966)
 
 ## `personOrgSummary.body()` — verified 2026-04-24
 
@@ -844,7 +844,7 @@ Body of the Person Org Summary iframe, used for DOM extraction where the page re
 
 **Tags:** body, evaluate, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:973`](./selectors.ts#L973)
+**Source:** [`src/systems/ucpath/selectors.ts:978`](./selectors.ts#L978)
 
 ## `personOrgSummary.lastHireDate()` — verified 2026-04-24
 
@@ -852,7 +852,7 @@ Last Hire Date on the detail page's ORG Instance section.
 
 **Tags:** hire-date, start-date, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:980`](./selectors.ts#L980)
+**Source:** [`src/systems/ucpath/selectors.ts:985`](./selectors.ts#L985)
 
 ## `personOrgSummary.terminationDate()` — verified 2026-04-24
 
@@ -860,7 +860,7 @@ Termination Date on the detail page's ORG Instance section. Empty means active e
 
 **Tags:** termination-date, end-date, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:988`](./selectors.ts#L988)
+**Source:** [`src/systems/ucpath/selectors.ts:993`](./selectors.ts#L993)
 
 ## `personOrgSummary.terminationReason()` — verified 2026-06-05
 
@@ -868,7 +868,7 @@ Termination Reason (PeopleSoft action-reason description) on the detail page's O
 
 **Tags:** termination-reason, action-reason, end-date, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:997`](./selectors.ts#L997)
+**Source:** [`src/systems/ucpath/selectors.ts:1002`](./selectors.ts#L1002)
 
 ## `personOrgSummary.nothingYetText()` — verified 2026-04-24
 
@@ -876,7 +876,7 @@ Empty-state copy shown before any search has run.
 
 **Tags:** empty-state, text, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:1004`](./selectors.ts#L1004)
+**Source:** [`src/systems/ucpath/selectors.ts:1009`](./selectors.ts#L1009)
 
 ## `personOrgSummary.noMatchingValuesText()` — verified 2026-04-24
 
@@ -884,7 +884,7 @@ No-results copy shown after PeopleSoft finds no matching values.
 
 **Tags:** no-results, text, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:1012`](./selectors.ts#L1012)
+**Source:** [`src/systems/ucpath/selectors.ts:1017`](./selectors.ts#L1017)
 
 ## `personOrgSummary.viewAllLink()` — verified 2026-04-24
 
@@ -892,7 +892,7 @@ View All link on paginated search results.
 
 **Tags:** view-all, pagination, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:1019`](./selectors.ts#L1019)
+**Source:** [`src/systems/ucpath/selectors.ts:1024`](./selectors.ts#L1024)
 
 ## `personOrgSummary.resultsTable()` — verified 2026-04-24
 
@@ -900,7 +900,7 @@ PeopleSoft configurable search results grid.
 
 **Tags:** results, table, grid, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:1026`](./selectors.ts#L1026)
+**Source:** [`src/systems/ucpath/selectors.ts:1031`](./selectors.ts#L1031)
 
 ## `personOrgSummary.drillInButton()` — verified 2026-04-24
 
@@ -908,7 +908,7 @@ Row drill-in icon in the search results grid.
 
 **Tags:** drill-in, results, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:1033`](./selectors.ts#L1033)
+**Source:** [`src/systems/ucpath/selectors.ts:1038`](./selectors.ts#L1038)
 
 ## `personOrgSummary.returnToSearchButton()` — verified 2026-04-24
 
@@ -916,7 +916,7 @@ Return to Search button on the Person Org Summary detail page.
 
 **Tags:** return, search, detail, person-org-summary
 
-**Source:** [`src/systems/ucpath/selectors.ts:1041`](./selectors.ts#L1041)
+**Source:** [`src/systems/ucpath/selectors.ts:1046`](./selectors.ts#L1046)
 
 ## `payPathActions.emplIdInput()` — verified 2026-04-24
 
@@ -924,7 +924,7 @@ Empl ID textbox. Most common search key.
 
 **Tags:** empl, id, employee, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1064`](./selectors.ts#L1064)
+**Source:** [`src/systems/ucpath/selectors.ts:1069`](./selectors.ts#L1069)
 
 ## `payPathActions.emplRecordInput()` — verified 2026-04-24
 
@@ -932,7 +932,7 @@ Empl Record textbox. Disambiguates between concurrent jobs for the same employee
 
 **Tags:** empl, record, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1072`](./selectors.ts#L1072)
+**Source:** [`src/systems/ucpath/selectors.ts:1077`](./selectors.ts#L1077)
 
 ## `payPathActions.nameInput()` — verified 2026-04-24
 
@@ -940,7 +940,7 @@ Name textbox. exact: true required because "Last Name" and other cells contain "
 
 **Tags:** name, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1080`](./selectors.ts#L1080)
+**Source:** [`src/systems/ucpath/selectors.ts:1085`](./selectors.ts#L1085)
 
 ## `payPathActions.businessUnitInput()` — verified 2026-04-24
 
@@ -948,7 +948,7 @@ Business Unit textbox. exact: true avoids matching "Look up Business Unit".
 
 **Tags:** business-unit, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1088`](./selectors.ts#L1088)
+**Source:** [`src/systems/ucpath/selectors.ts:1093`](./selectors.ts#L1093)
 
 ## `payPathActions.businessUnitLookupButton()` — verified 2026-04-24
 
@@ -956,7 +956,7 @@ Business Unit magnifying-glass lookup button.
 
 **Tags:** business-unit, lookup, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1095`](./selectors.ts#L1095)
+**Source:** [`src/systems/ucpath/selectors.ts:1100`](./selectors.ts#L1100)
 
 ## `payPathActions.positionNumberInput()` — verified 2026-04-24
 
@@ -964,7 +964,7 @@ Position Number textbox.
 
 **Tags:** position, number, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1102`](./selectors.ts#L1102)
+**Source:** [`src/systems/ucpath/selectors.ts:1107`](./selectors.ts#L1107)
 
 ## `payPathActions.positionNumberLookupButton()` — verified 2026-04-24
 
@@ -972,7 +972,7 @@ Position Number lookup button.
 
 **Tags:** position, number, lookup, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1109`](./selectors.ts#L1109)
+**Source:** [`src/systems/ucpath/selectors.ts:1114`](./selectors.ts#L1114)
 
 ## `payPathActions.departmentInput()` — verified 2026-04-24
 
@@ -980,7 +980,7 @@ Department textbox.
 
 **Tags:** department, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1116`](./selectors.ts#L1116)
+**Source:** [`src/systems/ucpath/selectors.ts:1121`](./selectors.ts#L1121)
 
 ## `payPathActions.departmentLookupButton()` — verified 2026-04-24
 
@@ -988,7 +988,7 @@ Department lookup button.
 
 **Tags:** department, lookup, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1123`](./selectors.ts#L1123)
+**Source:** [`src/systems/ucpath/selectors.ts:1128`](./selectors.ts#L1128)
 
 ## `payPathActions.jobCodeInput()` — verified 2026-04-24
 
@@ -996,7 +996,7 @@ Job Code textbox.
 
 **Tags:** job-code, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1130`](./selectors.ts#L1130)
+**Source:** [`src/systems/ucpath/selectors.ts:1135`](./selectors.ts#L1135)
 
 ## `payPathActions.jobCodeLookupButton()` — verified 2026-04-24
 
@@ -1004,7 +1004,7 @@ Job Code lookup button.
 
 **Tags:** job-code, lookup, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1137`](./selectors.ts#L1137)
+**Source:** [`src/systems/ucpath/selectors.ts:1142`](./selectors.ts#L1142)
 
 ## `payPathActions.employeeClassificationInput()` — verified 2026-04-24
 
@@ -1012,7 +1012,7 @@ Employee Classification textbox.
 
 **Tags:** employee, classification, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1144`](./selectors.ts#L1144)
+**Source:** [`src/systems/ucpath/selectors.ts:1149`](./selectors.ts#L1149)
 
 ## `payPathActions.employeeClassificationLookupButton()` — verified 2026-04-24
 
@@ -1020,7 +1020,7 @@ Employee Classification lookup button.
 
 **Tags:** employee, classification, lookup, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1151`](./selectors.ts#L1151)
+**Source:** [`src/systems/ucpath/selectors.ts:1156`](./selectors.ts#L1156)
 
 ## `payPathActions.employeeStatusSelect()` — verified 2026-04-24
 
@@ -1028,7 +1028,7 @@ Employee Status combobox. Options: Active, Leave With Pay, Leave of Absence, Sho
 
 **Tags:** employee, status, combobox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1159`](./selectors.ts#L1159)
+**Source:** [`src/systems/ucpath/selectors.ts:1164`](./selectors.ts#L1164)
 
 ## `payPathActions.caseSensitiveCheckbox()` — verified 2026-04-24
 
@@ -1036,7 +1036,7 @@ Case Sensitive checkbox.
 
 **Tags:** case, sensitive, checkbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1166`](./selectors.ts#L1166)
+**Source:** [`src/systems/ucpath/selectors.ts:1171`](./selectors.ts#L1171)
 
 ## `payPathActions.searchButton()` — verified 2026-04-24
 
@@ -1044,7 +1044,7 @@ Search submit button. Shared `#PTS_CFG_CL_WRK_PTS_SRCH_BTN` ID with other Find-a
 
 **Tags:** search, submit, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1174`](./selectors.ts#L1174)
+**Source:** [`src/systems/ucpath/selectors.ts:1179`](./selectors.ts#L1179)
 
 ## `payPathActions.clearButton()` — verified 2026-04-24
 
@@ -1052,7 +1052,7 @@ Clear search criteria button.
 
 **Tags:** clear, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1181`](./selectors.ts#L1181)
+**Source:** [`src/systems/ucpath/selectors.ts:1186`](./selectors.ts#L1186)
 
 ## `payPathActions.saveAndSubmitButton()`
 
@@ -1060,7 +1060,7 @@ Save and Submit button on the post-search PayPath edit page. The `UC_E102_PP_WRK
 
 **Tags:** save, submit, button, paypath-actions, edit
 
-**Source:** [`src/systems/ucpath/selectors.ts:1191`](./selectors.ts#L1191)
+**Source:** [`src/systems/ucpath/selectors.ts:1196`](./selectors.ts#L1196)
 
 ## `payPathActions.alertOkButton()` — verified 2026-03-17
 
@@ -1068,7 +1068,7 @@ PeopleSoft alert dialog OK button (e.g. "payroll in progress" warning).
 
 **Tags:** alert, dialog, ok, button, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1202`](./selectors.ts#L1202)
+**Source:** [`src/systems/ucpath/selectors.ts:1207`](./selectors.ts#L1207)
 
 ## `payPathActions.employeeNameDisplay()` — verified 2026-03-17
 
@@ -1076,7 +1076,7 @@ Employee name display span in the Position Data header (after search). Falls bac
 
 **Tags:** employee, name, display, position-data, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1210`](./selectors.ts#L1210)
+**Source:** [`src/systems/ucpath/selectors.ts:1215`](./selectors.ts#L1215)
 
 ## `payPathActions.effectiveDateInput()` — verified 2026-03-17
 
@@ -1084,7 +1084,7 @@ Effective Date textbox on the Position Data tab.
 
 **Tags:** effective-date, textbox, position-data, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1218`](./selectors.ts#L1218)
+**Source:** [`src/systems/ucpath/selectors.ts:1223`](./selectors.ts#L1223)
 
 ## `payPathActions.positionChangeReasonInput()` — verified 2026-03-17
 
@@ -1092,7 +1092,7 @@ Position Change Reason textbox on the Position Data tab.
 
 **Tags:** position, change-reason, textbox, position-data, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1225`](./selectors.ts#L1225)
+**Source:** [`src/systems/ucpath/selectors.ts:1230`](./selectors.ts#L1230)
 
 ## `payPathActions.positionPoolInput()` — verified 2026-03-17
 
@@ -1100,7 +1100,7 @@ Position Pool textbox on the Position Data tab.
 
 **Tags:** position, pool, textbox, position-data, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1232`](./selectors.ts#L1232)
+**Source:** [`src/systems/ucpath/selectors.ts:1237`](./selectors.ts#L1237)
 
 ## `payPathActions.jobDataTab()` — verified 2026-03-17
 
@@ -1108,7 +1108,7 @@ Job Data tab on the PayPath edit page.
 
 **Tags:** job-data, tab, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1239`](./selectors.ts#L1239)
+**Source:** [`src/systems/ucpath/selectors.ts:1244`](./selectors.ts#L1244)
 
 ## `payPathActions.jobDataCommentsInput()` — verified 2026-03-17
 
@@ -1116,7 +1116,7 @@ Job Data Comments textbox.
 
 **Tags:** job-data, comments, textbox, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1246`](./selectors.ts#L1246)
+**Source:** [`src/systems/ucpath/selectors.ts:1251`](./selectors.ts#L1251)
 
 ## `payPathActions.additionalPayDataTab()` — verified 2026-03-17
 
@@ -1124,7 +1124,7 @@ Additional Pay Data tab on the PayPath edit page.
 
 **Tags:** additional-pay, tab, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1253`](./selectors.ts#L1253)
+**Source:** [`src/systems/ucpath/selectors.ts:1258`](./selectors.ts#L1258)
 
 ## `payPathActions.initiatorsCommentsInput()` — verified 2026-03-17
 
@@ -1132,7 +1132,7 @@ Initiator's Comments textbox on the Additional Pay Data tab.
 
 **Tags:** initiators-comments, textbox, additional-pay, paypath-actions
 
-**Source:** [`src/systems/ucpath/selectors.ts:1260`](./selectors.ts#L1260)
+**Source:** [`src/systems/ucpath/selectors.ts:1265`](./selectors.ts#L1265)
 
 ## `ssSmartHRTransactions.txnNumberTextbox()` — verified 2026-04-24
 
@@ -1140,7 +1140,7 @@ Transaction ID textbox.
 
 **Tags:** transaction, id, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1277`](./selectors.ts#L1277)
+**Source:** [`src/systems/ucpath/selectors.ts:1282`](./selectors.ts#L1282)
 
 ## `ssSmartHRTransactions.nameInput()` — verified 2026-04-24
 
@@ -1148,7 +1148,7 @@ Name textbox.
 
 **Tags:** name, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1284`](./selectors.ts#L1284)
+**Source:** [`src/systems/ucpath/selectors.ts:1289`](./selectors.ts#L1289)
 
 ## `ssSmartHRTransactions.emplIdInput()` — verified 2026-04-24
 
@@ -1156,7 +1156,7 @@ Empl ID textbox.
 
 **Tags:** empl, id, employee, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1291`](./selectors.ts#L1291)
+**Source:** [`src/systems/ucpath/selectors.ts:1296`](./selectors.ts#L1296)
 
 ## `ssSmartHRTransactions.actionInput()` — verified 2026-04-24
 
@@ -1164,7 +1164,7 @@ Action textbox (PeopleSoft action code, e.g. HIR, REH).
 
 **Tags:** action, code, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1298`](./selectors.ts#L1298)
+**Source:** [`src/systems/ucpath/selectors.ts:1303`](./selectors.ts#L1303)
 
 ## `ssSmartHRTransactions.actionLookupButton()` — verified 2026-04-24
 
@@ -1172,7 +1172,7 @@ Action lookup button.
 
 **Tags:** action, lookup, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1305`](./selectors.ts#L1305)
+**Source:** [`src/systems/ucpath/selectors.ts:1310`](./selectors.ts#L1310)
 
 ## `ssSmartHRTransactions.approvalStatusSelect()` — verified 2026-04-24
 
@@ -1180,7 +1180,7 @@ Approval Status combobox. Options: Approved, Denied, Error, Manually Processed, 
 
 **Tags:** approval, status, combobox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1313`](./selectors.ts#L1313)
+**Source:** [`src/systems/ucpath/selectors.ts:1318`](./selectors.ts#L1318)
 
 ## `ssSmartHRTransactions.businessUnitInput()` — verified 2026-04-24
 
@@ -1188,7 +1188,7 @@ Business Unit textbox.
 
 **Tags:** business-unit, textbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1320`](./selectors.ts#L1320)
+**Source:** [`src/systems/ucpath/selectors.ts:1325`](./selectors.ts#L1325)
 
 ## `ssSmartHRTransactions.businessUnitLookupButton()` — verified 2026-04-24
 
@@ -1196,7 +1196,7 @@ Business Unit lookup button.
 
 **Tags:** business-unit, lookup, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1327`](./selectors.ts#L1327)
+**Source:** [`src/systems/ucpath/selectors.ts:1332`](./selectors.ts#L1332)
 
 ## `ssSmartHRTransactions.caseSensitiveCheckbox()` — verified 2026-04-24
 
@@ -1204,7 +1204,7 @@ Case Sensitive checkbox.
 
 **Tags:** case, sensitive, checkbox, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1334`](./selectors.ts#L1334)
+**Source:** [`src/systems/ucpath/selectors.ts:1339`](./selectors.ts#L1339)
 
 ## `ssSmartHRTransactions.searchButton()` — verified 2026-04-24
 
@@ -1212,7 +1212,7 @@ Search submit button (`#PTS_CFG_CL_WRK_PTS_SRCH_BTN`).
 
 **Tags:** search, submit, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1341`](./selectors.ts#L1341)
+**Source:** [`src/systems/ucpath/selectors.ts:1346`](./selectors.ts#L1346)
 
 ## `ssSmartHRTransactions.clearButton()` — verified 2026-04-24
 
@@ -1220,7 +1220,7 @@ Clear search criteria button.
 
 **Tags:** clear, button, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1348`](./selectors.ts#L1348)
+**Source:** [`src/systems/ucpath/selectors.ts:1353`](./selectors.ts#L1353)
 
 ## `ssSmartHRTransactions.transactionResultRow()` — verified 2026-06-24
 
@@ -1228,7 +1228,7 @@ Drill into a specific transaction from the results grid by its Transaction ID �
 
 **Tags:** transaction, drill-in, row, result, detail, effdt, ss-smart-hr
 
-**Source:** [`src/systems/ucpath/selectors.ts:1363`](./selectors.ts#L1363)
+**Source:** [`src/systems/ucpath/selectors.ts:1368`](./selectors.ts#L1368)
 
 ## `smartHRTransactionStatus.hrReviewStatusSelect()` — verified 2026-04-24
 
@@ -1236,7 +1236,7 @@ HR Review Status combobox — top filter. Options: All, Cancelled, My Transactio
 
 **Tags:** hr-review, status, combobox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1389`](./selectors.ts#L1389)
+**Source:** [`src/systems/ucpath/selectors.ts:1394`](./selectors.ts#L1394)
 
 ## `smartHRTransactionStatus.businessUnitInput()` — verified 2026-04-24
 
@@ -1244,7 +1244,7 @@ Business Unit textbox filter.
 
 **Tags:** business-unit, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1396`](./selectors.ts#L1396)
+**Source:** [`src/systems/ucpath/selectors.ts:1401`](./selectors.ts#L1401)
 
 ## `smartHRTransactionStatus.businessUnitLookupButton()` — verified 2026-04-24
 
@@ -1252,7 +1252,7 @@ Business Unit lookup button.
 
 **Tags:** business-unit, lookup, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1403`](./selectors.ts#L1403)
+**Source:** [`src/systems/ucpath/selectors.ts:1408`](./selectors.ts#L1408)
 
 ## `smartHRTransactionStatus.transactionTypeSelect()` — verified 2026-04-24
 
@@ -1260,7 +1260,7 @@ Transaction Type combobox. Options: All, Change Job Data, Change Job and Profile
 
 **Tags:** transaction-type, combobox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1414`](./selectors.ts#L1414)
+**Source:** [`src/systems/ucpath/selectors.ts:1419`](./selectors.ts#L1419)
 
 ## `smartHRTransactionStatus.emplIdInput()` — verified 2026-04-24
 
@@ -1268,7 +1268,7 @@ Empl ID textbox filter.
 
 **Tags:** empl, id, employee, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1421`](./selectors.ts#L1421)
+**Source:** [`src/systems/ucpath/selectors.ts:1426`](./selectors.ts#L1426)
 
 ## `smartHRTransactionStatus.transactionStatusSelect()` — verified 2026-04-24
 
@@ -1276,7 +1276,7 @@ Transaction Status combobox. Options: Action Required, All, Cancel, Completed, D
 
 **Tags:** transaction-status, combobox, status, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1429`](./selectors.ts#L1429)
+**Source:** [`src/systems/ucpath/selectors.ts:1434`](./selectors.ts#L1434)
 
 ## `smartHRTransactionStatus.firstNameInput()` — verified 2026-04-24
 
@@ -1284,7 +1284,7 @@ First Name textbox filter.
 
 **Tags:** first-name, name, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1436`](./selectors.ts#L1436)
+**Source:** [`src/systems/ucpath/selectors.ts:1441`](./selectors.ts#L1441)
 
 ## `smartHRTransactionStatus.startDateFromInput()` — verified 2026-04-24
 
@@ -1292,7 +1292,7 @@ Start Date From textbox (MM/DD/YYYY). Defaults to ~10 days before today.
 
 **Tags:** start-date, from, date, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1444`](./selectors.ts#L1444)
+**Source:** [`src/systems/ucpath/selectors.ts:1449`](./selectors.ts#L1449)
 
 ## `smartHRTransactionStatus.startDateFromCalendarButton()` — verified 2026-04-24
 
@@ -1300,7 +1300,7 @@ Calendar picker for Start Date From.
 
 **Tags:** start-date, from, calendar, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1451`](./selectors.ts#L1451)
+**Source:** [`src/systems/ucpath/selectors.ts:1456`](./selectors.ts#L1456)
 
 ## `smartHRTransactionStatus.toDateInput()` — verified 2026-04-24
 
@@ -1308,7 +1308,7 @@ Calendar picker for Start Date From.
 
 **Tags:** to-date, end-date, date, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1459`](./selectors.ts#L1459)
+**Source:** [`src/systems/ucpath/selectors.ts:1464`](./selectors.ts#L1464)
 
 ## `smartHRTransactionStatus.toDateCalendarButton()` — verified 2026-04-24
 
@@ -1316,7 +1316,7 @@ Calendar picker for the To date.
 
 **Tags:** to-date, end-date, calendar, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1466`](./selectors.ts#L1466)
+**Source:** [`src/systems/ucpath/selectors.ts:1471`](./selectors.ts#L1471)
 
 ## `smartHRTransactionStatus.lastNameInput()` — verified 2026-04-24
 
@@ -1324,7 +1324,7 @@ Last Name textbox filter.
 
 **Tags:** last-name, name, textbox, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1473`](./selectors.ts#L1473)
+**Source:** [`src/systems/ucpath/selectors.ts:1478`](./selectors.ts#L1478)
 
 ## `smartHRTransactionStatus.downloadButton()` — verified 2026-04-24
 
@@ -1332,7 +1332,7 @@ Download button — stays disabled until a Refresh has populated rows.
 
 **Tags:** download, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1481`](./selectors.ts#L1481)
+**Source:** [`src/systems/ucpath/selectors.ts:1486`](./selectors.ts#L1486)
 
 ## `smartHRTransactionStatus.refreshButton()` — verified 2026-04-24
 
@@ -1340,7 +1340,7 @@ Refresh button — runs the filter and populates the results grid.
 
 **Tags:** refresh, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1489`](./selectors.ts#L1489)
+**Source:** [`src/systems/ucpath/selectors.ts:1494`](./selectors.ts#L1494)
 
 ## `smartHRTransactionStatus.clearButton()` — verified 2026-04-24
 
@@ -1348,7 +1348,7 @@ Clear button — resets all filter fields to defaults.
 
 **Tags:** clear, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1496`](./selectors.ts#L1496)
+**Source:** [`src/systems/ucpath/selectors.ts:1501`](./selectors.ts#L1501)
 
 ## `smartHRTransactionStatus.downloadToExcelButton()` — verified 2026-04-24
 
@@ -1356,7 +1356,7 @@ Toolbar button: "Download Transaction Status Table to Excel" — exports the res
 
 **Tags:** download, excel, export, button, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1504`](./selectors.ts#L1504)
+**Source:** [`src/systems/ucpath/selectors.ts:1509`](./selectors.ts#L1509)
 
 ## `smartHRTransactionStatus.returnToSmartHRLink()` — verified 2026-04-24
 
@@ -1364,7 +1364,7 @@ Toolbar button: "Download Transaction Status Table to Excel" — exports the res
 
 **Tags:** return, smart-hr, link, transaction-status
 
-**Source:** [`src/systems/ucpath/selectors.ts:1513`](./selectors.ts#L1513)
+**Source:** [`src/systems/ucpath/selectors.ts:1518`](./selectors.ts#L1518)
 
 ## `emergencyContact.emplIdInput()` — verified 2026-04-14
 
@@ -1372,7 +1372,7 @@ Empl ID textbox at page top level.
 
 **Tags:** empl, id, employee, textbox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1524`](./selectors.ts#L1524)
+**Source:** [`src/systems/ucpath/selectors.ts:1529`](./selectors.ts#L1529)
 
 ## `emergencyContact.searchButton()` — verified 2026-04-14
 
@@ -1380,7 +1380,7 @@ Search button (exact: true).
 
 **Tags:** search, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1531`](./selectors.ts#L1531)
+**Source:** [`src/systems/ucpath/selectors.ts:1536`](./selectors.ts#L1536)
 
 ## `emergencyContact.noMatchMessage()` — verified 2026-04-14
 
@@ -1388,7 +1388,7 @@ Search button (exact: true).
 
 **Tags:** no-match, message, emergency-contact, search
 
-**Source:** [`src/systems/ucpath/selectors.ts:1538`](./selectors.ts#L1538)
+**Source:** [`src/systems/ucpath/selectors.ts:1543`](./selectors.ts#L1543)
 
 ## `emergencyContact.drillInLink()` — verified 2026-04-14
 
@@ -1396,7 +1396,7 @@ Drill-in link in multi-result grid.
 
 **Tags:** drill-in, link, results, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1545`](./selectors.ts#L1545)
+**Source:** [`src/systems/ucpath/selectors.ts:1550`](./selectors.ts#L1550)
 
 ## `emergencyContact.contactNameInputs()` — verified 2026-04-14
 
@@ -1404,7 +1404,7 @@ Every Contact Name textbox on the editor (for duplicate checking).
 
 **Tags:** contact, name, textbox, emergency-contact, duplicate
 
-**Source:** [`src/systems/ucpath/selectors.ts:1553`](./selectors.ts#L1553)
+**Source:** [`src/systems/ucpath/selectors.ts:1558`](./selectors.ts#L1558)
 
 ## `emergencyContact.primaryContactCheckboxes()` — verified 2026-04-28
 
@@ -1412,7 +1412,7 @@ Every Primary Contact checkbox on the editor — one per row, in document order,
 
 **Tags:** primary, contact, checkbox, emergency-contact, demote
 
-**Source:** [`src/systems/ucpath/selectors.ts:1564`](./selectors.ts#L1564)
+**Source:** [`src/systems/ucpath/selectors.ts:1569`](./selectors.ts#L1569)
 
 ## `emergencyContact.saveButton()` — verified 2026-04-14
 
@@ -1420,7 +1420,7 @@ Save button at the bottom of the editor.
 
 **Tags:** save, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1571`](./selectors.ts#L1571)
+**Source:** [`src/systems/ucpath/selectors.ts:1576`](./selectors.ts#L1576)
 
 ## `emergencyContact.messageDialog()` — verified 2026-07-08
 
@@ -1428,7 +1428,7 @@ PeopleSoft "Message" alert dialog raised after a failed editor save (e.g. the (1
 
 **Tags:** message, dialog, alert, error, save, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1582`](./selectors.ts#L1582)
+**Source:** [`src/systems/ucpath/selectors.ts:1587`](./selectors.ts#L1587)
 
 ## `emergencyContact.messageDialogOkButton()` — verified 2026-07-08
 
@@ -1436,7 +1436,7 @@ OK button inside the "Message" alert dialog — dismisses the save error. NEEDS 
 
 **Tags:** ok, button, message, dialog, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1592`](./selectors.ts#L1592)
+**Source:** [`src/systems/ucpath/selectors.ts:1597`](./selectors.ts#L1597)
 
 ## `emergencyContact.saveErrorBanner()` — verified 2026-07-08
 
@@ -1444,7 +1444,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** error, banner, alert, save, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1605`](./selectors.ts#L1605)
+**Source:** [`src/systems/ucpath/selectors.ts:1610`](./selectors.ts#L1610)
 
 ## `emergencyContact.addNewRowButton()` — verified 2026-07-08
 
@@ -1452,7 +1452,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** add, new, row, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1614`](./selectors.ts#L1614)
+**Source:** [`src/systems/ucpath/selectors.ts:1619`](./selectors.ts#L1619)
 
 ## `emergencyContact.relationshipComboBox()` — verified 2026-07-08
 
@@ -1460,7 +1460,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** relationship, combobox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1623`](./selectors.ts#L1623)
+**Source:** [`src/systems/ucpath/selectors.ts:1628`](./selectors.ts#L1628)
 
 ## `emergencyContact.sameAddressAsEmployeeCheckbox()` — verified 2026-07-08
 
@@ -1468,7 +1468,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** same, address, employee, checkbox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1632`](./selectors.ts#L1632)
+**Source:** [`src/systems/ucpath/selectors.ts:1637`](./selectors.ts#L1637)
 
 ## `emergencyContact.editAddressButton()` — verified 2026-07-08
 
@@ -1476,7 +1476,7 @@ Page-level PeopleSoft error banner on the emergency contact editor (same class/i
 
 **Tags:** edit, address, button, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1641`](./selectors.ts#L1641)
+**Source:** [`src/systems/ucpath/selectors.ts:1646`](./selectors.ts#L1646)
 
 ## `emergencyContact.address1Input()` — verified 2026-07-08
 
@@ -1484,7 +1484,7 @@ Address 1 textbox inside the Edit Address modal.
 
 **Tags:** address, street, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1649`](./selectors.ts#L1649)
+**Source:** [`src/systems/ucpath/selectors.ts:1654`](./selectors.ts#L1654)
 
 ## `emergencyContact.cityInput()` — verified 2026-07-08
 
@@ -1492,7 +1492,7 @@ City textbox inside the Edit Address modal.
 
 **Tags:** address, city, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1657`](./selectors.ts#L1657)
+**Source:** [`src/systems/ucpath/selectors.ts:1662`](./selectors.ts#L1662)
 
 ## `emergencyContact.stateInput()` — verified 2026-07-08
 
@@ -1500,7 +1500,7 @@ State textbox inside the Edit Address modal.
 
 **Tags:** address, state, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1665`](./selectors.ts#L1665)
+**Source:** [`src/systems/ucpath/selectors.ts:1670`](./selectors.ts#L1670)
 
 ## `emergencyContact.postalInput()` — verified 2026-07-08
 
@@ -1508,7 +1508,7 @@ Postal textbox inside the Edit Address modal.
 
 **Tags:** address, postal, zip, textbox, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1673`](./selectors.ts#L1673)
+**Source:** [`src/systems/ucpath/selectors.ts:1678`](./selectors.ts#L1678)
 
 ## `emergencyContact.editAddressOkButton()` — verified 2026-07-08
 
@@ -1516,7 +1516,7 @@ OK button inside the Edit Address modal (exact match — disambiguates from othe
 
 **Tags:** ok, button, modal, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1682`](./selectors.ts#L1682)
+**Source:** [`src/systems/ucpath/selectors.ts:1687`](./selectors.ts#L1687)
 
 ## `emergencyContact.phoneInput()` — verified 2026-07-08
 
@@ -1524,7 +1524,7 @@ Phone textbox (exact match) on the Contact Address/Phone tab.
 
 **Tags:** phone, textbox, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1691`](./selectors.ts#L1691)
+**Source:** [`src/systems/ucpath/selectors.ts:1696`](./selectors.ts#L1696)
 
 ## `emergencyContact.personIdText()` — verified 2026-07-08
 
@@ -1532,7 +1532,7 @@ Phone textbox (exact match) on the Contact Address/Phone tab.
 
 **Tags:** person, id, text, header, emergency-contact
 
-**Source:** [`src/systems/ucpath/selectors.ts:1701`](./selectors.ts#L1701)
+**Source:** [`src/systems/ucpath/selectors.ts:1706`](./selectors.ts#L1706)
 
 ## `oathSignature.getPersonProfileFrame()` — verified 2026-04-22
 
@@ -1540,7 +1540,7 @@ Person Profiles content iframe FrameLocator. Distinct from Smart HR's `#main_tar
 
 **Tags:** iframe, frame, person-profile, oath
 
-**Source:** [`src/systems/ucpath/selectors.ts:1722`](./selectors.ts#L1722)
+**Source:** [`src/systems/ucpath/selectors.ts:1727`](./selectors.ts#L1727)
 
 ## `oathSignature.emplIdInput()` — verified 2026-04-22
 
@@ -1548,7 +1548,7 @@ Empl ID textbox on the Find-an-Existing-Value search form.
 
 **Tags:** empl, id, employee, textbox, person-profile, search
 
-**Source:** [`src/systems/ucpath/selectors.ts:1729`](./selectors.ts#L1729)
+**Source:** [`src/systems/ucpath/selectors.ts:1734`](./selectors.ts#L1734)
 
 ## `oathSignature.searchButton()` — verified 2026-04-22
 
@@ -1556,7 +1556,7 @@ Search button (exact: true disambiguates from "Save Search").
 
 **Tags:** search, button, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1736`](./selectors.ts#L1736)
+**Source:** [`src/systems/ucpath/selectors.ts:1741`](./selectors.ts#L1741)
 
 ## `oathSignature.clearSearchButton()` — verified 2026-04-22
 
@@ -1564,7 +1564,7 @@ Clear button on the search form — clears Empl ID between iterations.
 
 **Tags:** clear, button, person-profile, search
 
-**Source:** [`src/systems/ucpath/selectors.ts:1743`](./selectors.ts#L1743)
+**Source:** [`src/systems/ucpath/selectors.ts:1748`](./selectors.ts#L1748)
 
 ## `oathSignature.addNewOathLink()` — verified 2026-04-22
 
@@ -1572,7 +1572,7 @@ Clear button on the search form — clears Empl ID between iterations.
 
 **Tags:** add, new, oath, signature, link, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1754`](./selectors.ts#L1754)
+**Source:** [`src/systems/ucpath/selectors.ts:1759`](./selectors.ts#L1759)
 
 ## `oathSignature.noOathSentinel()` — verified 2026-04-22
 
@@ -1580,7 +1580,7 @@ Clear button on the search form — clears Empl ID between iterations.
 
 **Tags:** no, existing, oath, sentinel, text, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1766`](./selectors.ts#L1766)
+**Source:** [`src/systems/ucpath/selectors.ts:1771`](./selectors.ts#L1771)
 
 ## `oathSignature.oathDateInput()` — verified 2026-07-01
 
@@ -1588,7 +1588,7 @@ Oath Signature Date textbox inside the "Add New Oath Signature Date" sub-form. D
 
 **Tags:** oath, signature, date, textbox, person-profile, effdt
 
-**Source:** [`src/systems/ucpath/selectors.ts:1779`](./selectors.ts#L1779)
+**Source:** [`src/systems/ucpath/selectors.ts:1784`](./selectors.ts#L1784)
 
 ## `oathSignature.oathOkButton()` — verified 2026-04-22
 
@@ -1596,7 +1596,7 @@ OK button on the oath-detail sub-form — applies the row and returns to the pro
 
 **Tags:** ok, button, oath, sub-form, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1790`](./selectors.ts#L1790)
+**Source:** [`src/systems/ucpath/selectors.ts:1795`](./selectors.ts#L1795)
 
 ## `oathSignature.oathCancelButton()` — verified 2026-04-22
 
@@ -1604,7 +1604,7 @@ Cancel button on the oath-detail sub-form — used by test/dry paths.
 
 **Tags:** cancel, button, oath, sub-form, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1797`](./selectors.ts#L1797)
+**Source:** [`src/systems/ucpath/selectors.ts:1802`](./selectors.ts#L1802)
 
 ## `oathSignature.saveButton()` — verified 2026-04-22
 
@@ -1612,7 +1612,7 @@ Save button at the bottom of the Person Profile form — commits the staged oath
 
 **Tags:** save, button, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1805`](./selectors.ts#L1805)
+**Source:** [`src/systems/ucpath/selectors.ts:1810`](./selectors.ts#L1810)
 
 ## `oathSignature.returnToSearchButton()` — verified 2026-04-22
 
@@ -1620,7 +1620,7 @@ Return to Search button shown after save — clears the profile and returns to t
 
 **Tags:** return, search, button, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1813`](./selectors.ts#L1813)
+**Source:** [`src/systems/ucpath/selectors.ts:1818`](./selectors.ts#L1818)
 
 ## `oathSignature.employeeNameDisplay()` — verified 2026-07-01
 
@@ -1628,7 +1628,7 @@ Employee name display on the loaded Person Profile — visible near the Empl ID 
 
 **Tags:** employee, name, display, person-profile
 
-**Source:** [`src/systems/ucpath/selectors.ts:1825`](./selectors.ts#L1825)
+**Source:** [`src/systems/ucpath/selectors.ts:1830`](./selectors.ts#L1830)
 
 ## `oathSignature.existingOathDate()` — verified 2026-07-02
 
@@ -1636,7 +1636,7 @@ The EXISTING (already-saved) Oath Signature Date on the loaded profile — a dis
 
 **Tags:** existing, oath, signature, date, display, person-profile, effdt
 
-**Source:** [`src/systems/ucpath/selectors.ts:1842`](./selectors.ts#L1842)
+**Source:** [`src/systems/ucpath/selectors.ts:1847`](./selectors.ts#L1847)
 
 ## `oathSignature.emplIdDisplay()` — verified 2026-07-08
 
@@ -1644,4 +1644,4 @@ The Empl ID displayed on the loaded Person Profile header — display-only span 
 
 **Tags:** empl-id, display, person-profile, identity, gate
 
-**Source:** [`src/systems/ucpath/selectors.ts:1855`](./selectors.ts#L1855)
+**Source:** [`src/systems/ucpath/selectors.ts:1860`](./selectors.ts#L1860)
