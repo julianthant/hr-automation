@@ -85,6 +85,15 @@ export interface DaemonState {
   workerStore: ControlWorkerStore | null
   exitError: unknown
   workflowInstanceForCleanup: string | null
+  /**
+   * True once this daemon finished auth and entered the claim loop (`idle`).
+   * Used by shutdown cleanup: if the last daemon dies *during* auth (Duo hang,
+   * browser closed mid-login, stop while authenticating), queued items must
+   * stay queued so a newly spawned worker can pick them up — mass-failing them
+   * is what made "Add a worker" look broken (first daemon dies mid-Duo → every
+   * pending member goes Failed before a peer can finish auth).
+   */
+  authCompleted: boolean
 }
 
 /**

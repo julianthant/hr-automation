@@ -197,6 +197,7 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
     // in-flight or queued items it marks as cancelled. Stays null if the
     // body never ran (e.g. session.launch threw before the callback).
     workflowInstanceForCleanup: null,
+    authCompleted: false,
   }
   const setPhase = (next: DaemonPhase): void => {
     if (state.phase === next) return
@@ -450,6 +451,10 @@ export async function runWorkflowDaemon<TData, TSteps extends readonly string[]>
           for (const sys of wf.config.systems) {
             if (isIdleRefreshSystem(sys.id)) emitIdleSignal(instance, trackerDir, sys.id, 'touch')
           }
+          // Auth succeeded — claim-loop entry is safe. Shutdown cleanup uses
+          // this to decide whether a last-daemon exit may mass-fail the queue
+          // (only after we were actually able to claim work).
+          state.authCompleted = true
         } catch (e) {
           const failedSession = session ?? state.activeSession
           if (failedSession) {

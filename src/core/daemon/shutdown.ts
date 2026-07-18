@@ -43,6 +43,27 @@ import { terminalizeWithReconciliation } from './terminalization.js'
 export { buildShutdownTrackerData }
 export type { ShutdownTrackerDataOpts }
 
+/**
+ * Whether the last daemon's shutdown sweep should mass-fail never-claimed
+ * queued items. Pure — extracted so the auth-never-completed leave-queue
+ * contract is unit-testable without driving a full daemon teardown.
+ *
+ * Leave the queue intact when auth never completed: a Duo hang / mid-login
+ * stop / browser-closed-during-auth would otherwise Fail every pending member
+ * before a newly spawned peer can finish auth and claim (the "Add a worker"
+ * cascade that wiped an I-9 Check fan-out).
+ */
+export function shouldFailQueuedItemsOnLastDaemonExit(args: {
+  authCompleted: boolean
+  drainOnlyShutdown: boolean
+  handoffPeerCount: number
+}): boolean {
+  if (args.drainOnlyShutdown) return false
+  if (args.handoffPeerCount > 0) return false
+  if (!args.authCompleted) return false
+  return true
+}
+
 export function createAbortLaunchAndKillSession<TData, TSteps extends readonly string[]>(
   wf: RegisteredWorkflow<TData, TSteps>,
   instanceId: string,
@@ -489,105 +510,123 @@ export async function runDaemonShutdownCleanup<TData, TSteps extends readonly st
     if (handoffPeers.length === 0 && !state.drainOnlyShutdown) {
       const queueState = await readQueueState(wf.config.name, trackerDir)
       if (queueState.queued.length > 0) {
-        log.warn(
-          `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${queueState.queued.length} unclaimed queue item(s); marking failed (no daemon available)`,
-        )
-        const nowIso = new Date().toISOString()
-        const failReason =
-          'No daemon available to run this item — the last daemon was stopped.'
-        // Re-read the queue state right before iterating so a concurrent
-        // /api/cancel-queued (which writes its own terminal tracker row)
-        // wins the race: items that the user just cancelled are no longer in
-        // `freshState.queued`, so we skip them and their cancel reason is
-        // preserved on the dashboard.
-        const freshState = await readQueueState(wf.config.name, trackerDir).catch(
-          () => queueState,
-        )
-        const stillQueued = new Set(freshState.queued.map((q) => q.id))
-        for (const item of queueState.queued) {
-          if (!stillQueued.has(item.id)) {
-            // Concurrent cancel-queued already terminated this item.
-            // Don't overwrite — the cancel handler's tracker row stays
-            // as the latest authoritative status.
-            continue
-          }
-          const runId = item.runId ?? randomUUID()
-          // Cross-process single-terminal (E2E-105): on a simultaneous stop-all
-          // several dying daemons each reach this sweep and each elect
-          // themselves the queue owner (the run-registry terminal-write token is
-          // per-process, so it can't dedupe across daemon processes). The
-          // guarded SQLite mark (terminal_at IS NULL) is the only cross-process
-          // authority — only the daemon that WINS the transition settles
-          // dependencies and emits the row; the losers skip, so the item gets
-          // exactly ONE terminal row. A genuine mark ERROR (not a lost race) is
-          // NOT a win — the terminal write may never have landed, so it's
-          // treated like a lost race (skip) instead of settling a dependency /
-          // emitting a row for a task that may still be sitting active.
-          let won: boolean
-          try {
-            won = await markItemFailedIfActive(wf.config.name, item.id, failReason, runId, trackerDir)
-          } catch (e) {
-            won = false
+        // Auth never completed (Duo hang / browser closed mid-login / stop while
+        // authenticating): leave the queue intact. Mass-failing here is what made
+        // "Add a worker" look broken — the first daemon dies mid-Duo and every
+        // pending member goes Failed before a peer can finish auth and claim.
+        if (
+          !shouldFailQueuedItemsOnLastDaemonExit({
+            authCompleted: state.authCompleted,
+            drainOnlyShutdown: state.drainOnlyShutdown,
+            handoffPeerCount: handoffPeers.length,
+          })
+        ) {
+          if (!state.authCompleted) {
             log.warn(
-              `[Daemon ${wf.config.name}/${instanceId}] mark-terminal threw for queued item '${item.id}' — not treating as won: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
+              `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting during auth with ${queueState.queued.length} unclaimed queue item(s); leaving them queued for a new worker`,
             )
           }
-          if (!won) continue
-          if (item.taskId) {
+        } else {
+          log.warn(
+            `[Daemon ${wf.config.name}/${instanceId}] last daemon exiting with ${queueState.queued.length} unclaimed queue item(s); marking failed (no daemon available)`,
+          )
+          const nowIso = new Date().toISOString()
+          const failReason =
+            'No daemon available to run this item — the last daemon was stopped.'
+          // Re-read the queue state right before iterating so a concurrent
+          // /api/cancel-queued (which writes its own terminal tracker row)
+          // wins the race: items that the user just cancelled are no longer in
+          // `freshState.queued`, so we skip them and their cancel reason is
+          // preserved on the dashboard.
+          const freshState = await readQueueState(wf.config.name, trackerDir).catch(
+            () => queueState,
+          )
+          const stillQueued = new Set(freshState.queued.map((q) => q.id))
+          for (const item of queueState.queued) {
+            if (!stillQueued.has(item.id)) {
+              // Concurrent cancel-queued already terminated this item.
+              // Don't overwrite — the cancel handler's tracker row stays
+              // as the latest authoritative status.
+              continue
+            }
+            const runId = item.runId ?? randomUUID()
+            // Cross-process single-terminal (E2E-105): on a simultaneous stop-all
+            // several dying daemons each reach this sweep and each elect
+            // themselves the queue owner (the run-registry terminal-write token is
+            // per-process, so it can't dedupe across daemon processes). The
+            // guarded SQLite mark (terminal_at IS NULL) is the only cross-process
+            // authority — only the daemon that WINS the transition settles
+            // dependencies and emits the row; the losers skip, so the item gets
+            // exactly ONE terminal row. A genuine mark ERROR (not a lost race) is
+            // NOT a win — the terminal write may never have landed, so it's
+            // treated like a lost race (skip) instead of settling a dependency /
+            // emitting a row for a task that may still be sitting active.
+            let won: boolean
             try {
-              const released = taskStore.markDependencyFromChildTerminal({
-                childTaskId: item.taskId,
-                childState: 'failed',
-              })
-              void wakeDaemonsForReleasedParents(released, trackerDir)
+              won = await markItemFailedIfActive(wf.config.name, item.id, failReason, runId, trackerDir)
             } catch (e) {
-              // Best-effort (last-daemon shutdown sweep, mirrors the `won`
-              // handling above): a dependent parent may stay stuck in
-              // waiting_dependencies until manually recovered, so this must
-              // never be fully silent even though we don't abort the loop
-              // (a throw here would strand the REMAINING queued items too).
+              won = false
               log.warn(
-                `[Daemon ${wf.config.name}/${instanceId}] dependency settle failed for queued item '${item.id}' (taskId ${item.taskId}) — a dependent parent may stay stuck waiting: ${
+                `[Daemon ${wf.config.name}/${instanceId}] mark-terminal threw for queued item '${item.id}' — not treating as won: ${
                   e instanceof Error ? e.message : String(e)
                 }`,
               )
             }
-          }
-          try {
-            // Reuse the same data-shape helper that `onPreEmitPending`
-            // uses so prefilledData (edit-and-resume) gets hoisted onto
-            // top-level keys. Without this, the failed row's `data`
-            // would override the pending row's hoisted fields with
-            // `docId` + an opaque `prefilledData` JSON blob, hiding the
-            // user's edits in the dashboard detail grid.
-            const data = buildShutdownTrackerData(wf, item.input, item.parentRunId, {
-              runId,
-              trackerDir,
-            }) as StampedData
-            emitTrackerRow(
-              {
-                workflow: wf.config.name,
-                timestamp: nowIso,
-                id: item.id,
+            if (!won) continue
+            if (item.taskId) {
+              try {
+                const released = taskStore.markDependencyFromChildTerminal({
+                  childTaskId: item.taskId,
+                  childState: 'failed',
+                })
+                void wakeDaemonsForReleasedParents(released, trackerDir)
+              } catch (e) {
+                // Best-effort (last-daemon shutdown sweep, mirrors the `won`
+                // handling above): a dependent parent may stay stuck in
+                // waiting_dependencies until manually recovered, so this must
+                // never be fully silent even though we don't abort the loop
+                // (a throw here would strand the REMAINING queued items too).
+                log.warn(
+                  `[Daemon ${wf.config.name}/${instanceId}] dependency settle failed for queued item '${item.id}' (taskId ${item.taskId}) — a dependent parent may stay stuck waiting: ${
+                    e instanceof Error ? e.message : String(e)
+                  }`,
+                )
+              }
+            }
+            try {
+              // Reuse the same data-shape helper that `onPreEmitPending`
+              // uses so prefilledData (edit-and-resume) gets hoisted onto
+              // top-level keys. Without this, the failed row's `data`
+              // would override the pending row's hoisted fields with
+              // `docId` + an opaque `prefilledData` JSON blob, hiding the
+              // user's edits in the dashboard detail grid.
+              const data = buildShutdownTrackerData(wf, item.input, item.parentRunId, {
                 runId,
-                status: 'failed',
-                // No step:"cancelled" sentinel → red Failed badge.
-                data,
-                ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
-                error: failReason,
-              },
-              trackerDir,
-            )
-          } catch (e) {
-            // Best-effort: SQLite is already durably marked failed (the `won`
-            // check above); this only affects the tracker-row VISUAL signal.
-            log.warn(
-              `[Daemon ${wf.config.name}/${instanceId}] failed-row emit threw for queued item '${item.id}': ${
-                e instanceof Error ? e.message : String(e)
-              }`,
-            )
+                trackerDir,
+              }) as StampedData
+              emitTrackerRow(
+                {
+                  workflow: wf.config.name,
+                  timestamp: nowIso,
+                  id: item.id,
+                  runId,
+                  status: 'failed',
+                  // No step:"cancelled" sentinel → red Failed badge.
+                  data,
+                  ...(item.parentRunId ? { parentRunId: item.parentRunId } : {}),
+                  error: failReason,
+                },
+                trackerDir,
+              )
+            } catch (e) {
+              // Best-effort: SQLite is already durably marked failed (the `won`
+              // check above); this only affects the tracker-row VISUAL signal.
+              log.warn(
+                `[Daemon ${wf.config.name}/${instanceId}] failed-row emit threw for queued item '${item.id}': ${
+                  e instanceof Error ? e.message : String(e)
+                }`,
+              )
+            }
           }
         }
       }

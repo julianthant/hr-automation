@@ -6,7 +6,10 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { defineWorkflow } from '../../../../src/core/kernel/workflow.js'
 import { clear } from '../../../../src/core/kernel/registry.js'
-import { buildShutdownTrackerData } from '../../../../src/core/daemon/shutdown.js'
+import {
+  buildShutdownTrackerData,
+  shouldFailQueuedItemsOnLastDaemonExit,
+} from '../../../../src/core/daemon/shutdown.js'
 import { buildHttpPendingData } from '../../../../src/core/daemon/enqueue-dispatch.js'
 import { emitTrackerRow } from '../../../../src/tracker/jsonl.js'
 import { runIdFragment, tracePrefix } from '../../../../src/domain/queue-trace-id.js'
@@ -116,4 +119,42 @@ test('buildShutdownTrackerData without opts leaves __traceId unstamped (rebuild 
   const wf = makeWf()
   const data = buildShutdownTrackerData(wf, { id: 'E1' }, undefined)
   assert.equal(data.__traceId, undefined)
+})
+
+test('shouldFailQueuedItemsOnLastDaemonExit leaves queue when auth never completed', () => {
+  assert.equal(
+    shouldFailQueuedItemsOnLastDaemonExit({
+      authCompleted: false,
+      drainOnlyShutdown: false,
+      handoffPeerCount: 0,
+    }),
+    false,
+  )
+})
+
+test('shouldFailQueuedItemsOnLastDaemonExit mass-fails only after auth when last owner', () => {
+  assert.equal(
+    shouldFailQueuedItemsOnLastDaemonExit({
+      authCompleted: true,
+      drainOnlyShutdown: false,
+      handoffPeerCount: 0,
+    }),
+    true,
+  )
+  assert.equal(
+    shouldFailQueuedItemsOnLastDaemonExit({
+      authCompleted: true,
+      drainOnlyShutdown: true,
+      handoffPeerCount: 0,
+    }),
+    false,
+  )
+  assert.equal(
+    shouldFailQueuedItemsOnLastDaemonExit({
+      authCompleted: true,
+      drainOnlyShutdown: false,
+      handoffPeerCount: 1,
+    }),
+    false,
+  )
 })
