@@ -6,6 +6,7 @@ import {
 } from "./queue-surfaces.js";
 import { resolveRowArchetype } from "../domain/row-archetype.js";
 import type { WorkflowRuntimePolicyLookup } from "../domain/workflow-runtime/registry.js";
+import { isUcpathEmployeeId } from "../domain/identity/eid.js";
 
 /** SSE payloads may enrich rows; JSONL replay may omit this — both are valid. */
 function activityTimestamp(e: TrackerEntry): string {
@@ -29,6 +30,32 @@ function canonicalMergeKey(e: TrackerEntry): string {
   return typeof eid === "string" && eid.length > 0 ? eid : e.id;
 }
 
+/**
+ * True when this row's Search field is an EID-keyed lookup (typed EID, or
+ * `__subjectKind: "eid"`). Used so a name-search sibling doesn't become the
+ * merge primary and overwrite Search with the resolved person name.
+ */
+function isEidKeyedSearch(e: TrackerEntry): boolean {
+  const data = e.data ?? {};
+  if (data.__subjectKind === "eid") return true;
+  const searchName = typeof data.searchName === "string" ? data.searchName.trim() : "";
+  if (searchName && isUcpathEmployeeId(searchName)) return true;
+  // Direct EID input runs use the EID as the tracker item id.
+  return isUcpathEmployeeId(e.id);
+}
+
+/**
+ * Prefer an EID-keyed search as the merge primary so the log-panel Search
+ * field shows the original query (EID) rather than a later name-search
+ * sibling's typed name. Among the same kind, newest activity wins.
+ */
+function compareMergedPrimaries(a: TrackerEntry, b: TrackerEntry): number {
+  const aEid = isEidKeyedSearch(a);
+  const bEid = isEidKeyedSearch(b);
+  if (aEid !== bEid) return aEid ? -1 : 1;
+  return activityTimestamp(b).localeCompare(activityTimestamp(a));
+}
+
 export function groupMergedTrackerEntries(entries: TrackerEntry[]): MergedEntryGroup[] {
   const buckets = new Map<string, TrackerEntry[]>();
   for (const e of entries) {
@@ -43,9 +70,7 @@ export function groupMergedTrackerEntries(entries: TrackerEntry[]): MergedEntryG
       groups.push({ primary: bucket[0], siblings: [] });
       continue;
     }
-    const sorted = [...bucket].sort((a, b) =>
-      activityTimestamp(b).localeCompare(activityTimestamp(a)),
-    );
+    const sorted = [...bucket].sort(compareMergedPrimaries);
     const [primary, ...siblings] = sorted;
     groups.push({ primary, siblings });
   }
@@ -141,8 +166,18 @@ function rollupOperationMembersToQueueStripSynth(
   // Classify members by their CANONICAL status key (cancelled/discarded override
   // applied) so a cancelled member (failed + step=cancelled) rolls up to
   // "cancelled", not "failed" (ISS-010). Precedence: any queued work → pending;
-  // else any running → running; else a GENUINE failure → failed (a real failure
-  // outranks a cancel); else a cancellation → cancelled; else done.
+  // else any running → running; else a GENUINE failure with NOTHING succeeded →
+  // failed; else a cancellation → cancelled; else done.
+  //
+  // A partial failure rolls up to DONE, matching the coordinator CARD, which
+  // renders via `rollupOperationStatus` (`src/domain/operation-status.ts`) and
+  // deliberately refuses to let a failed member promote the operation to failed
+  // (E2E-106). A partial failure is normal — an I-9 batch where 25 people
+  // resolve and 5 don't is a completed operation with per-member outcomes, and
+  // the failed count is already surfaced by the row's StatusCounts badge. Only a
+  // wholesale failure (no member succeeded) reads as Failed here. The `!done`
+  // gate — rather than "every member failed" — preserves the older rule that a
+  // genuine failure outranks a cancel when nothing succeeded.
   const keys = members.map(rollupStatusKey);
   let status: TrackerEntry["status"];
   let step: string | undefined;
@@ -150,7 +185,7 @@ function rollupOperationMembersToQueueStripSynth(
     status = "pending";
   } else if (keys.some((k) => k === "running")) {
     status = "running";
-  } else if (keys.some((k) => k === "failed")) {
+  } else if (keys.some((k) => k === "failed") && !keys.some((k) => k === "done")) {
     status = "failed";
   } else if (keys.some((k) => k === "cancelled")) {
     // Emit the cancelled SHAPE (failed + step=cancelled) so the downstream

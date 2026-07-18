@@ -405,7 +405,7 @@ export const INSTANCE_LABELS: Record<string, string> = {
   "kronos-pay-rule": "Kronos Paycodes",
   "oath-signature": "Oath Signature",
   "oath-upload": "Oath Upload",
-  onbase: "OnBase Import",
+  onbase: "Import",
   ocr: "OCR",
   "i9-lookup": "I9 Lookup",
   "person-match": "Person Match",

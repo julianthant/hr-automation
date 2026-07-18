@@ -169,6 +169,24 @@ function resolveEmployeeLabel(data: Record<string, string>): string {
   return "";
 }
 
+/**
+ * A **display-only** row: a tracker row that reports the outcome of work done
+ * elsewhere and has NO daemon task of its own (`data.displayOnly === "true"`).
+ * Today: the per-person I-9 check results fanned back into the separations
+ * queue — the person-match children that produced them ran under the OCR run,
+ * not under these rows.
+ *
+ * Such a row must NOT offer retry / cancel / bump. There is nothing to cancel,
+ * and a retry is actively DANGEROUS: with no SQLite task to re-queue,
+ * `reEnqueueEntry` falls back to reconstructing an input from the row's tracker
+ * data and enqueuing it — which on separations would start a REAL termination
+ * run for that person. Delete stays available (dropping a stale result row is
+ * harmless and is the operator's only way to clear one).
+ */
+export function isDisplayOnlyRow(entry: TrackerEntry): boolean {
+  return entry.data?.displayOnly === "true";
+}
+
 function isPrepRow(entry: TrackerEntry): boolean {
   const data = entry.data ?? {};
   const shape = classifyTrackerRow(entry).shape;
@@ -381,19 +399,16 @@ export function buildWorkflowRunProjection(
     step: entry.step,
     surfaceType,
     rowTypeLabel: overrides.rowTypeLabel ?? rowTypeLabelFor(surfaceType),
-    actions: overrides.actions ?? withRowTargets(policy.rowActions, targets),
+    actions:
+      overrides.actions ??
+      withRowTargets(
+        isDisplayOnlyRow(entry)
+          ? policy.rowActions.filter((action) => action.kind === "delete")
+          : policy.rowActions,
+        targets,
+      ),
     operationMembers: overrides.operationMembers ?? [],
   };
-}
-
-/** Aggregate a batch/operation group's status from its member rows. */
-function memberAggregateStatus(members: readonly TrackerEntry[]): string {
-  if (members.some((member) => member.status === "running")) return "running";
-  if (members.some((member) => member.status === "pending" || member.status === "skipped")) {
-    return "pending";
-  }
-  if (members.some((member) => member.status === "failed")) return "failed";
-  return "done";
 }
 
 /**
