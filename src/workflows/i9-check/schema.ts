@@ -1,11 +1,12 @@
 import { z } from "zod/v4";
 
 /**
- * Input for one **i9-check task** — one person from a scanned I-9 packet whose
- * UCPath existence the daemon verifies (search-only; see `check.ts`). Fanned
- * out by `enqueueI9CheckMemberTasks` (`src/tracker/dashboard/ocr/i9-check-results.ts`)
- * under the upload's i9-check operation coordinator when the delegated OCR run
- * completes.
+ * Input for one **i9-check task** — one person from a scanned I-9 packet.
+ * The daemon resolves them via person-match → optional hire-dated
+ * person-lookup → Action History roster rematch (search-only; see `check.ts`).
+ * Fanned out by `enqueueI9CheckMemberTasks`
+ * (`src/tracker/dashboard/ocr/i9-check-results.ts`) under the upload's
+ * i9-check operation coordinator when the delegated OCR run completes.
  *
  * The `mode: "i9-check"` literal predates the 2026-07-17 split (when these
  * tasks ran inside the separations daemon and the literal made the input union

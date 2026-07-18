@@ -52,5 +52,12 @@ describe("i9-check workflow import guard (search-only)", () => {
     const source = readFileSync(join(WORKFLOW_DIR, "check.ts"), "utf8");
     assert.match(source, /systems\/ucpath\/navigate\.js/, "searchPerson import expected");
     assert.match(source, /person-lookup\/lookup\.js/, "lookupPersonInUcpath import expected");
+    assert.match(source, /select-by-hire-date\.js/, "hire-date corroboration helper expected");
+  });
+
+  it("hire-date helper stays pure (datesWithinDays only — no browser)", () => {
+    const source = readFileSync(join(WORKFLOW_DIR, "select-by-hire-date.ts"), "utf8");
+    assert.match(source, /person-lookup\/crm-search\.js/, "datesWithinDays import expected");
+    assert.doesNotMatch(source, /playwright|page\(/i);
   });
 });
