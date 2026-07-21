@@ -1,6 +1,7 @@
 # 02 — Workflow Model: Descriptor SSOT · Constant Input · Run-State Machine · Start-Anywhere Resume
 
-Status: amended per `04-reconciliation.md` (binding) after `reviews/02-review.md`. Conforms to
+Status: amended per `04-reconciliation.md` (binding) after `reviews/02-review.md`; §3 builder
+amended per 04 §"Round 3" (A2/A3 = D24/D25, from the Phase-1 Step-0 spike). Conforms to
 `00-charter.md` (targets 1, 2, 4, 5, 6; fail-loud non-negotiable). Code lands in `temp_src/`.
 
 ## Ownership (D1)
@@ -281,27 +282,55 @@ this is the single API; doc 01 defers to it. The builder accumulates a **`Steps`
 
 ```ts
 // temp_src/base/flow.ts
-interface StepEntry<C extends AnyTaskContract> { contract: C; conditional: boolean }
-type OutputsOf<S> = { [K in keyof S]: S[K] extends StepEntry<infer C>
-  ? z.output<C["output"]> | (S[K]["conditional"] extends true ? undefined : never) : never };
+// A2 (RATIFIED — Step-0 spike, 04 §"Round 3" / D24): StepEntry carries the
+// conditional flag as a SECOND type param `Cond extends boolean`, DEFAULTING to
+// `boolean` so the bare `StepEntry<C>` form still type-checks everywhere it is
+// written (e.g. the FlowBuilder `S` constraint below). The original
+// `{ contract: C; conditional: boolean }` collapsed the flag to `boolean`, so
+// OutputsOf could NEVER add `| undefined`; the accumulator must store the LITERAL
+// `true`/`false` for the conditional-skip typing (spike property P6) to hold.
+interface StepEntry<C extends AnyTaskContract, Cond extends boolean = boolean> {
+  contract: C; conditional: Cond;
+}
+type OutputsOf<S> = { [K in keyof S]: S[K] extends StepEntry<infer C, infer Cond>
+  ? z.output<C["output"]> | (Cond extends true ? undefined : never) : never };
 interface FlowScope<WIn, S> { input: WIn; outputs: OutputsOf<S> }
+
+// A3 (RATIFIED — Step-0 spike, 04 §"Round 3" / D25): the opts bag is a NAMED type
+// and the literal `conditional` is DERIVED from whether the inferred opts type `O`
+// carries a `when` fn (`(input: never)` matches any `when` regardless of its param).
+type HasWhen<O> = O extends { when: (input: never) => boolean } ? true : false;
+interface StepOpts<WIn, S, C extends AnyTaskContract> {
+  label?: string;                                        // defaults to contract.title (§1.5)
+  bind: (scope: FlowScope<WIn, S>) => z.input<C["input"]>;  // compile-time coupling (doc 01/D15)
+  when?: (input: WIn) => boolean;
+  replay: "checkpoint" | "always-rerun";                 // REQUIRED
+  probePolicy?: "always" | "retries-and-recovery-only";  // REQUIRED-on-mutate — see the .step note
+}
 
 interface FlowBuilder<WIn, S extends Record<string, StepEntry<AnyTaskContract>>> {
   meta(m: DescriptorMeta<WIn>): this;
 
-  step<Id extends string, C extends AnyTaskContract>(
-    id: Id, contract: C,
-    opts: {
-      label?: string;                                        // defaults to contract.title (§1.5)
-      bind: (scope: FlowScope<WIn, S>) => z.input<C["input"]>;  // compile-time coupling (doc 01/D15)
-      when?: (input: WIn) => boolean;
-      replay: "checkpoint" | "always-rerun";                 // REQUIRED
-      probePolicy?: "always" | "retries-and-recovery-only";  // REQUIRED on a mutate contract (D17,
-                                                             //   §b migration question); compile
-                                                             //   error if omitted there, illegal on
-                                                             //   a read/derive step. Doc 09 §5.
-    },
-  ): FlowBuilder<WIn, S & { [K in Id]: StepEntry<C> }>;
+  // A3 (RATIFIED — see above): `.step` is a SINGLE signature. The two-overload
+  // alternative this doc previously floated ("two overloads of `.step`, or a
+  // conditional type keyed on `when`") is REJECTED — the spike proved it BREAKS
+  // accumulation: during overload probing TS drops contextual typing on the
+  // `bind` arrow, its return literal widens (a discriminant like `by: "by-name"`
+  // collapses to `string`), the call mis-resolves to the first overload, and
+  // every downstream step's `outputs` is SILENTLY poisoned with spurious
+  // `| undefined`. Do NOT reintroduce `.step` overloads. The literal `conditional`
+  // comes from `HasWhen<O>` on the inferred opts type.
+  //
+  // probePolicy REQUIRED-on-mutate / illegal-on-read (D17, §b, doc 09 §5): making
+  // that a COMPILE error under the single signature needs `StepOpts` to be
+  // conditional on `C`'s effect (require `probePolicy` when `C extends
+  // SealedMutateContract`, forbid it otherwise) — a small extension NOT exercised
+  // by the Step-0 spike. 1d verifies it compiles; else enforcement falls to the
+  // factory + `descriptor-coverage` guard (runtime-enforced always — fail-loud
+  // holds either way).
+  step<Id extends string, C extends AnyTaskContract, O extends StepOpts<WIn, S, C>>(
+    id: Id, contract: C, opts: O,
+  ): FlowBuilder<WIn, S & { [K in Id]: StepEntry<C, HasWhen<O>> }>;
 
   /** Insert a gate node (D5) at this point in the sequence. */
   gate(id: string, decl: Omit<GateNode, "kind" | "id">): this;

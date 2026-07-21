@@ -1,7 +1,7 @@
 # 01 — The Task Contract & Per-System Task Stores
 
 Status: **Phase 0 design — for operator review.** Conforms to `00-charter.md` and to the binding
-reconciliation memo `04-reconciliation.md` (D2–D8, D15, D16 applied; D22 write-safety attachment amendment applied — see doc 09 §2.1).
+reconciliation memo `04-reconciliation.md` (D2–D8, D15, D16 applied; D22 write-safety attachment amendment applied — see doc 09 §2.1; D23 per-effect `defineTaskContract` overloads applied — §2.2 · A1, from the Phase-1 Step-0 spike).
 
 ## Ownership (D1 — this doc owns / this doc references)
 
@@ -188,11 +188,40 @@ export interface MutateTaskContract<Id extends TaskId, In extends z.ZodType,
 }
 
 /** `const Codes` (TS5) keeps errorCodes as a literal tuple — without it the
- *  union collapses to string[] and ctx.fail() would accept anything (D15). */
+ *  union collapses to string[] and ctx.fail() would accept anything (D15).
+ *
+ *  A1 (RATIFIED — Phase-1 Step-0 spike, 04 §"Round 3" / D23): `defineTaskContract`
+ *  is TWO per-effect OVERLOADS returning the EFFECT-SPECIFIC sealed contract —
+ *  NOT one signature over a union. A single signature returning
+ *  `Sealed<Read | Mutate>` distributes to a union whose members `defineTask`'s
+ *  own per-effect overloads can no longer route cleanly; the effect-specific
+ *  return keeps a defined contract's static type effect-specific (and reinforces
+ *  the fill/submit split — a read and a write are distinct types from birth). The
+ *  brand is a PURE intersection, so all four generics survive it. */
+type Sealed<T> = T & { readonly __sealed: true };
+export type SealedReadContract<Id extends TaskId, In extends z.ZodType,
+  Out extends z.ZodType, Codes extends readonly [string, ...string[]]> =
+  Sealed<ReadTaskContract<Id, In, Out, Codes>>;
+export type SealedMutateContract<Id extends TaskId, In extends z.ZodType,
+  Out extends z.ZodType, Codes extends readonly [string, ...string[]]> =
+  Sealed<MutateTaskContract<Id, In, Out, Codes>>;
+
 export function defineTaskContract<
   Id extends TaskId, In extends z.ZodType, Out extends z.ZodType,
   const Codes extends readonly [string, ...string[]],
->(c: ReadTaskContract<Id, In, Out, Codes> | MutateTaskContract<Id, In, Out, Codes>)
+>(c: ReadTaskContract<Id, In, Out, Codes>): SealedReadContract<Id, In, Out, Codes>;
+export function defineTaskContract<
+  Id extends TaskId, In extends z.ZodType, Out extends z.ZodType,
+  const Codes extends readonly [string, ...string[]],
+>(c: MutateTaskContract<Id, In, Out, Codes>): SealedMutateContract<Id, In, Out, Codes>;
+// impl body freezes + fails loud at module load (validation below).
+
+/** The `Any*Contract` aliases used from here on are the SEALED effect-specific
+ *  forms with generics erased to their bounds:
+ *    AnyReadContract   = SealedReadContract<TaskId, z.ZodType, z.ZodType, readonly [string, ...string[]]>
+ *    AnyMutateContract = SealedMutateContract<…same bounds…>
+ *    AnyContract       = AnyReadContract | AnyMutateContract
+ *  That union is exactly doc 02 §3's `AnyTaskContract`. */
 ```
 
 `defineTaskContract` freezes the object and **fails loud at module load** on: id not matching
