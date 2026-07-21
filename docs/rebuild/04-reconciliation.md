@@ -175,3 +175,47 @@ earlier D8/D14).
   `MutateTaskContract` carries the **reference-stub field** `writeSafety?: WriteSafety<In, Out>`
   (guard-required on every mutate contract) whose *shape* resolves to doc 09 §2.1 — doc 01
   references it, doc 09 owns it. Doc 01's header records this D22 amendment.
+
+---
+
+## Reconciliation round 3 (2026-07-18) — Phase-1 Step-0 FlowBuilder spike (`.rebuild-spike/`)
+
+Before building the base, a throwaway type-inference PROTOTYPE (master plan §Phase 1, item 1d's
+mandated first sub-task) compiled the CONTRACT / IMPL / BUILDER generics under the REAL toolchain
+(TS 5.9.3 + zod 4.4.3, `strict` + `verbatimModuleSyntax` + `moduleResolution: bundler`). **Verdict:
+the "coupled by contract" typing HOLDS** — all 7 load-bearing properties proven, **zero errors**,
+and the green is non-vacuous by construction (each of the four `@ts-expect-error` controls suppresses
+a real error — TS errors on an unused one — and every positive check uses an `any`-proof exact-`Equal`
+helper). Three minimal shape refinements were required to reach the clean green; they are **binding**
+and amend docs 01/02. None is a design compromise — D25 is a *correction* of an ambiguity doc 02 left
+open, caught exactly as the spike was meant to.
+
+- **D23 — `defineTaskContract` is TWO per-effect overloads (amends doc 01 §2.2).** It returns the
+  EFFECT-SPECIFIC sealed contract (`SealedReadContract` / `SealedMutateContract`), never one signature
+  over `ReadTaskContract | MutateTaskContract`. A union return distributes and defeats `defineTask`'s
+  per-effect overload routing; the effect-specific return keeps a defined contract's static type
+  effect-specific (and reinforces the fill/submit split — a read and a write are distinct types from
+  birth). `const Codes` is retained on both overloads. The sealing brand is a pure intersection, so
+  all four generics survive it.
+- **D24 — `StepEntry` carries the conditional flag as a literal type param (amends doc 02 §3).**
+  `StepEntry<C, Cond extends boolean = boolean>` — the default keeps the bare `StepEntry<C>` form
+  valid everywhere it is written; the accumulator stores the LITERAL `true`/`false`. The original
+  `conditional: boolean` field collapsed the flag, so `OutputsOf` could never add `| undefined` and
+  the conditional-skip typing (a `when`-step's output being `T | undefined`) would be dead.
+- **D25 — `.step` is a SINGLE signature with a derived `HasWhen<O>`; the two-overload form is
+  REJECTED (amends doc 02 §3).** The spike proved the overload route is actively harmful: during
+  overload probing TS drops contextual typing on the `bind` arrow, its return literal widens
+  (discriminants collapse to `string`), the call mis-resolves to the first overload, and every
+  downstream step's `outputs` is silently poisoned with spurious `| undefined`. The single signature
+  `step<Id, C, O extends StepOpts<WIn,S,C>>(…): …StepEntry<C, HasWhen<O>>` keeps contextual typing
+  intact. **Doc 02 must forbid reintroducing `.step` overloads.**
+  - **Disclosed residual (1d must verify).** Making `probePolicy` a COMPILE error when omitted on a
+    mutate step (doc 02's earlier claim) needs `StepOpts` conditional on `C`'s effect; that specific
+    inference was NOT part of the Step-0 spike. 1d verifies it compiles, else enforcement falls back to
+    the factory + `descriptor-coverage` guard (runtime-enforced always — fail-loud holds either way).
+
+**Scope not covered (honest).** The spike is pure types: it did NOT exercise `.build()` runtime
+wiring or runtime zod validation of `bind` returns — those get a runtime spike when 1d/1e are built.
+The `.rebuild-spike/` dir is retained locally (uncommitted, outside `temp_src`); its assertion battery
+is promoted into `temp_src`'s type-level test at 1d (satisfying doc 01 §8 #13 / doc 02 §7's
+"undeclared code fails tsc" pin).
