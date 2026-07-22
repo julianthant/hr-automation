@@ -1,10 +1,17 @@
 # Reconciliation memo — binding cross-doc decisions (2026-07-17)
 
+Status: **binding revision 2026-07-21.** Earlier rounds remain as decision history; Round 4 below
+supersedes their incompatible task effects, graph, recovery, ledger, migration, and spike claims.
+
 Three adversarial reviews (`reviews/01-review.md`, `reviews/02-review.md`, `reviews/03-review.md`)
 found that docs 01–03 describe divergent systems at their seams. This memo is the orchestrator's
 binding resolution. **Every decision below overrides anything contradicting it in docs 01–03.**
 Amendment agents rewrite each doc to comply; a doc may reference another doc's owned contract but
 must never redefine it.
+
+> **Implementation rule:** D1–D25 are historical rationale, not copyable current API/DDL. Apply
+> D26–D45 first; where they amend an older decision, the Round-4 form is the only implementable one.
+> Current contract shapes live in owning docs 01–03 and 09–11.
 
 ## D1 — Contract ownership matrix (one owner per concept, others reference)
 
@@ -178,7 +185,7 @@ earlier D8/D14).
 
 ---
 
-## Reconciliation round 3 (2026-07-18) — Phase-1 Step-0 FlowBuilder spike (`.rebuild-spike/`)
+## Reconciliation round 3 (2026-07-18) — historical, superseded Step-0 spike
 
 Before building the base, a throwaway type-inference PROTOTYPE (master plan §Phase 1, item 1d's
 mandated first sub-task) compiled the CONTRACT / IMPL / BUILDER generics under the REAL toolchain
@@ -216,6 +223,117 @@ open, caught exactly as the spike was meant to.
 
 **Scope not covered (honest).** The spike is pure types: it did NOT exercise `.build()` runtime
 wiring or runtime zod validation of `bind` returns — those get a runtime spike when 1d/1e are built.
-The `.rebuild-spike/` dir is retained locally (uncommitted, outside `temp_src`); its assertion battery
-is promoted into `temp_src`'s type-level test at 1d (satisfying doc 01 §8 #13 / doc 02 §7's
-"undeclared code fails tsc" pin).
+At that time `.rebuild-spike/` was retained locally for later promotion. It was deleted in the
+2026-07-21 reset because its two-effect linear surface no longer proves the Round-4 graph. Item 1e
+now requires a new real-scale three-effect DAG proof rather than promoting this battery.
+
+---
+
+## Reconciliation round 4 (2026-07-21) — external rebuild-plan review
+
+The prior `temp_src` skeleton and `.rebuild-spike/` were deleted. These decisions are binding and
+override/amend D2–D3/D5–D8/D12–D15/D17–D25 wherever they conflict.
+
+- **D26 — Three task effects; transaction-scoped fill/commit.** `read` observes external state;
+  `prepare` mutates only an ephemeral browser page; `commit` is the sole external-write class.
+  Prepare and commit are separate task contracts/spans but one workflow `transaction` node and one
+  uninterrupted page/context lease. No checkpoint, park, retry, reset, or `startAt` exists between
+  them. Dry-run executes prepare and has no executable commit arm or mutation capability.
+- **D27 — The workflow is a typed DAG, not a linear step list.** Foundation vocabulary includes
+  read, transaction, output-dependent branch, parallel fork/join, typed child-run, and typed gate
+  nodes. Conditions may read declared prior outputs. Verify/onboarding/oath-upload must be expressible
+  without handler-side delegation or branching. Dependencies are declared and runtime-audited;
+  proxy-walking bind functions is prohibited for freshness decisions.
+- **D28 — Descriptor exhaustiveness is concrete.** Doc 02's descriptor includes version/fingerprint,
+  full graph, details, actions/runtime policy, presets, match/item identity, presentation, gates with
+  subscriptions/resolvers, coordinator/completion-consumption, capabilities, and completion program.
+  Completion/child targets retain concrete input schemas; `WorkflowRef<unknown>` and unknown derives
+  are forbidden. The explicit projection coverage matrix—not the ≥3-id heuristic—is the proof.
+- **D29 — Layer ownership is acyclic.** Domain defines dependency-free contracts only. Stores and
+  workflow descriptors depend on domain. `core/workflow-registry.ts` is the composition root that
+  imports workflows/stores. Domain never imports workflows. Dashboard consumes a validated generated/
+  server projection, never workflow modules. No forward contract stub may precede its owning phase.
+- **D30 — Permanent-key write intent.** `(system,idempotency_key)` is the permanent primary key across
+  attempting, retryable, committed, and externally-observed-present states. Durable lookup is never
+  skipped and satisfied rows are never exempt. A later pristine run reuses validated proof + typed
+  output rather than fencing again. A live probe that discovers a pre-existing external transaction
+  permanently blocks a click but emits no write ledger entry—the automation did not file it. The
+  live prewrite probe policy may only affect a truly unseen/retryable key.
+- **D31 — Every completion arm has typed proof.** Receipt, save-verify, and upload-verify each carry
+  the same nontrivial `proofSchema` used for normal output and recovery-probe backfill. No optional or
+  genuinely-idempotent escape hatch exists for commit contracts. `outputFromProof` also reconstructs
+  and parses the full transaction-node output so recovery/preflight-present can satisfy downstream
+  typed dependencies without fabricating missing fields.
+- **D32 — Atomic commit outbox.** Intent commit, typed transaction-output checkpoint + proof, ledger outbox, terminal-span
+  outbox, and run state commit in one SQLite transaction. Recovery reconciles all committed-intent /
+  missing-outbox / unprojected permutations. Executors never append the write ledger directly.
+- **D33 — Serialized, anchored ledger.** One SQLite-coordinated projector assigns per-file sequence
+  and hash, preventing concurrent chain forks. SQLite ledger-head anchors make record-boundary tail
+  truncation and missing files detectable. Local DB+file coordinated tampering remains out of scope.
+- **D34 — Field provenance, not checkpoint freshness laundering.** Checkpoints retain per-field
+  live observed times and operator correction provenance. Editing one field never refreshes untouched
+  facts and never asserts current external truth. Read contracts classify output fields as live or
+  derived; derived fields carry their input source set and oldest observation, so a transform cannot
+  refresh stale facts. A stale corrected fact needs a live rerun or an
+  explicit field-scoped, single-resume audit override. Editability is descriptor-allowlisted and
+  excludes stable identity, original input, idempotency, write proof, and provenance fields.
+- **D35 — Semantic resume compatibility.** Runs/checkpoints stamp descriptor version plus contract
+  and implementation fingerprints. Equal output schema alone is insufficient. Resume across a
+  fingerprint change requires a checked-in typed checkpoint migration or refuses loudly.
+  Raw submitted input and the once-parsed canonical input snapshot are stored separately with the
+  input-schema hash; resume uses the parsed snapshot and never re-applies changed defaults/transforms.
+  Fingerprints come from deterministic content-hash manifests over canonical relative dependency
+  closures + generated schemas/toolchain, never `Function.toString`, mtimes, or absolute paths.
+- **D36 — Safe session exclusivity.** UCPath transaction acquisition drains/blocks all sibling reads
+  on that PeopleSoft context; read/read sharing remains allowed. OnBase's cross-process identity
+  lease covers the authenticated context lifetime and releases only after context close.
+- **D37 — Per-run migration authority.** Enqueue stamps engine and cutover generation. New native
+  runs can start while an enumerated legacy drain set finishes; late authorized legacy terminals are
+  not quarantined. Rollback is another generation. The legacy SPA fallback reads a compatibility API
+  projected from unified native/lifted state, so native runs remain visible. Legacy row/log/session
+  schemas are versioned rather than frozen; a source-schema change requires version bump, lift adapter,
+  and golden fixtures in the same commit, while unstamped historical data is explicit `v0`.
+- **D38 — Intake reaches novel and duplicate headers.** Generic header-row candidates do not require
+  known aliases. Operator selection resolves uncertainty. Mappings bind normalized header+occurrence
+  column ids; duplicate reuse requires confirmation; fingerprint input is canonical structured JSON,
+  not a space-joined string.
+- **D39 — Guard claims are bounded honestly.** Guard inventory prevents accidental shrink. It cannot
+  stop coordinated deletion of guard+inventory; removals require an explicit decision/replacement and
+  code review. Before the tree exists, guard plumbing does not claim to scan it; each target family
+  activates atomically with its first file and proves a non-empty scan. ESLint CLI and typed config
+  coverage land together, unmatched-pattern suppression is banned, the nullish ratchet covers the
+  whole non-dashboard tree, and path exemptions use exact normalized roots rather than substring
+  matches. The suite also adds transaction pairing, commit capability, sequential dedupe,
+  atomic-outbox, projector-concurrency, tail-anchor, provenance, and real-scale graph type fixtures.
+- **D40 — Config contracts are executable.** `resolveConfig():Config` returns plain values;
+  `resolveConfigWithProvenance()` returns config+source map+fingerprint. Nested schema parents have
+  valid defaults and no `.url().default("")`. Production and sparse test endpoints are separate;
+  settings/env test overrides cannot silently replace production. Enqueue stamps a complete resolved
+  instance/config snapshot; browser pools partition by it and tasks never re-resolve mutable config.
+- **D41 — The old spike is not ratification.** D23–D25 are historical observations about a smaller
+  two-effect, three-step prototype. The new Phase-1 proof must cover three effects, transaction
+  pairing, output branches, fork/join, typed child runs, typed gates/completion, and realistic graph
+  scale before the production workflow builder/descriptor implementation is built.
+- **D42 — Workflow mini-stores are headless-only.** D2's closed `SystemId` still owns all browser and
+  service stores. Pure workflow-specific read/transform tasks may use
+  `workflow:<descriptor-id>/<verb-object>`; composition-root coverage binds that namespace to a real
+  descriptor. The headless store type requires `sessions:[]` and exposes no page or mutation
+  capability. Every prepare/commit and every browser task remains under its owning system prefix.
+- **D43 — Probe before staged-page mutation; fence immediately before commit.** A transaction binds
+  and parses commit input only from workflow input plus declared upstream outputs, never prepare
+  output. Durable history and any policy-required live probe run first on a separate read lease.
+  The exclusive transaction lease then runs prepare; a required migration-justified
+  `probeToFenceMaxMs` is checked before the permanent-key CAS fence, followed immediately by commit
+  and proof on the retained page. Probe navigation therefore cannot erase staged state; an expired
+  probe or lost CAS discards the page without clicking.
+- **D44 — Parked writes have typed, generation-locked resolutions.** Generic Done/Retry actions do
+  not apply to an unfinished write intent. Confirmed-present proof parses through the same completion
+  schema and performs the same atomic intent/checkpoint/outbox/run commit. Confirmed-absent records
+  operator/time/evidence and makes the same permanent intent retryable for a later CAS generation.
+  `unverifiableByPage` requires a typed operator-attestation proof arm. No action deletes, voids, or
+  reopens committed history.
+- **D45 — Local artifacts are not hidden read mutations.** Read tasks may create only immutable
+  content-addressed artifacts through a declared atomic writer. Mutable files such as i9's retention
+  workbook are stable-keyed SQLite outbox projections with serialized, head-hash-checked projectors;
+  a blocking sink must acknowledge before the run reports done. This retains the three task effects
+  without making task retry duplicate an append.

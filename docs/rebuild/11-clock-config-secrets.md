@@ -1,9 +1,9 @@
 # 11 — Clock, Config & Secrets
 
-Status: **Phase 0 design — for operator/orchestrator review.** Answers gap-audit (`08`) TOP GAP 3
-in full and closes gap-audit findings #4 (config/instance selection), #6 (secrets), #7 (fiscal
-rollover). Grounded in `src/config.ts`, `src/domain/settings/types.ts`, `src/tracker/settings/
-store.ts`, `src/domain/queue-trace-id.ts`, `src/utils/env.ts`, `src/infra/auth/duo-webauthn.ts`.
+Status: **Phase 0 revised design — 2026-07-21 resolver/run-snapshot corrections integrated.**
+
+Answers gap-audit (`08`) TOP GAP 3 and closes config/instance, secrets, and fiscal rollover gaps.
+Grounded in `src/config.ts`, settings, queue trace-id, env, and Duo credential code.
 
 ## 0. Ownership header (D1)
 
@@ -11,13 +11,12 @@ store.ts`, `src/domain/queue-trace-id.ts`, `src/utils/env.ts`, `src/infra/auth/d
 |---|---|
 | The Clock — sole time-read site, freshness `now`, trace-id time-of-day, span/ledger timestamps | **This doc** |
 | Config resolver — env > settings.json > default precedence, typed schema | **This doc** |
-| Per-run test-vs-production instance selection (design; scope-optional-now) | **This doc** (field lives on doc 02's `RunEnvelope`, which this doc amends by reference — doc 02 does not redefine it) |
+| Immutable per-run config/instance resolution + snapshot | **This doc** (fields live on doc 02's `RunEnvelope`) |
 | Fiscal-year date source + rollover fail-loud | **This doc** |
 | Secrets accessor (`.env` / `.auth` / Duo credential) | **This doc** |
 
-Imports (never redefines): doc 01 `MutateTaskContract.receipt`/`idempotency` (write-safety ledger
-timestamps consume the Clock, don't own it); doc 02 `RunEnvelope` (D6 `dryRun`, D8 `freshness.
-maxAgeMs`, the bind-graph walk — this doc supplies the `now` those mechanisms read); doc 03 span/
+Imports (never redefines): doc 01 `CommitTaskContract.writeSafety`; doc 02 `RunEnvelope`, field
+provenance, and declared-DAG freshness walk—this doc supplies the clock/config snapshot; doc 03 span/
 event wire schema (`ts: string` on `Base` — this doc supplies the value); doc 05 timeouts/
 backpressure knobs (narrow this doc's config, don't re-declare precedence); doc 09 write-safety
 ledger (`write.attempting`/`write.committed` timestamps — this doc's Clock, doc 09's events).
@@ -61,15 +60,17 @@ ledger (`write.attempting`/`write.committed` timestamps — this doc's Clock, do
 ## 2. The Clock
 
 **One injectable interface is the sole permitted site of `new Date()`/`Date.now()` in `temp_src`.**
-Every timestamp in the rebuilt system — span `ts`, checkpoint `captured_at`, trace-id time-of-day,
+Every timestamp in the rebuilt system—span `ts`, checkpoint fact `observedAt`/`correctedAt`, trace-id time-of-day,
 write-safety ledger events (doc 09), fiscal-year lookups — reads through it.
 
 ```ts
 // temp_src/domain/clock.ts — the ONLY file in temp_src allowed to call new Date()/Date.now()
 export interface Clock {
-  /** Current instant. Every other Clock method is derived from this — never a second OS read. */
+  /** Current wall-clock instant; every calendar/serialized-time helper derives from this. */
   now(): Date;
   nowMs(): number;
+  /** Process-monotonic milliseconds for elapsed budgets/durations; never serialized as an instant. */
+  monotonicMs(): number;
   /** Local calendar day, YYYY-MM-DD — tracker partitioning, one impl (replaces 4 ad-hoc copies). */
   todayLocal(): string;
   /** HHMMSS local time-of-day — feeds buildTraceId(at); ported verbatim from queue-trace-id.ts. */
@@ -86,19 +87,21 @@ export interface Clock {
 export const systemClock: Clock = {
   now: () => new Date(),
   nowMs: () => Date.now(),
+  monotonicMs: () => performance.now(),
   todayLocal() { return localDatePart(this.now()); },
   timeOfDayCode(at = this.now()) { return formatTraceTimestamp(at); },  // ported from queue-trace-id.ts
   fiscalYear(at = this.now()) { return at.getMonth() >= 6 ? at.getFullYear() + 1 : at.getFullYear(); },
 };
 
-/** Deterministic test Clock — every method derives from the one frozen instant. */
-export function fixedClock(at: Date): Clock { /* same shape, `now()` always returns `at` */ }
+/** Deterministic test Clock — wall and monotonic values are independently advanceable so skew and
+ * elapsed-budget behavior can be tested without sleeping. */
+export function manualClock(at: Date, monotonicMs = 0): TestClock { /* advanceWall/advanceMonotonic */ }
 ```
 
 **Composition with existing contracts (nothing else changes shape — only the `now` input):**
 
-- **Doc 02 §5.5 freshness walk (D8).** `now − captured_at > maxAgeMs` reads `clock.now()`. This
-  makes the freshness *safety* computation unit-testable for the first time — a `fixedClock` test
+- **Doc 02 §5.5 freshness walk.** `now − fact.observedAt > fieldLimit` reads `clock.now()`. This
+  makes the freshness *safety* computation unit-testable for the first time — a `manualClock` test
   can assert the exact boundary (`maxAgeMs` exactly exceeded vs. not) without waiting real time.
 - **Doc 03 spans.** The executor holds one `Clock` instance; every `SpanEvent.ts` (`Base.ts: string`
   in doc 03 §2) is `clock.now().toISOString()`, stamped once at emission, never re-derived.
@@ -108,15 +111,20 @@ export function fixedClock(at: Date): Clock { /* same shape, `now()` always retu
 - **Doc 09 write-safety ledger.** `write.attempting`/`write.committed` timestamps and the crash-
   window fence read `clock.now()` — same executor-held instance as spans, so a fence and its span
   are never timestamped by two different clock reads.
-- **Checkpoint `captured_at`** (doc 02 §5.7) — `clock.now().toISOString()` at checkpoint write.
+- **Doc 09 prewrite age.** `probeToFenceMaxMs` uses `clock.monotonicMs()` at probe completion and
+  immediately before the fence. Wall-clock correction cannot make an over-age probe look fresh;
+  expiration discards staged page state and restarts preflight.
+- **Checkpoint provenance timestamps**—live observations and operator corrections use the Clock;
+  an operator correction does not replace the original observation time.
 
 **The guard (registered in doc 10's guard-of-guards manifest):**
-`tests/unit/architecture/clock-single-source.test.ts` — bans `new Date(` / `Date.now(` anywhere in
+`tests/unit/architecture/clock-single-source.test.ts` — bans `new Date(` / `Date.now(` /
+`performance.now(` / direct `process.hrtime` anywhere in
 `temp_src/**` **except** `temp_src/domain/clock.ts`, using the same `Record<file,{count,reason}>`
 shrink-only-allowlist mechanism as `wait-for-timeout-allowlist.test.ts`: a **ported leaf** (e.g. a
 verbatim-ported selector helper with an inline timestamp) may carry a shrinking allowlist entry;
-**new `temp_src` code gets zero tolerance.** A second guard, `fixed-clock-test-only.test.ts`, bans
-importing `fixedClock` outside `*.test.ts` / `tests/**` — a `fixedClock` import in production code
+**new `temp_src` code gets zero tolerance.** A second guard, `manual-clock-test-only.test.ts`, bans
+importing `manualClock` outside `*.test.ts` / `tests/**` — a `manualClock` import in production code
 is a symptom of accidentally wiring the test double into a real executor.
 
 ---
@@ -130,27 +138,40 @@ this resolver; the precedence logic itself is never repeated.
 ```ts
 // temp_src/domain/config/schema.ts — the ONE place defaults live (kills the config.ts ↔
 // DEFAULT_OPERATOR_SETTINGS duplication the gap audit flagged at types.ts:226)
+const EndpointMapSchema = z.record(z.string(), z.string().url()).refine(
+  (routes) => typeof routes.entry === "string",
+  "each system endpoint map requires an entry route",
+);
+const SystemEndpointsSchema = z.object({
+  prod: EndpointMapSchema,
+  test: EndpointMapSchema.optional(),
+}).strict();
+
 export const ConfigSchema = z.object({
   urls: z.object({
-    kualiSpace: z.string().url().default("https://ucsd.kualibuild.com/build/space/5e47518b90adda9474c14adb"),
-    newKronos: z.string().url().default("https://ucsd-sso.prd.mykronos.com/wfd/home"),
-    crmEntry: z.string().url().default("https://crm.ucsd.edu/hr"),
-    onbase: z.string().url().default("https://ucsd.hylandcloud.com/251ids/NavPanel.aspx"),
-    crmSearch: z.string().url().default("https://act-crm.my.site.com/hr/ONB_SearchOnboardings"),
-    ucpathSmartHr: z.string().url().default(/* the long UCPath deep-link literal, ported verbatim */ ""),
-    i9: z.string().url().default("https://i9complete.ucop.edu"),
-    i9App: z.string().url().default("https://wwwe.i9complete.com"),      // was escaping the schema (I9_APP_URL)
-    ukg: z.string().url().default("https://ucsd.kronos.net/wfcstatic/..."),
-    crmSections: z.record(z.string().url()).default({                    // was escaping the schema (CRM_SECTION_URLS)
-      "UCPath Entry Sheet": "https://act-crm.my.site.com/hr/ONB_PPSEntrySheet",
-      "Onboarding History": "https://act-crm.my.site.com/hr/ONB_ShowOnboardingHistory",
-    }),
-  }).strict(),
-  timeouts: z.object({ navigationMs: z.number().int().positive().default(15_000), /* … */ }).strict(),
-  paths: z.object({ reportsDir: z.string().default(""), /* … */ }).strict(),
+    kuali: SystemEndpointsSchema, newKronos: SystemEndpointsSchema,
+    crm: SystemEndpointsSchema, onbase: SystemEndpointsSchema,
+    ucpath: SystemEndpointsSchema, i9: SystemEndpointsSchema, ukg: SystemEndpointsSchema,
+  }).strict().default({
+    // Full parent defaults—not `.default({})`. Each `prod` map is ported from the current
+    // constants, including all CRM subroutes; `test` is absent until explicitly configured.
+    kuali: { prod: KUALI_PROD_ENDPOINTS }, newKronos: { prod: NEW_KRONOS_PROD_ENDPOINTS },
+    crm: { prod: CRM_PROD_ENDPOINTS }, onbase: { prod: ONBASE_PROD_ENDPOINTS },
+    ucpath: { prod: UCPATH_PROD_ENDPOINTS }, i9: { prod: I9_PROD_ENDPOINTS },
+    ukg: { prod: UKG_PROD_ENDPOINTS },
+  }),
+  timeouts: z.object({
+    navigationMs: z.number().int().positive(),
+    taskMs: z.number().int().positive(),
+    transactionMs: z.number().int().positive(),
+    /* … */
+  }).strict().default({ navigationMs: 15_000, taskMs: 180_000,
+                        transactionMs: 300_000, /* every required sibling */ }),
+  paths: z.object({ reportsDir: z.string(), /* … */ }).strict()
+    .default({ reportsDir: "", /* every required sibling */ }),
   /** Keyed by fiscal year ("FY2027"), NOT a flat literal — see §5. */
   annualDates: z.record(z.string().regex(/^FY\d{4}$/), AnnualDateEntrySchema).default({}),
-  operator: z.object({ timekeeperName: z.string().default("") }).strict(),
+  operator: z.object({ timekeeperName: z.string() }).strict().default({ timekeeperName: "" }),
   // … capture / browserHealth / concurrency / daemon / ocr / features: ported 1:1 from
   // domain/settings/types.ts, unchanged shape, now zod-typed instead of a hand-written interface.
 }).strict();
@@ -161,7 +182,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 // temp_src/domain/config/resolve.ts
 /** One declarative table replaces every scattered `process.env.X ?? …` read site. */
 const ENV_KEY_MAP: Record<string, string> = {
-  "urls.kualiSpace": "KUALI_SPACE_URL_OVERRIDE",     // rare — URLs are normally settings-driven, not env
+  "urls.kuali.test.entry": "KUALI_SPACE_URL_OVERRIDE",
   "annualDates.*.jobEndDate": "ANNUAL_DATES_END",     // resolved against the CURRENT fiscal year only
   "annualDates.*.kronosDefaultEndDate": "KRONOS_DEFAULT_END_DATE",
   "annualDates.*.kronosDefaultStartDate": "KRONOS_DEFAULT_START_DATE",
@@ -170,12 +191,22 @@ const ENV_KEY_MAP: Record<string, string> = {
   // … every OperatorSettingsOverride ↔ env-var pair from applyOperatorSettingsEnv, ported verbatim
 };
 
+// SettingsOverrideSchema migrates today's sparse "System URLs" values into `urls.<system>.test`.
+// It can never replace `prod`; selecting the test endpoint is an explicit RunEnvelope decision.
+
 export function resolveConfig(env: NodeJS.ProcessEnv, settingsOverride: unknown): Config {
   const withDefaults = ConfigSchema.parse({});                 // zod .default() fills every leaf — ONE source
   const withSettings = deepMergeNonEmpty(withDefaults, SettingsOverrideSchema.parse(settingsOverride ?? {}));
   const withEnv = applyEnvPrecedence(withSettings, ENV_KEY_MAP, env);  // explicit env wins, treats "" as unset
   return ConfigSchema.parse(withEnv);                           // final validation — a bad env/settings value throws here
 }
+
+export interface ResolvedConfig {
+  config: Config; // plain values consumed by runtime code
+  provenance: Readonly<Record<ConfigLeafPath, "env"|"settings"|"default">>;
+  fingerprint: string;
+}
+export function resolveConfigWithProvenance(env: NodeJS.ProcessEnv, settings: unknown): ResolvedConfig;
 ```
 
 - **"Empty settings = today's behavior" invariant, structurally guaranteed, not hand-maintained.**
@@ -186,21 +217,22 @@ export function resolveConfig(env: NodeJS.ProcessEnv, settingsOverride: unknown)
   themselves (so an accidental edit to a default URL/timeout is caught in review, same spirit as
   today's mirrored-literal safety net, but with one source instead of two).
 - **Workflow/system configs narrow, they never redeclare.** `temp_src/stores/ucpath/config.ts`
-  reads `const { ucpathSmartHr } = resolveConfig(...).urls;` — a thin selector over the one
-  resolved `Config`, never its own `env > settings > default` expression. This directly closes gap
-  #4's "precedence re-implemented per read-site" finding.
-- **Effective value + source, surfaced.** The resolver returns `{ value, source: "env" |
-  "settings" | "default" }` per leaf (not just the merged value) so Settings can keep showing the
+  calls `resolveSystemEndpoints(snapshot, "ucpath")`—a thin selector over the run's resolved
+  `prod`/`test` endpoint map, never its own `env > settings > default` expression. Production and
+  sparse test endpoints are distinct fields, so a settings override cannot silently retarget a prod
+  run. This directly closes gap #4's "precedence re-implemented per read-site" finding.
+- **Effective value + source, surfaced.** `resolveConfig` returns plain `Config` exactly as typed.
+  `resolveConfigWithProvenance` returns `{config, provenance, fingerprint}` so Settings can show the
   read-only transparency the old dashboard already has (`.env` Credentials panel) — this is what
   closes the "precedence-shadowing" risk (§7).
 
 ---
 
-## 4. Per-run test-vs-production instance selection — **scope-optional-now**
+## 4. Immutable per-run config and instance snapshot — required in Phase 1
 
-The charter defers this (operator directive: process-global URL override is today's accepted
-behavior); this section **designs** the mechanism so it exists as an approved shape when a workflow
-genuinely needs mixed prod/test targeting, without building it in Phase 1/2.
+Every run and ledger entry must say which environment/config actually governed it. The request may
+omit instance preferences (meaning production), but enqueue always resolves and stamps a complete
+snapshot; runtime tasks never re-read mutable process settings mid-run.
 
 ```ts
 // amends doc 02's RunEnvelope — doc 02 remains the OWNER of RunEnvelope's shape; this field is
@@ -215,11 +247,14 @@ interface RunEnvelope {
    * run's tasks against that system resolve config from the settings.json test-URL override
    * instead of the production literal.
    */
-  instance?: Partial<Record<SystemId, "prod" | "test">>;
+  requestedInstance?: Partial<Record<SystemId, "prod" | "test">>;
+  resolvedInstance: Readonly<Record<SystemId, "prod" | "test">>;
+  configFingerprint: string;
+  configSnapshotId: string; // immutable SQLite row containing non-secret effective values+sources
 }
 ```
 
-- **Loud default, never silent.** Omitting `instance` (the common case — every run today) resolves
+- **Loud default, never silent.** Omitting `requestedInstance` resolves
   every system to production, matching current behavior byte-for-byte. There is no implicit "test"
   state to fall into by omission.
 - **Fail-loud mismatch check, at resolve time.** `resolveSystemUrl(config, systemId, requested)`:
@@ -235,13 +270,9 @@ interface RunEnvelope {
 - **Recorded in the audit trail.** `RunQueued.instance` (doc 03's span schema) carries the resolved
   map (even when empty/all-prod) — so every run's actual target, per system, is queryable from the
   ledger (gap-audit gap 5), not inferred.
-- **Recommendation: defer.** Adopt when a workflow needs concurrent mixed targeting — e.g.
-  validating a new Kuali/OnBase task against a sandbox instance while production runs of other
-  workflows continue on the same executor. Until two runs need *different* targets *at the same
-  time*, the existing process-global `SETTINGS.urls.*` override (start the daemon once against a
-  test instance, once against prod) is simpler and already ported. The design above is what to
-  build the day that changes — it is a RunEnvelope field + one resolver function, not a new
-  subsystem, so adopting it later is cheap.
+- **Executor pool partitioning.** Browser contexts are keyed by `(system,resolvedInstance,
+  configFingerprint)`. Prod/test runs never share a context. A config change creates new contexts;
+  existing runs finish against their stamped snapshot.
 
 ---
 
@@ -359,10 +390,11 @@ shape as the existing ratchets, catching an accidental `log.info(`login as ${pas
 |---|---|---|
 | A config default masks a genuinely missing value (empty URL silently = production) | An operator who *meant* to set a test URL, typo'd it empty, unknowingly runs against production | This is the charter's "verified + genuinely valid" exception, not a masked failure: empty-URL-means-production is a **documented, verified** default (every URL's production literal is the live-verified value already in `config.ts` today) — not a guess. What closes the *dangerous* half (test intended, prod delivered) is §4's fail-loud instance-selection check, which is orthogonal to and stricter than the plain config default |
 | Stale fiscal-date fallback | A rollover is missed; last year's date silently reused | §5: missing-FY throws; existing-but-past-due entry ALSO throws (`assertNotPast`) — closes both the "nobody rolled it over" and "somebody rolled it over wrong" cases |
-| Clock skew (host OS clock is wrong) | Freshness comparisons (D8) and trace-id time-of-day become wrong in lockstep, undetectably | **Residual, not fully closed** — both `captured_at` and the freshness check's `now` read the SAME `Clock`, so a *constant* OS skew cancels out in the `now − captured_at` subtraction; a skew that *changes* between capture and check (e.g. host clock stepped by NTP mid-run) is a genuine gap. Recommend (not built here): log a skew warning if the OS clock jumps backward or by a large delta between two `systemClock.now()` reads in the same process — a cheap monotonic-vs-wall-clock sanity check, out of scope for this doc |
-| `fixedClock` (test double) leaks into a production executor | A daemon silently runs with a frozen clock — every trace id, span, and freshness check wrong in the same way, all at once, no crash | `fixed-clock-test-only.test.ts` — import-site guard, `fixedClock` only importable from `*.test.ts`/`tests/**` |
+| Clock skew (host OS clock is wrong) | Freshness comparisons and trace-id time-of-day become wrong in lockstep | constant skew cancels in `now-observedAt`; changing skew remains residual; compare monotonic vs wall clock and warn/park on a large backward jump |
+| `manualClock` (test double) leaks into a production executor | A daemon silently runs with a frozen clock — every trace id, span, and freshness check wrong in the same way, all at once, no crash | `manual-clock-test-only.test.ts` — import-site guard, `manualClock` only importable from `*.test.ts`/`tests/**` |
 | `ENV_KEY_MAP` typo (env var name misspelled, or a schema leaf added without a matching env entry) | An operator sets an env var that silently does nothing (the resolver never looks for it) | `config-env-map-coverage.test.ts` — asserts every schema leaf marked `envBacked` in a leaf-level annotation has exactly one `ENV_KEY_MAP` entry, and every `ENV_KEY_MAP` entry resolves to a real schema path (bidirectional coverage, same shape as the existing registry-parity guards) |
-| Per-run instance selection (§4) becomes the THIRD `??`-chain nobody audits | Design rot before it's even built | Marked explicitly scope-optional-now; the recommendation names the exact adoption trigger (concurrent mixed targeting) so it isn't built speculatively and isn't forgotten either — it's one `RunEnvelope` field + one resolver function away, not a parallel subsystem to maintain unused |
+| Runtime re-reads config after enqueue | one run changes target/timeouts mid-flight or ledger mislabels instance | immutable snapshot/fingerprint on envelope; contexts partitioned by snapshot; guard bans config resolution from task impls |
+| Resolver return type drifts | consumers expect plain values but receive provenance wrappers | type test pins `resolveConfig():Config` and `resolveConfigWithProvenance():ResolvedConfig` separately |
 
 ---
 
@@ -378,14 +410,13 @@ validateRequiredSecrets();                                    // throws loud if 
 const runId = crypto.randomUUID();
 const traceId = buildTraceId({ code: "ou", runId, at: clock.now() });   // §2 — Clock supplies `at`
 
-const ucpathUrl = resolveSystemUrl(config, "ucpath", envelope.instance?.ucpath ?? "prod");  // §4 — loud default = prod
-// envelope.instance is absent here → "prod" → production literal, exactly as today
+const ucpathUrl = resolveSystemUrl(config, "ucpath", envelope.resolvedInstance.ucpath);
 
 const annualDates = requireAnnualDates(config, clock);         // §5 — FY2027 entry, not past-due; else throws
 const ucpathPassword = requireSecret("ucpathPassword");        // §6 — throws loud if unset, never logged
 
-// … task runs, checkpoints written with captured_at: clock.now().toISOString() (§2/§3 composition) …
-// span.ended(run, "done") — RunQueued.instance = {} (all-prod, recorded per §4)
+// … task runs, checkpoint facts record observedAt from clock; configSnapshotId stays fixed …
+// span.ended(run, "done") — all-prod resolved map + config fingerprint recorded
 ```
 
 **The same run one fiscal year later, nobody rolled the dates over:**
@@ -404,23 +435,19 @@ fiscal literal.
 
 ---
 
-## 9. Open questions
+## 9. Settled design questions
 
-1. **`SECRETS`/descriptor-declared secret requirements (§6).** Should a workflow descriptor
-   formally declare `requires: SecretName[]` (checked at enqueue, like session needs), or is a
-   lazy per-task `requireSecret()` call sufficient? The lazy form matches today's
-   `getTimekeeperName()` pattern but defers the failure later than necessary.
-2. **Clock-skew detection (§7).** Worth a cheap monotonic-vs-wall sanity probe in the executor, or
-   accept it as a residual, documented risk given real hosts rarely skew mid-run?
-3. **`ENV_KEY_MAP` for URLs.** Today's `config.ts` has almost no URL env-var overrides (URLs are
-   settings-driven, not env-driven) — should the rebuild keep that asymmetry (URLs: settings only;
-   timeouts/OCR/etc.: settings + env), or make every config leaf uniformly env-overridable for
-   consistency?
-4. **Fiscal-year entry authoring UI.** `annualDates` keyed by `FY${year}` needs an operator-facing
-   place to add next year's entry (Settings page) — is that in this doc's scope or doc 03's
-   dashboard-flip scope (D13 says Settings proxies to old endpoints until its own migration
-   milestone)?
-5. **Per-run instance selection's actual trigger (§4).** Is there a concretely planned workflow
-   (e.g. a Kuali/OnBase sandbox validation pass) that will need it soon, which would argue for
-   building it in Phase 2 rather than deferring — or is it genuinely speculative until further
-   notice?
+1. ~~Secret requirement timing~~ — **resolved 2026-07-21:** descriptors derive `requires` from task
+   contracts; enqueue checks the complete set before creating a run. Per-task `requireSecret()`
+   remains a fail-loud defense-in-depth backstop, not the primary discovery mechanism.
+2. ~~Clock-skew detection~~ — **resolved:** durations use monotonic time; the executor compares wall
+   vs monotonic deltas and emits a loud health warning/pauses new commits on material backward wall
+   jumps until the operator acknowledges. Existing runs never rewrite timestamps.
+3. ~~`ENV_KEY_MAP` for URLs~~ — **resolved:** only intentionally supported leaves appear in the
+   explicit map. No reflection/uniform "every leaf" override. Production endpoint maps remain code
+   defaults; settings and named URL env vars populate sparse test maps only.
+4. ~~Fiscal-year entry authoring UI~~ — **resolved:** schema/file authoring works in Phase 1;
+   operator UI lands when native Settings migrates under doc 03's scoped-flip sequence. Until then,
+   Settings proxies old controls and the validated JSON entry is the supported new-config path.
+5. ~~Per-run config snapshot timing~~ — **resolved 2026-07-21:** required in Phase 1 because every
+   write ledger record needs trustworthy instance/config provenance even when all runs are prod.

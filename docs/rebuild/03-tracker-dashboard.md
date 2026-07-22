@@ -1,17 +1,17 @@
 # 03 — Tracker/Event Layer + Dashboard Contract (span rebuild)
 
-Status: **amended per `04-reconciliation.md` (D1, D10–D14) — for operator review.** Conforms to
-`00-charter.md` (full blast radius: tracker rebuilt around spans; dashboard consumes descriptor +
-span contract).
+Status: **Phase 0 revised design — 2026-07-21 event/migration corrections integrated.** Conforms to
+`00-charter.md` and Round-4 decisions D28/D29/D32/D33/D37/D44/D45 (tracker rebuilt around spans; dashboard
+consumes descriptor + span contract).
 
 ## Ownership (D1)
 
 | | Concept | Where |
 |---|---|---|
-| **This doc OWNS** | Span/event wire schema (§1, amended per D10), the notes stream, storage layout (§2.1), the SQLite projection role (per D14), SSE wire shapes (§2.2), the lift adapter + flip plan (§5), the completion (fan-out/approval) union (§4) | §§1–5 |
+| **This doc OWNS** | Span/event wire schema (§1, amended per D10), the notes stream, storage layout (§2.1), the SQLite projection role (per D14), durable local artifact outboxes/projector semantics (D45), SSE wire shapes (§2.2), the lift adapter + flip plan (§5), the completion (fan-out/approval) union (§4) | §§1–5 |
 | **Imports from doc 01** | Task contract + `defineTask`, task id grammar (`<system>/<verb-object>` slash ids, per D2), the closed `SystemId` union — real `src/systems/` dir names (`new-kronos`, `old-kronos`) plus the D4 service systems (`extraction`, `ocr`, `roster` — charter §11), error taxonomy | referenced, never redefined |
 | **Imports from doc 02** | Workflow descriptor shape + builder, RunEnvelope (`dryRun` home per D6), run-state machine incl. gates/parks (D5), checkpoint store schema, the readable span-path id grammar (`pl-104233-9f3e/searching#2`) | referenced, never redefined |
-| **Exports doc 02 adopts** | Verdict mappings (§3.2 — these REPLACE `statusExtensions` in doc 02's descriptor), gate declarations, step display rules (`hidden`/`foldInto`), the detail-field declaration `SpanPatched` validates against | §3 |
+| **Exports doc 02 adopts** | Verdict/detail semantics, completion program semantics, and wire projections; doc 02's descriptor now carries every consumed field | §3–4 |
 
 ---
 
@@ -109,7 +109,7 @@ export interface RunQueued extends Base {
   shape: "single" | "preview" | "operation" | "operation-member";  // SHAPE axis, stamped ONCE
   subjectKind: "person" | "file" | "catalog";                      // KIND axis, derived from
                                                                    // descriptor.inputSubject, ONCE
-  input: unknown;                  // the zod-validated input (retry/edit-resume authority) —
+  input: JsonValue;                // canonical-JSON, zod-validated input (retry/edit-resume authority) —
                                    // OMITTED for inputs carrying identifiers that must not ride
                                    // JSONL (i9 SSNs; the SQLite task row is the input authority,
                                    // mirroring today's deliberate i9-check-results deviation)
@@ -141,7 +141,7 @@ export interface SpanStarted extends Base {
  */
 export interface SpanPatched extends Base {
   t: "span.patched";
-  patch: Record<string, unknown>;
+  patch: Record<string, JsonValue>;
 }
 
 /** A run parked on an operator/system decision (D5: gates are run-state, owned by doc 02;
@@ -169,7 +169,7 @@ export interface Note extends SpanRef {
   fields?: Record<string, string>;           // category/system/attempt/durationMs/…
   /** Per-action attribution (D10): store-task id (doc 01 slash grammar) + selector-registry key. */
   action?: { task: string /* "ucpath/search-person-org" */; type: string; target?: string };
-  attachment?: { kind: "screenshot" | "data-point"; payload: Record<string, unknown> };
+  attachment?: { kind: "screenshot" | "data-point"; payload: Record<string, JsonValue> };
 }
 ```
 
@@ -223,13 +223,14 @@ Derived statuses stop being per-workflow code where a universal mechanism exists
 .tracker/
 ├── spans/   <workflow>-<date>.jsonl   span events (low volume — the queue/timeline truth)
 ├── notes/   <workflow>-<date>.jsonl   notes (high volume — logs, actions, screenshots, data points)
+├── artifacts/sha256/<prefix>/<hash>    content-addressed task outputs; atomic, immutable bytes
 ├── ledger/  <system>-<date>.jsonl     immutable write receipts (D21; shape owned by doc 09 §6) —
 │                                      hash-chained (seq + prevHash), append-only, per-SYSTEM+day,
 │                                      NEVER pruned (the audit floor)
 ├── rows/ logs/ sessions/ …            LEGACY dirs — untouched, still written by old src,
 │                                      read via the lift adapter (§5) until deleted
-└── state.db                           SQLite — split role per D14 (§2.3): claim/checkpoint/fence
-                                       tables are system-of-record; projection tables are rebuildable
+└── state.db                           SQLite — claims/checkpoints/intents/outboxes/ledger heads
+                                       are system-of-record; read projections are rebuildable
 ```
 
 Rationale against alternatives:
@@ -254,16 +255,26 @@ Rationale against alternatives:
   until deletion.
 - **Why per-workflow files?** Small greppable files; partition key matches the SSE topic scope.
   Worker spans write to their workflow's file (a daemon serves one workflow).
-- **Write discipline (ported verbatim):** append-at-now partitioning; cross-midnight solved at the
+- **Span/note write discipline (ported):** append-at-now partitioning; cross-midnight solved at the
   read layer with the OPEN-span forward-merge (same algorithm as `cross-midnight.ts`); synchronous
-  SIGINT terminal writes; `O_APPEND` single-line writes, no async mutex.
+  SIGINT terminal writes; `O_APPEND` single-line writes. **Ledger is different:** executors write
+  durable outbox rows and one serialized projector assigns sequence/hash and appends (doc 09).
+- **Local artifacts are not hidden task writes (D45).** A read task may create only immutable,
+  content-addressed bytes under `artifacts/` through doc 01's writer; the returned `{id,sha256,bytes,
+  mediaType}` is canonical JSON and checkpoints reference it without exposing a filesystem path.
+  Mutable operator artifacts (for
+  example i9's retention workbook) are different: the node checkpoint and a stable-keyed
+  `artifact_outbox` row commit atomically in SQLite, then a single sink projector performs
+  temp+fsync+atomic-replace and records the projected content hash. Duplicate outboxes/key retries
+  are no-ops. A blocking projection failure parks the run; it never reports done while silently
+  dropping the workbook update.
 
 ### 2.2 Projections are computed server-side — the wire carries surfaces, not rows
 
 Today the client re-implements queue-surface classification, status keying, and pipeline math. In
 temp_src the SSE stream carries **finished projections**; the client renders and never re-derives.
-Static descriptor metadata does NOT travel on this stream — the SPA imports `DESCRIPTORS` directly
-(doc 02 §1.2); the SSE hello carries only a `descriptorHash` so a stale partial rebuild fails loud.
+Descriptor metadata is served as doc 02's validated client projection; the SPA never imports
+workflow modules. The SSE hello carries its fingerprint so a stale bundle fails loud.
 
 ```ts
 // temp_src/server/topics.ts — SSE topic payloads (all change-gated snapshots, as today)
@@ -303,6 +314,12 @@ interface QueueSurfaceWire {
 }
 ```
 
+For a run parked on an unfinished write intent, the server replaces ordinary retry/done actions
+with the closed kernel actions `resolve-write-present` and `resolve-write-absent` (doc 09 §4.1),
+including intent generation+version tokens and the proof/evidence form spec. The descriptor cannot
+re-enable generic Done/Retry for that state. These actions derive from durable intent state, not a
+workflow-id registry; stale tokens fail with a conflict and trigger a fresh projection.
+
 Per-run detail (timeline, notes, screenshots) stays request/response + a per-run SSE topic, as
 today — but the payload is the span tree + notes, already merged and ordered; `LogStream` stops
 owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server-side fold).
@@ -313,9 +330,10 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
 
 - **System-of-record (NOT rebuildable, NOT deletable):** the task/claim store (tasks, leases,
   dependencies, commands — doc 02 §5.7's checkpoint payloads, §4.4's `ocr_approvals` manifests, and
-  **doc 09's `write_intents` crash-fence table**). The `write_intents` addition **amends D14** — the
-  system-of-record set is now "claims + checkpoint payloads **+ the write-intent fence**," because a
-  lost in-flight fence would re-open the exactly-once crash window (doc 09 §3/§4). Live queue truth.
+  doc 09's permanent-key `write_intents`, `write_attempts`, durable outbox, and `ledger_heads`, plus
+  stable-keyed local `artifact_outbox`/sink-head rows). The system-of-record set is
+  "claims + checkpoint payloads + write authority/outboxes/ledger tails + local artifact projection
+  authority."
   Losing any of these loses claims, checkpoints, or in-flight write fences — they have no JSONL
   double.
 - **Projection tables (rebuildable):** span-shaped read models (`spans`, `gates`, `notes`,
@@ -338,10 +356,11 @@ doc 02 to adopt. The tracker enforces its half at the emit boundary: **emitting 
 verdict map, or a patch key not in its detail-field list, throws at emit time.**
 
 ### 3.1 Read from doc 02's descriptor
-`id`, `code` (2-char trace prefix), `label`, `icon`, `category`, `archetype` (shape / resolver),
-`inputSubject`, `tasks[].key/label` (step pipeline + labels), `surfaces` (input/upload run
-affordances), presentation-override layering (D16: descriptor label → operator override, nothing
-else).
+`id`, `code` (2-char trace prefix), `label`, `icon`, `category`, `surface.shape` /
+`surface.resolveShape`,
+`inputSubject`, graph-node keys/labels, `surfaces`, `details`, `actions`, `presets`, `identity`,
+`presentation`, `coordinator`, `completionConsumes`, `artifactProjections`, version/fingerprint, and
+override layering. There is no second `archetype` declaration.
 
 ### 3.2 Contributed by this doc, adopted into doc 02's descriptor
 These are plain-data fields; doc 02's descriptor carries them, this doc defines their semantics:
@@ -360,8 +379,30 @@ details:  { key: string; label: string; conditional?: boolean }[]
 //    Successor of today's detailFields incl. the "declared but never populated" warn.
 capabilities: { review?: "ocr"; editData?; viewData?; delegation?: {...} }
 completion?: CompletionProgram                                // §4 — OCR-backed workflows only
-migratedAt?: string                                           // §5.2 — source-authority cutover
+actions / presets / identity / presentation / coordinator / completionConsumes / artifactProjections
+// artifact projection specs name an exact producing node+field, sink id, stable key fields,
+// blocking policy, and canonical record schema; the client receives status only, never sink paths
 ```
+
+The bundle-safe artifact spec is a closed infrastructure contract, not an arbitrary callback:
+
+```ts
+export type ArtifactSinkId = "xlsx-retention"; // extend with a sink implementation + guard fixture
+export interface DurableArtifactProjectionSpec<RecordSchema extends z.ZodType> {
+  id: string;
+  source: { nodeId: string; fieldPath: string };
+  record: CanonicalJsonSchema<RecordSchema>;
+  keyFields: readonly [string, ...string[]];
+  sink: ArtifactSinkId;
+  blocking: true;
+}
+```
+
+The builder factory receives the exact node accumulator and constrains `nodeId`, `fieldPath`, and
+`keyFields` to real paths in that node's output/record schema; the broad wire form above is runtime
+only. `blocking:false`, a free-form sink id, positional keys, and function-valued projectors are not
+legal. Sink implementations live in one exhaustive `Record<ArtifactSinkId,Projector>` owned by
+infrastructure—deliberately a sink-kind registry, never keyed by workflow.
 
 Every hand-maintained parallel list in today's dashboard (icons, INSTANCE_LABELS, step-label
 switches, stub map) becomes a projection of the descriptor set with a coverage guard — that
@@ -382,31 +423,33 @@ display-only failed rows.
 
 ```ts
 // temp_src/descriptor/completion.ts
-import type { WorkflowRef } from "./ref.js";   // typed handle: WorkflowRef<TInput> carries the
-                                               // target's zod-inferred input type (docs 01/02)
+import { z } from "zod/v4";
+import type { AnyWorkflowRef } from "./ref.js";
+// WorkflowRef<InputSchema> carries the concrete target zod schema (docs 01/02).
 
 export type CompletionProgram =
-  | StagedFanOut          // oath, emergency-contact, onbase-ec: approval gate → ordered stages
-  | CompleteThenEnqueue;  // i9: read-only run completes, THEN members enqueue under the coordinator
+  | StagedFanOut<readonly [PerRecordStage<AnyWorkflowRef>, ...AnyFanOutStage[]]>
+  | CompleteThenEnqueue<AnyWorkflowRef>;
 // oath-upload deliberately has NO CompletionProgram — see §4.5 (sibling subscriber).
 // verify deliberately has NO CompletionProgram — see §4.6 (in-run enrichment, not completion).
 
-export interface StagedFanOut {
+export interface StagedFanOut<Stages extends readonly [PerRecordStage<AnyWorkflowRef>, ...AnyFanOutStage[]]> {
   mode: "staged-fanout";
   gate: "approval";                          // the gate this program resolves
   /** ORDERED. Stage N+1's derive receives stage N's ACTUALLY-ENQUEUED itemIds — as-built:
    *  oath's per-document ticket gets `perRecordItemIds` = the ids the record stage really
    *  enqueued after `eligible` filtering (approve.ts:306, oath.ts:455), never the selected set. */
-  stages: [PerRecordStage<any>, ...FanOutStage[]];
+  stages: Stages;
 }
 
-export type FanOutStage = PerRecordStage<unknown> | PerDocumentStage<unknown>;
+export type AnyFanOutStage =
+  | PerRecordStage<AnyWorkflowRef>
+  | PerDocumentStage<AnyWorkflowRef>;
 
-export interface PerRecordStage<TIn> {
+export interface PerRecordStage<Target extends AnyWorkflowRef> {
   per: "record";
-  to: WorkflowRef<TIn>;                      // compile error if derive() output ≠ target input type
-  derive: (record: PreviewRecord, ctx: ApproveContext) => TIn;  // ctx = sessionId/runId/parentRunId/
-                                                               // pdf identity (as-built recordContext)
+  to: Target;
+  derive: (record: PreviewRecord, ctx: ApproveContext) => z.input<Target["input"]>;
   /** As-built canFanOut: oath = signed + 5-digit EID (`hasOathSignerInput`); EC = EID-complete.
    *  Shared, named, exported predicates only (§4.2). Skipped records are NOT enqueued and their
    *  itemIds do NOT reach later stages. */
@@ -418,21 +461,21 @@ export interface PerRecordStage<TIn> {
   deriveItemId: (record: PreviewRecord, runId: string, index: number) => string;
 }
 
-export interface PerDocumentStage<TIn> {
+export interface PerDocumentStage<Target extends AnyWorkflowRef> {
   per: "document";
-  to: WorkflowRef<TIn>;
-  derive: (doc: ApprovedDocument) => TIn;    // doc.perRecordItemIds = prior stage's enqueued ids
+  to: Target;
+  derive: (doc: ApprovedDocument) => z.input<Target["input"]>; // gets prior enqueued ids
   deriveItemId: (doc: ApprovedDocument) => string;
 }
 
-export interface CompleteThenEnqueue {
+export interface CompleteThenEnqueue<TTarget extends AnyWorkflowRef> {
   mode: "complete-then-enqueue";             // i9: no approval gate exists — nothing to approve
   then: {
     per: "person";
-    to: WorkflowRef<unknown>;                // i9-check member task (real daemon work)
+    to: TTarget;                             // concrete input schema retained end to end
     /** Runs at the PREPARE seam (as-built: /api/ocr/prepare after the delegated run completes,
      *  gated on the coordinator existing — prepare.ts:476-505), NOT at an approve route. */
-    derive: (plan: MemberPlanEntry) => unknown;
+    derive: (plan: MemberPlanEntry) => z.input<TTarget["input"]>;
     /** Pages that can never be searched become TASK-LESS display-only failed member rows
      *  (`run.queued { displayOnly: true }` + immediate `span.ended("failed")`; no run.claimed,
      *  no worker span, delete-only actions) — as-built i9-check-results.ts displayFailures. */
@@ -440,6 +483,11 @@ export interface CompleteThenEnqueue {
   };
 }
 ```
+
+`defineCompletionProgram(...)` infers and returns the concrete heterogeneous stage tuple; workflow
+descriptors are inferred values and are never annotated as broad `CompletionProgram`. A type-level
+fixture renames a target input field and requires every `derive` site—including i9—to fail `tsc`.
+Broad target erasure, untyped `derive` results, or exported erased stage arrays are forbidden.
 
 ### 4.2 Cross-spec borrowing becomes impossible
 
@@ -529,23 +577,18 @@ oath/ec/onbase-ec/verify/i9 — oath-upload is a fan-out *target*, not a form). 
   SQLite-backed, not an in-memory wake.
 - Declared on the oath-upload descriptor as a gate wired to an approval subscription:
   `gates: [{ id:"await-approval", subscribes: { workflow:"ocr", key:"sessionId" } }, { id:"await-signatures", … }]`.
-- **Handler-owned, NOT declarable** (stated per D11 rather than forced into the union): the
-  zero-signer refusal (approved-but-empty ⇒ throw, never file an empty ticket), the discard →
-  `cancelled("discarded")` mapping (ISS-007), and the submit-idempotency window
-  (`submitAttempted` marker + prior-ticket probe). These are run-state/task logic under docs
-  01/02's contracts.
+- The zero-signer refusal is an output-dependent branch to a typed failure node; discard is a gate
+  resolution mapped to cancelled; signature waiting is a typed children-terminal gate; ticket fill
+  and submit form a transaction node. The submit idempotency window is doc 09's write intent. None
+  of these hides in a handler side channel.
 
 ### 4.6 verify — in-run enrichment, not completion
 
 verify has **no completion contract**: no approve targets, no `completeDelegatedRun`. Its
-fan-outs (`verify.ts:523-660`) happen **during the run**, inside `enrichRecords`: two concurrent
-BLOCKING gated fan-outs (person-lookup + i9-lookup, `Promise.allSettled` so an abort lets each
-branch cascade-cancel its own children) that patch records and re-emit progress as EACH child
-terminates. In the new model that is doc 02 territory — delegation tasks + in-run gates emitting
-ordinary task spans and `span.patched` record updates — and this doc deliberately does not model
-it as completion. The previous draft's `CompleteOnEnrichment` conflated verify with i9; they share
-only "read-only". i9 is §4.1's `CompleteThenEnqueue` (post-completion member enqueue at the
-prepare seam); verify is mid-run enrichment with nothing after completion.
+fan-outs (`verify.ts:523-660`) happen during the run: doc 02 models two typed child-run branches in
+a first-class parallel `all-settled` node, followed by a typed join/enrichment step. Child inputs,
+results, cancellation, and joins are descriptor-visible and checkpointed. This doc still does not
+model them as completion. i9 is §4.1's post-completion enqueue; verify is mid-run enrichment.
 
 ---
 
@@ -562,22 +605,31 @@ down-emit shim (unneeded once the scoped flip lands first).
 // temp_src/tracker/compat/lift-legacy.ts — PURE, deleted at end of migration.
 // Reads legacy state via the OLD validators (imported from src/tracker — the one sanctioned
 // old→new import, quarantined to this module) and lifts each legacy run into spans.
-export function liftLegacyRun(entries: TrackerEntry[], logs: LogEntry[]): LiftResult;
+export function liftLegacyRun(
+  schemaVersion: LegacyEmitSchemaVersion,
+  entries: TrackerEntry[], logs: LogEntry[], sessions: SessionEvent[],
+): LiftResult;
 // LiftResult = { spans: SpanEvent[]; notes: Note[] } | { quarantined: QuarantinedRow }
 ```
+
+Legacy emit shapes are **versioned, not frozen**. Central legacy emitters stamp one reviewed
+`LegacyEmitSchemaVersion` covering row/log/session channels; records predating the field are explicit
+`v0`. The lifter dispatches through a closed version→adapter map. A guard snapshots the legacy wire
+schemas: changing a source schema without bumping the version, adding its adapter, and adding
+old+new golden fixtures fails CI. Production `src` can therefore receive necessary fixes during the
+multi-quarter migration without silently changing the meaning of already-stored rows.
 
 **Lift inputs come from the visible-entries layer, never raw files (review #9):** the lifter reads
 through `readVisibleEntries*` / the tombstone-filtered SQLite views (`deletions/visible.ts`), so an
 operator-deleted run stays deleted — raw-file reads would resurrect it. Session-event lifting
 applies the same tombstone filter.
 
-**Lift policy is quarantine, NEVER throw (D12) — including post-cutover rows and invalid
-archetypes.** A row the lifter cannot classify — an invalid `data.archetype` (which
+**Lift policy is quarantine, NEVER throw (D12) — for invalid rows.** A row the lifter cannot
+classify — an invalid `data.archetype` (which
 `resolveRowArchetype` throws on today, `row-archetype.ts:96-99`; the lifter catches at the row
-boundary), an unknown status/step combination, a post-cutover legacy row (§5.2) — produces a
+boundary) or an unknown status/step combination — produces a
 `quarantined` diagnostic: a loud queue card carrying the raw JSON + reason, a warn note, and a
-count on the SSE hub (`quarantine` topic, §2.2). One bad row — or one straggling old daemon still
-writing legacy rows after cutover — degrades to a visible quarantine card; it can never take down
+count on the SSE hub (`quarantine` topic, §2.2). One bad row degrades to a visible quarantine card; it can never take down
 the projection read path for every workflow, which a throw would.
 
 ### 5.2 The mapping — enumerated from the kernel terminal contract (D12)
@@ -610,24 +662,25 @@ sentinels and read-time reclassification. The lift decodes each exactly once:
 | operation coordinator rows (display-only, stamped at prepare) & i9 `data.displayOnly==="true"` members | `run.queued { displayOnly: true }` (+ `span.ended` for the failed members) — **NO fabricated `run.claimed`, NO worker span** (review #9); actions project delete-only |
 | session events | worker/browser spans keyed by (instance, pid) — the pid heuristics live here and ONLY here |
 | data diffs on re-emits | `span.patched` (identity keys excluded — a legacy re-stamp folds into details, never identity) |
-| anything else — invalid archetype, unknown status/step, post-cutover legacy row | **quarantine (§5.1), never throw, never a silent default** |
+| anything else — invalid archetype or unknown status/step | **quarantine (§5.1), never throw, never a silent default** |
 
-**Pinned by a real-tracker-day replay fixture (D12):** a test corpus of copied real `.tracker`
-days (plus the seeded operation/preview/cross-midnight fixtures) replays through the lift asserting
+**Pinned by versioned real-tracker fixtures (D12):** a test corpus of copied real `.tracker`
+days for every supported legacy schema version (plus seeded operation/preview/cross-midnight fixtures) replays through the lift asserting
 **zero quarantines** and asserting the invariants above (every attempt's spans open/close exactly
-once; no claimed/worker spans on display-only rows; tombstoned runs absent). A new legacy row shape
-discovered in production shows up as a quarantine card AND a fixture failure when that day is added.
+once; no claimed/worker spans on display-only rows; tombstoned runs absent). An unstamped/unregistered
+shape is quarantined visibly; the source-schema/version guard is what prevents shipping one knowingly.
 
-### 5.3 Source authority — a workflow is legacy XOR migrated
+### 5.3 Source authority — immutable per run
 
-`descriptor.migratedAt` (absent = legacy). Rows for a migrated workflow written *after*
-`migratedAt` mean old code is still running somewhere — the lift **quarantines them loudly**
-(visible card + notification; per D12 this is quarantine, not the previously-specified throw — a
-straggling old daemon must not kill the read path, §5.1). The native reader ignores legacy files
-entirely. History stays readable: pre-migration dates for a migrated workflow still render via
-lift. Cross-boundary delegation works because runId / parentRunId / traceId formats are ported
-unchanged — a lifted legacy OCR parent and a native person-lookup child join in the same
-projection by `parentRunId`, exactly like two native runs.
+Every enqueue stamps `(engine:"legacy"|"native", cutoverGeneration)` in the authoritative run
+record; the lift assigns the registered legacy generation to already-running tasks. All later
+events inherit authority by `runId`, never by timestamp. Starting generation N+1 routes new runs
+to native while the enumerated generation-N legacy run set drains normally. A duplicate event for
+one run from the wrong engine quarantines; a legitimate late legacy terminal does not.
+
+Cutover is transactional: increment generation, atomically switch enqueue routing, record the
+legacy drain set, and reject new legacy enqueues. Rollback creates another generation; it never
+rewrites an existing run. Cross-generation delegation still joins by runId/parentRunId/traceId.
 
 ### 5.4 The flip is SCOPED (D13), then per-workflow migration
 
@@ -651,10 +704,11 @@ surfaces only**:
    proxied long tail:** they are part of the OCR workflow's own scoped-flip surface set and
    migrate *with* the OCR workflow at master-plan order 3–4 (§5.3 / Phase 2+ per-workflow
    migration), exercising the native completion union + approval gates — not left proxied to the
-   old `/api/ocr/approve-batch`. The old dashboard stays runnable as `dashboard:legacy` for **one
-   week of real operation** (D13 resolves old open question 5), then dies.
-4. **Phase 2+ (per-workflow migration):** each migrated workflow sets `migratedAt`; its emissions
-   switch to native spans; the lift covers everyone else. The dashboard cannot tell the
+   old `/api/ocr/approve-batch`. The old SPA stays runnable for one week **against a compatibility
+   API projected from the unified native/lifted read model**. It does not read legacy files directly,
+   so native runs remain visible during rollback. No native event is down-written to legacy storage.
+4. **Phase 2+ (per-workflow migration):** each cutover increments the workflow generation; new
+   runs switch to native spans while the registered legacy drain set continues through the lift. The dashboard cannot tell the
    difference — that is the definition of the seam holding.
 5. **Deletion:** when the last workflow migrates, delete `lift-legacy.ts`, the legacy validators
    it imported, and the `rows|logs|sessions` readers; when the last proxied surface migrates,
@@ -678,10 +732,10 @@ its own milestones with no parity deadline coupling.
 | 3 | Silent projection fallbacks (`?? "running"`, catch→default) violating fail-loud | The existing `fail-loud-catch-default` + `nullish-literal-data-fallback` ratchets extended to `temp_src/` from day one (charter: same quality umbrella). Projection code has zero allowlist entries |
 | 4 | Re-stamp culture returns via `span.patched` clobbering identity | Projector folds patches into a `details` namespace only; identity attrs (`shape`, `subjectKind`, `parentRunId`, `traceId`, `itemId`) are read exclusively from `run.queued`. A patch carrying an identity key OR an undeclared detail key **throws at emit**. Unit-pinned |
 | 5 | Undeclared vocabulary (ad-hoc gate names, step keys, verdicts, patch keys) | Emit-time validation against the descriptor (task name ∈ steps, gate ∈ gates, verdict ∈ verdicts, patch key ∈ details) — throws. Coverage test walks every descriptor and asserts the sets are non-empty where capabilities require them |
-| 6 | Double-source counting during migration (a workflow emits both legacy rows and spans) | `migratedAt` authority rule (§5.3): post-cutover legacy rows **quarantine loudly** (card + notification + fixture assertion) — visible, attributable, and non-fatal to the read path. Test seeds exactly that and asserts the quarantine surfaces |
+| 6 | Double-source counting during migration | per-run engine/generation authority; wrong-engine events for one run quarantine, while authorized legacy drain events remain valid |
 | 7 | Open spans leak on crash and show "running" forever | Projection derives `interrupted` for an open run span whose worker pid is dead AND a newer run for the same itemId started (mirrors `readRunsForId` exactly — pending/running only, non-newest only); worker liveness rides SQLite heartbeats as today. No fabricated durations |
 | 8 | The completion union grows a fourth ad-hoc arm as an object literal side-channel | Programs constructible only via `defineFormSpec` (sealed brand, §4.2); spec-to-spec imports banned by guard; `extendFormSpec` is the sole composition path and re-validates. The two declared non-arms (oath-upload, verify — §4.5/§4.6) are pinned by tests asserting they have NO CompletionProgram |
-| 9 | The lift adapter becomes load-bearing forever (nobody deletes it) | Ratchet: test fails when `descriptors.every(d => d.migratedAt)` && `compat/lift-legacy.ts` exists. Also fails the reverse (a legacy workflow with no lift coverage) |
+| 9 | The lift adapter becomes load-bearing forever | ratchet fails when no workflow has legacy-authorized generations but compat remains; reverse check requires lift coverage for every legacy generation |
 | 10 | Notes stream abused as a data channel (parsing log text for state — today's forbidden pattern) | Notes are render-only in projections; any projection reading `note.message` content (vs. structured `fields`/`action`) fails a grep guard. Data that drives state must be a span event |
 | 11 | Quarantine becomes a silent bit-bucket (rows rot there unnoticed) | Quarantine is a VISIBLE queue card + SSE `quarantine` count + notification; the real-day replay fixture asserts **zero** quarantines on known-good days, so any new legacy shape fails CI when its day joins the corpus |
 | 12 | Resolved member trees creep back onto the wire (the 5-8k-field re-serialization) | `QueueSurfaceWire` has `memberRunIds: string[]` only — no recursive member field exists to populate; a type-level test pins that the wire type is non-recursive; the SSE tick test asserts a 100-member operation patch serializes one surface |
@@ -760,7 +814,7 @@ returns its log/action detail (§2.1 — two greps, by design).
 
 ---
 
-## 8. Open questions for the operator / orchestrator
+## 8. Settled design questions and one volume monitor
 
 1. **Notes retention & volume — RESOLVED (D21), no longer open.** Base retention is **decided**
    (§2.1): `notes/` prune at **7 days** (today's `clean:tracker` default — the high-volume stream
@@ -768,15 +822,15 @@ returns its log/action detail (§2.1 — two greps, by design).
    `ledger/` dir is **never pruned** and sits above both floors (doc 09 §6 depends on this settled
    number). Only the *volume* question — whether 7-day notes strain disk in practice — remains a
    monitor-and-revisit, not an open design decision.
-2. **Worker-span ownership of multi-workflow daemons** — the i9-check single-UCPath-browser daemon
-   and future shared daemons: one worker span per workflow (current design) or per process with
-   workflow links? Current design assumes daemon:workflow is 1:1, as today.
-3. **Descriptor `verdicts` expressiveness** — person-lookup's A/IA secondary tag needs one derived
-   field beyond a verdict enum; is a small `tag: {fromDetail: "activeStatus", map: {...}}` data rule
-   acceptable, or do we allow bundle-safe pure functions in the descriptor module (doc 02 call)?
-4. **Quarantine operations** — does a quarantined legacy row need an operator action beyond
-   "inspect raw JSON + delete" (e.g. "re-lift after fix"), or is read-only + delete enough for a
-   transition-period diagnostic surface?
+2. ~~Worker-span ownership of multi-workflow executors~~ — **resolved 2026-07-21:** one worker span
+   per executor process, with per-system browser/session child spans and linked workflow run spans.
+   Never fabricate one process span per workflow; the executor is intentionally multi-workflow.
+3. ~~Descriptor `verdicts` expressiveness~~ — **resolved 2026-07-21:** use a closed serializable
+   `tag: { fromDetail, map }` rule interpreted exhaustively on the server/client projection. No
+   pure-function escape is sent to the browser and no workflow-id switch is introduced.
+4. ~~Quarantine operations~~ — **resolved 2026-07-21:** visible raw/reason, Delete, and Re-lift.
+   Re-lift reruns the now-registered version adapter and replaces only projection state; there is no
+   “mark valid/done” shortcut. Adapter deployment also schedules all quarantines of that version.
 
 *(Resolved since the first draft: SQLite's role — D14, §2.3; the flip fallback window — one week,
 D13, §5.4. End of design doc. Review order suggestion: §1.1 span identity → §4 completion union →

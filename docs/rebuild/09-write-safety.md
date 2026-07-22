@@ -1,8 +1,8 @@
 # 09 — Write-Safety: Exactly-Once for Real HR Mutations
 
-Status: **Phase 0 design — for operator review.** Conforms to `00-charter.md` (§1a fill/submit
+Status: **Phase 0 revised design — external-review corrections integrated 2026-07-21.** Conforms to `00-charter.md` (§1a fill/submit
 split, §13 write-safety + the binding operator answers of 2026-07-18, §b migration questionnaire),
-the reconciliation memo `04-reconciliation.md` (D5/D7/D8/D14), and the top finding of the gap audit
+the reconciliation memo `04-reconciliation.md` (D26/D30–D33/D43/D44), and the top finding of the gap audit
 `08-foundation-gap-audit.md` (this doc turns that BLOCKER into an owned contract). Code lands in
 `temp_src/`.
 
@@ -16,26 +16,27 @@ transaction (a UCPath termination, a ServiceNow ticket, a Kuali save, an OnBase 
 
 | This doc **owns** (siblings reference, never redefine) |
 |---|
-| The **write-safety contract** — the `WriteSafety` field on a mutate task (receipt/verify + idempotency probe + key), the three completion-check kinds, the `ProbeVerdict` three-valued protocol |
-| The **kernel write sequence** — probe → fence → submit → capture/verify → commit, and its ordering invariant |
+| The **write-safety contract** — the required `WriteSafety` field on a commit task, typed proof schema for every completion kind, idempotency probe/key, and fail-closed verdict protocol |
+| The **kernel write sequence** — resolve/probe → prepare → fence → external commit → proof → durable commit, and its ordering invariant |
 | The **crash-window fence** (`write_intents` SQLite table) and the **crash-recovery replay** (recovery-probe branching) |
+| Typed, intent-generation-locked operator resolution for parked writes (confirmed present/absent; no generic Done/Retry) |
 | **Double-submit prevention** — idempotency key derivation + the per-workflow probe-policy knob (§b) |
 | The **immutable receipt/transaction ledger** — schema, location, never-pruned guarantee, hash-chain, what one entry records |
 
 | This doc **references** (owner) |
 |---|
-| `MutateTaskContract`, `effect:"mutate"`, dry-run mechanics (`ctx.dryRun`, simulate/unsupported), the mutation-primitive choke `stores/common/mutation.ts`, error taxonomy, `freshness`, contract/impl split, service vs browser stores → **doc 01** |
-| Run-state machine incl. gates + `PARKED(needs-operator)`, checkpoint store + `captured_at`, resume/`startAt`, the freshness bind-graph walk, `RunEnvelope` (`dryRun`, `instance`) → **doc 02** |
+| `PrepareTaskContract`/`CommitTaskContract`, transaction-scoped dry-run composition, `MutationCapability`, error taxonomy, freshness, stores → **doc 01** |
+| Transaction nodes, gates + `PARKED(needs-operator)`, checkpoint provenance/fingerprints, declared dependency DAG, `RunEnvelope` → **doc 02** |
 | Span/note wire schema, `.tracker/` storage layout, SQLite system-of-record vs projection split (D14), completion fan-out union → **doc 03** |
 | The injectable Clock (all timestamps), per-run test/prod instance selection, the config/secrets domain → **doc 11 (clock/config/secrets)** |
 | The fill↔submit pairing guard + dry-run composition guard → **doc 10 (guard-architecture)** |
 
 Amendments at sibling seams (each is a one-owner-per-concept addition, not a redefinition):
-- **Doc 01 §2.2** — `MutateTaskContract` gains a `writeSafety` field; its *shape* is owned here.
-- **Doc 01 §6.2** — the mutation primitive gains a second precondition (an open fence), beside the
-  existing dry-run throw. One choke point, two guards.
+- **Doc 01 §2.2** — `CommitTaskContract` requires `writeSafety`; its shape is owned here.
+- **Doc 01 §6.2** — the mutation primitive requires both `CommitTaskCtx.mutation` and an open fence.
 - **Doc 02 §5.6 #2 / §OQ2 (per D17 — doc 02 OWNS and adds these).** "Crash-mid-write always parks"
-  becomes **probe-then-park**, and the mutate step node gains the **required `probePolicy`** field.
+  becomes **probe-then-park**, and the transaction node gains required `probePolicy` and
+  `probeToFenceMaxMs` fields.
   Doc 02 owns those fields; this doc owns only the recovery-probe *mechanism* they invoke.
 - **Doc 03 §2.1 / §2.3 (per D21 — doc 03 OWNS and adds these).** The `ledger/` dir (never-pruned
   retention floor) and the `write_intents` **system-of-record** table live in doc 03's storage
@@ -72,10 +73,12 @@ Every row below is live-verified leaf knowledge the charter forbids re-deriving.
 
 ## 1. The one-sentence thesis + the fail-closed principle
 
-> **Every `effect:"mutate"` submit task declares proof-of-landing (a receipt or a verify read-back)
-> and an idempotency probe; the kernel drives a fixed probe → fence → submit → capture → commit
+> **Every `effect:"commit"` task declares typed proof-of-landing (a receipt, saved-state proof, or
+> uploaded-artifact proof)
+> and an idempotency probe; the kernel drives a fixed resolve/probe → prepare → fence → external
+> commit → proof → durable-commit
 > sequence around it; and every "is it done / is it already there?" question is answered by a
-> THREE-valued verdict where `unknown` blocks — never a boolean that lets uncertainty read as
+> FOUR-state verdict where `unknown` blocks — never a boolean that lets uncertainty read as
 > success.**
 
 The single mechanism that makes fail-closed structural is the **`ProbeVerdict`**: a probe or verify
@@ -89,49 +92,69 @@ than both.
 
 ## 2. The write-safety contract
 
-### 2.1 The `WriteSafety` field (owned here; attached to doc 01's `MutateTaskContract`)
+### 2.1 The `WriteSafety` field (owned here; attached to doc 01's `CommitTaskContract`)
 
 ```ts
 // temp_src/domain/contracts/write-safety.ts — bundle-safe: imports zod + TaskId ONLY (D3 guard)
 import { z } from "zod";
 import type { TaskId } from "./base.js";
 
-/** THREE-valued — the fail-closed heart. A probe/verify read task's OUTPUT schema MUST be (or
- *  extend) this. There is deliberately NO boolean form: "couldn't tell" can never look like "no". */
-export const ProbeVerdict = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("present"),  receipt: z.unknown() }), // found — carries proof for backfill
-  z.object({ state: z.literal("absent") }),                         // provably NOT present
-  z.object({ state: z.literal("ambiguous"), matches: z.number().int().min(2) }), // >1 match — never guess
-  z.object({ state: z.literal("unknown"),   reason: z.string() }),  // indeterminate — FAIL-CLOSED, parks
-]);
-export type ProbeVerdict = z.infer<typeof ProbeVerdict>;
-
-/** UCPath / CRM / ServiceNow — the irreversible submits capture a verifiable receipt (operator §13). */
-export interface ReceiptCheck<Out extends z.ZodType> {
-  kind: "receipt";
-  /** Extract the receipt slice from the submit task's typed output (the confirmation/ticket number). */
-  pick: (output: z.output<Out>) => unknown;
-  /** NON-EMPTY schema the slice MUST satisfy. `submitted:true` whose picked receipt is null/empty or
-   *  fails this schema is a FAIL-LOUD park, never "done" (a guard rejects trivially-empty schemas). */
-  schema: z.ZodType;
+/** Fail-closed verdict factory. `present` cannot exist without proof of the exact schema
+ * required by the commit's completion arm; there is deliberately no untyped/boolean form. */
+export function probeVerdictSchema<Proof extends z.ZodType>(proofSchema: Proof) {
+  return z.discriminatedUnion("state", [
+    z.object({ state: z.literal("present"), proof: proofSchema }),
+    z.object({ state: z.literal("absent") }),
+    z.object({ state: z.literal("ambiguous"), matches: z.number().int().min(2) }),
+    z.object({ state: z.literal("unknown"), reason: z.string() }),
+  ]);
 }
-/** Kuali — SAVE-only, NOT a receipt-bearing submit (operator §13). No confirmation number exists;
- *  a read task re-reads the just-saved record and returns a ProbeVerdict of whether the save landed. */
-export interface SaveVerifyCheck { kind: "save-verify"; verify: TaskId; }
-/** OnBase — operator tracks completion manually (operator §13); automation must be VERY sure the
- *  upload landed. A POSITIVE read-back (not merely "not an error page") returning a ProbeVerdict. */
-export interface UploadVerifyCheck {
+export type ProbeVerdict<Proof extends z.ZodType> =
+  z.output<ReturnType<typeof probeVerdictSchema<Proof>>>;
+
+interface ProofCheck<Out extends z.ZodType, Proof extends z.ZodType> {
+  /** The same parser validates normal commit output and recovery-probe backfill. */
+  proofSchema: CanonicalJsonSchema<Proof>;
+  proofFromOutput: (output: z.output<Out>) => z.input<Proof>;
+  proofFromPresentProbe: (
+    verdict: Extract<ProbeVerdict<Proof>, { state:"present" }>,
+  ) => z.input<Proof>;
+  /** Recovery/preflight-present must reconstruct the transaction node's full typed output; proof
+   * alone is not a substitute for fields downstream nodes consume. Both schemas are parsed. */
+  outputFromProof: (proof: z.output<Proof>) => z.input<Out>;
+}
+
+/** UCPath / CRM / ServiceNow — irreversible submits capture a verifiable receipt. */
+export interface ReceiptCheck<Out extends z.ZodType, Proof extends z.ZodType>
+  extends ProofCheck<Out, Proof> {
+  kind: "receipt";
+}
+/** Kuali — typed saved-state proof, not merely a boolean/present verdict. */
+export interface SaveVerifyCheck<Out extends z.ZodType, Proof extends z.ZodType>
+  extends ProofCheck<Out, Proof> {
+  kind: "save-verify"; verify: TaskId;
+}
+/** OnBase — typed artifact proof from a positive read-back. */
+export interface UploadVerifyCheck<Out extends z.ZodType, Proof extends z.ZodType>
+  extends ProofCheck<Out, Proof> {
   kind: "upload-verify"; verify: TaskId;
   /** Escape hatch (allowlisted + argued in doc 10): the page genuinely cannot prove landing. Then the
    *  submit ALWAYS parks needs-operator for manual confirmation — it never auto-reports done. */
-  unverifiableByPage?: { reason: string };
+  unverifiableByPage?: {
+    reason: string;
+    /** Must parse through proofSchema and exercise its operator-attestation discriminant. The
+     * runtime replaces example values with the authenticated operator/Clock/evidence form. */
+    operatorAttestationExample: z.input<Proof>;
+  };
 }
-export type CompletionCheck<Out extends z.ZodType> =
-  ReceiptCheck<Out> | SaveVerifyCheck | UploadVerifyCheck;
+export type CompletionCheck<Out extends z.ZodType, Proof extends z.ZodType> =
+  | ReceiptCheck<Out, Proof>
+  | SaveVerifyCheck<Out, Proof>
+  | UploadVerifyCheck<Out, Proof>;
 
 export interface Idempotency<In extends z.ZodType> {
   /** A read task answering "is THIS exact transaction already present?" → ProbeVerdict. Runs
-   *  pre-write AND on crash recovery. Declared with freshness.maxAgeMs:0 (always live, never a stale
+   *  pre-write AND on crash recovery. Declared with zero-age freshness (always live, never a stale
    *  checkpoint). Must resolve to a real effect:"read" task in the SAME store (guard §8). */
   probe: TaskId;
   /** The natural idempotency KEY — derived from STABLE business identity, NEVER row/position/index
@@ -139,16 +162,27 @@ export interface Idempotency<In extends z.ZodType> {
   key: (input: z.output<In>) => string;
 }
 
-export interface WriteSafety<In extends z.ZodType, Out extends z.ZodType> {
-  completion: CompletionCheck<Out>;
+export interface WriteSafety<
+  In extends z.ZodType,
+  Out extends z.ZodType,
+  Proof extends z.ZodType,
+> {
+  completion: CompletionCheck<Out, Proof>;
   idempotency: Idempotency<In>;
 }
 ```
 
-`MutateTaskContract<Id, In, Out, Codes>` (doc 01 §2.2) gains **`writeSafety: WriteSafety<In, Out>`**
-(or, rarely, an allowlisted `writeSafety: { genuinelyIdempotent: { reason } }` — §8). The receipt is
-part of the submit task's typed **output** (operator §13: "…as its typed output"), so `pick` slices
-it; the probe/verify are separate `read` tasks in the same store.
+`CommitTaskContract<Id, In, Out, Proof, Codes>` requires
+**`writeSafety: WriteSafety<In, Out, Proof>`**. There is
+no optional escape hatch: even a naturally idempotent external write must declare its key, proof,
+and probe. All three completion arms carry a nontrivial `proofSchema`; recovery and normal commit
+use the same parser, and `outputFromProof` must reconstruct a value accepted by the commit output
+schema for preflight-present/recovery paths. The kernel then wraps it in doc 02's discriminated
+`TransactionOutcome`, so downstream code sees whether this run committed or found prior work.
+Probe/verify tasks are separate reads in the same store. An
+`unverifiableByPage` proof schema is a discriminated union with an `operator-attestation` arm
+containing operator, confirmedAt, exact artifact/business identity, and a non-empty evidence note;
+its example is guard-parsed. It may never be a bare boolean or generic “mark done.”
 
 ### 2.2 Per-system instantiation (three shapes, one mechanism)
 
@@ -156,18 +190,24 @@ it; the probe/verify are separate `read` tasks in the same store.
 // UCPath termination — receipt-bearing (ports transaction.ts:919-985 into ucpath/read-transaction-number)
 writeSafety: {
   completion: { kind: "receipt",
-    pick: (o) => o.receipt,
-    schema: z.object({ transactionNumber: z.string().regex(/^T\d{6,}$/) }) },
+    proofFromOutput: (o) => o.receipt,
+    proofFromPresentProbe: (v) => v.proof,
+    outputFromProof: (p) => ({ receipt: p }),
+    proofSchema: z.object({ transactionNumber: z.string().regex(/^T\d{6,}$/) }) },
   idempotency: {
     probe: "ucpath/find-existing-termination",                 // by EID + effdt + "Terminatn"
     key:   (i) => `${i.emplId}|termination|${i.effectiveDate}` },
 }
 // ServiceNow ticket — receipt-bearing (ports fill-form.ts:140-173)
-completion: { kind: "receipt", pick: (o) => o.ticketNumber, schema: z.string().regex(/^HRC\d{6,}$/) }
+completion: { kind: "receipt", proofFromOutput: (o) => o.ticketNumber,
+  proofFromPresentProbe: (v) => v.proof, outputFromProof,
+  proofSchema: z.string().regex(/^HRC\d{6,}$/) }
 // Kuali save — save-verify, NO receipt (operator §13)
-completion: { kind: "save-verify", verify: "kuali/read-saved-document" }
+completion: { kind: "save-verify", verify: "kuali/read-saved-document",
+  proofFromOutput, proofFromPresentProbe, outputFromProof, proofSchema: KualiSavedStateProof }
 // OnBase upload — upload-verify, positive read-back OR allowlisted unverifiable→always-park
-completion: { kind: "upload-verify", verify: "onbase/read-filed-document" }
+completion: { kind: "upload-verify", verify: "onbase/read-filed-document",
+  proofFromOutput, proofFromPresentProbe, outputFromProof, proofSchema: OnBaseArtifactProof }
 ```
 
 Kuali and OnBase are the one place the port is a **genuine addition** (§10): their submit tasks
@@ -178,81 +218,137 @@ none. That is by design — the contract *forces* proof to exist.
 
 ## 3. The kernel write sequence
 
-The kernel drives a **fixed five-beat sequence** around every real (non-dry-run) mutate submit. The
-impl author cannot reorder it; the fill is a separate `read`-safe task (charter §1a) and is not part
-of this sequence.
+The kernel drives a fixed six-beat sequence. It binds/parses the commit input first from workflow
+input plus declared upstream outputs; commit input cannot depend on ephemeral prepare output. Beat ①
+uses an ordinary read lease and releases it. Beats ②–⑤ use one uninterrupted exclusive transaction
+lease, so a navigating probe can never destroy a staged form. Dry-run composes beat ② only and has
+no executable preflight/fence/commit path or mutation capability. The impl author cannot reorder the
+real-write beats.
 
 ```
-① PROBE   → ② FENCE → ③ SUBMIT → ④ CAPTURE/VERIFY → ⑤ COMMIT
-   read       durable    click        read-back           durable + ledger + span
+① RESOLVE/PROBE → ② PREPARE → ③ FENCE → ④ EXTERNAL COMMIT → ⑤ PROOF → ⑥ DURABLE COMMIT
+   read lease      transaction lease ───────────────────────────────┘    DB + outboxes
 ```
 
 | Beat | What runs | What is DURABLE at end of beat | Fail-closed exit |
 |---|---|---|---|
-| **① Probe** (pre-write) | **FIRST consult `write_intents` (D18)** for an un-committed `attempting` row on the SAME `idempotency_key` — this happens **before** the live-page read. If one exists, another run holds the fence for this exact transaction: this run does **not** fence or submit — it **fails loud** *"another run is mid-submit for key <k> — refusing to double-fence"* (a retry/operator resolves once the holder commits or clears). Only if no in-flight intent exists does the beat run `idempotency.probe(key)` — a live read, `freshness.maxAgeMs:0`. Per the probe-policy knob (§5) the *live-page* read may be **skipped on a pristine first attempt**; the `write_intents` consult is **never** skipped, and neither is skipped on a retry/resume. | nothing (a read) | in-flight same-key intent ⇒ **fail loud, no fence** (D18). `present` ⇒ complete `done { submitted:false, reason:"already-present", receipt }` (doc 01 §6.2 honest no-op) + ledger note, **no submit**. `ambiguous`/`unknown` ⇒ `PARKED(needs-operator)`. `absent` ⇒ proceed. A probe that **throws** = `unknown` (never "absent"). |
-| **② Fence** | Commit a `write_intents` row (SQLite, system-of-record) `{key, status:"attempting"}` **before the click** — the partial-unique in-flight index (D18) makes this INSERT the same-key **mutex**: it FAILS if another run already holds an un-committed intent for this `idempotency_key`, failing the run loud rather than double-fencing (the backstop to beat ①'s consult under a race); then emit `write.attempting` span. | `write_intents` row (D14 system-of-record) | INSERT conflict on the in-flight-key index ⇒ fail loud (D18), no click |
-| **③ Submit** | `stores/common/mutation.ts` primitive fires the single irreversible click. It throws if `ctx.dryRun` (doc 01 §6.2) AND if no open fence exists for `(runId, step, attempt)` — fence-before-click is unbypassable. | the live HR side effect | primitive-not-fenced ⇒ throw (corruption, loud) |
-| **④ Capture / Verify** | `receipt`: read back the confirmation/ticket number, `pick` + `schema.parse`. `save-verify`/`upload-verify`: run the `verify` read → `ProbeVerdict`. | nothing yet (still in memory) | receipt missing/empty/`""`/schema-fail ⇒ `PARKED` ("clicked, cannot prove it landed — verify in <system>"). verify `present` ⇒ ok; anything else (`absent`/`ambiguous`/`unknown`/throw) ⇒ `PARKED`. |
-| **⑤ Commit** | ONE ordered commit: (a) receipt checkpoint + `write_intents.status:"committed", receipt_json` (SQLite); (b) **append the immutable ledger entry** (idempotent by `(runId,step,attempt)`); (c) emit `write.committed` span + `span.ended(done)`. | receipt checkpoint + committed intent + **ledger entry** | a `write.committed` span with no ledger entry ⇒ backfilled on next read + flagged (§6) |
+| **① Resolve + live probe** | From the already parsed stable commit input, derive the key and read the permanent `write_intents` row regardless of status/originating run. `committed` or `observed-present` ⇒ validate/reuse proof+typed output; `attempting` ⇒ recovery/owner check; `retryable` ⇒ eligible generation. Only an eligible unseen/retryable key may run the policy-controlled live probe, on a separate read lease. Record probe completion monotonic time. | one SQLite transaction records an unseen live `present` permanently as `observed-present`, checkpoints `TransactionOutcome{disposition:"already-present",proofSource:"live-probe"}`, advances run state, and enqueues its audit span—but **no write-ledger row** | invalid stored proof/output ⇒ corruption/park; attempting owner live ⇒ wait/fail loud; stale owner ⇒ recovery first; live `present` ⇒ typed no-click completion; ambiguous/unknown/throw parks |
+| **② Prepare** | Acquire the context-exclusive transaction lease and run the prepare contract. The parsed commit input is already frozen; prepare output is preview/span data only. Retry may restart from beat ① on a fresh/reset lease before any fence. | no write intent | prepare failure/timeout ⇒ release poisoned/clean page; no external side effect to recover |
+| **③ Fence** | Check `probeToFenceMaxMs`; if expired, discard staged state and restart at ①. INSERT the unseen key or CAS its `retryable` row to `attempting`, incrementing generation. Enqueue `write.attempting` in the span outbox in the same SQLite transaction. The permanent primary key is the same-key mutex. | durable intent + span outbox | elapsed probe ⇒ no click; CAS conflict ⇒ discard staged page/no click; no generic retry after a won fence |
+| **④ External commit** | The external-write helper requires the unforgeable `MutationCapability` bound to the open intent generation. | live HR side effect | missing/mismatched fence capability ⇒ throw before click |
+| **⑤ Capture / verify** | Extract `proofFromOutput` or run the verify read on the retained transaction page; every completion kind parses through its `proofSchema`. | proof remains in memory | absent/ambiguous/unknown/throw/schema failure parks; no arm can return unvalidated proof |
+| **⑥ Atomic durable commit** | ONE SQLite transaction marks the intent committed and writes the schema-valid `TransactionOutcome` checkpoint, immutable ledger outbox row, terminal-span outbox row, and run state. JSONL ledger/span projectors run afterward. | all authorities/outboxes durable together | transaction failure leaves intent attempting and enters recovery; projector lag is repairable and never changes write outcome |
 
-**Ordering invariant (extends doc 02 §5.6 + doc 03 §2.3):** the `write_intents` SQLite commit in ②
-**happens-before** the click in ③, which happens-before the receipt/verify read in ④, which
-happens-before the SQLite committed-write in ⑤(a), which happens-before the ledger append ⑤(b), which
-happens-before the spans ⑤(c). "Span says committed, no durable intent" is impossible by
-construction and treated as corruption (loud) if ever observed. This generalizes oath-upload's
+**Ordering invariant:** stable commit input and live probe exist before page preparation; the fence
+transaction in ③ happens-before the click; the click happens-before proof validation; proof
+validation happens-before the single ⑥ transaction. Ledger and span JSONL
+are projections of durable outboxes, not additional commit beats. This generalizes oath-upload's
 "marker durable before the POST" (`handler.ts:306-309`) into the kernel.
 
 ```sql
 -- temp_src state.db — SYSTEM-OF-RECORD (D14: not rebuildable, not deletable). The crash-window fence.
 CREATE TABLE write_intents (
-  workflow        TEXT NOT NULL,
-  item_id         TEXT NOT NULL,   -- (workflow,item_id) logical key, mirrors run_checkpoints (doc 02 §5.7)
-  step_id         TEXT NOT NULL,
-  run_id          TEXT NOT NULL,
-  attempt         INTEGER NOT NULL,
   system          TEXT NOT NULL,   -- SystemId
-  idempotency_key TEXT NOT NULL,   -- idempotency.key(input) — the natural key + the D18 mutex column
-  status          TEXT NOT NULL,   -- 'attempting' | 'committed'
-  fenced_at       TEXT NOT NULL,   -- clock.now() (doc 11) — before the click
-  committed_at    TEXT,            -- null until ⑤
-  receipt_json    TEXT,            -- captured receipt/verify proof (null until ⑤)
-  PRIMARY KEY (workflow, item_id, step_id, attempt)
+  idempotency_key TEXT NOT NULL,
+  workflow        TEXT NOT NULL,
+  item_id         TEXT NOT NULL,
+  node_id         TEXT NOT NULL,
+  owner_run_id    TEXT NOT NULL,
+  owner_attempt   INTEGER NOT NULL,
+  generation      INTEGER NOT NULL DEFAULT 1,
+  status          TEXT NOT NULL CHECK(status IN
+                    ('attempting','retryable','committed','observed-present')),
+  origin          TEXT NOT NULL CHECK(origin IN
+                    ('automation-attempt','external-observed')),
+  fenced_at       TEXT,
+  committed_at    TEXT,
+  proof_json      TEXT,
+  proof_schema_hash TEXT NOT NULL,
+  output_json     TEXT,
+  output_schema_hash TEXT NOT NULL,
+  PRIMARY KEY (system, idempotency_key)
 );
--- D18 — same-key concurrency mutex: AT MOST ONE un-committed intent per idempotency_key.
--- The fence INSERT (beat ②) fails if another run already holds an 'attempting' row for this key,
--- so two runs deriving the same key can never both fence-and-click. Partial index: 'committed'
--- history is exempt and accretes freely; only the in-flight set is mutually exclusive.
-CREATE UNIQUE INDEX write_intents_inflight_key
-  ON write_intents (idempotency_key) WHERE status = 'attempting';
+
+CREATE TABLE write_attempts (
+  system TEXT NOT NULL, idempotency_key TEXT NOT NULL, generation INTEGER NOT NULL,
+  run_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('attempting','retryable','committed','observed-present')),
+  started_at TEXT NOT NULL, ended_at TEXT,
+  resolution_json TEXT,             -- typed operator/recovery evidence; never overwrites history
+  PRIMARY KEY (system, idempotency_key, generation)
+);
+
+CREATE TABLE durable_outbox (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, aggregate_key TEXT NOT NULL,
+  payload_json TEXT NOT NULL, created_at TEXT NOT NULL, projected_at TEXT
+);
+
+CREATE TABLE ledger_heads (
+  system TEXT NOT NULL, ledger_date TEXT NOT NULL,
+  expected_seq INTEGER NOT NULL, expected_hash TEXT NOT NULL,
+  expected_bytes INTEGER NOT NULL,
+  PRIMARY KEY (system, ledger_date)
+);
 ```
+
+Committed and externally-observed-present keys remain in the primary-key table forever. A later run with the same business key
+parses and reuses the stored proof; it cannot create a second fence merely because the earlier row
+is already satisfied. `observed-present` blocks a click but writes no ledger entry: discovering a
+transaction is not evidence this automation filed it. There is no operator action that reopens a committed key. Normal recovery from a
+proven-absent click changes the same row to `retryable` and increments its generation on the next
+fence rather than deleting history. If an externally reversed transaction must legitimately be
+filed again, its input carries a distinct audited correction/revision identity that derives a new
+natural key; "void the fence and click again" is not an operation.
 
 ---
 
 ## 4. Crash-window recovery (the exactly-once guarantee)
 
-**The guarantee, stated precisely:** for any real mutate submit, after a crash at *any* point the
-run reaches exactly one of three terminal states, and **never double-files**:
+**The guarantee, stated precisely:** for any real commit, after a crash at *any* point recovery
+selects exactly one of three outcomes, and **never blindly double-files**:
 
-1. **The write landed** (crash anywhere after ③) → recovery's probe returns `present` → the kernel
-   runs **`completion.schema.parse` on the probe verdict's receipt (D19)** — the SAME validation
-   beat ④ runs; a `present` receipt is never trusted blind. On parse **success** it **backfills** the
-   receipt, marks the intent `committed`, appends the ledger entry, and completes `done` (no second
+1. **The write landed** (crash anywhere after ④) → recovery's probe returns `present` → the kernel
+   runs `completion.proofSchema.parse(completion.proofFromPresentProbe(verdict))`, then
+   `commit.output.parse(completion.outputFromProof(proof))` — the SAME validation
+   beat ⑤ parsers run; a `present` proof is never trusted blind. On parse **success** it **backfills** the
+   full typed `TransactionOutcome{disposition:"committed",proofSource:"recovery-probe"}`, marks the existing attempted intent committed, atomically
+   enqueues ledger/span outboxes, and completes `done` (no second
    submit). On parse **failure** it **parks `needs-operator`** (a `present` we cannot validate is
-   indeterminate, not done). There is **NO path to `done` with an unvalidated receipt — recovery
+   indeterminate, not done). There is **NO path to `done` with unvalidated proof—recovery
    included.**
-2. **The write never landed** (crash between ② and ③, or a genuinely-not-sent click) → recovery's
-   probe returns `absent` → the intent is cleared and the five-beat is safe to re-run from ①.
+2. **The write never landed** (crash between ③ and ④, or a genuinely-not-sent click) → recovery's
+   probe returns `absent` → the same intent becomes `retryable`; history is retained and the next
+   attempt CAS-fences a new generation of that key.
 3. **Indeterminate** (probe returns `ambiguous`/`unknown`, or throws) → `PARKED(needs-operator)` with
    a legible message naming the key, the system, and the match count — the operator verifies in the
-   target system and marks done or retries. Never a guess.
+   target system and uses one of the typed resolutions below. Never a guess.
 
 **Recovery replay (resolves doc 02 §OQ2 — replaces "always park"):** on resume, the kernel first
 scans `write_intents` for the resuming `(workflow,item_id,step_id)`. If it finds a row with
 `status:"attempting"` and no `committed`, it **re-runs `idempotency.probe(key)` FIRST** (before any
-`startAt` step logic) and routes on the verdict per 1/2/3 above. Only after the probe resolves does
-normal resume proceed. A non-mutate step with no fence auto-resumes as today (worst case: a repeated
+`startAt` node logic) and routes on the verdict per 1/2/3 above. Only after the probe resolves does
+normal resume proceed. A read node with no fence auto-resumes as today (worst case: a repeated
 read). This reads durable state from SQLite (system-of-record), never post-crash JSONL, mirroring
 oath-upload's SQLite-fast-path recovery (`handler.ts:427-429`).
+
+### 4.1 Parked-write resolution is typed and intent-scoped
+
+A parked write does not inherit the queue's ordinary Done/Retry actions. The kernel exposes exactly
+two intent-scoped resolutions, both requiring the current intent generation and an optimistic-lock
+version so a stale browser action cannot race recovery:
+
+1. **Confirmed present.** The operator supplies the exact business/artifact identity and proof. It
+   parses through the same `completion.proofSchema`; `unverifiableByPage` uses the schema's typed
+   `operator-attestation` arm. Success runs the same atomic beat ⑥ (intent committed + proof
+   checkpoint + ledger/span outboxes + run state). Parse failure changes nothing.
+2. **Confirmed absent.** The operator supplies a non-empty evidence note after checking the target
+   system. SQLite records `{operator, confirmedAt, evidence, priorGeneration}` in `write_attempts`
+   and changes the same permanent intent to `retryable`; only the next CAS may create a generation.
+   It never deletes/reopens committed history and does not itself click.
+
+Cancel/delete may hide or cancel the run but cannot alter the intent. There is no third “force done”
+or “retry anyway” endpoint. Every resolution emits an audited note and is covered by authorization,
+schema, stale-generation, and double-click tests.
 
 ---
 
@@ -265,37 +361,40 @@ hires have no EID pre-hire, so the key uses name+effdt+jobCode, the same fields
 `findExistingHireTransaction` matches on). It **never** incorporates run position, attempt number,
 array index, or the OCR fan-out index — that is the doc1/doc2 (E2E-015) shared-id fallback, banned in
 the fan-out (`buildFanOutItemIdResolver`) and banned here (§8). Two runs for the same
-person+type+date derive the same key, so beat ① sees the first run's `present` and refuses to
+person+type+date derive the same key, so beat ① sees the first run's committed intent and refuses to
 double-file.
 
 **Two probe kinds are distinct and both port** (separations taught us the difference):
 - The **idempotency probe** reads *processed/filed* transactions (a committed `T…` exists) —
   `findExistingTerminationTransaction` keyed EID+effdt+"Terminatn".
 - The **date-agnostic pending sweep** (`deletePendingTransaction`, `transaction.ts:1167`) is a
-  *mutate cleanup* that deletes ALL in-progress unprocessed Terminat rows for the EID regardless of
+  *commit cleanup* that deletes ALL in-progress unprocessed Terminat rows for the EID regardless of
   effdt — it catches a stale prior attempt carrying a *different* computed effdt that the date-keyed
-  probe misses. It ports as its own `ucpath/clear-pending-terminations` mutate task composed BEFORE
-  the submit (it has its own trivial write-safety: idempotent by construction — deleting nothing is
-  `absent`, its "receipt" is the count of rows cleared).
+  probe misses. It ports as its own `ucpath/clear-pending-terminations` transaction composed BEFORE
+  termination (it has its own durable key and typed proof: deleting nothing is a validated no-op;
+  deleted row identities are its proof).
 
 **The per-workflow probe-policy knob (charter §b — decided at migration, NOT defaulted here).** Beat
 ① (the *pre-write* probe) is governed by a per-workflow knob; the *recovery* probe (§4) is always on
 regardless.
 
 ```ts
-// on the mutate step node of the descriptor (doc 02 OWNS/adds this field per D17; semantics owned here)
-probePolicy: "always" | "retries-and-recovery-only";   // REQUIRED on a mutate step — no default
+// on the transaction node (doc 02 owns the field; semantics owned here)
+probePolicy: "always" | "retries-and-recovery-only";   // REQUIRED — no default
+probeToFenceMaxMs: number;                              // REQUIRED, >0 — migration-justified
 ```
 
 - `"always"` — probe before every submit (one extra live read per submit; safest; closes the crash
   window even on the first attempt).
-- `"retries-and-recovery-only"` — skip beat ① on a pristine first attempt (attempt 1, no prior
-  `write_intents` row), accepting a first-attempt crash-window that the recovery probe still closes
-  on the *next* run; probe on every retry/resume. Trades one round-trip for a narrow first-attempt
-  window (the doc 05 speed tension, gap-audit OQ2).
+- `"retries-and-recovery-only"` — may skip only the live-page probe when the durable key has never
+  existed. Durable lookup is never skipped, committed keys are never exempt, and retries/recovery
+  always probe. The trade-off is failure to notice an older external transaction absent from this
+  automation's ledger, not permission to repeat one already committed here.
 
-The field is **required** (compile error if omitted on a mutate step), which forces the §b migration
-question to be answered per workflow. There is **no hardcoded default** — the operator deferred it.
+Both fields are **required** (compile error if omitted on a transaction), which forces the §b
+migration question to answer policy and maximum preflight age per workflow. There is **no hardcoded
+default**. The Clock's monotonic time measures probe completion → fence; expiration discards the
+prepared page and restarts at preflight, never clicks on an over-age result.
 
 ---
 
@@ -306,21 +405,28 @@ pruned** — it outlives doc 03's decided base retention (spans 30d / notes 7d, 
 `clean-tracker` sweep.
 
 ```ts
-// temp_src/domain/ledger.ts — the at-rest ledger entry (append-only). Written at beat ⑤(b).
+// temp_src/domain/ledger.ts — the append-only at-rest entry shape.
+// Beat ⑥ writes its unsequenced payload to durable_outbox; the projector adds seq/prevHash.
 export interface LedgerEntry {
-  seq: number;                    // monotonic per file — truncation is detectable
+  outboxId: string;               // immutable DB identity; projector idempotency key
+  seq: number;                    // assigned transactionally by the serialized projector
   prevHash: string;               // sha256 of the previous entry's canonical JSON ("" for seq 0)
   workflow: string;
   itemId: string;
   system: string;                 // SystemId — ucpath | crm | servicenow | kuali | onbase
   idempotencyKey: string;         // the natural key (§5) — dedupe + audit join
-  receipt: unknown;               // the confirmation/ticket number, or the verify proof (Kuali/OnBase)
+  proof: JsonValue;               // canonical JSON, already parsed by the completion proof schema
+  proofSchemaHash: string;
   completionKind: "receipt" | "save-verify" | "upload-verify";
+  proofSource: "normal-output" | "recovery-probe" | "operator-attestation";
   runId: string; traceId: string; attempt: number;
   operator: string;               // from the config/secrets domain (doc 11), never fabricated
-  instance: "prod" | "test";      // RunEnvelope.instance (doc 11) — a test read can never look like a prod file
+  instance: "prod" | "test";      // resolved run snapshot (doc 11)
+  configFingerprint: string;
   dryRun: false;                  // real writes only; a dry run composes no submit, so writes NO ledger entry
-  filedAt: string;                // clock.now() (doc 11) — the single source of time
+  fencedAt: string;               // durable instant before the click
+  confirmedAt: string;            // proof accepted; may be later after recovery/manual confirmation
+  externalOccurredAt?: string;    // only when the external proof itself supplies a trustworthy time
 }
 ```
 
@@ -331,18 +437,29 @@ export interface LedgerEntry {
   7d — doc 03's decided base retention, D21) skips `ledger/` unconditionally — a ratchet guard fails
   if any prune path can reach `ledger/`. This is the "immutable transaction ledger, never pruned" of
   operator §13. The never-pruned floor sits above a *settled* number (D21), not a guessed one.
-- **Hash-chain — decision: YES, lightweight.** Each entry carries `seq` + `prevHash` (sha256 of the
-  prior entry's canonical JSON), forming a per-file chain. A `cli ledger verify` walks the chain and
-  reports any break. This is cheap, local, and gives **tamper-evidence** (edits/truncation are
-  detectable) — honestly **not** tamper-*proof* (no external signing/anchoring; a local attacker who
-  rewrites the whole file undetected is out of scope for a single-operator tool). It is the right
+- **Serialized projection.** Executors never append the ledger file. Beat ⑥ writes a unique ledger
+  outbox row. One projector holds a SQLite lease for `(system,date)` and processes exactly one row:
+  it verifies the anchored file tail, derives `seq/prevHash`, appends one canonical line, fsyncs, then
+  CAS-updates `ledger_heads` and marks that outbox projected in one SQLite transaction. A crash after
+  append but before the CAS leaves the file exactly one known `outboxId` ahead; restart validates and
+  adopts that line instead of appending it twice. A torn/unrecognized tail is truncated only to the
+  anchored `expected_bytes` after preserving a corruption artifact and raising an alert. Multiple
+  executors therefore cannot fork a chain, and the DB/file seam has an explicit recovery protocol.
+- **Hash-chain + durable tail anchor.** Each entry carries `seq` + `prevHash`; SQLite table
+  `ledger_heads(system,date,expected_seq,expected_hash,expected_bytes)` is the independent expected tail. A
+  `cli ledger verify` compares the file to that anchor, so editing, interior deletion, record-boundary
+  tail truncation, and whole-file loss are detectable. Without this anchor a valid-prefix tail
+  truncation would be invisible. This is tamper-evidence, not tamper-proof: a local attacker who
+  rewrites both the DB and file coherently is out of scope for a single-operator tool. It is the right
   altitude: enough to trust the audit trail, no HSM ceremony. Escalation to signed/anchored is a
   documented future option (§13 Q3), not built now.
-- **Append is idempotent** by `(runId, step, attempt)` — a crash-recovery backfill (§4 case 1)
-  re-appending finds the entry present and no-ops; a `write.committed` span with *no* ledger entry is
-  backfilled on the next read and flagged loud (the ledger, not the span, is the audit authority).
+- **Projection is idempotent** by `outboxId`. Recovery audits committed intents against ledger and
+  terminal-span outboxes, creates only missing outboxes in SQLite, then lets projectors catch up.
 - **One entry = one filed transaction.** The ledger is the durable superset of the `write.committed`
-  span events (gap-audit gap 5: "receipts ARE the ledger").
+  span events (gap-audit gap 5: "receipts ARE the ledger"). It records a confirmed automation
+  attempt, not a claim that `confirmedAt` equals the external filing instant. A preflight probe that
+  merely discovers an existing external transaction produces `write.skipped-existing` audit state
+  and no ledger entry.
 
 ---
 
@@ -356,15 +473,18 @@ The operator's core requirement. Exhaustive:
 | 2 | Pre-write probe finds >1 match | `ambiguous` ⇒ `PARKED` — never guess which is "the" transaction |
 | 3 | Probe read **throws** (page/net error) | wrapped as `unknown` (a failed check ≠ "found nothing" — the charter catch-swallow ban) ⇒ `PARKED` |
 | 4 | Receipt read-back returns `""` (UCPath) / no `number=` (ServiceNow) | missing/empty receipt ⇒ `PARKED("clicked, cannot prove it landed")` — mirrors today's "refusing to report success" throw |
-| 5 | Captured receipt fails its `schema` | schema-fail ⇒ `PARKED`, never `done{submitted:true}` |
+| 5 | Captured proof fails its `proofSchema` | schema-fail ⇒ `PARKED`, never `done{committed:true}` |
 | 6 | Kuali `save-verify` can't confirm the save | any verdict ≠ `present` ⇒ `PARKED` |
 | 7 | OnBase `upload-verify` can't confirm the filing | any verdict ≠ `present` ⇒ `PARKED`; `unverifiableByPage` allowlist ⇒ **always** `PARKED` for manual confirm (never auto-done) |
-| 8 | Crash mid-write, recovery probe indeterminate | `ambiguous`/`unknown`/throw ⇒ `PARKED`; `present` ⇒ backfill-done **only if its receipt passes `completion.schema.parse` (D19)**, else `PARKED`; `absent`→retry |
-| 9 | A mutate `run` returns `{submitted:true}` with no receipt/verify evidence | kernel rejects at ④ (the contract owns the check, not the impl) ⇒ `PARKED` |
-| 10 | The mutation primitive fired without a fence (a mis-authored submit) | primitive throws (③) — corruption, loud |
+| 8 | Crash mid-write, recovery probe indeterminate | `ambiguous`/`unknown`/throw ⇒ `PARKED`; `present` ⇒ backfill-done only after the arm's `proofSchema`; `absent`→same-key retry generation |
+| 9 | A commit `run` returns success with no proof | kernel rejects at ⑤ ⇒ `PARKED` |
+| 10 | The mutation primitive fired without a fence (a mis-authored submit) | primitive throws (④) — corruption, loud |
 | 11 | dry-run: no submit composed at all (charter §1a) | write-safety never engages; nothing to make done — clean, no leak |
+| 12 | Live probe aged while the form was prepared | `probeToFenceMaxMs` expires ⇒ discard page and restart at preflight; no fence/click |
+| 13 | Operator clicks a stale/generic Done or Retry on a parked write | those actions do not exist; present proof/absent evidence endpoints require intent generation+version and fail on conflict |
 
-The unifying rule: **only `present` (or a schema-valid receipt) yields `done`. Every other outcome —
+The unifying rule: **only schema-valid proof plus schema-valid reconstructed/normal transaction
+output yields `done`; only an actual fenced automation attempt yields a write-ledger entry. Every other outcome —
 absent-after-click, ambiguous, unknown, throw, empty — parks or retries.** A boolean probe would
 collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that collapse
 *unrepresentable*.
@@ -373,58 +493,59 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 
 ## 8. Mechanical guards (fail-loud ratchets, `npm run test:architecture`)
 
-- **`write-safety-contract.test.ts`** — every `effect:"mutate"` contract MUST declare `writeSafety`
-  with a `completion` and an `idempotency`, OR an allowlisted `{ genuinelyIdempotent:{reason} }`
-  entry (rare, argued — same `Record<file,{reason}>` shape as the existing ratchets). Pins: a
-  `receipt.schema` that parses `{}`/`undefined`/`null` fails (non-empty required); a mutate `run`
-  returning `submitted:true` with a receipt failing its schema throws (unit fixture).
+- **`write-safety-contract.test.ts`** — every `effect:"commit"` contract MUST declare write safety;
+  no allowlisted escape hatch. Every completion arm has nontrivial `proofSchema`, normal-output and
+  recovery-probe extractors, `outputFromProof`, and fixtures proving normal/recovery/preflight-
+  present paths parse the same proof and commit-output schemas and yield the correct discriminated
+  `TransactionOutcome`.
 - **Probe/verify resolution** — `idempotency.probe` and any `save-verify`/`upload-verify` `verify`
   TaskId resolve to a real `effect:"read"` task in the **same store**, whose output is (or extends)
-  `ProbeVerdict`, whose contract declares `freshness.maxAgeMs:0`. Table-driven over the store index.
+  `ProbeVerdict`, whose contract declares zero-age freshness. Table-driven over the store index.
 - **Fence-before-click** — a unit fixture asserts the `write_intents` SQLite commit is observed
   before the mutation primitive is invoked; the primitive throws when invoked with no open fence.
-- **Same-key concurrency (D18)** — a fixture opens two runs deriving the SAME `idempotency_key`: the
-  first fences; the second's beat-① `write_intents` consult fails it loud, and (backstop under a
-  race) the partial-unique in-flight index rejects its fence INSERT. Pins that two same-key runs can
-  never both fence-and-click — exactly-once holds under concurrency, not only under crashes.
+- **Same-key sequential + concurrent dedupe** — fixtures cover two simultaneous starters and a
+  later fresh run after the first committed. Both reuse/block on the permanent primary-key intent;
+  neither can create a second fence/click. An unseen live `present` becomes `observed-present`,
+  produces typed output but no ledger outbox, and remains permanently click-blocking.
 - **Crash-recovery** — a fixture injects a `write_intents{status:"attempting"}` with no `committed`
   and asserts the recovery probe runs FIRST and routes present→(schema-parse then)backfill /
   present-with-receipt-failing-schema→park (D19) / absent→retry / unknown→park (four cases pinned).
-- **Ledger integrity** — a `write.committed` span with no matching ledger entry fails a parity
-  fixture; a `clean-tracker` dry-run that would delete any `ledger/` path fails the retention-floor
-  guard; `cli ledger verify` is exercised on a tampered fixture (chain break detected).
+- **Atomic outbox + ledger integrity** — crash injection at every subpoint of beat ⑥ proves the
+  intent/checkpoint/ledger-outbox/span-outbox commit is all-or-none. Concurrent projector fixtures
+  prove one linear chain. Verification detects interior edits, tail truncation, and missing files
+  against `ledger_heads`.
 - **Idempotency key hygiene** — a grep/AST guard flags an `idempotency.key` body referencing
   `attempt`, `index`, `runId`, or array position (the doc1/doc2 ban); keys must read input fields.
-- **Fill↔submit pairing** — every form-filing mutate submit has a preceding `read` fill task in the
-  same workflow (owned by **doc 10**; cross-referenced here because the dry-run boundary is the
-  submit and write-safety only engages there). The dry-run composition guard (doc 10) proves a
-  dry-run composition reaches no mutation primitive.
+- **Transaction pairing** — every prepare and commit contract is paired in a transaction node;
+  neither is legal standalone, the lease scope is transaction-wide, and a dry-run executable plan
+  contains the prepare arm but zero commit arms or mutation capabilities (doc 10).
 
 ---
 
 ## 9. Composition with the existing docs (no redefinition)
 
-- **Charter §1a (fill/submit split).** The fill task is `effect:"read"`, carries no `writeSafety`;
-  the submit task IS the transaction boundary and carries the whole triple. A **dry-run composition
-  excludes the submit task entirely** — so there is nothing to fence, probe, verify, or ledger in a
-  dry run. Write-safety only ever engages on a real submit. Clean by construction.
-- **Doc 01 §6.2 (mutation primitive).** The single choke `stores/common/mutation.ts` is the one home
-  for both the dry-run throw (existing) and the fence-precondition (new). Beats ② and ③ are folded
-  into the primitive wrapper so a submit cannot fire un-fenced.
-- **Doc 02 §5.6/§5.7 (checkpoints/resume).** Receipts are `replay:"checkpoint"` outputs; a mutate
-  step whose receipt checkpoint exists already refuses re-execution. Beat ⑤'s receipt checkpoint and
+- **Charter §1a (fill/submit split).** Fill is `effect:"prepare"`, submit/save/upload is
+  `effect:"commit"`, and one transaction node retains the page lease across both. A dry-run plan
+  includes prepare and excludes commit, so no fence/probe/ledger work begins.
+- **Doc 01 §6.2 (mutation primitive).** `stores/common/mutation.ts` accepts only the commit ctx's
+  capability bound to the open intent generation; no boolean dry-run branch exists.
+- **Doc 02 §5.6/§5.7 (checkpoints/resume).** Transaction nodes checkpoint their full typed
+  `TransactionOutcome`
+  and retain the validated proof on the permanent intent; a transaction
+  whose committed/satisfied key exists reuses its validated proof+output. Beat ⑥'s transaction-output checkpoint and
   the `write_intents` row share the `(workflow,item_id,step_id,attempt)` key. §5.6 #2 is upgraded per
   §4. The freshness walk (D8) is orthogonal and upstream: it keeps *stale read data* out of the fill;
-  write-safety keeps *duplicate writes* out of the submit — two different holes, two different guards.
+  write-safety keeps duplicate writes out of commit — two different holes, two different guards.
 - **Doc 02 gates (D5).** `PARKED(needs-operator)` is doc 02's park state; write-safety is one of the
-  producers of it. Parking releases browser sessions; resume reacquires (login idempotent) and
+  producers of it. Parking closes browser contexts before releasing exclusive leases; resume reacquires and
   re-enters at the recovery probe.
 - **Doc 03 (spans/storage/ledger dir).** `write.attempting` and `write.committed` are two new span
-  events (the fence + the commit); the receipt rides a `span.patched` detail on the run. Per **D21**,
+  events (the fence + the commit); the proof rides a `span.patched` detail on the run. Per **D21**,
   doc 03 OWNS and adds the `ledger/` dir (never-pruned retention floor) and the `write_intents`
   SQLite **system-of-record** table (added to the D14 set) in its storage layout — this doc
   references them, it does not place them in the `.tracker/` tree.
-- **Clock/instance (doc 11).** Every timestamp (`fenced_at`, `committed_at`, `filedAt`) comes from the
+- **Clock/instance (doc 11).** Every timestamp (`fenced_at`, `committed_at`, ledger `fencedAt` /
+  `confirmedAt` / optional `externalOccurredAt`) comes from the
   injectable Clock; `operator` and `instance` (prod/test) come from the config/secrets domain and
   RunEnvelope — all owned by **doc 11** — so the ledger never fabricates a time or lets a test read
   look like a prod filing.
@@ -437,7 +558,7 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 - UCPath `waitForTransactionOutcome` (polls, RETURNS `"timeout"` on neither-signal) + its caller
   `clickSaveAndSubmit`'s "outcome unknown, refusing to report success" throw (`transaction.ts:855-859`)
   + `readLatestTransactionNumber` (`transaction.ts:919-985`) → UCPath submit tasks' `receipt`
-  capture (beat ④) and the `""`-means-unknown rule (fail-closed #4). The by-EID (not name) row
+  capture (beat ⑤) and the `""`-means-unknown rule (fail-closed #4). The by-EID (not name) row
   re-find ports as-is.
 - ServiceNow `submitAndCaptureTicketNumber` + `parseTicketNumberFromUrl` (`fill-form.ts:140-173`) →
   ServiceNow `receipt` capture.
@@ -446,15 +567,15 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   fence + the recovery-probe replay (§4).
 - Separations `findExistingTerminationTransaction` (`steps/ucpath-transaction.ts:83-104`) → the
   `ucpath/find-existing-termination` probe; `deletePendingTransaction` (`transaction.ts:1167`) → the
-  `ucpath/clear-pending-terminations` pre-submit mutate cleanup (§5).
+  `ucpath/clear-pending-terminations` cleanup transaction (§5).
 - Onboarding `findExistingHireTransaction` + `decideHireDuplicateSkip` (`workflow.ts:488-521`) → the
   hire probe — its verdict widened from boolean fail-open to `ProbeVerdict` (its high-confidence skip
   becomes `present`; its low-confidence "fail open→submit" becomes `absent`; its genuinely-ambiguous
   case becomes `ambiguous`→park, which is the safety upgrade).
 
 **Newly built (mostly the write-ahead layer — the gap audit's "mostly new"):**
-- The `write_intents` fence table, the kernel five-beat sequencer, the `ProbeVerdict` protocol, the
-  ledger + hash-chain + `cli ledger verify`, and the recovery-probe replay.
+- The permanent-key intent table, atomic outboxes, fixed sequencer, `ProbeVerdict`, serialized
+  ledger projector + anchored hash-chain, and recovery reconciliation.
 - **Kuali `kuali/read-saved-document`** — a positive `save-verify` read-back that does NOT exist today
   (Kuali removed its error detection as false-positive-prone). Must be built and live-verified before
   Kuali submit tasks can instantiate a passing `completion`.
@@ -467,17 +588,16 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 
 ## 11. Adversarial self-review — how this could still fail, and residual risk
 
-- **Same-key concurrency and recovery backfill are now closed (D18/D19).** Two runs deriving the same
-  `idempotency_key` cannot both fence — beat ① consults `write_intents` before the live read, and the
-  partial-unique in-flight index is the mutex backstop — so the double-**file** class is structurally
-  shut (pinned by the concurrency + crash-recovery fixtures, §8). Recovery no longer trusts a
-  `present` receipt blind: `completion.schema.parse` runs on the backfilled receipt, parse-fail →
+- **Same-key sequential/concurrent dedupe and recovery backfill are closed.** The permanent
+  `(system,idempotency_key)` primary key covers attempting and committed states, so a later pristine
+  run cannot fence again. Recovery no longer trusts a present proof blind: the completion arm's
+  `proofSchema` parses it, parse-fail →
   park, so there is no unvalidated path to `done`. **Honest scope (D20):** this closes
   double-*file*, NOT duplicate-*person* — that racy-read class stays a disclosed residual (next
   bullet), not a structural guarantee.
 - **The probe/verify read is itself a read that can lie.** A false `present` skips a needed write; a
   false `absent` double-submits. This re-introduces the exact fail-open hazard if sloppy. *Guards:*
-  `maxAgeMs:0` always-live (never a checkpoint); exact-match on the stable key; `ambiguous`/`unknown`
+  zero-age freshness (never a checkpoint); exact-match on the stable key; `ambiguous`/`unknown`
   park; a throwing probe is `unknown`, not `absent` (charter catch-swallow ban). **Residual:** a
   probe that reads too early (the duplicate-person root cause) could report `absent` on a
   still-rendering page — mitigated only by porting the race-based classifiers
@@ -496,56 +616,61 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 - **Fence bypass.** A future submit task could fire a raw click outside the mutation primitive.
   *Guard:* inline-`page.` bans (doc 01/02) keep clicks inside `stores/*`; the primitive is the only
   sanctioned submit path and it requires a fence; and per **D22** doc 10's
-  `mutate-routes-through-mutation` ratchet is an **import-graph** check that every `effect:"mutate"`
+  `commit-routes-through-mutation` ratchet is an import/capability check that every `effect:"commit"`
   impl routes its submit click through `stores/common/mutation.ts` — so "fence-before-click is
   unbypassable" is now structural, not grep-hopeful. **Residual:** a leaf that reaches a submit via a
   novel un-wrapped helper the import walk doesn't recognize as a click — narrowed to review, not
   wide open.
-- **Probe-policy misconfig.** `"retries-and-recovery-only"` re-opens the crash window on attempt 1;
-  a wrong per-workflow choice is a real hazard. *Mitigation:* it's a required, reviewed §b decision
-  recorded in the descriptor diff, and the recovery probe still closes it on the following run.
-- **Ledger tamper / loss.** Local unsigned JSONL: the hash-chain detects edits/truncation but a full
-  local rewrite is undetectable. **Residual:** acceptable for a single-operator tool; escalation path
-  documented (§13 Q3).
+- **Probe-policy misconfig.** `"retries-and-recovery-only"` can miss a transaction created outside
+  this ledger on a pristine key; it cannot bypass durable committed history. The choice remains a
+  required migration decision and should default by review preference to `always`.
+- **Ledger tamper / loss.** The SQLite tail anchor detects file truncation/loss but remains local; an
+  attacker rewriting both DB and file is out of scope. External signing remains an escalation path.
 
 ---
 
 ## 12. Worked example — a separations termination, with a crash
 
 Input `{ emplId:"10694136", action:"termination", effectiveDate:"08/01/2026" }`, dry-run **off**,
-`instance:"prod"`. Composed nodes (charter §1a): `ucpath/clear-pending-terminations` (mutate cleanup)
-→ `ucpath/fill-termination` (read-safe fill) → **`ucpath/submit-termination`** (the mutate submit,
-`probePolicy:"always"`).
+`instance:"prod"`. Composed nodes: cleanup transaction → termination transaction whose prepare arm
+is `ucpath/fill-termination`, commit arm is `ucpath/submit-termination`, and probe policy is always.
 
-**Happy path (five beats):**
+**Happy path (six beats):**
 ```
-① probe  ucpath/find-existing-termination key="10694136|termination|08/01/2026" → { state:"absent" }
-② fence  write_intents{key, status:"attempting", fenced_at:clock.now()} COMMITTED (SQLite)
-         → span write.attempting
-③ submit mutation primitive: Save+Submit click (fence present, dryRun false → fires)
-④ capture readLatestTransactionNumber (re-nav, row by EID) → "T002173999"
+bind stable commit input + key="10694136|termination|08/01/2026"
+① durable lookup → unseen; separate read lease runs find-existing-termination → { state:"absent" }
+   release read lease; record monotonic probe completion
+② acquire exclusive transaction lease; fill-termination stages the form
+③ probe age < probeToFenceMaxMs; fence write_intents{key,status:"attempting"} COMMITTED (SQLite)
+   → span write.attempting
+④ commit mutation primitive: Save+Submit click (matching fence capability → fires)
+⑤ capture readLatestTransactionNumber (re-nav on retained transaction page) → "T002173999"
          pick(o)=o.receipt; schema z.object({transactionNumber:/^T\d{6,}$/}).parse → ok
-⑤ commit receipt checkpoint + write_intents{status:"committed", receipt_json}
-         + ledger append { system:"ucpath", idempotencyKey:"10694136|termination|08/01/2026",
-                           receipt:{transactionNumber:"T002173999"}, operator, instance:"prod",
-                           dryRun:false, filedAt:clock.now(), seq:N, prevHash:… }
+⑥ atomic DB commit: typed TransactionOutcome{disposition:"committed",proofSource:"normal-output"}
+                        checkpoint + write_intents{status:"committed",
+                           proof_json, output_json}
+         + ledger/span outboxes { system:"ucpath", idempotencyKey:"10694136|termination|08/01/2026",
+                           proof:{transactionNumber:"T002173999"}, operator, instance:"prod",
+                           dryRun:false, proofSource:"normal-output",
+                           fencedAt, confirmedAt:clock.now() }
+           // ledger projector assigns seq/prevHash only after claiming this outbox
          + span write.committed + span.ended(done)
 ```
 
-**Crash AFTER the click (③) but BEFORE capture (④).** The daemon dies; the Save landed in PeopleSoft
+**Crash AFTER the click (④) but BEFORE capture (⑤).** The daemon dies; the Save landed in PeopleSoft
 but no receipt was recorded. Lease expiry re-enqueues the run; recovery (§4) runs FIRST:
 ```
 scan write_intents (separations, 10694136-item, ucpath-submit) → status:"attempting", no committed
 re-run ucpath/find-existing-termination key="10694136|termination|08/01/2026"
-  → { state:"present", receipt:{transactionNumber:"T002173999"} }   // the row PeopleSoft now shows
-⇒ BACKFILL: write_intents{status:"committed", receipt_json} + ledger append (idempotent) + span.ended(done)
+  → { state:"present", proof:{transactionNumber:"T002173999"} }   // the row PeopleSoft now shows
+⇒ BACKFILL in one DB transaction: committed proof + ledger/span outboxes + done
 ⇒ NO second Save. Exactly-once holds.
 ```
-Had the probe returned `absent` (crash between ② and ③, click never fired) → clear the intent, re-run
-the five-beat safely. Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or
+Had the probe returned `absent` → mark the same intent retryable, then CAS a new generation and run
+safely. Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or
 `unknown` (grid didn't render) → `PARKED(needs-operator)`: *"termination for EID 10694136 effdt
 08/01/2026: probe found 2 matches / probe indeterminate — verify in UCPath, then retry or mark
-done."* Had `present`'s receipt failed `completion.schema.parse` (D19) → `PARKED`, never `done`.
+done."* Had the present proof failed `proofSchema` → `PARKED`, never `done`.
 Never a guess, never a duplicate `T…`.
 
 **Two runs, same key (D18).** Suppose a second run for the same
@@ -553,8 +678,8 @@ Never a guess, never a duplicate `T…`.
 `write_intents` FIRST, finds the first run's `attempting` row on
 `idempotency_key="10694136|termination|08/01/2026"`, and **fails loud without fencing or clicking** —
 *"another run is mid-submit for key 10694136|termination|08/01/2026 — refusing to double-fence."*
-Even if the consult raced two simultaneous starters, the second's beat-② fence INSERT hits the
-partial-unique in-flight index and fails. Two same-key runs can never both fence.
+Even if two starters race, one permanent-key INSERT/CAS wins. After commit, any future run finds and
+reuses the proof. Concurrent and sequential duplicates are both blocked.
 
 **Honest scope (D20).** This is how the double-**FILE** class is closed: the fence + same-key mutex
 (D18), plus the pre-Save `present` probe and the recovery probe, mean two runs — or one crashed run —
@@ -576,11 +701,14 @@ create-path pending-termination sweep (§11). Exactly-once here means *no double
 2. **OnBase positive read-back vs always-park.** Is a live-verifiable "document filed" read achievable
    in OnBase, or does it take the `unverifiableByPage` allowlist → always-park for manual confirm
    (aligned with "operator tracks completion manually")?
-3. **Ledger tamper-evidence altitude.** Is local unsigned hash-chained JSONL sufficient, or does
-   compliance want external anchoring/signing (out of scope now, easy to add later)?
-4. **Probe-policy default per workflow (§b).** For each migrating workflow: `"always"` (safe, +1
-   round-trip) or `"retries-and-recovery-only"` (faster, narrow first-attempt window)? Asked per
-   workflow at migration — this doc sets the mechanism, not the default.
+3. ~~Ledger tamper-evidence altitude~~ — **resolved 2026-07-21:** local hash chain + independent
+   SQLite tail anchor is diagnostic tamper-evidence, not a security boundary. Coordinated local
+   DB+file rewriting is out of scope. External signing/anchoring is added only if a later compliance
+   requirement names it; Phase 1 does not wait for an unanswered preference.
+4. **Probe policy + elapsed budget per workflow (§b).** For each migrating workflow: `"always"`
+   (safe, +1 round-trip) or `"retries-and-recovery-only"` (cannot detect a prior external write on
+   an unseen key), and what justified `probeToFenceMaxMs` bounds preparation after that probe?
+   Asked per workflow at migration — this doc sets the mechanism, not the values.
 5. **Pending-sweep as write-safety.** Should `ucpath/clear-pending-terminations` (the date-agnostic
    sweep — the real duplicate guard today) be a first-class write-safety pre-step on every UCPath
    create path, or only on separations? It mutates (deletes rows), so it needs its own fence/ledger
