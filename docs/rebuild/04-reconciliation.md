@@ -1,7 +1,8 @@
-# Reconciliation memo — binding cross-doc decisions (2026-07-17)
+# Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-22)
 
-Status: **binding revision 2026-07-21.** Earlier rounds remain as decision history; Round 4 below
-supersedes their incompatible task effects, graph, recovery, ledger, migration, and spike claims.
+Status: **binding revision 2026-07-22.** Earlier rounds remain as decision history; Round 6 below
+supersedes incompatible typing, UI-access, control, delegation, recovery, trust, knowledge, and
+workflow-editor claims.
 
 Three adversarial reviews (`reviews/01-review.md`, `reviews/02-review.md`, `reviews/03-review.md`)
 found that docs 01–03 describe divergent systems at their seams. This memo is the orchestrator's
@@ -10,8 +11,8 @@ Amendment agents rewrite each doc to comply; a doc may reference another doc's o
 must never redefine it.
 
 > **Implementation rule:** D1–D25 are historical rationale, not copyable current API/DDL. Apply
-> D26–D45 first; where they amend an older decision, the Round-4 form is the only implementable one.
-> Current contract shapes live in owning docs 01–03 and 09–11.
+> D46–D68 first, then D26–D45; where they amend an older decision, the latest-round form is the only
+> implementable one. Current contract shapes live in owning docs 01–03 and 05–06/09–12.
 
 ## D1 — Contract ownership matrix (one owner per concept, others reference)
 
@@ -20,6 +21,12 @@ must never redefine it.
 | Task contract (`defineTask`), id grammar, error taxonomy, effect/dry-run mechanics, retry policy, decoration, stores, session providers, shared leaf-code homes | **Doc 01** |
 | Workflow builder API (single API), descriptor shape, RunEnvelope, run-state machine incl. gates/parks, checkpoint/resume model | **Doc 02** |
 | Span/event wire schema, notes stream, storage layout, lift adapter, SSE wire shapes, completion (fan-out/approval) union | **Doc 03** |
+| Executor lanes, resource budgets, page/driver leases, fairness/backpressure, page isolation | **Doc 05** |
+| Canonical-field intake mapping, normalization outcomes, admission manifests, durable capture, roster/local projections, Edit Data | **Doc 06** |
+| Write intents, proof/completion union, subject proof, recovery sequence, immutable ledger | **Doc 09** |
+| Guard/test inventory, scenario execution lanes, non-vacuity/meta-guard | **Doc 10** |
+| Clock, config/instance snapshots, fiscal dates, secrets, environment preflight, local network boundary | **Doc 11** |
+| Semantic UI vocabulary/drivers, run evidence/diagnostics, scenario corpus, structured knowledge/fix records, workflow explorer/editor, base capability inventory | **Doc 12** |
 
 Each doc gets a header table stating what it owns and what it imports from siblings.
 
@@ -34,15 +41,17 @@ A task is split into:
   mandatory `example` output. Lives in `temp_src/domain/contracts/<system>/` (bundle-safe, satisfies
   the "descriptors import only zod + domain" guard).
 - **impl** — `run` + session needs, lives in the store (`temp_src/stores/<system>/tasks/`), imports
-  Playwright. `defineTask(contract, impl)` binds them; the store is the only impl registry.
+  the typed system-driver API. Raw Playwright imports live only in that store's driver/session
+  internals. `defineTask(contract, impl)` binds them; the store is the only impl registry.
 Descriptors and the dashboard import contracts only. E2e stubs derive their happy path from
-`example` (schema-parsed); failure/cancel/parallel scenarios REMAIN hand-scripted in the stub lane
+`example` (schema-parsed); failure/cancel/parallel scenarios come from the registered strict
+`ScenarioManifest` corpus rather than per-test ad hoc stubs
 (examples cannot express them — review 02 #12).
 
 ## D4 — System-less work gets service stores
-Service stores (`local` for pure compute like PDF extraction/roster matching, `ocr-llm` for the OCR
-provider pipeline) use the same contract; `sessions: []` is legal ONLY for service stores; browser
-stores stay type-constrained to their own system's sessions.
+Service stores (`extraction` for file parsing, `normalization` for typed contact/address cleanup,
+`roster` for matching, and `ocr` for the provider pipeline) use the same contract; `sessions: []` is legal only for service stores and pure
+`workflow:<id>` mini-stores; browser stores stay type-constrained to their own system's sessions.
 
 ## D5 — Waits and operator gates are run-state, not task internals
 Tasks remain run-to-completion with bounded duration. Long waits (OCR approval, child-signature
@@ -55,20 +64,20 @@ manual-MFA path anywhere in the new design. Login is always unattended and bound
 
 ## D6 — dryRun lives on the RunEnvelope (kernel-owned), never in workflow input. Doc 02's table is amended.
 
-## D7 — Write-ness is derived, never re-declared
-`TaskStep.write` is DELETED. All write gating (refuse-replay, crash-park, freshness) keys off the
-contract's `effect: "mutate"`. `defineTask` uses per-effect overloads so a mutate contract without
-dry-run handling fails to compile where possible, with the runtime factory check as backstop (docs
-must say "compile-time where possible, runtime-enforced always" — not overclaim "type-level").
+## D7 — Write-ness is derived, never re-declared (amended by D26)
+`TaskStep.write` is deleted. All write gating derives from the contract's closed effect:
+`read | prepare | commit`; only `commit` is an external write and it is legal only inside a
+transaction node paired with `prepare`. `defineTask` uses effect-specific overloads and the runtime
+factory remains the always-on backstop. Dry-run composition removes commit arms rather than asking a
+task to branch on a flag.
 
-## D8 — Checkpoint freshness (closes the stale-read→live-write hole, review 02 #2)
-Every checkpoint records `capturedAt`. Every read contract whose output may feed a write declares
-`freshness.maxAgeMs` (mandatory field on ALL read contracts; `Infinity` must be written explicitly
-and justified in a comment). At resume, the kernel walks the step bind graph: if any replayed
-checkpoint feeds (directly or transitively via later mappings) a mutate task in this run and its
-age exceeds `maxAgeMs`, the kernel REFUSES loudly — naming the checkpoint, its age, the limit, and
-the consuming write task — and requires either `always-rerun` of the producing task or explicit
-operator override. Crash-mid-write still parks `needs-operator`.
+## D8 — Checkpoint freshness (closes the stale-read→live-write hole, review 02 #2; amended by D34)
+Every read contract declares default + validated field-path freshness and provenance. Checkpoints
+retain per-field source observations; derived values retain the oldest contributing observation.
+At resume, the kernel walks declared DAG dependencies to every commit sink. An over-age contributing
+fact refuses loudly—naming checkpoint, field, source age, limit, and consuming commit—and requires a
+live rerun or a contract-permitted field-scoped audited override. `Infinity` is explicit policy
+metadata with adjacent justification and is illegal for identity/key/proof facts.
 
 ## D9 — Resume-model scope (explicit)
 Resume covers rows with a real daemon task only (`single`, real `operation-member`). Explicitly
@@ -106,13 +115,15 @@ workflow (EID/identity-approval, standalone-OCR approval with no parentRunId). P
 real `.tracker` days through the lift asserting zero quarantines.
 
 ## D13 — The dashboard flip is SCOPED, not wholesale (operator-reviewable)
-Parity gate covers queue rows + log panel + session cards + wfCounts only. Capture, workflow-
-modifier, settings, AI-assist proxy to the old endpoints until their own migration milestones.
+Parity gate covers queue rows + log panel + session cards + wfCounts only. Workflow modifier,
+settings, mobile capture, and AI-assist proxy to the old endpoints until their explicit D58
+migration milestones.
 One-week legacy-dashboard fallback stays. (Review 03 sized wholesale flip at ~103 endpoints / ~122
 components — an unacceptable pre-Phase-2 mega-milestone.)
 
-## D14 — SQLite role
-SQLite remains system-of-record for claims + checkpoint payloads (NOT rebuildable/deletable);
+## D14 — SQLite role (expanded by D21/D45/D50/D51/D59)
+SQLite remains system-of-record for claims, checkpoint payloads, dependencies/manifests, commands,
+write/artifact outboxes, notifications, ledger heads, and capture handoffs (NOT rebuildable/deletable);
 spans/notes JSONL is the display/audit source. Doc 03's "deletable projection" claim is scoped to
 projection tables only.
 
@@ -143,15 +154,17 @@ The adversarial review of docs 09/10/11 found two blockers in write-safety and s
 seams. These decisions are binding and override anything contradicting them in 09/10 (and amend the
 earlier D8/D14).
 
-- **D17 — Crash recovery is PROBE-THEN-PARK, not always-park (amends D8 + doc 02).** On a crash
+- **D17 — Crash recovery is PROBE-THEN-PARK, not always-park (amends D8 + doc 02; negative arm
+  further amended by D64).** On a crash
   during a real submit, recovery re-runs the idempotency probe FIRST: `present` → backfill +
-  ledger + done (no second submit); `absent` → clear the intent, safe to retry;
+  ledger + done (no second submit); `absent` → record a negative observation for D64 settlement;
   `ambiguous`/`unknown`/throw → PARK `needs-operator`. Rationale: always-park does NOT prevent a
-  double-file, it only defers everything to manual; probe-then-park prevents the double-file AND
-  auto-resolves the confident cases, while the fail-closed `unknown → park` still honors "be very
-  sure." D8's "crash-mid-write still parks needs-operator" clause and doc 02 §5.5 / §5.6#2 / OQ2 /
-  the line-364 statement are amended to this. Doc 02's mutate step node gains a **required
-  `probePolicy`** (`"always" | "retries-and-recovery-only"`, no default — the §b migration
+  double-file, it only defers everything to manual; probe-then-park recognizes typed positive proof
+  and may resolve only an evidence-qualified negative sequence, while fail-closed unknown or
+  unsettled evidence still honors "be very sure." D8's "crash-mid-write still parks needs-operator" clause and doc 02 §5.5 / §5.6#2 / OQ2 /
+  the line-364 statement are amended to this. In the final three-effect model, doc 02's
+  **transaction node** gains a required `probePolicy` (`"always" | "retries-and-recovery-only"`,
+  no default — the §b migration
   question); the recovery probe is always-on regardless.
 - **D18 — Same-key concurrency fence (BLOCKER fix).** `idempotency_key` gets a **partial UNIQUE /
   mutex among un-committed `write_intents`**, and beat ① MUST consult `write_intents` for an
@@ -170,18 +183,20 @@ earlier D8/D14).
   table (added to the system-of-record set, amending D14's "claims + checkpoint payloads"). Doc 03
   must also DECIDE the base spans/notes retention (today an open question) so 09's "never-pruned"
   floor sits above a settled number rather than a guessed "30 days."
-- **D22 — Contract-shape + guards owner split.** Doc 09 owns the mutate contract's `writeSafety`
-  shape: `completion` is a UNION (`receipt | save-verify | upload-verify`) + `idempotency`. Doc 10's
+- **D22 — Contract-shape + guards owner split (terminology amended by D26).** Doc 09 owns the
+  **commit** contract's required `writeSafety` shape: `completion` is a UNION (`receipt |
+  save-verify | upload-verify`) + `idempotency`. Doc 10's
   `write-safety-contract` guard must walk that union — it must NOT demand a flat `receipt` schema
   from Kuali/OnBase (which use save-verify/upload-verify per charter §13). Doc 10 adds ratchets:
-  `unverifiableByPage` requires an allowlist+reason entry, and every `effect:"mutate"` impl must
-  route its transaction click through the `stores/common/mutation.ts` fence primitive (no raw
-  `page.click` submit). Port fix: the "outcome unknown, refusing success" throw is in
+  `unverifiableByPage` requires an allowlist+reason entry, and every `effect:"commit"` impl must
+  route its external action through a typed system driver operation that requires doc 12's
+  `MutationCapability`; raw task-level `page.click` is impossible. The driver operation may cross
+  the fence only through the kernel mutation primitive. Port fix: the "outcome unknown, refusing success" throw is in
   `clickSaveAndSubmit` (`transaction.ts:855-859`), not `waitForTransactionOutcome`.
   Doc 01 amendment (so the attachment isn't orphaned inside doc 09): doc 01 §2.2's
-  `MutateTaskContract` carries the **reference-stub field** `writeSafety?: WriteSafety<In, Out>`
-  (guard-required on every mutate contract) whose *shape* resolves to doc 09 §2.1 — doc 01
-  references it, doc 09 owns it. Doc 01's header records this D22 amendment.
+  `CommitTaskContract` carries the **required field** `writeSafety: WriteSafety<In, Out, Proof>`;
+  doc 09 owns that shape and doc 10 guards it. There is no optional reference stub and no
+  two-effect `MutateTaskContract` in the final model.
 
 ---
 
@@ -337,3 +352,156 @@ override/amend D2–D3/D5–D8/D12–D15/D17–D25 wherever they conflict.
   workbook are stable-keyed SQLite outbox projections with serialized, head-hash-checked projectors;
   a blocking sink must acknowledge before the run reports done. This retains the three task effects
   without making task retry duplicate an append.
+
+---
+
+## Reconciliation round 5 (2026-07-22) — whole-plan + legacy-code improvement review
+
+These decisions answer the operator's maintainability/trust/debugging/workflow-authoring brief and
+the failure modes found by rereading the old codebase. They are binding and supersede any earlier
+statement that leaves these seams implicit.
+
+- **D46 — Runtime schemas are the type authority.** Every external/durable boundary (workflow/task
+  input and result, run/checkpoint, command, event/note, SSE, config, intake, artifact, evidence,
+  notification, knowledge/fix) has a strict, versioned zod schema; TypeScript types are inferred
+  from it. Unknown keys fail. Canonical ids/dates/instants/digests/amounts are branded. Missing,
+  optional, nullable, unknown, not-applicable, and redacted are distinct—no empty-string/null/default
+  collapse. Open `Record<string,unknown|JsonValue>` cannot carry decision state.
+- **D47 — Semantic UI registry + typed drivers are the reusable browser-task store.** Canonical
+  `ElementId`, `PageStateId`, `ScreenId`, and `ObservationId` entries own selector strategy,
+  meaning, valid page states, verification date, aliases, and scenarios. Tasks receive a typed
+  `SystemDriver`, never Page/Locator/selectors. Raw Playwright access is confined to driver/session
+  internals. External-commit UI operations additionally require the fenced mutation capability.
+  Generated `UI-CATALOG.md` is a safe projection without locator recipes and gives the operator and coding agents one vocabulary; aliases
+  are explicit migrations, not duplicate names. The task store reuses business operations; the UI
+  registry reuses proven element knowledge; checkpoints/mini-stores reuse typed computed facts.
+- **D48 — Fresh subject binding is mandatory before every real write fence.** Prepare and commit
+  contracts declare compatible expected subject + semantic observation + matcher. After prepare on
+  the exact lease, the kernel re-observes the staged person/file/catalog, records a strict redacted
+  `SubjectProof`, and fences only on a fresh match. Mismatch/unknown/missing/stale proof yields zero
+  fence/click. The mutation capability is bound to intent generation + subject-proof digest. This
+  closes stale-open-record writes; it does not claim upstream business selection is correct.
+- **D49 — One command protocol owns enqueue and queue-row operations.** Dashboard, CLI, gates,
+  recovery, and editor issue durable idempotent CAS commands. Descriptors choose closed enqueue and
+  action policies. Cancel resolves authoritative SQLite dependency targets and fails closed—never
+  caller-visible root fallback. Active-run lookup failure cannot degrade to enqueue. Retry preserves
+  immutable input/config and creates linked run history; bump changes scheduling only. The UI says
+  Hide/Unhide for reversible presentation tombstones. Physical purge is an offline exact-id command
+  requiring a verified backup and a purge receipt; workflows own no row mutation handlers.
+- **D50 — Delegation is a typed atomic graph contract.** `WorkflowRef` carries strict input and
+  successful result schemas. Every child edge declares stable edge/item identity, cardinality,
+  await/join, failure, cancellation, child-retry/parent-resume, and visibility policies. Parent,
+  children, dependencies, and immutable fan-out manifest commit atomically. Replay reuses the
+  manifest; separate edges never join via a broad “all children under parentRunId” query. The
+  kernel implements control semantics; workflows only choose policies and bind typed inputs/results.
+- **D51 — Non-rebuildable SQLite authority has a recovery contract.** WAL/foreign-key/full-sync
+  authority transactions, boot quick-check + invariant queries, checksummed online backups,
+  retention, read-only degraded mode, `storage doctor`, exact-backup atomic restore, and an automated
+  restore drill are Phase-1 requirements. JSONL rebuilds projection tables only and may never invent
+  lost claims/dependencies/checkpoints/write intents/outboxes/commands. Post-backup uncertain writes
+  park behind recovery probes.
+- **D52 — Trust is a first-class output.** Structured `FailureRecord`s, redacted automatic diagnostic
+  bundles, terminal `RunEvidenceReceipt`s, and `cli explain run` link input/config/graph/schema
+  fingerprints, node outcomes, provenance, UI actions/page states, screenshots/artifacts, subject
+  proofs, exclusions, write proofs, and confidence. `done` requires mandatory evidence and no
+  unresolved write/subject/storage condition. Notifications are durable deduped inbox records;
+  desktop delivery is best-effort and cannot be the only alert.
+- **D53 — Behavioral scenarios are maintained product data.** Task/workflow/UI contracts reference
+  checked-in strict `ScenarioManifest`s covering happy, no-match/empty, schema failure, transient/
+  permanent failure, branch/gate/delegation/control, subject mismatch, proof/crash, and discovered
+  real-world variants as applicable. Examples seed only the minimal happy path. Every production
+  bug fix links a regression scenario; orphaned, stale, or referenced-but-unexecuted scenarios fail
+  guards. This is how workflows improve as new cases appear without silent catch-all fallbacks.
+- **D54 — Chronological lessons are not active architecture authority.** Port only verified current
+  rules into scoped, statused, evidence-linked `KnowledgeRecord`s with validity/supersession. Every
+  Codex/Claude-assisted fix creates a `FixRecord` linking failure, changed contract/UI ids, scenario,
+  verification, and commit. Existing LESSONS/CLAUDE lessons are triaged into active/superseded/
+  historical—not bulk-copied—and duplicate active rules are rejected.
+- **D55 — Workflow tooling is staged hybrid, not graph-as-code fantasy.** Phase 1 ships a read-only
+  Workflow Explorer generated from descriptors/tasks/UI ids/scenarios/evidence, with exact source
+  links and run replay/explanation. Phase 2 may add constrained edits for presentation, safe closed
+  policies, and typed task-node composition. Source-authored workflows receive patch scaffolds only;
+  a workflow converted to DSL-authoring has exactly one versioned strict definition and deterministic
+  generated descriptor. Every applicable edit compiles/validates/diffs/version-bumps before restart-
+  gated atomic apply/rollback. Arbitrary TypeScript, selectors, driver code, proof rules, and schema
+  semantics stay code-reviewed. Generated design-intent briefs remain projections, never hand-edited authority.
+- **D56 — Local-only scope is deliberate (amended only by D59).** Native operator dashboard binds loopback only; Phase 1 omits
+  accounts/RBAC/teams/remote sync/HA/certificates/external audit signing. Non-loopback bind fails.
+  Correctness, redaction, least-retained evidence, safe file permissions, backups, and loopback Origin
+  checks remain because the tool controls live HR systems and diagnostic artifacts may be shared.
+- **D57 — Intake reruns are manifest-backed.** Mapping/validation produces an immutable
+  `IntakePlanManifest` containing source artifact digest, mapping and workflow fingerprints, every
+  valid row→stable item/input hash, every correction, rejection, and explicit exclusion. Coordinator,
+  members, dependencies, and manifest enqueue atomically. Rerun-with-existing-data references that
+  manifest and shows hash/schema diffs; it never silently reparses a changed file or newer mapping.
+- **D58 — Old-code closure is capability-inventoried, not workflow-counted.** Migrating all 16
+  workflow directories does not prove `src` is deletable. Phase 0 records every legacy service,
+  route family, dashboard surface, CLI/ops script, exporter, code generator, and maintenance tool
+  with exactly one disposition: native milestone, temporary proxy with removal milestone,
+  deliberate replacement, or evidence-backed retirement. A machine-readable inventory guard fails
+  on unclassified additions and before deletion on any proxy/undecided entry. This closes the old
+  plan's omission of capture, AI-assist, timecard, setup/export/maintenance, and long-tail routes.
+- **D59 — Mobile capture is durable intake with one explicit network exception.** The operator
+  dashboard/API remains loopback-only. Only while the operator opens a capture session may a
+  separately scoped phone ingress/tunnel expose the token-gated capture asset/manifest/status/
+  upload/replace/delete/reorder/finalize endpoints—never queue, settings, evidence, files, or commands. Capture sessions,
+  photo order/digests, expiry, finalization command, and handoff state are strict SQLite authority;
+  restart resumes them. A stable outbox converges bundle publication and one atomic authority
+  transaction that records the artifact plus intake/OCR handoff, or records a retryable loud
+  failure; it never returns final success then silently loses `onFinalize` work.
+- **D60 — AI help is advisory and schema-bounded.** Shared provider/rate-limit infrastructure may
+  serve OCR, contact normalization, and optional operator-requested triage/sanity/selector/run
+  summaries. Every result is strict-schema, source/provenance-labelled, redacted before third-party
+  submission, and explicitly `advisory-produced|unavailable|invalid-response`; it cannot change authority, resolve a gate,
+  mark success, choose identity, invent a selector, or authorize a write. Deterministic receipts,
+  scenarios, UI catalog, and validators remain authoritative when the pool is absent/exhausted.
+- **D61 — Shared timecard logic is split at the right boundary.** Calendar/range/year resolution
+  becomes Clock-injected pure domain code. Current/previous-period orchestration uses a semantic
+  timecard-driver interface in `stores/common/`, while Old/New Kronos own their page-state/UI
+  implementations. Raw `Page`, optional `new Date()` defaults, fixed sleeps, and `null`-as-navigation-
+  failure do not port. The date-window and positive period-switch scenarios are shared once.
+- **D62 — Parsed input is immutable but still validated on every authority read.** Enqueue applies
+  ingress defaults/transforms exactly once, then stores canonical `z.output` plus its hash. Every
+  later DB/resume read parses those bytes through a separate strict canonical-input schema that
+  performs validation only; it never reapplies ingress defaults/transforms and never trusts a cast.
+  Descriptor construction must prove ingress-output → canonical-schema round-trip. Changed
+  canonical semantics require an explicit input-snapshot migration or a loud refusal.
+- **D63 — Non-browser provider I/O is capability-injected and budgeted.** OCR/model/geocoder and
+  other remote service calls may not hide behind imports in a service task. Contracts declare a
+  closed provider-capability set; `ServiceTaskCtx` exposes only those injected clients. Calls are
+  abortable, timeout/rate/concurrency-budgeted, redacted, and action-evidenced, with strict
+  produced/unavailable/invalid outcomes. Direct SDK/network imports outside the registered infra
+  adapters fail a guard. Provider budgets participate in scheduler admission even though they use
+  no browser page.
+- **D64 — A post-fence `absent` is not retry authority by itself.** A recovery probe's negative arm
+  carries typed evidence and is accepted only by the commit contract's system-specific recovery-
+  absence policy: a bounded propagation window plus the required number/source of consistent
+  observations, or `operator-only` when safe negative proof cannot be earned. A bare/single early
+  absence becomes `unknown` and parks; it never marks an intent retryable. The enforceable claim is
+  **at most one unattended commit attempt per intent generation, with automatic convergence only
+  when positive or stabilized negative evidence is valid**—not unconditional distributed
+  exactly-once against systems that expose no idempotent API/authoritative negative read.
+- **D65 — Every commit fences on a binding proof, including explicitly unscoped writes.** The
+  write-bound proof is a strict union: a matched person/artifact subject proof, or an allowlisted
+  `unscoped` proof containing the reviewed reason, exact page state, run/attempt/lease/task, and
+  observation time. `subject.kind:"none"` does not fabricate expected/observed identities and is
+  legal for a commit only when no stronger business subject exists. The mutation capability and
+  ledger bind to the resulting `bindingProofDigest`.
+- **D66 — Column mappings bind target fields, not canonical concepts.** A saved mapping keys each
+  binding by the intake projection's stable target-field id/path and records the canonical field id
+  it uses. This permits two target fields with the same canonical concept (for example home and
+  mailing city), survives source-column reordering, and makes projection changes fingerprint-
+  visible. Keying only by `CanonicalFieldId` is retired.
+- **D67 — The command protocol is a family, not a run-action-shaped partial union.** One idempotent
+  command envelope has strict target-specific arms for run controls/Edit Data/write resolution,
+  typed gate resolution, notification lifecycle, and capture-session mutations. Each arm owns a
+  version/CAS token and schema-parsed payload; adding a UI mutation without an arm fails coverage.
+  Gate result payloads live in SQLite/checkpoints under their declared result schema; span events
+  carry only a validated resolution key plus payload hash/ref, never a free-form string as control
+  state.
+- **D68 — Runtime dependency coverage is exhaustive, not illustrative.** Phase 1 inventories every
+  browser system endpoint map, current secret/credential/provider key, optional feature dependency,
+  and legacy env/config name. The config and secret registries cover both directions: every declared
+  browser system/provider has the required endpoint/credential/preflight entries, and every runtime
+  read is registered or explicitly retired/proxied in D58. Examples in doc 11 are excerpts, never
+  permission to omit ServiceNow, SharePoint, Old Kronos, capture tooling, or provider credentials.

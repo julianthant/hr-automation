@@ -1,14 +1,14 @@
-# 09 — Write-Safety: Exactly-Once for Real HR Mutations
+# 09 — Write-Safety: Fenced, Fail-Closed Real HR Mutations
 
-Status: **Phase 0 revised design — external-review corrections integrated 2026-07-21.** Conforms to `00-charter.md` (§1a fill/submit
-split, §13 write-safety + the binding operator answers of 2026-07-18, §b migration questionnaire),
-the reconciliation memo `04-reconciliation.md` (D26/D30–D33/D43/D44), and the top finding of the gap audit
-`08-foundation-gap-audit.md` (this doc turns that BLOCKER into an owned contract). Code lands in
-`temp_src/`.
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The write sequence includes
+a fresh expected↔observed binding proof on the staged page before the fence, and crash recovery now
+requires stabilized typed negative evidence before another generation may submit. The guarantee is
+stated at the boundary the UI targets can actually support; this doc does not claim unconditional
+distributed exactly-once from a browser probe.
 
 This is the highest-stakes doc in the rebuild. It governs whether a real, sometimes irreversible HR
-transaction (a UCPath termination, a ServiceNow ticket, a Kuali save, an OnBase filing) is filed
-**exactly once** and reported **done only when we are sure it landed**. The operator's non-negotiable
+transaction (a UCPath termination, a ServiceNow ticket, a Kuali save, an OnBase filing) is protected
+from duplicate unattended attempts and reported **done only when we are sure it landed**. The operator's non-negotiable
 (charter §13, 2026-07-18): *"you have to be very sure they were completed"* — completion is
 **FAIL-CLOSED everywhere**: an unknown or unverifiable result is **never** treated as done.
 
@@ -17,8 +17,9 @@ transaction (a UCPath termination, a ServiceNow ticket, a Kuali save, an OnBase 
 | This doc **owns** (siblings reference, never redefine) |
 |---|
 | The **write-safety contract** — the required `WriteSafety` field on a commit task, typed proof schema for every completion kind, idempotency probe/key, and fail-closed verdict protocol |
-| The **kernel write sequence** — resolve/probe → prepare → fence → external commit → proof → durable commit, and its ordering invariant |
-| The **crash-window fence** (`write_intents` SQLite table) and the **crash-recovery replay** (recovery-probe branching) |
+| The **kernel write sequence** — resolve/probe → prepare → subject bind → fence → external commit → proof → durable commit, and its ordering invariant |
+| Fresh write-binding enforcement at the write seam and the subject-match/unscoped proof retained with the intent/ledger |
+| The **crash-window fence** (`write_intents` SQLite table) and the **crash-recovery replay** (positive proof or stabilized negative-proof branching) |
 | Typed, intent-generation-locked operator resolution for parked writes (confirmed present/absent; no generic Done/Retry) |
 | **Double-submit prevention** — idempotency key derivation + the per-workflow probe-policy knob (§b) |
 | The **immutable receipt/transaction ledger** — schema, location, never-pruned guarantee, hash-chain, what one entry records |
@@ -30,6 +31,7 @@ transaction (a UCPath termination, a ServiceNow ticket, a Kuali save, an OnBase 
 | Span/note wire schema, `.tracker/` storage layout, SQLite system-of-record vs projection split (D14), completion fan-out union → **doc 03** |
 | The injectable Clock (all timestamps), per-run test/prod instance selection, the config/secrets domain → **doc 11 (clock/config/secrets)** |
 | The fill↔submit pairing guard + dry-run composition guard → **doc 10 (guard-architecture)** |
+| Subject declarations, semantic `ObservationId`, driver evidence/bundles → **docs 01 and 12** |
 
 Amendments at sibling seams (each is a one-owner-per-concept addition, not a redefinition):
 - **Doc 01 §2.2** — `CommitTaskContract` requires `writeSafety`; its shape is owned here.
@@ -63,30 +65,38 @@ Every row below is live-verified leaf knowledge the charter forbids re-deriving.
 - **Wrong-person termination `T002173685`** (`separations/CLAUDE.md`, 2026-06-29): a name-search
   override date-matched a *different* career employee and filed a real termination against him —
   still needing manual reversal. **Honest scope:** that was a *wrong-data* error, not a duplicate.
-  Write-safety's idempotency prevents **double-filing**; **wrong-data** is prevented by doc 02's
-  freshness (D8) + the **identity-approval gate** (`domain/identity-approval.ts`, now a real gate,
-  not a "return done + park data"). Write-safety's contribution to `T002173685` is narrower but real:
-  the receipt is **recorded in the immutable ledger**, so a wrong filing is attributable and findable
-  for reversal instead of buried in row snapshots.
+  Idempotency prevents **double-filing**. Two distinct wrong-person paths now have distinct guards:
+  upstream source/selection ambiguity is blocked by doc 02 freshness + the identity-approval gate;
+  stale browser state showing a different person after correct selection is blocked here by a fresh
+  subject observation on the exact staged page before fencing. The immutable ledger then makes any
+  residual wrong-data filing attributable and reversible instead of burying it in row snapshots.
 
 ---
 
-## 1. The one-sentence thesis + the fail-closed principle
+## 1. The one-sentence thesis + the fail-closed guarantee boundary
 
 > **Every `effect:"commit"` task declares typed proof-of-landing (a receipt, saved-state proof, or
 > uploaded-artifact proof)
-> and an idempotency probe; the kernel drives a fixed resolve/probe → prepare → fence → external
-> commit → proof → durable-commit
+> and an idempotency probe; the kernel drives a fixed resolve/probe → prepare → **binding proof** →
+> fence → external commit → proof → durable-commit
 > sequence around it; and every "is it done / is it already there?" question is answered by a
-> FOUR-state verdict where `unknown` blocks — never a boolean that lets uncertainty read as
-> success.**
+> FOUR-state verdict where both positive and negative claims carry evidence and `unknown` blocks —
+> never a boolean that lets uncertainty read as success.**
 
 The single mechanism that makes fail-closed structural is the **`ProbeVerdict`**: a probe or verify
-read cannot return `true/false`. It returns `present | absent | ambiguous | unknown`. `unknown` and
-`ambiguous` route to `PARKED(needs-operator)` — never to a submit and never to a "done." This
+read cannot return `true/false`. It returns `present | absent | ambiguous | unknown`. `present`
+requires landing proof; `absent` requires typed observation evidence. `unknown` and `ambiguous`
+route to `PARKED(needs-operator)` — never to a submit and never to a "done." After a fence, even an
+evidenced `absent` must satisfy §4's propagation/consistency policy before retry authority exists. This
 directly dissolves today's fail-open dichotomy (onboarding: *"skip and never hire" vs "blind
 double-submit"*): the third answer is **park and let the operator decide**, which is strictly safer
 than both.
+
+**Guarantee boundary (D64).** The permanent key/CAS guarantees at most one unattended commit
+attempt per intent generation. The kernel automatically converges to done from valid positive proof
+or to a new generation from contract-valid stabilized negative proof. If the external UI cannot
+authoritatively prove absence after its propagation window, recovery parks for operator resolution.
+That is enforceable. “Exactly once against every remote UI regardless of consistency” is not.
 
 ---
 
@@ -100,13 +110,22 @@ import { z } from "zod";
 import type { TaskId } from "./base.js";
 
 /** Fail-closed verdict factory. `present` cannot exist without proof of the exact schema
- * required by the commit's completion arm; there is deliberately no untyped/boolean form. */
+ * required by the commit's completion arm; `absent` cannot exist without typed evidence of the
+ * exact key/query/state observed. There is deliberately no untyped/boolean form. */
+export const AbsentEvidenceSchema = z.strictObject({
+  idempotencyKeyDigest: Sha256Schema,
+  source: ObservationIdSchema,
+  sourceState: PageStateIdSchema,
+  observedAt: IsoInstantSchema,
+  queryDigest: Sha256Schema,
+  evidenceRef: EvidenceRefSchema,
+});
 export function probeVerdictSchema<Proof extends z.ZodType>(proofSchema: Proof) {
   return z.discriminatedUnion("state", [
-    z.object({ state: z.literal("present"), proof: proofSchema }),
-    z.object({ state: z.literal("absent") }),
-    z.object({ state: z.literal("ambiguous"), matches: z.number().int().min(2) }),
-    z.object({ state: z.literal("unknown"), reason: z.string() }),
+    z.strictObject({ state: z.literal("present"), proof: proofSchema }),
+    z.strictObject({ state: z.literal("absent"), evidence: AbsentEvidenceSchema }),
+    z.strictObject({ state: z.literal("ambiguous"), matches: z.number().int().min(2) }),
+    z.strictObject({ state: z.literal("unknown"), reason: z.string().min(1) }),
   ]);
 }
 export type ProbeVerdict<Proof extends z.ZodType> =
@@ -160,6 +179,14 @@ export interface Idempotency<In extends z.ZodType> {
   /** The natural idempotency KEY — derived from STABLE business identity, NEVER row/position/index
    *  (the doc1/doc2 fix, §5). e.g. `${eid}|termination|${effectiveDate}`. Pure. */
   key: (input: z.output<In>) => string;
+  /** What may turn a post-fence absence into retry authority (D64). Waiting is scheduler requeue,
+   * never a sleeping task/lane. `operator-only` is mandatory when the target has no trustworthy
+   * negative read or bounded propagation behavior. */
+  recoveryAbsence:
+    | { kind: "stabilized"; minSinceFenceMs: number;
+        consistentReads: 2 | 3; minBetweenReadsMs: number;
+        requireSameSourceState: true }
+    | { kind: "operator-only"; reason: string };
 }
 
 export interface WriteSafety<
@@ -184,6 +211,58 @@ Probe/verify tasks are separate reads in the same store. An
 containing operator, confirmedAt, exact artifact/business identity, and a non-empty evidence note;
 its example is guard-parsed. It may never be a bare boolean or generic “mark done.”
 
+Every prepare/commit pair must also carry compatible doc 01 `SubjectBindingSpec`s. The kernel
+materializes the following strict proof; raw sensitive identifiers are not duplicated into event
+or ledger files—the normalized comparison happens in memory and evidence keeps a digest plus the
+minimum display-safe suffix/name needed to diagnose a mismatch.
+
+```ts
+export const SubjectProofSchema = z.strictObject({
+  kind: z.literal("subject-match"),
+  version: z.literal(1),
+  runId: RunIdSchema,
+  attempt: PositiveIntSchema,
+  leaseId: LeaseIdSchema,
+  taskId: TaskIdSchema,
+  observationId: ObservationIdSchema,
+  pageStateId: PageStateIdSchema,
+  expected: SubjectEvidenceSchema,
+  observed: SubjectEvidenceSchema,
+  match: z.literal("match"),
+  observedAt: IsoInstantSchema,
+  afterPrepareSpanPath: SpanPathSchema,
+});
+export type SubjectProof = z.output<typeof SubjectProofSchema>;
+
+/** D65: a commit with an explicitly reviewed `subject.kind:"none"` does not fabricate a subject
+ * match. It still proves the exact staged page/lease and reviewed contract reason. */
+export const UnscopedBindingProofSchema = z.strictObject({
+  kind: z.literal("unscoped"),
+  runId: RunIdSchema,
+  attempt: PositiveIntSchema,
+  leaseId: LeaseIdSchema,
+  taskId: TaskIdSchema,
+  pageStateId: PageStateIdSchema,
+  reviewedReasonId: UnscopedCommitReasonIdSchema,
+  observedAt: IsoInstantSchema,
+  afterPrepareSpanPath: SpanPathSchema,
+});
+export const WriteBindingProofSchema = z.discriminatedUnion("kind", [
+  SubjectProofSchema,
+  UnscopedBindingProofSchema,
+]);
+export type WriteBindingProof = z.output<typeof WriteBindingProofSchema>;
+```
+
+The proof is valid only for the same run, attempt, lease, task, and prepared page state, and only
+until the configured probe-to-fence budget. It cannot be reused after navigation, page reset,
+retry, or lease transfer. A file write binds the artifact digest/document id; a person write binds
+the system's displayed EID or another contract-declared strong identifier; a catalog/global write
+must explicitly declare `subject.kind:"none"` with a reviewed, allowlisted reason and produces the
+unscoped arm above. Name-only identity is not a
+strong write binding unless that system truly exposes no stronger value, in which case the task
+requires an operator gate and a dedicated scenario.
+
 ### 2.2 Per-system instantiation (three shapes, one mechanism)
 
 ```ts
@@ -193,10 +272,13 @@ writeSafety: {
     proofFromOutput: (o) => o.receipt,
     proofFromPresentProbe: (v) => v.proof,
     outputFromProof: (p) => ({ receipt: p }),
-    proofSchema: z.object({ transactionNumber: z.string().regex(/^T\d{6,}$/) }) },
+    proofSchema: z.strictObject({ transactionNumber: z.string().regex(/^T\d{6,}$/) }) },
   idempotency: {
     probe: "ucpath/find-existing-termination",                 // by EID + effdt + "Terminatn"
-    key:   (i) => `${i.emplId}|termination|${i.effectiveDate}` },
+    key:   (i) => `${i.emplId}|termination|${i.effectiveDate}`,
+    // Worked-example values only; migration must live-justify the real UCPath propagation policy.
+    recoveryAbsence: { kind:"stabilized", minSinceFenceMs:30_000,
+      consistentReads:2, minBetweenReadsMs:5_000, requireSameSourceState:true } },
 }
 // ServiceNow ticket — receipt-bearing (ports fill-form.ts:140-173)
 completion: { kind: "receipt", proofFromOutput: (o) => o.ticketNumber,
@@ -218,30 +300,33 @@ none. That is by design — the contract *forces* proof to exist.
 
 ## 3. The kernel write sequence
 
-The kernel drives a fixed six-beat sequence. It binds/parses the commit input first from workflow
+The kernel drives a fixed seven-beat sequence. It binds/parses the commit input first from workflow
 input plus declared upstream outputs; commit input cannot depend on ephemeral prepare output. Beat ①
-uses an ordinary read lease and releases it. Beats ②–⑤ use one uninterrupted exclusive transaction
-lease, so a navigating probe can never destroy a staged form. Dry-run composes beat ② only and has
-no executable preflight/fence/commit path or mutation capability. The impl author cannot reorder the
-real-write beats.
+uses an ordinary read lease and releases it. Beats ②–⑥ use one uninterrupted exclusive transaction
+lease, so a navigating probe can never destroy a staged form. Beat ③ is kernel-owned identity
+binding on the exact staged page—no task callback can skip it. Dry-run composes beat ② only and has
+no executable preflight/subject/fence/commit path or mutation capability. The impl author cannot
+reorder the real-write beats.
 
 ```
-① RESOLVE/PROBE → ② PREPARE → ③ FENCE → ④ EXTERNAL COMMIT → ⑤ PROOF → ⑥ DURABLE COMMIT
-   read lease      transaction lease ───────────────────────────────┘    DB + outboxes
+① RESOLVE/PROBE → ② PREPARE → ③ BINDING PROOF → ④ FENCE → ⑤ EXTERNAL COMMIT → ⑥ PROOF → ⑦ DURABLE COMMIT
+   read lease      transaction lease ──────────────────────────────────────────────────┘    DB + outboxes
 ```
 
 | Beat | What runs | What is DURABLE at end of beat | Fail-closed exit |
 |---|---|---|---|
 | **① Resolve + live probe** | From the already parsed stable commit input, derive the key and read the permanent `write_intents` row regardless of status/originating run. `committed` or `observed-present` ⇒ validate/reuse proof+typed output; `attempting` ⇒ recovery/owner check; `retryable` ⇒ eligible generation. Only an eligible unseen/retryable key may run the policy-controlled live probe, on a separate read lease. Record probe completion monotonic time. | one SQLite transaction records an unseen live `present` permanently as `observed-present`, checkpoints `TransactionOutcome{disposition:"already-present",proofSource:"live-probe"}`, advances run state, and enqueues its audit span—but **no write-ledger row** | invalid stored proof/output ⇒ corruption/park; attempting owner live ⇒ wait/fail loud; stale owner ⇒ recovery first; live `present` ⇒ typed no-click completion; ambiguous/unknown/throw parks |
 | **② Prepare** | Acquire the context-exclusive transaction lease and run the prepare contract. The parsed commit input is already frozen; prepare output is preview/span data only. Retry may restart from beat ① on a fresh/reset lease before any fence. | no write intent | prepare failure/timeout ⇒ release poisoned/clean page; no external side effect to recover |
-| **③ Fence** | Check `probeToFenceMaxMs`; if expired, discard staged state and restart at ①. INSERT the unseen key or CAS its `retryable` row to `attempting`, incrementing generation. Enqueue `write.attempting` in the span outbox in the same SQLite transaction. The permanent primary key is the same-key mutex. | durable intent + span outbox | elapsed probe ⇒ no click; CAS conflict ⇒ discard staged page/no click; no generic retry after a won fence |
-| **④ External commit** | The external-write helper requires the unforgeable `MutationCapability` bound to the open intent generation. | live HR side effect | missing/mismatched fence capability ⇒ throw before click |
-| **⑤ Capture / verify** | Extract `proofFromOutput` or run the verify read on the retained transaction page; every completion kind parses through its `proofSchema`. | proof remains in memory | absent/ambiguous/unknown/throw/schema failure parks; no arm can return unvalidated proof |
-| **⑥ Atomic durable commit** | ONE SQLite transaction marks the intent committed and writes the schema-valid `TransactionOutcome` checkpoint, immutable ledger outbox row, terminal-span outbox row, and run state. JSONL ledger/span projectors run afterward. | all authorities/outboxes durable together | transaction failure leaves intent attempting and enters recovery; projector lag is repairable and never changes write outcome |
+| **③ Binding proof** | Resolve the commit contract's required `SubjectBindingSpec`. Person/artifact scope executes its semantic observation after preparation on this exact page and builds `SubjectProof`; explicitly unscoped scope validates the allowlisted reason plus exact staged page state and builds `UnscopedBindingProof`. Both parse as `WriteBindingProof`. | proof is not yet authority, but is held for the fence transaction and evidence bundle | mismatch, unknown, missing/stale observation, unregistered unscoped reason, wrong system/page state, or schema failure ⇒ no fence/no click; close/poison page and emit a structured binding failure |
+| **④ Fence** | Check `probeToFenceMaxMs` **and** that `WriteBindingProof` was created after prepare for this run/attempt/lease. INSERT the unseen key or CAS its `retryable` row to `attempting`, incrementing generation. Store the parsed binding proof and enqueue `write.attempting` in the same SQLite transaction. The permanent primary key is the same-key mutex. | durable intent + binding proof + span outbox | elapsed proof or binding mismatch ⇒ no click; CAS conflict ⇒ discard staged page/no click; no generic retry after a won fence |
+| **⑤ External commit** | The external-write helper requires the unforgeable `MutationCapability` bound to the open intent generation **and binding-proof digest**. | live HR side effect | missing/mismatched fence capability or binding digest ⇒ throw before click |
+| **⑥ Capture / verify** | Extract `proofFromOutput` or run the verify read on the retained transaction page; every completion kind parses through its `proofSchema`. | proof remains in memory | absent/ambiguous/unknown/throw/schema failure parks; no arm can return unvalidated proof |
+| **⑦ Atomic durable commit** | ONE SQLite transaction marks the intent committed and writes the schema-valid `TransactionOutcome` checkpoint, immutable ledger outbox row (including binding-proof digest), terminal-span outbox row, evidence receipt ref, and run state. JSONL ledger/span projectors run afterward. | all authorities/outboxes durable together | transaction failure leaves intent attempting and enters recovery; projector lag is repairable and never changes write outcome |
 
-**Ordering invariant:** stable commit input and live probe exist before page preparation; the fence
-transaction in ③ happens-before the click; the click happens-before proof validation; proof
-validation happens-before the single ⑥ transaction. Ledger and span JSONL
+**Ordering invariant:** stable commit input and live probe exist before page preparation; a fresh
+binding proof follows successful preparation on the same lease; the fence transaction in ④
+stores that proof and happens-before the click; the click happens-before landing-proof validation;
+proof validation happens-before the single ⑦ transaction. Ledger and span JSONL
 are projections of durable outboxes, not additional commit beats. This generalizes oath-upload's
 "marker durable before the POST" (`handler.ts:306-309`) into the kernel.
 
@@ -262,20 +347,31 @@ CREATE TABLE write_intents (
                     ('automation-attempt','external-observed')),
   fenced_at       TEXT,
   committed_at    TEXT,
+  binding_proof_json TEXT,               -- required for origin='automation-attempt'; live-probe
+  binding_proof_schema_hash TEXT,        -- observed-present rows instead retain probe evidence
+  binding_proof_digest TEXT,
   proof_json      TEXT,
   proof_schema_hash TEXT NOT NULL,
   output_json     TEXT,
   output_schema_hash TEXT NOT NULL,
-  PRIMARY KEY (system, idempotency_key)
+  PRIMARY KEY (system, idempotency_key),
+  CHECK(origin='external-observed' OR
+        (binding_proof_json IS NOT NULL AND binding_proof_schema_hash IS NOT NULL
+         AND binding_proof_digest IS NOT NULL))
 );
 
 CREATE TABLE write_attempts (
   system TEXT NOT NULL, idempotency_key TEXT NOT NULL, generation INTEGER NOT NULL,
   run_id TEXT NOT NULL, attempt INTEGER NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('attempting','retryable','committed','observed-present')),
+  status TEXT NOT NULL CHECK(status IN ('attempting','retryable','committed')),
   started_at TEXT NOT NULL, ended_at TEXT,
+  binding_proof_json TEXT,         -- immutable proof for THIS generation; the intent holds latest
+  binding_proof_schema_hash TEXT,
+  binding_proof_digest TEXT,
   resolution_json TEXT,             -- typed operator/recovery evidence; never overwrites history
-  PRIMARY KEY (system, idempotency_key, generation)
+  PRIMARY KEY (system, idempotency_key, generation),
+  CHECK(binding_proof_json IS NOT NULL AND binding_proof_schema_hash IS NOT NULL
+        AND binding_proof_digest IS NOT NULL)
 );
 
 CREATE TABLE durable_outbox (
@@ -291,7 +387,9 @@ CREATE TABLE ledger_heads (
 );
 ```
 
-Committed and externally-observed-present keys remain in the primary-key table forever. A later run with the same business key
+`write_attempts` contains only generations in which this automation crossed a fence; a live probe
+that discovers an externally present transaction creates no attempt row. Committed and externally-
+observed-present keys remain in the primary-key table forever. A later run with the same business key
 parses and reuses the stored proof; it cannot create a second fence merely because the earlier row
 is already satisfied. `observed-present` blocks a click but writes no ledger entry: discovering a
 transaction is not evidence this automation filed it. There is no operator action that reopens a committed key. Normal recovery from a
@@ -302,31 +400,37 @@ natural key; "void the fence and click again" is not an operation.
 
 ---
 
-## 4. Crash-window recovery (the exactly-once guarantee)
+## 4. Crash-window recovery (positive proof or stabilized negative proof)
 
 **The guarantee, stated precisely:** for any real commit, after a crash at *any* point recovery
-selects exactly one of three outcomes, and **never blindly double-files**:
+selects exactly one of three outcomes and never retries from a single unproven UI miss:
 
-1. **The write landed** (crash anywhere after ④) → recovery's probe returns `present` → the kernel
+1. **The write landed** (crash anywhere after ⑤) → recovery's probe returns `present` → the kernel
    runs `completion.proofSchema.parse(completion.proofFromPresentProbe(verdict))`, then
    `commit.output.parse(completion.outputFromProof(proof))` — the SAME validation
-   beat ⑤ parsers run; a `present` proof is never trusted blind. On parse **success** it **backfills** the
+   beat ⑥ parsers run; a `present` proof is never trusted blind. On parse **success** it **backfills** the
    full typed `TransactionOutcome{disposition:"committed",proofSource:"recovery-probe"}`, marks the existing attempted intent committed, atomically
    enqueues ledger/span outboxes, and completes `done` (no second
    submit). On parse **failure** it **parks `needs-operator`** (a `present` we cannot validate is
    indeterminate, not done). There is **NO path to `done` with unvalidated proof—recovery
    included.**
-2. **The write never landed** (crash between ③ and ④, or a genuinely-not-sent click) → recovery's
-   probe returns `absent` → the same intent becomes `retryable`; history is retained and the next
-   attempt CAS-fences a new generation of that key.
-3. **Indeterminate** (probe returns `ambiguous`/`unknown`, or throws) → `PARKED(needs-operator)` with
+2. **The write is proven absent.** One `absent` result is only an observation, not retry authority.
+   The kernel validates its `AbsentEvidence`, waits until at least `minSinceFenceMs` using a
+   `not_before` requeue (no sleeping lane), and obtains the configured 2–3 consistent observations
+   separated by `minBetweenReadsMs`. All must bind the same key/query/source state. Only then does
+   the kernel record a strict `safe-to-retry` resolution and change the same intent to `retryable`;
+   history is retained and the next attempt CAS-fences a new generation. A contract whose target
+   cannot earn this proof declares `recoveryAbsence.kind:"operator-only"`.
+3. **Indeterminate** (probe returns `ambiguous`/`unknown`, throws, returns malformed/different-key
+   negative evidence, has not cleared its propagation window, disagrees across reads, or uses an
+   `operator-only` policy) → `PARKED(needs-operator)` with
    a legible message naming the key, the system, and the match count — the operator verifies in the
    target system and uses one of the typed resolutions below. Never a guess.
 
 **Recovery replay (resolves doc 02 §OQ2 — replaces "always park"):** on resume, the kernel first
 scans `write_intents` for the resuming `(workflow,item_id,step_id)`. If it finds a row with
 `status:"attempting"` and no `committed`, it **re-runs `idempotency.probe(key)` FIRST** (before any
-`startAt` node logic) and routes on the verdict per 1/2/3 above. Only after the probe resolves does
+`startAt` node logic) and routes on the evidence-qualified protocol above. Only after the probe resolves does
 normal resume proceed. A read node with no fence auto-resumes as today (worst case: a repeated
 read). This reads durable state from SQLite (system-of-record), never post-crash JSONL, mirroring
 oath-upload's SQLite-fast-path recovery (`handler.ts:427-429`).
@@ -339,16 +443,18 @@ version so a stale browser action cannot race recovery:
 
 1. **Confirmed present.** The operator supplies the exact business/artifact identity and proof. It
    parses through the same `completion.proofSchema`; `unverifiableByPage` uses the schema's typed
-   `operator-attestation` arm. Success runs the same atomic beat ⑥ (intent committed + proof
+   `operator-attestation` arm. Success runs the same atomic beat ⑦ (intent committed + proof
    checkpoint + ledger/span outboxes + run state). Parse failure changes nothing.
 2. **Confirmed absent.** The operator supplies a non-empty evidence note after checking the target
    system. SQLite records `{operator, confirmedAt, evidence, priorGeneration}` in `write_attempts`
    and changes the same permanent intent to `retryable`; only the next CAS may create a generation.
-   It never deletes/reopens committed history and does not itself click.
+   The next generation must perform a fresh prepare+subject observation and writes a new immutable
+   attempt proof; no prior `WriteBindingProof` is reused. It never deletes/reopens committed history and
+   does not itself click.
 
-Cancel/delete may hide or cancel the run but cannot alter the intent. There is no third “force done”
-or “retry anyway” endpoint. Every resolution emits an audited note and is covered by authorization,
-schema, stale-generation, and double-click tests.
+Cancel or Hide may change the run/presentation but cannot alter the intent. There is no third “force
+done” or “retry anyway” endpoint. Every resolution emits an audited note and is covered by strict
+command schema, stale-generation, and double-click tests.
 
 ---
 
@@ -406,29 +512,35 @@ pruned** — it outlives doc 03's decided base retention (spans 30d / notes 7d, 
 
 ```ts
 // temp_src/domain/ledger.ts — the append-only at-rest entry shape.
-// Beat ⑥ writes its unsequenced payload to durable_outbox; the projector adds seq/prevHash.
+// Beat ⑦ writes its unsequenced payload to durable_outbox; the projector adds seq/prevHash.
 export interface LedgerEntry {
-  outboxId: string;               // immutable DB identity; projector idempotency key
-  seq: number;                    // assigned transactionally by the serialized projector
-  prevHash: string;               // sha256 of the previous entry's canonical JSON ("" for seq 0)
-  workflow: string;
-  itemId: string;
-  system: string;                 // SystemId — ucpath | crm | servicenow | kuali | onbase
-  idempotencyKey: string;         // the natural key (§5) — dedupe + audit join
-  proof: JsonValue;               // canonical JSON, already parsed by the completion proof schema
-  proofSchemaHash: string;
+  outboxId: OutboxId;             // immutable DB identity; projector idempotency key
+  seq: NonNegativeInt;            // assigned transactionally by the serialized projector
+  prevHash: Sha256 | "GENESIS";  // sha256 of the previous entry's canonical JSON
+  workflow: WorkflowId;
+  itemId: ItemId;
+  system: BrowserSystemId;        // ucpath | crm | servicenow | kuali | onbase
+  idempotencyKey: IdempotencyKey; // the natural key (§5) — dedupe + audit join
+  proof: CanonicalJsonValue;      // already parsed by the referenced completion proof schema
+  proofSchemaHash: Fingerprint;
   completionKind: "receipt" | "save-verify" | "upload-verify";
   proofSource: "normal-output" | "recovery-probe" | "operator-attestation";
-  runId: string; traceId: string; attempt: number;
-  operator: string;               // from the config/secrets domain (doc 11), never fabricated
+  bindingProofDigest: Sha256;       // exact subject-match or unscoped proof stored on the intent
+  subject?: SubjectEvidenceWire;    // present only for subject/artifact-scoped commits
+  runId: RunId; traceId: TraceId; attempt: PositiveInt;
+  operator: OperatorId;           // from the config domain (doc 11), never fabricated
   instance: "prod" | "test";      // resolved run snapshot (doc 11)
-  configFingerprint: string;
+  configFingerprint: Fingerprint;
   dryRun: false;                  // real writes only; a dry run composes no submit, so writes NO ledger entry
-  fencedAt: string;               // durable instant before the click
-  confirmedAt: string;            // proof accepted; may be later after recovery/manual confirmation
-  externalOccurredAt?: string;    // only when the external proof itself supplies a trustworthy time
+  fencedAt: IsoInstant;           // durable instant before the click
+  confirmedAt: IsoInstant;        // proof accepted; may be later after recovery/manual confirmation
+  externalOccurredAt?: IsoInstant;// only when the external proof itself supplies a trustworthy time
 }
 ```
+
+`LedgerEntrySchema` is a strict discriminated/runtime schema and verifies the proof again by
+`proofSchemaHash` during projection/read. The interface is shown only for readability; persisted
+code uses its inferred type. There is no unchecked cast from the generic canonical proof envelope.
 
 - **Location:** `.tracker/ledger/<system>-<YYYY-MM-DD>.jsonl` (doc 03 §2.1 adds the dir). JSONL so the
   operator greps it; per-system+day partition so `grep 10694136 .tracker/ledger/ucpath-*.jsonl`
@@ -437,7 +549,7 @@ export interface LedgerEntry {
   7d — doc 03's decided base retention, D21) skips `ledger/` unconditionally — a ratchet guard fails
   if any prune path can reach `ledger/`. This is the "immutable transaction ledger, never pruned" of
   operator §13. The never-pruned floor sits above a *settled* number (D21), not a guessed one.
-- **Serialized projection.** Executors never append the ledger file. Beat ⑥ writes a unique ledger
+- **Serialized projection.** Executors never append the ledger file. Beat ⑦ writes a unique ledger
   outbox row. One projector holds a SQLite lease for `(system,date)` and processes exactly one row:
   it verifies the anchored file tail, derives `seq/prevHash`, appends one canonical line, fsyncs, then
   CAS-updates `ledger_heads` and marks that outbox projected in one SQLite transaction. A crash after
@@ -476,16 +588,20 @@ The operator's core requirement. Exhaustive:
 | 5 | Captured proof fails its `proofSchema` | schema-fail ⇒ `PARKED`, never `done{committed:true}` |
 | 6 | Kuali `save-verify` can't confirm the save | any verdict ≠ `present` ⇒ `PARKED` |
 | 7 | OnBase `upload-verify` can't confirm the filing | any verdict ≠ `present` ⇒ `PARKED`; `unverifiableByPage` allowlist ⇒ **always** `PARKED` for manual confirm (never auto-done) |
-| 8 | Crash mid-write, recovery probe indeterminate | `ambiguous`/`unknown`/throw ⇒ `PARKED`; `present` ⇒ backfill-done only after the arm's `proofSchema`; `absent`→same-key retry generation |
-| 9 | A commit `run` returns success with no proof | kernel rejects at ⑤ ⇒ `PARKED` |
-| 10 | The mutation primitive fired without a fence (a mis-authored submit) | primitive throws (④) — corruption, loud |
+| 8 | Crash mid-write, recovery probe indeterminate | `ambiguous`/`unknown`/throw/malformed absence ⇒ `PARKED`; `present` ⇒ backfill-done only after the arm's `proofSchema`; `absent` becomes retry authority only after typed evidence clears the contract's propagation + repeated-observation policy, otherwise parks |
+| 9 | A commit `run` returns success with no proof | kernel rejects at ⑥ ⇒ `PARKED` |
+| 10 | The mutation primitive fired without a fence (a mis-authored submit) | primitive throws (⑤) — corruption, loud |
 | 11 | dry-run: no submit composed at all (charter §1a) | write-safety never engages; nothing to make done — clean, no leak |
 | 12 | Live probe aged while the form was prepared | `probeToFenceMaxMs` expires ⇒ discard page and restart at preflight; no fence/click |
 | 13 | Operator clicks a stale/generic Done or Retry on a parked write | those actions do not exist; present proof/absent evidence endpoints require intent generation+version and fail on conflict |
+| 14 | Staged page shows another person/file, or the identity cannot be read | beat ③ returns mismatch/unknown ⇒ zero fence, zero mutation capability, poisoned/closed lease, structured failure + diagnostic bundle |
+| 15 | A commit declares no subject and therefore has nothing to bind to the fence | `subject.kind:"none"` requires an allowlisted reason and a schema-valid unscoped page-state proof; otherwise zero fence. The capability always binds to a `WriteBindingProof` digest (D65) |
 
-The unifying rule: **only schema-valid proof plus schema-valid reconstructed/normal transaction
-output yields `done`; only an actual fenced automation attempt yields a write-ledger entry. Every other outcome —
-absent-after-click, ambiguous, unknown, throw, empty — parks or retries.** A boolean probe would
+The unifying rule: **only schema-valid landing proof plus schema-valid reconstructed/normal
+transaction output yields `done`; only an actual fenced automation attempt yields a write-ledger
+entry. An absence after a click retries only after schema-valid negative evidence satisfies the
+recovery-settlement policy; every other ambiguous, unknown, thrown, empty, early, or inconsistent
+outcome parks.** A boolean probe would
 collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that collapse
 *unrepresentable*.
 
@@ -502,15 +618,28 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   TaskId resolve to a real `effect:"read"` task in the **same store**, whose output is (or extends)
   `ProbeVerdict`, whose contract declares zero-age freshness. Table-driven over the store index.
 - **Fence-before-click** — a unit fixture asserts the `write_intents` SQLite commit is observed
-  before the mutation primitive is invoked; the primitive throws when invoked with no open fence.
+  before the mutation primitive is invoked; the primitive throws when invoked with no open fence
+  or when its capability's binding-proof digest does not match the fenced intent.
+- **Subject-before-fence** — every commit contract has a strong/explicit-none subject declaration;
+  prepare/commit subjects are compatible; the driver observation resolves in the same system.
+  Ordering tests assert prepare-end < subject-observed < fence-commit < mutation-call. Registered
+  scenarios cover match, mismatch, unknown/missing element, stale proof after navigation, stale
+  proof after retry, and two EIDs alternating through one pooled page.
+- **Unscoped binding allowlist** — every commit with `subject.kind:"none"` has one reviewed reason
+  and builds the D65 unscoped proof on a registered page state; stale entries fail in reverse. A
+  fixture proves no empty/fabricated subject evidence is accepted and the mutation capability is
+  bound to the unscoped proof digest.
 - **Same-key sequential + concurrent dedupe** — fixtures cover two simultaneous starters and a
   later fresh run after the first committed. Both reuse/block on the permanent primary-key intent;
   neither can create a second fence/click. An unseen live `present` becomes `observed-present`,
   produces typed output but no ledger outbox, and remains permanently click-blocking.
 - **Crash-recovery** — a fixture injects a `write_intents{status:"attempting"}` with no `committed`
   and asserts the recovery probe runs FIRST and routes present→(schema-parse then)backfill /
-  present-with-receipt-failing-schema→park (D19) / absent→retry / unknown→park (four cases pinned).
-- **Atomic outbox + ledger integrity** — crash injection at every subpoint of beat ⑥ proves the
+  present-with-receipt-failing-schema→park (D19) / one early absent→requeue-or-park / stabilized
+  same-key negative evidence→retry / inconsistent or malformed absence→park / operator-only→park /
+  unknown→park. Manual Clock fixtures cross the exact propagation/read-spacing boundaries without
+  sleeping.
+- **Atomic outbox + ledger integrity** — crash injection at every subpoint of beat ⑦ proves the
   intent/checkpoint/ledger-outbox/span-outbox commit is all-or-none. Concurrent projector fixtures
   prove one linear chain. Verification detects interior edits, tail truncation, and missing files
   against `ledger_heads`.
@@ -528,11 +657,12 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   `effect:"commit"`, and one transaction node retains the page lease across both. A dry-run plan
   includes prepare and excludes commit, so no fence/probe/ledger work begins.
 - **Doc 01 §6.2 (mutation primitive).** `stores/common/mutation.ts` accepts only the commit ctx's
-  capability bound to the open intent generation; no boolean dry-run branch exists.
+  capability bound to the open intent generation + `WriteBindingProof` digest; no boolean dry-run
+  branch exists.
 - **Doc 02 §5.6/§5.7 (checkpoints/resume).** Transaction nodes checkpoint their full typed
   `TransactionOutcome`
   and retain the validated proof on the permanent intent; a transaction
-  whose committed/satisfied key exists reuses its validated proof+output. Beat ⑥'s transaction-output checkpoint and
+  whose committed/satisfied key exists reuses its validated proof+output. Beat ⑦'s transaction-output checkpoint and
   the `write_intents` row share the `(workflow,item_id,step_id,attempt)` key. §5.6 #2 is upgraded per
   §4. The freshness walk (D8) is orthogonal and upstream: it keeps *stale read data* out of the fill;
   write-safety keeps duplicate writes out of commit — two different holes, two different guards.
@@ -540,7 +670,8 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   producers of it. Parking closes browser contexts before releasing exclusive leases; resume reacquires and
   re-enters at the recovery probe.
 - **Doc 03 (spans/storage/ledger dir).** `write.attempting` and `write.committed` are two new span
-  events (the fence + the commit); the proof rides a `span.patched` detail on the run. Per **D21**,
+  events (the fence + the commit); subject observation is `subject.observed`, and proof/evidence
+  refs ride strict run-detail updates. Per **D21**,
   doc 03 OWNS and adds the `ledger/` dir (never-pruned retention floor) and the `write_intents`
   SQLite **system-of-record** table (added to the D14 set) in its storage layout — this doc
   references them, it does not place them in the `.tracker/` tree.
@@ -558,7 +689,7 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 - UCPath `waitForTransactionOutcome` (polls, RETURNS `"timeout"` on neither-signal) + its caller
   `clickSaveAndSubmit`'s "outcome unknown, refusing to report success" throw (`transaction.ts:855-859`)
   + `readLatestTransactionNumber` (`transaction.ts:919-985`) → UCPath submit tasks' `receipt`
-  capture (beat ⑤) and the `""`-means-unknown rule (fail-closed #4). The by-EID (not name) row
+  capture (beat ⑥) and the `""`-means-unknown rule (fail-closed #4). The by-EID (not name) row
   re-find ports as-is.
 - ServiceNow `submitAndCaptureTicketNumber` + `parseTicketNumberFromUrl` (`fill-form.ts:140-173`) →
   ServiceNow `receipt` capture.
@@ -588,17 +719,20 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
 
 ## 11. Adversarial self-review — how this could still fail, and residual risk
 
-- **Same-key sequential/concurrent dedupe and recovery backfill are closed.** The permanent
+- **Same-key sequential/concurrent dedupe and positive recovery backfill are closed.** The permanent
   `(system,idempotency_key)` primary key covers attempting and committed states, so a later pristine
   run cannot fence again. Recovery no longer trusts a present proof blind: the completion arm's
   `proofSchema` parses it, parse-fail →
   park, so there is no unvalidated path to `done`. **Honest scope (D20):** this closes
-  double-*file*, NOT duplicate-*person* — that racy-read class stays a disclosed residual (next
-  bullet), not a structural guarantee.
+  two unattended generations from arising from one early post-fence miss. It does not create
+  distributed exactly-once when a target cannot supply authoritative positive/negative evidence;
+  those cases park. Duplicate-*person* remains a separate racy-selection residual (next bullet).
 - **The probe/verify read is itself a read that can lie.** A false `present` skips a needed write; a
-  false `absent` double-submits. This re-introduces the exact fail-open hazard if sloppy. *Guards:*
-  zero-age freshness (never a checkpoint); exact-match on the stable key; `ambiguous`/`unknown`
-  park; a throwing probe is `unknown`, not `absent` (charter catch-swallow ban). **Residual:** a
+  false `absent` before a first submit can still permit a duplicate of external work, and no UI
+  read can prove distributed exactly-once absolutely. *Guards:* zero-age freshness (never a
+  checkpoint); exact-match on the stable key; typed negative evidence; post-fence propagation +
+  repeated-read stabilization; `ambiguous`/`unknown` park; a throwing probe is `unknown`, not
+  `absent` (charter catch-swallow ban). **Residual:** a
   probe that reads too early (the duplicate-person root cause) could report `absent` on a
   still-rendering page — mitigated only by porting the race-based classifiers
   (`raceNewHireVsRehireSignal`) into the probe impls, a review+live-verify discipline, not a
@@ -609,13 +743,16 @@ collapse #1/#3/#8 into "false ⇒ proceed"; the `ProbeVerdict` type makes that c
   Kuali's `save-verify` may over-park on benign pages. Over-parking is fail-*closed* (safe but noisy);
   the real risk is a `save-verify` that returns a false `present` and reports a save that didn't land.
   This is the one place the fail-closed guarantee rests on read quality we cannot fully mechanize.
-- **Wrong-DATA is not covered here.** Write-safety prevents *duplicate* filings, not *wrong* ones
-  (`T002173685`). That axis is doc 02 freshness (D8) + the identity-approval gate. Write-safety's only
-  contribution is making the wrong filing *auditable* in the ledger. Stated so no one mistakes
-  exactly-once for correctness-of-content.
+- **Wrong-DATA is only partly covered here.** Fresh subject binding structurally blocks one critical
+  subtype: the staged browser page belongs to someone/something other than the expected commit
+  subject. It does **not** prove that upstream rules selected the correct real-world person, action,
+  effective date, pay data, or document content. Those remain doc 02 freshness, typed validation,
+  scenario coverage, and identity/operator gates. The ledger makes residual wrong filings
+  attributable. Exactly-once plus subject-match is still not correctness of every field.
 - **Fence bypass.** A future submit task could fire a raw click outside the mutation primitive.
-  *Guard:* inline-`page.` bans (doc 01/02) keep clicks inside `stores/*`; the primitive is the only
-  sanctioned submit path and it requires a fence; and per **D22** doc 10's
+  *Guard:* tasks have no raw Page/Locator/selector access (docs 01/12); submit-capable driver methods
+  require the mutation capability, and that primitive validates the fence + subject digest. Per
+  **D22** doc 10's
   `commit-routes-through-mutation` ratchet is an import/capability check that every `effect:"commit"`
   impl routes its submit click through `stores/common/mutation.ts` — so "fence-before-click is
   unbypassable" is now structural, not grep-hopeful. **Residual:** a leaf that reaches a submit via a
@@ -635,39 +772,47 @@ Input `{ emplId:"10694136", action:"termination", effectiveDate:"08/01/2026" }`,
 `instance:"prod"`. Composed nodes: cleanup transaction → termination transaction whose prepare arm
 is `ucpath/fill-termination`, commit arm is `ucpath/submit-termination`, and probe policy is always.
 
-**Happy path (six beats):**
+**Happy path (seven beats):**
 ```
 bind stable commit input + key="10694136|termination|08/01/2026"
-① durable lookup → unseen; separate read lease runs find-existing-termination → { state:"absent" }
+① durable lookup → unseen; separate read lease runs find-existing-termination →
+   { state:"absent", evidence:{idempotencyKeyDigest,source,sourceState,observedAt,queryDigest,evidenceRef} }
    release read lease; record monotonic probe completion
 ② acquire exclusive transaction lease; fill-termination stages the form
-③ probe age < probeToFenceMaxMs; fence write_intents{key,status:"attempting"} COMMITTED (SQLite)
+③ driver observes ucpath.smart-hr.subject-eid="10694136" on the staged page;
+   kernel matches expected EID and constructs WriteBindingProof{kind:"subject-match",leaseId,
+     pageStateId,observedAt,digest}
+④ probe/subject age < probeToFenceMaxMs; fence
+   write_intents{key,status:"attempting",binding_proof_digest} COMMITTED (SQLite)
    → span write.attempting
-④ commit mutation primitive: Save+Submit click (matching fence capability → fires)
-⑤ capture readLatestTransactionNumber (re-nav on retained transaction page) → "T002173999"
-         pick(o)=o.receipt; schema z.object({transactionNumber:/^T\d{6,}$/}).parse → ok
-⑥ atomic DB commit: typed TransactionOutcome{disposition:"committed",proofSource:"normal-output"}
+⑤ commit mutation primitive: Save+Submit click (matching fence+subject capability → fires)
+⑥ capture readLatestTransactionNumber (re-nav on retained transaction page) → "T002173999"
+         pick(o)=o.receipt; schema z.strictObject({transactionNumber:/^T\d{6,}$/}).parse → ok
+⑦ atomic DB commit: typed TransactionOutcome{disposition:"committed",proofSource:"normal-output"}
                         checkpoint + write_intents{status:"committed",
-                           proof_json, output_json}
+                           proof_json, output_json, binding_proof_json}
          + ledger/span outboxes { system:"ucpath", idempotencyKey:"10694136|termination|08/01/2026",
                            proof:{transactionNumber:"T002173999"}, operator, instance:"prod",
-                           dryRun:false, proofSource:"normal-output",
+                           dryRun:false, proofSource:"normal-output", bindingProofDigest,
                            fencedAt, confirmedAt:clock.now() }
            // ledger projector assigns seq/prevHash only after claiming this outbox
          + span write.committed + span.ended(done)
 ```
 
-**Crash AFTER the click (④) but BEFORE capture (⑤).** The daemon dies; the Save landed in PeopleSoft
+**Crash AFTER the click (⑤) but BEFORE capture (⑥).** The executor dies; the Save landed in PeopleSoft
 but no receipt was recorded. Lease expiry re-enqueues the run; recovery (§4) runs FIRST:
 ```
 scan write_intents (separations, 10694136-item, ucpath-submit) → status:"attempting", no committed
 re-run ucpath/find-existing-termination key="10694136|termination|08/01/2026"
   → { state:"present", proof:{transactionNumber:"T002173999"} }   // the row PeopleSoft now shows
 ⇒ BACKFILL in one DB transaction: committed proof + ledger/span outboxes + done
-⇒ NO second Save. Exactly-once holds.
+⇒ NO second Save. The permanent fence and typed positive proof establish convergence without a
+second unattended commit attempt.
 ```
-Had the probe returned `absent` → mark the same intent retryable, then CAS a new generation and run
-safely. Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or
+Had the first recovery probe returned `absent`, the kernel would wait until 30s after the fence,
+requeue without occupying a lane, then require a second same-key/same-state absence at least 5s
+later before marking the intent retryable. An early, malformed, or disagreeing absence would park.
+Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or
 `unknown` (grid didn't render) → `PARKED(needs-operator)`: *"termination for EID 10694136 effdt
 08/01/2026: probe found 2 matches / probe indeterminate — verify in UCPath, then retry or mark
 done."* Had the present proof failed `proofSchema` → `PARKED`, never `done`.
@@ -681,14 +826,18 @@ Never a guess, never a duplicate `T…`.
 Even if two starters race, one permanent-key INSERT/CAS wins. After commit, any future run finds and
 reuses the proof. Concurrent and sequential duplicates are both blocked.
 
-**Honest scope (D20).** This is how the double-**FILE** class is closed: the fence + same-key mutex
-(D18), plus the pre-Save `present` probe and the recovery probe, mean two runs — or one crashed run —
-cannot both file the same transaction, and every uncertain state parks instead of fail-open→SUBMIT.
+**Honest scope (D20/D64).** This is how the known double-**FILE** paths are controlled: the permanent
+fence + same-key mutex (D18), plus the pre-Save `present` probe and evidence-qualified recovery,
+prevent a second unattended click unless a new generation first earns typed stabilized-negative
+authority. Every uncertain state parks instead of fail-open→SUBMIT. This is deliberately not a
+claim of unconditional distributed exactly-once for a UI-only target.
 The duplicate-**PERSON** class (the too-early racy read that classified a rehire as a new hire — §0)
-is **NOT** structurally closed by this layer: it is a **disclosed residual**, mitigated by porting
-the race-classifiers into the probe impls + per-probe live verification + the conditional,
-create-path pending-termination sweep (§11). Exactly-once here means *no double-file*, not
-*no wrong-person*.
+is **NOT** structurally closed by subject binding: the selected record and staged page could agree
+while the selection itself was wrong. That remains a disclosed residual mitigated by porting race
+classifiers, typed ambiguity, per-probe live verification, identity gates, and the conditional
+create-path pending-termination sweep (§11). The fenced-generation guarantee controls duplicate
+attempts; subject binding means no commit on an observably different open record; neither alone
+proves every business choice.
 
 ---
 

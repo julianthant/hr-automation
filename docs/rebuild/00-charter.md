@@ -1,7 +1,8 @@
 # Rebuild Program Charter — `temp_src`
 
-Started 2026-07-17. Reset 2026-07-21 after external review. Status: **Phase 0 — revised
-foundation design; no rebuild implementation exists**.
+Started 2026-07-17. Reset 2026-07-21 after external review. Expanded 2026-07-22 after the
+whole-plan/legacy-code review. Status: **Phase 0 — revised foundation design; no rebuild
+implementation exists**.
 This is the single source of truth for the rebuild's vision and constraints. Every design doc in
 `docs/rebuild/` must conform to it. The operator reviews each accepted part in plain language before
 it becomes binding.
@@ -51,7 +52,8 @@ it becomes binding.
    `transaction` node. Both execute under one uninterrupted page/context lease because staged wizard
    state is not serializable and lease cleanup would destroy it. A real run binds a stable commit
    input, resolves durable history and any live idempotency probe on a separate read lease, then
-   executes `prepare → fence → commit → verify` on the uninterrupted transaction lease. The probe
+   executes `prepare → fresh subject bind → fence → commit → verify` on the uninterrupted
+   transaction lease. The probe
    is never allowed to navigate the staged page. A dry run executes the same prepare task and
    structurally omits the commit arm before execution. The prepare and commit remain separately
    named task spans, but there is no checkpoint, retry, park, or page reset between them. A crash
@@ -76,9 +78,10 @@ it becomes binding.
    workflow modules. Playwright implementations stay behind the server registry. Every current
    parallel list must either disappear into a projection or be named explicitly as a deliberate
    non-workflow registry.
-6. **Trace + timeline SSOT** — a well-defined trace id with run → task → action spans covering
-   every action. Timelines, step durations, and step labels are computed **from** spans + the
-   descriptor; no second hand-maintained source of time or naming anywhere.
+6. **Trace + timeline SSOT** — a well-defined trace id with run/task spans and span-addressed action
+   notes covering every action. Timelines, step durations, and step labels are computed **from**
+   spans + the descriptor; action detail joins by span path. There is no second hand-maintained
+   source of time or naming anywhere.
 7. **Tracker + dashboard in scope** — the event layer is rebuilt around span events; the dashboard
    consumes the descriptor + span contract. (Operator decision: full blast radius, including
    tracker.)
@@ -93,7 +96,11 @@ it becomes binding.
    designed from the ground up for fast parallel work — same parallel-running capability as today,
    but re-architected for speed, not ported. Design doc: `05-execution-parallelism.md`.
 11. **First-class data-service systems (operator directive 2026-07-17).** `extraction` (CSV + PDF),
-   `ocr`, and `roster` (spreadsheet matching) are their own systems with their own task stores.
+   `normalization` (contact/address rules plus explicit provider-backed suggestions), `ocr`, and
+   `roster` (spreadsheet matching) are their own systems with their own task stores. Remote
+   OCR/model/geocoder calls are declared provider capabilities with injected clients, bounded
+   admission, redaction, and typed failure outcomes; a service task cannot hide network I/O in a
+   direct SDK import.
    Extraction and roster use **operator-defined column mapping**: the operator manually connects a
    source column title to a canonical codebase field (e.g. some spreadsheet's column → `eid`); the
    mapped values flow into the workflow's zod input schema, so every cell and assembled row is
@@ -102,15 +109,17 @@ it becomes binding.
    parked for later resume, the data the workflow currently holds (its checkpoint state) is ALWAYS
    live-visible in the Edit Data tab. Descriptor-allowlisted correction fields are editable and
    schema-validated on save; identity, input, idempotency, proof, and provenance are read-only.
-13. **Write-safety — exactly-once for real mutations (gap audit `08` + operator answers 2026-07-18;
+13. **Write-safety — fenced, fail-closed real mutations (gap audit `08` + operator answers 2026-07-18;
    full design: doc `09`).** Every mutation gets completion-verification and double-submit
    protection appropriate to its system, and completion is checked **FAIL-CLOSED**: an unknown or
    unverifiable result is NEVER treated as done (operator: *"you have to be very sure they were
    completed"*). Per system:
    - **UCPath / CRM / ServiceNow** — the irreversible submits. The submit task captures a
      **verifiable receipt** (e.g. a confirmation number) as its typed output; the kernel runs a
-     resolve/probe → prepare → fence → external-commit → proof → durable-commit sequence, and
-     crash-recovery re-runs the probe.
+     resolve/probe → prepare → binding proof → fence → external-commit → proof → durable-commit
+     sequence, and crash-recovery re-runs the probe. A post-fence `absent` authorizes retry only
+     after the contract's typed, system-specific propagation/negative-proof policy succeeds; a
+     single early miss parks as unknown.
      UCPath is where the real incidents happened (a duplicate person; a wrong-person termination,
      `T002173685`). Permanent-key fencing closes double filing; the wrong-person class additionally
      requires the designed identity-approval gate before separations. The plan never claims a probe
@@ -131,6 +140,11 @@ it becomes binding.
      an audited confirmed-absent decision that makes the permanent intent retryable. An
      `unverifiableByPage` write uses a typed operator-attestation proof; it never turns an uncertain
      page result into automatic success.
+   - **Guarantee boundary (D64):** the kernel guarantees at most one unattended commit attempt per
+     permanent intent generation and never retries from an unproven absence. Automatic recovery
+     converges when the target supplies valid positive or stabilized negative evidence; targets
+     without an idempotent API or authoritative negative read park for operator resolution. The
+     plan does not claim unconditional distributed exactly-once from a UI probe.
 
 14. **Local artifacts are replay-safe, not hidden writes.** A `read` task may download or derive a
    content-addressed local artifact only through the kernel artifact writer (temp + fsync + atomic
@@ -139,6 +153,67 @@ it becomes binding.
    by a serialized projector. They are not mislabeled read-task side effects and cannot duplicate on
    task retry.
 
+15. **Runtime-validated data, not TypeScript-only confidence.** Every value crossing an external,
+    persistence, command, event, config, or client boundary is parsed by a strict zod schema.
+    Branded ids/scalars and discriminated outcomes replace interchangeable strings; `optional`
+    means not supplied, `nullable` means observed no value, and `unknown` is an explicit outcome
+    that must be handled. Open `Record<string, unknown|JsonValue>` bags are forbidden for durable or
+    decision-driving data. Full rules: docs 01/03 and reconciliation D46.
+16. **Observed-subject binding before real writes.** The intended EID/name in a workflow input does
+    not prove which person's page is open. Subject-scoped browser tasks may declare an authoritative
+    UI observation and matching policy for high-risk reads; every prepare/commit pair must. A commit re-observes and matches the page
+    after prepare, immediately before the fence/click, and records expected+observed proof in the
+    transaction evidence. Missing/mismatched identity fails or parks before mutation. This closes
+    the stale-page class seen in New Kronos and complements—does not replace—the separations
+    identity-approval gate. Full enforcement: docs 01/09/12.
+17. **Queue/control/delegation are kernel protocols, not workflow features.** Enqueue, retry,
+    cancel, bump, hide/restore, authoritative tree targeting, dependency transitions, and command
+    idempotency/versioning have one server-owned implementation. “Delete” means reversible
+    **Hide from queue**; destructive Purge is a separate offline maintenance operation. Workflows
+    can restrict safe actions, never redefine their semantics. Delegation declares typed child
+    input/output, stable child identity, join/failure/partial/cascade/retry policy, and is persisted
+    atomically with the child manifest. Full design: docs 02/03.
+18. **Semantic UI vocabulary + trustworthy evidence.** Important controls, screens, page states,
+    and observations have stable canonical names with aliases and verification evidence. Browser
+    tasks use typed system drivers; raw Playwright pages/locators stay inside driver/session
+    infrastructure. Every run projects a receipt of inputs, observations, decisions, actions,
+    verification, output, reused checkpoints/proofs, warnings, and uncertainty. Failures produce a
+    structured record and redacted diagnostic bundle addressable by `explain run`. Full design:
+    doc 12.
+19. **Scenarios and knowledge improve with real use without becoming a pile.** Every task/workflow
+    has a registered scenario corpus beyond one happy example; unexpected page states fail visibly
+    and become new scenarios when understood. Existing LESSONS are triaged, not copied wholesale,
+    into structured active/superseded/retired knowledge. AI-assisted fixes record the failure,
+    affected ids/files, regression scenario, verification, and commit; raw chat is never authority.
+    Full design: doc 12.
+20. **The workflow editor starts as the real graph, then earns safe editing.** The Phase-1 base
+    includes a read-only descriptor/live-run explorer. After Phase 2 it may edit presentation and a
+    closed set of typed composition/policy fields through compile/validate/diff/version/apply;
+    arbitrary code, selectors, subject matchers, idempotency keys, and write proof remain code work.
+    Running runs never hot-change. Full design: doc 12.
+21. **Irreplaceable local state has an operational recovery contract.** SQLite claims,
+    checkpoints, dependencies, commands, intents, manifests, and outboxes are not reconstructible
+    from JSONL. Startup integrity/migration/disk/WAL checks, rotating online backups, mandatory
+    pre-migration backup, restore drills, and read-only rescue mode are part of the base. New writes
+    stay disabled when authority health is unknown. Full storage owner: doc 03.
+22. **Mobile photo capture is reliable intake, not an in-memory sidecar.** Open sessions, token
+    expiry, ordered photo digests, finalization, and OCR/intake handoff survive dashboard restarts.
+    Finalization is one durable, retryable operation: bundle/register/enqueue succeeds visibly or
+    fails visibly; it cannot return success and lose a background callback. The main app remains
+    loopback-only; an operator-started short-lived phone tunnel exposes only token-scoped capture
+    endpoints. Full intake design: doc 06; network boundary: doc 12.
+23. **AI assistance is optional evidence, never authority.** OCR/contact normalization and
+    operator-requested triage, sanity checks, selector suggestions, or run summaries return strict,
+    provenance-labelled advisory outcomes. Redacted inputs only; unavailable/invalid model output
+    is distinguishable from “nothing wrong.” AI cannot select a person, resolve a gate, alter run
+    state, declare success, create a selector, or authorize a commit. Deterministic contracts,
+    scenarios, receipts, and UI registry remain authoritative.
+24. **The old code is retired by capability inventory, not workflow count.** Every old workflow,
+    service, route family, dashboard surface, CLI/ops command, exporter, code generator, and
+    maintenance tool receives a port/replace/retire/proxy disposition plus a closing milestone.
+    `src` cannot be deleted while any inventory entry is undecided or still proxied. Master owner:
+    doc 07; guard owner: doc 10.
+
 ## Non-negotiables
 
 - **Fail loud.** The root `CLAUDE.md` rule applies in full to `temp_src` from the first line.
@@ -146,6 +221,15 @@ it becomes binding.
   `duo-login-flows.ts`, UCPath iframe/modal-mask handling, OCR fabrication-tiering + tolerant-field
   lessons, OnBase single-session constraint. This code moves nearly verbatim and gets *wrapped* in
   new contracts. Re-derivation from scratch is forbidden — it discards live verification.
+- **Port knowledge, not stale lesson files.** Existing `LESSONS.md`/`CLAUDE.md` entries are evidence
+  for migration. They are triaged into doc 12's structured active knowledge or incident history;
+  superseded/incorrect/duplicate guidance does not move into the rebuilt prompt/search surface.
+- **Local-only is a scope reduction, not a correctness waiver.** No RBAC, multi-tenant service,
+  remote operator deployment, distributed consensus, or high-availability work is required. The
+  operator server stays localhost-only; doc 06's short-lived token-scoped mobile-capture ingress is
+  the sole explicit exception. Secret/SSN/HR-data redaction, reliable backups, strict validation,
+  and fail-closed write/identity behavior remain mandatory because the tool handles real employee
+  data and transactions.
 - **Same quality umbrella from day one.** `temp_src` is inside the same tsconfig project, unit
   tests, and `npm run test:architecture` ratchets (extended to cover it). No ungated parallel tree.
 - **No implementation before the corrected dependency graph is accepted.** The abandoned Phase-1a
@@ -170,10 +254,13 @@ The foundation's documentation is part of the foundation.
 - **Phase 0 (now):** foundation design docs in `docs/rebuild/`, each reviewed part-by-part with the
   operator in plain language (what the old version did → why it hurt → how the new design fixes it).
 - **Phase 1:** pre-tree guard plumbing, then the first domain leaf plus type/lint/guard activation in
-  one commit; after that: config primitives → write-safety proof
-  contracts and outbox schema → task/store/session contracts → complete workflow graph → executor
-  and checkpoints → spans/projections. The core registry is the composition root; lower layers never
-  import workflows.
+  one commit; after that: strict config/domain primitives → authority storage/recovery + command/
+  write-safety shells → semantic UI registry/drivers + task/store/session contracts → complete
+  workflow graph/results/delegation/scenarios → executor/checkpoints/control/write sequencer →
+  spans/projections/evidence/diagnostics/notifications/knowledge → data services, durable capture,
+  typed intake, optional advisory AI, and dashboard/read-only workflow explorer → full restore/
+  soak/capability-inventory/doc gate. The core registry is the composition root; lower
+  layers never import workflows.
 - **Phase 2:** two vertical proofs before volume migration: person-lookup end-to-end proves the read
   path; a page-scoped transactional workflow/harness proves prepare-only dry-run, real commit
   recovery, durable dedupe, and ledger projection. A read-only slice cannot prove write safety.
@@ -194,7 +281,7 @@ The foundation's documentation is part of the foundation.
 
 ## Process
 
-- The orchestrator (main session) stays context-lean; deep design runs in subagents that write full
-  docs here and return short summaries. The orchestrator adversarially reviews every doc before
-  presenting it.
+- Work stays sequential by default with coherent local commits and explicit handoffs when context
+  separation is actually needed. The active implementer adversarially reviews every owning doc and
+  the master-plan integration before presenting a phase as complete.
 - Nothing in `temp_src` gets built before its design part is operator-approved.

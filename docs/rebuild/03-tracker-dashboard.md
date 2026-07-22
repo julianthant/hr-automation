@@ -1,17 +1,18 @@
 # 03 — Tracker/Event Layer + Dashboard Contract (span rebuild)
 
-Status: **Phase 0 revised design — 2026-07-21 event/migration corrections integrated.** Conforms to
-`00-charter.md` and Round-4 decisions D28/D29/D32/D33/D37/D44/D45 (tracker rebuilt around spans; dashboard
-consumes descriptor + span contract).
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The span rebuild now also
+owns a closed control-command protocol, durable notifications, strict boundary schemas, and an
+explicit backup/restore contract for the non-rebuildable SQLite state.
 
 ## Ownership (D1)
 
 | | Concept | Where |
 |---|---|---|
-| **This doc OWNS** | Span/event wire schema (§1, amended per D10), the notes stream, storage layout (§2.1), the SQLite projection role (per D14), durable local artifact outboxes/projector semantics (D45), SSE wire shapes (§2.2), the lift adapter + flip plan (§5), the completion (fan-out/approval) union (§4) | §§1–5 |
-| **Imports from doc 01** | Task contract + `defineTask`, task id grammar (`<system>/<verb-object>` slash ids, per D2), the closed `SystemId` union — real `src/systems/` dir names (`new-kronos`, `old-kronos`) plus the D4 service systems (`extraction`, `ocr`, `roster` — charter §11), error taxonomy | referenced, never redefined |
+| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the lift adapter + flip plan, the completion union | §§1–5 |
+| **Imports from doc 01** | Task contract + `defineTask`, task id grammar (`<system>/<verb-object>` slash ids, per D2), the closed `SystemId` union — real `src/systems/` dir names (`new-kronos`, `old-kronos`) plus the D4 service systems (`extraction`, `normalization`, `ocr`, `roster` — charter §11), error taxonomy | referenced, never redefined |
 | **Imports from doc 02** | Workflow descriptor shape + builder, RunEnvelope (`dryRun` home per D6), run-state machine incl. gates/parks (D5), checkpoint store schema, the readable span-path id grammar (`pl-104233-9f3e/searching#2`) | referenced, never redefined |
 | **Exports doc 02 adopts** | Verdict/detail semantics, completion program semantics, and wire projections; doc 02's descriptor now carries every consumed field | §3–4 |
+| **Imports from doc 12** | `FailureRecord`, evidence receipts/bundles, semantic action targets, scenario ids, knowledge/fix references | referenced, never redefined |
 
 ---
 
@@ -91,7 +92,7 @@ export interface SpanRef {
 
 export type SpanEvent =
   | RunQueued | RunClaimed | RunRequeued | SpanStarted | SpanPatched
-  | GateOpened | GateResolved | SpanEnded;
+  | SubjectObserved | GateOpened | GateResolved | SpanEnded;
 
 interface Base extends SpanRef {
   t: string;            // event type discriminant
@@ -100,8 +101,9 @@ interface Base extends SpanRef {
   pid: number;
 }
 
-/** Run is born at ENQUEUE, not at claim. Carries the validated workflow-constant input. */
-export interface RunQueued extends Base {
+/** Run is born at ENQUEUE, not at claim. Carries the validated workflow-constant input or a
+ * sensitive-input authority reference—exactly one, proven by `RunQueuedSchema`. */
+interface RunQueuedBase extends Base {
   t: "run.queued";
   kind: "run";
   itemId: string;                  // stable business key (the completion program's deriveItemId, §4)
@@ -109,15 +111,23 @@ export interface RunQueued extends Base {
   shape: "single" | "preview" | "operation" | "operation-member";  // SHAPE axis, stamped ONCE
   subjectKind: "person" | "file" | "catalog";                      // KIND axis, derived from
                                                                    // descriptor.inputSubject, ONCE
-  input: JsonValue;                // canonical-JSON, zod-validated input (retry/edit-resume authority) —
-                                   // OMITTED for inputs carrying identifiers that must not ride
-                                   // JSONL (i9 SSNs; the SQLite task row is the input authority,
-                                   // mirroring today's deliberate i9-check-results deviation)
-  subject?: { kind: string; value: string; name?: string };        // operator subject
-  dryRun?: true;                   // mirrored from the RunEnvelope (D6) for display
-  displayOnly?: true;              // task-less display row (§4.3, §5) — no claim will ever follow
+  subject?: QueueSubjectWire;      // closed person/file/catalog union; display-safe fields only
+  dryRun: boolean;                 // mirrored from the RunEnvelope (D6) for display
+  displayOnly: boolean;            // task-less display row (§4.3, §5) — no claim will ever follow
+  priority: "interactive" | "bulk"; // trusted server stamp; children inherit their root
   retryOf?: string;                // prior runId when this is a cross-run retry
+  engine: "legacy" | "native";
+  cutoverGeneration: number;
+  descriptorVersion: number;
+  contractFingerprint: Fingerprint;
+  resolvedInstance: Partial<Record<BrowserSystemId, SystemInstance>>;
+  configFingerprint: Fingerprint;
+  configSnapshotId: ConfigSnapshotId;
 }
+export type RunQueued = RunQueuedBase & (
+  | { input: JsonValue; sensitiveInputRef?: never }
+  | { input?: never; sensitiveInputRef: SensitiveInputRef }
+);
 
 export interface RunClaimed extends Base { t: "run.claimed"; workerId: string; }
 export interface RunRequeued extends Base {
@@ -141,21 +151,48 @@ export interface SpanStarted extends Base {
  */
 export interface SpanPatched extends Base {
   t: "span.patched";
-  patch: Record<string, JsonValue>;
+  updates: readonly [DetailUpdateWire, ...DetailUpdateWire[]];
+}
+
+/** Fresh subject observation. The raw identifier is retained only in the encrypted/local
+ * authority record when required; this stream carries a redacted value + comparison outcome. */
+export interface SubjectObserved extends Base {
+  t: "subject.observed";
+  taskId: TaskId;
+  expected: SubjectEvidenceWire;
+  observed: SubjectEvidenceWire;
+  observationId: ObservationId;
+  result: "match" | "mismatch" | "unknown";
 }
 
 /** A run parked on an operator/system decision (D5: gates are run-state, owned by doc 02;
  *  these events are their wire form). Replaces `running/awaiting-approval` + sentinel steps. */
 export interface GateOpened extends Base { t: "gate.opened"; gate: string; }   // gate ids declared in descriptor
-export interface GateResolved extends Base { t: "gate.resolved"; gate: string; resolution: string; }
+export interface GateResolved extends Base {
+  t: "gate.resolved"; gate: string;
+  /** Descriptor-validated display/audit key, never the gate's decision payload. */
+  resolutionKey: GateResolutionKey;
+  /** The schema-parsed gate result lives in authority/checkpoint storage (D67). */
+  resultRef: GateResultRef;
+  resultHash: Sha256;
+}
 
 export interface SpanEnded extends Base {
   t: "span.ended";
   outcome: RunOutcome;             // task spans use "done" | "failed" | "cancelled" | "skipped"
-  error?: string;                  // legible, names the offending value (fail-loud rule)
-  verdict?: string;                // typed domain result ("not-found", "inactive") — see §3.2
+  failureId?: FailureId;           // full structured failure lives in doc 12's failure store
+  errorSummary?: string;           // display-safe, legible summary; never the only failure evidence
+  verdict?: VerdictKey;            // validated against the descriptor's closed tuple (§3.2)
+  evidenceReceiptId?: EvidenceReceiptId;
 }
 ```
+
+The TypeScript declarations above are readable views, **not validation**. `SpanEventSchema`,
+`NoteSchema`, every `*WireSchema`, and the SSE payload schemas are strict discriminated zod unions;
+their inferred types are the implementation types. JSONL read, SQLite read/write, legacy lift,
+HTTP input/output, SSE emission, and fixture load all parse at the boundary. Unknown keys, invalid
+ISO instants, unbranded ids, non-canonical JSON, `NaN`, and invalid state combinations fail or enter
+the explicit legacy quarantine—never get cast into the model.
 
 **Notes** (high-volume annotations — log lines, screenshots, per-action records, data points) are a
 parallel stream, not span events. Same `SpanRef` addressing, so a note attributes to its exact task
@@ -166,12 +203,17 @@ export interface Note extends SpanRef {
   ts: string; workflow: string; pid: number;
   level: "step" | "success" | "error" | "waiting" | "warn" | "debug";
   message: string;
-  fields?: Record<string, string>;           // category/system/attempt/durationMs/…
-  /** Per-action attribution (D10): store-task id (doc 01 slash grammar) + selector-registry key. */
-  action?: { task: string /* "ucpath/search-person-org" */; type: string; target?: string };
-  attachment?: { kind: "screenshot" | "data-point"; payload: Record<string, JsonValue> };
+  fields?: readonly NoteFieldWire[];          // closed key/value union; no decision-bearing map
+  /** Per-action attribution: task + semantic UI id + page-state transition, never a raw selector. */
+  action?: UiActionEvidenceWire;
+  attachment?: ScreenshotAttachmentWire | DataPointAttachmentWire | DiagnosticAttachmentWire;
 }
 ```
+
+Notes are evidence, not control state. A new structured field requires a union/schema extension.
+High-cardinality exploratory metadata belongs in a schema-versioned diagnostic attachment. No
+projector, command handler, retry policy, or workflow bind may branch on note prose or an untyped
+attachment payload.
 
 **Volume, honestly (review #8):** today the per-page OCR pipeline emits **zero** tracker rows —
 its state rides ~8–12 deduped, 250ms-debounced row snapshots per run (`orchestrator.ts:671-692`).
@@ -223,14 +265,17 @@ Derived statuses stop being per-workflow code where a universal mechanism exists
 .tracker/
 ├── spans/   <workflow>-<date>.jsonl   span events (low volume — the queue/timeline truth)
 ├── notes/   <workflow>-<date>.jsonl   notes (high volume — logs, actions, screenshots, data points)
+├── evidence/<runId>/                  run receipts + redacted diagnostic bundle manifests (doc 12)
 ├── artifacts/sha256/<prefix>/<hash>    content-addressed task outputs; atomic, immutable bytes
 ├── ledger/  <system>-<date>.jsonl     immutable write receipts (D21; shape owned by doc 09 §6) —
 │                                      hash-chained (seq + prevHash), append-only, per-SYSTEM+day,
 │                                      NEVER pruned (the audit floor)
 ├── rows/ logs/ sessions/ …            LEGACY dirs — untouched, still written by old src,
 │                                      read via the lift adapter (§5) until deleted
-└── state.db                           SQLite — claims/checkpoints/intents/outboxes/ledger heads
-                                       are system-of-record; read projections are rebuildable
+├── backups/state/                     checksummed online backups + restore manifests (§2.5)
+└── state.db                           SQLite — claims/checkpoints/intents/outboxes/ledger heads,
+                                       commands/dependencies/notifications are system-of-record;
+                                       read projections alone are rebuildable
 ```
 
 Rationale against alternatives:
@@ -268,6 +313,10 @@ Rationale against alternatives:
   temp+fsync+atomic-replace and records the projected content hash. Duplicate outboxes/key retries
   are no-ops. A blocking projection failure parks the run; it never reports done while silently
   dropping the workbook update.
+- **Evidence is indexed, not scattered.** `evidence/<runId>/receipt.json` points to immutable
+  screenshots/artifacts/failures by content hash and records missing capture explicitly. Diagnostic
+  bundles redact by schema before writing; they never copy `.env`, cookies, browser storage, raw
+  SSNs, or unrestricted input blobs (doc 12 §3).
 
 ### 2.2 Projections are computed server-side — the wire carries surfaces, not rows
 
@@ -281,10 +330,11 @@ workflow modules. The SSE hello carries its fingerprint so a stale bundle fails 
 interface EventsHubPayload {
   descriptorHash: string;                  // doc 02's skew tripwire — NOT the descriptors themselves
   queue: { workflow: string; date: string; surfaces: QueueSurfaceWire[] };  // per subscribed panel
-  queuePatch?: { workflow: string; date: string; runId: string; patch: Partial<QueueSurfaceWire> }[];
-  //  ^ after the initial snapshot, a changed surface re-sends ONLY itself (id + delta) — a
+  queuePatch?: { workflow: string; date: string; surface: QueueSurfaceWire }[];
+  //  ^ after the initial snapshot, a changed surface re-sends ONLY that complete strict surface — a
   //    100-member operation tick re-serializes one member row, never the resolved member tree (D10)
-  wfCounts: Record<string, number>;        // rail badges — backend-authoritative, unchanged rule
+  wfCounts: readonly { workflow: WorkflowId; count: NonNegativeInt }[];
+                                             // closed tuples, backend-authoritative rail badges
   sessions: WorkerCardWire[];              // worker-span projections
   notifications: NotificationWire[];       // incl. gate.opened rising edges (kills App.tsx:386)
   quarantine: { workflow: string; count: number }[];   // §5.1 — lifted-row quarantine is VISIBLE
@@ -302,15 +352,18 @@ interface QueueSurfaceWire {
   title: string; subtitle?: string;                  // kind dispatch applied server-side
   status: StatusWire;                                // { key, label, tone, secondaryTag? } — final
   pipeline: { step: string; label: string; state: "pending"|"running"|"done"|"failed"|"cancelled"|"skipped"; durationMs?: number; attempt?: number }[];
-  gates: { gate: string; open: boolean; resolution?: string }[];
-  actions: ActionDescriptorWire[];                   // ported from runtime-policy projection;
-                                                     // display-only rows get delete only (§4.3)
+  gates: { gate: string; open: boolean; resolutionKey?: GateResolutionKey }[];
+  actions: ActionDescriptorWire[];                   // ported from the standard command projection;
+                                                     // display-only rows get Hide only (§4.3)
   memberRunIds?: string[];                           // operation only — ids, NEVER nested trees (D10);
-  memberRollup?: Record<string, number>;             // status-key → count, for the mini-badge
+  memberRollup?: readonly { status: StatusKey; count: NonNegativeInt }[];
+                                                     // closed status/count tuples for the mini-badge
   //  members are ordinary flat surfaces in the same queue payload (joined client-side by
   //  parentRunId); each is change-gated individually via queuePatch
   detailSurfaces: ("logs"|"screenshots"|"review"|"edit-data"|"view-data")[];  // capability-driven tabs
   links?: { review?: { workflow: string; runId: string } };  // "Open OCR review" jump
+  evidence: { receiptId?: EvidenceReceiptId; failureId?: FailureId;
+              confidence: "verified" | "partial" | "unknown" };
 }
 ```
 
@@ -328,13 +381,16 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
 
 `state.db` has **two classes of table with different authority**:
 
-- **System-of-record (NOT rebuildable, NOT deletable):** the task/claim store (tasks, leases,
-  dependencies, commands — doc 02 §5.7's checkpoint payloads, §4.4's `ocr_approvals` manifests, and
+- **System-of-record (NOT rebuildable and never deleted by projection/runtime row maintenance):**
+  the task/claim store (tasks, leases,
+  dependencies, delegation manifests, commands, notifications, capture sessions/photo order/
+  finalization outboxes — doc 02 §5.7's checkpoint payloads,
+  §4.4's `ocr_approvals` manifests, and
   doc 09's permanent-key `write_intents`, `write_attempts`, durable outbox, and `ledger_heads`, plus
   stable-keyed local `artifact_outbox`/sink-head rows). The system-of-record set is
   "claims + checkpoint payloads + write authority/outboxes/ledger tails + local artifact projection
-  authority."
-  Losing any of these loses claims, checkpoints, or in-flight write fences — they have no JSONL
+  authority + in-progress capture/handoff authority."
+  Losing any of these loses claims, checkpoints, in-flight write fences, or accepted capture work — they have no JSONL
   double.
 - **Projection tables (rebuildable):** span-shaped read models (`spans`, `gates`, `notes`,
   `runs_view`) fed by one projector consuming both native spans and lifted legacy events (§5).
@@ -343,7 +399,194 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
   never block workflows; source identity is `resolve(path)`; deletion tombstones and offline
   compaction port as-is.
 
-Any sentence in this doc that says "rebuildable" means the projection tables only.
+Any sentence in this doc that says "rebuildable" means the projection tables only. The sole
+authority-removal exception is the explicit stopped-system, exact-id, backup-gated Purge procedure
+in §2.4; ordinary cleanup, Hide, projection rebuild, and runtime code cannot reach authority rows.
+
+### 2.4 One command protocol with strict target families
+
+The dashboard, CLI, recovery code, workflow editor, notification inbox, gate resolvers, and capture
+UI all issue the same idempotent command **envelope**, then one strict target-family arm (D67). They
+do not update queue rows, JSONL, or authority records directly. Workflow descriptors select from
+closed policies; workflows never own cancel/delete/retry/bump/update implementations.
+
+```ts
+export type EnqueuePolicy = "reject-active" | "supersede-active" | "allow-parallel";
+export type CommandActionId =
+  | "retry" | "cancel" | "bump" | "hide" | "unhide"
+  | "edit-checkpoint" | "resolve-write-present" | "resolve-write-absent";
+export type NavigationActionId = "open-review" | "open-evidence";
+export type WorkflowActionId = CommandActionId | NavigationActionId;
+
+export interface WorkflowActionPolicy {
+  enabled: readonly WorkflowActionId[];
+  /** Optional descriptor conditions are closed rules over projected state, not callbacks. */
+  conditions?: readonly ActionConditionRule[];
+}
+
+interface CommandEnvelope {
+  commandId: CommandId;                 // client-generated idempotency key
+  requestedAt: IsoInstant;
+  reason?: OperatorReason;
+}
+export type RunCommandRequest = CommandEnvelope & (
+  | {
+      target: { runId: RunId; expectedVersion: PositiveInt };
+      type: "retry" | "cancel" | "bump" | "hide" | "unhide";
+      payload?: never;
+    }
+  | { target: { runId: RunId; expectedVersion: PositiveInt };
+      type: "edit-checkpoint"; payload: EditCheckpointCommand }
+  | {
+      target: { runId: RunId; expectedVersion: PositiveInt };
+      type: "resolve-write-present" | "resolve-write-absent";
+      payload: ResolveWriteCommand;
+    });
+export type GateCommandRequest = CommandEnvelope & {
+  type: "resolve-gate";
+  target: { runId: RunId; gateId: GateId; expectedVersion: PositiveInt };
+  /** Generic only on the wire; the handler resolves the descriptor and parses the exact gate schema
+   * before atomically storing the result checkpoint + resolved event outbox. */
+  payload: { result: CanonicalJsonValue };
+};
+export type NotificationCommandRequest = CommandEnvelope & (
+  | { type: "notification-read" | "notification-acknowledge" | "notification-resolve";
+      target: { notificationId: NotificationId; expectedVersion: PositiveInt }; payload?: never }
+  | { type: "notification-snooze";
+      target: { notificationId: NotificationId; expectedVersion: PositiveInt };
+      payload: { until: IsoInstant } }
+);
+export type CommandRequest =
+  | RunCommandRequest | GateCommandRequest | NotificationCommandRequest | CaptureCommandRequest;
+// CaptureCommandRequest is owned by doc 06 and uses this envelope's idempotency/CAS semantics.
+
+/** Multi-select never means "loop and hope". Targets and versions are frozen at confirmation. */
+export interface BulkCommandRequest {
+  bulkCommandId: CommandId;
+  type: "retry" | "cancel" | "bump" | "hide" | "unhide";
+  targets: readonly [
+    { runId: RunId; expectedVersion: PositiveInt },
+    ...{ runId: RunId; expectedVersion: PositiveInt }[],
+  ];
+  mode: "all-or-none" | "best-effort";
+  requestedAt: IsoInstant;
+  reason?: OperatorReason;
+}
+export type CommandResult =
+  | { state: "applied" | "already-applied"; commandId: CommandId; affectedRunIds: RunId[] }
+  | { state: "conflict"; commandId: CommandId; currentVersion: PositiveInt; message: string }
+  | { state: "rejected"; commandId: CommandId; code: CommandRejectionCode; message: string };
+
+export type ActionDescriptorWire =
+  | {
+      kind: "command";
+      id: CommandActionId;
+      label: string;
+      tone: "neutral" | "warning" | "destructive";
+      target: { runId: RunId; expectedVersion: PositiveInt };
+      form?: ActionFormWire;
+    }
+  | {
+      kind: "navigation";
+      id: NavigationActionId;
+      label: string;
+      tone: "neutral";
+      target: { runId: RunId };
+    };
+```
+
+Command semantics are binding:
+
+| Operation | Standard behavior |
+|---|---|
+| Enqueue | Validate raw input once, derive stable item id, then apply descriptor policy in one transaction. `reject-active` returns the existing active run; `supersede-active` terminalizes the exact active generation and creates the new run atomically; `allow-parallel` still requires a distinct stable item/variant key. An authority read error aborts—never “continue and enqueue anyway.” |
+| Retry | Creates a new run linked by `retryOf`, reuses immutable parsed input/config, validates checkpoints/freshness, and preserves the logical item. A parked unknown write uses resolution actions, never generic retry. |
+| Cancel | Resolves the full dependency tree from authoritative SQLite, applies every edge's doc 02 cancel policy, and commits state transitions together. If the tree is unavailable/inconsistent, no target is cancelled. Visible queue roots are never an authority fallback. |
+| Bump | Changes priority/claim order with CAS; it does not fabricate a requeue or mutate business input. Running work returns a typed rejection unless the scheduler explicitly supports cooperative yield. |
+| Hide / Unhide | A reversible presentation tombstone only. It changes no run outcome, task, dependency, checkpoint, intent, or evidence. The UI label is **Hide**, never Delete. |
+| Purge | Not a row action. `cli purge-run <exact-run-id> --backup <path>` is an offline maintenance command requiring a fresh verified backup and refusing any active/dependency/write-authority reference. It writes a purge receipt. |
+| Edit checkpoint | Uses doc 06's field-level patch/provenance model, creates a new run/attempt as specified there, and never mutates original input or a completed proof. |
+
+Every command is inserted durably before application and handled transactionally with the target's
+monotonic `version`. Re-delivery returns `already-applied`; stale projections return `conflict` and
+force refresh. The command audit records requester (`local-operator` for now), source surface,
+reason, before/after versions, affected dependency ids, and outcome. API routes are thin schema
+parsers over this service—there are no workflow-specific mutation endpoints except domain gates
+whose handlers themselves issue commands.
+
+Bulk commands first resolve the union of all authoritative dependency targets. `all-or-none` locks,
+validates every expected version/policy, and applies one transaction or none. `best-effort` writes a
+child command/result per requested target and returns the complete applied/conflict/rejected vector;
+the UI may never collapse a partial result into “Done.” Bulk cancel defaults to `all-or-none`; bulk
+hide defaults to `best-effort`. There is no client loop whose last response overwrites earlier errors.
+
+### 2.5 Non-rebuildable SQLite recovery contract
+
+Calling `state.db` authoritative without a recovery path would make a single corrupt file capable
+of erasing claim, delegation, checkpoint, and write-fence truth. The base therefore includes:
+
+1. SQLite runs with WAL, foreign keys on, a busy timeout, and `synchronous=FULL` for authority
+   transactions. Schema migrations run only under an exclusive migration lease.
+2. Boot runs `PRAGMA quick_check`, schema-version validation, foreign-key checks, and invariant
+   queries (one active claim per run, manifest children match dependencies, every attempting write
+   has an attempt, every outbox references authority, every finalizing capture has exactly one live
+   bundle/handoff outbox, and every finalized capture references one intake handoff). Any failure starts the dashboard read-only
+   and blocks enqueue/claim/commit/control commands with one durable/console-visible health error.
+3. The SQLite online-backup API creates a temp backup, checks it, writes a manifest containing
+   schema version/page count/SHA-256/created-at/source generation, fsyncs, then atomically renames.
+   Retain 14 verified daily backups, the latest 8 coalesced critical/interval backups, and the last
+   5 pre-migration backups; expose age/health in
+   Settings. A configurable path may point at another local volume.
+4. A dirty authority store gets a coalesced verified online backup at least every 15 minutes and
+   immediately after schema migration, external-write durable commit, capture final handoff, and
+   graceful drain. Critical triggers may share one already-running backup, but cannot be silently
+   dropped. Backup health reports both last verified time and authority generation/RPO gap.
+5. `cli storage doctor` is read-only and reports checks, backup freshness, pending commands,
+   unresolved writes, leases, outboxes, and restore candidates. `cli storage restore --from
+   <exact-backup>` first preserves the suspect DB, restores into a temp path, repeats all checks,
+   and atomically swaps only while workers/server are stopped.
+6. Restore reconciliation replays JSONL into **projection tables only**. It never invents lost
+   authority from spans. Runs/events newer than the restored authority generation are surfaced as
+   `authority-unknown`; any possible external write is parked for doc 09's live probe/operator
+   resolution before execution continues.
+
+Phase 1 cannot exit until an automated restore drill copies a real-shaped fixture DB, corrupts the
+copy, detects it, restores the newest verified backup, rebuilds projections, and proves pending
+commands/delegations/write intents and capture handoffs remain consistent. Backups are useful
+recovery state, so they
+are excluded from ordinary tracker cleanup and covered by disk-space warnings.
+
+### 2.6 Durable single-operator notifications
+
+Desktop notifications are delivery conveniences, not the record. A `notifications` authority
+table stores a strict event with `notificationId`, dedupe key, severity, run/workflow/failure refs,
+created time, message template+arguments, state (`unread|read|acknowledged|snoozed|resolved`), and
+delivery attempts. Triggers are closed and base-owned: run failure, subject mismatch, open operator
+gate, unknown write outcome, quarantined legacy row, storage degradation, stalled lease/outbox, and
+failed backup. Repeated identical triggers update count/lastSeen instead of spamming.
+
+The dashboard inbox and per-run timeline always render durable state. OS notification delivery is
+best-effort with retry/backoff and a recorded failure; a failed toast never loses the inbox item.
+Acknowledging is distinct from resolving; snooze has an expiry; a resolved underlying condition
+auto-resolves only notification types whose schema says so. Notification text uses redacted
+arguments and links to the evidence/failure/run—not raw secrets or captured form contents.
+
+```ts
+export interface NotificationWire {
+  notificationId: NotificationId;
+  dedupeKey: NotificationDedupeKey;
+  trigger: NotificationTrigger;
+  severity: "info" | "warning" | "error" | "critical";
+  state: "unread" | "read" | "acknowledged" | "snoozed" | "resolved";
+  title: string;
+  message: string;
+  count: PositiveInt;
+  createdAt: IsoInstant;
+  lastSeenAt: IsoInstant;
+  snoozedUntil?: IsoInstant;
+  link?: { kind: "run" | "failure" | "storage"; id: string };
+}
+```
 
 ---
 
@@ -359,27 +602,28 @@ verdict map, or a patch key not in its detail-field list, throws at emit time.**
 `id`, `code` (2-char trace prefix), `label`, `icon`, `category`, `surface.shape` /
 `surface.resolveShape`,
 `inputSubject`, graph-node keys/labels, `surfaces`, `details`, `actions`, `presets`, `identity`,
-`presentation`, `coordinator`, `completionConsumes`, `artifactProjections`, version/fingerprint, and
+`presentation`, `coordinator`, `completionConsumes`, `artifactProjections`, `enqueue`, `scenarios`,
+version/fingerprint, and
 override layering. There is no second `archetype` declaration.
 
 ### 3.2 Contributed by this doc, adopted into doc 02's descriptor
 These are plain-data fields; doc 02's descriptor carries them, this doc defines their semantics:
 
 ```ts
-steps display rules:  { key, label, hidden?, foldInto? }      // computeOcrPipelineView's fold/hide
-                                                              // tables become data
-gates:    { id: string; label: string; statusKey?: string }[] // e.g. { id:"approval", statusKey:"needsReview" }
-verdicts: Record<string, { label; tone: "info"|"success"|"warning"|"destructive"; tag?: boolean }>
+steps display rules: readonly StepDisplayRule[]               // computeOcrPipelineView's fold/hide
+gates: readonly GateProjectionDefinition[]                    // descriptor-derived from gate nodes
+verdicts: readonly VerdictDefinition[]
 //  ^ REPLACES statusExtensions (review #5 / D1): person-lookup's `notFound` becomes
-//    { "not-found": { label:"Not found", tone:"warning" } } over span.ended.verdict; the
+//    { key:"not-found", label:"Not found", tone:"warning" } over span.ended.verdict; the
 //    identity-approval badge (§5.4) becomes a gate statusKey. The statusExtensions function
 //    registry does not exist in temp_src.
-details:  { key: string; label: string; conditional?: boolean }[]
+details: readonly DetailProjectionSpec<Nodes>[]
 //  ^ the SpanPatched validation set (review #11): every patch key must be declared here.
 //    Successor of today's detailFields incl. the "declared but never populated" warn.
-capabilities: { review?: "ocr"; editData?; viewData?; delegation?: {...} }
+capabilities: WorkflowCapabilities
 completion?: CompletionProgram                                // §4 — OCR-backed workflows only
-actions / presets / identity / presentation / coordinator / completionConsumes / artifactProjections
+enqueue / actions / scenarios / presets / identity / presentation / coordinator /
+completionConsumes / artifactProjections
 // artifact projection specs name an exact producing node+field, sink id, stable key fields,
 // blocking policy, and canonical record schema; the client receives status only, never sink paths
 ```
@@ -425,7 +669,7 @@ display-only failed rows.
 // temp_src/descriptor/completion.ts
 import { z } from "zod/v4";
 import type { AnyWorkflowRef } from "./ref.js";
-// WorkflowRef<InputSchema> carries the concrete target zod schema (docs 01/02).
+// WorkflowRef<InputSchema,ResultSchema> carries both concrete schemas (docs 01/02).
 
 export type CompletionProgram =
   | StagedFanOut<readonly [PerRecordStage<AnyWorkflowRef>, ...AnyFanOutStage[]]>
@@ -454,11 +698,13 @@ export interface PerRecordStage<Target extends AnyWorkflowRef> {
    *  Shared, named, exported predicates only (§4.2). Skipped records are NOT enqueued and their
    *  itemIds do NOT reach later stages. */
   eligible?: NamedPredicate;
-  /** As-built deriveItemId(record, ocrRunId, index) — stable ids minted into the durable manifest
-   *  BEFORE dispatch. The enqueue-side resolver keys on the LOGICAL (runtime-options-stripped)
-   *  input and FAILS LOUD on a miss (buildFanOutItemIdResolver; the E2E-015 shared-id fallback is
-   *  banned). */
-  deriveItemId: (record: PreviewRecord, runId: string, index: number) => string;
+  /** PreviewRecord carries a StableRecordId derived when extraction admits the record from
+   * source-artifact digest + stable page/form identity. Item identity may use that id and validated
+   * subject/business fields, never array index or run id. IDs are minted into the durable manifest
+   * BEFORE dispatch. The enqueue-side resolver keys on the LOGICAL (runtime-options-stripped)
+   * input and FAILS LOUD on a miss (buildFanOutItemIdResolver); the E2E-015 shared-id/index fallback
+   * is banned. */
+  deriveItemId: (record: PreviewRecord, ctx: ApproveContext) => ItemId;
 }
 
 export interface PerDocumentStage<Target extends AnyWorkflowRef> {
@@ -478,7 +724,7 @@ export interface CompleteThenEnqueue<TTarget extends AnyWorkflowRef> {
     derive: (plan: MemberPlanEntry) => z.input<TTarget["input"]>;
     /** Pages that can never be searched become TASK-LESS display-only failed member rows
      *  (`run.queued { displayOnly: true }` + immediate `span.ended("failed")`; no run.claimed,
-     *  no worker span, delete-only actions) — as-built i9-check-results.ts displayFailures. */
+     *  no worker span, Hide-only actions) — as-built i9-check-results.ts displayFailures. */
     displayFailures: true;
   };
 }
@@ -628,7 +874,8 @@ applies the same tombstone filter.
 classify — an invalid `data.archetype` (which
 `resolveRowArchetype` throws on today, `row-archetype.ts:96-99`; the lifter catches at the row
 boundary) or an unknown status/step combination — produces a
-`quarantined` diagnostic: a loud queue card carrying the raw JSON + reason, a warn note, and a
+`quarantined` diagnostic: a loud queue card carrying a schema-redacted excerpt + reason, a warn
+note, and a
 count on the SSE hub (`quarantine` topic, §2.2). One bad row degrades to a visible quarantine card; it can never take down
 the projection read path for every workflow, which a throw would.
 
@@ -659,7 +906,7 @@ sentinels and read-time reclassification. The lift decodes each exactly once:
 | `running` + `step="awaiting-approval"` **with** `parentRunId` (delegated OCR, `prep-rows.ts:29-41`) | `gate.opened("approval")`, statusKey `needsReview` |
 | `running` + `step="awaiting-approval"` **without** `parentRunId` (standalone OCR — review #10) | `gate.opened("approval")` STILL opens (the run IS parked on the operator); only the projected status key differs (`in-review`, mirroring today's delegated-only `needsReview` scoping) — the gate is keyed on row state, not on delegation |
 | `running` + `step="wait-approval"` / `"wait-signatures"` (oath-upload waits) | `gate.opened("await-approval")` / `gate.opened("await-signatures")` (§4.5 gates) |
-| operation coordinator rows (display-only, stamped at prepare) & i9 `data.displayOnly==="true"` members | `run.queued { displayOnly: true }` (+ `span.ended` for the failed members) — **NO fabricated `run.claimed`, NO worker span** (review #9); actions project delete-only |
+| operation coordinator rows (display-only, stamped at prepare) & i9 `data.displayOnly==="true"` members | `run.queued { displayOnly: true }` (+ `span.ended` for the failed members) — **NO fabricated `run.claimed`, NO worker span** (review #9); actions project Hide only |
 | session events | worker/browser spans keyed by (instance, pid) — the pid heuristics live here and ONLY here |
 | data diffs on re-emits | `span.patched` (identity keys excluded — a legacy re-stamp folds into details, never identity) |
 | anything else — invalid archetype or unknown status/step | **quarantine (§5.1), never throw, never a silent default** |
@@ -741,6 +988,11 @@ its own milestones with no parity deadline coupling.
 | 12 | Resolved member trees creep back onto the wire (the 5-8k-field re-serialization) | `QueueSurfaceWire` has `memberRunIds: string[]` only — no recursive member field exists to populate; a type-level test pins that the wire type is non-recursive; the SSE tick test asserts a 100-member operation patch serializes one surface |
 | 13 | Attempt discipline erodes (a re-pend reuses attempt 1 and re-opens closed spans) | The replay fixture asserts open/close-once per `(runId, attempt, spanPath)` across days containing real reassign/bump traffic; `run.requeued.nextAttempt` is emit-validated as monotonic |
 | 14 | The `ledger/` dir gets pruned, or `write_intents` treated as a rebuildable projection (D21) | `ledger/` is exempt from `clean-tracker` (a retention-floor ratchet — owned by doc 09 §8 — fails if any prune path reaches it); `write_intents` is enumerated in §2.3's system-of-record set (amends D14), so the "rebuildable ⇒ projection tables only" rule (§2.3) keeps it undeletable. Base retention (`notes/` 7d, `spans/` 30d) is a fixed §2.1 decision, so the never-pruned floor sits above a settled number, not a guess |
+| 15 | Cancel/deletion targets fall back to whatever roots the caller can currently see | command integration tests make SQLite authority unavailable/inconsistent and assert zero transitions; source scan bans caller-supplied root fallback in target resolution |
+| 16 | Two active runs appear because active-run lookup failed and enqueue continued | transactional enqueue-policy tests inject lookup/constraint failures; every result is reject/no-op/one new generation, never two active generations |
+| 17 | A dashboard retry races a newer state and mutates the wrong attempt | every action carries `expectedVersion`; concurrency tests prove one applies and the loser gets a typed conflict |
+| 18 | `state.db` corrupts and the app silently starts an empty authority store | boot corruption fixture must enter read-only degraded mode; restore-drill test proves a checksummed backup restores commands, dependencies, checkpoints, and write intents before claims resume |
+| 19 | OS notification fails, so a critical unknown write is invisible | notification trigger and durable inbox commit in the authority transaction; delivery failure is recorded/retried and the unread inbox assertion remains true |
 
 ---
 
@@ -750,6 +1002,8 @@ Operator uploads `Oath_Packet.pdf` targeting oath-signature (dry-run off, 2 sign
 Span ids shown in doc 02's path grammar; `attempt` omitted where 1.
 
 ```jsonc
+// Abridged for readability. Checked fixtures are generated through RunQueuedSchema and include
+// every required Base/engine/config field; these snippets are not accepted as standalone events.
 // spans/oath-signature-2026-07-17.jsonl        (coordinator — operation shape, file kind)
 {"t":"run.queued","workflow":"oath-signature","runId":"R-op","spanPath":"os-141002-9f3e",
  "traceId":"os-141002-9f3e","itemId":"op-9f3e","shape":"operation","subjectKind":"file",
@@ -766,10 +1020,11 @@ Span ids shown in doc 02's path grammar; `attempt` omitted where 1.
 {"t":"span.started","kind":"task","name":"ocr","spanPath":"os-141002-11ab/ocr#1"}
 // per-page provider calls are NOTES (D10), not spans — notes/ocr-2026-07-17.jsonl:
 //   {"spanPath":"os-141002-11ab/ocr#1","level":"step","message":"page 1 … 1 record",
-//    "action":{"task":"ocr/extract-page","type":"ocr"},"fields":{"page":"1","tier":"1"}}
+//    "action":{"task":"ocr/extract-page","type":"ocr"},
+//    "fields":[{"key":"page","value":"1"},{"key":"tier","value":"1"}]}
 {"t":"span.ended","spanPath":"os-141002-11ab/ocr#1","outcome":"done"}
 {"t":"span.started","kind":"task","name":"person-lookup","spanPath":"os-141002-11ab/person-lookup#1"}
-{"t":"span.patched","spanPath":"os-141002-11ab","patch":{"records":[/* preview records v2 */]}}
+{"t":"span.patched","spanPath":"os-141002-11ab","updates":[{"key":"records","value":[/* preview records v2 */]}]}
 {"t":"span.ended","spanPath":"os-141002-11ab/person-lookup#1","outcome":"done"}
 {"t":"gate.opened","spanPath":"os-141002-11ab","gate":"approval"}   // parked — NOT a fake "running" step
 ```
@@ -788,14 +1043,15 @@ suppresses `document` (§4.3), so only the record stage dispatches — with stab
 from the durable manifest (§4.4):
 
 ```jsonc
-{"t":"gate.resolved","spanPath":"os-141002-11ab","gate":"approval","resolution":"approved"}
+{"t":"gate.resolved","spanPath":"os-141002-11ab","gate":"approval",
+ "resolutionKey":"approved","resultRef":"gate-result:R-ocr:approval","resultHash":"sha256:…"}
 {"t":"span.ended","spanPath":"os-141002-11ab","outcome":"done"}
 
 // spans/oath-signature-2026-07-17.jsonl        (member fan-out — children of the COORDINATOR)
 {"t":"run.queued","workflow":"oath-signature","runId":"R-m1","spanPath":"os-141002-c001",
- "traceId":"os-141002-c001","parentRunId":"R-op","itemId":"ocr-oath-R-ocr-r0",
+ "traceId":"os-141002-c001","parentRunId":"R-op","itemId":"ocr-oath-rec-7b12a9",
  "shape":"operation-member","subjectKind":"person","input":{"employeeId":"12345678","name":"Lopez, Maria"}}
-{"t":"run.queued","workflow":"oath-signature","runId":"R-m2", /* … r1 … */}
+{"t":"run.queued","workflow":"oath-signature","runId":"R-m2", /* … rec-c84d31 … */}
 {"t":"run.claimed","runId":"R-m1","spanPath":"os-141002-c001","workerId":"W-oath-1"}
 {"t":"span.started","kind":"task","name":"navigation","spanPath":"os-141002-c001/navigation#1"} 
 {"t":"span.ended","spanPath":"os-141002-c001","outcome":"done"}
@@ -828,7 +1084,7 @@ returns its log/action detail (§2.1 — two greps, by design).
 3. ~~Descriptor `verdicts` expressiveness~~ — **resolved 2026-07-21:** use a closed serializable
    `tag: { fromDetail, map }` rule interpreted exhaustively on the server/client projection. No
    pure-function escape is sent to the browser and no workflow-id switch is introduced.
-4. ~~Quarantine operations~~ — **resolved 2026-07-21:** visible raw/reason, Delete, and Re-lift.
+4. ~~Quarantine operations~~ — **resolved 2026-07-22:** visible redacted raw/reason, Hide, and Re-lift.
    Re-lift reruns the now-registered version adapter and replaces only projection state; there is no
    “mark valid/done” shortcut. Adapter deployment also schedules all quarantines of that version.
 

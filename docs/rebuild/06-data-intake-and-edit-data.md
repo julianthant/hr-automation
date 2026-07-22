@@ -1,20 +1,17 @@
 # 06 — Data Intake (operator column mapping) & Edit Data over checkpoints
 
-Status: **Phase 0 revised design — 2026-07-21 intake/provenance corrections integrated.** Conforms to `00-charter.md` (§11 first-class
-`extraction`/`ocr`/`roster` service systems + operator-defined column mapping onto canonical fields;
-§12 Edit Data over checkpoints; fail-loud non-negotiable) and to `04-reconciliation.md` (D3 contract/
-impl split, D4 service stores, D6 RunEnvelope, D9 resume scope, D34/D38 provenance+mapping, D45
-local-artifact projections). Slotting is
-`07-master-plan.md`'s: the service **stores** are Phase 1h (they need only 01+11); the **column-
-mapping + Edit-Data UI** land in the scoped dashboard-flip window (§3.5 there), off the critical path.
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** Intake now produces a
+durable, replayable admission manifest; every data boundary is strict; scenario coverage and
+evidence make partial/excluded rows impossible to mistake for silently completed work.
 
 ## Ownership (D1 — this doc owns / this doc references)
 
 | This doc **owns** (siblings reference, never redefine) |
 |---|
 | The **operator column-mapping design** — the mapping object, per-source persistence + header fingerprint, the upload→map→validate→run UI flow, per-cell coercion, the unmapped-required block, fuzzy-suggestion policy |
-| The **extraction** intake task designs (`extraction/parse-csv`, `extraction/parse-pdf-fields`) and the **roster** matching task designs (`roster/match-spreadsheet`) — their contract shapes + intake semantics |
+| The **extraction** intake task designs (`extraction/parse-csv`, `extraction/parse-pdf-fields`), **roster** matching (`roster/match-spreadsheet`), and typed **normalization** service outcomes — their contract shapes + intake semantics |
 | The **intake pipeline**: how a parsed+mapped dataset becomes N workflow inputs, and the pre-run per-row rejection review (nothing half-launches) |
+| Durable mobile-photo capture intake: session/photo/finalization state, bundle outbox, artifact handoff, expiry, restart recovery, and phone-scope lifecycle (network exposure policy remains doc 12) |
 | The **Edit-Data surface** — its data source, editable/read-only rules, the edit-during-resume concurrency rule |
 | Roster/retention projection semantics: typed stable-key record, blocking outbox, idempotent xlsx upsert, and concurrent-edit conflict policy (storage/projector authority remains doc 03) |
 
@@ -24,6 +21,8 @@ mapping + Edit-Data UI** land in the scoped dashboard-flip window (§3.5 there),
 | Task contract/impl split (`defineTaskContract`/`defineTask`), service stores (D4), `freshness` field, error taxonomy → **doc 01** |
 | The **injected-data mechanism** (`RunEnvelope.injected`, §5.6 #3), checkpoint store + resume scope (D9), freshness walk (D8), the "Live Edit Data over checkpoints" subsection → **doc 02** |
 | SSE wire shapes (`detailSurfaces` incl. `edit-data`), `span.patched`, notes stream, SQLite projection role (D14) → **doc 03** |
+| Standard CAS command path for Edit Data → **doc 03** |
+| Scenario manifests, evidence receipts, run explanation, knowledge/fix records → **doc 12** |
 
 Grounding (read, not imagined): `src/services/matching/roster-loader.ts` (today's **hardcoded**
 `COLUMN_PATTERNS` header regexes — the thing operator mapping replaces),
@@ -59,13 +58,17 @@ Data a **typed view of the run's checkpoints** edited through doc 02's `injected
 ## 1. Canonical field registry (vocabulary lives in `temp_src/domain/`, referenced here)
 
 The closed, typed field vocabulary is domain-owned (charter §11). This doc consumes it; it does not
-redefine the field schemas. The registry entry shape (domain-defined) is:
+redefine the field schemas. **The ids shown below are an excerpt, not the Phase-1 inventory.** Before
+the registry freezes, D58/D68 scan every legacy workflow input/schema, roster/header rule, OCR form,
+and Edit-Data field; each shared mappable concept is assigned one canonical id/schema or explicitly
+remains a workflow-local strict field with a reason. No current mappable field may be silently
+omitted because it was absent from this example. The registry entry shape is:
 
 ```ts
 // temp_src/domain/fields/registry.ts  — domain-owned; imports zod + domain identity only
 import { z } from "zod";
 
-export type CanonicalFieldId =
+export type CanonicalFieldId = // excerpt; generated inventory/type is exhaustive in the build
   | "eid" | "firstName" | "lastName" | "fullName" | "email"
   | "deptId" | "department" | "effectiveDate" | "kualiDocId";   // closed union — one-line edit to grow
 
@@ -96,7 +99,7 @@ those field schemas reuse canonical schema objects rather than parallel regexes:
 
 ```ts
 // temp_src/workflows/work-study/input.ts
-export const WorkStudyInput = z.object({
+export const WorkStudyInput = z.strictObject({
   emplId:        fields.eid.schema,            // same object the mapper coerces to
   effectiveDate: fields.effectiveDate.schema,
 });
@@ -111,11 +114,13 @@ the plan does not overclaim that field validity implies whole-input validity. A 
 asserts every field exposed by an intake projection reuses its declared canonical schema. Workflows
 may still have non-intake fields such as file refs, selectors, options, and discriminants.
 
-> **Reconciliation flag (open, §9):** today's `work-study`/`separations` accept a *looser* EID
-> (`/^\d{5,}$/`, verified live) than canonical `/^10\d{6}$/`. That divergence is real and is resolved
-> as an **explicit decision at work-study's order-6 migration** (master-plan §3.3): adopt the
-> canonical field, or declare a distinct `legacyEid` field with its own schema — **not** papered over
-> by widening the canonical field, which would weaken every consumer.
+> **Resolved base decision:** `Eid` means the canonical UCPath 8-digit identifier matching
+> `/^10\d{6}$/` everywhere. The old `work-study`/`separations` `/^\d{5,}$/` validators are loose
+> validation bugs, not evidence for a second domain value. Before each migration, scan its real
+> fixtures/tracker inputs through the canonical schema and quarantine/report every rejection. If
+> evidence proves a genuinely different source identifier exists, give it a domain-specific name
+> and brand plus an explicit, verified conversion to `Eid`; never add a vague `legacyEid` or widen
+> `Eid` globally.
 
 ---
 
@@ -125,44 +130,64 @@ may still have non-intake fields such as file refs, selectors, options, and disc
 
 ```ts
 // temp_src/domain/intake/mapping.ts  (domain — bundle-safe, zod only)
-export const ColumnMapping = z.object({
-  workflow:       z.string(),
+export const ColumnMapping = z.strictObject({
+  workflow:       WorkflowIdSchema,
+  /** Exact target-field set/schema this map was built against (D66). */
+  intakeProjectionFingerprint: FingerprintSchema,
   /** header fingerprint of the source this mapping was built for (§2.3). */
-  fingerprint:    z.string(),
-  savedAt:        z.string(),              // ISO — provenance, drives stale display
+  fingerprint:    Sha256Schema,
+  savedAt:        IsoInstantSchema,         // provenance, drives stale display
   headerRowIndex: z.number().int(),        // which sniffed row is the header (parsers agree on this)
   /** Stable within one parsed layout: normalized header + duplicate occurrence. */
-  columns:        z.array(z.object({
+  columns:        z.array(z.strictObject({
     sourceColumnId: z.string(), header: z.string(), normalizedHeader: z.string(),
     occurrence: z.number().int().positive(), currentIndex: z.number().int(),
   })),
-  /** canonical field id → concrete source-column id. A required field
-   *  absent from this map is a LOUD block at run time (§2.4). */
-  bind:           z.record(z.enum(CANONICAL_FIELD_IDS), z.string()), // sourceColumnId
-}).strict();
+  /** Target-field binding, not canonical-concept binding (D66). Two target paths may intentionally
+   * use the same canonical field, e.g. homeCity and mailingCity. */
+  bindings: z.array(z.strictObject({
+    targetFieldId: IntakeTargetFieldIdSchema,
+    canonicalFieldId: CanonicalFieldIdSchema,
+    sourceColumnId: SourceColumnIdSchema,
+    confirmedAt: IsoInstantSchema,
+  })),
+});
 export type ColumnMapping = z.infer<typeof ColumnMapping>;
 ```
 
-The mapping binds by
+The mapping binds each stable target id from `defineIntakeProjection` by
 `sourceColumnId = base64url(canonicalJson({ normalizedHeader, occurrence }))`, never raw header,
 delimiter concatenation, or position. Duplicate `Name` columns are distinct. Current index is diagnostic only; duplicate-header reuse
 requires visible confirmation because reordered identical headings are semantically unknowable.
+Load validates that every binding's target id still exists, its recorded canonical id matches the
+current intake projection, no target appears twice, and the projection fingerprint is unchanged.
+This permits two target fields with the same canonical concept without one binding overwriting the
+other.
+
+All saved mapping, parse result, validation request/result, intake plan, edit snapshot, and edit
+command schemas are strict and versioned. Unknown keys are errors. Missing, blank, null, invalid,
+and unresolved are distinct states; UI code never converts them to `""` or omits them to make a
+schema pass. Canonical scalars (`WorkflowId`, `SourceColumnId`, SHA-256, EID, ISO instant/date,
+artifact id) are branded at parse time, so equally shaped strings cannot be interchanged by a cast.
 
 ### 2.2 The UI flow (upload → map → validate → run)
 
 1. **Upload.** Operator uploads a `.csv`/`.xlsx`. `extraction/parse-csv`|`parse-pdf-fields` (§3)
    returns the **detected columns + a few sample values per column** (never the whole file to the
    client at this stage — sample rows only).
-2. **Map.** The mapping grid shows each canonical field the *target workflow* requires (+ optionals),
+2. **Map.** The mapping grid shows each stable target field/path the *target workflow* requires
+   (+ optionals), including its canonical concept label,
    with a dropdown of detected source columns and each column's sample values inline. The operator
    connects each canonical field to a column. Fuzzy header matches appear as **suggestions** the
    operator confirms — never pre-applied (§2.5).
-3. **Validate.** On "Validate", every data row is coerced+parsed against the bound canonical fields
+3. **Validate.** On "Validate", every data row is coerced+parsed against the bound target fields'
+   canonical schemas
    (§2.4). The result is a **rows-valid / rows-rejected** split shown in the grid, each rejection
    naming the offending row + column + value.
-4. **Run.** Enabled only when **every required canonical field is bound** and the operator has
-   reviewed the rejection list (§5). Running fans out the *valid* rows as N workflow inputs; the
-   rejected rows are never launched.
+4. **Run.** Enabled only when **every required target field is bound**, at least one row is valid,
+   and the operator has reviewed the rejection list (§5). A valid zero-row intake is not a no-op
+   success: it stays blocked with `no-valid-rows` and the manifest remains inspectable. Running fans
+   out the *valid* rows as N workflow inputs; rejected rows are never launched.
 
 ### 2.3 Per-source persistence — header fingerprint (recommended scheme)
 
@@ -213,14 +238,14 @@ hint ("column 'DeptCode' bound to `effectiveDate` — all 42 rows failed date co
 
 ### 2.5 Fuzzy header auto-match — SUGGESTIONS only, never silent auto-apply
 
-The suggestion engine scores each detected header against every canonical field's `aliases` +
-`label` (the redesigned successor of `COLUMN_PATTERNS`). It **proposes** a binding (a highlighted
+The suggestion engine scores each detected header against every target field's referenced canonical
+field `aliases` + `label` (the redesigned successor of `COLUMN_PATTERNS`). It **proposes** a binding (a highlighted
 dropdown default the operator can accept in one click) but **never applies it** — the grid starts
 with the field *unbound* and the suggestion shown as a hint. Rationale (charter fail-loud): a
 confident-but-wrong header guess ("Name" → `fullName` when the file's real name is in "Legal Name")
 is exactly the silent-substitution class we ban. Mechanically enforced: the mapping is only
-`bind`-populated by an operator action (accept-suggestion or manual pick); a guard (§7 #1) asserts no
-code path writes `bind` from the suggestion scorer directly.
+`bindings`-populated by an operator action (accept-suggestion or manual pick); a guard (§7 #1)
+asserts no code path writes `bindings` from the suggestion scorer directly.
 
 ---
 
@@ -238,13 +263,16 @@ export const ParseCsv = defineTaskContract({
   provenance: { default: "live" }, // observes these content-addressed bytes now
   freshness: { defaultMaxAgeMs: Infinity }, // content-addressed bytes do not age;
                                        // justified: re-parsing the same bytes is deterministic (grep ratchet).
-  input:  z.object({ fileRef: FileRef, sheet: z.string().optional() }),
-  output: z.object({
+  subject: { kind: "none", reason: "deterministic local artifact parsing" },
+  scenarios: ["intake/csv/happy", "intake/csv/no-header", "intake/csv/duplicate-headers",
+              "intake/csv/unreadable"],
+  input:  z.strictObject({ fileRef: FileRefSchema, sheet: z.string().min(1).optional() }),
+  output: z.strictObject({
     headerRowIndex: z.number().int().nullable(), // null means operator selection required
-    headerCandidates: z.array(z.object({ rowIndex:z.number().int(), cells:z.array(z.string()),
-                                         confidence:z.number().min(0).max(1) })),
-    columns: z.array(z.object({ header: z.string(), index: z.number().int(),
-                                samples: z.array(z.string()) })),   // sample values for the grid
+    headerCandidates: z.array(z.strictObject({ rowIndex:z.number().int(), cells:z.array(z.string()),
+                                               confidence:z.number().min(0).max(1) })),
+    columns: z.array(z.strictObject({ header: z.string(), index: z.number().int(),
+                                      samples: z.array(z.string()) })), // sample values for the grid
     rows:    z.array(z.array(z.string())),                          // raw cell matrix, header-relative
   }),
   errorCodes: ["unreadable-file", "empty-sheet", "invalid-header-selection"],
@@ -277,18 +305,21 @@ export const MatchSpreadsheet = defineTaskContract({
   effect: "read",
   provenance: { default: "derived" }, // carries subject+roster sources/oldest observedAt
   /** D8: a roster match may feed a WRITE (an OnBase upload keyed on the matched
-   *  EID). A stale match must not silently ride into that write on resume, so
-   *  this is a real, finite budget — NOT Infinity. */
-  freshness: { defaultMaxAgeMs: 24 * 60 * 60_000 }, // 24h — older roster is re-fetched
-  input:  z.object({
-    subjects: z.array(z.object({ subjectId: StableItemId,
+   *  EID). A stale match must not silently ride into that write on resume. The base maximum is 24h;
+   *  a consuming workflow may narrow it, never widen it without a reviewed policy change. */
+  freshness: { defaultMaxAgeMs: 24 * 60 * 60_000 },
+  subject: { kind: "none", reason: "pure cross-source roster matching" },
+  scenarios: ["roster/match/exact-eid", "roster/match/name-only", "roster/match/ambiguous",
+              "roster/match/name-eid-conflict", "roster/match/no-match"],
+  input:  z.strictObject({
+    subjects: z.array(z.strictObject({ subjectId: StableItemIdSchema,
                                  name: fields.fullName.schema.optional(),
                                  eid:  fields.eid.schema.optional() })),
-    rosterFileRef: FileRef,
+    rosterFileRef: FileRefSchema,
     mapping: ColumnMapping,                     // the roster is operator-mapped too (§2)
   }),
-  output: z.array(z.object({
-    subjectId:       StableItemId,
+  output: z.array(z.strictObject({
+    subjectId:       StableItemIdSchema,
     matchedEid:      fields.eid.schema.nullable(),
     matchConfidence: z.number().min(0).max(1),  // 0–1 — same axis as today
     tier:            z.enum(["high", "medium", "low"]),   // ported bucketing (below)
@@ -337,6 +368,52 @@ registry; descriptor coverage validates every source/key path and sink id.
 Input/download `FileRef` values are likewise content-addressed artifact references created through
 doc 01's atomic writer, not arbitrary mutable paths.
 
+### 4.2 Contact/address normalization is typed advice, not a silent fallback
+
+The old path mixes deterministic phone/state/ZIP cleanup, Census→Nominatim fallback, and optional
+LLM inference inside `services/llm/normalize-contact.ts`; provider failure collapses to `null`, which
+is indistinguishable from “nothing needed changing.” The rebuild exposes one reusable
+`normalization/normalize-contact` read contract whose output names what happened:
+
+```ts
+const ContactFieldIdSchema = z.enum([
+  "relationship", "cellPhone", "homePhone", "address1", "address2",
+  "city", "state", "postalCode", "country",
+]);
+const NormalizationChangeSchema = z.strictObject({
+  field: ContactFieldIdSchema,
+  before: RedactedValueSchema,
+  after: CanonicalJsonValueSchema,
+  source: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("rule"), ruleId: NormalizationRuleIdSchema }),
+    z.strictObject({ kind: z.enum(["census", "nominatim"]),
+                     observedAt: IsoInstantSchema, evidence: EvidenceRefSchema }),
+    z.strictObject({ kind: z.literal("ai"), provider: AiProviderIdSchema,
+                     model: AiModelIdSchema, confidence: z.number().min(0).max(1) }),
+  ]),
+});
+export const NormalizeContactOutputSchema = z.strictObject({
+  normalized: ContactFieldsSchema,
+  changes: z.array(NormalizationChangeSchema),
+  disposition: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("complete") }),
+    z.strictObject({ kind: z.literal("advisory-unavailable"),
+                     unavailable: z.array(ProviderFailureSchema).nonempty() }),
+    z.strictObject({ kind: z.literal("ambiguous"),
+                     fields: z.array(ContactFieldIdSchema).nonempty() }),
+  ]),
+});
+```
+
+Deterministic rules execute first. Provider-backed paths are individually observed and recorded;
+one provider may try the next provider only through a declared, scenario-pinned provider policy.
+Exhaustion is `advisory-unavailable`, not an empty change list. AI/geocoder values never overwrite
+OCR/input silently: the review gate shows before/after/source/confidence and accepted changes become
+operator-correction provenance. Ambiguous or unavailable **mandatory** fields block approval; truly
+optional suggestions may yield `done-with-warnings` only under doc 12's evidence rule. The contract
+uses a finite freshness budget for provider-derived facts and registers rule-only, each-provider,
+rate-limit/failure, malformed-model-output, ambiguous, and approval/rejection scenarios.
+
 ---
 
 ## 5. Intake pipeline: mapped dataset → N inputs, with a pre-run rejection review
@@ -356,16 +433,196 @@ operator ColumnMapping ────────┼─► coerce+parse each row �
                                         fan out `valid` as N inputs → operation coordinator + members
 ```
 
-**The pre-run rejection review is mandatory — nothing half-launches (charter fail-loud).** `Run` is
+Before enqueue, validation produces one immutable, strict `IntakePlanManifest`:
+
+```ts
+const RejectLocation = {
+  rejectId: RowRejectIdSchema,
+  sourceRow: z.number().int().positive(),
+  code: IntakeErrorCodeSchema,
+  reason: z.string().min(1),
+};
+export const RowRejectSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ ...RejectLocation, kind: z.literal("unmapped-required"),
+                   field: IntakeTargetFieldIdSchema }),
+  z.strictObject({ ...RejectLocation, kind: z.literal("cell-coercion"),
+                   field: IntakeTargetFieldIdSchema, column: SourceColumnRefSchema,
+                   raw: RedactedValueSchema }),
+  z.strictObject({ ...RejectLocation, kind: z.literal("field-schema"),
+                   field: IntakeTargetFieldIdSchema, column: SourceColumnRefSchema,
+                   raw: RedactedValueSchema, issues: z.array(BoundaryIssueSchema).nonempty() }),
+  z.strictObject({ ...RejectLocation, kind: z.literal("workflow-schema"),
+                   path: WorkflowInputPathSchema, issues: z.array(BoundaryIssueSchema).nonempty() }),
+  z.strictObject({ ...RejectLocation, kind: z.literal("duplicate-identity"),
+                   itemId: ItemIdSchema, collidingSourceRows: z.array(z.number().int().positive()).min(2) }),
+  z.strictObject({ ...RejectLocation, kind: z.literal("cross-field"),
+                   paths: z.array(WorkflowInputPathSchema).min(2) }),
+]);
+
+export const IntakePlanManifestSchema = z.strictObject({
+  version: z.literal(1),
+  planId: IntakePlanIdSchema,
+  workflow: WorkflowIdSchema,
+  source: z.strictObject({ artifactId: ArtifactIdSchema, sha256: Sha256Schema,
+                           originalName: z.string().min(1) }),
+  mappingFingerprint: Sha256Schema,
+  mappingSnapshotHash: Sha256Schema,
+  workflowContractFingerprint: FingerprintSchema,
+  createdAt: IsoInstantSchema,
+  totals: z.strictObject({ sourceRows: z.number().int().nonnegative(),
+                           valid: z.number().int().nonnegative(),
+                           rejected: z.number().int().nonnegative(),
+                           rejectionEvents: z.number().int().nonnegative(),
+                           excluded: z.number().int().nonnegative(),
+                           corrected: z.number().int().nonnegative() }),
+  /** Exactly one current disposition per source row; totals are derived from this, never guessed
+   * from the event arrays. */
+  sourceRowDispositions: z.array(z.strictObject({
+    sourceRow: z.number().int().positive(),
+    disposition: z.enum(["valid", "rejected", "excluded"]),
+    itemId: ItemIdSchema.optional(),
+    currentRejectIds: z.array(RowRejectIdSchema),
+  })),
+  validRows: z.array(z.strictObject({ sourceRow: z.number().int().positive(),
+                                     itemId: ItemIdSchema, inputHash: Sha256Schema,
+                                     parsedInput: CanonicalJsonValueSchema })),
+  rejectedRows: z.array(RowRejectSchema),
+  /** Corrections never rewrite the source artifact. The parsed value is revalidated through the
+   * canonical field and full workflow schemas before it appears in validRows. */
+  corrections: z.array(z.strictObject({
+    sourceRow: z.number().int().positive(),
+    field: IntakeTargetFieldIdSchema,
+    original: RedactedValueSchema,
+    correctedValue: CanonicalJsonValueSchema,
+    correctedAt: IsoInstantSchema,
+  })),
+  exclusions: z.array(z.strictObject({ sourceRow: z.number().int().positive(),
+                                      reason: z.string().min(1), operatorConfirmedAt: IsoInstantSchema })),
+});
+```
+
+`parsedInput` is stored under the generic canonical-JSON envelope only because manifests cover many
+workflows. No caller casts or reads it as a workflow input directly: manifest load, rerun, and
+enqueue resolve the named descriptor and parse each value through that descriptor's exact current
+transform-free `canonicalInput` schema (D62), never its ingress parser. The stored workflow
+fingerprint controls whether that is a same-contract replay or a
+visible migration/diff. A parse failure quarantines the manifest; it never reaches a task bind.
+
+The manifest is the rerun/explanation authority: it proves which file and mapping were used, which
+rows became which stable items, which cells were corrected without rewriting the source, which rows
+were rejected or explicitly excluded, and the exact validated input hashes. Invariants verify that
+every source row is represented exactly once in the final valid/rejected/excluded disposition and every
+correction points to that row's source value. `rejectedRows` and `rejectionEvents` are immutable
+validation history and may overlap a later corrected valid row; consequently the manifest stores a
+separate current disposition per source row (`valid|rejected|excluded`) and does not infer it by
+adding historical event arrays. Schema refinement requires `itemId` only for `valid`, at least one
+current reject id only for `rejected`, neither for `excluded`, unique source-row coverage from
+`1..totals.sourceRows`, exact derived totals, and `valid > 0` before enqueue. “Rerun with existing data” references this manifest
+and immutable artifact; it revalidates against the current workflow fingerprint and shows a diff
+before creating a new run. It never silently reparses a changed file or applies a newer mapping.
+
+**The pre-run rejection review is mandatory—nothing silently half-launches (charter fail-loud).** `Run` is
 disabled until (a) every required canonical field is bound and (b) the operator has seen the reject
-list. Each `RowReject` carries `{ rowIndex, field, column, value, reason }`. The operator either
+list. `RowRejectSchema` is a strict discriminated union whose variants are `unmapped-required`,
+`cell-coercion`, `field-schema`, `workflow-schema`, `duplicate-identity`, and `cross-field`; every
+variant carries source row, canonical field/path when applicable, source column id/header,
+redacted raw value, stable error code, and legible reason. The operator either
 **fixes the cell in the intake grid** (re-coerces that row live) or **excludes it** — an unresolved
 rejection is never silently dropped into or out of the run. Only the `valid` set fans out; a partial
-file never produces a run where some rows silently vanished.
+file may run only after every non-valid row has a durable rejection or explicit exclusion in the
+manifest. Coordinator, all member inputs, stable ids, dependency rows, and the intake manifest are
+inserted atomically; a single invalid input/constraint failure creates none of them.
 
-This is the structural version of "the parsed+mapped dataset becomes N workflow inputs": each input
-is `field.schema`-valid by construction (§1), so the fan-out cannot enqueue a member the workflow
-input schema then rejects.
+This is the structural version of "the parsed+mapped dataset becomes N workflow inputs": each
+assembled input has passed the full strict workflow schema, so the fan-out cannot enqueue a member
+the workflow input schema then rejects. The coordinator evidence receipt displays source/valid/
+excluded/enqueued counts plus rejection-event and correction history and links to the manifest; `done` can never imply every source row
+ran when exclusions exist.
+
+### 5.1 Mobile photo capture is a recoverable artifact-intake source
+
+Capture is an input-acquisition service, not a workflow and not an in-memory callback. Its strict
+SQLite authority records are:
+
+```ts
+export const CaptureSessionSchema = z.strictObject({
+  sessionId: CaptureSessionIdSchema,
+  tokenDigest: Sha256Schema,                 // raw phone token is never logged/projected
+  workflow: WorkflowIdSchema,
+  formType: OcrFormTypeSchema.optional(),
+  contextHint: z.string().max(200).optional(),
+  state: z.enum(["open", "finalizing", "finalized", "failed", "discarded", "expired"]),
+  version: z.number().int().positive(),
+  createdAt: IsoInstantSchema,
+  connectedAt: IsoInstantSchema.optional(),
+  expiresAt: IsoInstantSchema,
+  photoRefs: z.array(z.strictObject({
+    photoId: CapturePhotoIdSchema,
+    artifact: ArtifactRefSchema,             // immutable converted JPEG/PNG bytes + digest
+    ordinal: z.number().int().nonnegative(),
+    originalMediaType: MediaTypeSchema,
+  })),
+  finalArtifact: ArtifactRefSchema.optional(),
+  handoff: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("pending") }),
+    z.strictObject({ kind: z.literal("enqueued"), runId: RunIdSchema,
+                     intakePlanId: IntakePlanIdSchema }),
+    z.strictObject({ kind: z.literal("failed"), failureId: FailureIdSchema }),
+  ]),
+});
+
+/** D67 command-family arm; each payload is strict and commandId/requestedAt/reason come from doc
+ * 03's CommandEnvelope. Upload bytes are accepted into a temporary bounded request stream and
+ * become an ArtifactRef before this authority mutation commits. */
+export type CaptureCommandRequest = CommandEnvelope & (
+  | { type: "capture-upload" | "capture-replace";
+      target: { sessionId: CaptureSessionId; expectedVersion: PositiveInt };
+      payload: CapturePhotoMutationPayload }
+  | { type: "capture-reorder";
+      target: { sessionId: CaptureSessionId; expectedVersion: PositiveInt };
+      payload: { orderedPhotoIds: readonly CapturePhotoId[] } }
+  | { type: "capture-delete";
+      target: { sessionId: CaptureSessionId; expectedVersion: PositiveInt };
+      payload: { photoId: CapturePhotoId } }
+  | { type: "capture-finalize" | "capture-retry-finalize" | "capture-discard";
+      target: { sessionId: CaptureSessionId; expectedVersion: PositiveInt }; payload?: never }
+);
+```
+
+- **Every mutation is versioned and idempotent.** Upload/replace/reorder/delete/finalize/discard
+  takes a command id plus expected session version. Duplicate phone retries return the prior result;
+  stale ordering/finalize requests conflict and reload. These are doc 03 D67
+  `CaptureCommandRequest` arms, not route-local mutations. Only `finalized|discarded|expired` are
+  terminal and never reopen; `failed` is a durable recoverable state whose Retry Finalize command
+  creates a new finalization generation/outbox under CAS without changing photo identity/order.
+- **Photos are immutable refs.** HEIC conversion happens before acceptance; the server validates
+  decoded image type/dimensions/size, writes through the content-addressed artifact writer, and
+  records only refs/order. Replace changes the ref; it never overwrites bytes. Empty, corrupt,
+  oversized, duplicate, and conversion-failure scenarios are explicit.
+- **Finalize is an outbox, not fire-and-forget.** The finalize command atomically sets
+  `state:"finalizing"` and inserts one stable-keyed bundle/handoff outbox. A serialized projector
+  builds temp PDF → validates page count/digest → content-addressed atomic publish, then one SQLite
+  transaction records `finalArtifact`, creates the immutable intake/OCR manifest and downstream run,
+  marks the outbox done, and sets `finalized`. Crash at every boundary replays the same outbox. The
+  phone says “Sent” only after polling/receiving `finalized`; a failure is `failed` with Retry
+  Finalize/Discard—not silently converted to `discarded`.
+- **Restart and expiry are authoritative.** Open/finalizing/failed sessions reload after dashboard
+  restart. The Clock drives the 15-minute pre-connect and 60-minute active idle budgets; expiry is a
+  durable transition and notification. Artifact retention distinguishes active evidence from
+  expired/discarded staging, with cleanup only after the recorded retention boundary.
+- **The handoff uses the same intake proof.** The bundled PDF gets a `FileRef`, source digest,
+  capture-session id, ordered photo digests, and form/workflow binding in its manifest. The
+  downstream descriptor parses it like any upload; no special `pdfPath` or callback bypass exists.
+- **Network scope is explicit.** The loopback dashboard starts no public listener by default. When
+  the operator starts capture, a short-lived ingress/tunnel may serve only the phone asset and
+  token-scoped manifest/upload/replace/reorder/delete/finalize/status routes. Start/list/discard,
+  queue, files, settings, evidence, and commands remain loopback-only (doc 12 §7).
+
+Mandatory scenarios cover restart between every state, duplicate/reordered phone requests, expired
+token, HEIC conversion, corrupt/empty image, bundle failure/retry, crash before/after artifact
+publish and before/after enqueue commit, wrong form/workflow binding, and attempts to reach a
+non-capture route through the phone origin. The dashboard shows session state, photo count/order,
+bundle digest/page count, handoff run, expiry, and structured failure.
 
 ---
 
@@ -428,12 +685,14 @@ resume can be triggered concurrently (a watcher gate resolving, an operator else
 Retry). **Rule: the resume claim is the fence; the Edit-Data save is a compare-and-swap against it.**
 
 - The operator loads the snapshot at generation `G` (`attempt` + span-seq).
-- On Save, the injected-checkpoint write is a **conditional SQLite transaction**: it commits only if
+- On Save, the UI issues doc 03's standard `edit-checkpoint` command. Its injected-checkpoint write
+  is a **conditional SQLite transaction**: it commits only if
   the run is still in a non-executing state at generation `G` — i.e. **no `run.claimed` for a newer
   attempt** has landed and the gate has not resolved since load.
 - If a resume claimed the run between load and save, the CAS **fails and the save is rejected
   loudly**: *"run `sp-0912-4c2e` resumed while you were editing — your edit was not applied; reload
-  the current state."* The **resume wins**; the edit is dropped, never silently merged into a
+  the current state."* The **resume wins**; the command is rejected and the proposed patch remains
+  only in the local editor for copy/review, never silently merged into a
   now-executing run.
 - Symmetrically, the resume path never blocks on an open editor — it just claims; the open editor
   discovers it is stale via the SSE `run.claimed` signal (§6.1) and disables Save before the operator
@@ -468,16 +727,19 @@ endpoints.
 
 | # | Silent-fallback vector | Mechanical guard |
 |---|---|---|
-| 1 | **Fuzzy header auto-applies a wrong binding** (Name→fullName when Legal Name is the real one) | Suggestions are hints only; a guard asserts `ColumnMapping.bind` is written ONLY by an operator action, never by the scorer. Fingerprint reuse pre-loads a *visible* mapping the operator still confirms (§2.3) |
+| 1 | **Fuzzy header auto-applies a wrong binding** (Name→fullName when Legal Name is the real one) | Suggestions are hints only; a guard asserts `ColumnMapping.bindings` is written ONLY by an operator action, never by the scorer. Fingerprint reuse pre-loads a *visible* mapping the operator still confirms (§2.3) |
 | 2 | **Coercion swallows a bad cell** (a malformed EID becomes `""` or a guessed value) | `field.coerce` throws a per-cell error naming row/column/value; the cell becomes a **row rejection** (§5), never a substituted default. `fail-loud-catch-default` + `nullish-literal-data-fallback` ratchets extend to `temp_src/intake` from day one |
 | 3 | **Mapping reuse on a changed/duplicate layout** | unambiguous canonical-JSON fingerprint; bindings resolve by header+occurrence; missing columns unmap; duplicate headings require visible sample confirmation; index never silently binds |
 | 4 | **A rejected row silently vanishes (or a partial file launches)** | `Run` is disabled until the reject list is reviewed; only the `valid` set fans out; each reject carries row/column/value/reason and must be fixed or explicitly excluded (§5) — nothing half-launches |
 | 5 | **An Edit-Data save races a resume and clobbers a running item** | The save is a CAS against the resume-claim fence at generation `G`; a concurrent claim → **loud reject, resume wins** (§6.4). Running-task checkpoints are read-only outright (§6.2) |
-| 6 | **An intake projection re-declares a regex looser than its canonical field** | Guard asserts every *mapped* input key points at the same `CanonicalField.schema` object; non-intake workflow fields remain legal. The full assembled input still parses through the workflow schema; EID divergence is an explicit migration decision (§1/§9) |
+| 6 | **An intake projection re-declares a regex looser than its canonical field** | Guard asserts every *mapped* input key points at the same `CanonicalField.schema` object; non-intake workflow fields remain legal. The full assembled input still parses through the workflow schema; every migrated legacy EID fixture is audited against canonical `Eid`, and a truly distinct identifier must get a separately named/validated domain type (§1) |
 | 7 | **Roster match fabricates an EID on no-match** | `matchedEid` is `nullable`; `mismatch:"no-match"` is a first-class output; the caller falls through to person-lookup — a guard bans `?? "<eid-literal>"`-shaped fallbacks in the roster impl |
 | 8 | **A stale roster match rides into a write on resume** | finite field freshness + declared DAG walk refuses stale facts feeding a commit; an unrelated Edit Data patch cannot reset their observed time |
 | 9 | **Novel headers never reach mapping** | parser candidate generation is alias-independent; fixture with zero known aliases must reach header selection + mapping rather than throw |
 | 10 | **Edit Data changes identity or write proof** | Default read-only; descriptor allowlists exact node+field paths. Guard rejects item/match/idempotency/proof/provenance paths and paths absent from the producing schema; the full patched output re-parses |
+| 11 | **A rerun called “same data” actually uses a changed file, mapping, or workflow schema** | rerun references an immutable `IntakePlanManifest`; artifact/mapping/contract hashes are compared and any difference requires a visible new-plan diff + confirmation |
+| 12 | **A partial intake looks like all source rows completed** | coordinator/evidence receipt always shows source, valid, rejected, explicitly excluded, enqueued, and terminal counts; manifest/member insert is atomic and counts are invariant-checked |
+| 13 | **Two target fields sharing one canonical concept overwrite each other** | bindings key on the intake projection's stable target-field id and also record its canonical field id; duplicate targets, changed projection fingerprints, or canonical mismatch fail before validation (D66) |
 
 Honest residual (no full mechanical guard): the redesigned roster *scoring* (0–1 confidence) is only
 verified at the roster migration (order 3) live-verify — the *tiering* ports verbatim, the *scoring*
@@ -501,7 +763,8 @@ Operator uploads `WorkStudy_July.xlsx` targeting the work-study workflow.
    - row 17, column `"Employee ID#"` → `eid`: value `"10-4567"` — not a UCPath EID (must be 10xxxxxx).
    - row 31, column `"Employee ID#"` → `eid`: value `"TBD"` — not numeric.
 4. **Fix in the intake grid.** The operator corrects row 17's cell to `10456712` (re-coerces live →
-   valid) and row 31 to `10998801` (valid). Now **42 valid, 0 rejected**. The mapping is saved under
+   valid) and row 31 to `10998801` (valid). Now **42 valid, 0 unresolved**; the immutable manifest
+   still records two rejection events and two corrections linked to the original cells. The mapping is saved under
    `config/column-mappings/work-study/<fingerprint>.json` for next week's identically-shaped export.
 5. **Run.** `Run` enables; 42 inputs fan out as an `operation` coordinator + 42 `operation-member`
    rows, each input `WorkStudyInput`-valid by construction.
@@ -515,17 +778,19 @@ Operator uploads `WorkStudy_July.xlsx` targeting the work-study workflow.
 
 ---
 
-## 9. Open questions for the operator / orchestrator
+## 9. Settled intake defaults
 
-1. **Canonical EID width** — adopt `/^10\d{6}$/` everywhere (breaking work-study/separations' looser
-   `/^\d{5,}$/`), or add a distinct `legacyEid` field? (§1 flag.) Proposed: adopt canonical; audit the
-   loose consumers at their migration.
+1. ~~Canonical EID width~~ — **resolved 2026-07-22:** adopt `/^10\d{6}$/` everywhere and audit the
+   loose legacy consumers at migration. A genuinely different source identifier gets a distinct
+   domain type and explicit conversion; there is no `legacyEid` escape hatch (§1).
 2. ~~Mapping storage location~~ — **resolved 2026-07-21:** versioned, schema-validated JSON at
    `config/column-mappings/<workflow>/<fingerprint>.json`, written temp+fsync+rename. It is
    operator-greppable configuration, not run authority; malformed files fail loud and never fall
    back to a nearest mapping.
-3. **Roster freshness budget** — is 24h the right `maxAgeMs` for a roster match feeding a write, or
-   should it key off the roster file's mtime vs a fixed window? (§4.)
+3. ~~Roster freshness budget~~ — **resolved 2026-07-22:** 24h is the conservative base maximum and
+   consumers may narrow it. File mtime is not truth (copying a file changes it); freshness is the
+   observation time of the immutable content-addressed roster artifact. Crossing the budget requires
+   a new artifact/match or an allowed audited field override, never an mtime substitution (§4).
 4. ~~Suggestion engine source of truth~~ — **resolved:** aliases live on `CanonicalField`; the
    suggestion engine consumes them but cannot write a mapping without operator action.
 5. ~~Edit-Data on a `done` item~~ — **resolved:** read-only. Correction/rerun is always the separate
