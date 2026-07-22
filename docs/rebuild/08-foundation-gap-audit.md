@@ -1,16 +1,48 @@
 # 08 — Foundation Gap Audit: the unowned cross-cutting concerns
 
-Status: **Phase 0 design — for operator/orchestrator review.** A principal-architect pass over the
+Status: **historical gap-discovery memo; superseded at its contract seams by 2026-07-21 Round 4.** A principal-architect pass over the
 four written design docs (01 task-contract, 02 workflow-model, 03 tracker-dashboard, 05 execution),
 the charter (`00`), and the binding reconciliation (`04` — D1 ownership matrix). This doc **owns
 nothing** yet: it is a findings-and-design memo that names what the foundation of a production,
 single-operator, **real-HR-transaction** system needs that no doc currently owns adequately, ranks
 the gaps by risk, and designs the top three. Docs 06 (data-intake/Edit-Data) and 07 (master-plan)
-are planned-but-unwritten and are **not** counted as gaps here.
+were planned-but-unwritten at the time. This file is evidence, not an implementation plan; current
+contracts live in 01–03 and 09–11, with build order in 07.
 
 Every finding is grounded in the as-built code (file:line cited), not imagined — because for a
 rebuild that ports live-verified leaf knowledge, a concern we fail to *own* is one we will
 re-derive badly or drop, and a dropped write-safety concern is a real wrong-person HR transaction.
+
+## 2026-07-21 closure / amendment matrix
+
+The external full-plan review found that the first closure still had unsafe seams. Current owners
+must implement these amended outcomes; older sketches below that say `mutate`, read-safe fill,
+partial-unique committed exemption, direct ledger append, schema-hash-only resume, or proxy bind
+walking are explicitly retired.
+
+| Gap / review seam | Binding closure |
+|---|---|
+| fill→submit vs fresh page leases | separate `prepare`/`commit` contracts inside one transaction-scoped lease (00/01/02) |
+| sequential duplicate after a committed intent | permanent `(system,idempotency_key)` authority across attempting/retryable/committed/observed-present states (09) |
+| save/upload recovery proof | every completion arm has one typed proof schema plus typed output reconstruction for normal+recovery paths (09/10) |
+| DB commit→ledger/span crash seam | one SQLite commit creates intent/checkpoint/ledger+span outboxes (09) |
+| concurrent ledger chain and tail truncation | serialized projector plus independent SQLite tail anchor (09/03) |
+| output branches/fan-out/gates absent | typed branch, fork/join, child-run, subscription/resolver nodes in the foundation DAG (02/03) |
+| operator edits refresh stale facts | field-level provenance; edits never refresh untouched live facts (02/06) |
+| proxy dependency under-approximation | declared DAG edges with runtime read auditing (02) |
+| schema-only deploy resume | descriptor/contract/implementation fingerprints and explicit checkpoint migrations (02) |
+| descriptor not exhaustive/type erasure | complete projection fields and concrete workflow-target input generics (02/03/10) |
+| layer/phase cycles | write type shell before commit contracts; core registry above workflows; no domain→workflows import (07) |
+| migration timestamp/fallback | per-run engine+generation and legacy SPA over unified compatibility API (03/07) |
+| session interference | context-exclusive UCPath transactions; OnBase lease covers context lifetime (05) |
+| novel/duplicate headers | generic header candidates + operator choice; header+occurrence ids and structured fingerprint (06) |
+| guard self-protection overclaim | accidental-shrink protection only; explicit removal decision/review for coordinated changes (10) |
+| config shape contradiction | plain resolver vs provenance resolver; executable nested defaults; immutable run snapshot (11) |
+| charter mini-store vs system-only task ids | `workflow:<descriptor-id>` headless read stores; all browser/prepare/commit tasks remain system-owned (01/02, D42) |
+| probe navigation destroys staged form | stable commit input + separate preflight read lease; prepare→age-check→fence→commit stays on transaction lease (02/05/09, D43) |
+| parked write “force done/retry” bypass | only schema-valid confirmed-present or generation-locked audited confirmed-absent resolution (02/03/09, D44) |
+| read task hides workbook append | content-addressed immutable read artifacts; mutable files use stable-keyed blocking outbox projectors (01/03/06, D45) |
+| pre-existing external transaction pollutes write ledger | `observed-present` blocks clicks and checkpoints typed `already-present`, but emits no write-ledger entry (09, D30/D31) |
 
 ---
 

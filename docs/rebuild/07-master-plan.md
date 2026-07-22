@@ -1,6 +1,6 @@
 # 07 — Master Plan: the single phased build order for `temp_src`
 
-Status: **Phase 0 — the consolidated build plan.** This is the ONE plan the charter demands
+Status: **Phase 0 reset — revised build plan, 2026-07-21. No `temp_src` implementation exists.** This is the ONE plan the charter demands
 (§"One master plan"): every design doc converges here, and there must never be a competing plan.
 
 **What this doc is.** It *sequences* and *indexes* the build. It states the order phases run in, the
@@ -29,15 +29,15 @@ Every concept has exactly one owner (reconciliation `04` D1). Reference the owne
 
 | Concept | Owner |
 |---|---|
-| Task contract (`defineTaskContract`/`defineTask`), contract/impl split (D3), `<system>/<verb-object>` id grammar + closed `SystemId` union (D2), error taxonomy, effect/dry-run mechanics (D6/D7), retry, decoration, stores + service stores (D4), session providers + login signature, `stores/common/` leaf homes | **Doc 01** |
+| Task contract (`defineTaskContract`/`defineTask`), contract/impl split (D3), task-namespace grammar + closed `SystemId` union (D2), error taxonomy, three effects/dry-run mechanics, retry, decoration, system/service stores + pure workflow mini-stores, session providers + login signature, `stores/common/` leaf homes | **Doc 01** |
 | Workflow builder API (single), descriptor shape, `RunEnvelope`, run-state machine incl. gates/parks (D5), checkpoint/resume + freshness walk (D8), label precedence (D16) | **Doc 02** |
 | Span/event wire schema (D10), notes stream, storage layout, SQLite projection role (D14), SSE wire shapes, lift adapter + flip plan (D12/D13), completion (fan-out/approval) union (D11) | **Doc 03** |
-| Binding cross-doc reconciliation (D1–D22, both rounds) | **Doc 04** |
+| Binding cross-doc reconciliation (D1–D45, including 2026-07-21 Round 4) | **Doc 04** |
 | Scheduler/lanes/fairness/backpressure, session pool + page leases, executor process model, speed/sleep-tax contract, page-isolation invariant | **Doc 05** |
 | Data-service systems: CSV/PDF extraction + roster matching stores, operator column mapping, Edit Data checkpoint UI | **Doc 06 (written, pending approval)** |
 | Cross-cutting gap findings memo (owns nothing — a design input) | **Doc 08** |
-| Write-safety contract (`WriteSafety`, `ProbeVerdict`, completion union), kernel five-beat write sequence, `write_intents` fence + recovery probe (D17–D19), immutable ledger (D21) | **Doc 09** |
-| Guard/test architecture suite: ratchet port map, the four safety guards, descriptor-coverage crosswalk, guard-of-guards manifest, TDD tiers, stub + live lanes | **Doc 10** |
+| Write-safety contract, permanent-key intents, typed proof, atomic outboxes/recovery, serialized anchored ledger | **Doc 09** |
+| Guard/test architecture suite: ratchet port map, safety guards, descriptor-coverage crosswalk, guard-of-guards manifest, TDD tiers, stub + live lanes | **Doc 10** |
 | The Clock (sole time source), config resolver (env>settings>default), per-run prod/test instance (D6-adjacent), fiscal-year rollover, secrets accessor | **Doc 11** |
 
 ### 0.3 Standing rule — each completed phase documents itself
@@ -51,39 +51,55 @@ sub-systems get new docs or amend existing ones; stale prose is corrected, never
 
 ## 1. Dependency graph of the base
 
-The base/kernel is built along one critical path, with the guard umbrella (doc 10) scaffolded
-alongside from the first commit (charter: "same quality umbrella from day one").
+The base/kernel is built along one critical path. Guard plumbing lands before the tree; the first
+real `temp_src` leaf and every applicable type/lint/architecture arm activate in the same commit
+(charter: "same quality umbrella from day one").
 
 ```
-        ┌─────────────────────────────────────────────────────────────────────┐
-        │ GUARD UMBRELLA (doc 10) — scaffolded from commit 1, extended each step │
-        │  ported ratchets → temp_src (zero-allowlist new) · guard-manifest ·    │
-        │  descriptor-coverage · the 4 safety guards land as their targets exist │
-        └─────────────────────────────────────────────────────────────────────┘
-              │ enforces ▲ every step below
-   11 ────► 01 ────► 02 ────► 03 ────► 05 ────► 09
- clock/    task     descr.   span/    exec     write-
- config/   contract builder  event    kernel   safety
- secrets   + stores + run-    + tracker + pool   + ledger
-                    state
+  guard scaffold
+        │
+        ▼
+  domain + clock/config snapshot
+        │
+        ▼
+  write-safety TYPE SHELL + state/outbox/ledger-head schema
+        │                    (owned now; no later forward reference)
+        ▼
+  task contracts/stores/sessions (read · prepare · commit)
+        │
+        ▼
+  complete typed workflow DAG + descriptor + completion/gate types
+        │
+        ├────────► core composition-root registry
+        │                         │
+        ▼                         ▼
+  spans/lift/projections ◄── executor/checkpoints/write sequencer
+        │                         │
+        └────────────┬────────────┘
+                     ▼
+          dashboard/client projection + intake UI
 ```
 
-**Critical path: 11 → 01 → 02 → 03 → 05 → 09.** Justification:
+**Critical path: guard → domain/config → write types/storage → task/store → workflow graph →
+registry/executor/events → dashboard.** Justification:
 
 - **11 (clock/config/secrets) is the root.** Every timestamp (spans, checkpoints, trace ids, fence),
   every URL/timeout/fiscal date, and every credential reads through it. Building 01+ on raw
   `new Date()`/`process.env` would require re-threading later; the `clock-single-source` and
   `secrets-single-source` guards must be green from the first `temp_src` file.
-- **01 before 02** — the descriptor (02) composes task *contracts* (01, D3's client-safe half); the
+- **Write-safety types/storage precede commit task contracts.** `CommitTaskContract` cannot refer to
+  a later-owned placeholder. The dependency-free `WriteSafety`/proof types and SQLite authority/
+  outbox schema land first; sequencing behavior lands with the executor later.
+- **01 before 02** — the descriptor (02) composes task contracts; the
   builder's `Steps` type map (D15) is typed against contracts.
-- **02 before 03** — the span-path grammar, verdict mappings, gate declarations, and completion
-  program all key off doc 02's descriptor + run-state machine; doc 03 consumes them.
-- **03 before 05** — the executor emits doc 03's worker/run/task spans + notes; the session pool's
-  budgets feed doc 03's executor-card projections.
-- **05 before 09** — the write-safety five-beat sequence (probe→fence→submit→capture→commit) is
-  driven by the executor; the `write_intents` mutex is load-bearing for the *parallel* kernel (D18).
-  09 also needs 02's park state, 03's `ledger/` dir + `write_intents` system-of-record table (D21),
-  and 01's mutation primitive. It is therefore last of the base.
+- **The 02/03 completion seam lands together in 1e.** Doc 03 owns the bundle-safe completion-program
+  union while doc 02 owns the descriptor/gate graph that contains it; both domain types land in the
+  same work item. Doc 03's event/storage/projection implementation waits until 1g, so neither side
+  forward-declares a later contract.
+- **Registry is above workflows.** `core/workflow-registry.ts` imports descriptors/stores; domain
+  never imports workflows. The dashboard receives generated/server projections, never workflow modules.
+- **Executor and events co-evolve after the graph.** The executor emits events and owns transaction
+  sequencing; durable outbox contracts already exist, so neither layer forward-declares the other.
 - **10 is orthogonal, not sequential** — it is built alongside every step (guards land as their
   target concepts appear), never "at the end." Its own meta-guard (`guard-manifest`) is what stops
   the umbrella silently shrinking.
@@ -99,10 +115,10 @@ dashboard concern that lands later (doc 06, when the flip reaches it — §3.5).
 
 | Phase | Headline deliverable | Gate to exit |
 |---|---|---|
-| **0** | Foundation design complete + operator-approved | doc 06 written+approved; master-plan approved; deferred OQs logged to §b |
-| **1** | The base/kernel in `temp_src` under the full guard umbrella | `typecheck:all` + `test` + `test:architecture` green incl. all new guards; write-safety fixtures pinned |
-| **2** | person-lookup end-to-end on the new base | live dry-run reads real UCPath+CRM; descriptor-coverage + parity gate green |
-| **3+** | Per-workflow migration, one at a time (order §3.3) | each: §b questionnaire answered; live dry-run; old per-system code deleted; docs updated |
+| **0** | Corrected foundation design approved; empty rebuild tree | Round-4 decisions reconciled across 00–11; dependency/type proof spec approved |
+| **1** | The base/kernel in `temp_src` under the full guard umbrella | `typecheck:all` + `lint` + `test` + `test:architecture` green incl. all new guards; write-safety fixtures pinned |
+| **2** | read slice + transactional safety slice | person-lookup live; page-scoped dry-run and controlled commit/crash recovery/outbox/ledger proof green |
+| **3+** | Per-workflow migration, one at a time (order §3.3) | each: §b questionnaire answered; live dry-run + controlled write evidence where applicable; migrated leaves removed or explicitly retained for named legacy consumers; docs updated |
 
 ---
 
@@ -114,13 +130,12 @@ dashboard concern that lands later (doc 06, when the flip reaches it — §3.5).
 before any `temp_src` code is built (charter §Process: nothing is built before its design part is
 approved).
 
-**Status (2026-07-18).** Docs 01 (task contract), 02 (workflow model), 03 (tracker/dashboard), 04
-(reconciliation, both rounds), 05 (execution), 06 (data-intake & Edit Data), 08 (gap audit), 09
-(write-safety), 10 (guards), 11 (clock/config/secrets) are all **written and reconciled**. Three
-adversarial review rounds are folded into D1–D22.
+**Status (2026-07-21 reset).** Docs 00–11 have been reconciled to external-review Round 4
+(D26–D45). The abandoned skeleton and spike are deleted; Phase 1 has not started. This corrected
+design now awaits operator approval as one set.
 
-**What remains (the two operator sign-offs).**
-1. **Doc 06 — data-intake & Edit Data.** Written, pending approval. Scope from charter §11
+**What remains.**
+1. **Doc 06 — data-intake & Edit Data.** Corrected, pending approval with this document set. Scope from charter §11
    (first-class `extraction`/`ocr`/`roster` service systems + **operator-defined column mapping** →
    workflow zod input) + §12 (Edit Data over checkpoints — checkpoint state always live-visible +
    editable, schema-validated on save) + gap-audit `08`. It specifies: the column-mapping model
@@ -129,18 +144,16 @@ adversarial review rounds are folded into D1–D22.
    store (§5.7). **This plan does NOT block on doc 06** — the service *stores* are buildable under
    doc 01 in Phase 1; only the mapping + Edit-Data *UI* wait for doc 06, and they land in the
    dashboard-flip window (§3.5), not on the critical path.
-2. **This master plan** — operator approval of the build order itself, plus a decision on the
-   deferred operator open questions (below), each of which is otherwise carried into a §b checkpoint.
+2. **This revised master plan**—operator approval of the corrected build order and explicit
+   acceptance that the system-specific questions below block their named migrations, not Phase 1.
 
-**Deferred operator OQs (logged, resolved at the named point).** Kuali `save-verify` feasibility &
-OnBase `upload-verify`-vs-`unverifiableByPage` (doc 09 OQ1/OQ2 — resolved at oath-upload/onbase/
-separations migration); ledger tamper-evidence altitude (09 OQ3 — decided now: lightweight
-hash-chain, escalation deferred); per-workflow probe-policy (09 OQ4 / charter §b — per migration);
-per-run instance selection trigger (11 §4 — deferred until concurrent mixed targeting is needed);
-default lane count + UCPath write-tab widening (05 OQ1/OQ2 — Phase 2 default 4, widening is a live
-experiment at separations); checkpoint retention (doc 02 §9 OQ1 — resolved per D14: checkpoints
-pruned only on logical-item deletion, never on the 7-day JSONL clock; operator confirms at plan
-approval).
+**Deferred decisions (logged, resolved at the named point).** Kuali `save-verify` and OnBase
+`upload-verify` vs always-park (doc 09 OQ1/OQ2—before their first migration); per-workflow prewrite
+probe policy/elapsed budget and pending-termination sweep modeling (09 OQ4/OQ5—each §b questionnaire); canonical
+EID width and roster freshness budget (06 OQ1/OQ3—work-study/roster migration). Checkpoint retention
+is otherwise settled by D14—logical-item deletion only, never JSONL age—and needs plan-approval
+confirmation. Ledger altitude, config snapshots, four lanes, and context-exclusive transactions are
+already settled defaults, not open Phase-1 dependencies.
 
 **Exit criteria.** Doc 06 approved; this plan approved; the deferred-OQ list has an owner+resolution
 point each. No `temp_src` code before this gate.
@@ -157,65 +170,68 @@ parallel tree). The base is proven by tests + fixtures, not by a live workflow (
 
 | # | Work item | Owner | Key guards that must be green at this step |
 |---|---|---|---|
-| 1a | **Guard scaffold first.** `test:architecture` globs `temp_src/**`; `guard-manifest` + `gate-coverage` seeded; ported grep-ratchets extended to `temp_src` with **zero-allowlist for new code**, shrink-only for ported leaves | **Doc 10** §2/§5 | `guard-manifest`, `gate-coverage`, `fail-loud-catch-default`, `nullish-literal-data-fallback`, `wait-for-timeout-allowlist`, `inline-selectors`, `evaluate-named-fn`, `import-cycles`, `control-layering`(matrix), `code-conventions` |
-| 1b | **Clock + config + secrets.** `domain/clock.ts` (sole `new Date()` site), `domain/config/{schema,resolve}.ts` (env>settings>default once), `domain/secrets.ts`, fiscal-year `requireAnnualDates` fail-loud | **Doc 11** | `clock-single-source`, `fixed-clock-test-only`, `secrets-single-source`, `no-secret-values-in-logs`, `config-env-map-coverage`, `config-schema-snapshot` |
-| 1c | **Task contract + stores.** contract/impl split (D3), closed `SystemId` (D2), error taxonomy, effect/dry-run overloads (D7), `freshness` field (D8), `defineStore`, service stores (D4), `stores/common/` incl. the **mutation primitive** (dry-run throw), auth login task/adapter (D15). Port UCPath/CRM selectors as **re-exports** of `src/systems/*` (D15, kills dual-maintenance drift) | **Doc 01** | example-parse, reachability, bundle-safety, verb↔effect, `KnownTaskId` stringly-dispatch ratchet, `z.record` output ban, auth-boilerplate ban, undeclared-error-code type-test, mutation-primitive dry-run throw |
-| 1d | **Descriptor + builder + run-state machine.** ONE builder API, descriptor shape + `ICON_NAMES`, `RunEnvelope` (`dryRun` D6, `instance` scaffold), gates as run-state (D5), checkpoint store + freshness walk (D8) + resume scope (D9), label precedence (D16) | **Doc 02** | `descriptor-coverage` (the one guard retiring the ~5 parity guards), `no-positional-identity`, `fill-submit-pairing`, `dry-run-composition-submit-free` |
-| 1e | **Span/event layer + tracker.** span wire schema (D10), notes stream, `spans/`+`notes/`+`ledger/` storage layout, SQLite projection role + `write_intents` system-of-record table (D14/D21), SSE wire shapes, completion union (D11), **lift adapter** (D12) | **Doc 03** | `tracker-row-emission`, `deletion-tombstones`, identity-on-patch throw, undeclared-vocabulary emit-validation, sealed-completion, non-recursive wire type-test, real-tracker-day zero-quarantine replay |
-| 1f | **Execution kernel + session pool.** workflow-agnostic executor (ports claim/lease/heartbeat machinery), lanes, session pool + page leases, single-flight login, fairness + budgets, page-isolation invariant, OnBase cross-process lease (D15) | **Doc 05** | page-lease/no-module-`Page`, `newPage(` ratchet, single-flight login, onbase-`exclusive` lease, fan-out-starvation, sleep-budget, executor teardown soak, lane-overlap |
-| 1g | **Write-safety + ledger.** `WriteSafety` field + `ProbeVerdict`, five-beat sequence, fence + same-key mutex (D18), recovery probe (D17) + schema-validated backfill (D19), immutable hash-chained ledger (D21), `cli ledger verify` | **Doc 09** | `write-safety-contract` (completion-UNION, not receipt-only, D22), `mutate-routes-through-mutation` (D22), fence-before-click fixture, same-key concurrency fixture, crash-recovery 4-case fixture, ledger-integrity + retention-floor |
-| 1h | **Data-service stores** (`extraction`/`ocr`/`roster` contracts+impls, D4). Contract/impl only — mapping UI is doc 06/dashboard | **Doc 01** §3.4 (shapes), **Doc 06** (mapping, later) | reachability, bundle-safety, `example`-parse (service stores allow `sessions: []`) |
+| 1a | **Pre-tree guard plumbing.** With `temp_src` still absent, first extract shared walk/allowlist helpers as a zero-count-change commit; then add the reviewed inventory format and exact path-exemption tests. Do not add unmatched CLI globs or pretend an absent tree was scanned | **Doc 10** | helper-refactor commit preserves the measured architecture file/test count exactly; later intentional test additions are enumerated; inventory self-validation; nested-`scripts` fixture |
+| 1b | **First domain leaf + full coverage activation, atomically.** Add closed ids/base schemas and clock/config/secrets/run-snapshot types; in the same commit activate `temp_src` typecheck, full ESLint config+CLI coverage, whole-tree ratchets, and layer matrix. Each active scan resolves ≥1 file; `--no-error-on-unmatched-pattern` is banned | **Docs 01/10/11** | typecheck/lint/gate coverage; non-vacuity; clock/secrets/config; schema defaults parse from `{}`; resolver return-type tests |
+| 1c | **Write-safety type/storage shell.** `ProbeVerdict`, typed proof union, permanent-key intent/attempt tables, durable outbox and ledger-head schemas—dependency-free, before commit contracts refer to them | **Doc 09** | schema/DDL invariants; committed key cannot be reinserted; no untyped proof arm |
+| 1d | **Task contracts + stores/sessions.** read/prepare/commit overloads, mutation capability, freshness+provenance metadata, content-addressed artifact writer, store/session providers, context-lifetime exclusivity; selector re-exports | **Doc 01** | effect/capability, contract/impl, example, error-code, store reachability, no-`any`, artifact boundary, OnBase lifetime |
+| 1e | **Complete workflow DAG + descriptor.** Real-scale type spike first, then read/transaction/branch/fork-join/child-run/gate nodes, exhaustive descriptor, completion types, fingerprints, checkpoint provenance/migrations | **Docs 02/03 contract seam** | graph type suite at realistic scale; transaction pairing; descriptor projection matrix; no `WorkflowRef<unknown>`; no layer cycles |
+| 1f | **Core registry + executor/checkpoints/write sequencer.** Composition-root registry above workflows; claims/lanes; context-exclusive UCPath transactions; separate preflight read lease; permanent-key lookup/prepare/fence/commit/recovery; typed parked-intent resolution; atomic commit outbox | **Docs 02/05/09** | dry-run commit-free plan; probe cannot touch staged page; probe-age/CAS loss cause zero clicks; sequential+concurrent dedupe; crash injection; stale manual action; context-interference and lease-lifetime tests |
+| 1g | **Events/tracker/lift/projections + ledger projector.** spans/notes, unified projection, per-run migration authority, client projection API, serialized ledger projector + tail verification, legacy compatibility API | **Docs 03/09** | real-day lift; generation authority; atomic outbox projection; concurrent ledger chain; tail truncation/missing-file detection |
+| 1h | **Dashboard/intake foundation.** four parity surfaces, legacy-SPA compatibility API, extraction/ocr/roster stores, generic header selection, duplicate-safe mapping core, Edit Data provenance API, stable-keyed local artifact outbox/projector | **Docs 03/06** | parity payloads; novel/duplicate header fixtures; edit-does-not-refresh facts; workbook retry/concurrent-edit fixtures; headless dashboard verification |
 
-**Item 1d begins with a type-inference PROTOTYPE spike — before anything depends on the builder.**
-The whole "coupled by contract" thesis rests on the FlowBuilder inferring types across steps without
-manual annotation; that is **unverified until a prototype compiles**. So the first sub-task of 1d is a
-throwaway spike proving the hard generics actually infer: the **two accumulated generic maps** (step
-outputs + declared error codes), **`z.input`/`z.output` threading** (step mappings return `z.input`,
-`run` receives `z.output`), **const-tuple `errorCodes`** (the `const` type param that keeps the code
-union literal, D15), and the **sealed brands** (`defineFormSpec`/contract brands). Only once the spike
-type-checks does the real 1d builder — and the 1e–1h layers that depend on it — get built on top.
+**Item 1e begins with a new real-scale type-inference proof.** The deleted spike covered only two
+effects and three linear steps. The replacement must compile a representative 15–25-node graph with
+read/prepare/commit, transaction pairing, output-dependent branch, fork/join, typed child runs,
+external/children gates, heterogeneous completion stages, decorations, errors, and schema changes
+that deliberately fail their consumers. No production builder or skeleton lands until the positive
+and negative controls pass under the real toolchain with no `any`/`unknown` target erasure.
 
 **Hard exit criteria (Phase 1).**
-- `npm run typecheck:all` (both tsc programs), `npm run test`, `npm run test:architecture` **all
-  green**, with every guard in §1a–1g's right column registered in `guard-manifest`'s
-  `REGISTERED_GUARDS` and covering `temp_src`.
-- The write-safety **fixtures pinned**: fence-before-click, same-key mutex (D18), the four
-  crash-recovery cases (D17/D19), ledger hash-chain break detection.
+- `npm run typecheck:all` (both tsc programs), `npm run lint`, `npm run test`, and
+  `npm run test:architecture` **all
+  green**, with every guard inventoried and covering `temp_src`.
+- Write-safety fixtures pin simultaneous and later sequential same-key dedupe, proof validation for
+  every completion arm, crash injection across atomic commit, and ledger projector concurrency/tail loss.
 - The `real-tracker-day zero-quarantine` lift replay passes on real `.tracker` days (D12).
+- Legacy row/log/session wire schemas have an explicit version, `v0` fixtures for pre-version data,
+  and a source-schema guard requiring version bump+adapter+goldens for every later shape change.
 - Zero new-code allowlist entries in any extended ratchet (ported leaves shrink-only, argued).
+- Every activated guard arm resolves a non-empty file set; ESLint's CLI target and typed config block
+  both cover `temp_src`. Missing paths and unmatched patterns are failures, not skips.
 - **No live system involved yet** — the base is unit/fixture-proven; the live proof is Phase 2.
 
-**Program invariant Phase 1 establishes — FREEZE of `src`'s tracker-emit shapes.** For the whole
-migration duration, the old `src`'s tracker row/log/session **emit shapes are frozen** (no new legacy
-row fields, no shape changes). The lift adapter's **zero-quarantine guarantee (D12)** is only true
-against the shapes the lift was written for; a new legacy emit shape mid-program would silently
-quarantine (or worse, mis-lift) real rows. Any change that would touch a legacy emit shape must
-instead land natively in `temp_src`. **Honesty correction to §4/risk #3:** the **ucpath/crm**
-dual-maintenance windows are **program-length, not "short"** — those two systems are touched by
-almost every workflow, so their `src` leaves stay alive (as re-exports, D15) until the *last*
-consumer migrates at orders 8–9. "Short and explicit" holds for single-consumer systems
-(sharepoint, old-kronos, onbase), not for ucpath/crm.
+**Program invariant Phase 1 establishes—versioned legacy compatibility, not a production freeze.**
+The old `src` remains maintainable. Central emitters stamp a row/log/session schema version; old
+unstamped data is `v0`; the lift has one checked adapter per supported version. A source-schema
+snapshot guard requires any legacy wire change to bump the version and land adapter+golden fixtures
+in the same commit. Unknown versions/shapes quarantine visibly and cannot be mis-lifted through a
+default arm. **Dual-maintenance honesty:** UCPath/CRM windows are program-length because almost every
+workflow consumes them; single-consumer systems should be shorter. All windows are explicit and end
+when the final consumer migrates.
 
 ---
 
-### Phase 2 — vertical slice: person-lookup end-to-end (the contract's proof)
+### Phase 2 — two vertical proofs: read spine and transactional safety
 
-**Goal.** One simple, read-only workflow runs **end to end on the new base** and is validated by a
-**live dry-run**, BEFORE any bulk migration. This is the proof the contract holds against a real
-system; a flaw surfacing here is cheap, a flaw surfacing after ten migrations is not.
+**Goal.** Before any bulk migration, prove both halves the foundation claims: the read/projection
+spine and a page-scoped external-write transaction with recovery/durability.
 
-**Why person-lookup.** UCPath+CRM **reads only** (no mutate boundary → no write-safety engaged, no
-irreversible risk), yet it exercises the whole spine: descriptor → contracts → executor → session
+**Why person-lookup.** UCPath+CRM reads only, so it exercises no commit boundary or irreversible
+risk, yet it covers the spine: descriptor → contracts → executor → session
 pool (the proven 4-tab shared context) → spans → dashboard projection. Its worked example is already
 written in doc 02 §8.
 
-**Work items.** Author `person-lookup` descriptor + its UCPath/CRM read task contracts+impls (port
+**Read work items.** Author `person-lookup` descriptor + UCPath/CRM read tasks (port
 `person-org-summary` + CRM match leaves, wrapped); wire the scoped dashboard flip (§4) for queue/log/
 session/wfCounts; run the live dry-run.
 
-**Dry-run = submit-free composition (charter §a).** person-lookup has no submit task, so "dry-run"
-here means the standard live read path with no mutation composed at all — the safety boundary is
-structural, not a runtime flag.
+**Transactional work items.** Choose the smallest controlled test-instance or sacrificial test
+record whose prepare and commit paths are real and whose outcome is independently queryable. Build
+its transaction pair. First run dry-run and prove staged preview with zero intent/commit. Then, only
+under the explicit Phase-2 test protocol, perform one controlled commit, inject process crashes at
+the supported seams in repeatable fixtures, and prove permanent-key dedupe, typed recovery proof,
+atomic outboxes, serialized ledger projection, and context cleanup. If no safe independently
+verifiable target exists, Phase 2 is blocked; write-heavy workflow migration may not begin.
 
 **Hard exit criteria (Phase 2).**
 - Live dry-run reads real UCPath + CRM (Duo cleared hands-off by Autopilot, charter §9) and produces
@@ -228,18 +244,20 @@ structural, not a runtime flag.
 - Speed sanity: sleep-tax measured (`sleepMs` per task span); person-org read path materially below
   the old ~24s sleep budget (doc 05 §4.1 target), recorded.
 - Docs updated: doc 02 §8 marked as-built; any contract flaw found is fixed in the owning doc first.
+- Transaction dry-run shows prepare preview and zero commit span/intent. Controlled write proof
+  yields one external transaction, one committed intent, one typed transaction-output checkpoint
+  plus validated proof, one ledger entry,
+  one terminal span; a later fresh same-key run performs no second click.
+- Crash/outbox/projector fixtures and context-exclusive UCPath/OnBase lease tests remain green under
+  multiple executors.
 
-**What Phase 2 does and does NOT prove.** Phase 2 proves the **read spine + the parity gate only** —
-descriptor → contracts → executor → session pool → spans → dashboard projection, against a real read.
-It deliberately engages **no gate and no write**, so the write-safety and gate contracts are still
-only test-proven at the end of Phase 2. Two live checkpoints are therefore named and pulled forward
-so those contracts get a real-system proof as early as the migration order allows, not at order 8:
+**What Phase 2 still does not prove.** Workflow-specific gates and each production system's receipt/
+verify quality remain migration-specific. The foundation write sequence itself is no longer deferred
+to order 6. One later checkpoint remains:
 - **First-gate live checkpoint — order 4** (oath-signature/emergency-contact): the first live exercise
   of the completion union + an approval gate (park/resolve) end to end on the new base.
-- **First-write live checkpoint — order 6** (work-study): the first live write-safety proof — fence →
-  submit → receipt/save-verify → ledger append, pulled forward onto the smallest single-system write
-  (one system, low volume) rather than waiting for the incident-grade write-heavy workflows at
-  orders 7–9. A flaw in the write contract surfacing at order 6 is cheap; at order 8 it is not.
+- **First workflow-specific production write checkpoint — order 6** validates that workflow's
+  receipt/probe policy on top of the already-proven transaction kernel.
 
 ---
 
@@ -257,29 +275,33 @@ deleted the moment that system's workflows are fully migrated (charter §Migrati
 2. **Author** — reuse store tasks (peer-to-peer, charter §1); add new tasks as reusable bases +
    name the workflow-specific customization (charter §3/§8); write contracts → impls → pure-logic
    unit tests (`fakeCtx`) → descriptor (doc 10 §6 red→green order).
-3. **Safety guards fire** — `fill-submit-pairing`, `dry-run-composition-submit-free`,
-   `write-safety-contract`, `mutate-routes-through-mutation`, `no-positional-identity` all green.
-4. **Live dry-run** (`tests/live/`, `dryRun=true` = submit tasks not composed) reads the real path
-   and asserts excluded submits emit `skipped`.
-5. **Quiesce/drain in-flight runs before the flip.** A legacy→native flip is per-workflow but **not
-   instantaneous**: any of this workflow's runs still live in the old store (queued / claimed / or
-   **parked** — e.g. an oath-upload run awaiting signatures for days) must first be drained. Either
-   (a) stop enqueueing new legacy runs and let the in-flight ones **complete on the old path**, or
-   (b) **dual-run** old+native until the old store shows zero non-terminal runs for this workflow. A
-   long-parked old run is either completed-on-old-path or **hand-migrated into an equivalent native
-   checkpoint** — it is never abandoned mid-flip. Only once the workflow's old-store drain is clean
-   does source authority (§5.3) flip legacy→migrated.
-6. **Delete old code** for any system now fully migrated; update the nearest CLAUDE.md + owning docs.
+3. **Safety guards fire** — transaction pairing, dry-run commit-free, write safety/capability,
+   permanent-key dedupe, provenance, graph target typing, and stable identity all green.
+4. **Live dry-run** reads the real path and asserts prepare previews exist while commit spans,
+   write intents, and mutation helpers are absent.
+5. **Controlled commit proof for write workflows.** Exercise each new commit/probe/verify against a
+   configured test instance or a deliberately harmless, operator-approved canary. If neither exists,
+   cutover is blocked—dry-run alone cannot prove landing, recovery, or dedupe. The §b questionnaire
+   records target, cleanup/reversibility, expected proof, and stop condition before this test.
+6. **Generation cutover.** Stop new legacy enqueues, atomically increment generation and enumerate
+   existing legacy runs as the authorized drain set, then route new runs native. Parked legacy runs
+   may finish on the old path and remain visible. Hand-migrate only when explicitly chosen and
+   checkpoint fingerprints/provenance validate; never require the entire old set to drain before
+   native work begins and never assign authority by event timestamp.
+7. **Delete old code** for any system now fully migrated; update the nearest CLAUDE.md + owning docs.
 
 #### 3.2 Exit criteria (per workflow)
 
 - §b questionnaire answered + recorded in the workflow's migration doc.
-- `typecheck:all` + `test` + `test:architecture` green; the workflow's descriptor passes
-  `descriptor-coverage`; every mutate task passes `write-safety-contract` (its completion arm +
-  probe + probe-policy) and `fill-submit-pairing`.
+- `typecheck:all` + `lint` + `test` + `test:architecture` green; the workflow's descriptor passes
+  `descriptor-coverage`; every commit contract passes `write-safety-contract` (its completion arm +
+  probe + probe-policy) and transaction pairing.
 - **Live dry-run** green against every real system it touches (submit-free).
+- Every commit/probe/verify has controlled live evidence on the configured target; unavailable safe
+  evidence blocks cutover rather than converting dry-run success into a write-safety claim.
 - Old per-system `src` code deleted once that system has no remaining un-migrated consumer; a
-  system's dual-maintenance window is short and explicit (charter).
+  system's dual-maintenance window is bounded and explicit; shared UCPath/CRM may remain until their
+  last consumer, while single-consumer stores should close promptly.
 
 #### 3.3 Recommended migration order (by risk / complexity / reuse)
 
@@ -290,13 +312,13 @@ last as the highest-stakes proofs.
 
 | Order | Workflow(s) | Class | One-line justification |
 |---|---|---|---|
-| 0 | **person-lookup** | read | Phase 2 slice — done; proves the spine |
+| 0 | **person-lookup** | read | Phase 2 slice; will prove the spine before any migration |
 | 1 | **person-match**, **i9-lookup** | read | Pure UCPath reads; reuse person-lookup's store tasks almost wholesale — fastest reuse proof |
 | 2 | **crm-doc-download**, **sharepoint-download**, **old-kronos-reports** | read/download | Single-system reads/downloads; stand up crm/sharepoint/old-kronos stores at low risk |
 | 3 | **ocr** pipeline workflow (consumes the Phase-1h service stores) | service | No browser, no submit; the `extraction`/`ocr`/`roster` service stores are already built in **Phase 1h** (§3.5) — this order migrates the pipeline *workflow* on top of them, unblocking every OCR/roster-dependent workflow below |
 | 4 | **oath-signature**, **emergency-contact** | OCR fan-out + light write | Exercise the completion union (D11) + approval gates (D5) + operation-member fan-out; the write is a bounded UCPath enter/fill |
-| 5 | **i9-check** | UCPath-only read + roster append | Operation coordinator + member enqueue + display-only rows, but **no submit** (charter §13 note) — the bridge that exercises fan-out completion without write-safety risk |
-| 6 | **work-study**, **kronos-pay-rule** | single write | First real mutate submits — small, isolated (one system each: UCPath / new-kronos); prove the five-beat sequence + receipt/save-verify on a low-volume surface |
+| 5 | **i9-check** | UCPath read + durable roster projection | Operation coordinator + member enqueue + display-only rows, but **no external submit**; its stable-keyed SQLite outbox + serialized workbook projector must prove retry-safe local materialization |
+| 6 | **work-study**, **kronos-pay-rule** | single write | First workflow-specific production commits—small, isolated; validate receipt/save proof on the proven transaction kernel |
 | 7 | **oath-upload**, **onbase** | write-heavy (ServiceNow + OnBase) | ServiceNow `receipt` + OnBase `upload-verify`/`unverifiableByPage`; oath-upload ports the born-at-upload fence (the write-ahead pattern the kernel generalizes); resolve OQ1/OQ2 here |
 | 8 | **separations** | write-heavy (UCPath term + Kuali) | Wrong-person incident (`T002173685`); needs UCPath `receipt` probe + pending-sweep + Kuali `save-verify` + identity-approval gate — the deepest write-safety proof |
 | 9 | **onboarding** | write-heavy (UCPath hire) | Duplicate-person incident; the hire probe (no-EID key, `ProbeVerdict`-widened) + roster ingest — last, highest-stakes, most reuse of everything below it |
@@ -328,25 +350,31 @@ slip past the first real-write migration.
 Embed in **every** workflow's migration plan doc; answer with the operator BEFORE building
 (charter §b). Grounded in docs 09 (write-safety) + 11 (freshness/instance) + 02 (gates).
 
-1. **Real submits** — which task(s) in this workflow are irreversible mutate boundaries? (Each
-   becomes an `effect:"mutate"` submit task, split from its fill — charter §a.)
+1. **Real commits** — which actions mutate the external system? For each, define a prepare contract,
+   commit contract, one transaction lease scope, and stable idempotency key.
 2. **Completion check per submit** — receipt (UCPath/ServiceNow: source of the confirmation/ticket
    number + its schema) | save-verify (Kuali: the read-back task) | upload-verify (OnBase: the
    positive read-back, OR an argued `unverifiableByPage`→always-park)? (Doc 09 §2.)
-3. **Double-submit probe policy per submit** — `"always"` (safe, +1 read) or
-   `"retries-and-recovery-only"` (faster, narrow first-attempt window)? **Required, no default**
-   (doc 09 §5 / D17).
-4. **Dry-run split boundary** — confirm which submit tasks are excluded from the dry-run composition
-   (the operator curates which submits exist as their own task — charter §a).
+3. **Double-submit probe policy and age budget per transaction** — `"always"` or
+   `"retries-and-recovery-only"` (may miss only an older external write on an unseen durable key)? Required, no default
+   (doc 09 §5 / D17). What justified `probeToFenceMaxMs` bounds preparation after the live probe?
+4. **Dry-run preview** — confirm what prepare evidence is shown and whether the run stops there;
+   commit is structurally absent.
 5. **Freshness maxAges — justify the *value*, not just its presence.** For each read whose output
-   feeds a write, state the chosen `freshness.maxAgeMs` (D8) **and the reason that number is right**
+   feeds a write, state default/field freshness limits, whether each non-identity field is
+   `forbidden|audited` for override, and **why each is right**
    for this data's staleness risk — the guard only checks the field is *present*, never that the
    value is *correct*, so the operator owns justifying it (a too-large window silently reuses stale
-   data into a live write). `Infinity` must be argued in a comment.
+   data into a live write). Identity, match/item, idempotency, and proof fields are never overridable;
+   `Infinity` must be argued in a comment.
 6. **Workflow-specific gates/data** — identity-approval gate? OCR approval gate? EID re-match?
    roster column mapping (doc 06)? per-run test/prod instance need (doc 11 §4)?
 7. **Reuse map** — which store tasks reused (peer-to-peer), which new, and for each new task: its
    reusable-base design + the workflow-specific customization (charter §3/§8).
+8. **Local artifact effects** — does a read download immutable bytes (content-addressed writer), or
+   does the workflow update a mutable local file? Mutable targets require a stable-keyed blocking
+   outbox projection, idempotent upsert semantics, and concurrent-edit/head-hash policy—not a task
+   append.
 
 #### 3.5 Where the data systems slot
 
@@ -369,32 +397,30 @@ Embed in **every** workflow's migration plan doc; answer with the operator BEFOR
 Old `src` and new `temp_src` run **side by side** throughout Phase 3 (charter: old system keeps
 working). Three mechanisms make that safe; the compat layer is deleted at the end.
 
-- **Lift adapter (doc 03 §5 / D12).** One-direction, one-place decoder from the old terminal contract
+- **Lift adapter (doc 03 §5 / D12).** One-direction, one-place, version-keyed decoder from the old terminal contract
   (`tracked-workflow.ts` outcomes — `done`/`failed`-with-step/`skipped`/`interrupted`/`superseded`/
-  the `<step>:failed:<err>` pseudo-step) into the new span model. It **quarantines** (a loud card),
-  **never throws**, on post-cutover legacy rows or invalid archetypes; it reads the visible-entries
-  layer (deletion tombstones respected). Pinned by replaying real `.tracker` days asserting **zero
-  quarantines** (Phase 1e exit).
+  the `<step>:failed:<err>` pseudo-step) into the new span model. It quarantines invalid shapes,
+  never throws; it reads the visible-entries
+  layer (deletion tombstones respected). Every supported legacy wire version has real/golden fixtures
+  asserting **zero quarantines**; source changes require version bump+adapter+fixtures in one commit.
 - **Scoped dashboard flip (doc 03 §5.4 / D13).** The flip is **not wholesale** (review 03 sized that
   at ~103 endpoints / ~122 components — an unacceptable pre-Phase-2 mega-milestone). The **parity
   gate covers only queue rows + log panel + session cards + wfCounts.** Capture, workflow-modifier,
   settings, AI-assist **proxy to the old endpoints** until their own later migration milestones. A
-  **one-week legacy-dashboard fallback** stays after the flip. **OCR's review/approve mutation
+  **one-week legacy-SPA fallback** stays after the flip but reads a compatibility API from the
+  unified projection, so native runs remain visible. **OCR's review/approve mutation
   routes are the one exception to the proxied long tail:** they are not proxied but migrate native
   *with* the OCR workflow at order 3–4 (§3.3), so the completion union + approval gates run against
   the native review UI rather than the old `/api/ocr/approve-batch`.
 - **The parity gate.** For the scoped surfaces, the new server's projections must match the old
   dashboard's **golden payloads** byte-for-relevant-field (D13 golden-payload parity test). This gate
   is first met in **Phase 2** (person-lookup) and re-checked as each workflow migrates.
-- **Source authority (doc 03 §5.3).** A workflow is **legacy XOR migrated** — never both. The lift
-  only touches legacy rows; migrated workflows emit native spans. No workflow is half-flipped.
-- **In-flight drain at each flip (not instantaneous).** Because a workflow is legacy XOR migrated,
-  the flip cannot strand a run mid-flight in the old store. Before flipping a workflow, **quiesce/
-  drain** its non-terminal old-store runs (queued / claimed / parked): complete them on the old path
-  first, or dual-run old+native until the old store is empty of this workflow's live runs. A
-  long-parked old run (e.g. oath-upload awaiting signatures for days) is completed-on-old-path or
-  **hand-migrated into a native checkpoint** — never dropped. A per-workflow flip is therefore a
-  bounded drain window, not a switch throw (§3.1 step 5).
+- **Source authority (doc 03 §5.3).** Authority is immutable per run via engine+generation. One
+  workflow may have native generation-N+1 runs while its enumerated generation-N legacy drain set
+  finishes; one run may never have two authorities.
+- **In-flight drain.** Cutover rejects new legacy enqueues and records existing legacy run ids.
+  They complete visibly on legacy without blocking native starts. A hand migration is exceptional,
+  typed, fingerprint-validated, and audited—not a prerequisite for cutover.
 - **Compat-layer deletion.** When the LAST workflow migrates, the lift adapter, the golden-payload
   parity harness, the legacy-dashboard fallback, and the old `src` tree are deleted together — the
   program's definition of done (§6).
@@ -405,10 +431,10 @@ working). Three mechanisms make that safe; the compat layer is deleted at the en
 
 | # | Risk | Why it bites | Mitigation |
 |---|---|---|---|
-| 1 | **A contract flaw surfaces late** (after many migrations) | The base is proven only by tests until Phase 2; a real-system mismatch in the task/span/write contract is expensive to fix at order 8 | Phase 2 is a **mandatory live-dry-run proof before any bulk migration**; the read→OCR→write ordering (§3.3) surfaces contract stress incrementally, cheapest first; every flaw is fixed in the owning doc, not patched locally |
+| 1 | **A contract flaw surfaces late** | read-only proof would miss transaction failures | Phase 2 has separate read and controlled transaction proofs, including crash/outbox/dedupe evidence |
 | 2 | **The dashboard-flip parity milestone slips** (scope creep back to wholesale) | 103 endpoints/122 components is a mega-milestone that could swallow the schedule | D13 keeps the flip **scoped** (4 surfaces); everything else proxies; the parity gate is a concrete golden-payload test, not "looks right"; the one-week fallback de-risks the cutover |
-| 3 | **Dual-maintenance drift** during Phase 3 (a fix lands in `src` but not `temp_src`, or selectors diverge) | Old + new coexist for the whole migration; a selector fixed in one tree silently rots the other | Selectors ported as **re-exports** of `src/systems/*` (D15) so there is one source until deletion day; per-system windows are **short and explicit**; old code deleted the moment a system is fully migrated (no idle duplicate) |
-| 4 | **The probe can still lie** (write-safety residual) | A too-early racy read (duplicate-person root cause) can report `absent` on a still-rendering page — a mechanical guard cannot catch it | Disclosed residual (D20 / doc 09 §11): `ProbeVerdict` fail-closed (`unknown`/`ambiguous`→park), `maxAgeMs:0` always-live probe, stable-key exact match, and **per-probe live verification at migration** (the race-classifiers port into the probe impls); exactly-once = no double-**file**, NOT no wrong-**person** — stated honestly, never overclaimed |
+| 3 | **Dual-maintenance or legacy-wire drift** during Phase 3 | Old + new coexist; a selector fixed in one tree can rot the other, or an active-production tracker change can mis-lift | Selectors remain **re-exports** of `src/systems/*` (D15) until deletion; legacy wire schemas are versioned and guarded with per-version adapters/goldens; each system window is explicit and ends at its last consumer (UCPath/CRM are honestly program-length) |
+| 4 | **The probe can still lie** (write-safety residual) | A too-early racy read (duplicate-person root cause) can report `absent` on a still-rendering page — a mechanical guard cannot catch it | Disclosed residual (D20 / doc 09 §11): `ProbeVerdict` fail-closed (`unknown`/`ambiguous`→park), always-live probe on a separate read lease, required probe-to-fence elapsed budget, stable-key exact match, and **per-probe live verification at migration** (the race-classifiers port into the probe impls); exactly-once = no double-**file**, NOT no wrong-**person** — stated honestly, never overclaimed |
 | 5 | **Spend/model + operator-attention limits on the build itself** | The program is long (10 workflows × contract+impl+tests+live); an over-parallel or context-heavy build burns budget and drifts | One-at-a-time Phase 3 (bounded WIP); context-lean orchestration (deep work in subagents returning short summaries, charter §Process); Phase 2 gates before scale; the guard umbrella catches regressions cheaply so review effort concentrates on the live-verify tail |
 
 ### 5.1 Program stop-loss / abort gate
@@ -446,10 +472,10 @@ The rebuild is complete when **all** hold:
 3. **Compat layer gone** — the lift adapter (D12), the golden-payload parity harness, and the
    one-week legacy-dashboard fallback are removed; the dashboard serves entirely from the new
    descriptor + span contract (all surfaces flipped, not just the scoped four).
-4. **All guards green over `temp_src` only** — `guard-manifest` shows every registered guard covering
-   `temp_src`; the retired parity guards are gone; the four safety guards + write-safety fixtures
+4. **All guards green over `temp_src` only** — guard inventory shows every guard covering
+   `temp_src`; retired parity guards are gone; graph/transaction/write/outbox/provenance fixtures
    pass; ratchet allowlists hold no new-code entries.
 5. **The docs match what is built** — every owning doc updated to as-built (charter: the foundation's
    documentation is part of the foundation), and this master plan's phase table fully checked off.
-6. **The immutable ledger is live** — every real mutation across the migrated workflows writes a
-   never-pruned, hash-chained ledger entry (doc 09 §6); `cli ledger verify` passes.
+6. **The immutable ledger is live** — every real commit writes an atomic outbox projected into one
+   never-pruned serialized hash chain; DB tail-anchor verification passes, including truncation tests.
