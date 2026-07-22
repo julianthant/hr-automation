@@ -91,10 +91,14 @@ export default ts.config(
     },
   },
 
-  // Back-end / Node sources: everything under src EXCEPT the browser dashboard.
+  // Back-end / Node sources: everything under src and temp_src EXCEPT the
+  // browser dashboards. temp_src is covered from its first commit (charter:
+  // "Same quality umbrella from day one") — without it the rebuild tree would
+  // get only the base presets: no unused-imports rule, no Node globals, no
+  // type-aware tuning, i.e. a tree that looks linted but isn't.
   {
-    files: ["src/**/*.ts"],
-    ignores: ["src/dashboard/**"],
+    files: ["src/**/*.ts", "temp_src/**/*.ts"],
+    ignores: ["src/dashboard/**", "temp_src/dashboard/**"],
     plugins: { "unused-imports": unusedImports },
     languageOptions: { globals: { ...globals.node } },
     rules: { ...unusedImportsRules, ...typeAwareTuning },
