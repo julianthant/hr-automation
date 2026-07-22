@@ -1,8 +1,9 @@
 # 01 — The Task Contract & Per-System Task Stores
 
-Status: **Phase 0 revised design — 2026-07-21 external-review corrections integrated.** Conforms
-to `00-charter.md` and the binding reconciliation memo `04-reconciliation.md`. The abandoned
-Step-0 spike is evidence only and has been deleted; all three effect overloads must be re-proved.
+Status: **Phase 0 revised design — 2026-07-22 whole-plan/legacy-code corrections integrated.**
+Conforms to `00-charter.md` and the binding reconciliation memo `04-reconciliation.md`. The
+abandoned Step-0 spike is evidence only and has been deleted; all three effect overloads must be
+re-proved.
 
 ## Ownership (D1 — this doc owns / this doc references)
 
@@ -11,6 +12,7 @@ Step-0 spike is evidence only and has been deleted; all three effect overloads m
 | The task contract and **contract/impl split** (`defineTaskContract` + `defineTask`), system/workflow namespace grammar + closed `SystemId` (D2/D3/D42) |
 | Error taxonomy (`TaskError`, declared `errorCodes`) |
 | Effect classes + dry-run mechanics (D6/D7), `freshness` + provenance contract fields (D8/D34), and the content-addressed read-artifact boundary (D45) |
+| Strict runtime-schema rules, branded domain scalar/id policy, absence semantics, and the task-side subject-binding declaration (D46/D47) |
 | Retry policy |
 | Decoration (`decorateTask`, hook semantics, error-propagation rule) |
 | Task stores—browser, service, and pure workflow mini-stores (D4/D42), session providers + the single login signature, shared leaf-code homes (`stores/common/`) |
@@ -21,6 +23,7 @@ Step-0 spike is evidence only and has been deleted; all three effect overloads m
 | Workflow builder API (the single API), descriptor shape, RunEnvelope, run-state machine incl. **gates/parks**, checkpoint/resume + the freshness enforcement walk → **doc 02** |
 | Span/event wire schema, notes stream, completion (fan-out/approval) union, storage + SSE → **doc 03** |
 | `WriteSafety<In, Out, Proof>` shape attached to `CommitTaskContract` (typed proof/verify + idempotency probe + key, D22/D31) → **doc 09** |
+| Canonical `ElementId`/`PageStateId`/`ObservationId`, typed `SystemDriver`, scenarios, diagnostics, and knowledge records → **doc 12** |
 
 Grounding (read, not imagined): `src/core/kernel/types.ts` (WorkflowConfig/Ctx/SystemConfig),
 `src/workflows/person-lookup/workflow.ts` (the `dataString()` untyped-blob hacks, screenshot
@@ -74,8 +77,13 @@ import { z } from "zod";
 export type BrowserSystemId =
   | "ucpath" | "crm" | "onbase" | "kuali" | "servicenow"
   | "i9" | "new-kronos" | "old-kronos" | "sharepoint";
-export type ServiceSystemId = "extraction" | "ocr" | "roster";
+export type ServiceSystemId = "extraction" | "normalization" | "ocr" | "roster";
 export type SystemId = BrowserSystemId | ServiceSystemId;
+/** Closed non-browser I/O capabilities (D63). These name operations, not vendors; provider/model
+ * selection is config. Extending the union also requires an infra adapter, budgets, preflight,
+ * redaction policy, and scenarios. */
+export type ProviderCapabilityId =
+  | "ocr.extract" | "geocode.census" | "geocode.nominatim" | "ai.advisory";
 /** Pure workflow-specific mini-store namespace; registry coverage validates the id against a real
  * descriptor without making domain import workflows. */
 export type WorkflowStoreId = `workflow:${string}`;
@@ -94,6 +102,19 @@ export type CanonicalJsonSchema<S extends z.ZodType> =
   IsAny<z.output<S>> extends true ? never :
   z.output<S> extends JsonValue ? S : never;
 
+/** Opaque compile-time brands stop unrelated strings being interchangeable. Every brand has a
+ * strict zod factory at runtime; these aliases are examples, not an exhaustive duplicate list. */
+export type Brand<T, Name extends string> = T & { readonly __brand: Name };
+export type RunId = Brand<string, "RunId">;
+export type ItemId = Brand<string, "ItemId">;
+export type TraceId = Brand<string, "TraceId">;
+export type IsoInstant = Brand<string, "IsoInstant">;
+export type DateOnly = Brand<string, "DateOnly">;
+export type Eid = Brand<string, "Eid">;
+export type MoneyMinorUnits = Brand<number, "MoneyMinorUnits">;
+/** Created only by the contract factory after resolving a path against the exact output schema. */
+export type ContractFieldPath = Brand<string, "ContractFieldPath">;
+
 /**
  * D8 (contract side): mandatory on EVERY read contract. How long a
  * checkpointed output of this read may age before it is allowed to feed a
@@ -107,17 +128,23 @@ export interface Freshness {
   /** Default is forbidden. `audited` must be explicit and is never legal for identity,
    * idempotency-key, or write-proof fields. */
   defaultOverride?: "forbidden" | "audited";
-  byField?: Readonly<Record<string, {
+  byField?: readonly {
+    /** Validated against the exact output schema at contract definition time. */
+    path: ContractFieldPath;
     maxAgeMs: number;
     override?: "forbidden" | "audited";
-  }>>;
+  }[];
 }
 
 export interface ProvenancePolicy {
   /** `live` means this task actually observed the authoritative source during this execution.
    * `derived` carries all input source facts forward and uses their oldest observedAt. */
   default: "live" | "derived";
-  byField?: Readonly<Record<string, "live" | "derived">>;
+  byField?: readonly {
+    /** Validated against the exact output schema at contract definition time. */
+    path: ContractFieldPath;
+    source: "live" | "derived";
+  }[];
 }
 
 /**
@@ -127,7 +154,48 @@ export interface ProvenancePolicy {
  * standalone step.
  */
 export type EffectClass = "read" | "prepare" | "commit";
+
+/** Bundle-safe, declarative expected↔observed subject binding. The observation itself is owned by
+ * doc 12's UI registry/system driver. `none` is explicit so a person-scoped task cannot omit the
+ * question accidentally. */
+export type SubjectBindingSpec =
+  | { kind: "none"; reason: string }
+  | {
+      kind: "person";
+      expected: { fromInput: string; identity: "eid" | "name" | "eid-and-name" };
+      observe: ObservationId;
+      match: "normalized-exact-eid" | "normalized-exact-name" | "eid-and-name";
+      requiredAt: "before-subject-read" | "after-prepare-before-fence";
+    }
+  | {
+      /** File/document writes bind to the staged artifact, not merely the surrounding person. */
+      kind: "artifact";
+      expected: { fromInput: string; identity: "artifact-id" | "sha256" | "document-id" };
+      observe: ObservationId;
+      match: "exact";
+      requiredAt: "before-subject-read" | "after-prepare-before-fence";
+    };
 ```
+
+### 2.1.1 Strict schema and absence rules (D46)
+
+- Every contract input/output/proof/example/scenario and every persisted or transported object is
+  defined with `z.strictObject(...)` (or a strict discriminated union of strict objects). Plain
+  TypeScript interfaces are implementation views, never trust-boundary validators.
+- Unknown keys are errors at the boundary. They are not stripped silently, because a misspelled
+  field that disappears is exactly the “workflow says done but used no value” class of bug.
+- `optional()` means the producer did not supply a field; `nullable()` means the authoritative
+  source was read and has no value. An operation that could not determine a value returns a
+  discriminated `unknown`/`ambiguous` outcome, never `null`, empty string, or omitted data.
+- `undefined`, `Date`, `Map`, class instances, `NaN`, and `Infinity` values are not persisted.
+  `Infinity` is permitted only in **freshness policy metadata**, not task data.
+- Dates use branded `DateOnly`/`IsoInstant` schemas; EIDs use the canonical `Eid` schema; money uses
+  integer minor units plus currency, never binary floating-point dollars; ids use distinct brands.
+- Open records are legal only as explicitly declared presentation/diagnostic extension data that is
+  never used for control, identity, writes, or completion. Durable decision-driving shapes may not
+  contain `Record<string, unknown|JsonValue>`.
+- The kernel runs `safeParse` at ingress and persistence reads, converts the full zod issue tree
+  into a typed boundary failure naming path/value/source, and never falls back to a TypeScript cast.
 
 ```ts
 // temp_src/base/task.ts — server-side (may import Playwright types)
@@ -172,10 +240,12 @@ A task is **two files**:
   id, zod
   input/output, `title`, `effect`, `errorCodes`, `freshness` (reads), write safety (commits),
   and a **mandatory `example` output**. Descriptors (doc 02) and the dashboard import contracts
-  ONLY. E2e stubs derive their **happy path** from `example` (schema-parsed); failure / cancel /
-  parallel-worker scenarios REMAIN hand-scripted in the stub lane — examples cannot express them.
+  ONLY. E2e stubs derive their **minimum happy-path value** from `example` (schema-parsed); failure,
+  cancellation, concurrency, delegation, mismatch, and recovery behavior comes from the checked-in
+  `ScenarioManifest` corpus (doc 12). Examples are fixtures, never behavioral coverage.
 - **impl**—`run` + session needs + read retry, in the matching store's `tasks/`,
-  imports Playwright. `defineTask(contract, impl)` binds them; the store is the only impl registry.
+  imports its typed system driver API. Only `stores/<system>/driver/**` and session infrastructure
+  import Playwright. `defineTask(contract, impl)` binds the pair; the store is the only impl registry.
 
 ```ts
 // temp_src/domain/contracts/base.ts (continued)
@@ -198,6 +268,14 @@ export interface TaskContractBase<
   errorCodes: Codes;
   /** Declared secret names; shape/accessor owned by doc 11. Empty/absent means none. */
   requires?: readonly SecretName[];
+  /** D63: explicit non-browser remote I/O. Legal only for service-store contracts; absent means
+   * deterministic/local. The task receives exactly this narrowed injected client set. */
+  providers?: readonly ProviderCapabilityId[];
+  /** Explicit subject scope. Person-scoped tasks name the authoritative observation used to prove
+   * which record/page is open; service/global tasks declare `{kind:"none"}`. */
+  subject: SubjectBindingSpec;
+  /** Registered behavioral scenarios (doc 12). `example` is a value fixture, not coverage. */
+  scenarios: readonly [ScenarioId, ...ScenarioId[]];
   /**
    * Mandatory canonical output value. A guard parses it through `output`
    * (§8); the e2e stub lane emits it as the task's happy-path response.
@@ -281,7 +359,14 @@ export function defineTaskContract<
 the system/workflow namespace grammar, unknown system prefix, malformed `workflow:<id>`, empty
 `errorCodes`, `example`
 failing `output.parse`, output/proof not canonical-JSON round-trippable, or a read contract missing
-`freshness`/`provenance`. `CanonicalJsonSchema` rejects `any` and known non-JSON output types at
+`freshness`/`provenance`; non-strict schemas; unresolved scenario ids; or an invalid subject
+declaration. A browser task declaring `subject.kind:"person"` must resolve a same-system
+authoritative observation and a wrong-subject scenario. A service/workflow task cannot declare a
+browser observation. Browser and workflow-store contracts cannot declare provider capabilities;
+service contracts resolve every declared capability and required secret through the provider and
+preflight registries. A person-scoped commit must use
+`requiredAt:"after-prepare-before-fence"`; the descriptor/kernel reject any other declaration.
+`CanonicalJsonSchema` rejects `any` and known non-JSON output types at
 compile time; the factory
 round-trip is the runtime backstop. A **type-level test** pins that
 `ctx.fail("undeclared-code", …)` fails `tsc` (D15).
@@ -294,10 +379,12 @@ export type BrowserSystemOf<C> = Extract<NamespaceOf<C>, BrowserSystemId>;
 export type SessionsFor<C> = [BrowserSystemOf<C>] extends [never]
   ? readonly []
   : readonly [SessionNeed<BrowserSystemOf<C>>];
+export type ProviderNeedsOf<C> = C extends { providers: readonly ProviderCapabilityId[] }
+  ? C["providers"] : readonly [];
 type BaseReadCtxFor<C extends AnyReadContract> = [BrowserSystemOf<C>] extends [never]
   ? NamespaceOf<C> extends WorkflowStoreId
     ? PureTaskCtx<C["errorCodes"]>
-    : ServiceTaskCtx<C["errorCodes"]>
+    : ServiceTaskCtx<C["errorCodes"], ProviderNeedsOf<C>>
   : ReadTaskCtx<BrowserSystemOf<C>, C["errorCodes"]>;
 export type ReadCtxFor<C extends AnyReadContract> = BaseReadCtxFor<C> &
   (C extends { artifacts: "content-addressed" }
@@ -344,8 +431,12 @@ export type ImplFor<C extends AnyContract> =
   C extends AnyPrepareContract ? PrepareTaskImpl<C> :
   C extends AnyCommitContract ? CommitTaskImpl<C> : never;
 
-export type TaskInput<T>  = T extends { contract: { input:  infer I extends z.ZodType } } ? z.input<I>  : never;
-export type TaskOutput<T> = T extends { contract: { output: infer O extends z.ZodType } } ? z.output<O> : never;
+export type TaskInput<T> =
+  T extends { input: infer I extends z.ZodType } ? z.input<I> :
+  T extends { contract: { input: infer I extends z.ZodType } } ? z.input<I> : never;
+export type TaskOutput<T> =
+  T extends { output: infer O extends z.ZodType } ? z.output<O> :
+  T extends { contract: { output: infer O extends z.ZodType } } ? z.output<O> : never;
 ```
 
 **`z.input` vs `z.output` (D15, review #4):** step input mappings produce `TaskInput<T>` =
@@ -375,8 +466,14 @@ export interface TaskCtxCommon<Codes extends readonly string[]> {
 export interface PureTaskCtx<Codes extends readonly string[]>
   extends TaskCtxCommon<Codes> {} // workflow transforms: no page/artifact/mutation
 
-export interface ServiceTaskCtx<Codes extends readonly string[]>
-  extends TaskCtxCommon<Codes> {} // service I/O is contract-declared; no page/mutation
+export interface ServiceTaskCtx<Codes extends readonly string[],
+  Needs extends readonly ProviderCapabilityId[]>
+  extends TaskCtxCommon<Codes> {
+  /** Injected abortable clients, narrowed to the contract declaration. Each call is timeout/rate/
+   * concurrency-admitted, redacted, and action-evidenced by infra. No provider SDK or raw fetch is
+   * reachable from task code. An empty need tuple exposes no client. */
+  providers: ProviderClientSubset<Needs[number]>;
+}
 
 export interface ArtifactRef {
   id: `sha256:${string}`;
@@ -394,9 +491,9 @@ export interface ContentAddressedArtifactWriter {
 
 export interface BrowserTaskCtx<S extends BrowserSystemId, Codes extends readonly string[]>
   extends TaskCtxCommon<Codes> {
-  /** Only the declared browser system; cross-system page access is a compile error. */
-  page(system: S): Promise<Page>;
-  screenshot(label: string): Promise<void>;
+  /** Only the declared browser system. Raw Page/Locator access is confined to driver/session
+   * infrastructure (doc 12); every operation is element/state/observation-addressed and traced. */
+  driver: SystemDriver<S>;
 }
 
 export interface ReadTaskCtx<S extends BrowserSystemId, Codes extends readonly string[]>
@@ -411,6 +508,17 @@ export interface CommitTaskCtx<S extends BrowserSystemId, Codes extends readonly
   mutation: MutationCapability;
 }
 ```
+
+**Subject binding is kernel-enforced, not an optional leaf convention.** For a read that declares
+`requiredAt:"before-subject-read"`, the driver freshly observes the declared identity before it
+extracts subject-scoped facts and the kernel—not task code—compares that typed observation to parsed
+input. For every transaction, the kernel observes on the retained staged page after prepare and
+immediately before doc 09's fence; mismatch/unknown means zero clicks. Artifact-scoped writes bind
+the staged document id/digest the same way. Doc 09 wraps a matched subject proof—or an explicitly
+allowlisted unscoped page-state proof when no stronger subject exists—into the durable
+`WriteBindingProof` bound to the mutation capability and post-write verification. Searching for an EID, seeing it in stale page text, or
+trusting the workflow input does not count as observing the open record. The New Kronos stale-
+timecard incident is the required base scenario, not a separations-only workaround.
 
 **What TaskCtx deliberately does NOT have:** `updateData` (the untyped blob — display fields become
 projections of typed task outputs, doc 03), `step` (the graph node owns orchestration), `delegateTo` (delegation
@@ -494,7 +602,7 @@ temp_src/
         index.ts              # contract barrel — KnownTaskId codegen + pairing guard read this
         search-person-org.ts
         save-oath-signature.ts
-      onbase/ …  crm/ …  extraction/ …  ocr/ …  roster/ …
+      onbase/ …  crm/ …  extraction/ …  normalization/ …  ocr/ …  roster/ …
       workflows/
         verify/merge-enrichment.ts       # pure workflow-specific contract
   base/                       # task.ts (impl types + defineTask), store.ts, errors.ts, session.ts
@@ -502,15 +610,18 @@ temp_src/
     ucpath/
       index.ts                # defineStore("ucpath", { ...tasks }) — THE impl registry
       session.ts              # SessionProvider: login/prepareLogin/resetUrl/idleRefresh/exclusive
-      selectors.ts            # PURE RE-EXPORT of src/systems/ucpath/selectors.ts (D15 — see §3.3)
-      SELECTORS.md            # regenerated by the (extended) selectors:catalog script
-      LESSONS.md              # moved with the store
+      driver/                 # ONLY task-adjacent layer allowed raw Page/Locator access (doc 12)
+        index.ts              # typed SystemDriver implementation + named complex operations
+        ui-registry.ts        # canonical elements/screens/states/observations
+        legacy-selectors.ts   # temporary mapping/re-export from src selector registry (§3.3)
+      UI-CATALOG.md           # generated; stable ids/labels/aliases/evidence/task uses
       impl/                   # verbatim-ported leaf drivers (person-org-summary.ts, ss-smart-hr.ts…)
       tasks/
         search-person-org.task.ts      # defineTask(contract, impl) — binds the pair
         save-oath-signature.task.ts
     onbase/ …   crm/ …   kuali/ …
     extraction/               # service store (D4, charter §11): CSV + PDF extraction — sessions: []
+    normalization/            # service store: contact/address normalization + typed change provenance
     ocr/                      # service store (D4, charter §11): the OCR provider pipeline
     roster/                   # service store (D4, charter §11): spreadsheet matching — sessions: []
     workflows/
@@ -518,6 +629,8 @@ temp_src/
         index.ts
         tasks/merge-enrichment.task.ts
     common/                   # shared leaf code across stores — home of src/systems/common/ (D15)
+  scenarios/                  # strict registered behavior corpus (doc 12)
+  knowledge/records/          # active/superseded/retired/unverified structured guidance (doc 12)
 ```
 
 ### 3.2 `defineStore` — one impl registry per task namespace
@@ -574,24 +687,33 @@ export function defineWorkflowStore<Id extends string,
      declared content-addressed writer; workflow mini-stores cannot declare artifacts, and mutable
      append/update paths are confined to reviewed serialized projectors.
 
-### 3.3 Porting selectors + LESSONS (wrap, don't rewrite)
+### 3.3 Porting selectors + knowledge (preserve evidence, do not copy stale authority)
 
-- **UCPath selectors are NOT copied — they are re-exported.** `stores/ucpath/selectors.ts` is a
-  pure re-export of `src/systems/ucpath/selectors.ts` until the old tree's deletion day (D15):
+- **UCPath selectors are NOT copied — they are mapped/re-exported behind the new driver.**
+  `stores/ucpath/driver/legacy-selectors.ts` is a pure re-export of
+  `src/systems/ucpath/selectors.ts` until the old tree's deletion day (D15):
   27 commits touched that file, ~7 since June — a copied snapshot WILL drift during the
-  dual-maintenance window. A guard asserts the store file stays a pure re-export (no local
-  declarations) until the old registry is deleted, at which point the content moves wholesale.
+  dual-maintenance window. `ui-registry.ts` assigns stable doc-12 `ElementId`s to those legacy
+  property paths; tasks call the typed driver, never the re-export directly. A guard asserts the
+  re-export stays pure and every mapped legacy selector resolves until the old registry is deleted,
+  at which point locator recipes move behind the same stable ids.
   The same pattern is offered to any other high-churn store (crm, kuali) at its migration time;
   low-churn stores may move their registry in the port commit.
-- **Two-commit rule per store:** commit 1 is a pure move (`LESSONS.md`, `impl/*` moved with only
-  import-path edits — reviewable as zero-logic-diff); commit 2 wraps `impl` in `defineTask` shells
+- **Two-commit rule per store:** commit 1 is a pure move (`impl/*` with only import-path edits —
+  reviewable as zero-logic-diff); commit 2 wraps `impl` in `defineTask` shells
   + contract files. Re-derivation is forbidden (charter): `// verified <date>` stamps, `.or()`
   fallback chains, `getContentFrame`, employment-instance expansion, Duo two-phase factor logic
   move byte-for-byte.
-- `npm run selectors:catalog` + `selector:search` extend to `temp_src/stores/*/selectors.ts` (same
-  script, extra glob) so the intent-search loop keeps working during migration.
+- Existing LESSONS do **not** move wholesale. Each referenced lesson is triaged during migration:
+  active invariant → structured `KnowledgeRecord`; incident-only context → linked incident history;
+  superseded/duplicate/incorrect → excluded from the generated active guide. The old LESSONS file
+  remains for the legacy store only until its last consumer is deleted. See doc 12 §4.
+- `npm run ui:catalog` generates the new catalog; `selector:search` searches canonical ids, labels,
+  aliases, active knowledge, and temporary legacy paths. During coexistence the old
+  `selectors:catalog` still serves legacy source, but it is not a second source for new tasks.
 - The existing inline-selector architecture guard extends to `temp_src/stores/*/tasks/**` and
-  `impl/**` — tasks import from the store's `selectors.ts`, never `page.locator(...)` inline.
+  workflow code. Raw `Page`/`Locator`, `page.` calls, and locator recipes are allowed only under
+  `stores/*/driver/**` and session infrastructure. Tasks receive `ctx.driver`.
 
 ### 3.4 Service stores — system-less work has a home (D4)
 
@@ -603,9 +725,17 @@ Pure compute and non-browser pipelines get **service stores** under the same con
   a canonical field (e.g. some spreadsheet's column → `eid`); mapped values parse through the
   workflow's zod input schema, so ingest is validated by construction. Full design: doc 06.
 - **`ocr`** — the OCR provider pipeline (`src/services/ocr/` ports here): model calls, fabrication
-  tiering, tolerant-field handling. External I/O, but no browser.
+  tiering, tolerant-field handling. External I/O, but no browser; contracts declare
+  `providers:["ocr.extract"]` and receive only the injected admitted client.
 - **`roster`** — spreadsheet matching, using the same operator-defined column mapping onto
   canonical fields (charter §11). Full design: doc 06.
+- **`normalization`** — reusable contact/address cleanup currently split across
+  `services/llm/normalize-contact.ts` and `services/address/`. Deterministic phone/state/ZIP rules,
+  geocoder reads, and optional model suggestions return a strict discriminated result with one
+  provenance-labelled change per field (`rule|census|nominatim|ai`) plus explicit
+  `unchanged|ambiguous|unavailable`; provider exhaustion/error can never become “no change.” The
+  workflow decides whether an advisory enters an approval gate. Shared provider/rate-limit clients
+  live in infra and may also serve OCR; one store never imports another store's implementation.
 
 Rules:
 - Same contract types, same id grammar (`extraction/extract-pdf-fields`), same error taxonomy, same
@@ -615,7 +745,14 @@ Rules:
   type-constrained to exactly one need for their own system, and a browser-store task with empty or
   cross-system sessions fails the types and factory.
 - Service-store ctx has no `page` member (type-level) and no session provider; `defineStore` for a
-  service system takes no `SessionProvider`.
+  service system takes no `SessionProvider`. Remote service I/O is not ambient: direct provider SDK,
+  `fetch`, or HTTP-client imports are restricted to `infra/providers/**`. A service task declares
+  `providers`, and `ctx.providers` is narrowed to exactly those capabilities. Pure extraction/
+  roster tasks declare none and cannot call the network.
+- Provider adapters apply the immutable Clock/config snapshot, timeout, abort, retry/admission,
+  redaction, request/response schema, usage/cost, and evidence policy once. Provider failure is a
+  typed unavailable/invalid outcome or a declared task error; no adapter returns an empty value
+  that can mean success. D63 budgets and scheduling are owned by doc 05.
 - A read that downloads or creates a local file declares `artifacts:"content-addressed"` and receives
   the kernel `ContentAddressedArtifactWriter`; direct mutable-path writes/imports from a task fail an
   architecture guard. A retry can therefore recreate the same cache artifact but cannot append a
@@ -623,6 +760,13 @@ Rules:
   and serialized projectors (docs 03/06), not task `run` side effects.
 - What service stores are NOT: a home for waits. Tracker-subscription waiting (oath-upload's
   approval park) is a **gate** (§2.6, doc 02) — it must not be smuggled in as a `local` task.
+
+The old `services/timecard` is **not** another service store. Its pure calendar/range/year functions
+move to Clock-injected domain code; its current→previous orchestration becomes a semantic
+`stores/common/timecard.ts` helper over a typed timecard-driver interface. Old/New Kronos retain
+only their driver implementations. Raw `Page`, fixed sleeps, optional `new Date()` defaults, and
+`null` that conflates navigation failure with a verified no-punch result do not cross the boundary
+(D61).
 
 ### 3.5 Workflow mini-stores — pure specialization, never a system-policy bypass
 
@@ -649,19 +793,21 @@ replace the output, or swallow the error.
 
 ```ts
 // temp_src/base/decorate.ts
-export interface TaskHooks<T extends AnyTask> {
-  before?: (args: { input: TaskInput<T>; ctx: HookCtx }) => Promise<void>;
-  after?:  (args: { input: TaskInput<T>; output: TaskOutput<T>; ctx: HookCtx }) => Promise<void>;
+export interface TaskHooks<C extends AnyTaskContract> {
+  before?: (args: { input: TaskInput<C>; ctx: HookCtx }) => Promise<void>;
+  after?:  (args: { input: TaskInput<C>; output: TaskOutput<C>; ctx: HookCtx }) => Promise<void>;
   /** Observe only. The kernel ALWAYS rethrows the base TaskError; if this
    *  hook itself throws, its failure is attached as TaskError.hookErrors —
    *  secondary metadata, never a replacement (D15; pinned by unit test). */
-  onError?: (args: { input: TaskInput<T>; error: TaskError; ctx: HookCtx }) => Promise<void>;
+  onError?: (args: { input: TaskInput<C>; error: TaskError; ctx: HookCtx }) => Promise<void>;
 }
 
-export function decorateTask<T extends AnyTask>(base: T, hooks: TaskHooks<T>, label: string): T
+export function decorateTask<T extends AnyTask>(
+  base: T, hooks: TaskHooks<T["contract"]>, label: string,
+): T
 ```
 
-- `HookCtx` = `{ page (read-only, the task's system), screenshot, log, signal }` — no `fail` with
+- `HookCtx` = `{ driver (read-only capabilities for the task's system), capture, log, signal }` — no `fail` with
   the task's codes. A `before`/`after` hook that throws produces `code:"decorator-failed"`,
   `decoratedBy: label` — a broken decoration is never attributed to the base task. An `onError`
   hook that throws does NOT produce a new error at all: the base error propagates with the hook
@@ -837,6 +983,11 @@ inference — tasks stay plain objects.
 | 12 | **Stale reads feeding writes** — a resumed run replays an old checkpoint into a commit | freshness+provenance metadata are mandatory on every read; derived outputs retain oldest input observation; `Infinity` needs a justification comment; graph dependencies are declared, never inferred by executing JavaScript bind functions (doc 02) |
 | 13 | **Undeclared error codes** — `ctx.fail` drifting to arbitrary strings | `const Codes` literal-tuple inference + a checked-in type-level test pinning that an undeclared code fails `tsc` (D15) |
 | 14 | **A read task hides a mutable local write** — retry duplicates a workbook row or overwrites an operator edit | read tasks can access only the content-addressed artifact writer when declared; direct mutable filesystem writes fail a guard; mutable sinks are stable-keyed serialized outbox projections (docs 03/06) |
+| 15 | **TypeScript interface mistaken for runtime validation** — malformed JSON/DB/event payload is cast and reaches a write | every boundary owns a strict zod schema and parses on ingress/read; guard rejects non-strict persisted/wire objects and unchecked `as` casts at boundary adapters |
+| 16 | **Person input mistaken for page identity** — a stale employee remains open after a search | explicit subject scope on every task; reads that consume an already-open subject and every transaction resolve a registered authoritative observation at the declared point; wrong/unknown proof fails before extraction/commit; scenario corpus pins the New Kronos stale-timecard case |
+| 17 | **Selector duplication returns behind task helpers** | tasks cannot import `Page`/`Locator`, legacy selector maps, or locator recipes; only the driver layer can, and every task-used element/state/observation resolves through the doc-12 registry |
+| 18 | **One example masquerades as behavioral coverage** | contracts reference registered scenarios; error codes, wrong-subject, unexpected-state, cancellation, and transaction failure obligations are checked by doc 10's scenario-coverage guard |
+| 19 | **A service task hides provider/network I/O in an import** | service contracts declare provider capabilities; task ctx exposes only injected narrowed clients; direct SDK/fetch imports outside registered infra adapters fail the D63 guard; provider budgets/preflight/scenarios are bidirectionally covered |
 
 Honest residual risks (no full mechanical guard): (a) *output schemas that are too loose*
 (`z.string()` where an enum belongs) — mitigated by review + the stub-must-emit-canonical-values
@@ -864,14 +1015,14 @@ import { z } from "zod";
 import { defineTaskContract } from "../base.js";
 
 const Query = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("by-name"), name: z.string().min(1),
-             keepNonHdh: z.boolean().default(false) }),
-  z.object({ kind: z.literal("by-eid"), emplId: z.string().regex(/^10\d{6}$/, "EID must be 10xxxxxx") }),
+  z.strictObject({ kind: z.literal("by-name"), name: z.string().min(1),
+                   keepNonHdh: z.boolean().default(false) }),
+  z.strictObject({ kind: z.literal("by-eid"), emplId: EidSchema }),
 ]);
 
 /** Mirrors EidResult (person-org-summary.ts) — required/optional per the real interface. */
-const Candidate = z.object({
-  emplId: z.string(), emplRecord: z.string(),
+const Candidate = z.strictObject({
+  emplId: EidSchema, emplRecord: z.string(),
   name: z.string(), lastName: z.string(),
   hrStatus: z.string(), businessUnit: z.string(),
   jobCode: z.string(), jobCodeDescription: z.string(),
@@ -903,11 +1054,18 @@ export const SearchPersonOrg = defineTaskContract({
    *  commit task on resume (D8; enforcement walk in doc 02). */
   freshness: { defaultMaxAgeMs: 15 * 60_000 },
   provenance: { default: "live" }, // this execution read the authoritative UCPath grid
+  subject: { kind: "none", reason: "identity-search" }, // resolves identity; no subject is open yet
+  scenarios: [
+    "ucpath/search-person-org/by-eid-found",
+    "ucpath/search-person-org/not-found",
+    "ucpath/search-person-org/ambiguous",
+    "ucpath/search-person-org/unexpected-grid",
+  ],
   input: Query,
   // Mirrors PersonLookupRunResult minus allAttempts (audit → notes stream):
-  output: z.object({
+  output: z.strictObject({
     results: z.array(Candidate),
-    selection: z.object({
+    selection: z.strictObject({
       status: z.enum(["resolved", "not-found", "ambiguous"]),   // PersonLookupStatus, verbatim
       searchName: z.string(),
       selected: Candidate.nullable(),
@@ -933,9 +1091,9 @@ export const searchPersonOrg = defineTask(SearchPersonOrg, {
   sessions: [{ system: "ucpath" }],
   retry: { attempts: 2, backoffMs: 2000, retryOn: "transient" },
   run: async ({ input, ctx }) => {
-    const page = await ctx.page("ucpath");
-    // employment-instance expansion + preferred-row selection intact (verbatim port)
-    const lookup = await lookupPersonInUcpath(page, input,
+    // Named driver operation wraps the verbatim-ported employment-instance expansion and
+    // preferred-row selection; actions still resolve through canonical UI ids/page states.
+    const lookup = await ctx.driver.searchPersonOrg(input,
       input.kind === "by-name" ? { keepNonHdh: input.keepNonHdh } : {});
     ctx.recordData({ direction: "read", field: "candidates", value: String(lookup.results.length) });
     return { results: lookup.results, selection: lookup.selection };
@@ -957,11 +1115,15 @@ export const FillImport = defineTaskContract({
   title: "Fill OnBase import",
   effect: "prepare",
   checkpoint: "in-memory-only",
-  input: z.object({
-    pdfPath: z.string().min(1), docType: z.string().min(1),
-    emplId: z.string().regex(/^10\d{6}$/), personName: z.string().min(1),
+  subject: { kind:"person", expected:{fromInput:"emplId", identity:"eid"},
+             observe:"onbase.import.employee-eid", match:"normalized-exact-eid",
+             requiredAt:"after-prepare-before-fence" },
+  scenarios: ["onbase/import/prepare", "onbase/import/wrong-subject", "onbase/import/form-missing"],
+  input: z.strictObject({
+    pdf: ArtifactRefSchema, docType: z.string().min(1),
+    emplId: EidSchema, personName: z.string().min(1),
   }),
-  output: z.object({ stagedFields: z.array(z.string()) }),
+  output: z.strictObject({ stagedFields: z.array(z.enum(["docType", "emplId", "personName"])) }),
   errorCodes: ["import-form-missing", "field-rejected", "session-held-elsewhere"],
   example: { stagedFields: ["docType", "emplId", "personName"] },
 });
@@ -970,8 +1132,12 @@ export const SubmitImport = defineTaskContract({
   id: "onbase/submit-import",
   title: "Submit OnBase import",
   effect: "commit",
-  input: z.object({ emplId: z.string(), documentDigest: z.string() }),
-  output: z.object({ proof: OnBaseUploadProofSchema }),
+  subject: { kind:"person", expected:{fromInput:"emplId", identity:"eid"},
+             observe:"onbase.import.employee-eid", match:"normalized-exact-eid",
+             requiredAt:"after-prepare-before-fence" },
+  scenarios: ["onbase/import/commit", "onbase/import/proof-unknown", "onbase/import/crash-after-click"],
+  input: z.strictObject({ emplId: EidSchema, documentDigest: Sha256Schema }),
+  output: z.strictObject({ proof: OnBaseUploadProofSchema }),
   errorCodes: ["upload-unverified", "session-held-elsewhere"],
   example: { proof: ONBASE_UPLOAD_PROOF_EXAMPLE },
   writeSafety: onBaseUploadSafety, // doc 09: typed state/artifact proof
@@ -980,9 +1146,8 @@ export const SubmitImport = defineTaskContract({
 export const fillImport = defineTask(FillImport, {
   sessions: [{ system: "onbase", exclusive: true }],
   run: async ({ input, ctx }) => {
-    const page = await ctx.page("onbase");
-    await openImportForm(page);
-    const staged = await fillImportFields(page, input);
+    await ctx.driver.goto("onbase.import.form");
+    const staged = await ctx.driver.fillImportFields(input);
     return { stagedFields: staged };
   },
 });
@@ -990,9 +1155,8 @@ export const fillImport = defineTask(FillImport, {
 export const submitImport = defineTask(SubmitImport, {
   sessions: [{ system: "onbase", exclusive: true }],
   run: async ({ input, ctx }) => {
-    const page = await ctx.page("onbase");
-    await clickImport(page, ctx.mutation);
-    return { proof: await verifyImportedDocument(input) };
+    await ctx.driver.commitImport("onbase.import.submit", ctx.mutation);
+    return { proof: await ctx.driver.verifyImportedDocument(input) };
   },
 });
 ```
@@ -1008,8 +1172,8 @@ lives in doc 02 §3.2 and imports these contracts verbatim (D16).
 
 ```ts
 const auditedSave = decorateTask(ucpathStore.tasks.saveOathSignature, {
-  before: async ({ ctx }) => ctx.screenshot("oath-staged"),
-  after:  async ({ ctx }) => ctx.screenshot("oath-saved"),
+  before: async ({ ctx }) => ctx.capture("oath-staged"),
+  after:  async ({ ctx }) => ctx.capture("oath-saved"),
 }, "oath-form-audit");
 // same type as the base — slots into any step the base fits; on the builder,
 // the equivalent is .decorate("transaction", hooks, "oath-form-audit") (doc 02).

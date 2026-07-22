@@ -1,13 +1,13 @@
 # 08 — Foundation Gap Audit: the unowned cross-cutting concerns
 
-Status: **historical gap-discovery memo; superseded at its contract seams by 2026-07-21 Round 4.** A principal-architect pass over the
+Status: **historical gap-discovery memo; superseded at its contract seams by 2026-07-22 Round 6.** A principal-architect pass over the
 four written design docs (01 task-contract, 02 workflow-model, 03 tracker-dashboard, 05 execution),
 the charter (`00`), and the binding reconciliation (`04` — D1 ownership matrix). This doc **owns
 nothing** yet: it is a findings-and-design memo that names what the foundation of a production,
 single-operator, **real-HR-transaction** system needs that no doc currently owns adequately, ranks
 the gaps by risk, and designs the top three. Docs 06 (data-intake/Edit-Data) and 07 (master-plan)
 were planned-but-unwritten at the time. This file is evidence, not an implementation plan; current
-contracts live in 01–03 and 09–11, with build order in 07.
+contracts live in 01–07 and 09–12, with build order in 07.
 
 Every finding is grounded in the as-built code (file:line cited), not imagined — because for a
 rebuild that ports live-verified leaf knowledge, a concern we fail to *own* is one we will
@@ -43,6 +43,45 @@ walking are explicitly retired.
 | parked write “force done/retry” bypass | only schema-valid confirmed-present or generation-locked audited confirmed-absent resolution (02/03/09, D44) |
 | read task hides workbook append | content-addressed immutable read artifacts; mutable files use stable-keyed blocking outbox projectors (01/03/06, D45) |
 | pre-existing external transaction pollutes write ledger | `observed-present` blocks clicks and checkpoints typed `already-present`, but emits no write-ledger entry (09, D30/D31) |
+
+## 2026-07-22 second closure matrix
+
+The whole-plan + legacy-code review found additional cross-cutting gaps that this historical audit
+did not ask about. Round-5 decisions D46–D61 and the owning docs close them:
+
+| Newly identified gap | Binding closure / owner |
+|---|---|
+| TypeScript-looking but unvalidated wire/DB/config shapes; open decision maps; ambiguous absence | recursively strict/versioned zod boundaries, inferred types, branded scalars, explicit absence states (01/02/03/06/11; D46) |
+| Tasks rescan/reinvent selectors and important UI elements have multiple names | server-only canonical semantic UI registry + safe generated catalog + typed system drivers; raw Page/Locator isolated and external-commit actions capability-gated (01/05/12; D47) |
+| Correct workflow input can act on a stale page for another employee/document | fresh post-prepare expected↔observed subject proof before fence, bound into mutation capability/ledger (01/05/09/12; D48) |
+| Queue cancel/delete/retry/bump/update logic diverges; target resolution can degrade to caller roots; supersede lookup can continue on error | one durable CAS command protocol, descriptor policy, authority-only target resolver, transactional enqueue, Hide vs offline Purge (02/03; D49) |
+| Child-run input/output, partial failure, cancellation, retry, and multiple-delegation behavior implicit | typed results + complete edge policy + atomic immutable delegation manifests and scenario matrix (02/03; D50) |
+| Non-rebuildable SQLite authority had no backup/restore/degraded-mode plan | checksummed online backups, boot doctor/invariants, read-only degraded mode, exact restore and mandatory restore drill (03/10; D51) |
+| “Done” still requires operator trust/double-checking; failures lack one structured debug package | `FailureRecord`, redacted diagnostic bundles, terminal evidence receipt/confidence, `explain run`, durable notifications (03/09/11/12; D52) |
+| Unknown workflow scenarios accrue only after production surprises | maintained `ScenarioManifest` corpus and bug→regression coverage contract (01/02/06/10/12; D53) |
+| Append-only lessons confuse agents with duplicate/superseded rules; AI fixes are not traceable | statused/evidence-linked `KnowledgeRecord`, `FixRecord`, lesson triage and conflict guards (12; D54) |
+| Workflow modifier either overpromises safe code editing or remains an opaque side system | Phase-1 read-only generated explorer; Phase-2 constrained compile/diff/version/apply with exclusive source-authored vs DSL-authored mode; code/selectors/proofs stay code-owned (12; D55) |
+| Enterprise security could consume effort despite one local operator | loopback-only operator app; explicitly omit RBAC/teams/HA/remote sync while retaining correctness/redaction/backups, with only the scoped on-demand capture ingress (11/12; D56/D59) |
+| “Rerun existing data” can silently use a changed file/mapping and partial rows look complete | immutable intake admission manifest with hashes/corrections/rejections/exclusions + atomic member enqueue (06/12; D57) |
+| Workflow-count migration forgets old services/routes/UI/CLI tools | machine-checked legacy capability disposition with proxy removal milestones and final-delete mode (07/10; D58) |
+| Mobile capture is in-memory and finalization is fire-and-forget | durable capture authority, immutable photos, retryable bundle/handoff outbox, scoped phone ingress (03/06/12; D59) |
+| LLM/provider failure collapses to “no result” and advisory output can look authoritative | strict produced/unavailable/invalid advisory outcomes plus a no-authority capability guard (06/10/12; D60) |
+| Shared timecard helper mixes Date defaults, raw Page, fixed sleeps, and null outcomes | Clock-injected domain dates + semantic common driver orchestration + discriminated results (01/05; D61) |
+
+## 2026-07-22 final closure matrix
+
+The full end-to-end reread found seven remaining seams. Round-6 decisions D62–D68 are binding;
+historical sketches below do not override them.
+
+| Newly identified gap | Binding closure / owner |
+|---|---|
+| Canonical input could be trusted from SQLite without revalidation | ingress is transformed once; every authority read validates a separate transform-free/default-free `canonicalInput` schema; semantic changes require an explicit snapshot migration (02/10; D62) |
+| Remote OCR/geocoder/AI calls could hide behind service imports | closed declared provider capabilities, narrowed injected clients, infra-only adapters, provider budgets, preflight and scenarios (01/05/10/11; D63) |
+| One early `absent` recovery read could authorize a duplicate write | typed negative evidence, target propagation window, repeated consistent authoritative observations, durable `not_before`, otherwise park (00/02/09/10; D64) |
+| Subjectless file/catalog writes had no binding-proof contract | `WriteBindingProof = SubjectProof | allowlisted UnscopedBindingProof`; every mutation and ledger row binds its digest (01/09/10; D65) |
+| Spreadsheet mappings keyed only a canonical concept, so two target fields could collide | mappings bind stable target field ids/paths and separately record canonical concepts plus projection fingerprint (06/10; D66) |
+| Gates, notification controls, and capture controls could bypass the standard command protocol | one durable command envelope with strict run/gate/notification/capture arms; typed gate result is authority, event is a reference (02/03/06/10; D67) |
+| Endpoint/secret/provider inventories were illustrative and could omit runtime dependencies | exhaustive bidirectional runtime-dependency inventory over browser systems, providers, config/env/secret consumers and preflight (01/07/10/11; D68) |
 
 ---
 

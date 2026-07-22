@@ -1,8 +1,8 @@
 # 05 — Execution Kernel: Parallelism & Speed
 
-Status: **Phase 0 revised design — 2026-07-21 concurrency-safety corrections integrated.** Conforms
-to `00-charter.md` (§9 automated Duo, §10 parallelism-first) and `04-reconciliation.md`
-(D26/D27/D36/D43/D45). Code lands in `temp_src/`.
+Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** Concurrency now composes
+with the semantic driver boundary, fresh subject binding, the standard command protocol, and
+authority-store degraded mode rather than exposing Playwright pages to tasks.
 
 ## Ownership (D1)
 
@@ -19,6 +19,8 @@ to `00-charter.md` (§9 automated Duo, §10 parallelism-first) and `04-reconcili
 | Task contract, `SessionNeed` (one system per task), exclusive leases, session providers, retry policy → **doc 01** |
 | Run-state machine, gates/parks (D5), checkpoints, navigation-ownership rule (§3.1 there), RunEnvelope → **doc 02** |
 | Worker/run/task span wire schema, session-card projections, notes stream → **doc 03** |
+| Command/claim authority, degraded storage mode, notifications → **doc 03** |
+| Semantic UI ids, typed system drivers, action evidence, scenario manifests → **doc 12** |
 | OnBase cross-process SQLite lease → **D15** (mechanics here in §3.4; contract in doc 01 §2.1) |
 
 Grounding (read, not imagined): `src/core/daemon/daemon.ts` (claim loop: ONE
@@ -101,8 +103,10 @@ running(node i) → parked/terminal). The scheduler is the engine that decides *
   workflows (fairness, §5); an oath-signature member and a person-lookup run interleave on the
   same UCPath context's tabs. Login happens once per system per executor, not once per workflow
   per worker.
-- Service-store tasks (`ocr`, `extraction`, `roster` — D4) take no page lease and don't count
-  against system budgets; the OCR page pool keeps its own internal admission control unchanged.
+- Service-store tasks (`ocr`, `extraction`, `normalization`, `roster` — D4) take no page lease.
+  Pure local work consumes a bounded CPU/file lane. Remote provider work declares doc 01's D63
+  capability and must win the matching provider admission token; OCR's proven page/key limiter
+  ports behind that common capability surface rather than remaining an invisible exception.
 - Gates (D5): a lane hitting a gate node parks the run, **returns all page leases to the pool**,
   and frees the lane immediately. Parked runs cost zero capacity.
 
@@ -166,6 +170,7 @@ filter) when isolation matters more than sharing — e.g. a risky live batch.
 export interface ExecutorConfig {
   lanes: number;                        // max concurrent runs (default 4)
   systems: Partial<Record<BrowserSystemId, SystemPoolConfig>>;  // §3.2 sizing
+  providers: Partial<Record<ProviderCapabilityId, ProviderBudgetConfig>>; // D63
   group?: string;                       // optional isolation pin
 }
 export async function runExecutor(cfg: ExecutorConfig): Promise<void> {
@@ -183,19 +188,20 @@ export async function runExecutor(cfg: ExecutorConfig): Promise<void> {
 
 ## 3. The session pool
 
-### 3.1 Page leases
+### 3.1 Driver leases (Playwright page remains internal)
 
 ```ts
-// temp_src/exec/session-pool.ts
-export interface PageLease {
-  page: Page;                 // abort-racing proxy, ported from page-proxy.ts
-  system: BrowserSystemId;
+// temp_src/exec/session-pool.ts — exported task-facing view
+export interface DriverLease<S extends BrowserSystemId> {
+  driver: SystemDriver<S>;    // semantic operations + observation APIs (docs 01/12)
+  system: S;
   kind: "read" | "transaction";
   release(disposition: "clean" | "poisoned"): Promise<void>;
 }
 export interface SessionPool {
   /** Blocks until a lease is available within budget; single-flight login on first use (§3.3). */
-  acquire(system: BrowserSystemId, kind: "read"|"transaction", signal: AbortSignal): Promise<PageLease>;
+  acquire<S extends BrowserSystemId>(system: S, kind: "read"|"transaction",
+    signal: AbortSignal): Promise<DriverLease<S>>;
   budgets(): BudgetSnapshot;  // feeds the claim filter (§1.3) and the dashboard
 }
 
@@ -205,8 +211,14 @@ export type PoolMode =
 // No numeric combination can express mixed read+transaction or multiple transactions.
 ```
 
-- **Exclusive while held.** `ctx.page(system)` inside a task resolves to the lease's page and
-  nothing else; the pool never hands one page to two tasks. Kernel-owned — a task cannot opt out.
+An internal `PageLease` exists only under `exec/session-pool` and `stores/<system>/driver`; it owns
+the abort-racing Playwright proxy and constructs the typed driver. Task implementations cannot
+import `Page`, `Locator`, `BrowserContext`, `PageLease`, selector strings, or `newPage`. This is how
+semantic element identity, page-state assertions, subject observations, action evidence, and
+selector fixes remain centralized (doc 12).
+
+- **Exclusive while held.** `ctx.driver` resolves to the lease's typed driver and nothing else;
+  the pool never hands one internal page to two drivers/tasks. Kernel-owned—a task cannot opt out.
 - **Checked out per node, not per run.** A read gets one task-length lease. A transaction's live
   prewrite probe first gets an ordinary read lease and releases it; the transaction lease then spans
   prepare, fence, commit, and verification with no reset/checkpoint between arms. The probe can
@@ -214,6 +226,10 @@ export type PoolMode =
   transaction lease is acquired. Between
   nodes (and at any gate) the run holds no page.
   This is what makes D5's "parking is free" true and what returns capacity to siblings.
+- **The fence follows a fresh identity observation, not just a clean lease.** After prepare has
+  staged the form, the transaction driver executes the contract's `subject.observe` operation on
+  that exact page. The kernel records expected/observed evidence and allows the doc 09 CAS fence
+  only on `match`; `mismatch` and `unknown` never degrade to a warning or selector alternative.
 - **Release discipline (the §6.1 invariant's mechanical half):** `release("clean")` navigates the
   page to the system's `resetUrl` (bounded, e.g. 5s) before returning it to the pool; if the
   reset fails or the disposition is `"poisoned"` (aborted mid-Playwright-call — ports
@@ -277,7 +293,8 @@ per-store **commit-2+ hardening pass** with the discipline the 2026-06-22 job-su
 taught (a naive spinner-wait is WORSE than the sleep it replaced — it returns early and
 un-synchronized):
 
-1. **`stores/common/waits.ts`** provides condition waits that poll the *actual* readiness
+1. **`stores/common/waits.ts`** is **driver/session-internal only** and provides condition waits
+   that poll the *actual* readiness
    predicate: `settle(frame, { until: Locator|predicate, quietMs })` — target-element presence /
    value, plus a short DOM-mutation quiet window for PeopleSoft fragment refreshes; the
    `pollForJobInfoScan` pattern (poll the data you need, injected sleep, unit-testable)
@@ -292,6 +309,16 @@ un-synchronized):
    task execution → a `sleepMs` field on the task span's end note (doc 03 notes stream). The
    dashboard can show sleep-per-task; a ratchet pins per-contract sleep budgets and only shrinks.
    What gets measured gets deleted.
+
+The shared timecard path is the required worked migration for this rule (D61). Pure month/day/year
+resolution uses the injected Clock in domain code. `stores/common/timecard.ts` orchestrates
+current→previous checks over semantic driver methods such as `waitForTimecardReady`,
+`observeVisiblePeriod`, `switchToPreviousPeriod`, and `readLastPunchOutcome`; it receives neither
+`Page` nor a sleep method. Old/New Kronos drivers own their page implementations and positively
+verify the period label/grid changed. The result is discriminated (`found | verified-empty |
+navigation-failed | period-switch-unverified | parse-failed`) so the old `null` cannot mean both
+“no punches” and “the page never loaded.” Shared scenarios pin Dec→Jan, leap day, blank period
+label, unchanged label, empty current/non-empty previous, and driver failure once for both systems.
 
 Expected recovery: person-org lookup drops from ~24s sleep to <5s of condition-wait residue;
 Smart HR transaction from ~30s+ toward the real PeopleSoft roundtrip time. Combined with 3-tab
@@ -324,7 +351,8 @@ same budgets; verify's child fan-outs no longer hide inside one task.
 
 ### 5.1 Budgets (three nested caps, all operator-visible)
 
-1. **Per-system, per-executor:** the §3.2 tab counts — the hard physical cap.
+1. **Per-system/provider, per-executor:** the §3.2 browser tab counts plus closed provider
+   concurrency/rate/token budgets — the hard physical/admission cap.
 2. **Per-system, global:** SQLite-registered cap across executors (e.g. `ucpath: 6`) so two
    executors can't jointly hammer one backend; OnBase's global cap is structurally 1 (D15).
 3. **Per-workflow lane cap:** max runs of one workflow in flight per executor (default = lanes),
@@ -343,16 +371,17 @@ outlives the deadline fails the executor soak/teardown test; no unbounded SDK ca
 
 Claim order is **fair-share, then FIFO**: group queued runs by workflow; pick from the workflow
 with the fewest currently-running claims (tie → oldest `enqueued_at`). Plus one reservation:
-**at least one lane is reserved for operator-interactive runs** (root runs with no
-`parentRunId`) whenever any exist — a fresh person-lookup typed into the dashboard claims within
-one scheduler tick even mid-fan-out. Fan-out members (operation-member shape) fill the remaining
-lanes. Retry backoff rides a `not_before` timestamp on the queue row — a backing-off run is
+**at least one lane is reserved for `RunEnvelope.priority:"interactive"` runs** whenever any exist
+— a fresh person-lookup typed into the dashboard claims within one scheduler tick even mid-fan-out.
+Priority is server-stamped from the run surface, not inferred from `parentRunId`; an interactive
+child inherits interactive priority and an uploaded bulk root remains bulk. Bulk members fill the
+remaining lanes. Retry backoff rides a `not_before` timestamp on the queue row — a backing-off run is
 simply not claimable yet and blocks nothing (no head-of-line: the claim query skips it).
 
 ```sql
 -- claim sketch: fairness folded into the ported indexed claim
 SELECT ... FROM runs WHERE state='queued' AND not_before <= @now
-  AND (@interactiveLaneFree OR parent_run_id IS NOT NULL OR ...)
+  AND (@interactiveLaneFree = 0 OR priority = 'interactive')
 ORDER BY running_count_for_workflow ASC, enqueued_at ASC LIMIT 1;
 ```
 
@@ -360,8 +389,13 @@ ORDER BY running_count_for_workflow ASC, enqueued_at ASC LIMIT 1;
 
 - Pool exhaustion is **visible**: lanes waiting on a lease emit `waiting` notes (span-addressed);
   the executor card shows per-system `in-use / cap`.
-- Enqueue is never blocked (queue depth is unbounded, as today); admission control happens at
-  claim time. The rail's queue badges stay backend-authoritative (doc 03 wfCounts).
+- Lane saturation never blocks enqueue; admission to execution happens at claim time. Storage is
+  still a correctness dependency: enqueue first checks doc 03's authority health and configured
+  free-disk floor. A degraded DB, failed backup invariant, or exhausted disk rejects the enqueue
+  loudly with a durable health notification instead of accepting work that cannot be recorded.
+  Queue depth has no arbitrary per-workflow cap by default, but an operator-set global cap rejects
+  new bulk work explicitly while preserving interactive capacity. Rail badges remain backend-
+  authoritative (doc 03 `wfCounts`).
 
 ---
 
@@ -372,12 +406,17 @@ ORDER BY running_count_for_workflow ASC, enqueued_at ASC LIMIT 1;
 > **A `Page` is referenced by at most one task execution at any instant. A page that hosted a
 > task is returned to the pool only after a successful bounded navigation to the system's
 > neutral `resetUrl` — otherwise it is closed. A page that hosted an aborted/poisoned task is
-> ALWAYS closed, never reused. Identity of lease-holder is checked on every `ctx.page` call.**
+> ALWAYS closed, never reused. Identity of lease-holder is checked on every driver operation.
+> Before a write fence, the driver freshly observes the declared doc 01 subject on the staged
+> page and the kernel matches it to the expected normalized subject; mismatch or unknown closes
+> the lease and parks/fails before any commit action.**
 
 Two items sharing a page mid-form — task B typing into the Smart HR wizard task A half-filled —
 is the one failure mode that silently writes person A's data into person B's transaction. The
-invariant kills it three ways: exclusivity (no concurrent reference), reset-or-close (no residual
-form state), poison-close (no reuse after an indeterminate abort). Mechanical guards: §7 #2.
+invariant kills it four ways: exclusivity (no concurrent reference), reset-or-close (no residual
+form state), poison-close (no reuse after an indeterminate abort), and fresh subject binding (a
+valid-looking page for the prior employee cannot cross the write fence). Mechanical guards: §7
+#2 and #11.
 
 ### 6.2 Crash/failure matrix
 
@@ -389,6 +428,8 @@ form state), poison-close (no reuse after an indeterminate abort). Mechanical gu
 | Session expired (SSO bounce) | That system | Surface `failed` + re-login on next acquire (idempotent login); no auto-Duo-loop hiding it |
 | Executor crash | Its in-flight runs | reads re-pend; a transaction with an intent runs doc 09 recovery before any prepare/commit replay |
 | Retry storm | None (no HOL) | `not_before` backoff — backing-off runs are invisible to claims |
+| Stale/wrong subject remains on an otherwise valid page | Its transaction only | semantic observation after prepare returns mismatch/unknown; kernel emits subject evidence + structured failure, closes the lease, and never acquires the commit fence |
+| Authority DB degraded/corrupt | All mutations stop; dashboard remains diagnostic | doc 03 boot/runtime health gate blocks claims, commands, enqueue, and commits until verified recovery |
 
 ### 6.3 Retries schedule like everything else
 
@@ -402,15 +443,18 @@ competes under fair-share like any run. No lane ever sleeps waiting for a backof
 | # | Rot vector | Mechanical guard |
 |---|---|---|
 | 1 | **Hidden serialization returns** — a well-meaning mutex/`await` chain quietly makes lanes run one-at-a-time | The e2e stub parallel matrix (already deterministic via hold gates) gains a lane-overlap scenario: two held runs of different workflows must be simultaneously `running` on one executor; asserted on span timestamps. A scheduler metric (`maxConcurrentLanes`) is asserted ≥2 in that lane |
-| 2 | **Page cross-contamination** — pool hands a dirty or shared page | Unit-pinned: `release("clean")` must navigate-or-close before re-checkout; poisoned ⇒ closed (test constructs the half-filled-form case). Runtime: lease records `(runId, spanPath)`; `ctx.page` throws if the caller isn't the lease-holder. Ratchet: no `Page` value may be stored on module scope in `stores/**` (grep guard) |
+| 2 | **Page cross-contamination** — pool hands a dirty or shared page | Unit-pinned: `release("clean")` must navigate-or-close before re-checkout; poisoned ⇒ closed (test constructs the half-filled-form case). Runtime: lease records `(runId, spanPath)` and every driver call checks it. Ratchet: Playwright types/page APIs exist only in driver/session internals, never tasks or workflow modules |
 | 3 | **Sleep tax re-accretes** | wait-for-timeout ratchet extended to `temp_src` with zero-allowlist for new files, shrink-only for ported ones; `sleepMs` recorded per task span + budget ratchet (§4.1) |
 | 4 | **Fan-out starves interactive runs** | Unit test seeds 100 members + 1 root run, asserts the root claims within one tick (interactive lane reservation); fair-share ORDER BY pinned by query test |
 | 5 | **Pool mode creeps past evidence** — someone enables mixed read/write or multiple transactions | modes are a closed safe union, not numeric overrides; any widened mode requires an adjacent live-proof record and dedicated interference test |
 | 6 | **Login stampede** — N lanes trigger N concurrent Duo logins for one system | Single-flight pinned: N concurrent `acquire`s on a cold system produce exactly one `login()` call (spy test) |
 | 7 | **OnBase lease bypass/early release** | every OnBase session is identity-exclusive; test proves context close happens-before DB lease release and crash takeover waits for dead-owner proof |
 | 8 | **Executor becomes a new god-process nobody can restart** | Parked-runs-are-free (D5) + lease recovery mean restart cost is bounded; a soak test (ports `daemon-teardown-soak`) kills an executor mid-lanes and asserts every run reaches re-pend/park/terminal with zero orphans |
-| 9 | **Budgets silently ignored** (a direct `context.newPage()` beside the pool) | Grep ratchet: `newPage(` allowlisted only inside `session-pool.ts`; all task page access flows through `ctx.page` → lease |
+| 9 | **Budgets silently ignored** (a direct `context.newPage()` beside the pool) | Import/AST ratchet: `newPage(` and raw Playwright imports are allowlisted only inside session/driver internals; all task interaction flows through `ctx.driver` → lease |
 | 10 | **Fairness math starves the fan-out instead** (inverse of #4) | Same seeded test asserts members drain at ≥ (lanes−1) concurrency while the interactive lane is idle |
+| 11 | **A clean-looking pooled page still contains the previous employee** | registered scenario alternates two EIDs on one pool slot, injects stale displayed identity after prepare, and asserts `subject.observed:mismatch`, zero fence acquisition, zero commit call, poisoned-close, and a diagnostic bundle |
+| 12 | **Driver abstraction becomes a thin locator passthrough** | public driver signatures may use domain inputs/outputs + semantic ids only; signatures accepting selector strings/Locator/Page fail the architecture guard; contract scenarios assert page-state transitions and action evidence |
+| 13 | **Provider calls bypass admission/evidence** | service contracts declare D63 capabilities; direct SDK/fetch imports are infra-only; scheduler fixtures prove provider concurrency/rate/timeout/abort budgets and an exhausted optional provider returns typed unavailable without occupying a lane forever |
 
 Honest residuals: (a) PeopleSoft mixed read/write and multi-write behavior remain unknown until
 live proof — the design defaults to context-exclusive transactions and treats widening as an experiment, not
