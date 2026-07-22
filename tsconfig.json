@@ -19,10 +19,9 @@
   },
   "include": [
     "src/**/*",
-    "temp_src/**/*",
     "tests/**/*",
     "vitest.config.ts",
     "data/documents/make-e2e-roster.mjs"
   ],
-  "exclude": ["src/dashboard/**/*", "temp_src/dashboard/**/*"]
+  "exclude": ["src/dashboard/**/*"]
 }
