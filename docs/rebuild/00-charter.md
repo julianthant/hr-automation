@@ -231,7 +231,10 @@ it becomes binding.
   and fail-closed write/identity behavior remain mandatory because the tool handles real employee
   data and transactions.
 - **Same quality umbrella from day one.** `temp_src` is inside the same tsconfig project, unit
-  tests, and `npm run test:architecture` ratchets (extended to cover it). No ungated parallel tree.
+  tests, and `npm run test:architecture` ratchets (extended to cover it). New rebuild source and
+  tests have explicit non-vacuous zero-warning lint gates; known legacy test-lint debt is
+  fingerprinted and shrink-only, never silently inherited or used to exempt a new diagnostic
+  (D70). No ungated parallel tree.
 - **No implementation before the corrected dependency graph is accepted.** The abandoned Phase-1a
   skeleton and spike were removed on 2026-07-21. The next implementation starts from an empty
   `temp_src`; no type shell may forward-declare a contract owned by a later phase.

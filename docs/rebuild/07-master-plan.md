@@ -33,7 +33,7 @@ Every concept has exactly one owner (reconciliation `04` D1). Reference the owne
 | Task contract (`defineTaskContract`/`defineTask`), contract/impl split (D3), task-namespace grammar + closed `SystemId` union (D2), error taxonomy, three effects/dry-run mechanics, retry, decoration, system/service stores + pure workflow mini-stores, session providers + login signature, `stores/common/` leaf homes | **Doc 01** |
 | Workflow builder API (single), descriptor shape, `RunEnvelope`, run-state machine incl. gates/parks (D5), checkpoint/resume + freshness walk (D8), label precedence (D16) | **Doc 02** |
 | Span/event wire schema (D10), notes stream, storage layout, SQLite projection role (D14), SSE wire shapes, lift adapter + flip plan (D12/D13), completion (fan-out/approval) union (D11) | **Doc 03** |
-| Binding cross-doc reconciliation (D1–D68, including 2026-07-22 Round 6) | **Doc 04** |
+| Binding cross-doc reconciliation (D1–D72, including 2026-07-22 Round 7) | **Doc 04** |
 | Scheduler/lanes/fairness/backpressure, session pool + driver leases, executor process model, speed/sleep-tax contract, page/subject-isolation invariant | **Doc 05** |
 | Data-service systems: CSV/PDF extraction, typed contact/address normalization, roster matching, durable mobile capture, operator column mapping, immutable intake manifest/rerun, Edit Data checkpoint UI | **Doc 06** |
 | Cross-cutting gap findings memo (owns nothing — a design input) | **Doc 08** |
@@ -130,7 +130,7 @@ semantics mid-migration.
 
 | Phase | Headline deliverable | Gate to exit |
 |---|---|---|
-| **0** | Corrected foundation design approved; empty rebuild tree | Round-6 decisions reconciled across 00–12; dependency/type proof spec approved |
+| **0** | Corrected foundation design approved; empty rebuild tree | Round-7 decisions reconciled across 00–12; executable feasibility + honest gate baseline recorded |
 | **1** | Complete base/kernel + trust/authoring foundation in `temp_src` | full gates green; strict/subject/control/delegation/recovery/scenario/evidence/notification fixtures pinned; read-only explorer works on synthetic state |
 | **2** | Read slice + transactional safety + constrained-editor proof | person-lookup live; subject-bound dry-run and controlled commit/crash recovery/outbox/ledger proof green; editor compile/diff/apply proven only for safe closed fields |
 | **3+** | Per-workflow migration, one at a time (order §3.3), plus explicit non-workflow capability closure (§3.6) | each: §b questionnaire answered; live dry-run + controlled write evidence where applicable; migrated leaves removed or explicitly retained for named legacy consumers; every capability inventory entry advances to native/replaced/retired; docs updated |
@@ -145,7 +145,7 @@ semantics mid-migration.
 before any `temp_src` code is built (charter §Process: nothing is built before its design part is
 approved).
 
-**Status (2026-07-22 revision).** Docs 00–12 have been reconciled through Round 6 (D46–D68) after
+**Status (2026-07-22 revision).** Docs 00–12 have been reconciled through Round 7 (D46–D72) after
 the entire design and relevant legacy code were reread. The abandoned skeleton and spike remain
 deleted; Phase 1 has not started. This corrected design now awaits operator approval as one set.
 
@@ -162,6 +162,23 @@ retention is settled by D14—logical-item deletion only, never JSONL age. Ledge
 snapshots, four lanes, and context-exclusive transactions are also settled defaults, not open
 Phase-1 dependencies.
 
+**Executable feasibility evidence (not implementation).** Disposable files outside the repository
+were compiled/run with the project's actual Node 26, TypeScript 5.9, and Zod 4 dependencies. The
+spike proved effect-specific contract overloads and negative type controls, provider-client
+narrowing, canonical-input transform-once/revalidate-many behavior, strict command arms, target-
+field mappings, typed child results, proof unions, a 40-node typed chain, post-write settlement,
+SQLite permanent-key/atomic-outbox behavior, and native online backup/read-only verification. The
+40-node compile completed in 0.68s at about 212 MB. This establishes feasibility only: D71 requires
+the same controls against the real API as committed Phase-1 tests. One adversarial case initially
+failed—pre-propagation negative evidence could contribute a vote—and is now closed by D69.
+
+**Measured existing gate baseline.** `typecheck:all`, unit+serial tests, all 137 architecture tests,
+and dashboard build pass. Source lint currently has 2 errors + 1 warning; test lint has 1,325 errors
++ 2 warnings. D70/doc 10 §1.1 makes this explicit: source lint is repaired before 1b; new rebuild
+source/tests are zero-warning from their first file; legacy test diagnostics are fingerprinted,
+shrink-only coexistence debt and must reach zero before final cutover. No plan milestone may report
+`npm run lint:tests` green until it actually is.
+
 **Exit criteria.** Docs 00–12 and this build order approved; every deferred question has an owner,
 evidence needed, and resolution point. No `temp_src` code before this gate.
 
@@ -177,9 +194,9 @@ parallel tree). The base is proven by tests + fixtures, not by a live workflow (
 
 | # | Work item | Owner | Key guards that must be green at this step |
 |---|---|---|---|
-| 1a | **Pre-tree guard plumbing + legacy capability baseline.** With `temp_src` still absent, first extract shared walk/allowlist helpers as a zero-count-change commit; then add the reviewed guard inventory, D58 legacy capability-disposition schema/baseline, and exact path-exemption tests. Do not add unmatched CLI globs or pretend an absent tree was scanned | **Docs 07/10** | helper-refactor commit preserves the measured architecture file/test count exactly; later intentional test additions are enumerated; guard and capability inventories self-validate; every workflow/service/route/UI/CLI/tool family is classified; nested-`scripts` fixture |
+| 1a | **Pre-tree guard plumbing + honest legacy baselines.** With `temp_src` still absent, first extract shared walk/allowlist helpers as a zero-count-change commit; add the reviewed guard inventory, D58 capability baseline, and exact path-exemption tests; repair the 2-error/1-warning source-lint baseline without suppressions; generate D70's diagnostic-fingerprinted shrink-only legacy-test lint manifest and zero-debt/non-vacuous rebuild lint commands. Do not add unmatched CLI globs or pretend an absent tree was scanned | **Docs 07/10** | helper-refactor preserves measured architecture file/test count; `npm run lint` green before 1b; legacy diagnostic fingerprints reproduce exactly then only shrink; new-tree lint commands reject warnings and unmatched paths; guard/capability inventories self-validate; every workflow/service/route/UI/CLI/tool family classified; nested-`scripts` fixture |
 | 1b | **First strict domain leaf + full coverage activation, atomically.** Add closed/branded ids, canonical JSON/absence/error types, Clock/config/secrets/redaction classifications, exhaustive runtime-dependency + environment/preflight registries, and base failure/evidence/scenario/knowledge schemas; activate `temp_src` typecheck, ESLint CLI+config, whole-tree ratchets, and layer matrix in the same commit | **Docs 01/10/11/12** | strict-boundary schema inventory; typecheck/lint non-vacuity; clock/secrets/config/preflight/redaction canaries; defaults parse; resolver return types; bidirectional system/provider/endpoint/secret prerequisite coverage; no open decision maps |
-| 1c | **Authority storage + recovery + command/write type shell.** Create versioned authority/projection table classes, backup manifest/online backup/doctor/degraded-mode/restore APIs, full command-family types, `ProbeVerdict`/negative-settlement policy, typed write-binding proof union, permanent intent/attempt, dependency/manifest, gate-result, notification, outbox and ledger-head schemas before consumers refer to them | **Docs 03/09/11** | DDL/invariants; authority vs projection enumeration; boot corruption fixture; backup checksum + restore drill skeleton; committed key cannot reinsert; one negative observation cannot unlock retry; no untyped command/proof/gate/notification arm |
+| 1c | **Authority storage + recovery + command/write type shell.** Create the infra-owned native authority adapter, versioned authority/projection table classes, self-describing `node:sqlite` online-backup manifest/doctor/degraded-mode/restore APIs, full command-family types, `ProbeVerdict`/negative-settlement policy, typed write-binding proof union, permanent intent/attempt, dependency/manifest, gate-result, notification, outbox and ledger-head schemas before consumers refer to them | **Docs 03/09/11** | DDL/invariants; raw `DatabaseSync` private; authority vs projection enumeration; boot corruption fixture; native backup opens/read-checks its own generation + follow-up trigger; restore skeleton; committed key cannot reinsert; pre-window/single negative cannot unlock retry; no untyped command/proof/gate/notification arm |
 | 1d | **Semantic UI registry, typed drivers, task + provider contracts and stores/sessions.** Inventory legacy selector keys into one canonical id/alias migration map; implement the server-only recipe registry, safe generated `UI-CATALOG.md` projection, driver boundary, then read/prepare/commit overloads, subject specs, mutation capability, freshness/provenance, artifact writer, declared provider capabilities with narrowed injected clients, store/session providers and exclusivity. Fully typed recipes populate as tasks migrate; no task may port first and bypass this step | **Docs 01/05/12** | semantic-id uniqueness/dependencies/catalog; catalog omits recipes; commit UI actions require mutation capability; raw Page/Locator absent outside driver/session internals; remote I/O requires provider declaration and infra adapter; effect/capability/subject/contract/impl/example/error/store/no-any/artifact/OnBase guards; every new observation/recipe has fixture plus live/read-only verification evidence |
 | 1e | **Complete workflow DAG + result/delegation/scenario descriptor.** Real-scale type spike first; then ingress parser plus transform-free canonical-input validator, read/transaction/branch/fork-join/typed child result/gate nodes, complete delegation policies/manifests, enqueue/actions, completion, fingerprints, checkpoints/migrations and registered scenarios | **Docs 02/03/12** | realistic graph type suite; ingress→canonical round-trip and corrupted-authority rejection; strict terminal/gate result; delegation matrix; transaction pairing; descriptor projection matrix; no erased target; every branch/gate/policy has an executable scenario |
 | 1f | **Core registry + executor/checkpoints/command service/write sequencer.** Composition root above workflows; claims/lanes/provider budgets; standard run/gate/notification/capture commands; authority-only target resolution; context-exclusive transactions; probe→prepare→binding proof→fence→commit→proof→atomic outbox; evidence-qualified negative recovery and parked-intent resolution | **Docs 02/03/05/09** | command idempotency/CAS; lookup failure creates no duplicate; no visible-root fallback; dry-run commit-free; binding mismatch/unknown creates zero fence/click; a bare/early negative cannot retry; provider admission, probe-age/settlement/CAS/dedupe/crash/context tests |
@@ -194,11 +211,17 @@ read/prepare/commit, transaction pairing, output-dependent branch, fork/join, ty
 external/children gates, heterogeneous completion stages, decorations, errors, and schema changes
 that deliberately fail their consumers. No production builder or skeleton lands until the positive
 and negative controls pass under the real toolchain with no `any`/`unknown` target erasure.
+The D71 disposable 40-node simplified chain is a feasibility floor, not a substitute. The real
+suite records `tsc --extendedDiagnostics` and fails if the representative file exceeds 5 seconds or
+1 GiB on the same baseline machine; a regression outside that budget stops builder work for type-
+shape simplification rather than being normalized as editor lag.
 
 **Hard exit criteria (Phase 1).**
-- `npm run typecheck:all` (both tsc programs), `npm run lint`, `npm run test`, and
-  `npm run test:architecture` **all
-  green**, with every guard inventoried and covering `temp_src`.
+- `npm run typecheck:all` (both tsc programs), `npm run lint`, `npm run lint:rebuild`,
+  `npm run lint:rebuild-tests`, `npm run lint:legacy-tests-ratchet`, `npm run test`, and
+  `npm run test:architecture` are **all green**, with every guard inventoried and covering
+  `temp_src`. During coexistence the fingerprinted legacy-test ratchet is the honest gate;
+  `npm run lint:tests` becomes mandatory once its D70 manifest reaches zero and is deleted.
 - Write-safety fixtures pin simultaneous and later sequential same-key dedupe, proof validation for
   every completion arm, fresh subject binding, crash injection across atomic commit, and ledger
   projector concurrency/tail loss. Alternating-EID/file-digest mismatch produces zero fence/click.
@@ -559,7 +582,7 @@ working). Three mechanisms make that safe; the compat layer is deleted at the en
 | 1 | **A contract flaw surfaces late** | read-only proof would miss transaction failures | Phase 2 has separate read and controlled transaction proofs, including crash/outbox/dedupe evidence |
 | 2 | **The dashboard-flip parity milestone slips** (scope creep back to wholesale) | 103 endpoints/122 components is a mega-milestone that could swallow the schedule | D13 keeps the flip **scoped** (4 surfaces); everything else proxies; the parity gate is a concrete golden-payload test, not "looks right"; the one-week fallback de-risks the cutover |
 | 3 | **Dual-maintenance or legacy-wire drift** during Phase 3 | Old + new coexist; a selector fixed in one tree can rot the other, or an active-production tracker change can mis-lift | The canonical driver registry maps to the live legacy selector authority without copying during coexistence (UCPath uses a guarded pure re-export; other stores choose move vs re-export by churn), while tasks depend only on stable semantic ids. Legacy wire schemas are versioned with per-version adapters/goldens; each system window is explicit and ends at its last consumer |
-| 4 | **A target can make settlement unknowable** (write-safety residual) | UI-only systems may expose neither an idempotent API nor a trustworthy immediate negative read after a click; early absence can be eventual-consistency lag, and a positive match can still be for the wrong subject | D48/D64/doc 09: permanent key fence; fresh binding proof; typed positive proof; negative observations cannot unlock retry until the target-specific propagation window and repeated authoritative checks agree; unsettled/ambiguous evidence parks; per-probe live verification at migration. The guarantee is at most one unattended commit attempt per intent generation plus verified convergence—not unconditional distributed exactly-once |
+| 4 | **A target can make settlement unknowable** (write-safety residual) | UI-only systems may expose neither an idempotent API nor a trustworthy immediate negative read after a click; early absence can be eventual-consistency lag, and a positive match can still be for the wrong subject | D48/D64/D69/doc 09: permanent key fence; fresh binding proof; typed positive proof; every counted negative observation must occur after the target-specific propagation window and repeated authoritative checks must agree; unsettled/ambiguous evidence parks; per-probe live verification at migration. The guarantee is at most one unattended commit attempt per intent generation plus verified convergence—not unconditional distributed exactly-once |
 | 5 | **Build context + operator-attention limits** | The program is long (16 workflow directories across 10 migration orders, plus shared capability closure); high WIP and oversized sessions cause ownership drift | One-at-a-time Phase 3, coherent local commits, explicit handoffs/checkpoints when needed, Phase-2 gates before scale, machine inventories/guards so review concentrates on live evidence |
 | 6 | **Canonical UI registry becomes a second stale selector list** | Drivers change selectors but forget ids/catalog/scenarios, or aliases multiply | registry is driver authority, generated catalog only, same-system dependency guard, selector verification metadata, alias uniqueness/supersession, migration scenario before removal |
 | 7 | **Authority backup exists but has never been restored** | Corruption is discovered during a real run and the “backup” is unusable | Phase-1 automated corruption/restore drill and recurring doctor/backup-health surface; degraded mode blocks mutations instead of creating an empty DB |
@@ -605,9 +628,11 @@ The rebuild is complete when **all** hold:
 3. **Compat layer gone** — the lift adapter (D12), the golden-payload parity harness, and the
    one-week legacy-dashboard fallback are removed; the dashboard serves entirely from the new
    descriptor + span contract (all surfaces flipped, not just the scoped four).
-4. **All guards green over `temp_src` only** — guard inventory shows every guard covering
-   `temp_src`; retired parity guards are gone; graph/transaction/write/outbox/provenance fixtures
-   pass; ratchet allowlists hold no new-code entries.
+4. **All guards green with no inherited debt** — guard inventory shows every applicable guard
+   covering `temp_src`; `lint:rebuild`, `lint:rebuild-tests`, ordinary source lint, full
+   `lint:tests`, typecheck, and tests pass; D70's legacy-test diagnostic manifest has reached zero
+   and is deleted; retired parity guards are gone; graph/transaction/write/outbox/provenance
+   fixtures pass; ratchet allowlists hold no new-code entries.
 5. **The docs match what is built** — every owning doc updated to as-built (charter: the foundation's
    documentation is part of the foundation), and this master plan's phase table fully checked off.
 6. **The immutable ledger is live** — every real commit writes an atomic outbox projected into one

@@ -415,9 +415,12 @@ selects exactly one of three outcomes and never retries from a single unproven U
    indeterminate, not done). There is **NO path to `done` with unvalidated proof—recovery
    included.**
 2. **The write is proven absent.** One `absent` result is only an observation, not retry authority.
-   The kernel validates its `AbsentEvidence`, waits until at least `minSinceFenceMs` using a
-   `not_before` requeue (no sleeping lane), and obtains the configured 2–3 consistent observations
-   separated by `minBetweenReadsMs`. All must bind the same key/query/source state. Only then does
+   The kernel validates its `AbsentEvidence` and schedules the **first qualifying** probe no earlier
+   than `fencedAt + minSinceFenceMs` using a `not_before` requeue (no sleeping lane). It then obtains
+   the configured 2–3 consistent observations separated by `minBetweenReadsMs`. Every counted
+   observation—not merely the final one—must have `observedAt >= fencedAt + minSinceFenceMs` and
+   bind the same key/query/authoritative source state. Earlier observations remain diagnostic only
+   and contribute zero settlement votes (D69). Only then does
    the kernel record a strict `safe-to-retry` resolution and change the same intent to `retryable`;
    history is retained and the next attempt CAS-fences a new generation. A contract whose target
    cannot earn this proof declares `recoveryAbsence.kind:"operator-only"`.
@@ -588,7 +591,7 @@ The operator's core requirement. Exhaustive:
 | 5 | Captured proof fails its `proofSchema` | schema-fail ⇒ `PARKED`, never `done{committed:true}` |
 | 6 | Kuali `save-verify` can't confirm the save | any verdict ≠ `present` ⇒ `PARKED` |
 | 7 | OnBase `upload-verify` can't confirm the filing | any verdict ≠ `present` ⇒ `PARKED`; `unverifiableByPage` allowlist ⇒ **always** `PARKED` for manual confirm (never auto-done) |
-| 8 | Crash mid-write, recovery probe indeterminate | `ambiguous`/`unknown`/throw/malformed absence ⇒ `PARKED`; `present` ⇒ backfill-done only after the arm's `proofSchema`; `absent` becomes retry authority only after typed evidence clears the contract's propagation + repeated-observation policy, otherwise parks |
+| 8 | Crash mid-write, recovery probe indeterminate | `ambiguous`/`unknown`/throw/malformed absence ⇒ `PARKED`; `present` ⇒ backfill-done only after the arm's `proofSchema`; `absent` becomes retry authority only after every counted observation was captured after the propagation window and clears the repeated-observation policy, otherwise parks (D64/D69) |
 | 9 | A commit `run` returns success with no proof | kernel rejects at ⑥ ⇒ `PARKED` |
 | 10 | The mutation primitive fired without a fence (a mis-authored submit) | primitive throws (⑤) — corruption, loud |
 | 11 | dry-run: no submit composed at all (charter §1a) | write-safety never engages; nothing to make done — clean, no leak |
@@ -809,8 +812,9 @@ re-run ucpath/find-existing-termination key="10694136|termination|08/01/2026"
 ⇒ NO second Save. The permanent fence and typed positive proof establish convergence without a
 second unattended commit attempt.
 ```
-Had the first recovery probe returned `absent`, the kernel would wait until 30s after the fence,
-requeue without occupying a lane, then require a second same-key/same-state absence at least 5s
+Had an early recovery probe returned `absent`, it would be retained only as diagnostic evidence.
+The kernel would requeue without occupying a lane, take its first qualifying observation at least
+30s after the fence, then require a second same-key/same-state absence at least 5s
 later before marking the intent retryable. An early, malformed, or disagreeing absence would park.
 Had it returned `ambiguous` (two "Terminatn" rows for that EID+date) or
 `unknown` (grid didn't render) → `PARKED(needs-operator)`: *"termination for EID 10694136 effdt

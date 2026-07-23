@@ -1,6 +1,6 @@
 # Reconciliation memo — binding cross-doc decisions (2026-07-17 through 2026-07-22)
 
-Status: **binding revision 2026-07-22.** Earlier rounds remain as decision history; Round 6 below
+Status: **binding revision 2026-07-22.** Earlier rounds remain as decision history; Round 7 below
 supersedes incompatible typing, UI-access, control, delegation, recovery, trust, knowledge, and
 workflow-editor claims.
 
@@ -11,7 +11,7 @@ Amendment agents rewrite each doc to comply; a doc may reference another doc's o
 must never redefine it.
 
 > **Implementation rule:** D1–D25 are historical rationale, not copyable current API/DDL. Apply
-> D46–D68 first, then D26–D45; where they amend an older decision, the latest-round form is the only
+> D46–D72 first, then D26–D45; where they amend an older decision, the latest-round form is the only
 > implementable one. Current contract shapes live in owning docs 01–03 and 05–06/09–12.
 
 ## D1 — Contract ownership matrix (one owner per concept, others reference)
@@ -505,3 +505,49 @@ statement that leaves these seams implicit.
   browser system/provider has the required endpoint/credential/preflight entries, and every runtime
   read is registered or explicitly retired/proxied in D58. Examples in doc 11 are excerpts, never
   permission to omit ServiceNow, SharePoint, Old Kronos, capture tooling, or provider credentials.
+
+## Reconciliation round 7 (2026-07-22) — executable feasibility and real gate baseline
+
+The completed whole-plan reread was followed by repository gates plus disposable compile/runtime/
+SQLite spikes under the actual Node 26 + TypeScript 5.9 + Zod 4 toolchain. These decisions bind the
+implementation plan to what the tools proved and close the failures the experiments exposed.
+
+- **D69 — Every negative observation counted toward post-write settlement is post-propagation.**
+  `now >= fencedAt + minSinceFenceMs` is not enough if an observation in the candidate sequence was
+  captured earlier. The recovery scheduler sets the first eligible probe's `not_before` to the end
+  of the propagation window; the settlement validator independently rejects every observation with
+  `observedAt < fencedAt + minSinceFenceMs`. Only the configured 2–3 post-window, sufficiently
+  separated, same-key/same-authoritative-state observations count. Pre-window evidence remains in
+  diagnostics but contributes zero votes. This was a real failing adversarial spike, not a prose
+  preference.
+- **D70 — New-tree gates are zero-debt even while legacy lint debt is explicit and shrink-only.**
+  The 2026-07-22 baseline passed typecheck, unit/serial tests, 137 architecture tests, and dashboard
+  build, but `npm run lint` had 2 errors + 1 warning and `npm run lint:tests` had 1,325 errors + 2
+  warnings. Phase 1 may not pretend those commands were green or weaken rules to make them green.
+  Before the first `temp_src` production leaf, the small source-lint baseline is repaired without
+  suppressions. New code/tests use non-vacuous `lint:rebuild`/`lint:rebuild-tests` commands with
+  zero warnings from their first file. Pre-existing test lint diagnostics enter a reviewed,
+  machine-generated shrink-only manifest keyed by file/rule/message/start+end-column/source-line
+  hash; a new or
+  replaced diagnostic fails even if the total count is unchanged. The manifest must reach zero as
+  legacy tests are retired or corrected and is deleted before final cutover.
+- **D71 — Phase-0 spikes prove feasibility, not correctness, and must become Phase-1 tests.** The
+  disposable experiment compiled a 40-node typed chain plus effect overloads/provider narrowing/
+  child-result negatives in 0.68s (`tsc --extendedDiagnostics`, about 212 MB), and runtime-tested
+  canonical-input transforms, strict commands, mapping collisions, proof unions, and recovery
+  settlement. It also proved permanent SQLite keys, atomic intent+outbox commit, foreign keys, and
+  `node:sqlite` online backup/read-only integrity. These results remove obvious toolchain blockers
+  but are not shipped code and do not satisfy Phase 1. Each positive and `@ts-expect-error` negative
+  becomes a committed test beside the real API before that API lands; the representative real DAG
+  remains the acceptance test because a simplified chain cannot prove the final builder.
+- **D72 — The authority DB owner preserves native online-backup capability without leaking raw DB
+  handles.** The current compatibility wrapper erases the `DatabaseSync` required by
+  `node:sqlite.backup`; the rebuild does not copy that limitation. One infra-owned
+  `AuthorityDatabase` retains the private native handle and exposes narrow transaction/query/
+  `backupToTemp` operations. Consumers never receive `DatabaseSync`. Backup is single-flight and
+  async. A singleton `authority_meta` generation increments exactly once in every committed outer
+  authority-mutating transaction and not for projection-only work, with table-class coverage tests.
+  Verification opens the completed backup read-only and derives its schema version,
+  page count, `authority_generation`, and integrity result from the backup itself—not from a racy
+  pre/post read of the live DB—before hashing/fsync/rename and writing the manifest. File-copy and
+  `VACUUM INTO` fallbacks are forbidden while WAL writers are active.
