@@ -1,6 +1,6 @@
 # 08 — Foundation Gap Audit: the unowned cross-cutting concerns
 
-Status: **historical gap-discovery memo; superseded at its contract seams by 2026-07-22 Round 6.** A principal-architect pass over the
+Status: **historical gap-discovery memo; superseded at its contract seams by 2026-07-22 Round 7.** A principal-architect pass over the
 four written design docs (01 task-contract, 02 workflow-model, 03 tracker-dashboard, 05 execution),
 the charter (`00`), and the binding reconciliation (`04` — D1 ownership matrix). This doc **owns
 nothing** yet: it is a findings-and-design memo that names what the foundation of a production,
@@ -82,6 +82,17 @@ historical sketches below do not override them.
 | Spreadsheet mappings keyed only a canonical concept, so two target fields could collide | mappings bind stable target field ids/paths and separately record canonical concepts plus projection fingerprint (06/10; D66) |
 | Gates, notification controls, and capture controls could bypass the standard command protocol | one durable command envelope with strict run/gate/notification/capture arms; typed gate result is authority, event is a reference (02/03/06/10; D67) |
 | Endpoint/secret/provider inventories were illustrative and could omit runtime dependencies | exhaustive bidirectional runtime-dependency inventory over browser systems, providers, config/env/secret consumers and preflight (01/07/10/11; D68) |
+
+## 2026-07-22 executable-validation closure matrix
+
+Repository gates and disposable toolchain spikes found four final implementation seams:
+
+| Validated seam | Binding closure / owner |
+|---|---|
+| A pre-propagation negative read could be counted with a later read | every counted absence observation is captured after the window; first eligible probe is durably scheduled and validation independently rejects early evidence (09/10; D69) |
+| Existing lint debt made “all gates green” factually false or encouraged broad exemptions | repair the small source baseline; strict zero-debt rebuild lint commands; diagnostic-fingerprinted shrink-only legacy-test debt that must reach zero before cutover (07/10; D70) |
+| A simplified feasibility spike could be mistaken for proof of the final builder | disposable results are evidence only; every positive/negative becomes a committed test against the real Phase-1 API, including a performance budget (07/10; D71) |
+| The current SQLite wrapper erases the native online-backup handle and manifest generation could race | private native authority adapter; self-inspect the completed backup; single-flight plus generation-aware follow-up; no live-WAL file copy fallback (03/10; D72) |
 
 ---
 

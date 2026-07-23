@@ -962,8 +962,9 @@ Fix: re-run "ucpath-job-summary" (start there, or mark it always-rerun for this 
    not redefined) and routes on the verdict: `present` → backfill schema-valid proof + reconstructed
    commit output inside `TransactionOutcome{disposition:"committed",proofSource:"recovery-probe"}`
    (doc 09 D19) + complete `done`, **no second submit**; `absent` → validate its typed negative
-   evidence through doc 09's recovery-absence policy (propagation window + required consistent
-   authoritative observations). Only a validated `safe-to-retry` decision marks the same permanent
+   evidence through doc 09's recovery-absence policy (every counted observation occurs after the
+   propagation window + the required consistent authoritative observations). Only a validated
+   `safe-to-retry` decision marks the same permanent
    intent row `retryable` and permits a later CAS generation. A bare/early absence, an
    `operator-only` policy, `ambiguous`, `unknown`, or throw → park
    `needs-operator` ("write may have landed; verify in <system>, then attach schema-valid proof or
@@ -1206,8 +1207,9 @@ Nothing launched, no Duo spent, no partial run row.
 2. **Write-task crash disambiguation — RESOLVED.** Every commit contract ships
    a paired idempotency `probe` (doc 09's `writeSafety.idempotency.probe`), and crash recovery runs
    it FIRST (§5.6 #2): `present`→validate proof + reconstruct typed output + backfill `done`;
-   `absent` is only a typed observation and becomes retry-safe after the contract-specific
-   propagation window plus repeated consistent authoritative observations; `ambiguous`/`unknown`/
+   `absent` is only a typed observation and becomes retry-safe after repeated consistent
+   authoritative observations whose every timestamp is after the contract-specific propagation
+   window; `ambiguous`/`unknown`/
    throw or unsettled negative evidence→park. The earlier "always park `needs-operator`" default is
    retired, but a single negative read never authorizes another click. The remaining §b migration decision is the
    per-workflow *pre-write* `probePolicy` knob (doc 09 §5, on the transaction node), not this

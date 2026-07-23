@@ -50,6 +50,35 @@ in four mechanism families:
 Allowlist discipline (verbatim, ported): every survivor is read-in-context with a one-line reason;
 a new occurrence fails immediately and needs the same review, never a silent add.
 
+### 1.1 Measured pre-rebuild gate baseline (2026-07-22)
+
+This baseline was executed after the full plan reread, with a clean worktree and no `temp_src`:
+
+| Command | Result | Meaning for the plan |
+|---|---|---|
+| `npm run typecheck:all` | **PASS** | both existing TypeScript programs are a sound starting toolchain |
+| `npm run test` | **PASS** | existing unit + serial behavior is green; this does not test proposed rebuild contracts |
+| `npm run test:architecture` | **PASS — 23 files / 137 tests** | current guard harness works and can host the new manifest |
+| `npm run build:dashboard` | **PASS** | the existing dashboard build toolchain is healthy |
+| `npm run lint` | **FAIL — 2 errors / 1 warning** | repair these source diagnostics before the first rebuild production leaf; no suppression/baseline exception |
+| `npm run lint:tests` | **FAIL — 1,325 errors / 2 warnings** | pre-existing test debt must be fingerprinted/shrink-only; new rebuild tests remain zero-debt |
+
+The last two results forbid two dishonest shortcuts: Phase 1 cannot claim the whole repository was
+green, and it cannot weaken ESLint or dump 1,327 broad exceptions into a new-code allowlist. Item
+1a creates a machine baseline for **legacy test files only**, keyed by normalized repo-relative file,
+rule id, message id/text, start/end column, and SHA-256 of the diagnostic source line. The ratchet fails on any new
+fingerprint even if another diagnostic disappears, while removals are accepted and shrink the
+manifest. Any edit to a baselined line must remove/fix its entry or receive explicit review; a
+count-only “one out, one in” swap cannot pass.
+
+`lint:rebuild` and `lint:rebuild-tests` target `temp_src/**` and the dedicated rebuild test roots,
+resolve to non-empty file sets after activation, and run with `--max-warnings 0` plus **no debt
+manifest**. Before activation, an absent tree is an explicit Phase-0 state; after the first file,
+absence/unmatched globs fail. The small existing `src` lint failure is repaired before 1b, so the
+ordinary `npm run lint` also returns green during coexistence. The legacy-test manifest must be zero
+and deleted before final old-tree removal; until then `lint:legacy-tests-ratchet` is the truthful
+coexistence gate, not a false claim that `npm run lint:tests` passes.
+
 ---
 
 ## 2. Ratchet port map
@@ -143,8 +172,9 @@ extractor, `outputFromProof` reconstruction, and same-store live probe.
 The crash-recovery fixture injects `write.attempting`-without-`write.committed` and asserts: the probe
 re-runs FIRST (probe-then-park, D17); a `present` receipt and reconstructed transaction output are
 schema-validated before backfill (D19);
-one early/bare `absent` cannot authorize a retry; only D64 schema-valid same-key negative evidence
-that clears the contract's propagation window and repeated-read policy may mark retryable, while
+one early/bare `absent` cannot authorize a retry; only D64/D69 schema-valid same-key negative evidence
+whose **every counted observation** was captured after the propagation window and clears the
+repeated-read policy may mark retryable, while
 inconsistent/malformed/`operator-only` absence parks; and simultaneous **or later sequential**
 same-key runs cannot create a second fence. Crash
 injection proves intent/checkpoint/ledger-outbox/span-outbox atomicity. Parked-write fixtures prove
@@ -249,7 +279,13 @@ read while still permitting replay-safe browser downloads.
 ### 3.10 Trust surfaces: storage recovery, scenarios, evidence, and notifications
 
 - **`storage-recovery.test.ts`.** Boot quick-check/invariants fail closed into read-only degraded
-  mode. Online backups are checksummed/manifests verified. A restore drill corrupts a copied
+  mode. The infra-owned authority adapter retains `DatabaseSync` privately and proves
+  `node:sqlite.backup` works without exposing the handle to repositories. Online backups are
+  checksummed/manifests verified; schema/page count/authority generation are read from the completed
+  backup itself, and a trigger newer than an in-flight copy causes one follow-up backup. Tests ban
+  live-WAL file copy/`VACUUM INTO` fallback. Every registered authority repository mutation
+  increments `authority_generation` exactly once per outer transaction; projection-only changes do
+  not, and adding an authority table without generation coverage fails. A restore drill corrupts a copied
   real-shaped DB, restores the newest verified backup, rebuilds projections only, and proves
   commands/dependencies/checkpoints/write-intents/outboxes survive. No code path creates a fresh
   empty authority DB over an invalid existing file.
@@ -318,6 +354,31 @@ read while still permitting replay-safe browser downloads.
   inventory in both directions. A missing ServiceNow/SharePoint/Old-Kronos endpoint or provider key,
   an unregistered `process.env` read, and a stale registry entry all fail with the exact owner.
 
+### 3.12 D71 executable contract/type-budget suite
+
+The Phase-0 disposable spike is converted—not copied blindly—into committed tests against the real
+Phase-1 exports:
+
+- `contract-inference.test-d.ts` pins literal error-code inference, effect-specific required fields,
+  prepare/commit illegality as standalone tasks, wrong child input/result rejection, undeclared
+  provider-client rejection, duplicate node ids, and no erased `any`/`unknown` target. Every
+  intentional failure uses `@ts-expect-error` plus a neighboring positive control so a weakened API
+  that merely stops checking causes the suite to fail.
+- `workflow-real-scale.test-d.ts` builds a representative 15–25-node graph containing every node
+  kind and real schema transforms. On the Phase-0 baseline machine its isolated
+  `tsc --extendedDiagnostics` check must stay below 5 seconds and 1 GiB; the measured values are
+  recorded as test output. The simplified 40-node 0.68s/~212MB feasibility result is context, not
+  the acceptance value.
+- Runtime tests pin ingress-transform-once/canonical-revalidate-many, unknown-key rejection,
+  command-family arm separation, two target paths sharing one canonical concept, proof-union
+  rejection, and D69 settlement where a pre-window observation contributes zero votes.
+- The SQLite feasibility cases live in `storage-recovery.test.ts`: permanent key conflict, atomic
+  intent+outbox commit/rollback, foreign-key integrity, authority-generation behavior, native
+  online backup, and read-only self-verification.
+
+These tests land immediately before or with the real contract they exercise. A standalone scratch
+file outside the repository is never a Phase-1 gate and is deleted after its findings are captured.
+
 ---
 
 ## 4. `descriptor-coverage.test.ts` — the ONE guard that replaces the parity guards
@@ -379,7 +440,10 @@ a second inline name set. The test asserts:
 5. the `temp_src`-scoped ratchets (the extend-set in §2) each still include a `temp_src` glob token,
    so nobody can quietly narrow a ratchet back to `src/` only during the dual-maintenance window;
 6. `gate-coverage`'s existing assertions (both `tsc` programs, `--max-warnings 0`) are kept inline;
-7. ESLint's CLI target and the matching `eslint.config.js` typed rule block both include `temp_src`.
+7. ESLint's CLI target and the matching `eslint.config.js` typed rule block both include `temp_src`;
+8. D70's four lint scripts exist with exact scopes: new source/tests use zero-debt strict lint,
+   ordinary source lint is green, and the legacy-test ratchet consumes the reviewed fingerprint
+   manifest rather than ignoring failures or comparing only a total count.
 
 ESLint's known empty-pattern behavior is part of the ordering contract: no unmatched `temp_src`
 argument is added before the first real file, and `--no-error-on-unmatched-pattern` is forbidden.
@@ -441,7 +505,7 @@ contracts; the manifest owns that they exist and stay wired. The set (contract-o
   per-contract sleep budget, single-flight
   login, onbase-`exclusive` lease, `newPage(` ratchet, fan-out-starvation, pool-size `// verified` config,
   bounded task/transaction deadline, executor teardown soak, lane-overlap.
-- **Meta (this doc):** `gate-coverage` + `guard-manifest` itself.
+- **Meta (this doc):** `gate-coverage`, `guard-manifest`, and `legacy-test-lint-debt-ratchet`.
 
 A guard added to any doc that never lands in the inventory fails the manifest — so a doc's §guards
 promise cannot quietly stay a promise.

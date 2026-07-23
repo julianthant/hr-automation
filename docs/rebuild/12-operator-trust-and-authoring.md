@@ -657,7 +657,8 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
     subject assertions are also available to high-risk reads.
 17. Permanent write intents, same-key concurrency fence, typed landing proof, and at most one
     unattended commit attempt per intent generation; recovery needs typed positive proof or a
-    propagation-window-qualified sequence of authoritative negative observations, otherwise it
+    sequence of authoritative negative observations all captured after the propagation window,
+    otherwise it
     parks, and there is no generic “force done”.
 18. Never-pruned, hash-chained local write ledger with anchored tail verification.
 19. Content-addressed immutable artifacts and idempotent outbox-based mutable projections.
@@ -682,9 +683,11 @@ what the **base** implements before workflow-specific leaf behavior is migrated:
     transform-free/default-free canonical schema and semantic changes require explicit migration.
 34. Immutable per-run config/instance snapshots and one injectable clock.
 35. Fail-loud fiscal-year configuration and one secrets accessor.
-36. SQLite startup doctor, WAL/disk monitoring, rotating backups, pre-migration backup, tested
-    restore, and read-only rescue mode.
-37. Full type/lint/architecture/fixture/stub/live guard umbrella with non-vacuity checks.
+36. SQLite startup doctor, WAL/disk monitoring, native online backups whose completed copy
+    self-reports its authority generation, pre-migration backup, tested restore, and read-only
+    rescue mode.
+37. Full type/lint/architecture/fixture/stub/live guard umbrella with non-vacuity checks, zero-debt
+    rebuild linting, and fingerprinted shrink-only legacy test-lint debt during coexistence.
 38. Per-run legacy/native generation authority for gradual migration without double ownership.
 39. Immutable intake admission manifests and hash-diffed reruns showing every valid, rejected, and
     explicitly excluded source row.

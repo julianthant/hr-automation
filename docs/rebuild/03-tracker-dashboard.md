@@ -399,6 +399,17 @@ owning merge/dedup heuristics (`mergeDisplayItems` collapse survives as a server
   never block workflows; source identity is `resolve(path)`; deletion tombstones and offline
   compaction port as-is.
 
+The system-of-record class includes a singleton `authority_meta(schema_version,
+authority_generation,updated_at)`. The infra adapter exposes separate authority and projection
+transaction APIs; repositories cannot execute arbitrary SQL or receive the raw connection. Every
+top-level committed transaction that mutates at least one authority table increments
+`authority_generation` exactly once inside that same transaction; projection-only rebuilds do not.
+Nested authority operations share the outer transaction/generation increment. The table-class
+registry generates coverage tests that mutate each authority repository and prove the generation
+advances, then mutate each projection repository and prove it does not. A newly added authority
+table without a registered mutator test fails. This makes D72 backup RPO comparison an actual
+monotonic authority fact rather than a timestamp guess.
+
 Any sentence in this doc that says "rebuildable" means the projection tables only. The sole
 authority-removal exception is the explicit stopped-system, exact-id, backup-gated Purge procedure
 in §2.4; ordinary cleanup, Hide, projection rebuild, and runtime code cannot reach authority rows.
@@ -532,15 +543,24 @@ of erasing claim, delegation, checkpoint, and write-fence truth. The base theref
    has an attempt, every outbox references authority, every finalizing capture has exactly one live
    bundle/handoff outbox, and every finalized capture references one intake handoff). Any failure starts the dashboard read-only
    and blocks enqueue/claim/commit/control commands with one durable/console-visible health error.
-3. The SQLite online-backup API creates a temp backup, checks it, writes a manifest containing
-   schema version/page count/SHA-256/created-at/source generation, fsyncs, then atomically renames.
+3. One infra-owned `AuthorityDatabase` retains the private native `DatabaseSync`; task/command/
+   projection consumers receive only narrow repositories and never the raw handle. Its async,
+   single-flight `backupToTemp` calls `node:sqlite.backup`—the rebuild does not inherit the current
+   compatibility wrapper's erased backup capability and does not file-copy a live WAL database.
+   After backup completes, verification opens the **backup itself** read-only, runs full integrity/
+   foreign-key/invariant checks, and reads schema version/page count/`authority_generation` from
+   that copy. Only those self-observed values enter the manifest with SHA-256/created-at; the service
+   then fsyncs and atomically renames. A pre/post read of the live DB cannot label a different
+   snapshot. `VACUUM INTO` and raw file-copy are not online-backup fallbacks (D72).
    Retain 14 verified daily backups, the latest 8 coalesced critical/interval backups, and the last
    5 pre-migration backups; expose age/health in
    Settings. A configurable path may point at another local volume.
 4. A dirty authority store gets a coalesced verified online backup at least every 15 minutes and
    immediately after schema migration, external-write durable commit, capture final handoff, and
-   graceful drain. Critical triggers may share one already-running backup, but cannot be silently
-   dropped. Backup health reports both last verified time and authority generation/RPO gap.
+   graceful drain. Critical triggers may join one already-running backup, but cannot be silently
+   dropped: if the completed copy's self-read generation predates a trigger's required generation,
+   one coalesced follow-up backup is scheduled. Backup health reports both last verified time and
+   the verified copy's authority generation/RPO gap.
 5. `cli storage doctor` is read-only and reports checks, backup freshness, pending commands,
    unresolved writes, leases, outboxes, and restore candidates. `cli storage restore --from
    <exact-backup>` first preserves the suspect DB, restores into a temp path, repeats all checks,
