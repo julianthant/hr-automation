@@ -536,6 +536,73 @@ fill→save→reload→verify ≈ 8–10s/doc. Evidence: `.screenshots/kuali-pro
 dumps). Remaining half of §2.2#3: **OnBase upload-verify probe — needs an operator-named
 uploaded target doc** (asked in the decision sheet).
 
+## 6.6 Decision sheet 2 — ratified answers (2026-07-24)
+
+**Migration model: PAUSE-UNTIL-DONE (the big one).** The operator will NOT run the old codebase
+during the migration — automation is paused, HR work is manual until the new system is ready;
+old `src` becomes a frozen reference immediately. Go-live, testing, and old-copy deletion are
+**operator commands, not calendar machinery** ("I will let you know when to go live, when to
+test, when to delete"). Whether workflows resume per-workflow early or all at once is a runtime
+choice the operator makes, with no plan machinery either way. Consequences — the following get
+**deleted or reduced to one-time/optional** in docs 03/07 (next design pass must reconcile):
+- D12 version-keyed lift adapter + zero-quarantine real-day fixtures → at most a one-time
+  optional historical import of old tracker data, not a live compatibility layer.
+- D13 scoped flip + golden-payload parity gates → dropped; the new dashboard is validated by its
+  own fixtures + dry-runs, not byte-parity with legacy.
+- Per-run `(engine, cutoverGeneration)` authority (D37) → dropped; no mixed-engine period.
+- The Phase-1 dual-maintenance invariant (every legacy wire change ships version bump + adapter
+  + fixtures) → moot; legacy tree is frozen, D70 manifest churn tax ends.
+- Calendar stop-loss (07 §5.1(c)) → replaced by operator-controlled go-live.
+- The §2.2#1 interim legacy separations gate → dead (old code processes no real separations
+  during migration).
+- Charter "Old system keeps working throughout" non-negotiable → REVERSED to "old system is
+  frozen reference; automation paused during rebuild."
+**New top optimization target: build speed.** Every week of build is a week of manual HR work
+for the operator; the Phase-1 restructure and ceremony trims gain urgency, and migration order
+should weight "manual work saved per week" once the operator names their most-run workflows.
+
+**Trims ratified (Q5):** (a) DSL graph-editing editor — trimmed; (b) notification lifecycle —
+slimmed to read/unread+snooze, inbox actor-keyed; (c) commands keep version+actor wire fields
+everywhere, enforcement only where races exist; (d) capture crash-proofing slimmed; (e) ledger
+hash-chain deferred until multi-user (ledger itself + actor attribution stay); (f)
+lightweight task tier adopted. **M1 multi-user seams: adopted** (actor attribution, single auth
+seam, credential-set-keyed sessions, per-actor inbox).
+
+**Multi-user dashboard model (operator direction):** undecided by design — one server owns the
+data, dashboards are views; "my runs" vs shared boards are filters over actor attribution. The
+operator floated a shared completed-work board; deferred until multi-user is real. **Runs get
+operator-assigned display names (rename any run)** — added to the base; label rides row +
+receipt, trace id preserved underneath.
+
+**Workflow versioning/archiving (operator question, answered):** no archive folders. Descriptors
+carry version + content fingerprint; guards force a version bump on behavior change; every run
+permanently stamps the version (and app version) it ran with at enqueue; in-flight/queued runs
+keep their stamped version; git is the archive (any prior version restorable exactly); each
+update leaves a change record (same store as fix records: what/why/version/commit). Dashboard
+updates never archive workflows — app and workflow versions are independent.
+
+**Q1 testing standard: confirmed.** OnBase read-back probe + the OnBase workflow migration are
+**gated on the next real document to upload** (no probe target exists today).
+
+**Q8 receipt requirement (acceptance test):** the operator double-checks "most of them" — so the
+row/receipt must carry the exact proof they would otherwise fetch from UCPath: transaction/
+confirmation number, post-submit confirmation screenshot, observed person-identity at commit.
+Acceptance: **the operator can complete their double-check without opening UCPath.**
+
+**Q10 notifications:** failed/gate/parked/repeating/storage = Ping; verified-done = Inbox; pings
+silent. **Q11 retention:** as proposed (notes 30d, spans 30d, ledger forever, artifacts+
+checkpoints until purge); no extra PII constraint. **Q12 knowledge audits:** operator-triggered
+(no scheduled audit); every audit writes a dated audit record; knowledge records are versioned;
+write-time rules (unverified-until-regression-test, supersedes links) unchanged. **M2 demos:**
+activity report + live dry-run demo; demo mode (synthetic data) removed at operator request.
+**Q14 explorer:** read-only-first confirmed.
+
+**Dashboard naming canon (operator's words, final):** Workflow Panel (left list) · Status Bar
+(count pills) · Queue Panel (the queue surface) · **Queue Row (every row in it — grouped rows
+with members are still Queue Rows)** · Log Panel (right detail column, keeps its name despite
+tabs) · Session Panel (bottom drawer) · Session Card · Run Modal. Pattern: "<Thing> Panel" for
+major surfaces.
+
 ## 7. Legacy evidence appendix (headline numbers)
 
 - Registries to touch for a new workflow: ~19 candidate files, 9 mandatory; i9-check split = 47
