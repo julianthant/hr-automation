@@ -597,6 +597,21 @@ present/absent), and the bump flow lists them; an unresolved possible-submit is 
 the archive; (5) reversible Hide still exists for same-version runs; archive-on-bump is the
 automatic path.
 
+**Version registry + update-scope protocol (operator, 2026-07-24):** the dashboard keeps an
+authoritative registry of every workflow's current version. **A dashboard (app) update bumps the
+effective version of ALL workflows** — all prior runs archive, because old runs may not be
+compatible with the new dashboard state; this preserves the zero-compat-code invariant. **The AI
+session making a change decides its scope** — single-workflow update, multi-workflow update, or
+dashboard update — and the bump/archive follows that scope; the scope decision is recorded in
+the update's change record. (Same non-terminal-run carve-out as archive-on-bump.)
+
+**Workflow Panel count bug (operator report, 2026-07-24):** in the legacy dashboard the
+per-workflow badges (total runs / currently running) "always error out" — matching audit bug
+class #7 (count/badge divergence, ≥4 fixes). Acceptance requirement for the rebuild: Workflow
+Panel badges, Status Bar counts, and the Queue Panel rows are all read from the SAME server-side
+projection — a count can never be computed by a second path, so it can never disagree or error
+independently.
+
 **Q1 testing standard: confirmed.** OnBase read-back probe + the OnBase workflow migration are
 **gated on the next real document to upload** (no probe target exists today).
 
