@@ -646,6 +646,13 @@ Log Panel tabs are therefore FIVE: Logs / Data (edit mode when stopped) / Review
 Receipt / Screenshots, with state-driven defaults (Waiting on you & Write parked → Review;
 terminal → Receipt; running → Logs).
 
+**Visual design directive (operator, 2026-07-24):** the rebuilt dashboard's Log Panel and Queue
+Rows keep a **very close visual design to the current dashboard** — new features (persistent
+hoverable pipeline, receipts, gate blocks, rename, one-projection counts) wear the familiar
+skin; do not restyle the product. **OCR record review layout:** always an **expanded page ↔
+extracted-text pair** — each PDF page side-by-side with the fields extracted from it, never a
+collapsed table — so the operator can compare the document and the extraction at a glance.
+
 **Dashboard naming canon (operator's words, final):** Workflow Panel (left list) · Status Bar
 (count pills) · Queue Panel (the queue surface) · **Queue Row (every row in it — grouped rows
 with members are still Queue Rows)** · Log Panel (right detail column, keeps its name despite
