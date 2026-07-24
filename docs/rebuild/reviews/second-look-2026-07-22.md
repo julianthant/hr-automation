@@ -475,6 +475,47 @@ Grouped; each line carries the old→new contrast for the comparison page.
 
 ---
 
+## 6.5 Operator answers + live evidence (2026-07-23 update)
+
+Answers received in review session 2026-07-23 (remaining questions moved to the interactive
+decision sheet artifact "Rebuild: Remaining Decisions"):
+
+- **Phase-1 restructure (§2.1): ACCEPTED.** Person-lookup becomes the exit test of the minimal
+  spine; trust/capture/data-service/explorer tails move behind the first live proof.
+- **Separations identity gate (§2.2#1): ALWAYS-GATE**, for both separation types the operator
+  distinguishes (Kuali separations and I-9 separations). Manual approval every time; no
+  auto-approve-on-match mode.
+- **Dry-run policy: operator-triggered, no mandatory quota.** Workflows are built testing-first
+  so an AI session can run and debug a dry run on request; the operator chooses when.
+- **Phone capture: rarely used** (most documents arrive as scanned PDFs) — supports the §2.5
+  capture-durability slim.
+- **Test targets:** test employees/files live in `data/` (fixture PDFs, e2e roster + identities
+  sidecar, i9 scans + extracted records, Employee Action History roster). Kuali Action List docs
+  **4444–4453** (RRSS Separation Request Forms, new/unworked) authorized for probing: read-only
+  by default; writes allowed if removed after; save allowed with nothing written.
+- **Testing standardization:** operator asked for a better standard than the
+  `custom-hr-e2e-test` skill ritual. Proposal (in the decision sheet): scenario corpus as the
+  everyday lane + structural dry-run + a **TestTargetRegistry** (typed registry of test
+  employees/files/sacrificial docs with usage rules) + `cli test workflow <id> --dry-run` through
+  the real kernel + **positive no-write proof from an empty per-run write-intent ledger**
+  (replacing the old screenshot-absence heuristics). Old skill's keepers: "a workaround is a
+  finding," double-entry ground truth, issue ledger — as built-in kernel behavior.
+
+**Kuali save-verify live probe (09 OQ1): RESOLVED — BUILDABLE.** Run 2026-07-23 under the
+operator authorization above. Doc 4453 read-only: all separations-relevant fields
+(name/EID/LDW/sep date/term type/timekeeper/status) read deterministically by role+exact-label
+from the a11y tree; byte-identical across reload. Doc 4444 write round-trip: timekeeper field
+(the benign field the legacy flow fills on drafts) written `PROBE-DELETE-ME` → Save → reload →
+value persisted; cleared → Save → reload → empty; full-form normalized diff before/after clean
+(doc restored byte-identically; no workflow buttons touched). Key findings for the verifier
+design: **save success is UI-silent** (no toast/banner — reload read-back is mandatory, matching
+the 2026-04-10 lesson); date values render as child text nodes; DOM refs change every reload
+(anchor on role + exact label, literal `*` included); the doc URL is a stable reload-safe deep
+link but carries an opaque actionId (capture URL at open); `.trim()` before compare; full
+fill→save→reload→verify ≈ 8–10s/doc. Evidence: `.screenshots/kuali-probe/` (6 PNGs + 5 a11y
+dumps). Remaining half of §2.2#3: **OnBase upload-verify probe — needs an operator-named
+uploaded target doc** (asked in the decision sheet).
+
 ## 7. Legacy evidence appendix (headline numbers)
 
 - Registries to touch for a new workflow: ~19 candidate files, 9 mandatory; i9-check split = 47
