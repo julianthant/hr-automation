@@ -501,6 +501,26 @@ decision sheet artifact "Rebuild: Remaining Decisions"):
   (replacing the old screenshot-absence heuristics). Old skill's keepers: "a workaround is a
   finding," double-entry ground truth, issue ledger — as built-in kernel behavior.
 
+**Scope direction change (operator, 2026-07-23, later same session): future multi-user is now a
+design consideration.** The tool stays single-operator today, but the operator wants to expand it
+later so others can use it securely, and wants the foundation to make that migration easy. This
+softens the charter's "Local-only is a scope reduction" non-negotiable (and D56) to **local-first
+with multi-user seams**: (1) actor attribution (`requestedBy`/actor id) on every command, run,
+approval, gate resolution, ledger entry, and fix record — already mostly present in the D67/D52
+shapes, now explicitly load-bearing, never trimmed; (2) a single identity checkpoint (auth seam)
+all requests pass through, today constant "local operator"; (3) browser sessions/logins keyed by
+credential set (future users bring their own HR logins + own Duo — pre-keying makes that config,
+not rebuild); (4) notifications/read-state keyed per actor. Explicitly still out of scope: RBAC/
+permissions UI, user management, network deployment/TLS, per-user dashboards. Trim
+recommendations revised accordingly: (c) CAS → keep version+actor fields in every command's wire
+shape, enforce selectively today; (e) ledger hash-chain → deferrable but now has a real future
+threat model (shared accountability), operator's call; (b) notification slim stands but the inbox
+is actor-keyed from day one. **Supervisor demos are a wanted base capability**: PII-free demo mode
+(dashboard on seeded synthetic data — reuses the seed-fixture machinery), generated activity
+report (runs/people/error-rate/hours-saved projection over spans+ledger), live dry-run demo lane,
+recorded walkthroughs, explorer graph as the architecture visual. Format selection pending on the
+decision sheet.
+
 **Kuali save-verify live probe (09 OQ1): RESOLVED — BUILDABLE.** Run 2026-07-23 under the
 operator authorization above. Doc 4453 read-only: all separations-relevant fields
 (name/EID/LDW/sep date/term type/timekeeper/status) read deterministically by role+exact-label
