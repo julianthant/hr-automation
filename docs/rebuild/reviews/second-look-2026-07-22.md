@@ -628,6 +628,16 @@ write-time rules (unverified-until-regression-test, supersedes links) unchanged.
 activity report + live dry-run demo; demo mode (synthetic data) removed at operator request.
 **Q14 explorer:** read-only-first confirmed.
 
+**Row-type model ratified (operator, 2026-07-24, D1–D5 all as recommended):** THREE row types —
+Run Row / Group Row / Member Row — with review-as-STATUS (no preview/prep/display-only/anchor
+flavors); eight first-class statuses (Queued, Running, Waiting on you, Write parked, Verified
+done, Done with warnings, Failed, Cancelled); PDF uploads are ALWAYS Groups even with one member
+(D2); unrunnable items are typed Rejected Member Rows, delete-only by construction (D3);
+delegated OCR runs keep their own Run Row in the OCR panel + link from the parent group (D4);
+groups default collapsed, auto-expand when a member is Waiting on you or Failed (D5). Type,
+kind, and identity stamped once at enqueue from the descriptor; one QueueRow component; guard
+bans workflow-name switches in the projection path.
+
 **Dashboard naming canon (operator's words, final):** Workflow Panel (left list) · Status Bar
 (count pills) · Queue Panel (the queue surface) · **Queue Row (every row in it — grouped rows
 with members are still Queue Rows)** · Log Panel (right detail column, keeps its name despite
