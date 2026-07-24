@@ -638,6 +638,14 @@ groups default collapsed, auto-expand when a member is Waiting on you or Failed 
 kind, and identity stamped once at enqueue from the descriptor; one QueueRow component; guard
 bans workflow-name switches in the projection path.
 
+**Log Panel correction (operator, 2026-07-24): the step timeline is NOT a tab.** It stays a
+persistent strip (as today) always visible in the Log Panel regardless of the active tab. Extra
+depth comes from **hover detail per step** — status, real recorded duration, attempt count, key
+log lines, screenshot link — and/or an expandable step detail, not from a separate Timeline tab.
+Log Panel tabs are therefore FIVE: Logs / Data (edit mode when stopped) / Review (gate-only) /
+Receipt / Screenshots, with state-driven defaults (Waiting on you & Write parked → Review;
+terminal → Receipt; running → Logs).
+
 **Dashboard naming canon (operator's words, final):** Workflow Panel (left list) · Status Bar
 (count pills) · Queue Panel (the queue surface) · **Queue Row (every row in it — grouped rows
 with members are still Queue Rows)** · Log Panel (right detail column, keeps its name despite
