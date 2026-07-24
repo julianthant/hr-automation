@@ -581,6 +581,22 @@ keep their stamped version; git is the archive (any prior version restorable exa
 update leaves a change record (same store as fix records: what/why/version/commit). Dashboard
 updates never archive workflows — app and workflow versions are independent.
 
+**Archive-on-version-bump (operator, 2026-07-24, supersedes the "old runs stay interpretable in
+the dashboard" phrasing above):** when a workflow's version bumps, ALL runs of prior versions
+leave the dashboard — active surfaces, counts, and filters only ever contain current-version
+runs. Prior runs move to an **Archive** (browsable read-only view + on-disk store) for manual
+review by operator or AI. Rules: (1) the archive stores each run's **final projected row +
+receipt + evidence pointers as self-contained data**, so viewing an archived run requires zero
+old-version code — no compat shims, no version fallbacks in the dashboard, exactly one rendering
+path; (2) the **write ledger is untouched by archiving** — what was filed in HR systems stays
+forever regardless of run archival; (3) "relaunch from archive" starts a **fresh run on the
+current version** using the archived immutable input — never a resume of the old run; (4)
+safety carve-out: a version bump cannot archive a **non-terminal** old-version run — queued/
+parked runs must be terminalized first (cancelled, or for parked writes RESOLVED
+present/absent), and the bump flow lists them; an unresolved possible-submit is never buried in
+the archive; (5) reversible Hide still exists for same-version runs; archive-on-bump is the
+automatic path.
+
 **Q1 testing standard: confirmed.** OnBase read-back probe + the OnBase workflow migration are
 **gated on the next real document to upload** (no probe target exists today).
 
