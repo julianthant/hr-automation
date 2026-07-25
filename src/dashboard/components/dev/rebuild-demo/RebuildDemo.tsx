@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Keyboard } from "lucide-react";
-import { DemoLogPanel, type DemoTab } from "./DemoLogPanel";
+import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
+import { DemoCatalogView } from "./DemoCatalogView";
+import {
+  countRows,
+  DemoSessionPanel,
+  DemoStatusBar,
+  DemoTopBar,
+  DemoWorkflowPanel,
+  topLevelRows,
+} from "./DemoShell";
 import { DEMO_ROWS, LIVE_SEQUENCE, memberAttentionIds, ATTENTION_STATUSES } from "./demo-data";
 
 /**
@@ -16,13 +25,28 @@ import { DEMO_ROWS, LIVE_SEQUENCE, memberAttentionIds, ATTENTION_STATUSES } from
  * Esc back · c mark member checked · 1–5 switch tabs.
  */
 
-const TAB_KEYS: DemoTab[] = ["logs", "data", "review", "receipt", "shots"];
 
 export function RebuildDemo() {
-  const [selectedId, setSelectedId] = useState("sep-maria");
+  const [selectedId, setSelectedId] = useState("oath-summer");
+  const [shellView, setShellView] = useState<"queue" | "catalog">("queue");
+  const [activeWorkflow, setActiveWorkflow] = useState("All");
   const [view, setView] = useState<DemoView>({ kind: "queue" });
   const [filter, setFilter] = useState<DemoFilter>("all");
-  const [oathExpanded, setOathExpanded] = useState(false);
+  // Groups default collapsed (D5) but auto-expand when a member needs the
+  // operator — the packet at approval opens itself.
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        Object.values(DEMO_ROWS)
+          .filter(
+            (r) =>
+              r.rowType === "group" &&
+              (r.memberIds?.length ?? 0) <= 20 &&
+              (r.status === "waiting" || (r.memberIds ?? []).some((id) => ["waiting", "failed"].includes(DEMO_ROWS[id].status))),
+          )
+          .map((r) => r.id),
+      ),
+  );
   const [tab, setTab] = useState<DemoTab | null>(null);
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(
     () => new Set(Object.values(DEMO_ROWS).filter((r) => r.checkedByDefault).map((r) => r.id)),
@@ -42,8 +66,8 @@ export function RebuildDemo() {
   }, []);
 
   const state: DemoQueueState = useMemo(
-    () => ({ view, filter, selectedId, checkedIds, oathExpanded, tick }),
-    [view, filter, selectedId, checkedIds, oathExpanded, tick],
+    () => ({ view, filter, selectedId, checkedIds, expandedGroups, tick }),
+    [view, filter, selectedId, checkedIds, expandedGroups, tick],
   );
 
   const handlers = useMemo(
@@ -52,7 +76,13 @@ export function RebuildDemo() {
       onFilter: setFilter,
       onDrillIn: (groupId: string) => setView({ kind: "drill", groupId }),
       onBack: () => setView({ kind: "queue" }),
-      onToggleOath: () => setOathExpanded((v) => !v),
+      onToggleGroup: (groupId: string) =>
+        setExpandedGroups((prev) => {
+          const next = new Set(prev);
+          if (next.has(groupId)) next.delete(groupId);
+          else next.add(groupId);
+          return next;
+        }),
     }),
     [select],
   );
@@ -73,7 +103,7 @@ export function RebuildDemo() {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const visible = computeVisibleIds({ view, filter, oathExpanded });
+      const visible = computeVisibleIds({ view, filter, expandedGroups });
       const idx = visible.indexOf(selectedId);
 
       if (e.key === "j" || e.key === "ArrowDown") {
@@ -110,14 +140,16 @@ export function RebuildDemo() {
           e.preventDefault();
           toggleChecked(selectedId);
         }
-      } else if (/^[1-5]$/.test(e.key)) {
+      } else if (/^[1-4]$/.test(e.key)) {
         e.preventDefault();
-        setTab(TAB_KEYS[Number(e.key) - 1]);
+        const keys = tabsFor(DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"]);
+        const next = keys[Number(e.key) - 1];
+        if (next) setTab(next);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, filter, oathExpanded, selectedId, select, toggleChecked]);
+  }, [view, filter, expandedGroups, selectedId, select, toggleChecked]);
 
   // keep the selected row visible when keyboard-navigating
   useEffect(() => {
@@ -127,50 +159,75 @@ export function RebuildDemo() {
 
   const row = DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"];
 
+  const counts = useMemo(() => countRows(topLevelRows()), []);
+
+  const openExample = useCallback(
+    (id: string) => {
+      setShellView("queue");
+      setActiveWorkflow("All");
+      setView({ kind: "queue" });
+      select(id);
+    },
+    [select],
+  );
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* demo banner */}
-      <header className="flex items-center gap-3 border-b border-border/60 px-4 py-2">
-        <span className="text-[13px] font-semibold">Rebuild demo</span>
-        <span className="rounded-full border border-info/40 bg-info/10 px-2 py-px text-[9.5px] font-semibold uppercase tracking-wider text-info">
-          target design · synthetic data
-        </span>
-        <span className="ml-auto hidden items-center gap-2 font-mono text-[10px] text-muted-foreground min-[900px]:flex">
-          <Keyboard aria-hidden className="size-3.5" />
-          <span>
-            <kbd className="rounded border border-border bg-card px-1">j</kbd>/<kbd className="rounded border border-border bg-card px-1">k</kbd> move
-          </span>
-          <span>
-            <kbd className="rounded border border-border bg-card px-1">n</kbd> next attention
-          </span>
-          <span>
-            <kbd className="rounded border border-border bg-card px-1">Enter</kbd> open group
-          </span>
-          <span>
-            <kbd className="rounded border border-border bg-card px-1">Esc</kbd> back
-          </span>
-          <span>
-            <kbd className="rounded border border-border bg-card px-1">c</kbd> check
-          </span>
-          <span>
-            <kbd className="rounded border border-border bg-card px-1">1</kbd>–<kbd className="rounded border border-border bg-card px-1">5</kbd> tabs
-          </span>
-        </span>
-      </header>
+      <DemoTopBar view={shellView} onView={setShellView} attention={counts.attention} />
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 min-[1080px]:grid-cols-[470px_minmax(0,1fr)]">
-        <DemoQueue state={state} handlers={handlers} />
-        <DemoLogPanel
-          row={row}
-          tab={tab}
-          onTab={setTab}
-          onSelect={select}
-          checkedIds={checkedIds}
-          onToggleChecked={toggleChecked}
-          tick={tick}
-          liveCount={liveCount}
-        />
-      </main>
+      {shellView === "catalog" ? (
+        <DemoCatalogView onOpenExample={openExample} />
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <DemoWorkflowPanel active={activeWorkflow} onActive={setActiveWorkflow} />
+
+          <main className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1">
+              <span className="text-[12.5px] font-semibold text-foreground">{activeWorkflow === "All" ? "All workflows" : activeWorkflow}</span>
+              <span className="ml-auto hidden items-center gap-2 font-mono text-[10px] text-muted-foreground min-[1000px]:flex">
+                <Keyboard aria-hidden className="size-3.5" />
+                <span>
+                  <kbd className="rounded border border-border bg-card px-1">j</kbd>/<kbd className="rounded border border-border bg-card px-1">k</kbd> move
+                </span>
+                <span>
+                  <kbd className="rounded border border-border bg-card px-1">n</kbd> next attention
+                </span>
+                <span>
+                  <kbd className="rounded border border-border bg-card px-1">Enter</kbd> open group
+                </span>
+                <span>
+                  <kbd className="rounded border border-border bg-card px-1">c</kbd> check
+                </span>
+                <span>
+                  <kbd className="rounded border border-border bg-card px-1">1</kbd>–<kbd className="rounded border border-border bg-card px-1">4</kbd> tabs
+                </span>
+              </span>
+            </div>
+
+            <DemoStatusBar
+              counts={counts}
+              active={filter}
+              onSelect={setFilter}
+            />
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
+              <DemoQueue state={state} handlers={handlers} />
+              <DemoLogPanel
+                row={row}
+                tab={tab}
+                onTab={setTab}
+                onSelect={select}
+                checkedIds={checkedIds}
+                onToggleChecked={toggleChecked}
+                tick={tick}
+                liveCount={liveCount}
+              />
+            </div>
+          </main>
+        </div>
+      )}
+
+      <DemoSessionPanel tick={tick} />
     </div>
   );
 }
