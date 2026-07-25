@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { ArrowRight, LayoutList, PanelRight, Workflow } from "lucide-react";
+import { ArrowRight, Layers, LayoutList, Link2, PanelRight, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PANEL_KINDS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
+import { CONTAINMENT_KINDS, DENSITY_LADDER, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS, type RowVariantSpec } from "./demo-catalog";
 import { DEMO_ROWS } from "./demo-data";
 
 /**
@@ -107,6 +107,82 @@ export function DemoCatalogView({ onOpenExample }: { onOpenExample: (id: string)
                     </span>
                   ))}
                 </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        {/* ---- containment ---- */}
+        <section>
+          <SectionHead
+            icon={Link2}
+            title="Containment — the one field that decides where a child lives"
+            blurb="Not every child of a row is a member. Getting this wrong is what makes the same run appear in two panels and the badges disagree with the rows."
+          />
+          <div className="grid gap-2.5 min-[1100px]:grid-cols-3">
+            {CONTAINMENT_KINDS.map((c) => (
+              <article key={c.key} className="flex flex-col rounded-lg border border-border bg-card p-3">
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-[13px] font-semibold text-foreground">{c.name}</h3>
+                  <span className="font-mono text-[10px] text-muted-foreground">{c.key}</span>
+                </div>
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-secondary-foreground">{c.rule}</p>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                  <span className="text-secondary-foreground">Lives:</span> {c.lives}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  <span className="text-secondary-foreground">Counts:</span> {c.counts}
+                </p>
+                <ul className="mt-2 flex flex-col gap-0.5">
+                  {c.examples.map((e) => (
+                    <li key={e} className="flex gap-1.5 text-[11px] text-muted-foreground">
+                      <span aria-hidden className="mt-[6px] size-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                      <span className="min-w-0">{e}</span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        {/* ---- rollup + density ---- */}
+        <section>
+          <SectionHead
+            icon={Layers}
+            title="Rollup precedence and the density ladder"
+            blurb="A group's status is never authored — it is rolled up from its members through one shared function. Its shape is never a new row type — it is a rung on a ladder driven by member count."
+          />
+          <div className="rounded-lg border border-border bg-card p-3">
+            <div className="text-[11.5px] font-semibold text-foreground">Rollup precedence</div>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+              First match wins. A rejected member is excluded entirely — but an otherwise-verified group holding one drops to Done with warnings, so a
+              packet with an unreadable page can never read as clean.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              {ROLLUP_STEPS.map((s, i) => (
+                <span key={s} className="inline-flex items-center gap-1">
+                  {i > 0 && <ArrowRight aria-hidden className="size-3 text-muted-foreground/60" />}
+                  <span className="rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[11px] text-secondary-foreground">{s}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="mt-2.5 grid gap-2.5 min-[1100px]:grid-cols-2">
+            {DENSITY_LADDER.map((d) => (
+              <article key={d.key} className="flex flex-col rounded-lg border border-border bg-card p-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-[13px] font-semibold text-foreground">{d.range}</h3>
+                  <button
+                    type="button"
+                    onClick={() => onOpenExample(d.exampleId)}
+                    className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/45 bg-primary/12 px-2 py-0.5 text-[10.5px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    See {DEMO_ROWS[d.exampleId]?.title.slice(0, 22) ?? "example"}
+                    <ArrowRight aria-hidden className="size-3" />
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">{d.what}</p>
               </article>
             ))}
           </div>

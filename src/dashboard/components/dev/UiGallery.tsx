@@ -3,19 +3,17 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowUpRight,
-  Ban,
   Camera,
   Check,
   CheckCircle2,
   ChevronsUp,
   CircleHelp,
+  CircleSlash,
   ClipboardList,
-  Clock,
   CornerDownRight,
-  Eye,
+  GitBranch,
   Hourglass,
   KeyRound,
-  LayoutGrid,
   Loader2,
   Pause,
   Plus,
@@ -23,6 +21,7 @@ import {
   RotateCw,
   SearchX,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,8 @@ import { IconActionButton } from "@/components/shared/IconActionButton";
 import { StatusCounts } from "@/components/queue-panel/StatusCounts";
 import { DemoRowCard, type DemoQueueHandlers, type DemoQueueState } from "./rebuild-demo/DemoQueue";
 import { DemoLogPanel } from "./rebuild-demo/DemoLogPanel";
-import { PANEL_KINDS, ROW_VARIANTS } from "./rebuild-demo/demo-catalog";
+import { DemoStatusBar, countRows, topLevelRows } from "./rebuild-demo/DemoShell";
+import { CONTAINMENT_KINDS, PANEL_KINDS, ROLLUP_STEPS, ROW_VARIANTS } from "./rebuild-demo/demo-catalog";
 import { PROPOSED_STATUS, StatusBadge, type ProposedStatus } from "./rebuild-demo/demo-status";
 import { DEMO_ROWS, groupCounts } from "./rebuild-demo/demo-data";
 
@@ -57,7 +57,7 @@ const STATIC_STATE: DemoQueueState = {
   filter: "all",
   selectedId: "",
   checkedIds: new Set(),
-  expandedGroups: new Set(["oath-summer", "oath-batch"]),
+  expandedGroups: new Set(["oath-batch"]),
   tick: 0,
 };
 
@@ -67,6 +67,7 @@ const STATIC_HANDLERS: DemoQueueHandlers = {
   onDrillIn: NOOP,
   onBack: NOOP,
   onToggleGroup: NOOP,
+  onOpenPanel: NOOP,
 };
 
 // ===========================================================================
@@ -172,25 +173,119 @@ function QueueRowsTab() {
         })}
       </div>
 
-      <Section title="Group density ladder" sub="Member count is a continuous property, so scale is presentation — never a fourth row type." />
+      <Section
+        title="Group density ladder — four rungs"
+        sub="Member count is a continuous property, so scale is presentation — never a fourth row type. The matrix starts at 41; below that a person is still a readable line."
+      />
       <Specimen
-        name="Member list"
-        kind="≤ 20 members"
-        what="Compact person lines inline under the group, attention-first, first four then Show all. Each line is the one fact that distinguishes that person's outcome."
+        name="Full Member Rows, always expanded"
+        kind="1–3 members"
+        what="At three people or fewer the group IS its members, so they render as complete rows with no chevron. A group of one is still a Group Row — collapsing it would make an upload of one person look structurally different from an upload of six."
+        where="Packet Group Row — a single-page Emergency Contact upload"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["ec-single"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Compact list · first four then Show all"
+        kind="4–12 members"
+        what="Compact person lines inline under the group, attention-first. Each line is the one fact that distinguishes that person's outcome."
         where="Packet Group Row · small Roster Group Row"
         width={480}
       >
         <DemoRowCard row={DEMO_ROWS["oath-batch"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
       </Specimen>
       <Specimen
-        name="Status matrix + attention band"
-        kind="20+ members"
-        what="One cell per person as the general lookup, plus a band naming exactly who needs you and a Start review that walks them one at a time. The matrix is never the review."
+        name="Scroll well · Open all N"
+        kind="13–40 members"
+        what="The same compact lines, but inside a fixed-height well so a group of 40 takes exactly as much room as a group of 13. Open all N goes to the triage drill-in."
+        where="Roster Group Row — 18 typed work-study people"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["ws-batch"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Status matrix · attention strip above"
+        kind="41+ members"
+        what="One cell per person as the general lookup, with the strip that names exactly who needs you rendered ABOVE it — fifty cells is a texture, not a message, so the sentence has to be read first."
         where="Roster Group Row — I-9 Check quarterly retention"
         width={480}
       >
         <DemoRowCard row={DEMO_ROWS["i9-batch"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
       </Specimen>
+
+      <Section
+        title="Packet states"
+        sub="A packet before approval and a packet with an unresolved rejection — the two shapes that used to lie about what had happened."
+      />
+      <Specimen
+        name="Packet at review — extracted count, no members"
+        kind="Packet Group Row"
+        what="Member rows are created by the fan-out, and the fan-out is what approval releases — so there are none yet. The row shows what it genuinely knows (6 people) and offers the bulk approve here; editing a value is only offered inside the review, where the scanned page is on screen."
+        where="Oath Signature · Emergency Contact · OnBase"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["oath-summer"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Packet with a rejected page"
+        kind="Packet Group Row"
+        what="Five members verified, one page that never became work. The rejection is excluded from the rollup but counted on its own, so the packet reads Done with warnings until it is deleted or acknowledged — never a clean Verified done."
+        where="Emergency Contact · I-9 Check · OnBase"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["ec-packet"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Packet failed by its linked OCR run"
+        kind="Packet Group Row"
+        what="The delegated extraction failed, so the packet is Failed and mirrors the child's error with a Re-upload. Waiting on you would be a lie — nobody is being asked to decide anything, something broke."
+        where="OnBase · any packet-backed workflow"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["ob-packet"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Document run with linked signers"
+        kind="Document Run Row"
+        what="Oath Upload is ONE row: it files one ticket for the whole document. Its signers are linked runs living in the Oath Signature panel, so the row shows a chip (6 signers · 3 done) instead of a member list. One row, one home, one count."
+        where="Oath Upload"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["ou-packet"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+      <Specimen
+        name="Write parked — unknown outcome"
+        kind="Person Run Row"
+        what="Parked means the write outcome is genuinely unknown, not that a submit is being held. There is no Resume: the only two exits are confirmed-present and confirmed-absent, and both are you reporting what you saw in the system of record."
+        where="Separations · Onboarding · any workflow that writes"
+        width={480}
+      >
+        <DemoRowCard row={DEMO_ROWS["sep-rosa"]} state={STATIC_STATE} handlers={STATIC_HANDLERS} />
+      </Specimen>
+
+      <Section
+        title="Containment — where a child lives and whether it is counted"
+        sub="Not every child of a row is a member. This is the field behind every 'why is this run in two places' and every disagreeing badge."
+      />
+      <div className="col-span-full grid grid-cols-1 gap-2 min-[1100px]:grid-cols-3">
+        {CONTAINMENT_KINDS.map((c) => (
+          <Chip key={c.key} name={c.name} note={`${c.rule} ${c.lives} ${c.counts}`}>
+            <span
+              className={cn(
+                "rounded-md border px-2 py-0.5 font-mono text-[10px]",
+                c.key === "member"
+                  ? "border-log-teal/40 bg-log-teal/10 text-log-teal"
+                  : c.key === "linked"
+                    ? "border-info/40 bg-info/10 text-info"
+                    : "border-border bg-secondary/50 text-muted-foreground",
+              )}
+            >
+              {c.key}
+            </span>
+          </Chip>
+        ))}
+      </div>
     </div>
   );
 }
@@ -212,7 +307,17 @@ function LogPanelsTab() {
         return (
           <Specimen key={p.key} name={p.name} kind={`tabs: ${p.tabs.join(" · ")}`} what={p.forRows} where={`Opens on: ${p.defaultTab}`}>
             <div className="h-[580px] overflow-hidden rounded-lg border border-border">
-              <DemoLogPanel row={row} tab={null} onTab={NOOP} onSelect={NOOP} checkedIds={new Set()} onToggleChecked={NOOP} tick={0} liveCount={0} />
+              <DemoLogPanel
+                row={row}
+                tab={null}
+                onTab={NOOP}
+                onSelect={NOOP}
+                onOpenPanel={NOOP}
+                checkedIds={new Set()}
+                onToggleChecked={NOOP}
+                tick={0}
+                liveCount={0}
+              />
             </div>
             <ul className="mt-2 flex flex-col gap-0.5">
               {p.specifics.map((s) => (
@@ -547,16 +652,6 @@ function SessionCardsTab() {
 // TAB 4 — Controls
 // ===========================================================================
 
-const PILLS: { key: string; label: string; n: number; icon: typeof Eye; tone: string; on?: boolean }[] = [
-  { key: "all", label: "All", n: 15, icon: LayoutGrid, tone: "text-muted-foreground", on: true },
-  { key: "attention", label: "Needs you", n: 7, icon: Eye, tone: "text-warning" },
-  { key: "running", label: "Running", n: 3, icon: Loader2, tone: "text-primary" },
-  { key: "queued", label: "Queued", n: 1, icon: Clock, tone: "text-muted-foreground" },
-  { key: "done", label: "Done", n: 5, icon: CheckCircle2, tone: "text-success" },
-  { key: "failed", label: "Failed", n: 1, icon: AlertTriangle, tone: "text-destructive" },
-  { key: "cancelled", label: "Cancelled", n: 0, icon: Ban, tone: "text-warning" },
-];
-
 const RAIL_ROWS = [
   { label: "Separations", total: 2, queued: 0, on: true, note: "Active — 3px primary accent, bold label, primary count." },
   { label: "I-9 Check", total: 1, queued: 6, on: false, note: "Queued work waiting behind the running item." },
@@ -580,31 +675,31 @@ function ControlsTab() {
     <div className="grid grid-cols-1 gap-3 min-[1500px]:grid-cols-2">
       <Section
         title="Status Bar"
-        sub="The count pills. Every number here comes from the same server projection as the Workflow Panel badges and the queue itself — so two surfaces can never disagree."
+        sub="One row: All, the composite Needs you, then every one of the eight statuses. Nothing is hidden behind an overflow, and nothing is counted twice."
       />
       <div className="col-span-full">
-        <Specimen name="Status Bar" kind="filter + summary" what="Clicking a pill filters; clicking the active pill clears it. A zero count dims rather than disappearing, so the buckets stay in the same place.">
+        <Specimen
+          name="Status Bar"
+          kind="filter + summary"
+          what="This is the REAL bar rendering the REAL counts — it goes through countRows, the same single path as the Workflow Panel badges and the queue, so two surfaces cannot disagree. Needs you is the only overlap and it is labelled as a composite (Waiting on you + Write parked). A zero count dims rather than disappearing, so the buckets stay in the same place."
+          where="countRows(topLevelRows()) — no second tally exists"
+        >
+          <DemoStatusBar counts={countRows(topLevelRows())} active="all" onSelect={NOOP} />
+        </Specimen>
+      </div>
+      <div className="col-span-full">
+        <Specimen
+          name="Rollup precedence"
+          kind="one shared function"
+          what="A group's status is never authored — it is rolled up from its members, first match wins. A rejected member is excluded from the rollup entirely, but an otherwise-verified group holding one drops to Done with warnings."
+        >
           <div className="flex flex-wrap items-center gap-1">
-            {PILLS.map((p) => {
-              const Icon = p.icon;
-              return (
-                <button
-                  key={p.key}
-                  type="button"
-                  aria-pressed={p.on}
-                  onClick={NOOP}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    p.on ? "border-primary/45 bg-primary/12 font-semibold text-foreground" : "border-border bg-card text-muted-foreground",
-                    p.n === 0 && !p.on && "opacity-45",
-                  )}
-                >
-                  <Icon aria-hidden className={cn("size-3", p.tone)} />
-                  {p.label}
-                  <span className="font-mono tabular-nums">{p.n}</span>
-                </button>
-              );
-            })}
+            {ROLLUP_STEPS.map((s, i) => (
+              <span key={s} className="inline-flex items-center gap-1">
+                {i > 0 && <ArrowRight aria-hidden className="size-3 text-muted-foreground/60" />}
+                <span className="rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[11px] text-secondary-foreground">{s}</span>
+              </span>
+            ))}
           </div>
         </Specimen>
       </div>
@@ -632,11 +727,47 @@ function ControlsTab() {
           <IconActionButton tone="destructive" icon={<Trash2 aria-hidden className="size-3.5" />} label="Delete" onClick={NOOP} />
         </div>
       </Specimen>
-      <Specimen name="Cancel remaining" kind="group footer" what="Tree-scoped: cancels the coordinator, its OCR review and every non-terminal member in one act. Row-scoped group cancel is what used to leave orphaned OCR reviews behind.">
+      <Specimen
+        name="Cancel group"
+        kind="group footer"
+        what="Tree-scoped and FINAL: it cancels the group, its linked OCR review and every non-terminal member in one act, with no confirmation dialog and no undo. Row-scoped group cancel is what used to leave orphaned OCR reviews behind; an undo would mean holding a half-cancelled tree open, which is worse than either outcome."
+      >
         <span className="flex items-center gap-1">
-          <span className="mr-1 text-[10px] text-muted-foreground">Cancel remaining</span>
-          <IconActionButton tone="muted" icon={<X aria-hidden className="size-3.5" />} label="Cancel remaining" onClick={NOOP} />
+          <span className="mr-1 text-[10px] text-muted-foreground">Cancel group</span>
+          <IconActionButton
+            tone="muted"
+            icon={<X aria-hidden className="size-3.5" />}
+            label="Cancel group and everything under it"
+            title="Cancels this group, its delegated OCR review and every member. Final — there is no undo."
+            onClick={NOOP}
+          />
         </span>
+      </Specimen>
+      <Specimen
+        name="Write-parked resolution"
+        kind="gate banner"
+        what="The only two exits from Write parked, and neither one re-submits. Both are the operator reporting what they SAW in the system of record — there is no Resume, because resuming an unknown write is how you terminate somebody twice."
+      >
+        <div className="grid gap-1.5 min-[560px]:grid-cols-2">
+          <span className="flex flex-col items-start gap-0.5 rounded-md border border-success/45 bg-success/8 px-2.5 py-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-success">
+              <CheckCircle2 aria-hidden className="size-3" />
+              Confirmed present
+            </span>
+            <span className="text-[10.5px] leading-snug text-muted-foreground">
+              You found the write in UCPath. The run closes Verified done and records what you read.
+            </span>
+          </span>
+          <span className="flex flex-col items-start gap-0.5 rounded-md border border-destructive/40 bg-destructive/6 px-2.5 py-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-destructive">
+              <CircleSlash aria-hidden className="size-3" />
+              Confirmed absent
+            </span>
+            <span className="text-[10.5px] leading-snug text-muted-foreground">
+              You found nothing. The run closes Failed and becomes safely retryable — the retry cannot duplicate.
+            </span>
+          </span>
+        </div>
       </Specimen>
 
       <Section title="Group indicators" sub="How a group reports its members without you opening anything." />
@@ -661,9 +792,68 @@ function ControlsTab() {
           </button>
         </div>
       </Specimen>
-      <Specimen name="Rejected count" kind="group header" what="Pages or rows that can never become work are counted separately and excluded from the rollup, so a packet with rejections never reads as clean.">
+      <Specimen
+        name="Rejected count"
+        kind="group header"
+        what="Pages or rows that can never become work are counted separately and excluded from the rollup. They cannot count toward done — and because they are unresolved, the packet reads 5 done · 1 rejected at Done with warnings rather than a clean Verified done."
+      >
         <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
           <SearchX aria-hidden className="size-3" />1 rejected
+        </span>
+      </Specimen>
+      <Specimen
+        name="Extracted count"
+        kind="group body, pre-approval"
+        what="What a packet shows before any member row exists. Members are created by the fan-out and the fan-out is what approval releases — so the row reports the people it read rather than inventing rows for work that has not been authorised."
+      >
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+          <Users aria-hidden className="size-3 text-muted-foreground" />6 people
+        </span>
+      </Specimen>
+      <Specimen
+        name="Bulk approve on the row"
+        kind="group body, pre-approval"
+        what="A clean packet never has to be opened. But there is no edit here on purpose: changing an extracted value requires the scanned page on screen, so any edit sends you into the review."
+      >
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-warning/35 bg-warning/6 px-2.5 py-1.5">
+          <button
+            type="button"
+            onClick={NOOP}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning/55 bg-warning/15 px-2.5 py-0.5 text-[11px] font-semibold text-warning"
+          >
+            <CheckCircle2 aria-hidden className="size-3" />
+            Approve 5 of 6
+          </button>
+          <button
+            type="button"
+            onClick={NOOP}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-0.5 text-[11px] font-semibold text-secondary-foreground"
+          >
+            Open review
+            <ArrowUpRight aria-hidden className="size-3" />
+          </button>
+          <span className="min-w-0 flex-1 text-[10.5px] leading-snug text-muted-foreground">
+            Changing any extracted value opens the review — a value may only be edited with its scanned page on screen.
+          </span>
+        </div>
+      </Specimen>
+      <Specimen
+        name="Linked signers chip"
+        kind="on a Document Run Row"
+        what="A set of linked runs living in another panel. It is a chip, not a member list: each signer is an Oath Signature run with its own row there, counted once, in one place."
+      >
+        <button type="button" onClick={NOOP} className="inline-flex items-center gap-1.5 rounded-md border border-info/35 bg-info/8 px-2 py-0.5 text-[10.5px] text-info">
+          <Users aria-hidden className="size-3 shrink-0" />6 signers · 3 done
+          <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+        </button>
+      </Specimen>
+      <Specimen
+        name="Depth-2 lookup"
+        kind="on the Review Run Row only"
+        what="The person lookup a record delegated. It is shown on the row that owns the record and nowhere else — the packet group lists people, not the runs those people spawned."
+      >
+        <span className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          <GitBranch aria-hidden className="size-3" />6 lookups
         </span>
       </Specimen>
       <Specimen name="Checked by you" kind="group header" what="Your own review progress. Nobody else is tracking that you looked at each person — this is the only thing that does.">
@@ -860,11 +1050,11 @@ function ControlsTab() {
             <AlertTriangle aria-hidden className="size-3" />1
           </span>
         </Chip>
-        <Chip name="Gate age" note="How long a decision has been waiting — the most actionable fact in the queue.">
-          <span className="inline-flex items-center gap-1 rounded-md bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
-            <Clock aria-hidden className="size-3" />
-            waiting 18m
-          </span>
+        <Chip
+          name="Gate age"
+          note="How long a decision has been waiting, carried IN the status itself so a collapsed row already says it. 'Waiting on you' is a state; 'Waiting on you · 10m' is a priority."
+        >
+          <StatusBadge status="waiting" age="10m" />
         </Chip>
       </div>
     </div>
