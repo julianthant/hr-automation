@@ -82,6 +82,7 @@ import {
 } from "./components/queue-panel/queue-sort";
 import { AppErrorBoundary } from "./components/shared/AppErrorBoundary";
 import { UiGallery } from "./components/dev/UiGallery";
+import { RebuildDemo } from "./components/dev/rebuild-demo/RebuildDemo";
 
 /** Default workflow when ?wf= is missing or unknown. Must always exist
  *  in the registry; if it doesn't, we fall through to the first registered
@@ -1036,10 +1037,20 @@ export function DashboardApp() {
   // TEMPORARY dev route — ?view=ui-gallery catalogs the dashboard's reusable
   // surfaces (queue rows, session cards, controls) with the real components.
   // Remove this gate + src/dashboard/components/dev/UiGallery.tsx when done.
-  if (new URLSearchParams(window.location.search).get("view") === "ui-gallery") {
+  const devView = new URLSearchParams(window.location.search).get("view");
+  if (devView === "ui-gallery") {
     return (
       <AppErrorBoundary>
         <UiGallery />
+      </AppErrorBoundary>
+    );
+  }
+  // TEMPORARY dev route — ?view=rebuild-demo: the rebuild's target queue +
+  // per-row log panel as a living demo (dev/rebuild-demo/, synthetic data).
+  if (devView === "rebuild-demo") {
+    return (
+      <AppErrorBoundary>
+        <RebuildDemo />
       </AppErrorBoundary>
     );
   }

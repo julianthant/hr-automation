@@ -294,6 +294,14 @@ function Ledger() {
 export function ProposalsTab() {
   return (
     <ProposalTogglesProvider>
+      <p className="mb-3 text-[12px] text-muted-foreground">
+        These cells isolate each proposal for keep/cut decisions. The full living demo — every row wired to its own
+        log panel, drill-in, conveyor, keyboard flow —{" "}
+        <a href="?view=rebuild-demo" className="font-medium text-info underline-offset-2 hover:underline">
+          opens at ?view=rebuild-demo
+        </a>
+        .
+      </p>
       <ProposalToggleBar />
 
       <div className="grid grid-cols-1 items-start gap-4 min-[1080px]:grid-cols-[470px_minmax(0,1fr)]">
