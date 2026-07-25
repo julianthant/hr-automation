@@ -367,7 +367,7 @@ function GalleryTile({ label, state }: { label: string; state: TileState }) {
   const Icon = spec.icon;
   const spins = state === "refreshing" || state === "authing";
   return (
-    <div className={cn("flex w-[112px] flex-col gap-0.5 rounded-md border px-2 py-1", spec.cls)}>
+    <div className={cn("flex w-full min-w-0 flex-col gap-0.5 rounded-md border px-2 py-1", spec.cls)}>
       <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider">
         <Icon aria-hidden className={cn("size-3 shrink-0", spins && "animate-spin motion-reduce:animate-none")} />
         {label}
@@ -412,12 +412,17 @@ function GalleryCard({ s }: { s: CardSpec }) {
       <div className="flex items-center gap-2">
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", PHASE_DOT[s.phase])} />
         <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{s.workflow}</span>
+        {s.queued ? (
+          <span className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-[10px] leading-none text-primary">
+            <span className="font-medium">{s.queued}</span> queued
+          </span>
+        ) : null}
         <span className={cn("ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-wider", s.tone)}>{s.phase}</span>
       </div>
       <span className={cn("mt-0.5 truncate text-[10.5px] text-muted-foreground", s.mono && "font-mono")}>{s.subline}</span>
 
       {s.tiles.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
+        <div className="mt-1.5 grid grid-cols-2 gap-1">
           {s.tiles.map((t) => (
             <GalleryTile key={t.label} {...t} />
           ))}
@@ -444,11 +449,6 @@ function GalleryCard({ s }: { s: CardSpec }) {
 
       <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5 text-[10px] text-muted-foreground">
         <span className="font-mono tabular-nums">{s.elapsed}</span>
-        {s.queued ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-px leading-none text-primary">
-            <span className="font-medium">{s.queued}</span> queued
-          </span>
-        ) : null}
         <span className="min-w-0 flex-1 truncate">{s.step ?? ""}</span>
         <button
           type="button"
@@ -496,7 +496,9 @@ function SessionCardsTab() {
                       : undefined
             }
           >
-            <GalleryTile label="ucpath" state={k} />
+            <span className="w-[132px]">
+              <GalleryTile label="ucpath" state={k} />
+            </span>
           </Chip>
         ))}
       </div>
@@ -716,17 +718,10 @@ function ControlsTab() {
         <Specimen
           name="Evidence bar"
           kind="pinned, all tabs"
-          what="Every capture the run took, always one glance away. This replaces the Screenshots tab; failure captures are counted separately so you can see there is proof of the break."
+          what="Every capture the run took, always one glance away. This replaces the Screenshots tab — just the images; a capture taken at a failure carries a red frame."
         >
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5">
-            <span className="flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              <Camera aria-hidden className="size-3" />
-              Evidence
-              <span className="font-mono normal-case tracking-normal">6</span>
-              <span className="rounded border border-destructive/40 px-1 font-mono text-[9px] normal-case tracking-normal text-destructive">1 at failure</span>
-            </span>
-            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
-              {["Kuali doc", "Identity check", "Job summary", "Kronos timeout", "Kronos search", "Paused at gate"].map((l, i) => (
+          <div className="flex gap-1.5 overflow-x-auto rounded-lg border border-border bg-card px-3 py-1.5">
+            {["Kuali doc", "Identity check", "Job summary", "Kronos timeout", "Kronos search", "Paused at gate"].map((l, i) => (
                 <button
                   key={l}
                   type="button"
@@ -740,7 +735,6 @@ function ControlsTab() {
                   <span className="max-w-full truncate px-1 text-[8.5px] text-muted-foreground">{l}</span>
                 </button>
               ))}
-            </div>
           </div>
         </Specimen>
       </div>

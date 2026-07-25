@@ -254,10 +254,16 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     forRows: "Person Run Row · Document Run Row · Catalog Run Row",
     tabs: ["Logs", "Data", "Receipt"],
     defaultTab: "Running → Logs · terminal → Receipt · gated → Logs with the gate pinned open",
-    pinned: ["Header: title · status · elapsed · trace id", "Outcome bar", "Gate banner when waiting on you", "Step strip (hover for detail)", "Evidence bar"],
+    pinned: [
+      "Header: title · status · elapsed · trace id",
+      "Outcome bar",
+      "Gate banner when waiting on you",
+      "Timeline — each step sized by its real duration, hover for detail",
+      "Evidence bar",
+    ],
     specifics: [
       "No Review tab — this row has no records to review.",
-      "Data has an Edit & re-run mode once the run is stopped: change what was extracted, re-run from those values.",
+      "Data is one surface, not two: every value the run touched, with the read values editable in place, and a footer that starts a fresh run from them.",
       "The 4-column detail grid of today's panel is gone; those fields live on the row as facts and in the Data ledger.",
     ],
     exampleId: "sep-maria",
@@ -268,7 +274,7 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     forRows: "Review Run Row only",
     tabs: ["Review", "Logs", "Data", "Receipt"],
     defaultTab: "Review — always, this row exists to be reviewed",
-    pinned: ["Header with reviewed N of M", "Approve bar showing approvable vs blocked", "Step strip", "Evidence bar"],
+    pinned: ["Header with reviewed N of M", "Approve bar showing approvable vs blocked", "Timeline", "Evidence bar"],
     specifics: [
       "The ONLY panel with a Review tab.",
       "Review is one person at a time: the source page beside the fields read from it, never a collapsed table.",
@@ -283,7 +289,7 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     forRows: "Packet Group Row · Roster Group Row",
     tabs: ["People", "Logs", "Data", "Receipt"],
     defaultTab: "Anyone needing attention → People · otherwise Logs while running, Receipt when finished",
-    pinned: ["Header with member counts", "Outcome bar", "Coordinator step strip (extract → review → fan-out → rollup)", "Evidence bar"],
+    pinned: ["Header with member counts", "Outcome bar", "Coordinator timeline (extract → review → fan-out → rollup)", "Evidence bar"],
     specifics: [
       "People is the per-person work surface: matrix or list, attention first, click into any person.",
       "The group's Logs are the coordinator's own — member detail belongs to the member.",
