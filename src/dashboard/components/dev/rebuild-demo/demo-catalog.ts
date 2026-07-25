@@ -13,7 +13,8 @@
  * row's existing shape + subject, so nothing new has to be recorded to get one.
  */
 
-import { DEMO_ROWS, type DemoRow } from "./demo-data";
+import { DEMO_ROWS, DENSITY_RUNGS, ROLLUP_PRECEDENCE, type Containment, type DemoRow } from "./demo-data";
+import { PROPOSED_STATUS } from "./demo-status";
 
 // ---------------------------------------------------------------------------
 // Row variants — 8 names across the 3 ratified row types
@@ -32,7 +33,7 @@ export type RowVariant =
 export type PanelKind = "run" | "review" | "group" | "member";
 
 export function rowVariantOf(row: DemoRow): RowVariant {
-  if (row.rowType === "member") return row.displayOnly ? "rejected-member" : "person-member";
+  if (row.rowType === "member") return row.containment === "rejected" ? "rejected-member" : "person-member";
   if (row.rowType === "group") return row.reviewRunId ? "packet-group" : "roster-group";
   if (row.records) return "review-run";
   if (row.subjectKind === "file") return "document-run";
@@ -106,14 +107,15 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     carries: [
       "Page count + the identifier the document produced (ticket number, document id)",
       "An approval step inside its OWN pipeline — it does not fan out",
+      "A chip at the signers it is waiting on (6 signers · 3 done) that jumps to the panel they live in",
     ],
     gotcha:
-      "This is the deliberate exception to 'a PDF upload is always a Group'. Oath Upload files ONE ticket for the whole document, so splitting it into members would invent work that does not exist.",
+      "This is the deliberate exception to 'a PDF upload is always a Group'. Oath Upload files ONE ticket for the whole document, so splitting it into members would invent work that does not exist. Its signers are LINKED, not members: each is an Oath Signature run with its own row in that panel. Copying them under this row would double both the rows and the counts.",
     workflows: [
       {
         code: "ou",
         label: "Oath Upload",
-        note: "Born at upload; walks OCR prep → your review → wait signatures → file ticket as one row. Its OCR run is delegated and keeps its own Review Run Row.",
+        note: "Born at upload; walks OCR prep → your review → wait signatures → file ticket as one row. Its signers are linked Oath Signature runs; its OCR run is a linked Review Run Row.",
       },
     ],
     exampleId: "ou-packet",
@@ -155,14 +157,15 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     name: "Packet Group Row",
     rowType: "Group Row",
     subject: "A PDF of many people that STOPS for your approval before anything is written.",
-    titleRule: "Title = the PDF filename. Subtitle = the trace id. Always a Group, even with one person (D2).",
+    titleRule: "Title = the PDF filename. Subtitle = the trace id. Always a Group, even with one person.",
     carries: [
-      "Extraction phase text, then the review gate: reviewed N of M · approvable · blocked",
+      "Before approval: the extracted count (6 people) — there are no member rows yet",
+      "Bulk approve on the row itself (Approve 5 of 6) plus a link to the review; editing a value is only offered inside the review",
       "A prominent link to its Review Run Row",
       "After approval: member rows inline, with per-member status counts and progress",
     ],
     gotcha:
-      "The gate is the whole point — members stay Queued and NOTHING is written until you approve. Blocked records (inactive employee, unsigned form) are excluded from the approve count rather than silently approved.",
+      "Members are created by the FAN-OUT, so a packet at review has none — it shows what it read, not a fake member list. Blocked records are excluded from the approve count rather than silently approved. A rejected page never counts toward done: the packet stays at Done with warnings until each one is deleted or acknowledged. A packet of one is still a Group Row.",
     workflows: [
       { code: "os", label: "Oath Signature", note: "One signer member per approved person; no ServiceNow ticket." },
       { code: "ec", label: "Emergency Contact", note: "One contact-fill member per approved person; a person may carry several contacts." },
@@ -177,12 +180,12 @@ export const ROW_VARIANTS: RowVariantSpec[] = [
     subject: "A large fan-out that runs WITHOUT a pre-approval gate — you review the outcomes, not the inputs.",
     titleRule: "Title = the PDF/roster filename. Subtitle = the trace id.",
     carries: [
-      "The status matrix — one cell per person, the general lookup view",
-      "An attention band: how many failed / waiting / warned, with Start review",
+      "At 41+ people: the status matrix — one cell per person, the general lookup view",
+      "An attention strip ABOVE the matrix: how many failed / waiting / warned, with Start review",
       "Your own reviewed-N-of-M counter, because nobody else is tracking that you looked",
     ],
     gotcha:
-      "At 50 people the matrix is the overview, NOT the review. There must always be a per-person detail path off it — a matrix alone cannot be signed off on.",
+      "The matrix is the overview, NOT the review — there must always be a per-person detail path off it. It only appears at 41 people or more; below that a person is still a readable line, and 13–40 sit in a fixed-height scroll well so the row does not grow with the roster.",
     workflows: [
       {
         code: "ic",
@@ -292,8 +295,9 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     pinned: ["Header with member counts", "Outcome bar", "Coordinator timeline (extract → review → fan-out → rollup)", "Evidence bar"],
     specifics: [
       "People is the per-person work surface: matrix or list, attention first, click into any person.",
+      "Before approval there are no members — People lists the people the OCR extracted, read-only, and says member rows appear when you approve.",
       "The group's Logs are the coordinator's own — member detail belongs to the member.",
-      "The group receipt rolls up only when every member is terminal; a single failed member does not fail the group.",
+      "The receipt carries every member's confirmation number inline, so filing a packet never means opening N rows.",
     ],
     exampleId: "i9-batch",
   },
@@ -316,6 +320,63 @@ export const PANEL_KINDS: PanelKindSpec[] = [
     exampleId: "i9-m-19",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Containment — the one field that decides where a child lives and whether it
+// is counted. Every "why does this run appear twice / why is the badge wrong"
+// question in the old dashboard was really this question, unasked.
+// ---------------------------------------------------------------------------
+
+export interface ContainmentSpec {
+  key: Containment;
+  name: string;
+  rule: string;
+  counts: string;
+  lives: string;
+  examples: string[];
+}
+
+export const CONTAINMENT_KINDS: ContainmentSpec[] = [
+  {
+    key: "member",
+    name: "Member",
+    rule: "Created by the parent fanning out. It exists because the parent made it, and it has no meaning away from the parent.",
+    counts: "Counts toward the group's rollup and its member tallies.",
+    lives: "Renders ONLY nested inside the group — it never gets a top-level row.",
+    examples: [
+      "Each signer of an approved Oath Signature packet",
+      "Each person of an I-9 Check roster",
+      "Each contact fill of an Emergency Contact packet",
+    ],
+  },
+  {
+    key: "linked",
+    name: "Linked",
+    rule: "An independently meaningful sub-run the parent WAITS ON. It would still make sense if the parent did not exist.",
+    counts: "Never counted as a member. It is counted once, in its own panel.",
+    lives: "Keeps its OWN row in its OWN panel. The parent shows a chip pointing at it; the child shows a chip pointing back. Never a copy.",
+    examples: [
+      "An OCR review run under a packet — it stays the one row in the OCR panel",
+      "Oath Upload's signers — each is an Oath Signature run in the Oath Signature panel",
+    ],
+  },
+  {
+    key: "rejected",
+    name: "Rejected",
+    rule: "The parent could not turn it into work — an unreadable page, a line with no searchable name. It is typed as rejected at creation, never inferred later.",
+    counts: "Counted separately and EXCLUDED from the rollup. It cannot count toward done, and it stops the group reading as clean.",
+    lives: "A Member Row with delete as its only action — retry and cancel are structurally absent, because there is no task to replay.",
+    examples: ["A scanned cover sheet in an I-9 packet", "A page with no emergency-contact block"],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Rollup + density — both derived, both single-sourced
+// ---------------------------------------------------------------------------
+
+export const ROLLUP_STEPS = ROLLUP_PRECEDENCE.map((s) => PROPOSED_STATUS[s].label);
+
+export const DENSITY_LADDER = DENSITY_RUNGS;
 
 export function rowVariantSpec(row: DemoRow): RowVariantSpec {
   const key = rowVariantOf(row);
