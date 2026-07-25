@@ -44,10 +44,10 @@ export interface I9CheckSearchOutcome {
   ambiguousReason?: "multiple-candidates" | "missing-hire-date" | "multiple-hire-date-matches";
 }
 
-const I9_CHECK_STEPS = ["person-match", "person-lookup", "roster-match"] as const;
+type I9CheckSteps = readonly ["person-match", "person-lookup", "roster-match"];
 
 type I9CheckCtx = Pick<
-  Ctx<typeof I9_CHECK_STEPS, Record<string, unknown>>,
+  Ctx<I9CheckSteps, Record<string, unknown>>,
   "page" | "step" | "updateData" | "screenshot" | "skipStep"
 >;
 

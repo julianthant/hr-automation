@@ -86,7 +86,7 @@ export function selectPersonLookupByHireDate(
   });
 
   if (matched.length === 1) {
-    const hit = matched[0]!;
+    const hit = matched[0];
     return {
       status: "found",
       emplId: hit.emplId,

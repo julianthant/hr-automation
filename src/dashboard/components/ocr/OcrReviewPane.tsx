@@ -1032,10 +1032,7 @@ function useOcrReviewPrepApi(
                 </section>
               );
             }
-            const { page, group, ordinals } = renderEntry as Extract<
-              PageRenderWithOrdinals,
-              { kind: "records"; ordinals: number[] }
-            >;
+            const { page, group, ordinals } = renderEntry;
             if (group.length === 1) {
               const { record, originalIndex } = group[0];
               const rowOrdinal = ordinals[0];
