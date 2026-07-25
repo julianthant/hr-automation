@@ -2,13 +2,14 @@
 
 Status: **revised 2026-07-22 after the whole-plan/legacy-code review.** The span rebuild now also
 owns a closed control-command protocol, durable notifications, strict boundary schemas, and an
-explicit backup/restore contract for the non-rebuildable SQLite state.
+explicit backup/restore contract for the non-rebuildable SQLite state. **Amended 2026-07-25:** §9
+carries the operator-ratified delegation and presentation decisions (row-model series D6–D20).
 
 ## Ownership (D1)
 
 | | Concept | Where |
 |---|---|---|
-| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the lift adapter + flip plan, the completion union | §§1–5 |
+| **This doc OWNS** | Span/event wire schema (§1, amended per D10), notes, storage layout, SQLite authority and recovery, enqueue/action/queue command semantics, durable notifications, local artifact outboxes/projectors, SSE wire shapes, the lift adapter + flip plan, the completion union, the ratified delegation/presentation decisions | §§1–5, §9 |
 | **Imports from doc 01** | Task contract + `defineTask`, task id grammar (`<system>/<verb-object>` slash ids, per D2), the closed `SystemId` union — real `src/systems/` dir names (`new-kronos`, `old-kronos`) plus the D4 service systems (`extraction`, `normalization`, `ocr`, `roster` — charter §11), error taxonomy | referenced, never redefined |
 | **Imports from doc 02** | Workflow descriptor shape + builder, RunEnvelope (`dryRun` home per D6), run-state machine incl. gates/parks (D5), checkpoint store schema, the readable span-path id grammar (`pl-104233-9f3e/searching#2`) | referenced, never redefined |
 | **Exports doc 02 adopts** | Verdict/detail semantics, completion program semantics, and wire projections; doc 02's descriptor now carries every consumed field | §3–4 |
@@ -1109,5 +1110,168 @@ returns its log/action detail (§2.1 — two greps, by design).
    “mark valid/done” shortcut. Adapter deployment also schedules all quarantines of that version.
 
 *(Resolved since the first draft: SQLite's role — D14, §2.3; the flip fallback window — one week,
-D13, §5.4. End of design doc. Review order suggestion: §1.1 span identity → §4 completion union →
-§5.2 lift mapping table → §5.4 scoped flip → §6 guards.)*
+D13, §5.4. End of the design body; §9 carries the ratified presentation decisions. Review order
+suggestion: §1.1 span identity → §4 completion union → §5.2 lift mapping table → §5.4 scoped flip →
+§6 guards → §9 ratified decisions.)*
+
+---
+
+## 9. Ratified delegation and presentation decisions (D6–D20)
+
+Status: **ratified by the operator 2026-07-25.** These continue the **row-model decision series**
+ratified 2026-07-24 (`reviews/second-look-2026-07-22.md` §6.6 — D1: three row types Run/Group/Member
+with review-as-status and eight statuses; D2: a PDF upload is always a Group; D3: unrunnable items
+are typed Rejected Member Rows, delete-only; D4: a delegated OCR run keeps its own Run Row in the
+OCR panel plus a link from the parent; D5: groups default collapsed, auto-expand on a member
+`Waiting on you` or `Failed`). **This series is not the reconciliation memo's D-numbers**
+(`04-reconciliation.md` D1–D72) — cite these as *row-model D6…D20*.
+
+D6–D17 close the twelve delegation questions in `reviews/delegation-layouts-2026-07-25.md` §7;
+D18–D20 close three build-gating decisions in `reviews/demo-feature-plan-2026-07-25.md` §6. The
+vocabulary is that ledger's: **`containment`** = `member | linked | rejected` (§3), Group Row anatomy
++ presentation ladder + rollup precedence (§4), delegation shapes S0–S7 (§5).
+
+### D6 — oath-upload's signers are `linked`, not `member`; shape S4 is deleted
+
+Oath Upload stays **one Run Row** for the PDF being uploaded. The signer rows live in the **Oath
+Signature panel** as their own rows; the upload row carries a chip (`6 signers · 3 done ↗`) that
+jumps there. Containment is **`linked`** — signers are never counted as members, never render nested
+under the upload row, and are never removed from their own panel.
+
+Rationale: a signer run is independently meaningful and independently viewable; the upload row's job
+is the ticket, not the roster.
+
+**Supersedes `reviews/delegation-layouts-2026-07-25.md` §7 Q1, which recommended the opposite**
+(signers as `member`, delisted from the Oath Signature panel), **and deletes that ledger's §5 S4
+layout ("Packet that ends in one filing")** — oath-upload is a Run Row that waits on linked children
+and then performs its one final act. It has no Group Row anatomy, no member ladder, no member
+rollup. This restores the as-built production model recorded in the root `CLAUDE.md` and in §4.5
+here: the ticket is a real `single` daemon task born at upload that walks `OCR prep → awaiting
+approval → wait signatures → submit` as one row. §4.5's sibling-subscriber gates and §4.3's
+`completionConsumes: { memberShape: "natural", suppress: ["document"] }` are unchanged — the
+presentation now matches the contract instead of contradicting it.
+
+### D7 — a packet still at OCR review shows its extracted count
+
+The count badge reads `6 people extracted` while the delegated OCR run is open, and flips to
+`6 people` at fan-out. Rationale: "how big is this" is answerable before the members exist, and a
+blank group before approval reads as broken.
+
+### D8 — bulk approve from the Group Row; any edit forces the review surface
+
+`Approve N of M` is available from the Group Row without opening the OCR review row. **Editing an
+extracted value is not** — any edit routes through `Open review` so the scanned page is on screen
+when the value changes. Rationale: approving is a decision about a list; changing a value is a claim
+about paper, and the paper must be visible when it is made.
+
+### D9 — rejected members never count toward done
+
+A packet carrying rejections is `Done with warnings` until every rejection is deleted or explicitly
+acknowledged. Rejected members stay excluded from the rollup and counted separately
+(`50 people · 3 rejected`). Rationale: an unrun person is not a finished person. This pins the
+ledger §4 rollup rule to its ratified form — `Verified done` requires zero unacknowledged
+rejections.
+
+### D10 — depth-2 delegated lookups are visible only from the OCR review row
+
+Person-lookup / i9-lookup children of a delegated OCR run surface on that OCR row (and in their own
+panel, per row-model D4) — **never on the packet group**. From the packet, "why is this person
+blank" is answered on the **record card**, not by walking a delegation tree. Rationale: maximum real
+depth is 2; surfacing it twice buys nothing and doubles the count surface.
+
+### D11 — the presentation ladder, with the status matrix at 41+
+
+| Members | Expanded body |
+|---|---|
+| 1–3 | Full Member Rows inline |
+| 4–12 | Compact list, first 4 + `Show all N` |
+| 13–40 | Compact list in a scroll well + `Open all N` |
+| **41+** | **Status matrix** + attention strip + `Start review` drill-in |
+
+Member count is continuous — this is presentation, never a row type, and the drill-in is a rung of
+the ladder, not a route. **Supersedes the rebuild demo's current threshold of 20**, which changes to
+41.
+
+### D12 — the collapsed row shows the gate's age
+
+`Waiting on you · 10m`. Rationale: an aging gate is the most actionable fact in the queue.
+
+### D13 — a failed `linked` child makes the parent `Failed`, with `Re-upload`
+
+When a linked OCR child fails, the parent goes **`Failed`**, mirrors the child's error verbatim
+(never "Unknown error"), and offers a **`Re-upload`** action. **`Waiting on you` is reserved for a
+pending decision and is never used for a breakage.** Rationale: the two states demand different
+operator actions, and a breakage disguised as a decision is a gate that will never resolve.
+
+### D14 — a group of one still renders as a Group Row
+
+Consistent with row-model D2. Rationale: a group of one that looks like a Run Row makes the next
+fan-out look like a new object.
+
+### D15 — `person-match` keeps its Workflow Panel entry
+
+It stays visible in the rail despite having zero callers today (i9-check searches inline).
+**Supersedes `reviews/delegation-layouts-2026-07-25.md` §7 Q10, which recommended hiding it.**
+
+### D16 — cancelling a group is tree-scoped, final, with no dialog and no undo
+
+The only scope is the **tree** — group + all members + linked children. There is **no confirmation
+dialog and no undo window**; cancel commits immediately. Recovery is re-running from the row's
+history.
+
+**Tradeoff, stated plainly: this deliberately accepts misclick risk to avoid a dialog on every
+intentional cancel.** Cancel is used deliberately and often; a confirm on each one costs more than
+the occasional re-run.
+
+**Supersedes the "with a confirm naming the casualties" half of `reviews/delegation-layouts-2026-07-25.md`
+§7 Q11**; the tree-scope half is ratified as recommended. Mechanically this is §2.4's `Cancel`
+semantics unchanged — full dependency tree resolved from SQLite authority, every edge's doc 02
+cancel policy applied, all-or-none, visible queue roots never an authority fallback. What D16
+decides is scope and the absence of ceremony, not a new command.
+
+### D17 — per-member confirmation numbers are inline on the packet receipt
+
+Listed inline in the Receipt rollup table, not one link per member. Rationale: the Q8 acceptance
+test is "the operator completes their double-check without opening UCPath", and a link per member
+re-introduces N clicks.
+
+### D18 — Status Bar pills: `All`, a composite `Needs you`, then the individual statuses
+
+One row: an **`All`** pill, then a composite **`Needs you`** pill (= `Waiting on you` +
+`Write parked` — the two statuses that mean a human is blocking), then each individual status.
+**No status is hidden.** Rationale: the bar answers "is anything on me?" first and "what is
+everything doing?" second. Counts are the same server-side projection that feeds `wfCounts` and the
+queue rows (§2.2); the composite pill is a sum of projected buckets, never a second count path.
+
+### D19 — run-detail tabs derive from panel kind; Screenshots is not a tab; Data and Edit Data are one surface
+
+Ratifies the tab model **as built in the rebuild demo**:
+
+- **(a) Tabs derive from the panel kind**, not a fixed set — Run 3 · Review 4 · Group 4 · Member 3.
+- **(b) Screenshots is not a tab.** An **evidence bar** of images sits above the tabs, with no count
+  label; a failure capture carries a red frame.
+- **(c) Data and Edit Data are ONE merged surface** — every value the run touched. Reads are editable
+  in place; **writes are shown but not editable**; the footer offers `Load a prior run` and
+  `Start a run from this data`.
+
+**Supersedes the "Log Panel tabs are therefore FIVE: Logs / Data / Review / Receipt / Screenshots"
+wording in `reviews/second-look-2026-07-22.md` §6.6.** Unchanged from that decision sheet: the step
+timeline is **not** a tab (persistent strip + hover detail), and tab defaults stay state-driven
+(`Waiting on you` / `Write parked` → Review, terminal → Receipt, running → Logs).
+
+Consequence for §2.2's wire: `QueueSurfaceWire.detailSurfaces` stays server-declared and
+capability-driven — the panel kind selects from what the server declares — but `"screenshots"` no
+longer projects a tab (it projects the evidence bar), and `"edit-data"` / `"view-data"` collapse into
+one `data` surface whose write fields render read-only.
+
+### D20 — `Write parked` means an unknown write outcome, and nothing else
+
+`Write parked` is only for a write whose outcome is genuinely **UNKNOWN**, and it has exactly two
+typed resolutions: **confirmed-present** and **confirmed-absent** (§2.2's `resolve-write-present` /
+`resolve-write-absent` over doc 09's durable intent state). **A pre-submit hold is NOT parked — it
+is a gate, and its status is `Waiting on you`.**
+
+Consequence: the rebuild demo's `sep-rosa` fixture, which labels a pre-submit hold as `Write parked`
+with a "Resume & submit" action, is wrong and must be re-authored as a gate. Rationale: parked is the
+one status that means "we may have already filed something"; diluting it with holds we know the
+state of destroys the only signal that warrants a live probe.

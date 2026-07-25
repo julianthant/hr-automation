@@ -1,6 +1,8 @@
 # Delegation — topology, shapes, and layouts (2026-07-25)
 
-**Status:** proposal, awaiting operator ratification. Feeds `docs/rebuild/03-tracker-dashboard.md`.
+**Status:** proposal — **§7 ANSWERED and ratified 2026-07-25 as D6–D20 in
+`docs/rebuild/03-tracker-dashboard.md` §9** (§5's S4 layout is deleted by D6). Where this ledger and
+doc 03 §9 disagree, §9 wins.
 **Question this answers:** "figure out how single and multiple delegations should look across
 multiple workflows and how the design should be laid out and all the design layouts and what
 should be there."
@@ -77,6 +79,9 @@ Everything below reduces to one bit stamped on the child at enqueue.
   *(OCR under a coordinator — D4; person-lookup / i9-lookup / sharepoint-download under anything)*
 - **`rejected`** — an item the parent could not turn into work. Member Row, delete-only (D3),
   counted separately as `N rejected`, excluded from the rollup.
+
+**Amended by `../03-tracker-dashboard.md` §9 D6:** oath-upload's signers are **`linked`**, not
+`member` — they keep their own rows in the Oath Signature panel and are never counted as members.
 
 No workflow-name switches in the projection path.
 
@@ -196,6 +201,12 @@ Same anatomy minus the gate:
 
 ### S4 — Packet that ends in one filing (oath-upload)
 
+> **SUPERSEDED by `../03-tracker-dashboard.md` §9 D6 — this layout is deleted.** Oath Upload is a
+> **Run Row** with `linked` signer children (own rows in the Oath Signature panel + a
+> `6 signers · 3 done ↗` chip), not a Group Row. Everything below about members, member counts, and
+> a member rollup on the upload row is void; the strip, the ticket-number headline, tree-scoped
+> cancel, and the Write-parked handling survive as Run Row behavior.
+
 The parent is a real task, not a display coordinator. **Render it as a Group Row anyway**, whose
 members ARE the signer runs — and **do not** also list those signers as top-level rows in the Oath
 Signature panel. Nobody starts one of those signers independently; double-listing is precisely the
@@ -286,11 +297,19 @@ parent `Failed` with the child's error mirrored. Finished child → parent's own
 
 ## 7. Open questions for the operator
 
+> **ANSWERED 2026-07-25 — CLOSED, not open.** All twelve are ratified into
+> `../03-tracker-dashboard.md` §9: Q1→D6, Q2→D7, Q3→D8, Q4→D9, Q5→D10, Q6→D11, Q7→D12, Q8→D13,
+> Q9→D14, Q10→D15, Q11→D16, Q12→D17 (plus D18 Status Bar pills, D19 tab model, D20 write-parked
+> semantics). **Q1, Q10 and Q11 were answered AGAINST the recommendation printed below** — read the
+> decision in doc 03 §9, never the recommendation here.
+
 Each with a recommendation — answer inline and this becomes ratified.
 
 1. **Should oath-upload's signers disappear from the Oath Signature panel and live only inside the
    Oath Upload packet?** *Recommend yes* — they are not independently meaningful, and
    double-listing is the count-divergence bug class.
+   → **ANSWERED NO — superseded by doc 03 §9 D6:** signers stay in the Oath Signature panel as
+   `linked` children; Oath Upload stays one Run Row with a chip; shape S4 is deleted.
 2. **Should a packet still at OCR review show `6 people extracted` before those members exist?**
    *Recommend yes* — it answers "how big is this" at a glance.
 3. **Should the group be able to bulk-approve without opening the OCR row?** *Recommend yes for the
@@ -311,8 +330,11 @@ Each with a recommendation — answer inline and this becomes ratified.
    that looks like a run makes the next fan-out look like a new object.
 10. **`person-match` has zero callers — keep it in the Workflow Panel?** *Recommend hiding it*
     (keep it registered). A panel that can never have a row is noise.
+    → **ANSWERED KEEP IT VISIBLE — superseded by doc 03 §9 D15.**
 11. **Should cancelling any group default to tree scope?** *Recommend yes*, with a confirm naming
     the casualties. Row-scoped group cancel is what produced orphaned OCR reviews historically.
+    → **ANSWERED tree scope YES, confirm NO — superseded in part by doc 03 §9 D16:** no dialog and
+    no undo window; cancel is final, recovery is a re-run from history.
 12. **Per-member confirmation numbers inline on the packet receipt, or a link per member?**
     *Recommend inline* — the Q8 acceptance test is "double-check without opening UCPath", and a
     link per member re-introduces N clicks.
