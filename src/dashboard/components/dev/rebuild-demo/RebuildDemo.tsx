@@ -4,46 +4,53 @@ import { DemoLogPanel, tabsFor, type DemoTab } from "./DemoLogPanel";
 import { computeVisibleIds, DemoQueue, type DemoFilter, type DemoQueueState, type DemoView } from "./DemoQueue";
 import { DemoCatalogView } from "./DemoCatalogView";
 import {
+  ALL_WORKFLOWS,
   countRows,
   DemoSessionPanel,
   DemoStatusBar,
   DemoTopBar,
   DemoWorkflowPanel,
+  rowsForWorkflow,
   topLevelRows,
 } from "./DemoShell";
-import { DEMO_ROWS, LIVE_SEQUENCE, memberAttentionIds, ATTENTION_STATUSES } from "./demo-data";
+import {
+  ATTENTION_STATUSES,
+  DEMO_ROWS,
+  densityRung,
+  effectiveStatus,
+  groupNeedsExpanding,
+  LIVE_SEQUENCE,
+  memberAttentionIds,
+} from "./demo-data";
 
 /**
  * DEV-ONLY — `?view=rebuild-demo`. The rebuild's target frontend as a living
- * demo: the full queue (3 ratified row types × 8 ratified statuses, 50-member
- * group, triage drill-in) wired to a per-row log panel where every surface —
- * outcome bar, strip, waterfall, filmstrip, all 5 tabs — derives from THAT
- * row's own data. Synthetic data; interactions that matter (selection,
- * drill-in, conveyor, mark-checked, filters, search, keyboard) are real.
+ * demo: the full shell (Top Bar · Workflow Panel · Status Bar · Queue · Log
+ * Panel · Session Panel) over one typed world model, where every surface
+ * derives from the row you selected.
+ *
+ * Selecting a Workflow Panel entry genuinely scopes the view: the Status Bar
+ * counts, the queue rows and the rail badge all read the same scoped row set
+ * through the same counting path, so no two of them can disagree.
  *
  * Keyboard: j/k move · n next attention · Enter open group / drill-in ·
- * Esc back · c mark member checked · 1–5 switch tabs.
+ * Esc back · c mark member checked · 1–4 switch tabs.
  */
-
 
 export function RebuildDemo() {
   const [selectedId, setSelectedId] = useState("oath-summer");
   const [shellView, setShellView] = useState<"queue" | "catalog">("queue");
-  const [activeWorkflow, setActiveWorkflow] = useState("All");
+  const [activeWorkflow, setActiveWorkflow] = useState(ALL_WORKFLOWS);
   const [view, setView] = useState<DemoView>({ kind: "queue" });
   const [filter, setFilter] = useState<DemoFilter>("all");
-  // Groups default collapsed (D5) but auto-expand when a member needs the
-  // operator — the packet at approval opens itself.
+  // Groups default collapsed, but a group auto-expands when a member is stuck
+  // on you or has broken — you should never have to open a row to find that
+  // out. A 1–3 member group is always expanded by its rung, not by this set.
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
     () =>
       new Set(
         Object.values(DEMO_ROWS)
-          .filter(
-            (r) =>
-              r.rowType === "group" &&
-              (r.memberIds?.length ?? 0) <= 20 &&
-              (r.status === "waiting" || (r.memberIds ?? []).some((id) => ["waiting", "failed"].includes(DEMO_ROWS[id].status))),
-          )
+          .filter((r) => r.rowType === "group" && densityRung(r.memberIds?.length ?? 0) === "compact" && groupNeedsExpanding(r))
           .map((r) => r.id),
       ),
   );
@@ -65,9 +72,25 @@ export function RebuildDemo() {
     setTab(null); // state-driven default re-applies per row
   }, []);
 
+  // ONE scoped row set. The rail badge, the Status Bar and the queue are all
+  // computed from this, through `countRows`.
+  const scopedRows = useMemo(() => rowsForWorkflow(topLevelRows(), activeWorkflow), [activeWorkflow]);
+  const counts = useMemo(() => countRows(scopedRows), [scopedRows]);
+
   const state: DemoQueueState = useMemo(
     () => ({ view, filter, selectedId, checkedIds, expandedGroups, tick }),
     [view, filter, selectedId, checkedIds, expandedGroups, tick],
+  );
+
+  /** open another Workflow Panel entry and land on a specific row inside it */
+  const openPanel = useCallback(
+    (workflow: string, id: string) => {
+      setActiveWorkflow(workflow);
+      setFilter("all");
+      setView({ kind: "queue" });
+      select(id);
+    },
+    [select],
   );
 
   const handlers = useMemo(
@@ -76,6 +99,7 @@ export function RebuildDemo() {
       onFilter: setFilter,
       onDrillIn: (groupId: string) => setView({ kind: "drill", groupId }),
       onBack: () => setView({ kind: "queue" }),
+      onOpenPanel: openPanel,
       onToggleGroup: (groupId: string) =>
         setExpandedGroups((prev) => {
           const next = new Set(prev);
@@ -84,7 +108,7 @@ export function RebuildDemo() {
           return next;
         }),
     }),
-    [select],
+    [select, openPanel],
   );
 
   const toggleChecked = useCallback((id: string) => {
@@ -96,6 +120,11 @@ export function RebuildDemo() {
     });
   }, []);
 
+  const changeWorkflow = useCallback((label: string) => {
+    setActiveWorkflow(label);
+    setView({ kind: "queue" });
+  }, []);
+
   // ---- keyboard flow -----------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -103,7 +132,7 @@ export function RebuildDemo() {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const visible = computeVisibleIds({ view, filter, expandedGroups });
+      const visible = computeVisibleIds(scopedRows, { view, filter, expandedGroups });
       const idx = visible.indexOf(selectedId);
 
       if (e.key === "j" || e.key === "ArrowDown") {
@@ -119,13 +148,15 @@ export function RebuildDemo() {
           const next = attention.find((id) => visible.indexOf(id) > idx) ?? attention[0];
           if (next) select(next);
         } else {
-          const attention = visible.filter((id) => ATTENTION_STATUSES.includes(DEMO_ROWS[id].status) && !DEMO_ROWS[id].displayOnly);
+          const attention = visible.filter(
+            (id) => ATTENTION_STATUSES.includes(effectiveStatus(DEMO_ROWS[id])) && DEMO_ROWS[id].containment !== "rejected",
+          );
           const next = attention.find((id) => visible.indexOf(id) > idx) ?? attention[0];
           if (next) select(next);
         }
       } else if (e.key === "Enter") {
         const row = DEMO_ROWS[selectedId];
-        if (row?.rowType === "group") {
+        if (row?.rowType === "group" && (row.memberIds?.length ?? 0) > 0) {
           e.preventDefault();
           setView({ kind: "drill", groupId: row.id });
         }
@@ -136,7 +167,7 @@ export function RebuildDemo() {
         }
       } else if (e.key === "c") {
         const row = DEMO_ROWS[selectedId];
-        if (row?.rowType === "member" && !row.displayOnly) {
+        if (row?.rowType === "member" && row.containment !== "rejected") {
           e.preventDefault();
           toggleChecked(selectedId);
         }
@@ -149,7 +180,7 @@ export function RebuildDemo() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, filter, expandedGroups, selectedId, select, toggleChecked]);
+  }, [view, filter, expandedGroups, selectedId, select, toggleChecked, scopedRows]);
 
   // keep the selected row visible when keyboard-navigating
   useEffect(() => {
@@ -158,13 +189,13 @@ export function RebuildDemo() {
   }, [selectedId]);
 
   const row = DEMO_ROWS[selectedId] ?? DEMO_ROWS["sep-maria"];
-
-  const counts = useMemo(() => countRows(topLevelRows()), []);
+  const allCounts = useMemo(() => countRows(topLevelRows()), []);
 
   const openExample = useCallback(
     (id: string) => {
       setShellView("queue");
-      setActiveWorkflow("All");
+      setActiveWorkflow(ALL_WORKFLOWS);
+      setFilter("all");
       setView({ kind: "queue" });
       select(id);
     },
@@ -173,17 +204,20 @@ export function RebuildDemo() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <DemoTopBar view={shellView} onView={setShellView} attention={counts.attention} />
+      <DemoTopBar view={shellView} onView={setShellView} attention={allCounts.needsYou} />
 
       {shellView === "catalog" ? (
         <DemoCatalogView onOpenExample={openExample} />
       ) : (
         <div className="flex min-h-0 flex-1">
-          <DemoWorkflowPanel active={activeWorkflow} onActive={setActiveWorkflow} />
+          <DemoWorkflowPanel active={activeWorkflow} onActive={changeWorkflow} />
 
           <main className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1">
-              <span className="text-[12.5px] font-semibold text-foreground">{activeWorkflow === "All" ? "All workflows" : activeWorkflow}</span>
+              <span className="text-[12.5px] font-semibold text-foreground">
+                {activeWorkflow === ALL_WORKFLOWS ? "All workflows" : activeWorkflow}
+              </span>
+              <span className="font-mono text-[10.5px] text-muted-foreground tabular-nums">{counts.all} rows</span>
               <span className="ml-auto hidden items-center gap-2 font-mono text-[10px] text-muted-foreground min-[1000px]:flex">
                 <Keyboard aria-hidden className="size-3.5" />
                 <span>
@@ -204,19 +238,16 @@ export function RebuildDemo() {
               </span>
             </div>
 
-            <DemoStatusBar
-              counts={counts}
-              active={filter}
-              onSelect={setFilter}
-            />
+            <DemoStatusBar counts={counts} active={filter} onSelect={setFilter} />
 
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 min-[1180px]:grid-cols-[470px_minmax(0,1fr)]">
-              <DemoQueue state={state} handlers={handlers} />
+              <DemoQueue rows={scopedRows} state={state} handlers={handlers} />
               <DemoLogPanel
                 row={row}
                 tab={tab}
                 onTab={setTab}
                 onSelect={select}
+                onOpenPanel={openPanel}
                 checkedIds={checkedIds}
                 onToggleChecked={toggleChecked}
                 tick={tick}
